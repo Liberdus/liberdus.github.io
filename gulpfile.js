@@ -58,7 +58,9 @@ gulp.task('sass', function () {
  */
 gulp.task('watch', function () {
     // gulp.watch(['scss/**/*.scss'], ['sass']);
-    gulp.watch(['*.html', '_layouts/*.html', '_posts/*', '_includes/*', '_data/*', 'img/*'], ['jekyll-rebuild']);
+    gulp.watch(['*.html', '_layouts/*.html', '_posts/*', '_includes/*', '_data/*', 'img/**/*'], ['jekyll-rebuild']);
+    // TODO: Remove this. Temp addition before switch to scss
+    gulp.watch(['css/**/*.css'],['jekyll-rebuild']);
 });
 
 /**

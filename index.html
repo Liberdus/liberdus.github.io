@@ -9,7 +9,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="">
     <meta name="author" content="">
-    <title>Cryptoma - Bitcoin & Cryptocurrency ICO Landing Page</title>
+    <title>{{ site.title }}</title>
 	<link rel="shortcut icon" href="img/favicon.png" type="image/x-icon">
     <!-- Bootstrap Core CSS -->
     <link href="css/bootstrap.min.css" rel="stylesheet">
@@ -23,6 +23,8 @@
 	<link href="https://fonts.googleapis.com/css?family=Poppins:300,400,400i,500,600,700,800,900" rel="stylesheet">
 	<!-- Main CSS -->
 	<link href="style.css" rel="stylesheet">
+	<!-- Our styles -->
+	<link href="css/our-styles.css" rel="stylesheet">
 	
 </head>
 
@@ -40,37 +42,18 @@
 	<nav class="navbar navbar-expand-lg fixed-top bg-white">
 		<div class="container">
 			<a class="navbar-brand" href="index.html">
-				<img src="img/logo.png" alt="Logo">
+				<img src="img/logo.png" class="nav-logo" alt="Logo">
 			</a>
 			<button class="navbar-toggler collapsed" type="button" data-toggle="collapse" data-target="#main-nav" aria-expanded="false" aria-label="Toggle navigation">
 				<span class="navbar-toggler-icon"></span>
 			</button>
 			<div class="collapse navbar-collapse" id="main-nav">
 				<ul class="navbar-nav ml-auto">
-					<li class="nav-item">
-						<a class="nav-link" href="#home">Home</a>
-					</li>
-					<li class="nav-item">
-						<a class="nav-link" href="#about-us">About Us</a>
-					</li>
-					<li class="nav-item">
-						<a class="nav-link" href="#features">Features</a>
-					</li>
-					<li class="nav-item">
-						<a class="nav-link" href="#roadmap">Roadmap</a>
-					</li>
-					<li class="nav-item">
-						<a class="nav-link" href="#team">Team</a>
-					</li>
-					<li class="nav-item">
-						<a class="nav-link" href="#faqs">Faqs</a>
-					</li>
-					<li class="nav-item">
-						<a class="nav-link" href="#contact">Contact</a>
-					</li>
-					<li class="nav-item btn-login">
-						<a class="nav-link" href="#">Login</a>
-					</li>
+					{% for item in site.data.nav %}
+						<li class="nav-item">
+							<a class="nav-link" href="{{ item.href }}">{{ item.name }}</a>
+						</li>
+					{% endfor %}
 				</ul>
 			</div>
 		</div>
@@ -87,15 +70,15 @@
 				<div class="row align-items-center">
 					<div class="col-md-6">
 						<div class="hero-text">
-							<h1 class="animated fadeInLeft">Mine Crypto Currency and Earn Coin Easily</h1>
-							<p class="animated fadeInLeft">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed vitae tortor arcu. Vestibulum ac ex lacinia. Nulla molestie nunc varius.</p>
-							<a href="#" class="btn btn-primary animated fadeInLeft">Token Distributtion</a>
-							<a href="#" class="btn btn-default animated fadeInLeft">Whitepaper</a>
+							<h1 class="animated fadeInLeft">{{ site.data.hero.tagline }}</h1>
+							<p class="animated fadeInLeft">{{ site.data.hero.maintext }}</p>
+							<a href="{{ site.data.hero.button1.href }}" class="btn btn-primary animated fadeInLeft">{{ site.data.hero.button1.text }}</a>
+							<a href="{{ site.data.hero.button2.href }}" class="btn btn-default animated fadeInLeft">{{ site.data.hero.button2.text }}</a>
 						</div>
 					</div>
 					<div class="col-md-6 d-none d-md-block d-lg-block">
 						<div class="hero-img animated fadeInUp tilt-img text-center">
-							<img src="img/banner/2.png" alt="">
+							<img src="img/banner/2.png" alt="Liberdus Logo">
 						</div>
 					</div>
 				</div>
@@ -104,7 +87,7 @@
 	</section>
 	<!-- end home -->
 	
-	<section class="section-spacing" id="about-us">
+	<section class="section-spacing" id="why">
 		<div class="container">
 			<div class="row mb-120 align-items-center">
 				<div class="col-md-6">
@@ -114,13 +97,12 @@
 				</div>
 				<div class="col-md-6">
 					<div class="text-block wow fadeIn" data-wow-delay="0.2s">
-						<h2>We’ve built a platform to buy and sell shares.</h2>
-						<p>While existing solutions offer to solve just one problem at a time, our team is up to build a secure, useful, & easy-to-use product based on private blockchain. It will include easy cryptocurrency payments integration, and even a digital arbitration system.</p>
-						<p>At the end, Our aims to integrate all companies, employees, and business assets into a unified blockchain ecosystem, which will make business truly efficient, transparent, and reliable.</p>
+						<h2>Money isn't democratic...</h2>
+						<p>Throughout the ages, people have used money. Money is probably one of the most important inventions that mankind has ever invented, because it has made the trade of goods and services much more efficient.</p>
+						<p>Unfortunely, determining how money works for a large group of people has historically been difficult, and for that reason we have allowed governments to make these decisions &mdash; hoping they represent our best interests.</p>
 					</div>
 				</div>
 			</div>
-			
 			<div class="row align-items-center">
 				<div class="col-md-6 d-block d-md-none d-lg-none">
 					<div class="img-block wow fadeIn moveDown3 tilt-img text-center" data-wow-delay="0.2s">
@@ -129,9 +111,9 @@
 				</div>
 				<div class="col-md-6">
 					<div class="text-block wow fadeIn" data-wow-delay="0.2s">
-						<h2>We built a platform for the crypto trading industry</h2>
-						<p>While existing solutions offer to solve just one problem at a time, our team is up to build a secure, useful, & easy-to-use product based on private blockchain. It will include easy cryptocurrency payments integration, and even a digital arbitration system.</p>
-						<p>At the end, Our aims to integrate all companies, employees, and business assets into a unified blockchain ecosystem, which will make business truly efficient, transparent, and reliable.</p>
+						<h2>...But we believe it can be.</h2>
+						<p>Times have changed. Technology has made a lot of the logistical problems of collecting the votes of all the individuals of a body of people much more efficient. Blockchain has made that even more practical and completely decentralized.</p>
+						<p>So why aren't we governing our own money? That's what Liberdus aims to do: allow you to govern your own money. Your determine the future of Liberdus; you are part of a democracy.</p>
 					</div>
 				</div>
 				
@@ -143,7 +125,124 @@
 			</div>
 		</div>
 	</section>
-	<!-- end about-us -->
+	<!-- end why -->
+
+	<section class="section-spacing" id="roadmap">
+		<div class="container">
+			<div class="row">
+				<div class="col-md-12">
+					<div class="section-title text-center">
+						<h2>Roadmap</h2>
+						<p>Here is where we are, and what we expect to see for the future of Liberdus:</p>
+					</div>
+				</div>
+			</div>
+			
+			<div class="row">
+				<div class="col-md-12">
+					<div class="roadmap-outer">
+						<div class="roadmap">
+							<div class="roadmap-icon wow fadeIn" data-wow-delay="0.2s">
+								<span class="year">2017</span>
+							</div>
+							<div class="roadmap-content wow fadeInRight" data-wow-delay="0.2s">
+								<h3>Idea</h3>
+								<p>The idea for a cryptocurrency that gives the power to the community through on-chain self-governance was born.</p>
+							</div>
+						</div>
+						<div class="roadmap">
+							<div class="roadmap-icon wow fadeIn" data-wow-delay="0.2s">
+								<span class="year">2017</span>
+							</div>
+							<div class="roadmap-content wow fadeInLeft" data-wow-delay="0.2s">
+								<h3>Whitepaper</h3>
+								<p>The whitepaper for the project was drafted by one of the Shardus team members.<br><br></p>
+							</div>
+						</div>
+						<div class="roadmap">
+							<div class="roadmap-icon wow fadeIn" data-wow-delay="0.2s"><span class="year">2019</span></div>
+							<div class="roadmap-content wow fadeInRight" data-wow-delay="0.2s">
+								<h3>Development</h3>
+								<p>After the development of their blockchain framework, the Shardus team launched the development of the Liberdus cryptocurrency.</p>
+							</div>
+						</div>
+						<div class="roadmap">
+							<div class="roadmap-icon wow fadeIn" data-wow-delay="0.2s">
+								<span class="year">2019</span>
+							</div>
+							<div class="roadmap-content wow fadeInLeft" data-wow-delay="0.2s">
+								<h3>Test Net</h3>
+								<p>The Liberdus team plans to launch a test network at the beginning of 2019.<br><br></p>
+							</div>
+						</div>
+						<div class="roadmap">
+							<div class="roadmap-icon wow fadeIn" data-wow-delay="0.2s">
+								<span class="year">2019</span>
+							</div>
+							<div class="roadmap-content wow fadeInRight" data-wow-delay="0.2s">
+								<h3>Main Net</h3>
+								<p>The Liberdus team eagerly hopes to launch the main network before the mid of 2019.<br><br></p>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+	<!-- end roadmap -->
+
+	<section id="faq" class="section-spacing inverse-bg">
+		<div class="container">
+			<div class="row">
+				<div class="col-md-6">
+					<div class="faqs-img wow fadeIn text-center moveDown3 tilt-img">
+						<img src="img/faqs/1.png" alt="">
+					</div>
+				</div>
+				
+				<div class="col-md-6">
+					<div class="accordion" id="faqs-content">
+						<div class="card">
+							<div class="card-header">
+								<h4 class="collapsed" data-toggle="collapse" data-target="#item2">What is self-governance? Why is it important?</h4>
+							</div>
+							<div id="item2" class="collapse show" data-parent="#faqs-content">
+								<div class="card-body">
+									<p>Self-governance is the concept that a body of people are able to govern themselves. In other words: power to the people.</p>
+									<p>With many cryptocurrencies, the miners and/or the developers of the currency have too much when compared to the actual users of the coin. Liberdus is trying to prevent this by allowing users to vote for the future they want.</p>
+								</div>
+							</div>
+						</div>
+						
+						<div class="card">
+							<div class="card-header">
+								<h4 class="collapsed" data-toggle="collapse" data-target="#item3">What is Shardus?</h4>
+							</div>
+							<div id="item3" class="collapse" data-parent="#faqs-content">
+								<div class="card-body">
+									<p>Shardus is a linearly-scaling blockchain framework that enables Liberdus to scale TPS (transactions-per-second) with the growth of the network size, and provides the blockchain infrastructure for the Liberdus node software.</p>
+									<p>If you're interested in learning more about Shardus and how it works, check out the site <a href="https://shardus.com">here.</a></p>
+								</div>
+							</div>
+						</div>
+						<div class="card">
+							<div class="card-header">
+								<h4 data-toggle="collapse" data-target="#item1">Why use Liberdus over something like Ethereum? Doesn't Ethereum have more features?</h4>
+							</div>
+						
+							<div id="item1" class="collapse" data-parent="#faqs-content">
+								<div class="card-body">
+									<p>While Ethereum may have more features like smart contracts, the benefit of Liberdus is that it is a self-sustaining ecosystem that puts the coin holders in charge.</p>
+									<p>As a holder of Liberdus, you have a right to vote on decisions that will affect the future of the coin, including features and fees. You also get a network that linearly scales which means no congestion and nearly instantaneous transactions.</p>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+	<!-- end faqs -->
 	
 	<footer id="footer">
 		<div class="container">
