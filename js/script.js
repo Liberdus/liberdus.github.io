@@ -24,6 +24,14 @@ Version      : 1.0
 		}, 1000, 'easeInOutExpo');
 		event.preventDefault();
 	});
+
+	jQuery('a.learn-more.btn').on('click', function(event) {
+		var $anchor = jQuery(this);
+		jQuery('html, body').stop().animate({
+			scrollTop: jQuery($anchor.attr('href')).offset().top-headerHeight
+		}, 1000, 'easeInOutExpo');
+		event.preventDefault();
+	});
 	
 	jQuery(".navbar-nav li a").on("click",function(event){
 		jQuery(".navbar-collapse").removeClass('show');

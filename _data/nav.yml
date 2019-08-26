@@ -14,5 +14,8 @@
   name: Team
   href: '#team'
 -
+  name: Join
+  href: '#join'
+-
   name: FAQ
   href: '#faq'

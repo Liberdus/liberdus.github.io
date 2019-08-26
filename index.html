@@ -75,7 +75,7 @@
 								{{ site.data.hero.maintext }} <br><br>
 								<span class="hero-close"><strong>{{ site.data.hero.closeemphasis }}</strong> {{ site.data.hero.restofclose }}</span>
 							</p>
-							<a href="{{ site.data.hero.button1.href }}" class="btn btn-primary animated fadeInLeft">{{ site.data.hero.button1.text }}</a>
+							<a href="{{ site.data.hero.button1.href }}" class="learn-more btn btn-primary animated fadeInLeft">{{ site.data.hero.button1.text }}</a>
 							<a href="{{ site.data.hero.button2.href }}" class="btn btn-default animated fadeInLeft">{{ site.data.hero.button2.text }}</a>
 						</div>
 					</div>
@@ -141,7 +141,7 @@
 				</div>
 			</div>
 			
-			<div class="row">
+			<div class="row row-eq-height">
 				{% for feature in site.data.features %}
 					<div class="col-sm-6 col-md-6 col-lg-4">
 						<div class="features-item wow fadeInUp" data-wow-delay="0.2s">
@@ -251,6 +251,33 @@
 	</section>
 	<!-- end team -->
 
+	<section id="join" class="section-spacing inverse-bg">
+		<div class="container">
+			<div class="row align-items-center">
+				<div class="col-md-6">
+					<div class="download-img wow fadeIn text-center moveDown3 tilt-img">
+						<img src="img/banner/2.png" alt="">
+					</div>
+				</div>
+				
+				<div class="col-md-6">
+					<div class="download-text wow fadeIn">
+						<h2>Interested in joining the team?</h2>
+						<p>We are always looking for developers and collaborators who share our vision of democratic crypto communities and are willing to 
+							contribute their valuable time in order to help the project progress! Currently as the Shardus project is supporting the initial phases of
+							development of Liberdus, contributors will be awarded in the Shardus ERC-20 token (ULT).
+						</p>
+						
+						<a href="https://forms.gle/S4msLE2ANm1dyGpM8" class="btn btn-primary"><i class="fa fa-edit"></i> Apply to join</a>
+						<a href="https://shardus.com/#token" class="btn btn-default"><i class="fa fa-info-circle"></i> ULT</a>
+						
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+	<!-- end download -->
+
 	<section id="faq" class="section-spacing inverse-bg">
 		<div class="container">
 			<div class="row">
@@ -317,15 +344,17 @@
 			<div class="row">
 				<div class="col-md-12">
 					<ul class="social-media">
-						<li><a href="#"><i class="fa fa-facebook-square"></i></a></li>
-						<li><a href="#"><i class="fa fa-twitter-square"></i></a></li>
-						<li><a href="#"><i class="fa fa-linkedin-square"></i></a></li>
-						<li><a href="#"><i class="fa fa-instagram"></i></a></li>
+						<li><a href="https://www.youtube.com/channel/UCFibezzEPDQMpz1XJIlVIew/"><i class="fa fa-youtube-play"></i></a></li>
+						<li><a href="https://twitter.com/liberdus"><i class="fa fa-twitter-square"></i></a></li>
+						<li><a href="https://t.me/liberdus"><i class="fa fa-telegram"></i></a></li>
+						<li><a href="https://facebook.com/liberdus"><i class="fa fa-facebook-square"></i></a></li>
+						<li><a href="https://medium.com/@liberdus"><i class="fa fa-medium"></i></a></li>
+						<li><a href="https://reddit.com/r/Liberdus"><i class="fa fa-reddit"></i></a></li>
 					</ul>
 				</div>
 				<div class="col-md-12">
 					<div class="copyright text-center">
-						<p>&copy; Copyright 2019 | All right reserved.</p>
+						<p>&copy; Copyright 2019 | All rights reserved.</p>
 					</div>
 				</div>
 			</div>
@@ -349,7 +378,7 @@
     <script src="js/jquery.easing.min.js"></script>
 	<script src="js/tilt.jquery.js"></script>
 	<script src="js/wow.js"></script>
-	<script src="js/SmoothScroll.js"></script>
+	<script src="js/smooth-scroll.polyfills.min.js"></script>
     <script src="js/script.js"></script>
 	
 </body>
