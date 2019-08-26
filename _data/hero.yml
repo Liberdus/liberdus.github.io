@@ -7,7 +7,7 @@ closeemphasis: You decide
 restofclose: how Liberdus will work.
 button1:
   href: '#why'
-  text: Learn more ↓
+  text: Learn more&nbsp;<i class="fa fa-angle-down"></i> 
 button2:
   href: '#'
   text: Whitepaper

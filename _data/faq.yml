@@ -1,8 +1,7 @@
 -
   question: What is self-governance? Why is it important?
   answer:
-    - >
-      "Self-governance is the concept that a body of people are able to govern themselves. In other words: power to the people."
+    - "Self-governance is the concept that a body of people are able to govern themselves. In other words: power to the people."
     - > 
       With many cryptocurrencies, the miners and/or the developers of the currency have too much power over the currency
       when compared to the average users of the coin. 
@@ -24,3 +23,25 @@
     - >
       As a holder of Liberdus, you have a right to vote on decisions that will affect the future of the coin, including features and fees. 
       You also get a network that linearly scales which means no congestion and nearly instantaneous transactions.
+-
+  question: How do I support the project?
+  answer:
+    - "Hey, we're glad you want to support Liberdus! There are a few ways you can help out: "
+    - >
+      1. Follow us on social media and engage with us! We need your support and feedback to make Liberdus happen,
+      because Liberdus is the community!
+      Our social media links are available if you scroll to the bottom of the page.
+    - >
+      2. Contribute! We're always looking for strong developers and passionate people to help the project operate.
+      If you would like to be considered for the Liberdus core team, click <a href="https://forms.gle/S4msLE2ANm1dyGpM8">here</a>.
+    - >
+      3. Run a node! Liberdus will need independent supporters to run nodes in the network so that there is a good amount of decentralization
+      in the network and the network is fair. Without node runners, Liberdus is nothing and no transactions can be processed, so we need you guys!
+
+-
+  question: How can I run a node?
+  answer:
+    - >
+      Once the software is ready, the Liberdus team will release a binary file to download and run and you will be able to join the network.
+    - >
+      Check back in 2020 when the test and main networks should be operational for more info!

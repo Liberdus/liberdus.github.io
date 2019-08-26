@@ -8,6 +8,9 @@
   name: Features
   href: '#features'
 -
+  name: How it will work
+  href: '#how'
+-
   name: Roadmap
   href: '#roadmap'
 -
@@ -19,3 +22,6 @@
 -
   name: FAQ
   href: '#faq'
+-
+  name: Ask
+  href: '#ask'
