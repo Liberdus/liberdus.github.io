@@ -529,7 +529,6 @@ a + a{
 .features-item{
 	width:100%;
 	float:left;
-	height:auto;
 	padding:30px;
 	-webkit-box-shadow:0 0 10px rgba(165,165,165,0.2);
 	-ms-box-shadow:0 0 10px rgba(165,165,165,0.2);
