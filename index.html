@@ -18,7 +18,7 @@
 	<!-- Font-awesome -->
 	<link rel="stylesheet" href="fonts/font-awesome/css/font-awesome.min.css">
 	<!-- Flaticon -->
-	<link rel="stylesheet" href="fonts/flaticon/css/flaticon.css">
+	<link rel="stylesheet" href="fonts/flaticon/flaticon.css">
 	<!-- Google font-->
 	<link href="https://fonts.googleapis.com/css?family=Poppins:300,400,400i,500,600,700,800,900" rel="stylesheet">
 	<!-- Main CSS -->
@@ -71,7 +71,10 @@
 					<div class="col-md-6">
 						<div class="hero-text">
 							<h1 class="animated fadeInLeft">{{ site.data.hero.tagline }}</h1>
-							<p class="animated fadeInLeft">{{ site.data.hero.maintext }}</p>
+							<p class="animated fadeInLeft">
+								{{ site.data.hero.maintext }} <br><br>
+								<span class="hero-close"><strong>{{ site.data.hero.closeemphasis }}</strong> {{ site.data.hero.restofclose }}</span>
+							</p>
 							<a href="{{ site.data.hero.button1.href }}" class="btn btn-primary animated fadeInLeft">{{ site.data.hero.button1.text }}</a>
 							<a href="{{ site.data.hero.button2.href }}" class="btn btn-default animated fadeInLeft">{{ site.data.hero.button2.text }}</a>
 						</div>
@@ -97,7 +100,7 @@
 				</div>
 				<div class="col-md-6">
 					<div class="text-block wow fadeIn" data-wow-delay="0.2s">
-						<h2>Money isn't democratic...</h2>
+						<h2>Our money isn't democratic...</h2>
 						<p>Throughout the ages, people have used money. Money is probably one of the most important inventions that mankind has ever invented, because it has made the trade of goods and services much more efficient.</p>
 						<p>Unfortunely, determining how money works for a large group of people has historically been difficult, and for that reason we have allowed governments to make these decisions &mdash; hoping they represent our best interests.</p>
 					</div>
@@ -126,6 +129,32 @@
 		</div>
 	</section>
 	<!-- end why -->
+
+	<section class="section-spacing inverse-bg" id="features">
+		<div class="container">
+			<div class="row">
+				<div class="col-md-12">
+					<div class="section-title text-center">
+						<h2>Features</h2>
+						<p>The Liberdus cryptocurrency boasts many features; here are some of the most important ones:</p>
+					</div>
+				</div>
+			</div>
+			
+			<div class="row">
+				{% for feature in site.data.features %}
+					<div class="col-sm-6 col-md-6 col-lg-4">
+						<div class="features-item wow fadeInUp" data-wow-delay="0.2s">
+							<i class="flaticon-{{ feature.icon }}"></i>
+							<h3>{{ feature.name }}</h3>
+							<p>{{ feature.desc }}</p>
+						</div>
+					</div>
+				{% endfor %}
+			</div>
+		</div>
+	</section>
+	<!-- end features -->
 
 	<section class="section-spacing" id="roadmap">
 		<div class="container">
@@ -181,7 +210,7 @@
 							</div>
 							<div class="roadmap-content wow fadeInRight" data-wow-delay="0.2s">
 								<h3>Main Net</h3>
-								<p>The Liberdus team eagerly hopes to launch the main network before the mid of 2020.<br><br></p>
+								<p>The Liberdus team plans to launch the main network before the mid of 2020.<br><br></p>
 							</div>
 						</div>
 					</div>
@@ -191,8 +220,47 @@
 	</section>
 	<!-- end roadmap -->
 
+	<section id="team" class="section-spacing">
+		<div class="container">
+			<div class="row">
+				<div class="col-md-12">
+					<div class="section-title text-center">
+						<h2>Team</h2>
+						<p>The Liberdus team is made up of a collection of very talented and passionate technologists who believe cryptocurrency can be democratic. They are all working hard to make Liberdus a reality.</p>
+					</div>
+				</div>
+			</div>
+	
+			<div class="row">
+				{% for member in site.data.team %}
+					<div class="col-md-3">
+						<div class="team-member text-center">
+							<div class="thumb">
+								<img src="img/team/{{ member.img }}" alt="Photo of {{ member.name }}">
+							</div>
+							<h4>{{ member.name }}</h4>
+							<h5>{{ member.title }}</h5>
+							<ul class="social-media">
+								<li><a href="{{ member.linkedin }}"><i class="fa fa-linkedin-square"></i></a></li>
+							</ul>
+						</div>
+					</div>
+				{% endfor %}
+			</div>
+		</div>
+	</section>
+	<!-- end team -->
+
 	<section id="faq" class="section-spacing inverse-bg">
 		<div class="container">
+			<div class="row">
+					<div class="col-md-12">
+						<div class="section-title text-center">
+							<h2>FAQ</h2>
+							<p>Here are some of the most common questions we've received about Liberdus:</p>
+						</div>
+					</div>
+				</div>
 			<div class="row">
 				<div class="col-md-6">
 					<div class="faqs-img wow fadeIn text-center moveDown3 tilt-img">
@@ -209,7 +277,7 @@
 							<div id="item2" class="collapse show" data-parent="#faqs-content">
 								<div class="card-body">
 									<p>Self-governance is the concept that a body of people are able to govern themselves. In other words: power to the people.</p>
-									<p>With many cryptocurrencies, the miners and/or the developers of the currency have too much when compared to the actual users of the coin. Liberdus is trying to prevent this by allowing users to vote for the future they want.</p>
+									<p>With many cryptocurrencies, the miners and/or the developers of the currency have too much power over the currency when compared to the average users of the coin. Liberdus is trying to prevent this by allowing users to vote for the future they want.</p>
 								</div>
 							</div>
 						</div>
@@ -257,7 +325,7 @@
 				</div>
 				<div class="col-md-12">
 					<div class="copyright text-center">
-						<p>&copy; copyright 2019 | All right reserved.</p>
+						<p>&copy; Copyright 2019 | All right reserved.</p>
 					</div>
 				</div>
 			</div>
