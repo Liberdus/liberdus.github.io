@@ -1,0 +1,26 @@
+-
+  question: What is self-governance? Why is it important?
+  answer:
+    - >
+      "Self-governance is the concept that a body of people are able to govern themselves. In other words: power to the people."
+    - > 
+      With many cryptocurrencies, the miners and/or the developers of the currency have too much power over the currency
+      when compared to the average users of the coin. 
+      Liberdus is trying to prevent this by allowing users to vote for the future they want.
+-
+  question: What is Shardus?
+  answer:
+    - >
+      Shardus is a linearly-scaling blockchain framework that enables Liberdus to scale TPS (transactions-per-second) with the growth of the network size, 
+      and provides the blockchain infrastructure for the Liberdus node software.
+    - >
+      If you're interested in learning more about Shardus and how it works, check out the site <a href="https://shardus.com">here.</a>
+-
+  question: Why use Liberdus over something like Ethereum? Doesn't Ethereum have more features?
+  answer:
+    - >
+      While Ethereum may have more features like smart contracts, the benefit of Liberdus is that it is a self-sustaining 
+      ecosystem that puts the coin holders in charge.
+    - >
+      As a holder of Liberdus, you have a right to vote on decisions that will affect the future of the coin, including features and fees. 
+      You also get a network that linearly scales which means no congestion and nearly instantaneous transactions.
