@@ -17,6 +17,9 @@
   name: Join
   href: '#join'
 -
+  name: Download
+  href: 'https://gitlab.com/liberdus/validator-docker'
+-
   name: FAQ
   href: '#faq'
 -
