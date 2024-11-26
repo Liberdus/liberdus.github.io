@@ -1,0 +1,118 @@
+/* Base styles */
+body {
+    background-color: #f7f8fa;
+    color: #1a1a1a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif;
+    margin: 0;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Header styles */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 2rem;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.header-left .logo-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logo-image {
+    height: 32px;
+    width: auto;
+    object-fit: contain;
+}
+
+.header-left h1 {
+    margin: 0;
+    font-size: 32px;
+    color: #1a1a1a;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    line-height: 32px;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.network-badge {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    margin-right: 8px;
+    background-color: #666;
+    color: white;
+}
+
+.network-badge.connected {
+    background-color: #4CAF50;
+}
+
+.network-badge.wrong-network {
+    background-color: #f44336;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.main-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.content-wrapper {
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.05);
+    margin-top: 20px;
+    overflow: hidden;
+}
+
+.tab-content-wrapper {
+    padding: 20px;
+    text-align: center;
+}
+
+.tab-content-wrapper h2 {
+    margin-bottom: 16px;
+    color: #333;
+}
+
+.tab-content-wrapper p {
+    color: #666;
+}
+
+/* Example of browser-specific fixes */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Firefox-specific styles */
+@-moz-document url-prefix() {
+    /* Add Firefox-specific rules here */
+}
+
+/* Add Inter font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
