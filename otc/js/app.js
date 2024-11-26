@@ -12,7 +12,13 @@ console.log('App.js loaded');
 
 class App {
     constructor() {
-        console.log('App constructor called');
+        this.debug = (message, ...args) => {
+            if (isDebugEnabled('APP')) {
+                console.log('[App]', message, ...args);
+            }
+        };
+
+        this.debug('App constructor called');
         
         this.walletUI = new WalletUI();
         
@@ -99,12 +105,6 @@ class App {
             this.refreshActiveComponent();
         });
 
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('APP')) {
-                console.log('[App]', message, ...args);
-            }
-        };
-
         // Initialize debug panel
         this.initializeDebugPanel();
 
@@ -178,13 +178,13 @@ class App {
             window.webSocket = new WebSocketService();
             const wsInitialized = await window.webSocket.initialize();
             if (!wsInitialized) {
-                console.warn('[App] WebSocket initialization failed, falling back to HTTP');
+                this.debug('WebSocket initialization failed, falling back to HTTP');
             }
             
             // Initialize components in read-only mode initially
             await this.initializeComponents(true);
             
-            console.log('[App] Initialization complete');
+            this.debug('Initialization complete');
         } catch (error) {
             this.debug('Initialization error:', error);
         }
@@ -192,12 +192,12 @@ class App {
 
     async initializeComponents(readOnlyMode) {
         try {
-            console.log('[App] Initializing components...');
+            this.debug('Initializing components...');
             
             // Initialize each component
             for (const [id, component] of Object.entries(this.components)) {
                 if (component && typeof component.initialize === 'function') {
-                    console.log(`[App] Initializing component: ${id}`);
+                    this.debug(`Initializing component: ${id}`);
                     await component.initialize(readOnlyMode);
                 }
             }
@@ -205,7 +205,7 @@ class App {
             // Show the current tab
             this.showTab(this.currentTab);
             
-            console.log('[App] Components initialized');
+            this.debug('Components initialized');
         } catch (error) {
             console.error('[App] Error initializing components:', error);
             throw error;

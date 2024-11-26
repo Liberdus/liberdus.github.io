@@ -4,16 +4,15 @@ import { walletManager, isDebugEnabled } from '../config.js';
 
 export class WalletUI extends BaseComponent {
     constructor() {
+        super('wallet-container');
+        
+        this.debug = (message, ...args) => {
+            if (isDebugEnabled('WALLET_UI')) {
+                console.log('[WalletUI]', message, ...args);
+            }
+        };
+        
         try {
-            super('wallet-container');
-            
-            // Initialize debug logger
-            this.debug = (message, ...args) => {
-                if (isDebugEnabled('WALLET_UI')) {
-                    console.log('[WalletUI]', message, ...args);
-                }
-            };
-            
             this.debug('Constructor starting...');
             this.initializeElements();
             this.init();
