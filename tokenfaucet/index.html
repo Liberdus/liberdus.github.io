@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Test Token Faucet</title>
+    
+    <script type="importmap">
+      {
+        "imports": {
+          "ethers": "https://unpkg.com/ethers@5.7.2/dist/ethers.esm.min.js"
+        }
+      }
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+        :root {
+            --gb-dark: #8B4513;    /* Saddle Brown */
+            --gb-medium: #CD853F;  /* Peru */
+            --gb-light: #DEB887;   /* Burlywood */
+            --gb-lightest: #FFE4B5; /* Moccasin */
+        }
+
+        body {
+            font-family: 'Press Start 2P', cursive;
+            background-color: var(--gb-dark);
+            color: var(--gb-lightest);
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .container {
+            text-align: center;
+            padding: 2rem;
+            background-color: var(--gb-medium);
+            border: 8px solid var(--gb-light);
+            border-radius: 20px;
+            box-shadow: inset 0 0 10px var(--gb-dark);
+            max-width: 90%;
+            width: 400px;
+        }
+
+        h1 {
+            color: var(--gb-lightest);
+            margin-bottom: 1.5rem;
+            font-size: 1.2rem;
+        }
+
+        p {
+            margin-bottom: 2rem;
+            font-size: 0.8rem;
+        }
+
+        .addresses {
+            font-size: 12px;
+            margin: 20px 0;
+            word-break: break-all;
+            color: var(--gb-lightest);
+        }
+
+        .address-label {
+            color: var(--gb-lightest);
+            opacity: 0.8;
+            margin-top: 10px;
+        }
+
+        button {
+            background-color: var(--gb-dark);
+            color: var(--gb-lightest);
+            border: 4px solid var(--gb-light);
+            padding: 12px 24px;
+            margin: 10px;
+            cursor: pointer;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 0.8rem;
+            transition: all 0.2s ease;
+        }
+
+        button:hover:not(:disabled) {
+            background-color: var(--gb-light);
+            color: var(--gb-dark);
+            transform: scale(1.05);
+        }
+
+        button:active:not(:disabled) {
+            transform: scale(0.95);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 0.7rem;
+        }
+
+        .success {
+            background-color: var(--gb-light);
+            color: var(--gb-dark);
+        }
+
+        .error {
+            background-color: var(--gb-dark);
+            color: var(--gb-lightest);
+        }
+    </style>
+
+    <script type="module">
+        import { ethers } from 'ethers';
+        
+        window.addEventListener('load', async () => {
+            const faucetAddress = '0x3730f410e91F146089325fbD23f49D9ef544964F';
+            const faucetABI = [
+                "function getTokens() external",
+                "function getSecondTokenAddress() external view returns (address)",
+                "event TokensDistributed(address indexed recipient, uint256 amount, address firstToken, address secondToken)"
+            ];
+
+            let provider;
+            let signer;
+            let contract;
+            let secondTokenContract;
+            
+            const connectButton = document.getElementById('connectButton');
+            const getTokensButton = document.getElementById('getTokensButton');
+            const statusDiv = document.getElementById('status');
+            const firstTokenAddress = document.getElementById('firstTokenAddress');
+            const secondTokenAddress = document.getElementById('secondTokenAddress');
+
+            async function connectWallet() {
+                try {
+                    if (typeof window.ethereum === 'undefined') {
+                        throw new Error('Please install MetaMask to use this dApp');
+                    }
+                    await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    provider = new ethers.providers.Web3Provider(window.ethereum);
+                    signer = provider.getSigner();
+                    contract = new ethers.Contract(faucetAddress, faucetABI, signer);
+
+                    // Display first token address (faucet address)
+                    firstTokenAddress.textContent = faucetAddress;
+
+                    // Get and display second token address
+                    const secondAddress = await contract.getSecondTokenAddress();
+                    secondTokenAddress.textContent = secondAddress;
+
+                    const address = await signer.getAddress();
+                    connectButton.textContent = `Connected: ${address.substring(0, 6)}...${address.substring(38)}`;
+                    getTokensButton.disabled = false;
+
+                    showStatus('Wallet connected successfully!', 'success');
+                } catch (error) {
+                    showStatus(`Error: ${error.message}`, 'error');
+                }
+            }
+
+            async function getTokens() {
+                try {
+                    getTokensButton.disabled = true;
+                    showStatus("Transaction pending...", "success");
+
+                    const tx = await contract.getTokens();
+                    await tx.wait();
+
+                    showStatus("Tokens received successfully!", "success");
+                } catch (error) {
+                    showStatus(`Error: ${error.message}`, "error");
+                } finally {
+                    getTokensButton.disabled = false;
+                }
+            }
+
+            function showStatus(message, type) {
+                statusDiv.textContent = message;
+                statusDiv.className = type;
+                statusDiv.style.display = 'block';
+            }
+
+            connectButton.addEventListener('click', connectWallet);
+            getTokensButton.addEventListener('click', getTokens);
+        });
+    </script>
+  </head>
+  <body>
+    <div class="container">
+        <h1>Test Token Faucet</h1>
+        <p>INSERT COIN (CONNECT WALLET) TO CONTINUE</p>
+        <div class="addresses">
+            <div class="address-label">First Token:</div>
+            <div id="firstTokenAddress">Connect wallet to view</div>
+            <div class="address-label">Second Token:</div>
+            <div id="secondTokenAddress">Connect wallet to view</div>
+        </div>
+        <button id="connectButton">Connect Wallet</button>
+        <button id="getTokensButton" disabled>Get Tokens</button>
+        <div id="status" style="display: none;"></div>
+    </div>
+  </body>
+</html>
