@@ -37,7 +37,7 @@ export class Cleanup extends BaseComponent {
                 <div class="cleanup-section">
                     <h2>Cleanup Expired Orders</h2>
                     <div class="cleanup-info">
-                        <p>Earn fees by cleaning up old orders (14+ days old)</p>
+                        <p>Earn fees by cleaning up expired orders (14+ minutes old)</p>
                         <div class="cleanup-stats">
                             <div>Potential Reward: <span id="cleanup-reward">Loading...</span></div>
                             <div>Orders Ready: <span id="cleanup-ready">Loading...</span></div>
@@ -115,6 +115,11 @@ export class Cleanup extends BaseComponent {
             nextOrderId.toNumber()
         );
         
+        // Get constants from contract
+        const orderExpiry = await contract.ORDER_EXPIRY();
+        const gracePeriod = await contract.GRACE_PERIOD();
+        const totalExpiry = orderExpiry.add(gracePeriod);
+        
         for (let orderId = firstOrderId; orderId < batchEndId; orderId++) {
             const order = await contract.orders(orderId);
             
@@ -124,8 +129,8 @@ export class Cleanup extends BaseComponent {
                 continue;
             }
             
-            // Check if grace period has passed
-            if (currentTime > order.timestamp.toNumber() + (14 * 24 * 60 * 60)) {
+            // Check if grace period has passed (now 14 minutes total)
+            if (currentTime > order.timestamp.toNumber() + totalExpiry.toNumber()) {
                 reward = reward.add(order.orderCreationFee);
                 this.debug(`Order ${orderId} eligible for cleanup, fee:`, order.orderCreationFee.toString());
             } else {
@@ -148,6 +153,11 @@ export class Cleanup extends BaseComponent {
             nextOrderId.toNumber()
         );
         
+        // Get constants from contract
+        const orderExpiry = await contract.ORDER_EXPIRY();
+        const gracePeriod = await contract.GRACE_PERIOD();
+        const totalExpiry = orderExpiry.add(gracePeriod);
+        
         this.debug('Counting ready orders in range:', {
             firstOrderId: firstOrderId.toString(),
             batchEndId
@@ -161,8 +171,8 @@ export class Cleanup extends BaseComponent {
                 continue;
             }
             
-            // Check if grace period has passed
-            if (currentTime > order.timestamp.toNumber() + (14 * 24 * 60 * 60)) {
+            // Check if grace period has passed (now 14 minutes total)
+            if (currentTime > order.timestamp.toNumber() + totalExpiry.toNumber()) {
                 count++;
                 this.debug(`Order ${orderId} ready for cleanup`);
             } else {
