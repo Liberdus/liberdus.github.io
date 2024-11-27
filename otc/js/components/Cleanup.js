@@ -3,12 +3,12 @@ import { BaseComponent } from './BaseComponent.js';
 import { isDebugEnabled } from '../config.js';
 
 export class Cleanup extends BaseComponent {
-    constructor() {
+    constructor(containerId) {
         super('cleanup-container');
+        this.webSocket = window.webSocket;
         
-        // Initialize debug logger
         this.debug = (message, ...args) => {
-            if (isDebugEnabled('CLEANUP_ORDERS')) {
+            if (isDebugEnabled('CLEANUP')) {
                 console.log('[Cleanup]', message, ...args);
             }
         };
@@ -17,7 +17,22 @@ export class Cleanup extends BaseComponent {
     async initialize(readOnlyMode = true) {
         try {
             this.debug('Initializing cleanup component...');
-            // Clear previous content first
+            
+            if (!this.webSocket?.isInitialized) {
+                this.debug('Waiting for WebSocket service to initialize...');
+                for (let i = 0; i < 10; i++) {
+                    if (window.webSocket?.isInitialized) {
+                        this.webSocket = window.webSocket;
+                        break;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+            }
+
+            if (!this.webSocket?.isInitialized) {
+                throw new Error('WebSocket service not initialized after timeout');
+            }
+
             this.container.innerHTML = '';
             
             if (readOnlyMode) {
@@ -30,7 +45,6 @@ export class Cleanup extends BaseComponent {
                 return;
             }
 
-            // Set up UI
             this.debug('Setting up UI components');
             const wrapper = this.createElement('div', 'tab-content-wrapper');
             wrapper.innerHTML = `
@@ -51,18 +65,17 @@ export class Cleanup extends BaseComponent {
             
             this.container.appendChild(wrapper);
 
-            // Add event listeners
             this.cleanupButton = document.getElementById('cleanup-button');
             this.cleanupButton.addEventListener('click', () => this.performCleanup());
 
             this.debug('Starting cleanup opportunities check');
             await this.checkCleanupOpportunities();
             
-            // Check every 5 minutes
             this.intervalId = setInterval(() => this.checkCleanupOpportunities(), 5 * 60 * 1000);
             this.debug('Initialization complete');
         } catch (error) {
-            console.error('[Cleanup] Initialization error:', error);
+            this.debug('Initialization error:', error);
+            this.showError('Failed to initialize cleanup component');
         }
     }
 
@@ -77,111 +90,90 @@ export class Cleanup extends BaseComponent {
         try {
             const contract = await this.getContract();
             if (!contract) {
-                this.debug('Contract not available');
-                return;
+                throw new Error('Contract not initialized');
             }
 
-            this.debug('Calculating cleanup reward');
-            const reward = await this.calculateCleanupReward(contract);
-            const rewardElement = document.getElementById('cleanup-reward');
-            rewardElement.textContent = `${ethers.utils.formatEther(reward)} ETH`;
+            const orderExpiry = await contract.ORDER_EXPIRY();
+            const gracePeriod = await contract.GRACE_PERIOD();
+            const totalExpiry = orderExpiry.add(gracePeriod);
+            
+            const currentTime = Math.floor(Date.now() / 1000);
+            const orders = this.webSocket.getOrders('Active') || [];
+            
+            this.debug('Checking cleanup opportunities:', {
+                currentTime,
+                orderExpiry: orderExpiry.toString(),
+                gracePeriod: gracePeriod.toString(),
+                totalExpiry: totalExpiry.toString(),
+                activeOrders: orders.length
+            });
 
-            this.debug('Counting ready orders');
-            const readyOrders = await this.countReadyOrders(contract);
-            const readyElement = document.getElementById('cleanup-ready');
-            readyElement.textContent = readyOrders;
+            const readyOrders = orders.filter(order => {
+                const isPastGracePeriod = currentTime > order.timestamp + totalExpiry.toNumber();
+                this.debug('Order cleanup check:', {
+                    orderId: order.orderId,
+                    orderTime: order.timestamp,
+                    expiryTime: order.timestamp + totalExpiry.toNumber(),
+                    isPastGracePeriod
+                });
+                return isPastGracePeriod;
+            });
 
-            this.debug(`Found ${readyOrders} orders ready for cleanup`);
-            this.cleanupButton.disabled = readyOrders === 0;
+            const reward = readyOrders.reduce((total, order) => {
+                return total.add(ethers.BigNumber.from(order.orderCreationFee));
+            }, ethers.BigNumber.from(0));
+
+            const rewardSpan = document.getElementById('cleanup-reward');
+            const readySpan = document.getElementById('cleanup-ready');
+            const cleanupButton = document.getElementById('cleanup-button');
+
+            if (rewardSpan) {
+                rewardSpan.textContent = ethers.utils.formatEther(reward) + ' POL';
+            }
+            if (readySpan) {
+                readySpan.textContent = readyOrders.length.toString();
+            }
+            if (cleanupButton) {
+                cleanupButton.disabled = readyOrders.length === 0;
+            }
+
+            this.debug('Cleanup check complete:', {
+                readyOrders: readyOrders.length,
+                reward: reward.toString()
+            });
 
         } catch (error) {
-            console.error('[Cleanup] Error checking opportunities:', error);
+            this.debug('Error checking cleanup opportunities:', error);
+            throw error;
         }
     }
 
-    async calculateCleanupReward(contract) {
-        const currentTime = Math.floor(Date.now() / 1000);
-        const firstOrderId = await contract.firstOrderId();
-        const nextOrderId = await contract.nextOrderId();
-        let reward = ethers.BigNumber.from(0);
-        
-        this.debug('Calculating rewards for orders:', {
-            firstOrderId: firstOrderId.toString(),
-            nextOrderId: nextOrderId.toString()
-        });
-        
-        const batchEndId = Math.min(
-            firstOrderId.toNumber() + 10, 
-            nextOrderId.toNumber()
-        );
-        
-        // Get constants from contract
-        const orderExpiry = await contract.ORDER_EXPIRY();
-        const gracePeriod = await contract.GRACE_PERIOD();
-        const totalExpiry = orderExpiry.add(gracePeriod);
-        
-        for (let orderId = firstOrderId; orderId < batchEndId; orderId++) {
-            const order = await contract.orders(orderId);
-            
-            // Skip empty orders
-            if (order.maker === '0x0000000000000000000000000000000000000000') {
-                this.debug(`Order ${orderId} is empty, skipping`);
-                continue;
-            }
-            
-            // Check if grace period has passed (now 14 minutes total)
-            if (currentTime > order.timestamp.toNumber() + totalExpiry.toNumber()) {
-                reward = reward.add(order.orderCreationFee);
-                this.debug(`Order ${orderId} eligible for cleanup, fee:`, order.orderCreationFee.toString());
-            } else {
-                this.debug(`Order ${orderId} not yet eligible for cleanup`);
-                break;
-            }
+    setupWebSocket() {
+        if (!this.webSocket) {
+            this.debug('WebSocket not available for setup');
+            return;
         }
-        
-        return reward;
-    }
 
-    async countReadyOrders(contract) {
-        const currentTime = Math.floor(Date.now() / 1000);
-        const firstOrderId = await contract.firstOrderId();
-        const nextOrderId = await contract.nextOrderId();
-        let count = 0;
-        
-        const batchEndId = Math.min(
-            firstOrderId.toNumber() + 10, 
-            nextOrderId.toNumber()
-        );
-        
-        // Get constants from contract
-        const orderExpiry = await contract.ORDER_EXPIRY();
-        const gracePeriod = await contract.GRACE_PERIOD();
-        const totalExpiry = orderExpiry.add(gracePeriod);
-        
-        this.debug('Counting ready orders in range:', {
-            firstOrderId: firstOrderId.toString(),
-            batchEndId
+        // Subscribe to all relevant events
+        this.webSocket.subscribe('OrderCleaned', () => {
+            this.debug('Order cleaned event received');
+            this.checkCleanupOpportunities();
         });
-        
-        for (let orderId = firstOrderId; orderId < batchEndId; orderId++) {
-            const order = await contract.orders(orderId);
-            
-            // Skip empty orders
-            if (order.maker === '0x0000000000000000000000000000000000000000') {
-                continue;
-            }
-            
-            // Check if grace period has passed (now 14 minutes total)
-            if (currentTime > order.timestamp.toNumber() + totalExpiry.toNumber()) {
-                count++;
-                this.debug(`Order ${orderId} ready for cleanup`);
-            } else {
-                this.debug(`Order ${orderId} not ready, stopping count`);
-                break;
-            }
-        }
-        
-        return count;
+
+        this.webSocket.subscribe('OrderCanceled', () => {
+            this.debug('Order canceled event received');
+            this.checkCleanupOpportunities();
+        });
+
+        this.webSocket.subscribe('OrderFilled', () => {
+            this.debug('Order filled event received');
+            this.checkCleanupOpportunities();
+        });
+
+        this.webSocket.subscribe('orderSyncComplete', () => {
+            this.debug('Order sync complete event received');
+            this.checkCleanupOpportunities();
+        });
     }
 
     async performCleanup() {
@@ -191,25 +183,77 @@ export class Cleanup extends BaseComponent {
                 throw new Error('Contract not initialized');
             }
 
-            this.debug('Starting cleanup process');
+            console.log('[Cleanup] Starting cleanup process');  // Temporary console.log for debugging
             this.cleanupButton.disabled = true;
             this.cleanupButton.textContent = 'Cleaning...';
 
-            // Call the cleanup function
-            const tx = await contract.cleanupExpiredOrders();
-            this.debug('Cleanup transaction sent:', tx.hash);
-            await tx.wait();
-            this.debug('Cleanup transaction confirmed');
+            // Get current network conditions
+            const provider = contract.provider;
+            const feeData = await provider.getFeeData();
+            console.log('[Cleanup] Fee data:', {  // Temporary console.log for debugging
+                gasPrice: ethers.utils.formatUnits(feeData.gasPrice, 'gwei') + ' gwei',
+                maxFeePerGas: feeData.maxFeePerGas ? ethers.utils.formatUnits(feeData.maxFeePerGas, 'gwei') + ' gwei' : null,
+                maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ? ethers.utils.formatUnits(feeData.maxPriorityFeePerGas, 'gwei') + ' gwei' : null
+            });
 
-            // Show success message
+            // Get gas estimate with higher buffer
+            const gasEstimate = await contract.estimateGas.cleanupExpiredOrders()
+                .catch(error => {
+                    console.log('[Cleanup] Gas estimation failed:', error);  // Temporary console.log for debugging
+                    return ethers.BigNumber.from('300000'); // Lower default gas limit
+                });
+
+            // Add 50% buffer to gas estimate
+            const gasLimit = gasEstimate.mul(150).div(100);
+
+            console.log('[Cleanup] Transaction parameters:', {  // Temporary console.log for debugging
+                gasLimit: gasLimit.toString(),
+                gasPrice: ethers.utils.formatUnits(feeData.gasPrice, 'gwei') + ' gwei'
+            });
+
+            // Use legacy transaction type for compatibility
+            const txOptions = {
+                gasLimit,
+                gasPrice: feeData.gasPrice,
+                type: 0  // Force legacy transaction
+            };
+
+            console.log('[Cleanup] Sending cleanup transaction with options:', txOptions);  // Temporary console.log for debugging
+
+            const tx = await contract.cleanupExpiredOrders(txOptions);
+            console.log('[Cleanup] Transaction sent:', tx.hash);  // Temporary console.log for debugging
+
+            const receipt = await tx.wait();
+            console.log('[Cleanup] Transaction confirmed:', receipt);  // Temporary console.log for debugging
+
+            if (receipt.status === 0) {
+                throw new Error('Transaction failed during execution');
+            }
+
             this.showSuccess('Cleanup successful! Check your wallet for rewards.');
-
-            // Refresh stats
             await this.checkCleanupOpportunities();
 
         } catch (error) {
-            console.error('[Cleanup] Error performing cleanup:', error);
-            this.showError('Cleanup failed: ' + error.message);
+            console.error('[Cleanup] Error details:', {  // Temporary console.log for debugging
+                message: error.message,
+                code: error.code,
+                error: error.error,
+                reason: error.reason,
+                transaction: error.transaction
+            });
+            
+            let errorMessage = 'Cleanup failed: ';
+            if (error.error?.message) {
+                errorMessage += error.error.message;
+            } else if (error.reason) {
+                errorMessage += error.reason;
+            } else if (error.message) {
+                errorMessage += error.message;
+            } else {
+                errorMessage += 'Unknown error occurred';
+            }
+            
+            this.showError(errorMessage);
         } finally {
             this.cleanupButton.textContent = 'Clean Orders';
             this.cleanupButton.disabled = false;
