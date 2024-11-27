@@ -245,8 +245,12 @@ export class MyOrders extends ViewOrders {
         // Update the action column
         const actionCell = tr.querySelector('.action-column');
         if (actionCell) {
-            const status = this.getOrderStatus(order, this.getExpiryTime(order.timestamp));
-            if (status === 'Active') {
+            const currentTime = Math.floor(Date.now() / 1000);
+            const orderTime = Number(order.timestamp);
+            const isExpired = currentTime > orderTime + (7 * 60); // 7 minutes expiry
+            const isInGracePeriod = currentTime <= orderTime + (14 * 60); // 14 minutes total (expiry + grace)
+            
+            if (!isExpired || (isExpired && isInGracePeriod)) {
                 actionCell.innerHTML = `
                     <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
                 `;
@@ -381,10 +385,10 @@ export class MyOrders extends ViewOrders {
         if (thead) {
             thead.innerHTML = `
                 <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th data-sort="sell">Buy <span class="sort-icon">↕</span></th>
-                <th data-sort="sellAmount" class="">Amount <span class="sort-icon">↕</span></th>
                 <th data-sort="buy">Sell <span class="sort-icon">↕</span></th>
-                <th data-sort="buyAmount">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="buyAmount" class="">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="sell">Buy <span class="sort-icon">↕</span></th>
+                <th data-sort="sellAmount">Amount <span class="sort-icon">↕</span></th>
                 <th data-sort="expires">Expires <span class="sort-icon">↕</span></th>
                 <th data-sort="status">Status <span class="sort-icon">↕</span></th>
                 <th>Taker</th>
