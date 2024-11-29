@@ -181,6 +181,7 @@ export class MyOrders extends ViewOrders {
         const tr = await super.createOrderRow(order, tokenDetailsMap);
         const actionCell = tr.querySelector('.action-column');
         const statusCell = tr.querySelector('.order-status');
+        const expiresCell = tr.querySelector('td:nth-child(6)'); // Expires column
         
         if (actionCell && statusCell) {
             try {
@@ -192,36 +193,44 @@ export class MyOrders extends ViewOrders {
                 const orderExpiry = await contract.ORDER_EXPIRY();
                 const gracePeriod = await contract.GRACE_PERIOD();
                 
-                this.debug('Order timing:', {
-                    currentTime,
-                    orderTime,
-                    orderExpiry: orderExpiry.toNumber(),
-                    gracePeriod: gracePeriod.toNumber()
-                });
-
-                const isExpired = currentTime > orderTime + orderExpiry.toNumber();
-                const isInGracePeriod = currentTime <= (orderTime + orderExpiry.toNumber() + gracePeriod.toNumber());
+                const expiryTime = orderTime + orderExpiry.toNumber();
+                const timeDiff = expiryTime - currentTime;
                 
-                // Check order status first
+                // Format time difference for expires column
+                const formatTimeDiff = (diff) => {
+                    const absHours = Math.floor(Math.abs(diff) / 3600);
+                    const absMinutes = Math.floor((Math.abs(diff) % 3600) / 60);
+                    const sign = diff < 0 ? '-' : '';
+                    return `${sign}${absHours}h ${absMinutes}m`;
+                };
+
+                // Update expires column with the time difference
+                if (expiresCell) {
+                    expiresCell.textContent = formatTimeDiff(timeDiff);
+                }
+
+                const isGracePeriodExpired = currentTime > orderTime + orderExpiry.toNumber() + gracePeriod.toNumber();
+                
+                // Status column only shows contract states
                 if (order.status === 'Canceled') {
                     statusCell.textContent = 'Canceled';
                     statusCell.className = 'order-status canceled';
+                } else if (order.status === 'Filled') {
+                    statusCell.textContent = 'Filled';
+                    statusCell.className = 'order-status filled';
+                } else {
+                    statusCell.textContent = 'Active';
+                    statusCell.className = 'order-status active';
+                }
+
+                // Keep existing action column logic
+                if (order.status === 'Canceled') {
                     actionCell.innerHTML = '<span class="order-status">Canceled</span>';
-                } else if (isExpired && isInGracePeriod) {
-                    statusCell.textContent = 'Grace Period';
-                    statusCell.className = 'order-status grace-period';
-                    actionCell.innerHTML = `
-                        <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
-                    `;
-                    const cancelButton = actionCell.querySelector('.cancel-button');
-                    if (cancelButton) {
-                        cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
-                    }
-                } else if (isExpired) {
-                    statusCell.textContent = 'Expired';
+                } else if (order.status === 'Filled') {
+                    actionCell.innerHTML = '<span class="order-status">Filled</span>';
+                } else if (isGracePeriodExpired) {
                     actionCell.innerHTML = '<span class="order-status">Awaiting Cleanup</span>';
                 } else {
-                    // active order 
                     actionCell.innerHTML = `
                         <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
                     `;
@@ -263,7 +272,7 @@ export class MyOrders extends ViewOrders {
             let ordersToDisplay = Array.from(this.orders.values());
             if (showOnlyActive) {
                 ordersToDisplay = ordersToDisplay.filter(order => 
-                    this.getOrderStatus(order, this.getExpiryTime(order.timestamp)) === 'Active'
+                    order.status !== 'Canceled' && order.status !== 'Filled'
                 );
             }
 

@@ -10,6 +10,8 @@ export class WebSocketService {
         this.reconnectDelay = 1000;
         this.orderCache = new Map();
         this.isInitialized = false;
+        this.contractAddress = null;
+        this.contractABI = null;
         
         this.debug = (message, ...args) => {
             if (isDebugEnabled('WEBSOCKET')) {
@@ -26,6 +28,9 @@ export class WebSocketService {
             const config = getNetworkConfig();
             this.debug('Network config loaded, connecting to:', config.wsUrl);
             
+            this.contractAddress = config.contractAddress;
+            this.contractABI = config.contractABI;
+            
             this.provider = new ethers.providers.WebSocketProvider(config.wsUrl);
             
             // Wait for provider to be ready
@@ -33,8 +38,8 @@ export class WebSocketService {
             this.debug('Provider ready');
 
             const contract = new ethers.Contract(
-                config.contractAddress,
-                config.contractABI,
+                this.contractAddress,
+                this.contractABI,
                 this.provider
             );
 
@@ -142,7 +147,6 @@ export class WebSocketService {
         try {
             this.debug('Starting order sync with contract:', contract.address);
             
-            // Get current order state directly from contract
             let nextOrderId = 0;
             try {
                 nextOrderId = await contract.nextOrderId();
@@ -154,13 +158,12 @@ export class WebSocketService {
             // Clear existing cache before sync
             this.orderCache.clear();
             
-            // Always sync from 0 to ensure we don't miss any orders
+            // Sync all orders that have a valid maker address
             for (let i = 0; i < nextOrderId; i++) {
                 try {
                     const order = await contract.orders(i);
-                    // Only add non-zero address orders that are Active
-                    if (order.maker !== ethers.constants.AddressZero && 
-                        order.status === 0) { // 0 = Active
+                    // Only filter out zero-address makers (non-existent orders)
+                    if (order.maker !== ethers.constants.AddressZero) {
                         const orderData = {
                             id: i,
                             maker: order.maker,
@@ -170,7 +173,7 @@ export class WebSocketService {
                             buyToken: order.buyToken,
                             buyAmount: order.buyAmount,
                             timestamp: order.timestamp.toNumber(),
-                            status: ['Active', 'Filled', 'Canceled'][order.status],
+                            status: ['Active', 'Filled', 'Canceled'][order.status], // Map enum to string
                             orderCreationFee: order.orderCreationFee,
                             tries: order.tries
                         };
@@ -183,7 +186,7 @@ export class WebSocketService {
                 }
             }
             
-            this.debug('Order sync complete:', Object.fromEntries(this.orderCache));
+            this.debug('Order sync complete. Cache size:', this.orderCache.size);
             this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
             
         } catch (error) {
@@ -333,28 +336,42 @@ export class WebSocketService {
     // Add this method to check if orders are eligible for cleanup
     async checkCleanupEligibility(orderId) {
         try {
+            const order = this.orderCache.get(orderId);
+            if (!order) {
+                this.debug('Order not found in cache:', orderId);
+                return { isEligible: false };
+            }
+
             const contract = new ethers.Contract(
                 this.contractAddress,
                 this.contractABI,
                 this.provider
             );
 
-            const order = await contract.orders(orderId);
+            const orderExpiry = await contract.ORDER_EXPIRY();
+            const gracePeriod = await contract.GRACE_PERIOD();
+
             const currentTime = Math.floor(Date.now() / 1000);
-            const orderTime = order.timestamp.toNumber();
-            const totalExpiry = 14 * 24 * 60 * 60; // 14 days in seconds
+            const orderTime = order.timestamp;
+            const age = currentTime - orderTime;
+            
+            // Consider both active and cancelled orders that are past expiry + grace period
+            const isEligible = (order.status === 'Active' || order.status === 'Canceled') && 
+                              age > (orderExpiry.toNumber() + gracePeriod.toNumber());
 
             this.debug('Cleanup eligibility check:', {
                 orderId,
                 orderTime,
                 currentTime,
-                age: currentTime - orderTime,
-                requiredAge: totalExpiry,
-                isEligible: (currentTime - orderTime) > totalExpiry
+                age,
+                orderExpiry: orderExpiry.toNumber(),
+                gracePeriod: gracePeriod.toNumber(),
+                status: order.status,
+                isEligible
             });
 
             return {
-                isEligible: (currentTime - orderTime) > totalExpiry,
+                isEligible,
                 order
             };
         } catch (error) {

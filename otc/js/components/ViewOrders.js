@@ -13,6 +13,7 @@ export class ViewOrders extends BaseComponent {
         this.currentPage = 1;
         this.setupErrorHandling();
         this.eventSubscriptions = new Set();
+        this.expiryTimers = new Map();
         
         // Initialize debug logger with VIEW_ORDERS flag
         this.debug = (message, ...args) => {
@@ -416,7 +417,7 @@ export class ViewOrders extends BaseComponent {
                     </button>
                     <span class="page-info">Page 1 of 1</span>
                     <button class="pagination-button next-page" title="Next page">
-                        →
+                        
                     </button>
                 </div>
             </div>
@@ -775,6 +776,12 @@ export class ViewOrders extends BaseComponent {
     }
 
     cleanup() {
+        // Clear all expiry timers
+        if (this.expiryTimers) {
+            this.expiryTimers.forEach(timerId => clearInterval(timerId));
+            this.expiryTimers.clear();
+        }
+        
         // Clear existing subscriptions
         this.eventSubscriptions.forEach(sub => {
             if (window.webSocket) {
@@ -798,6 +805,8 @@ export class ViewOrders extends BaseComponent {
     async createOrderRow(order, tokenDetailsMap) {
         const tr = this.createElement('tr');
         tr.dataset.orderId = order.id.toString();
+        tr.dataset.timestamp = order.timestamp;
+        tr.dataset.status = order.status;
 
         const sellTokenDetails = tokenDetailsMap.get(order.sellToken);
         const buyTokenDetails = tokenDetailsMap.get(order.buyToken);
@@ -838,6 +847,9 @@ export class ViewOrders extends BaseComponent {
             fillButton.addEventListener('click', () => this.fillOrder(order.id));
         }
 
+        // Start the expiry timer for this row
+        this.startExpiryTimer(tr);
+        
         return tr;
     }
 
@@ -880,19 +892,18 @@ export class ViewOrders extends BaseComponent {
         // Check explicit status first
         if (order.status === 'Canceled') return 'Canceled';
         if (order.status === 'Filled') return 'Filled';
-        if (order.status === 'Cleaned') return 'Cleaned';
 
         // Then check timing
-        const totalExpiry = orderExpiry + gracePeriod;  // This adds up to 14 minutes
+        const totalExpiry = orderExpiry + gracePeriod;
         const orderTime = Number(order.timestamp);
 
         if (currentTime > orderTime + totalExpiry) {
             this.debug('Order not active: Past grace period');
-            return 'Cleaned';
+            return 'Expired';
         }
-        if (currentTime > orderTime + orderExpiry) {  // This should be the 7 minute mark
+        if (currentTime > orderTime + orderExpiry) {
             this.debug('Order status: Awaiting Clean');
-            return 'Awaiting Clean';
+            return 'Expired';
         }
 
         this.debug('Order status: Active');
@@ -921,10 +932,19 @@ export class ViewOrders extends BaseComponent {
                 return false;
             }
 
-            // Check if order is expired
-            const expiryTime = this.getExpiryTime(order.timestamp);
-            if (Date.now() >= expiryTime) {
-                this.debug('Order expired');
+            // Check if order is expired - using the contract's ORDER_EXPIRY
+            const contract = await this.getContract();
+            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
+            const now = Math.floor(Date.now() / 1000);
+            const expiryTime = Number(order.timestamp) + orderExpiry;
+
+            if (now >= expiryTime) {
+                this.debug('Order expired', {
+                    now,
+                    timestamp: order.timestamp,
+                    orderExpiry,
+                    expiryTime
+                });
                 return false;
             }
 
@@ -1068,5 +1088,59 @@ export class ViewOrders extends BaseComponent {
         
         const minutes = Math.ceil(timeLeft / 60);
         return `${minutes}m`;
+    }
+
+    startExpiryTimer(row) {
+        // Clear any existing timer
+        const existingTimer = this.expiryTimers?.get(row.dataset.orderId);
+        if (existingTimer) {
+            clearInterval(existingTimer);
+        }
+
+        // Initialize timers Map if not exists
+        if (!this.expiryTimers) {
+            this.expiryTimers = new Map();
+        }
+
+        const updateExpiry = async () => {
+            const expiresCell = row.querySelector('td:nth-child(6)'); // Expires column
+            if (!expiresCell) return;
+
+            const timestamp = row.dataset.timestamp;
+            const status = row.dataset.status;
+
+            // For cancelled orders, show 'Cancelled' instead of expiry time
+            if (status === 'Canceled') {
+                expiresCell.textContent = 'Cancelled';
+                return;
+            }
+            
+            // For filled orders, show 'Filled' instead of expiry time
+            if (status === 'Filled') {
+                expiresCell.textContent = 'Filled';
+                return;
+            }
+
+            const currentTime = Math.floor(Date.now() / 1000);
+            const contract = await this.getContract();
+            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
+            const expiryTime = Number(timestamp) + orderExpiry;
+            const timeDiff = expiryTime - currentTime;
+
+            // Format time difference
+            const absHours = Math.floor(Math.abs(timeDiff) / 3600);
+            const absMinutes = Math.floor((Math.abs(timeDiff) % 3600) / 60);
+            const sign = timeDiff < 0 ? '-' : '';
+            const newExpiryText = `${sign}${absHours}h ${absMinutes}m`;
+
+            if (expiresCell.textContent !== newExpiryText) {
+                expiresCell.textContent = newExpiryText;
+            }
+        };
+
+        // Update immediately and then every minute
+        updateExpiry();
+        const timerId = setInterval(updateExpiry, 60000); // Update every minute
+        this.expiryTimers.set(row.dataset.orderId, timerId);
     }
 }
