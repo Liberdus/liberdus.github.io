@@ -229,7 +229,7 @@ export class MyOrders extends ViewOrders {
                 } else if (order.status === 'Filled') {
                     actionCell.innerHTML = '<span class="order-status">Filled</span>';
                 } else if (isGracePeriodExpired) {
-                    actionCell.innerHTML = '<span class="order-status">Awaiting Cleanup</span>';
+                    actionCell.innerHTML = '<span class="order-status">Await Cleanup</span>';
                 } else {
                     actionCell.innerHTML = `
                         <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
