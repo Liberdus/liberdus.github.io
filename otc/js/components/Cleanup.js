@@ -3,12 +3,12 @@ import { BaseComponent } from './BaseComponent.js';
 import { isDebugEnabled } from '../config.js';
 
 export class Cleanup extends BaseComponent {
-    constructor() {
+    constructor(containerId) {
         super('cleanup-container');
+        this.webSocket = window.webSocket;
         
-        // Initialize debug logger
         this.debug = (message, ...args) => {
-            if (isDebugEnabled('CLEANUP_ORDERS')) {
+            if (isDebugEnabled('CLEANUP')) {
                 console.log('[Cleanup]', message, ...args);
             }
         };
@@ -17,7 +17,22 @@ export class Cleanup extends BaseComponent {
     async initialize(readOnlyMode = true) {
         try {
             this.debug('Initializing cleanup component...');
-            // Clear previous content first
+            
+            if (!this.webSocket?.isInitialized) {
+                this.debug('Waiting for WebSocket service to initialize...');
+                for (let i = 0; i < 10; i++) {
+                    if (window.webSocket?.isInitialized) {
+                        this.webSocket = window.webSocket;
+                        break;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+            }
+
+            if (!this.webSocket?.isInitialized) {
+                throw new Error('WebSocket service not initialized after timeout');
+            }
+
             this.container.innerHTML = '';
             
             if (readOnlyMode) {
@@ -30,14 +45,13 @@ export class Cleanup extends BaseComponent {
                 return;
             }
 
-            // Set up UI
             this.debug('Setting up UI components');
             const wrapper = this.createElement('div', 'tab-content-wrapper');
             wrapper.innerHTML = `
                 <div class="cleanup-section">
                     <h2>Cleanup Expired Orders</h2>
                     <div class="cleanup-info">
-                        <p>Earn fees by cleaning up old orders (14+ days old)</p>
+                        <p>Earn fees by cleaning up expired orders (14+ minutes old)</p>
                         <div class="cleanup-stats">
                             <div>Potential Reward: <span id="cleanup-reward">Loading...</span></div>
                             <div>Orders Ready: <span id="cleanup-ready">Loading...</span></div>
@@ -51,18 +65,17 @@ export class Cleanup extends BaseComponent {
             
             this.container.appendChild(wrapper);
 
-            // Add event listeners
             this.cleanupButton = document.getElementById('cleanup-button');
             this.cleanupButton.addEventListener('click', () => this.performCleanup());
 
             this.debug('Starting cleanup opportunities check');
             await this.checkCleanupOpportunities();
             
-            // Check every 5 minutes
             this.intervalId = setInterval(() => this.checkCleanupOpportunities(), 5 * 60 * 1000);
             this.debug('Initialization complete');
         } catch (error) {
-            console.error('[Cleanup] Initialization error:', error);
+            this.debug('Initialization error:', error);
+            this.showError('Failed to initialize cleanup component');
         }
     }
 
@@ -75,103 +88,65 @@ export class Cleanup extends BaseComponent {
 
     async checkCleanupOpportunities() {
         try {
-            const contract = await this.getContract();
-            if (!contract) {
-                this.debug('Contract not available');
-                return;
+            const orders = this.webSocket.getOrders('Active');
+            const eligibleOrders = [];
+            
+            for (const order of orders) {
+                const { isEligible } = await this.webSocket.checkCleanupEligibility(order.id);
+                if (isEligible) {
+                    eligibleOrders.push(order);
+                }
             }
-
-            this.debug('Calculating cleanup reward');
-            const reward = await this.calculateCleanupReward(contract);
-            const rewardElement = document.getElementById('cleanup-reward');
-            rewardElement.textContent = `${ethers.utils.formatEther(reward)} ETH`;
-
-            this.debug('Counting ready orders');
-            const readyOrders = await this.countReadyOrders(contract);
-            const readyElement = document.getElementById('cleanup-ready');
-            readyElement.textContent = readyOrders;
-
-            this.debug(`Found ${readyOrders} orders ready for cleanup`);
-            this.cleanupButton.disabled = readyOrders === 0;
-
+            
+            this.debug('Cleanup eligible orders:', eligibleOrders);
+            
+            // Update UI to show eligible orders
+            const container = document.getElementById('cleanup-container');
+            if (eligibleOrders.length > 0) {
+                container.innerHTML = `
+                    <div class="tab-content-wrapper">
+                        <h2>Cleanup Expired Orders</h2>
+                        <p>${eligibleOrders.length} orders eligible for cleanup</p>
+                        <button id="cleanupButton" class="action-button">Clean Orders</button>
+                    </div>`;
+            } else {
+                container.innerHTML = `
+                    <div class="tab-content-wrapper">
+                        <h2>Cleanup Expired Orders</h2>
+                        <p>No orders eligible for cleanup</p>
+                    </div>`;
+            }
         } catch (error) {
-            console.error('[Cleanup] Error checking opportunities:', error);
+            this.debug('Error checking cleanup opportunities:', error);
         }
     }
 
-    async calculateCleanupReward(contract) {
-        const currentTime = Math.floor(Date.now() / 1000);
-        const firstOrderId = await contract.firstOrderId();
-        const nextOrderId = await contract.nextOrderId();
-        let reward = ethers.BigNumber.from(0);
-        
-        this.debug('Calculating rewards for orders:', {
-            firstOrderId: firstOrderId.toString(),
-            nextOrderId: nextOrderId.toString()
-        });
-        
-        const batchEndId = Math.min(
-            firstOrderId.toNumber() + 10, 
-            nextOrderId.toNumber()
-        );
-        
-        for (let orderId = firstOrderId; orderId < batchEndId; orderId++) {
-            const order = await contract.orders(orderId);
-            
-            // Skip empty orders
-            if (order.maker === '0x0000000000000000000000000000000000000000') {
-                this.debug(`Order ${orderId} is empty, skipping`);
-                continue;
-            }
-            
-            // Check if grace period has passed
-            if (currentTime > order.timestamp.toNumber() + (14 * 24 * 60 * 60)) {
-                reward = reward.add(order.orderCreationFee);
-                this.debug(`Order ${orderId} eligible for cleanup, fee:`, order.orderCreationFee.toString());
-            } else {
-                this.debug(`Order ${orderId} not yet eligible for cleanup`);
-                break;
-            }
+    setupWebSocket() {
+        if (!this.webSocket) {
+            this.debug('WebSocket not available for setup');
+            return;
         }
-        
-        return reward;
-    }
 
-    async countReadyOrders(contract) {
-        const currentTime = Math.floor(Date.now() / 1000);
-        const firstOrderId = await contract.firstOrderId();
-        const nextOrderId = await contract.nextOrderId();
-        let count = 0;
-        
-        const batchEndId = Math.min(
-            firstOrderId.toNumber() + 10, 
-            nextOrderId.toNumber()
-        );
-        
-        this.debug('Counting ready orders in range:', {
-            firstOrderId: firstOrderId.toString(),
-            batchEndId
+        // Subscribe to all relevant events
+        this.webSocket.subscribe('OrderCleaned', () => {
+            this.debug('Order cleaned event received');
+            this.checkCleanupOpportunities();
         });
-        
-        for (let orderId = firstOrderId; orderId < batchEndId; orderId++) {
-            const order = await contract.orders(orderId);
-            
-            // Skip empty orders
-            if (order.maker === '0x0000000000000000000000000000000000000000') {
-                continue;
-            }
-            
-            // Check if grace period has passed
-            if (currentTime > order.timestamp.toNumber() + (14 * 24 * 60 * 60)) {
-                count++;
-                this.debug(`Order ${orderId} ready for cleanup`);
-            } else {
-                this.debug(`Order ${orderId} not ready, stopping count`);
-                break;
-            }
-        }
-        
-        return count;
+
+        this.webSocket.subscribe('OrderCanceled', () => {
+            this.debug('Order canceled event received');
+            this.checkCleanupOpportunities();
+        });
+
+        this.webSocket.subscribe('OrderFilled', () => {
+            this.debug('Order filled event received');
+            this.checkCleanupOpportunities();
+        });
+
+        this.webSocket.subscribe('orderSyncComplete', () => {
+            this.debug('Order sync complete event received');
+            this.checkCleanupOpportunities();
+        });
     }
 
     async performCleanup() {
@@ -181,25 +156,75 @@ export class Cleanup extends BaseComponent {
                 throw new Error('Contract not initialized');
             }
 
-            this.debug('Starting cleanup process');
             this.cleanupButton.disabled = true;
             this.cleanupButton.textContent = 'Cleaning...';
 
-            // Call the cleanup function
-            const tx = await contract.cleanupExpiredOrders();
-            this.debug('Cleanup transaction sent:', tx.hash);
-            await tx.wait();
-            this.debug('Cleanup transaction confirmed');
+            // Get current network conditions
+            const provider = contract.provider;
+            const feeData = await provider.getFeeData();
+            
+            // Get gas estimate
+            const gasEstimate = await contract.estimateGas.cleanupExpiredOrders()
+                .catch(error => {
+                    console.log('[Cleanup] Gas estimation failed:', error);
+                    return ethers.BigNumber.from('300000'); // Default gas limit
+                });
 
-            // Show success message
+            // Add 20% buffer to gas estimate
+            const gasLimit = gasEstimate.mul(120).div(100);
+
+            // Use legacy transaction type
+            const txOptions = {
+                gasLimit,
+                gasPrice: feeData.gasPrice,
+                type: 0  // Force legacy transaction
+            };
+
+            console.log('[Cleanup] Sending transaction with options:', txOptions);
+            const tx = await contract.cleanupExpiredOrders(txOptions);
+            console.log('[Cleanup] Transaction sent:', tx.hash);
+
+            const receipt = await tx.wait();
+            console.log('[Cleanup] Transaction confirmed:', receipt);
+            console.log('[Cleanup] Events:', receipt.events);
+
+            if (receipt.status === 0) {
+                throw new Error('Transaction failed during execution');
+            }
+
+            // Parse cleanup events from receipt
+            const cleanedOrderIds = receipt.events
+                ?.filter(event => {
+                    console.log('[Cleanup] Processing event:', event);
+                    return event.event === 'OrderCleanedUp';
+                })
+                ?.map(event => {
+                    console.log('[Cleanup] Cleaned order:', event.args);
+                    return event.args.orderId.toString();
+                });
+                
+            console.log('[Cleanup] Cleaned order IDs:', cleanedOrderIds);
+                
+            if (cleanedOrderIds?.length) {
+                this.debug('Orders cleaned:', cleanedOrderIds);
+                // Remove cleaned orders from WebSocket cache
+                this.webSocket.removeOrders(cleanedOrderIds);
+                // Force a fresh sync
+                await this.webSocket.syncAllOrders(contract);
+            }
+
             this.showSuccess('Cleanup successful! Check your wallet for rewards.');
-
-            // Refresh stats
             await this.checkCleanupOpportunities();
 
         } catch (error) {
-            console.error('[Cleanup] Error performing cleanup:', error);
-            this.showError('Cleanup failed: ' + error.message);
+            console.error('[Cleanup] Error details:', {
+                message: error.message,
+                code: error.code,
+                error: error.error,
+                reason: error.reason,
+                transaction: error.transaction
+            });
+            this.showError(`Cleanup failed: ${error.message}`);
         } finally {
             this.cleanupButton.textContent = 'Clean Orders';
             this.cleanupButton.disabled = false;

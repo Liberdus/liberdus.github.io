@@ -443,10 +443,10 @@ export class ViewOrders extends BaseComponent {
         thead.innerHTML = `
             <tr>
                 <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th data-sort="sell">Buy <span class="sort-icon">↕</span></th>
-                <th data-sort="sellAmount" class="">Amount <span class="sort-icon">↕</span></th>
-                <th data-sort="buy">Sell <span class="sort-icon">↕</span></th>
+                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
                 <th data-sort="buyAmount">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
+                <th data-sort="sellAmount">Amount <span class="sort-icon">↕</span></th>
                 <th data-sort="expires">Expires <span class="sort-icon">↕</span></th>
                 <th data-sort="status">Status <span class="sort-icon">↕</span></th>
                 <th>Taker</th>
@@ -565,20 +565,35 @@ export class ViewOrders extends BaseComponent {
         });
     }
 
-    formatExpiry(timestamp) {
-        const expiryTime = this.getExpiryTime(timestamp);
-        const now = Date.now();
-        const timeLeft = expiryTime - now;
+    async formatExpiry(timestamp) {
+        try {
+            const contract = await this.getContract();
+            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();  // 420 seconds (7 minutes)
+            // Don't add gracePeriod here since we only want to show when it expires
+            
+            const expiryTime = Number(timestamp) + orderExpiry;  // Just use orderExpiry
+            const now = Math.floor(Date.now() / 1000);
+            const timeLeft = expiryTime - now;
 
-        if (timeLeft <= 0) {
-            return 'Expired';
+            this.debug('Expiry calculation:', {
+                timestamp,
+                orderExpiry,
+                expiryTime,
+                now,
+                timeLeft,
+                timeLeftMinutes: timeLeft / 60
+            });
+
+            if (timeLeft <= 0) {
+                return 'Expired';
+            }
+
+            const minutes = Math.ceil(timeLeft / 60);
+            return `${minutes}m`;
+        } catch (error) {
+            this.debug('Error formatting expiry:', error);
+            return 'Unknown';
         }
-
-        const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-
-        return `${days}d ${hours}h ${minutes}m`;
     }
 
     setupEventListeners() {
@@ -622,36 +637,32 @@ export class ViewOrders extends BaseComponent {
             this.debug('Order details:', order);
 
             // Create token contract instance with full ERC20 ABI
-            const buyToken = new ethers.Contract(
-                order.buyToken,
+            // Use buyToken since the taker is selling what the maker wants to buy
+            const takerToken = new ethers.Contract(
+                order.buyToken,  // This is what the taker needs to sell (maker wants to buy)
                 erc20Abi,
                 this.provider
             );
             
             const userAddress = await window.walletManager.getAccount();
             
-            // Check balance first
-            const balance = await buyToken.balanceOf(userAddress);
-            this.debug('Current balance:', balance.toString());
-            this.debug('Required amount:', order.buyAmount.toString());
+            // Check balance and allowance for what taker needs to sell
+            const balance = await takerToken.balanceOf(userAddress);
+            const allowance = await takerToken.allowance(userAddress, this.contract.address);
 
             if (balance.lt(order.buyAmount)) {
                 throw new Error(`Insufficient token balance. Have ${ethers.utils.formatEther(balance)}, need ${ethers.utils.formatEther(order.buyAmount)}`);
             }
 
-            // Check allowance
-            const allowance = await buyToken.allowance(userAddress, this.contract.address);
-            this.debug('Current allowance:', allowance.toString());
-
             if (allowance.lt(order.buyAmount)) {
                 this.showSuccess('Requesting token approval...');
                 
                 try {
-                    const approveTx = await buyToken.connect(this.provider.getSigner()).approve(
+                    const approveTx = await takerToken.connect(this.provider.getSigner()).approve(
                         this.contract.address,
-                        order.buyAmount,
+                        order.buyAmount,  // Amount the taker needs to sell (maker's buyAmount)
                         {
-                            gasLimit: 70000,  // Standard gas limit for ERC20 approvals
+                            gasLimit: 70000,
                             gasPrice: await this.provider.getGasPrice()
                         }
                     );
@@ -791,8 +802,9 @@ export class ViewOrders extends BaseComponent {
         const sellTokenDetails = tokenDetailsMap.get(order.sellToken);
         const buyTokenDetails = tokenDetailsMap.get(order.buyToken);
         const canFill = await this.canFillOrder(order);
-        const expiryTime = this.getExpiryTime(order.timestamp);
+        const expiryTime = await this.getExpiryTime(order.timestamp);
         const status = this.getOrderStatus(order, expiryTime);
+        const formattedExpiry = await this.formatExpiry(order.timestamp);
         
         // Get current account first
         const accounts = await window.ethereum.request({ method: 'eth_accounts' });
@@ -806,11 +818,11 @@ export class ViewOrders extends BaseComponent {
 
         tr.innerHTML = `
             <td>${order.id}</td>
-            <td>${buyTokenDetails?.symbol || 'Unknown'}</td>
-            <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
             <td>${sellTokenDetails?.symbol || 'Unknown'}</td>
             <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
-            <td>${this.formatExpiry(order.timestamp)}</td>
+            <td>${buyTokenDetails?.symbol || 'Unknown'}</td>
+            <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
+            <td>${formattedExpiry}</td>
             <td class="order-status">${status}</td>
             <td class="taker-column">${takerDisplay}</td>
             <td class="action-column">${canFill ? 
@@ -829,15 +841,61 @@ export class ViewOrders extends BaseComponent {
         return tr;
     }
 
-    getExpiryTime(timestamp) {
-        const ORDER_EXPIRY = 7 * 24 * 60 * 60; // 7 days in seconds
-        return (Number(timestamp) + ORDER_EXPIRY) * 1000; // Convert to milliseconds
+    async getContractExpiryTimes() {
+        try {
+            const contract = await this.getContract();
+            if (!contract) {
+                throw new Error('Contract not initialized');
+            }
+            const orderExpiry = await contract.ORDER_EXPIRY();
+            const gracePeriod = await contract.GRACE_PERIOD();
+            return {
+                orderExpiry: orderExpiry.toNumber(),
+                gracePeriod: gracePeriod.toNumber()
+            };
+        } catch (error) {
+            console.error('[ViewOrders] Error fetching expiry times:', error);
+            throw error;
+        }
     }
 
-    getOrderStatus(order, expiryTime) {
-        if (order.status === 'Filled') return 'Filled';
+    async getExpiryTime(timestamp) {
+        try {
+            const { orderExpiry, gracePeriod } = await this.getContractExpiryTimes();
+            return (Number(timestamp) + orderExpiry + gracePeriod) * 1000; // Convert to milliseconds
+        } catch (error) {
+            console.error('[ViewOrders] Error calculating expiry time:', error);
+            return Number(timestamp) * 1000; // Fallback to original timestamp
+        }
+    }
+
+    getOrderStatus(order, currentTime, orderExpiry, gracePeriod) {
+        this.debug('Order timing:', {
+            currentTime,
+            orderTime: order.timestamp,
+            orderExpiry,  // 420 seconds (7 minutes)
+            gracePeriod   // 420 seconds (7 minutes)
+        });
+
+        // Check explicit status first
         if (order.status === 'Canceled') return 'Canceled';
-        if (Date.now() > expiryTime) return 'Expired';
+        if (order.status === 'Filled') return 'Filled';
+        if (order.status === 'Cleaned') return 'Cleaned';
+
+        // Then check timing
+        const totalExpiry = orderExpiry + gracePeriod;  // This adds up to 14 minutes
+        const orderTime = Number(order.timestamp);
+
+        if (currentTime > orderTime + totalExpiry) {
+            this.debug('Order not active: Past grace period');
+            return 'Cleaned';
+        }
+        if (currentTime > orderTime + orderExpiry) {  // This should be the 7 minute mark
+            this.debug('Order status: Awaiting Clean');
+            return 'Awaiting Clean';
+        }
+
+        this.debug('Order status: Active');
         return 'Active';
     }
 
@@ -931,5 +989,84 @@ export class ViewOrders extends BaseComponent {
         // Update both top and bottom controls
         const controls = this.container.querySelectorAll('.filter-controls');
         controls.forEach(updateControls);
+    }
+
+    async refreshOrders() {
+        try {
+            this.debug('Refreshing orders view');
+            const orders = this.webSocket.getOrders() || [];
+            this.debug('Orders from WebSocket:', orders);
+
+            const contract = await this.getContract();
+            if (!contract) {
+                throw new Error('Contract not initialized');
+            }
+
+            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
+            const gracePeriod = (await contract.GRACE_PERIOD()).toNumber();
+            const currentTime = Math.floor(Date.now() / 1000);
+
+            // Show all orders including cleaned ones
+            const filteredOrders = orders.filter(order => {
+                const status = this.getOrderStatus(order, currentTime, orderExpiry, gracePeriod);
+                this.debug('Processing order:', {
+                    orderId: order.id,
+                    status,
+                    timestamp: order.timestamp,
+                    currentTime,
+                    orderExpiry,
+                    gracePeriod
+                });
+                return true; // Show all orders
+            });
+
+            this.debug('Orders after filtering:', filteredOrders);
+
+            // Sort orders by timestamp descending
+            const sortedOrders = [...filteredOrders].sort((a, b) => b.timestamp - a.timestamp);
+            await this.displayOrders(sortedOrders);
+
+        } catch (error) {
+            this.debug('Error refreshing orders:', error);
+            this.showError('Failed to refresh orders');
+        }
+    }
+
+    async displayOrders(orders) {
+        try {
+            const contract = await this.getContract();
+            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
+            this.debug('Order expiry from contract:', {
+                orderExpiry,
+                inMinutes: orderExpiry / 60
+            });
+            
+            // ... rest of the code ...
+        } catch (error) {
+            this.debug('Error displaying orders:', error);
+            throw error;
+        }
+    }
+
+    formatExpiryTime(timestamp, orderExpiry) {
+        const expiryTime = timestamp + orderExpiry;
+        const now = Math.floor(Date.now() / 1000);
+        const timeLeft = expiryTime - now;
+        
+        this.debug('Expiry calculation:', {
+            timestamp,
+            orderExpiry,
+            expiryTime,
+            now,
+            timeLeft,
+            timeLeftMinutes: timeLeft / 60
+        });
+        
+        if (timeLeft <= 0) {
+            return 'Expired';
+        }
+        
+        const minutes = Math.ceil(timeLeft / 60);
+        return `${minutes}m`;
     }
 }

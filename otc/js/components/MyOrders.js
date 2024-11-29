@@ -84,74 +84,42 @@ export class MyOrders extends ViewOrders {
     }
 
     setupWebSocket() {
-        // Clear existing subscriptions first
-        this.eventSubscriptions.clear();
-        if (window.webSocket) {
-            window.webSocket.subscribers.forEach((_, event) => {
-                window.webSocket.unsubscribe(event, this);
-            });
+        // First call parent's setupWebSocket if it exists
+        if (super.setupWebSocket) {
+            super.setupWebSocket();
         }
 
-        // Subscribe to order sync completion with user filter
+        // Add OrderCanceled event handler
         this.eventSubscriptions.add({
-            event: 'orderSyncComplete',
-            callback: async (orders) => {
-                const userAddress = await window.walletManager.getAccount();
-                this.orders.clear();
-                
-                Object.values(orders)
-                    .filter(order => order.maker.toLowerCase() === userAddress.toLowerCase())
-                    .forEach(order => {
-                        this.orders.set(order.id, order);
-                    });
-                
-                this.refreshOrdersView().catch(error => {
-                    console.error('[MyOrders] Error refreshing orders after sync:', error);
-                });
-            }
-        });
-
-        // Subscribe to new orders
-        this.eventSubscriptions.add({
-            event: 'OrderCreated',
+            event: 'OrderCanceled',
             callback: async (orderData) => {
-                const userAddress = await window.walletManager.getAccount();
-                if (orderData.maker.toLowerCase() === userAddress.toLowerCase()) {
-                    this.debug('New order received:', orderData);
-                    this.orders.set(orderData.id, orderData);
-                    this.refreshOrdersView().catch(error => {
-                        console.error('[MyOrders] Error refreshing after new order:', error);
-                    });
-                }
-            }
-        });
-
-        // Subscribe to filled/canceled orders
-        ['OrderFilled', 'OrderCanceled'].forEach(event => {
-            this.eventSubscriptions.add({
-                event,
-                callback: (order) => {
-                    this.debug(`Order ${event.toLowerCase()}:`, order);
-                    if (this.orders.has(order.id)) {
-                        this.orders.get(order.id).status = event === 'OrderFilled' ? 'Filled' : 'Canceled';
-                        this.refreshOrdersView().catch(error => {
-                            console.error('[MyOrders] Error refreshing after order status change:', error);
-                        });
+                this.debug('Order canceled event received:', orderData);
+                
+                // Update the order in our local state
+                if (this.orders.has(orderData.id)) {
+                    const order = this.orders.get(orderData.id);
+                    order.status = 'Canceled';
+                    this.orders.set(orderData.id, order);
+                    
+                    // Update UI elements
+                    const statusCell = this.container.querySelector(`tr[data-order-id="${orderData.id}"] .order-status`);
+                    const actionCell = this.container.querySelector(`tr[data-order-id="${orderData.id}"] .action-column`);
+                    
+                    if (statusCell) {
+                        statusCell.textContent = 'Canceled';
+                        statusCell.className = 'order-status canceled';
+                    }
+                    if (actionCell) {
+                        actionCell.innerHTML = '<span class="order-status">Canceled</span>';
                     }
                 }
-            });
+            }
         });
-
-        // Register all subscriptions
-        if (window.webSocket) {
-            this.eventSubscriptions.forEach(sub => {
-                window.webSocket.subscribe(sub.event, sub.callback);
-            });
-        }
     }
 
     async cancelOrder(orderId) {
         const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
+        
         try {
             if (button) {
                 button.disabled = true;
@@ -166,48 +134,31 @@ export class MyOrders extends ViewOrders {
             try {
                 const cancelGasEstimate = await contract.estimateGas.cancelOrder(orderId);
                 cancelGasLimit = Math.floor(cancelGasEstimate.toNumber() * 1.2); // 20% buffer
-                this.debug('Cancel order gas estimate:', cancelGasEstimate.toString());
             } catch (error) {
                 this.debug('Gas estimation failed for cancel order, using default:', error);
                 cancelGasLimit = 100000; // Default gas limit for cancel orders
             }
 
-            this.debug('Sending cancel order transaction with params:', {
-                orderId,
-                gasLimit: cancelGasLimit,
-                gasPrice: (await this.provider.getGasPrice()).toString()
-            });
-
             const tx = await contract.cancelOrder(orderId, {
-                gasLimit: 100000,  // Standard gas limit for cancel orders
+                gasLimit: cancelGasLimit,
                 gasPrice: await this.provider.getGasPrice()
             });
             
             this.debug('Cancel transaction sent:', tx.hash);
+            this.showSuccess('Cancel transaction submitted');
+            
             await tx.wait();
             this.debug('Transaction confirmed');
 
-            this.showSuccess('Order canceled successfully');
-            
         } catch (error) {
-            this.debug('Cancel order error details:', {
-                message: error.message,
-                code: error.code,
-                data: error?.error?.data,
-                reason: error?.reason,
-                stack: error.stack
-            });
-            
+            this.debug('Cancel order error:', error);
             let errorMessage = 'Failed to cancel order: ';
             
-            // Try to decode the error
             if (error?.error?.data) {
                 try {
                     const decodedError = this.contract.interface.parseError(error.error.data);
                     errorMessage += `${decodedError.name}: ${decodedError.args}`;
-                    this.debug('Decoded error:', decodedError);
                 } catch (e) {
-                    // If we can't decode the error, fall back to basic messages
                     if (error.code === -32603) {
                         errorMessage += 'Transaction would fail. Please try again.';
                     } else {
@@ -217,7 +168,8 @@ export class MyOrders extends ViewOrders {
             }
             
             this.showError(errorMessage);
-        } finally {
+            
+            // Reset button state on error
             if (button) {
                 button.disabled = false;
                 button.textContent = 'Cancel';
@@ -227,37 +179,60 @@ export class MyOrders extends ViewOrders {
 
     async createOrderRow(order, tokenDetailsMap) {
         const tr = await super.createOrderRow(order, tokenDetailsMap);
-        
-        // Get the cells
-        const cells = tr.querySelectorAll('td');
-        
-        // Swap back the Buy and Sell columns for MyOrders view
-        const buySymbol = cells[1].textContent;
-        const buyAmount = cells[2].textContent;
-        const sellSymbol = cells[3].textContent;
-        const sellAmount = cells[4].textContent;
-        
-        cells[1].textContent = sellSymbol;
-        cells[2].textContent = sellAmount;
-        cells[3].textContent = buySymbol;
-        cells[4].textContent = buyAmount;
-
-        // Update the action column
         const actionCell = tr.querySelector('.action-column');
-        if (actionCell) {
-            const status = this.getOrderStatus(order, this.getExpiryTime(order.timestamp));
-            if (status === 'Active') {
-                actionCell.innerHTML = `
-                    <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
-                `;
+        const statusCell = tr.querySelector('.order-status');
+        
+        if (actionCell && statusCell) {
+            try {
+                const currentTime = Math.floor(Date.now() / 1000);
+                const orderTime = Number(order.timestamp);
+                const contract = await this.getContract();
                 
-                // Add click handler for cancel button
-                const cancelButton = actionCell.querySelector('.cancel-button');
-                if (cancelButton) {
-                    cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
+                // Get expiry times directly from contract
+                const orderExpiry = await contract.ORDER_EXPIRY();
+                const gracePeriod = await contract.GRACE_PERIOD();
+                
+                this.debug('Order timing:', {
+                    currentTime,
+                    orderTime,
+                    orderExpiry: orderExpiry.toNumber(),
+                    gracePeriod: gracePeriod.toNumber()
+                });
+
+                const isExpired = currentTime > orderTime + orderExpiry.toNumber();
+                const isInGracePeriod = currentTime <= (orderTime + orderExpiry.toNumber() + gracePeriod.toNumber());
+                
+                // Check order status first
+                if (order.status === 'Canceled') {
+                    statusCell.textContent = 'Canceled';
+                    statusCell.className = 'order-status canceled';
+                    actionCell.innerHTML = '<span class="order-status">Canceled</span>';
+                } else if (isExpired && isInGracePeriod) {
+                    statusCell.textContent = 'Grace Period';
+                    statusCell.className = 'order-status grace-period';
+                    actionCell.innerHTML = `
+                        <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
+                    `;
+                    const cancelButton = actionCell.querySelector('.cancel-button');
+                    if (cancelButton) {
+                        cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
+                    }
+                } else if (isExpired) {
+                    statusCell.textContent = 'Expired';
+                    actionCell.innerHTML = '<span class="order-status">Awaiting Cleanup</span>';
+                } else {
+                    // active order 
+                    actionCell.innerHTML = `
+                        <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
+                    `;
+                    const cancelButton = actionCell.querySelector('.cancel-button');
+                    if (cancelButton) {
+                        cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
+                    }
                 }
-            } else {
-                actionCell.innerHTML = `<span class="order-completed">Completed</span>`;
+            } catch (error) {
+                console.error('[MyOrders] Error in createOrderRow:', error);
+                actionCell.innerHTML = '<span class="order-status error">Error</span>';
             }
         }
 
@@ -376,15 +351,15 @@ export class MyOrders extends ViewOrders {
         // Call parent's setupTable to get basic structure
         await super.setupTable();
         
-        // Update the table header to swap Buy and Sell back
+        // Update the table header to show maker's perspective
         const thead = this.container.querySelector('thead tr');
         if (thead) {
             thead.innerHTML = `
                 <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
-                <th data-sort="sellAmount" class="">Amount <span class="sort-icon">↕</span></th>
-                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
-                <th data-sort="buyAmount">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="buy">Sell <span class="sort-icon">↕</span></th>
+                <th data-sort="buyAmount" class="">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="sell">Buy <span class="sort-icon">↕</span></th>
+                <th data-sort="sellAmount">Amount <span class="sort-icon">↕</span></th>
                 <th data-sort="expires">Expires <span class="sort-icon">↕</span></th>
                 <th data-sort="status">Status <span class="sort-icon">↕</span></th>
                 <th>Taker</th>
