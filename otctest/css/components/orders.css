@@ -6,6 +6,8 @@
   border-radius: 0.75rem;
   box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.1);
   padding: 0.5rem;
+  min-width: 48rem;
+  background: #ffffff;
 }
 
 /* Table base styles */
@@ -14,7 +16,6 @@
   border-collapse: collapse;
   background: #ffffff;
   table-layout: fixed;
-  min-width: 56rem;
 }
 
 .orders-table thead {
@@ -23,31 +24,28 @@
 
 /* Column widths - with wider ID column */
 .orders-table th:nth-child(1) {
-  width: 7%;
+  width: 10%;
 } /* ID */
 .orders-table th:nth-child(2) {
-  width: 11%;
+  width: 15%;
 } /* Buy Token */
 .orders-table th:nth-child(3) {
-  width: 11%;
+  width: 15%;
 } /* Buy Amount */
 .orders-table th:nth-child(4) {
-  width: 11%;
+  width: 15%;
 } /* Sell Token */
 .orders-table th:nth-child(5) {
-  width: 11%;
+  width: 15%;
 } /* Sell Amount */
 .orders-table th:nth-child(6) {
-  width: 12%;
+  width: 10%;
 } /* Expires */
 .orders-table th:nth-child(7) {
-  width: 12%;
+  width: 10%;
 } /* Status */
 .orders-table th:nth-child(8) {
-  width: 12%;
-} /* Maker */
-.orders-table th:nth-child(9) {
-  width: 13%;
+  width: 10%;
 } /* Action */
 
 /* Cell styles */
@@ -69,22 +67,24 @@
 /* Action column specific styles */
 .action-column {
   text-align: center;
+  padding: 0.5rem;
+  white-space: nowrap;
 }
 
 /* Fill button styles */
 .fill-button {
   background-color: #10b981;
   color: white;
-  padding: 0.5rem 1rem;
+  padding: 0.25rem 0.5rem;
   border: none;
-  border-radius: 0.5rem;
+  border-radius: 0.375rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   text-align: center;
-  min-width: 6rem;
-  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+  min-width: 4rem;
+  box-shadow: 0 1px 2px rgba(16, 185, 129, 0.2);
 }
 
 .fill-button:hover {
@@ -300,16 +300,176 @@ th[data-sort].active-sort .sort-icon {
 }
 
 /* Zebra striping for rows */
-.orders-table tbody tr:nth-child(even) {
-    background-color: #f9fafb;  /* Very light gray with slight blue tint */
+.orders-table tbody tr {
+  width: 100%;
+  background-color: #ffffff;
 }
 
-.orders-table tbody tr:nth-child(odd) {
-    background-color: #ffffff;  /* White */
+.orders-table tbody tr:nth-child(even) {
+  background-color: #f9fafb;
+}
+
+/* Remove any potential conflicting styles */
+.orders-table tr,
+.orders-table td,
+.orders-table th {
+  border: none;
+  margin: 0;
+  padding: 0.75rem;
+}
+
+/* Ensure the table container spans full width */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  margin-bottom: 1.25rem;
+  border-radius: 0.75rem;
+  box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.1);
+  padding: 0.5rem;
+  min-width: 48rem;
+  background: #ffffff;
 }
 
 /* Hover effect for rows */
 .orders-table tbody tr:hover {
-    background-color: #f3f4f6;  /* Slightly darker on hover */
-    transition: background-color 0.15s ease-in-out;
+  background-color: #f3f4f6;
+}
+
+/* Loading State Styles */
+.loading-message {
+  padding: 2rem;
+  text-align: center;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  margin: 20px auto;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.loading-text {
+  text-align: center;
+  color: #666;
+  margin-top: 10px;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Place this with other responsive adjustments */
+@media (max-width: 768px) {
+  .loading-spinner {
+    width: 2rem;
+    height: 2rem;
+  }
+}
+
+/* MyOrders specific column widths */
+#my-orders .orders-table th:nth-child(1) {
+  width: 8%;
+} /* ID */
+#my-orders .orders-table th:nth-child(2) {
+  width: 12%;
+} /* Buy Token */
+#my-orders .orders-table th:nth-child(3) {
+  width: 12%;
+} /* Buy Amount */
+#my-orders .orders-table th:nth-child(4) {
+  width: 12%;
+} /* Sell Token */
+#my-orders .orders-table th:nth-child(5) {
+  width: 12%;
+} /* Sell Amount */
+#my-orders .orders-table th:nth-child(6) {
+  width: 10%;
+} /* Expires */
+#my-orders .orders-table th:nth-child(7) {
+  width: 10%;
+} /* Status */
+#my-orders .orders-table th:nth-child(8) {
+  width: 12%;
+} /* Taker */
+#my-orders .orders-table th:nth-child(9) {
+  width: 12%;
+} /* Action */
+
+/* Token display styles */
+.token-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%; /* Ensure it fits in table cell */
+}
+
+.token-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0; /* Prevent icon from shrinking */
+}
+
+.token-icon.small {
+  width: 20px;
+  height: 20px;
+}
+
+.token-icon-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.token-icon-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.token-link {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #374151; /* Match existing table text color */
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.token-link:hover {
+  text-decoration: underline;
+  color: #10b981; /* Match your green theme */
+}
+
+.token-explorer-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+  flex-shrink: 0; /* Prevent icon from shrinking */
+}
+
+.token-link:hover .token-explorer-icon {
+  opacity: 1;
+}
+
+/* Adjust table cell padding for token info */
+.orders-table td:nth-child(2),
+.orders-table td:nth-child(4) {
+  padding: 0.5rem 0.75rem; /* Slightly reduce vertical padding to accommodate token info */
 }

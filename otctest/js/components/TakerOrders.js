@@ -80,9 +80,9 @@ export class TakerOrders extends ViewOrders {
             if (!filteredOrders.length) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="10" class="no-orders-message">
+                        <td colspan="8" class="no-orders-message">
                             <div class="placeholder-text">
-                                No orders found where you are the designated taker
+                                No orders found for you
                             </div>
                         </td>
                     </tr>`;
@@ -104,6 +104,17 @@ export class TakerOrders extends ViewOrders {
     }
 
     setupWebSocket() {
+        // Use parent's debounced refresh mechanism
+        const debouncedRefresh = () => {
+            this.debouncedRefresh();
+        };
+
+        // Clear existing subscriptions before adding new ones
+        this.eventSubscriptions.forEach(sub => {
+            window.webSocket.unsubscribe(sub.event, sub.callback);
+        });
+        this.eventSubscriptions.clear();
+
         // Subscribe to order sync completion with taker filter
         this.eventSubscriptions.add({
             event: 'orderSyncComplete',
@@ -118,24 +129,7 @@ export class TakerOrders extends ViewOrders {
                         this.orders.set(order.id, order);
                     });
                 
-                this.refreshOrdersView().catch(error => {
-                    this.debug('Error refreshing orders after sync:', error);
-                });
-            }
-        });
-
-        // Subscribe to new orders
-        this.eventSubscriptions.add({
-            event: 'OrderCreated',
-            callback: async (orderData) => {
-                const userAddress = await window.walletManager.getAccount();
-                if (orderData.taker.toLowerCase() === userAddress.toLowerCase()) {
-                    this.debug('New order received:', orderData);
-                    this.orders.set(orderData.id, orderData);
-                    this.refreshOrdersView().catch(error => {
-                        this.debug('Error refreshing after new order:', error);
-                    });
-                }
+                debouncedRefresh();
             }
         });
 
@@ -147,9 +141,7 @@ export class TakerOrders extends ViewOrders {
                     if (this.orders.has(order.id)) {
                         this.debug(`Order ${event.toLowerCase()}:`, order);
                         this.orders.get(order.id).status = event === 'OrderFilled' ? 'Filled' : 'Canceled';
-                        this.refreshOrdersView().catch(error => {
-                            this.debug('Error refreshing after order status change:', error);
-                        });
+                        debouncedRefresh();
                     }
                 }
             });
@@ -197,11 +189,6 @@ export class TakerOrders extends ViewOrders {
         }
 
         return tr;
-    }
-
-    isOrderForTaker(order, userAddress) {
-        if (!order || !userAddress) return false;
-        return order.taker.toLowerCase() === userAddress.toLowerCase();
     }
 
     // Override fillOrder to add specific handling for taker orders
@@ -317,6 +304,12 @@ export class TakerOrders extends ViewOrders {
                 throw new Error('Contract not initialized');
             }
 
+            // Get current account
+            const userAddress = await window.walletManager.getAccount();
+            if (!userAddress) {
+                throw new Error('No wallet connected');
+            }
+
             // Clear existing orders from table
             const tbody = this.container.querySelector('tbody');
             if (!tbody) {
@@ -325,60 +318,29 @@ export class TakerOrders extends ViewOrders {
             }
             tbody.innerHTML = '';
 
-            // Get filter and pagination state
+            // Get ALL orders from WebSocket cache without filtering
+            const allOrders = window.webSocket?.getOrders() || [];
+            
+            // Filter orders only by taker address
+            let ordersToDisplay = allOrders.filter(order => 
+                order?.taker && 
+                order.taker.toLowerCase() === userAddress.toLowerCase()
+            );
+
+            // Check if we should filter for fillable orders
             const showOnlyFillable = this.container.querySelector('#fillable-orders-toggle')?.checked;
-            const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
-
-            // Filter orders if necessary
-            let ordersToDisplay = Array.from(this.orders.values());
             if (showOnlyFillable) {
-                ordersToDisplay = await Promise.all(ordersToDisplay.map(async order => {
-                    const status = this.getOrderStatus(order, this.getExpiryTime(order.timestamp));
-                    return status === 'Active' ? order : null;
-                }));
-                ordersToDisplay = ordersToDisplay.filter(order => order !== null);
+                // Filter for fillable orders
+                const fillableChecks = await Promise.all(
+                    ordersToDisplay.map(async order => {
+                        const canFill = await this.canFillOrder(order);
+                        return canFill ? order : null;
+                    })
+                );
+                ordersToDisplay = fillableChecks.filter(order => order !== null);
             }
 
-            // Sort orders based on current sort configuration
-            ordersToDisplay = ordersToDisplay.sort((a, b) => {
-                const direction = this.sortConfig.direction === 'asc' ? 1 : -1;
-                
-                switch (this.sortConfig.column) {
-                    case 'id':
-                        return (Number(a.id) - Number(b.id)) * direction;
-                    case 'status':
-                        const statusA = this.getOrderStatus(a, this.getExpiryTime(a.timestamp));
-                        const statusB = this.getOrderStatus(b, this.getExpiryTime(b.timestamp));
-                        return statusA.localeCompare(statusB) * direction;
-                    default:
-                        return 0;
-                }
-            });
-
-            // Apply pagination if not viewing all
-            const totalOrders = ordersToDisplay.length;
-            if (pageSize !== -1) {
-                const startIndex = (this.currentPage - 1) * pageSize;
-                ordersToDisplay = ordersToDisplay.slice(startIndex, startIndex + pageSize);
-            }
-
-            // Update pagination controls
-            this.updatePaginationControls(totalOrders);
-
-            // Check if we have any orders after filtering
-            if (!ordersToDisplay || ordersToDisplay.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="10" class="no-orders-message">
-                            <div class="placeholder-text">
-                                ${showOnlyFillable ? 'No fillable orders found' : 'No orders found where you are the designated taker'}
-                            </div>
-                        </td>
-                    </tr>`;
-                return;
-            }
-
-            // Get token details
+            // Get token details for display
             const tokenAddresses = new Set();
             ordersToDisplay.forEach(order => {
                 if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
@@ -392,6 +354,19 @@ export class TakerOrders extends ViewOrders {
                     tokenDetailsMap.set(address, tokenDetails[index]);
                 }
             });
+
+            // Check if we have any orders after filtering
+            if (!ordersToDisplay.length) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="8" class="no-orders-message">
+                            <div class="placeholder-text">
+                                No orders found for you
+                            </div>
+                        </td>
+                    </tr>`;
+                return;
+            }
 
             // Create and append order rows
             for (const order of ordersToDisplay) {
@@ -420,7 +395,13 @@ export class TakerOrders extends ViewOrders {
         // Call parent's setupTable to get basic structure
         await super.setupTable();
         
-        // Update the table header with only ID and Status sorting
+        // Update the filter toggle text to be more specific
+        const filterToggleSpan = this.container.querySelector('.filter-toggle span');
+        if (filterToggleSpan) {
+            filterToggleSpan.textContent = 'Show only fillable orders';
+        }
+
+        // Update the table header
         const thead = this.container.querySelector('thead tr');
         if (thead) {
             thead.innerHTML = `
@@ -431,7 +412,6 @@ export class TakerOrders extends ViewOrders {
                 <th>Amount</th>
                 <th>Expires</th>
                 <th data-sort="status">Status <span class="sort-icon">↕</span></th>
-                <th>Taker</th>
                 <th>Action</th>
             `;
 
@@ -446,19 +426,12 @@ export class TakerOrders extends ViewOrders {
                 th.addEventListener('click', () => this.handleSort(th.dataset.sort));
             });
         }
-
-        // Update filter toggle text
-        const filterToggleSpan = this.container.querySelector('.filter-toggle span');
-        if (filterToggleSpan) {
-            filterToggleSpan.textContent = 'Show only fillable orders';
-        }
     }
 
-    // Add handleSort method if not inherited properly
+    // Override handleSort to use parent's debouncedRefresh
     handleSort(column) {
         this.debug('Sorting by column:', column);
         
-        // Toggle direction if clicking same column
         if (this.sortConfig.column === column) {
             this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
         } else {
@@ -466,7 +439,6 @@ export class TakerOrders extends ViewOrders {
             this.sortConfig.direction = 'asc';
         }
 
-        // Update sort icons and active states
         const headers = this.container.querySelectorAll('th[data-sort]');
         headers.forEach(header => {
             const icon = header.querySelector('.sort-icon');
@@ -479,7 +451,7 @@ export class TakerOrders extends ViewOrders {
             }
         });
 
-        // Refresh the view with new sort
-        this.refreshOrdersView();
+        // Use parent's debouncedRefresh instead of direct refreshOrdersView call
+        this.debouncedRefresh();
     }
 }

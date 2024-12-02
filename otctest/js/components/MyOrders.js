@@ -6,10 +6,11 @@ export class MyOrders extends ViewOrders {
     constructor() {
         super('my-orders');
         
-        // Initialize sort config
+        // Initialize sort config with id as default sort, descending
         this.sortConfig = {
             column: 'id',
-            direction: 'asc'
+            direction: 'desc',
+            isColumnClick: false
         };
         
         // Initialize debug logger
@@ -189,172 +190,238 @@ export class MyOrders extends ViewOrders {
         const statusCell = tr.querySelector('.order-status');
         const expiresCell = tr.querySelector('td:nth-child(6)'); // Expires column
         
-        if (actionCell && statusCell) {
-            try {
-                const currentTime = Math.floor(Date.now() / 1000);
-                const orderTime = Number(order.timestamp);
-                const contract = await this.getContract();
-                
-                // Get expiry times directly from contract
-                const orderExpiry = await contract.ORDER_EXPIRY();
-                const gracePeriod = await contract.GRACE_PERIOD();
-                
-                const expiryTime = orderTime + orderExpiry.toNumber();
-                const timeDiff = expiryTime - currentTime;
-                
-                // Format time difference for expires column
-                const formatTimeDiff = (diff) => {
-                    const absHours = Math.floor(Math.abs(diff) / 3600);
-                    const absMinutes = Math.floor((Math.abs(diff) % 3600) / 60);
-                    const sign = diff < 0 ? '-' : '';
-                    return `${sign}${absHours}h ${absMinutes}m`;
-                };
-
-                // Update expires column with the time difference
-                if (expiresCell) {
-                    expiresCell.textContent = formatTimeDiff(timeDiff);
-                }
-
-                const isGracePeriodExpired = currentTime > orderTime + orderExpiry.toNumber() + gracePeriod.toNumber();
-                
-                // Status column only shows contract states
-                if (order.status === 'Canceled') {
-                    statusCell.textContent = 'Canceled';
-                    statusCell.className = 'order-status canceled';
-                } else if (order.status === 'Filled') {
-                    statusCell.textContent = 'Filled';
-                    statusCell.className = 'order-status filled';
-                } else {
-                    statusCell.textContent = 'Active';
-                    statusCell.className = 'order-status active';
-                }
-
-                // Keep existing action column logic
-                if (order.status === 'Canceled') {
-                    actionCell.innerHTML = '<span class="order-status">Canceled</span>';
-                } else if (order.status === 'Filled') {
-                    actionCell.innerHTML = '<span class="order-status">Filled</span>';
-                } else if (isGracePeriodExpired) {
-                    actionCell.innerHTML = '<span class="order-status">Await Cleanup</span>';
-                } else {
-                    actionCell.innerHTML = `
-                        <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
-                    `;
-                    const cancelButton = actionCell.querySelector('.cancel-button');
-                    if (cancelButton) {
-                        cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
-                    }
-                }
-            } catch (error) {
-                console.error('[MyOrders] Error in createOrderRow:', error);
-                actionCell.innerHTML = '<span class="order-status error">Error</span>';
-            }
+        // Remove the existing action column if it exists (from parent class)
+        if (actionCell) {
+            actionCell.remove();
         }
+
+        // Create new taker cell
+        const takerCell = document.createElement('td');
+        // Check if order is open to anyone (taker is zero address)
+        const isPublicOrder = order.taker === ethers.constants.AddressZero;
+        
+        if (isPublicOrder) {
+            takerCell.innerHTML = '<span class="open-order">Public</span>';
+        } else {
+            // For private orders, show truncated address
+            const shortAddress = `${order.taker.slice(0, 6)}...${order.taker.slice(-4)}`;
+            takerCell.innerHTML = `<span class="targeted-order" title="${order.taker}">${shortAddress}</span>`;
+        }
+
+        // Create new action cell
+        const newActionCell = document.createElement('td');
+        newActionCell.className = 'action-column';
+
+        try {
+            const currentTime = Math.floor(Date.now() / 1000);
+            const orderTime = Number(order.timestamp);
+            const contract = await this.getContract();
+            const orderExpiry = await contract.ORDER_EXPIRY();
+            const gracePeriod = await contract.GRACE_PERIOD();
+            const isGracePeriodExpired = currentTime > orderTime + orderExpiry.toNumber() + gracePeriod.toNumber();
+
+            if (order.status === 'Canceled') {
+                newActionCell.innerHTML = '<span class="order-status">Canceled</span>';
+            } else if (order.status === 'Filled') {
+                newActionCell.innerHTML = '<span class="order-status">Filled</span>';
+            } else if (isGracePeriodExpired) {
+                newActionCell.innerHTML = '<span class="order-status">Await Cleanup</span>';
+            } else {
+                newActionCell.innerHTML = `
+                    <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
+                `;
+                const cancelButton = newActionCell.querySelector('.cancel-button');
+                if (cancelButton) {
+                    cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
+                }
+            }
+        } catch (error) {
+            console.error('[MyOrders] Error in createOrderRow:', error);
+            newActionCell.innerHTML = '<span class="order-status error">Error</span>';
+        }
+
+        // Append both cells in correct order
+        tr.appendChild(takerCell);
+        tr.appendChild(newActionCell);
 
         return tr;
     }
 
     async refreshOrdersView() {
         try {
-            this.debug('Initializing MyOrders component');
-            
             // Get contract instance first
             this.contract = await this.getContract();
             if (!this.contract) {
                 throw new Error('Contract not initialized');
             }
 
+            // Get current account
+            const userAddress = await window.walletManager.getAccount();
+            if (!userAddress) {
+                throw new Error('No wallet connected');
+            }
+
             // Clear existing orders from table
             const tbody = this.container.querySelector('tbody');
             if (!tbody) {
-                this.debug('Table body not found');
+                console.warn('[MyOrders] Table body not found');
                 return;
             }
             tbody.innerHTML = '';
 
-            // Get current account
-            const userAddress = await window.walletManager.getAccount();
-            if (!userAddress) {
-                this.debug('No account connected');
-                return;
-            }
-
-            // Get filter state
-            const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked;
-
-            // Filter orders for the current user
-            let ordersToDisplay = Array.from(this.orders.values()).filter(order => 
-                order?.maker && userAddress && 
+            // Get ALL orders from WebSocket cache without filtering
+            const allOrders = window.webSocket?.getOrders() || [];
+            
+            // Filter orders only by maker address
+            let ordersToDisplay = allOrders.filter(order => 
+                order?.maker && 
                 order.maker.toLowerCase() === userAddress.toLowerCase()
             );
 
-            if (showOnlyActive) {
-                ordersToDisplay = ordersToDisplay.filter(order => 
-                    order.status !== 'Canceled' && order.status !== 'Filled'
-                );
+            // Check if we should filter for cancellable orders
+            const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked;
+            if (showOnlyCancellable) {
+                // Filter for active orders that can be cancelled
+                const currentTime = Math.floor(Date.now() / 1000);
+                const contract = await this.getContract();
+                const orderExpiry = await contract.ORDER_EXPIRY();
+                const gracePeriod = await contract.GRACE_PERIOD();
+
+                ordersToDisplay = ordersToDisplay.filter(order => {
+                    const orderTime = Number(order.timestamp);
+                    const isExpiredWithoutGrace = currentTime > orderTime + orderExpiry.toNumber();
+                    const isGracePeriodExpired = currentTime > orderTime + orderExpiry.toNumber() + gracePeriod.toNumber();
+
+                    // Show orders that are:
+                    // 1. Active/Open AND not expired, OR
+                    // 2. Active/Open AND expired but still within grace period
+                    return (order.status === 'Active' || order.status === 'Open') && 
+                           (!isExpiredWithoutGrace || !isGracePeriodExpired);
+                });
             }
 
-            // Get token details
+            // Get token details for display
             const tokenAddresses = new Set();
             ordersToDisplay.forEach(order => {
-                if (order?.sellToken) tokenAddresses.add(order.sellToken);
-                if (order?.buyToken) tokenAddresses.add(order.buyToken);
+                if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
+                if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
             });
 
             const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
             const tokenDetailsMap = new Map();
-            tokenDetails.forEach((details, index) => {
-                if (details) {
-                    tokenDetailsMap.set(Array.from(tokenAddresses)[index], details);
-                }
-            });
-
-            // Sort orders based on current sort configuration
-            ordersToDisplay = ordersToDisplay.sort((a, b) => {
-                const direction = this.sortConfig.direction === 'asc' ? 1 : -1;
-                
-                switch (this.sortConfig.column) {
-                    case 'id':
-                        return (Number(a.id) - Number(b.id)) * direction;
-                    case 'status':
-                        const statusA = this.getOrderStatus(a, this.getExpiryTime(a.timestamp));
-                        const statusB = this.getOrderStatus(b, this.getExpiryTime(b.timestamp));
-                        return statusA.localeCompare(statusB) * direction;
-                    default:
-                        return 0;
+            Array.from(tokenAddresses).forEach((address, index) => {
+                if (tokenDetails[index]) {
+                    tokenDetailsMap.set(address, tokenDetails[index]);
                 }
             });
 
             // Check if we have any orders after filtering
-            if (!ordersToDisplay || ordersToDisplay.length === 0) {
-                this.debug('No orders to display after filtering');
+            if (!ordersToDisplay.length) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="10" class="no-orders-message">
+                        <td colspan="9" class="no-orders-message">
                             <div class="placeholder-text">
-                                ${showOnlyActive ? 'No active orders found' : 'No orders found'}
+                                No orders found
                             </div>
                         </td>
                     </tr>`;
                 return;
             }
 
-            // Add orders to table
+            // Sort orders based on sortConfig
+            ordersToDisplay.sort((a, b) => {
+                if (this.sortConfig.column === 'id') {
+                    return this.sortConfig.direction === 'asc'
+                        ? Number(a.id) - Number(b.id)
+                        : Number(b.id) - Number(a.id);
+                } else if (this.sortConfig.column === 'status') {
+                    const statusPriority = {
+                        'Open': 1,
+                        'Active': 1,
+                        'Pending': 2,
+                        'Filled': 3,
+                        'Canceled': 4,
+                        'Await Cleanup': 5
+                    };
+                    
+                    const priorityA = statusPriority[a.status] || 999;
+                    const priorityB = statusPriority[b.status] || 999;
+                    
+                    return this.sortConfig.direction === 'asc'
+                        ? priorityA - priorityB
+                        : priorityB - priorityA;
+                }
+                
+                // Default to ID sort if no other criteria
+                return this.sortConfig.direction === 'asc'
+                    ? Number(a.id) - Number(b.id)
+                    : Number(b.id) - Number(a.id);
+            });
+
+            // Create and append order rows
             for (const order of ordersToDisplay) {
-                if (order) {
-                    const row = await this.createOrderRow(order, tokenDetailsMap);
-                    tbody.appendChild(row);
+                try {
+                    const orderWithLowercase = {
+                        ...order,
+                        sellToken: order.sellToken.toLowerCase(),
+                        buyToken: order.buyToken.toLowerCase()
+                    };
+                    const row = await this.createOrderRow(orderWithLowercase, tokenDetailsMap);
+                    if (row) {
+                        tbody.appendChild(row);
+                    }
+                } catch (error) {
+                    console.error('[MyOrders] Error creating row for order:', order.id, error);
                 }
             }
+
         } catch (error) {
-            console.error('[MyOrders] Error refreshing orders view:', error);
+            this.debug('Error refreshing orders view:', error);
             throw error;
         }
+    }
+
+    handleSort(column) {
+        this.debug('Sorting by column:', column);
+        
+        if (this.sortConfig.column === column) {
+            this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.sortConfig.column = column;
+            this.sortConfig.direction = 'asc';
+        }
+
+        const headers = this.container.querySelector('thead').querySelectorAll('th[data-sort]');
+        headers.forEach(header => {
+            const icon = header.querySelector('.sort-icon');
+            if (header.dataset.sort === column) {
+                header.classList.add('active-sort');
+                icon.textContent = this.sortConfig.direction === 'asc' ? '↑' : '↓';
+            } else {
+                header.classList.remove('active-sort');
+                icon.textContent = '↕';
+            }
+        });
+
+        // Use parent's debouncedRefresh instead of direct refreshOrdersView call
+        this.debouncedRefresh();
     }
 
     async setupTable() {
         // Call parent's setupTable to get basic structure
         await super.setupTable();
+        
+        // Update the filter toggle text to be more specific
+        const filterToggleSpan = this.container.querySelector('.filter-toggle span');
+        if (filterToggleSpan) {
+            filterToggleSpan.textContent = 'Show only cancellable orders';
+        }
+
+        // Show the filter toggle
+        const filterToggle = this.container.querySelector('.filter-toggle');
+        if (filterToggle) {
+            filterToggle.style.display = 'flex';
+        }
         
         // Update the table header to show maker's perspective
         const thead = this.container.querySelector('thead tr');
@@ -371,16 +438,10 @@ export class MyOrders extends ViewOrders {
                 <th>Action</th>
             `;
 
-            // Re-add click handlers for sorting after updating innerHTML
+            // Re-add click handlers for sorting
             thead.querySelectorAll('th[data-sort]').forEach(th => {
                 th.addEventListener('click', () => this.handleSort(th.dataset.sort));
             });
-        }
-
-        // Replace the filter toggle text
-        const filterToggleSpan = this.container.querySelector('.filter-toggle span');
-        if (filterToggleSpan) {
-            filterToggleSpan.textContent = 'Show only active orders';
         }
     }
 }
