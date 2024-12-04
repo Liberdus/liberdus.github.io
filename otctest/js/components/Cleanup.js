@@ -8,7 +8,7 @@ export class Cleanup extends BaseComponent {
         this.webSocket = window.webSocket;
         
         this.debug = (message, ...args) => {
-            if (isDebugEnabled('CLEANUP')) {
+            if (isDebugEnabled('CLEANUP_ORDERS')) {
                 console.log('[Cleanup]', message, ...args);
             }
         };
@@ -88,12 +88,36 @@ export class Cleanup extends BaseComponent {
                         Clean Orders
                     </button>
                 </div>
+                <div class="admin-controls-toggle">
+                    <button id="toggle-admin" class="toggle-button">
+                        <span>Admin Controls</span>
+                        <svg class="chevron-icon" viewBox="0 0 24 24">
+                            <path d="M7 10l5 5 5-5z"/>
+                        </svg>
+                    </button>
+                </div>
+                <div id="admin-section" class="admin-section collapsed">
+                    <p class="admin-note">Note: These actions can only be performed by the contract owner</p>
+                    <button id="disable-contract-button" class="action-button warning">
+                        Disable Contract
+                    </button>
+                </div>
             `;
             
             this.container.appendChild(wrapper);
 
             this.cleanupButton = document.getElementById('cleanup-button');
             this.cleanupButton.addEventListener('click', () => this.performCleanup());
+
+            this.disableContractButton = document.getElementById('disable-contract-button');
+            this.disableContractButton.addEventListener('click', () => this.disableContract());
+
+            this.toggleAdminButton = document.getElementById('toggle-admin');
+            this.adminSection = document.getElementById('admin-section');
+            this.toggleAdminButton.addEventListener('click', () => {
+                this.adminSection.classList.toggle('collapsed');
+                this.toggleAdminButton.classList.toggle('active');
+            });
 
             this.debug('Starting cleanup opportunities check');
             await this.checkCleanupOpportunities();
@@ -425,5 +449,37 @@ export class Cleanup extends BaseComponent {
     // Add helper method to format ETH values
     formatEth(wei) {
         return ethers.utils.formatEther(wei.toString());
+    }
+
+    async disableContract() {
+        try {
+            const contract = this.webSocket?.contract;
+            if (!contract) {
+                throw new Error('Contract not initialized');
+            }
+
+            // Get signer from wallet manager
+            const signer = await window.walletManager.getSigner();
+            if (!signer) {
+                throw new Error('No signer available');
+            }
+
+            const contractWithSigner = contract.connect(signer);
+
+            this.disableContractButton.disabled = true;
+            this.disableContractButton.textContent = 'Disabling...';
+
+            const tx = await contractWithSigner.disableContract();
+            await tx.wait();
+
+            this.showSuccess('Contract successfully disabled');
+            this.disableContractButton.textContent = 'Contract Disabled';
+
+        } catch (error) {
+            this.debug('Error disabling contract:', error);
+            this.showError(`Failed to disable contract: ${error.message}`);
+            this.disableContractButton.disabled = false;
+            this.disableContractButton.textContent = 'Disable Contract';
+        }
     }
 } 
