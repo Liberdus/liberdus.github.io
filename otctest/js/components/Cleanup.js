@@ -298,19 +298,12 @@ export class Cleanup extends BaseComponent {
 
     async performCleanup() {
         try {
-            // Get contract with signer
             const contract = this.webSocket?.contract;
             if (!contract) {
                 throw new Error('Contract not initialized');
             }
 
-            // Check if provider and wallet are connected
-            if (!contract.provider) {
-                throw new Error('Provider not available');
-            }
-
-            // Add these checks for wallet connection
-            if (!window.walletManager?.isConnected) {
+            if (!window.walletManager?.provider) {
                 throw new Error('Wallet not connected');
             }
 
@@ -328,29 +321,28 @@ export class Cleanup extends BaseComponent {
             // Get eligible orders first
             const orders = this.webSocket.getOrders();
             const currentTime = Math.floor(Date.now() / 1000);
-            const ORDER_EXPIRY = 7 * 60; // 7 minutes in seconds
-            const GRACE_PERIOD = 7 * 60; // 7 minutes in seconds
+            const ORDER_EXPIRY = await contract.ORDER_EXPIRY();
+            const GRACE_PERIOD = await contract.GRACE_PERIOD();
 
             const eligibleOrders = orders.filter(order => 
-                currentTime > order.timestamp + ORDER_EXPIRY + GRACE_PERIOD
+                currentTime > Number(order.timestamp) + ORDER_EXPIRY.toNumber() + GRACE_PERIOD.toNumber()
             );
 
             if (eligibleOrders.length === 0) {
                 throw new Error('No eligible orders to clean');
             }
 
-            const batchSize = Math.min(eligibleOrders.length, 10); // MAX_CLEANUP_BATCH
-            
-            // More accurate base gas calculation
+            // More accurate base gas calculation for single order cleanup
             const baseGasEstimate = ethers.BigNumber.from('85000')  // Base transaction cost
-                .add(ethers.BigNumber.from('65000').mul(batchSize)) // Per-order cost
-                .add(ethers.BigNumber.from('25000'));              // Buffer for contract state changes
+                .add(ethers.BigNumber.from('65000'))               // Single order cost
+                .add(ethers.BigNumber.from('25000'));             // Buffer for contract state changes
 
             // Try multiple gas estimation attempts with fallback
             let gasEstimate;
             try {
                 // Try actual contract estimation first
                 gasEstimate = await contractWithSigner.estimateGas.cleanupExpiredOrders();
+                this.debug('Initial gas estimation:', gasEstimate.toString());
             } catch (estimateError) {
                 this.debug('Primary gas estimation failed:', estimateError);
                 try {
@@ -358,14 +350,16 @@ export class Cleanup extends BaseComponent {
                     gasEstimate = await contractWithSigner.estimateGas.cleanupExpiredOrders({
                         gasLimit: baseGasEstimate.mul(2) // Double the base estimate
                     });
+                    this.debug('Fallback gas estimation succeeded:', gasEstimate.toString());
                 } catch (fallbackError) {
                     this.debug('Fallback gas estimation failed:', fallbackError);
                     // Use calculated estimate as last resort
                     gasEstimate = baseGasEstimate;
+                    this.debug('Using base gas estimate:', gasEstimate.toString());
                 }
             }
 
-            // Add 30% buffer for safety (increased from 20%)
+            // Add 30% buffer for safety (increased from 20% due to retry mechanism)
             const gasLimit = gasEstimate.mul(130).div(100);
 
             const feeData = await contract.provider.getFeeData();
@@ -385,41 +379,69 @@ export class Cleanup extends BaseComponent {
                 estimatedCost: ethers.utils.formatEther(gasLimit.mul(feeData.gasPrice)) + ' ETH'
             });
 
-            console.log('[Cleanup] Sending transaction with options:', txOptions);
-            const tx = await contractWithSigner.cleanupExpiredOrders(txOptions);
-            console.log('[Cleanup] Transaction sent:', tx.hash);
+            // Execute cleanup with retry mechanism
+            const maxRetries = 3;
+            let attempt = 0;
+            let lastError;
 
-            const receipt = await tx.wait();
-            console.log('[Cleanup] Transaction confirmed:', receipt);
-            console.log('[Cleanup] Events:', receipt.events);
+            while (attempt < maxRetries) {
+                try {
+                    console.log('[Cleanup] Sending transaction with options:', txOptions);
+                    const tx = await contractWithSigner.cleanupExpiredOrders(txOptions);
+                    console.log('[Cleanup] Transaction sent:', tx.hash);
 
-            if (receipt.status === 0) {
-                throw new Error('Transaction failed during execution');
+                    const receipt = await tx.wait();
+                    console.log('[Cleanup] Transaction confirmed:', receipt);
+
+                    if (receipt.status === 1) {
+                        // Parse cleanup events from receipt
+                        const events = receipt.events || [];
+                        const cleanedOrderIds = [];
+                        const retryOrderIds = new Map(); // Map old order IDs to new ones
+
+                        for (const event of events) {
+                            if (event.event === 'OrderCleanedUp') {
+                                cleanedOrderIds.push(event.args.orderId.toString());
+                            } else if (event.event === 'RetryOrder') {
+                                retryOrderIds.set(
+                                    event.args.oldOrderId.toString(),
+                                    event.args.newOrderId.toString()
+                                );
+                            }
+                        }
+
+                        if (cleanedOrderIds.length || retryOrderIds.size) {
+                            this.debug('Cleanup results:', {
+                                cleaned: cleanedOrderIds,
+                                retried: Array.from(retryOrderIds.entries())
+                            });
+
+                            // Remove cleaned orders from WebSocket cache
+                            if (cleanedOrderIds.length) {
+                                this.webSocket.removeOrders(cleanedOrderIds);
+                            }
+
+                            // Update retried orders in WebSocket cache
+                            if (retryOrderIds.size) {
+                                await this.webSocket.syncAllOrders(contract);
+                            }
+
+                            this.showSuccess('Cleanup successful! Check your wallet for rewards.');
+                        }
+                        return;
+                    }
+                    throw new Error('Transaction failed during execution');
+                } catch (error) {
+                    lastError = error;
+                    attempt++;
+                    if (attempt < maxRetries) {
+                        this.debug(`Attempt ${attempt} failed, retrying...`, error);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                }
             }
 
-            // Parse cleanup events from receipt
-            const cleanedOrderIds = receipt.events
-                ?.filter(event => {
-                    console.log('[Cleanup] Processing event:', event);
-                    return event.event === 'OrderCleanedUp';
-                })
-                ?.map(event => {
-                    console.log('[Cleanup] Cleaned order:', event.args);
-                    return event.args.orderId.toString();
-                });
-                
-            console.log('[Cleanup] Cleaned order IDs:', cleanedOrderIds);
-                
-            if (cleanedOrderIds?.length) {
-                this.debug('Orders cleaned:', cleanedOrderIds);
-                // Remove cleaned orders from WebSocket cache
-                this.webSocket.removeOrders(cleanedOrderIds);
-                // Force a fresh sync
-                await this.webSocket.syncAllOrders(contract);
-            }
-
-            this.showSuccess('Cleanup successful! Check your wallet for rewards.');
-            await this.checkCleanupOpportunities();
+            throw lastError;
 
         } catch (error) {
             console.error('[Cleanup] Error details:', {
@@ -433,6 +455,7 @@ export class Cleanup extends BaseComponent {
         } finally {
             this.cleanupButton.textContent = 'Clean Orders';
             this.cleanupButton.disabled = false;
+            await this.checkCleanupOpportunities();
         }
     }
 
