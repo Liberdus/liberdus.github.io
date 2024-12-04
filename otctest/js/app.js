@@ -359,6 +359,11 @@ class App {
         try {
             this.debug('Reinitializing components with wallet...');
             
+            // Clean up existing CreateOrder component if it exists
+            if (this.components['create-order']?.cleanup) {
+                this.components['create-order'].cleanup();
+            }
+            
             // Create and initialize CreateOrder component when wallet is connected
             const createOrderComponent = new CreateOrder();
             this.components['create-order'] = createOrderComponent;

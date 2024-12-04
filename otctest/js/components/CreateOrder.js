@@ -57,7 +57,6 @@ export class CreateOrder extends BaseComponent {
     }
 
     async initialize(readOnlyMode = true) {
-        if (this.initialized) return;
         try {
             this.debug('Starting initialization...');
             
@@ -65,6 +64,12 @@ export class CreateOrder extends BaseComponent {
                 this.setReadOnlyMode();
                 return;
             }
+
+            // Clear existing content before re-populating
+            const sellContainer = document.getElementById('sellContainer');
+            const buyContainer = document.getElementById('buyContainer');
+            if (sellContainer) sellContainer.innerHTML = '';
+            if (buyContainer) buyContainer.innerHTML = '';
 
             // Enable form when wallet is connected
             this.setConnectedMode();
@@ -986,6 +991,26 @@ export class CreateOrder extends BaseComponent {
                 </div>
             </div>
         `;
+    }
+
+    cleanup() {
+        // Remove event listeners
+        if (this.boundCreateOrderHandler) {
+            const createOrderBtn = document.getElementById('createOrderBtn');
+            if (createOrderBtn) {
+                createOrderBtn.removeEventListener('click', this.boundCreateOrderHandler);
+            }
+        }
+        
+        // Clear containers
+        const sellContainer = document.getElementById('sellContainer');
+        const buyContainer = document.getElementById('buyContainer');
+        if (sellContainer) sellContainer.innerHTML = '';
+        if (buyContainer) buyContainer.innerHTML = '';
+        
+        // Reset state
+        this.initialized = false;
+        this.isSubmitting = false;
     }
 }
 

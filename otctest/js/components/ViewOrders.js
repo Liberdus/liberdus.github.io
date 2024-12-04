@@ -1168,6 +1168,22 @@ export class ViewOrders extends BaseComponent {
             this.expiryTimers = new Map();
         }
 
+        const formatTimeDiff = (timeDiff) => {
+            const absDiff = Math.abs(timeDiff);
+            const days = Math.floor(absDiff / 86400); // 86400 seconds in a day
+            const hours = Math.floor((absDiff % 86400) / 3600);
+            const minutes = Math.floor((absDiff % 3600) / 60);
+            const sign = timeDiff < 0 ? '-' : '';
+
+            // If less than 24 hours, show only hours and minutes
+            if (days === 0) {
+                return `${sign}${hours}h ${minutes}m`;
+            }
+            
+            // If days exist, show days and hours (minutes omitted for clarity)
+            return `${sign}${days}d ${hours}h`;
+        };
+
         const updateExpiry = async () => {
             const expiresCell = row.querySelector('td:nth-child(6)'); // Expires column
             if (!expiresCell) return;
@@ -1175,7 +1191,7 @@ export class ViewOrders extends BaseComponent {
             const timestamp = row.dataset.timestamp;
             const status = row.dataset.status;
 
-            // For cancelled orders, show 'Cancelled' instead of expiry time
+            // Show status instead of time for completed orders
             if (status === 'Canceled') {
                 expiresCell.textContent = 'Cancelled';
                 return;
@@ -1193,11 +1209,7 @@ export class ViewOrders extends BaseComponent {
             const expiryTime = Number(timestamp) + orderExpiry;
             const timeDiff = expiryTime - currentTime;
 
-            // Format time difference
-            const absHours = Math.floor(Math.abs(timeDiff) / 3600);
-            const absMinutes = Math.floor((Math.abs(timeDiff) % 3600) / 60);
-            const sign = timeDiff < 0 ? '-' : '';
-            const newExpiryText = `${sign}${absHours}h ${absMinutes}m`;
+            const newExpiryText = formatTimeDiff(timeDiff);
 
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;

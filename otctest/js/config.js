@@ -5,7 +5,7 @@ const networkConfig = {
     "80002": {
         name: "Amoy",
         displayName: "Amoy Testnet",
-        contractAddress: "0x58EB5dD12B3D8c7F7A463680892CAc4E5255B628", // 0x3e6326657B7130613c943D013EC84cE1F33027Ba 0x8d65112BA50B600c6495c4C199561AD74752D7eE 0x58EB5dD12B3D8c7F7A463680892CAc4E5255B628
+        contractAddress: "0xeEB34a9b5d6E8B82C01e33866a74B8AD520C794d", // 0x3e6326657B7130613c943D013EC84cE1F33027Ba 0x8d65112BA50B600c6495c4C199561AD74752D7eE 0x58EB5dD12B3D8c7F7A463680892CAc4E5255B628 0x4802e3cdCcccf4e21D0A83214Ddabf9329eA1066 0xD44CCCA463E61e418141F36DecA6Fa072cb0a393 0xeEB34a9b5d6E8B82C01e33866a74B8AD520C794d
         contractABI: CONTRACT_ABI,
         explorer: "https://amoy.polygonscan.com",
         rpcUrl: "https://rpc.ankr.com/polygon_amoy",
@@ -159,8 +159,9 @@ export class WalletManager {
     }
 
     async connect() {
-        if (!window.ethereum) {
-            throw new Error("MetaMask is not installed!");
+        if (this.isConnecting) {
+            console.log('[WalletManager] Connection already in progress');
+            return null;
         }
 
         this.isConnecting = true;
