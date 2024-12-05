@@ -89,30 +89,49 @@ export class ViewOrders extends BaseComponent {
     async initialize(readOnlyMode = true) {
         try {
             this.debug('Initializing ViewOrders component');
+            
+            // Add WebSocket connection check
+            if (!window.webSocket) {
+                this.debug('ERROR: WebSocket not available');
+                this.showError('WebSocket connection not available');
+                return;
+            }
+
+            if (!window.webSocket.isInitialized) {
+                this.debug('WebSocket not yet initialized, waiting...');
+                let attempts = 0;
+                const maxAttempts = 10;
+                
+                while (!window.webSocket.isInitialized && attempts < maxAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    attempts++;
+                    this.debug(`Waiting for WebSocket initialization... Attempt ${attempts}/${maxAttempts}`);
+                }
+                
+                if (!window.webSocket.isInitialized) {
+                    this.debug('ERROR: WebSocket failed to initialize after waiting');
+                    this.showError('Failed to connect to WebSocket');
+                    return;
+                }
+            }
+
+            // Add cache check
+            const cachedOrders = window.webSocket.getOrders();
+            this.debug('Initial cached orders:', {
+                orderCount: cachedOrders?.length || 0,
+                orders: cachedOrders
+            });
+            
             // Cleanup previous state
             this.cleanup();
             this.container.innerHTML = '';
             
             await this.setupTable();
             
-            // Wait for WebSocket to be initialized
-            if (!window.webSocket?.isInitialized) {
-                this.debug('Waiting for WebSocket initialization...');
-                await new Promise(resolve => {
-                    const checkInterval = setInterval(() => {
-                        if (window.webSocket?.isInitialized) {
-                            clearInterval(checkInterval);
-                            resolve();
-                        }
-                    }, 100);
-                });
-            }
-            
             // Setup WebSocket event handlers
             await this.setupWebSocket();
 
             // Get initial orders from cache
-            const cachedOrders = window.webSocket.getOrders();
             if (cachedOrders && cachedOrders.length > 0) {
                 this.debug('Loading orders from cache:', cachedOrders);
                 // Clear existing orders before adding new ones
@@ -126,13 +145,26 @@ export class ViewOrders extends BaseComponent {
             await this.refreshOrdersView();
 
         } catch (error) {
-            console.error('[ViewOrders] Initialization error:', error);
+            this.debug('Initialization error:', error);
             throw error;
         }
     }
 
     async setupWebSocket() {
         this.debug('Setting up WebSocket subscriptions');
+        
+        // Add connection status check
+        if (!window.webSocket?.provider) {
+            this.debug('ERROR: WebSocket provider not available');
+            this.showError('WebSocket provider not available');
+            return;
+        }
+
+        // Add provider state logging
+        this.debug('WebSocket provider state:', {
+            connected: window.webSocket.provider._websocket?.connected,
+            readyState: window.webSocket.provider._websocket?.readyState
+        });
         
         // Clear existing subscriptions
         this.eventSubscriptions.clear();
@@ -209,6 +241,21 @@ export class ViewOrders extends BaseComponent {
         
         try {
             this.debug('Refreshing orders view');
+            
+            // Add WebSocket state check
+            if (!window.webSocket?.isInitialized) {
+                this.debug('ERROR: WebSocket not initialized during refresh');
+                this.showError('WebSocket connection not available');
+                return;
+            }
+
+            // Add order cache check
+            const cachedOrders = Array.from(this.orders.values());
+            this.debug('Current order cache:', {
+                size: this.orders.size,
+                orders: cachedOrders
+            });
+
             this.showLoadingState();
 
             // Get contract instance first
@@ -358,20 +405,8 @@ export class ViewOrders extends BaseComponent {
             }
 
         } catch (error) {
-            console.error('[ViewOrders] Error refreshing orders view:', error);
-            const tbody = this.container.querySelector('tbody');
-            if (tbody) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="10" class="no-orders-message">
-                            <div class="placeholder-text">
-                                ${!this.contract ? 
-                                    'Connect wallet to view orders' : 
-                                    'Unable to load orders. Please try again later.'}
-                            </div>
-                        </td>
-                    </tr>`;
-            }
+            this.debug('Error refreshing orders:', error);
+            this.showError('Failed to refresh orders');
         } finally {
             this.isLoading = false;
         }

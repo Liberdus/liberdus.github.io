@@ -25,7 +25,12 @@ const networkConfig = {
             symbol: "POL",
             decimals: 18
         },
-        wsUrl: 'wss://polygon-amoy-bor.publicnode.com'
+        wsUrl: `wss://polygon-amoy.gateway.tenderly.co`,
+        fallbackWsUrls: [
+            `wss://polygon-amoy.g.alchemy.com/v2/SiEh1ZidfpxItbVCgPN573bPGOqQee9r`,
+            'wss://polygon-bor-amoy-rpc.publicnode.com',
+            'wss://polygon-amoy-bor.publicnode.com',
+        ]
     },
 };
 

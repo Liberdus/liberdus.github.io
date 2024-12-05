@@ -16,19 +16,32 @@ export class Cleanup extends BaseComponent {
 
     async initialize(readOnlyMode = true) {
         try {
-            this.debug('Initializing cleanup component...');
+            this.debug('Starting Cleanup initialization...');
+            this.debug('ReadOnly mode:', readOnlyMode);
             
             // Wait for both WebSocket and Contract to be ready
             if (!this.webSocket?.isInitialized || !this.webSocket?.contract) {
-                this.debug('Waiting for WebSocket service and contract to initialize...');
+                this.debug('WebSocket status:', {
+                    exists: !!this.webSocket,
+                    isInitialized: this.webSocket?.isInitialized,
+                    hasContract: !!this.webSocket?.contract
+                });
+                
                 let attempts = 0;
                 while (attempts < 10) {
                     if (window.webSocket?.isInitialized && window.webSocket?.contract) {
                         this.webSocket = window.webSocket;
-                        this.debug('WebSocket service and contract found');
+                        this.debug('WebSocket connection successful:', {
+                            isInitialized: this.webSocket.isInitialized,
+                            contractAddress: this.webSocket.contract.address
+                        });
                         break;
                     }
-                    this.debug(`Attempt ${attempts + 1}: Waiting for WebSocket...`);
+                    this.debug(`Attempt ${attempts + 1}: WebSocket status:`, {
+                        windowWebSocket: !!window.webSocket,
+                        isInitialized: window.webSocket?.isInitialized,
+                        hasContract: !!window.webSocket?.contract
+                    });
                     await new Promise(resolve => setTimeout(resolve, 500));
                     attempts++;
                 }
@@ -36,7 +49,14 @@ export class Cleanup extends BaseComponent {
 
             // Verify both WebSocket and Contract are available
             if (!this.webSocket?.isInitialized || !this.webSocket?.contract) {
-                throw new Error('WebSocket service or contract not properly initialized');
+                const error = new Error('WebSocket service or contract not properly initialized');
+                this.debug('Initialization failed:', {
+                    webSocketExists: !!this.webSocket,
+                    isInitialized: this.webSocket?.isInitialized,
+                    hasContract: !!this.webSocket?.contract,
+                    error
+                });
+                throw error;
             }
 
             // Setup WebSocket event listeners
@@ -125,7 +145,15 @@ export class Cleanup extends BaseComponent {
             this.intervalId = setInterval(() => this.checkCleanupOpportunities(), 5 * 60 * 1000);
             this.debug('Initialization complete');
         } catch (error) {
-            this.debug('Initialization failed:', error);
+            this.debug('Initialization error details:', {
+                error,
+                stack: error.stack,
+                webSocketState: {
+                    exists: !!this.webSocket,
+                    isInitialized: this.webSocket?.isInitialized,
+                    hasContract: !!this.webSocket?.contract
+                }
+            });
             this.showError('Failed to initialize cleanup component');
             this.updateUIForError();
         }
