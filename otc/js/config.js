@@ -32,7 +32,30 @@ const networkConfig = {
 
 export const getAllNetworks = () => Object.values(networkConfig);
 
-// Keep existing DEBUG_CONFIG and isDebugEnabled functions
+export const DEBUG_CONFIG = {
+    APP: true,
+    WEBSOCKET: true,
+    COMPONENTS: true,
+    WALLET: true,
+    VIEW_ORDERS: true,
+    CREATE_ORDER: true,
+    MY_ORDERS: true,
+    TAKER_ORDERS: true,
+    CLEANUP_ORDERS: true,
+    WALLET_UI: true,
+    BASE_COMPONENT: true,
+    // Add more specific flags as needed
+};
+
+export const isDebugEnabled = (component) => {
+    // Check if debug mode is forced via localStorage
+    const localDebug = localStorage.getItem('debug');
+    if (localDebug) {
+        const debugSettings = JSON.parse(localDebug);
+        return debugSettings[component] ?? DEBUG_CONFIG[component];
+    }
+    return DEBUG_CONFIG[component];
+};
 
 export class WalletManager {
     constructor() {
