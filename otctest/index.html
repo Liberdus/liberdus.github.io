@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="css/components/tabs.css" />
     <link rel="stylesheet" href="css/components/wallet.css" />
     <link rel="stylesheet" href="css/components/cleanup.css" />
+    <link rel="stylesheet" href="css/components/contract-params.css" />
     <!-- Script -->
     <script type="importmap">
       {
@@ -39,14 +40,11 @@
           <div class="logo-container">
             <img src="assets/1.png" alt="LiberSwap Logo" class="logo-image">
             <h1>LiberOTCSwap</h1>
-            <span class="version">v1.0.8</span>
+            <span class="version">v1.0.9</span>
           </div>
         </div>
         <!-- Header Right -->
         <div class="header-right">
-          <button class="network-config-button" title="Show App Parameters">
-            <i class="icon-config"></i> App Parameters
-          </button>
           <div id="wallet-container" class="wallet-container">
             <div class="network-selector">
               <button class="network-button">
@@ -143,6 +141,9 @@
             <button class="tab-button" data-tab="cleanup-orders">
               Cleanup
             </button>
+            <button class="tab-button" data-tab="contract-params">
+              Parameters
+            </button>
           </nav>
 
           <div id="create-order" class="tab-content active">
@@ -207,23 +208,16 @@
                         <circle cx="12" cy="8" r="1" fill="currentColor" />
                       </svg>
                       <span class="tooltip-text">
-                        <strong>Order Creation Fee:</strong> A small fee in POL
-                        is required to create an order. This prevents spam and
-                        rewards users who help clean up expired orders.
+                        <strong>Order Creation Fee:</strong> A small fee in USDC
+                        is required to create an order. This helps prevent spam and
+                        incentivizes users who assist in cleaning up expired orders.
                         <br /><br />
-                        <strong>Average Gas:</strong> This number represents the
-                        typical computational cost to process an order on the
-                        blockchain. The creation fee is automatically adjusted
-                        based on this value to ensure fair pricing regardless of
-                        network conditions. <br /><br />
-                        💡 For example: If gas is 100,000, the fee will be
-                        approximately 0.00001 POL.
                       </span>
                     </span>
                   </label>
-                  <span id="orderCreationFee" class="placeholder-text"
-                    >Connect wallet to view fee</span
-                  >
+                  <div id="orderCreationFee">
+                    <span id="orderFee"></span>
+                  </div>
                 </div>
                 <button class="action-button" id="createOrderBtn" disabled>
                   Connect Wallet to Create Order
@@ -238,6 +232,11 @@
           <div id="cleanup-orders" class="tab-content">
             <div id="cleanup-container" class="cleanup-container">
               <!-- Cleanup component will populate this -->
+            </div>
+          </div>
+          <div id="contract-params" class="tab-content">
+            <div id="contract-params-container" class="contract-params-container">
+              <!-- Content will be populated by ContractParams component -->
             </div>
           </div>
         </div>
