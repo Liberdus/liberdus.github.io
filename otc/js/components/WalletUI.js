@@ -272,8 +272,8 @@ export class WalletUI extends BaseComponent {
             const decimalChainId = parseInt(chainId, 16).toString();
             this.debug('Decimal chain ID:', decimalChainId);
 
-            if (decimalChainId === "80002") {
-                networkBadge.textContent = "Amoy";
+            if (decimalChainId === "137") {
+                networkBadge.textContent = "Polygon";
                 networkBadge.classList.remove('wrong-network');
                 networkBadge.classList.add('connected');
             } else {
