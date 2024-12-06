@@ -21,7 +21,7 @@ const networkConfig = {
             symbol: "MATIC",
             decimals: 18
         },
-        wsUrl: "wss://ws-mainnet.matic.network",
+        wsUrl: "wss://polygon-bor-rpc.publicnode.com",
         fallbackWsUrls: [
             "wss://polygon-bor.publicnode.com",
             "wss://polygon.gateway.tenderly.co",
