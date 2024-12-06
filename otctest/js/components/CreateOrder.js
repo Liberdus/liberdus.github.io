@@ -279,17 +279,35 @@ export class CreateOrder extends BaseComponent {
         }
         
         try {
+            // Get form values first
+            let taker = document.getElementById('takerAddress')?.value.trim() || '';
+            const sellToken = document.getElementById('sellToken').value.trim();
+            const sellAmount = document.getElementById('sellAmount').value.trim();
+            const buyToken = document.getElementById('buyToken').value.trim();
+            const buyAmount = document.getElementById('buyAmount').value.trim();
+            
+            // Validate inputs
+            if (!sellToken || !ethers.utils.isAddress(sellToken)) {
+                this.showStatus('Please select a valid token to sell', 'error');
+                return;
+            }
+            if (!buyToken || !ethers.utils.isAddress(buyToken)) {
+                this.showStatus('Please select a valid token to buy', 'error');
+                return;
+            }
+            if (!sellAmount || isNaN(sellAmount) || parseFloat(sellAmount) <= 0) {
+                this.showStatus('Please enter a valid sell amount', 'error');
+                return;
+            }
+            if (!buyAmount || isNaN(buyAmount) || parseFloat(buyAmount) <= 0) {
+                this.showStatus('Please enter a valid buy amount', 'error');
+                return;
+            }
+
             this.isSubmitting = true;
             createOrderBtn.disabled = true;
             createOrderBtn.classList.add('disabled');
             this.showStatus('Processing...', 'pending');
-            
-            // Get form values
-            let taker = document.getElementById('takerAddress')?.value.trim() || '';
-            const sellToken = document.getElementById('sellToken').value;
-            const sellAmount = document.getElementById('sellAmount').value.trim();
-            const buyToken = document.getElementById('buyToken').value;
-            const buyAmount = document.getElementById('buyAmount').value.trim();
             
             // If taker is empty, use zero address for public order
             if (!taker) {
@@ -407,59 +425,19 @@ export class CreateOrder extends BaseComponent {
                 const modal = document.getElementById(`${type}TokenModal`);
                 if (!modal) return;
 
-                // Get references to all token lists
-                const nativeList = modal.querySelector(`#${type}NativeTokenList`);
+                // Get references to token lists
                 const userList = modal.querySelector(`#${type}UserTokenList`);
                 const allList = modal.querySelector(`#${type}AllTokenList`);
 
-                // Separate native token
-                const nativeToken = this.tokens.find(t => 
-                    t.address.toLowerCase() === '0x0000000000000000000000000000000000001010'
-                );
-
-                // Filter out native token from other tokens
-                const otherTokens = this.tokens.filter(t => 
-                    t.address.toLowerCase() !== '0x0000000000000000000000000000000000001010'
-                );
-
-                // Display native token
-                if (nativeToken) {
-                    nativeList.innerHTML = `
-                        <div class="token-item" data-address="${nativeToken.address}">
-                            <div class="token-item-left">
-                                <div class="token-icon">
-                                    ${this.getTokenIcon(nativeToken)}
-                                </div>
-                                <div class="token-item-info">
-                                    <div class="token-item-symbol">${nativeToken.symbol}</div>
-                                    <div class="token-item-name">
-                                        ${nativeToken.name}
-                                        <a href="${this.getExplorerUrl(nativeToken.address)}" 
-                                           class="token-explorer-link"
-                                           target="_blank"
-                                           title="View contract on explorer">
-                                            <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                                <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                                            </svg>
-                                        </a>
-                                    </div>
-                                </div>
-                            </div>
-                            ${nativeToken.balance ? `
-                                <div class="token-item-balance">
-                                    ${Number(nativeToken.balance).toFixed(4)}
-                                </div>
-                            ` : ''}
-                        </div>
-                    `;
-                }
+                // Remove filtering for native token
+                const tokens = this.tokens.filter(t => t.address);
 
                 // Display tokens in wallet (tokens with balance)
-                const walletTokens = otherTokens.filter(t => t.balance && Number(t.balance) > 0);
+                const walletTokens = tokens.filter(t => t.balance && Number(t.balance) > 0);
                 this.displayTokens(walletTokens, userList);
 
                 // Display all other tokens
-                this.displayTokens(otherTokens, allList);
+                this.displayTokens(tokens, allList);
 
                 // Add click handlers
                 modal.querySelectorAll('.token-item').forEach(item => {
@@ -574,18 +552,6 @@ export class CreateOrder extends BaseComponent {
                 </div>
                 <div class="token-sections">
                     <div id="${type}ContractResult"></div>
-                    <div class="token-section">
-                        <div class="token-section-header">
-                            <h4>Native Token</h4>
-                            <span class="token-section-subtitle">Chain's native currency</span>
-                        </div>
-                        <div class="token-list" id="${type}NativeTokenList">
-                            <div class="token-list-loading">
-                                <div class="spinner"></div>
-                                <div>Loading...</div>
-                            </div>
-                        </div>
-                    </div>
                     <div class="token-section">
                         <div class="token-section-header">
                             <h4>Tokens in Wallet</h4>
@@ -719,9 +685,9 @@ export class CreateOrder extends BaseComponent {
         // Filter and display wallet tokens
         const searchTermLower = searchTerm.toLowerCase().trim();
         const filteredWalletTokens = this.walletTokens.filter(token => 
-            token.symbol.toLowerCase().includes(searchTermLower) ||
-            token.name.toLowerCase().includes(searchTermLower) ||
-            token.address.toLowerCase().includes(searchTermLower)
+            (token.symbol.toLowerCase().includes(searchTermLower) ||
+             token.name.toLowerCase().includes(searchTermLower) ||
+             token.address.toLowerCase().includes(searchTermLower))
         );
 
         // Display wallet tokens
