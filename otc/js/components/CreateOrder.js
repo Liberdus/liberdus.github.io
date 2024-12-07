@@ -998,7 +998,7 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug(`Checking allowance for token: ${tokenAddress}`);
             
-            // Get signer from walletManager instead of using this.provider
+            // Get signer from walletManager
             const signer = walletManager.getSigner();
             if (!signer) {
                 throw new Error('No signer available - wallet may be disconnected');
@@ -1010,6 +1010,24 @@ export class CreateOrder extends BaseComponent {
                 throw new Error('No wallet address available');
             }
 
+            // Calculate required amount, accounting for fee token if same as sell token
+            let requiredAmount = amount;
+            
+            if (tokenAddress.toLowerCase() === this.feeToken?.address?.toLowerCase()) {
+                // If this is the fee token, we need to account for both fee and potential sell amount
+                const sellToken = document.getElementById('sellToken')?.value;
+                const sellAmountStr = document.getElementById('sellAmount')?.value;
+                
+                if (sellToken?.toLowerCase() === tokenAddress.toLowerCase() && sellAmountStr) {
+                    const sellTokenDecimals = await this.getTokenDecimals(sellToken);
+                    const sellAmountWei = ethers.utils.parseUnits(sellAmountStr, sellTokenDecimals);
+                    
+                    // Add fee amount and sell amount together
+                    requiredAmount = this.feeToken.amount.add(sellAmountWei);
+                    this.debug(`Token is both fee and sell token. Combined amount for approval: ${requiredAmount.toString()}`);
+                }
+            }
+
             // Create token contract instance with the correct signer
             const tokenContract = new ethers.Contract(
                 tokenAddress,
@@ -1017,21 +1035,21 @@ export class CreateOrder extends BaseComponent {
                     'function allowance(address owner, address spender) view returns (uint256)',
                     'function approve(address spender, uint256 amount) returns (bool)'
                 ],
-                signer  // Use the signer from walletManager
+                signer
             );
 
             // Get current allowance
             const currentAllowance = await tokenContract.allowance(
-                currentAddress,  // Use the current address we got earlier
+                currentAddress,
                 this.contract.address
             );
 
             // If allowance is insufficient, request approval
-            if (currentAllowance.lt(amount)) {
-                this.debug(`Insufficient allowance for token ${tokenAddress}. Current: ${currentAllowance}, Required: ${amount}`);
+            if (currentAllowance.lt(requiredAmount)) {
+                this.debug(`Insufficient allowance for token ${tokenAddress}. Current: ${currentAllowance}, Required: ${requiredAmount}`);
                 this.showStatus('Requesting token approval...', 'pending');
                 
-                const approveTx = await tokenContract.approve(this.contract.address, amount);
+                const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
                 
                 this.showStatus('Waiting for approval confirmation...', 'pending');
                 await approveTx.wait();
