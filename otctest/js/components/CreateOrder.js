@@ -1049,13 +1049,46 @@ export class CreateOrder extends BaseComponent {
                 this.debug(`Insufficient allowance for token ${tokenAddress}. Current: ${currentAllowance}, Required: ${requiredAmount}`);
                 this.showStatus('Requesting token approval...', 'pending');
                 
-                const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
-                
-                this.showStatus('Waiting for approval confirmation...', 'pending');
-                await approveTx.wait();
-                
-                this.debug(`Token ${tokenAddress} approved successfully`);
-                this.showStatus('Token approved successfully', 'success');
+                try {
+                    const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
+                    this.showStatus('Waiting for approval confirmation...', 'pending');
+                    
+                    // Wait for transaction and handle replacement
+                    try {
+                        await approveTx.wait();
+                    } catch (waitError) {
+                        // Check if transaction was replaced
+                        if (waitError.code === 'TRANSACTION_REPLACED') {
+                            if (waitError.cancelled) {
+                                // Transaction was cancelled (dropped)
+                                throw new Error('Approval transaction was cancelled');
+                            } else {
+                                // Transaction was replaced (speed up)
+                                this.debug('Approval transaction was sped up:', waitError.replacement.hash);
+                                // Check if replacement transaction was successful
+                                if (waitError.receipt.status === 1) {
+                                    this.debug('Replacement approval transaction successful');
+                                    this.showStatus('Token approved successfully', 'success');
+                                    return true;
+                                } else {
+                                    throw new Error('Replacement approval transaction failed');
+                                }
+                            }
+                        } else {
+                            // Other error occurred
+                            throw waitError;
+                        }
+                    }
+                    
+                    this.debug(`Token ${tokenAddress} approved successfully`);
+                    this.showStatus('Token approved successfully', 'success');
+                } catch (error) {
+                    // Handle user rejection or other errors
+                    if (error.code === 4001) { // MetaMask user rejection error code
+                        throw new Error('User rejected the approval transaction');
+                    }
+                    throw error;
+                }
             } else {
                 this.debug(`Token ${tokenAddress} already has sufficient allowance`);
             }
@@ -1063,7 +1096,8 @@ export class CreateOrder extends BaseComponent {
             return true;
         } catch (error) {
             this.debug('Token approval error:', error);
-            throw new Error(`Failed to approve token: ${error.message}`);
+            this.showStatus(error.message || 'Failed to approve token', 'error');
+            throw error;
         }
     }
 
