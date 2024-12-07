@@ -90,13 +90,24 @@ export class ViewOrders extends BaseComponent {
         try {
             this.debug('Initializing ViewOrders component');
             
-            // Add WebSocket connection check
+            // Wait for WebSocket initialization with timeout
             if (!window.webSocket) {
-                this.debug('ERROR: WebSocket not available');
-                this.showError('WebSocket connection not available');
-                return;
+                this.debug('WebSocket not available, waiting for initialization...');
+                let attempts = 0;
+                const maxAttempts = 10;
+                
+                while (!window.webSocket && attempts < maxAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    attempts++;
+                    this.debug(`Waiting for WebSocket... Attempt ${attempts}/${maxAttempts}`);
+                }
+                
+                if (!window.webSocket) {
+                    throw new Error('WebSocket initialization failed');
+                }
             }
 
+            // Wait for WebSocket to be fully initialized
             if (!window.webSocket.isInitialized) {
                 this.debug('WebSocket not yet initialized, waiting...');
                 let attempts = 0;
@@ -109,13 +120,11 @@ export class ViewOrders extends BaseComponent {
                 }
                 
                 if (!window.webSocket.isInitialized) {
-                    this.debug('ERROR: WebSocket failed to initialize after waiting');
-                    this.showError('Failed to connect to WebSocket');
-                    return;
+                    throw new Error('WebSocket failed to initialize');
                 }
             }
 
-            // Add cache check
+            // Get initial orders from cache
             const cachedOrders = window.webSocket.getOrders();
             this.debug('Initial cached orders:', {
                 orderCount: cachedOrders?.length || 0,
@@ -126,26 +135,27 @@ export class ViewOrders extends BaseComponent {
             this.cleanup();
             this.container.innerHTML = '';
             
+            // Setup the table structure
             await this.setupTable();
             
-            // Setup WebSocket event handlers
+            // Setup WebSocket subscriptions
             await this.setupWebSocket();
 
-            // Get initial orders from cache
+            // Initialize orders Map with cached orders
             if (cachedOrders && cachedOrders.length > 0) {
                 this.debug('Loading orders from cache:', cachedOrders);
-                // Clear existing orders before adding new ones
                 this.orders.clear();
                 cachedOrders.forEach(order => {
                     this.orders.set(order.id, order);
                 });
             }
 
-            // Always call refreshOrdersView to show orders or empty state
+            // Refresh the view
             await this.refreshOrdersView();
 
         } catch (error) {
             this.debug('Initialization error:', error);
+            this.showError('Failed to initialize orders view. Please try again.');
             throw error;
         }
     }
@@ -153,10 +163,8 @@ export class ViewOrders extends BaseComponent {
     async setupWebSocket() {
         this.debug('Setting up WebSocket subscriptions');
         
-        // Add connection status check
         if (!window.webSocket?.provider) {
-            this.debug('ERROR: WebSocket provider not available');
-            this.showError('WebSocket provider not available');
+            this.debug('WebSocket provider not available, waiting for reconnection...');
             return;
         }
 
@@ -167,72 +175,53 @@ export class ViewOrders extends BaseComponent {
         });
         
         // Clear existing subscriptions
+        this.eventSubscriptions.forEach(sub => {
+            window.webSocket.unsubscribe(sub.event, sub.callback);
+        });
         this.eventSubscriptions.clear();
-        if (window.webSocket) {
-            window.webSocket.subscribers.forEach((_, event) => {
-                window.webSocket.unsubscribe(event, this);
-            });
-        }
-        
-        // Add new subscriptions
-        this.eventSubscriptions.add({
-            event: 'orderSyncComplete',
-            callback: (orders) => {
-                this.debug('Received order sync:', orders);
-                this.orders.clear();
-                Object.entries(orders).forEach(([orderId, orderData]) => {
-                    this.orders.set(Number(orderId), {
-                        id: Number(orderId),
-                        ...orderData
-                    });
-                });
-                this.refreshOrdersView().catch(console.error);
-            }
-        });
 
-        this.eventSubscriptions.add({
-            event: 'OrderCreated',
-            callback: (orderData) => {
-                this.debug('New order received:', orderData);
-                this.orders.set(Number(orderData.id), orderData);
-                this.refreshOrdersView().catch(error => {
-                    console.error('[ViewOrders] Error refreshing view after new order:', error);
-                });
-            }
-        });
-
-        this.eventSubscriptions.add({
-            event: 'OrderFilled',
-            callback: (orderData) => {
-                this.debug('Order filled:', orderData);
-                if (this.orders.has(Number(orderData.id))) {
-                    this.orders.get(Number(orderData.id)).status = 'Filled';
-                    this.refreshOrdersView().catch(error => {
-                        console.error('[ViewOrders] Error refreshing view after order fill:', error);
-                    });
+        // Add new subscriptions with error handling
+        const addSubscription = (event, callback) => {
+            const wrappedCallback = async (...args) => {
+                try {
+                    await callback(...args);
+                } catch (error) {
+                    this.debug(`Error in ${event} callback:`, error);
+                    this.showError('Error processing order update');
                 }
-            }
-        });
+            };
+            this.eventSubscriptions.add({ event, callback: wrappedCallback });
+            window.webSocket.subscribe(event, wrappedCallback);
+        };
 
-        this.eventSubscriptions.add({
-            event: 'OrderCanceled',
-            callback: (orderData) => {
-                this.debug('Order canceled:', orderData);
-                if (this.orders.has(Number(orderData.id))) {
-                    this.orders.get(Number(orderData.id)).status = 'Canceled';
-                    this.refreshOrdersView().catch(error => {
-                        console.error('[ViewOrders] Error refreshing view after order cancel:', error);
-                    });
-                }
-            }
-        });
-
-        if (window.webSocket) {
-            this.debug('Registering WebSocket subscriptions');
-            this.eventSubscriptions.forEach(sub => {
-                window.webSocket.subscribe(sub.event, sub.callback);
+        // Add subscriptions with error handling
+        addSubscription('orderSyncComplete', async (orders) => {
+            this.debug('Order sync complete:', orders);
+            this.orders.clear();
+            Object.entries(orders).forEach(([orderId, orderData]) => {
+                this.orders.set(Number(orderId), {
+                    id: Number(orderId),
+                    ...orderData
+                });
             });
-        }
+            await this.refreshOrdersView();
+        });
+
+        // Add other event subscriptions similarly
+        ['OrderCreated', 'OrderFilled', 'OrderCanceled'].forEach(event => {
+            addSubscription(event, async (orderData) => {
+                this.debug(`${event} event received:`, orderData);
+                if (event === 'OrderCreated') {
+                    this.orders.set(Number(orderData.id), orderData);
+                } else {
+                    const order = this.orders.get(Number(orderData.id));
+                    if (order) {
+                        order.status = event === 'OrderFilled' ? 'Filled' : 'Canceled';
+                    }
+                }
+                await this.refreshOrdersView();
+            });
+        });
     }
 
     async refreshOrdersView() {
