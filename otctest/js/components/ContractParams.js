@@ -5,18 +5,33 @@ import { ethers } from 'ethers';
 export class ContractParams extends BaseComponent {
     constructor() {
         super('contract-params');
-        
         this.debug = (message, ...args) => {
             if (isDebugEnabled('CONTRACT_PARAMS')) {
                 console.log('[ContractParams]', message, ...args);
             }
         };
+        this.isInitializing = false;
+        this.isInitialized = false;
     }
 
     async initialize(readOnlyMode = true) {
+        // Prevent concurrent initializations
+        if (this.isInitializing) {
+            this.debug('Already initializing, skipping...');
+            return;
+        }
+
+        // Skip if already initialized
+        if (this.isInitialized) {
+            this.debug('Already initialized, skipping...');
+            return;
+        }
+
+        this.isInitializing = true;
+
         try {
             this.debug('Initializing ContractParams component');
-            
+
             // Create basic structure
             this.container.innerHTML = `
                 <div class="tab-content-wrapper">
@@ -27,125 +42,171 @@ export class ContractParams extends BaseComponent {
                     </div>
                 </div>`;
 
-            // Get contract instance
-            const contract = await this.getContract();
-            if (!contract) {
-                this.showError('Contract not initialized');
-                return;
+            // Wait for WebSocket to be fully initialized
+            if (!window.webSocket?.isInitialized) {
+                this.debug('Waiting for WebSocket initialization...');
+                await new Promise(resolve => {
+                    const checkInterval = setInterval(() => {
+                        if (window.webSocket?.isInitialized) {
+                            clearInterval(checkInterval);
+                            resolve();
+                        }
+                    }, 100);
+                });
             }
 
-            // Fetch all parameters
-            const [
-                orderCreationFee,
-                firstOrderId,
-                nextOrderId,
-                isDisabled,
-                feeToken,
-                owner,
-                accumulatedFees,
-                gracePeriod,
-                orderExpiry,
-                maxRetryAttempts
-            ] = await Promise.all([
-                contract.orderCreationFeeAmount(),
-                contract.firstOrderId(),
-                contract.nextOrderId(),
-                contract.isDisabled(),
-                contract.feeToken(),
-                contract.owner(),
-                contract.accumulatedFees(),
-                contract.GRACE_PERIOD(),
-                contract.ORDER_EXPIRY(),
-                contract.MAX_RETRY_ATTEMPTS()
-            ]);
+            // Use the existing WebSocket service's contract instance
+            const contract = window.webSocket.contract;
+            if (!contract) {
+                throw new Error('Contract not initialized');
+            }
 
-            // Get token symbol
-            const tokenContract = new ethers.Contract(
-                feeToken,
-                ['function symbol() view returns (string)'],
-                contract.provider
-            );
-            const tokenSymbol = await tokenContract.symbol();
+            this.debug('Contract instance found, fetching parameters...');
 
-            // Update UI
+            // Fetch all parameters with individual error handling
+            const params = {};
+            for (const [key, method] of Object.entries({
+                orderCreationFee: 'orderCreationFeeAmount',
+                firstOrderId: 'firstOrderId',
+                nextOrderId: 'nextOrderId',
+                isDisabled: 'isDisabled',
+                feeToken: 'feeToken',
+                owner: 'owner',
+                accumulatedFees: 'accumulatedFees',
+                gracePeriod: 'GRACE_PERIOD',
+                orderExpiry: 'ORDER_EXPIRY',
+                maxRetryAttempts: 'MAX_RETRY_ATTEMPTS'
+            })) {
+                try {
+                    params[key] = await contract[method]();
+                    this.debug(`Fetched ${key}:`, params[key]);
+                } catch (e) {
+                    this.debug(`Error fetching ${key}:`, e);
+                }
+            }
+
+            // Add chain ID and contract address
+            try {
+                params.chainId = (await contract.provider.getNetwork()).chainId;
+                params.contractAddress = contract.address;
+            } catch (e) {
+                this.debug('Error fetching network info:', e);
+            }
+
+            // Only proceed with token details if we have the fee token
+            if (params.feeToken) {
+                try {
+                    const tokenContract = new ethers.Contract(
+                        params.feeToken,
+                        ['function symbol() view returns (string)'],
+                        contract.provider
+                    );
+                    params.tokenSymbol = await tokenContract.symbol();
+                    this.debug('Fetched token symbol:', params.tokenSymbol);
+                } catch (e) {
+                    this.debug('Error fetching token symbol:', e);
+                    params.tokenSymbol = 'Unknown';
+                }
+            }
+
+            // Update UI with available parameters
             const paramsContainer = this.container.querySelector('.params-container');
-            paramsContainer.innerHTML = `
-                <div class="param-grid">
-                    <div class="param-section">
-                        <h3>Contract State</h3>
-                        <div class="param-item">
-                            <h4>Order Creation Fee</h4>
-                            <p>${this.formatEther(orderCreationFee)} ${tokenSymbol}</p>
-                        </div>
-                        <div class="param-item">
-                            <h4>Fee Token</h4>
-                            <p>${feeToken}</p>
-                        </div>
-                        <div class="param-item">
-                            <h4>Accumulated Fees</h4>
-                            <p>${this.formatEther(accumulatedFees)} ${tokenSymbol}</p>
-                        </div>
-                        <div class="param-item">
-                            <h4>Contract Status</h4>
-                            <p class="${isDisabled ? 'status-disabled' : 'status-enabled'}">
-                                ${isDisabled ? 'Disabled' : 'Enabled'}
-                            </p>
-                        </div>
-                    </div>
+            paramsContainer.innerHTML = this.generateParametersHTML(params);
 
-                    <div class="param-section">
-                        <h3>Order Tracking</h3>
-                        <div class="param-item">
-                            <h4>First Order ID</h4>
-                            <p>${firstOrderId.toString()}</p>
-                        </div>
-                        <div class="param-item">
-                            <h4>Next Order ID</h4>
-                            <p>${nextOrderId.toString()}</p>
-                        </div>
-                        <div class="param-item">
-                            <h4>Total Orders</h4>
-                            <p>${nextOrderId.sub(firstOrderId).toString()}</p>
-                        </div>
-                    </div>
-
-                    <div class="param-section">
-                        <h3>Contract Configuration</h3>
-                        <div class="param-item">
-                            <h4>Owner</h4>
-                            <p>${owner}</p>
-                        </div>
-                        <div class="param-item">
-                            <h4>Grace Period</h4>
-                            <p>${this.formatTime(gracePeriod)}</p>
-                        </div>
-                        <div class="param-item">
-                            <h4>Order Expiry</h4>
-                            <p>${this.formatTime(orderExpiry)}</p>
-                        </div>
-                        <div class="param-item">
-                            <h4>Max Retry Attempts</h4>
-                            <p>${maxRetryAttempts.toString()}</p>
-                        </div>
-                    </div>
-
-                    <div class="param-section">
-                        <h3>Network Info</h3>
-                        <div class="param-item">
-                            <h4>Chain ID</h4>
-                            <p>${await contract.provider.getNetwork().then(n => n.chainId)}</p>
-                        </div>
-                        <div class="param-item">
-                            <h4>Contract Address</h4>
-                            <p>${contract.address}</p>
-                        </div>
-                    </div>
-                </div>`;
+            this.isInitialized = true;
+            this.debug('Initialization complete');
 
         } catch (error) {
-            console.error('[ContractParams] Initialization error:', error);
-            this.showError('Failed to load contract parameters');
+            this.debug('Initialization error:', error);
+            this.showError(`Failed to load contract parameters: ${error.message}`);
+        } finally {
+            this.isInitializing = false;
         }
+    }
+
+    generateParametersHTML(params) {
+        // Helper function to safely display values
+        const safe = (value, formatter = (v) => v?.toString() || 'N/A') => {
+            try {
+                return formatter(value);
+            } catch (e) {
+                return 'N/A';
+            }
+        };
+
+        return `
+            <div class="param-grid">
+                <div class="param-section">
+                    <h3>Contract State</h3>
+                    <div class="param-item">
+                        <h4>Order Creation Fee</h4>
+                        <p>${safe(params.orderCreationFee, (v) => this.formatEther(v))} ${safe(params.tokenSymbol)}</p>
+                    </div>
+                    <div class="param-item">
+                        <h4>Fee Token</h4>
+                        <p>${safe(params.feeToken)}</p>
+                    </div>
+                    <div class="param-item">
+                        <h4>Accumulated Fees</h4>
+                        <p>${safe(params.accumulatedFees, (v) => this.formatEther(v))} ${safe(params.tokenSymbol)}</p>
+                    </div>
+                    <div class="param-item">
+                        <h4>Contract Status</h4>
+                        <p class="${params.isDisabled ? 'status-disabled' : 'status-enabled'}">
+                            ${params.isDisabled ? 'Disabled' : 'Enabled'}
+                        </p>
+                    </div>
+                </div>
+
+                <div class="param-section">
+                    <h3>Order Tracking</h3>
+                    <div class="param-item">
+                        <h4>First Order ID</h4>
+                        <p>${safe(params.firstOrderId)}</p>
+                    </div>
+                    <div class="param-item">
+                        <h4>Next Order ID</h4>
+                        <p>${safe(params.nextOrderId)}</p>
+                    </div>
+                    <div class="param-item">
+                        <h4>Total Orders</h4>
+                        <p>${safe(params.nextOrderId && params.firstOrderId ? 
+                            params.nextOrderId.sub(params.firstOrderId) : 'N/A')}</p>
+                    </div>
+                </div>
+
+                <div class="param-section">
+                    <h3>Contract Configuration</h3>
+                    <div class="param-item">
+                        <h4>Owner</h4>
+                        <p>${safe(params.owner)}</p>
+                    </div>
+                    <div class="param-item">
+                        <h4>Grace Period</h4>
+                        <p>${safe(params.gracePeriod, (v) => this.formatTime(v))}</p>
+                    </div>
+                    <div class="param-item">
+                        <h4>Order Expiry</h4>
+                        <p>${safe(params.orderExpiry, (v) => this.formatTime(v))}</p>
+                    </div>
+                    <div class="param-item">
+                        <h4>Max Retry Attempts</h4>
+                        <p>${safe(params.maxRetryAttempts)}</p>
+                    </div>
+                </div>
+
+                <div class="param-section">
+                    <h3>Network Info</h3>
+                    <div class="param-item">
+                        <h4>Chain ID</h4>
+                        <p>${safe(params.chainId)}</p>
+                    </div>
+                    <div class="param-item">
+                        <h4>Contract Address</h4>
+                        <p>${safe(params.contractAddress)}</p>
+                    </div>
+                </div>
+            </div>`;
     }
 
     formatTime(seconds) {
@@ -158,5 +219,12 @@ export class ContractParams extends BaseComponent {
 
     formatEther(wei) {
         return ethers.utils.formatEther(wei);
+    }
+
+    // No need for cleanup since we'renot managing the contract instance
+    cleanup() {
+        this.debug('Cleaning up ContractParams component');
+        this.isInitialized = false;
+        this.isInitializing = false;
     }
 } 

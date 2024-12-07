@@ -18,7 +18,11 @@ export class TakerOrders extends ViewOrders {
     async initialize(readOnlyMode = true) {
         try {
             this.debug('Initializing TakerOrders component');
-            
+
+            // Clear any existing content first
+            this.cleanup();
+            this.container.innerHTML = '';
+
             // Show connect wallet message if in read-only mode
             if (readOnlyMode || !window.walletManager?.provider) {
                 this.container.innerHTML = `
@@ -28,12 +32,6 @@ export class TakerOrders extends ViewOrders {
                     </div>`;
                 return;
             }
-
-            // Cleanup previous state
-            this.cleanup();
-            this.container.innerHTML = '';
-            
-            await this.setupTable();
 
             // Get current account
             let userAddress;
@@ -54,47 +52,30 @@ export class TakerOrders extends ViewOrders {
                 return;
             }
 
-            // Get initial orders from cache and filter for taker
+            // Initialize WebSocket and base functionality from ViewOrders
+            await super.initialize(readOnlyMode);
+
+            // Get and filter orders for the current taker
             const cachedOrders = window.webSocket?.getOrders() || [];
             const filteredOrders = cachedOrders.filter(order => 
                 order?.taker && userAddress && 
                 order.taker.toLowerCase() === userAddress.toLowerCase()
             );
 
-            // Clear existing orders and add filtered ones
+            // Initialize orders Map with filtered orders
             this.orders.clear();
             if (filteredOrders.length > 0) {
-                this.debug('Loading orders from cache:', filteredOrders);
+                this.debug('Loading filtered orders from cache:', filteredOrders);
                 filteredOrders.forEach(order => {
                     this.orders.set(order.id, order);
                 });
             }
 
-            // Create table structure
-            const tbody = this.container.querySelector('tbody');
-            if (!tbody) {
-                this.debug('Table body not found');
-                return;
-            }
-
-            if (!filteredOrders.length) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="8" class="no-orders-message">
-                            <div class="placeholder-text">
-                                No orders found for you
-                            </div>
-                        </td>
-                    </tr>`;
-            } else {
-                await this.refreshOrdersView();
-            }
-
-            // Setup WebSocket event handlers after initial load
-            this.setupWebSocket();
+            // Update view
+            await this.refreshOrdersView();
 
         } catch (error) {
-            console.error('[TakerOrders] Initialization error:', error);
+            this.debug('Initialization error:', error);
             this.container.innerHTML = `
                 <div class="tab-content-wrapper">
                     <h2>Orders for Me</h2>
@@ -407,40 +388,30 @@ export class TakerOrders extends ViewOrders {
         }
     }
 
+    // Override setupTable to customize for taker orders
     async setupTable() {
-        // Call parent's setupTable to get basic structure
+        // Call parent's setupTable first
         await super.setupTable();
         
-        // Update the filter toggle text to be more specific
-        const filterToggleSpan = this.container.querySelector('.filter-toggle span');
-        if (filterToggleSpan) {
-            filterToggleSpan.textContent = 'Show only fillable orders';
-        }
-
-        // Update the table header
+        // Customize the table header for taker orders
         const thead = this.container.querySelector('thead tr');
         if (thead) {
             thead.innerHTML = `
                 <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th>Buy</th>
+                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
                 <th>Amount</th>
-                <th>Sell</th>
+                <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
                 <th>Amount</th>
                 <th>Expires</th>
-                <th data-sort="status">Status <span class="sort-icon">↕</span></th>
+                <th>Status</th>
                 <th>Action</th>
             `;
+        }
 
-            // Initialize sorting state
-            this.sortConfig = {
-                column: 'id',
-                direction: 'asc'
-            };
-
-            // Re-add click handlers for sorting
-            thead.querySelectorAll('th[data-sort]').forEach(th => {
-                th.addEventListener('click', () => this.handleSort(th.dataset.sort));
-            });
+        // Remove the "Show only fillable orders" toggle since all orders are for this taker
+        const filterToggle = this.container.querySelector('.filter-toggle');
+        if (filterToggle) {
+            filterToggle.remove();
         }
     }
 

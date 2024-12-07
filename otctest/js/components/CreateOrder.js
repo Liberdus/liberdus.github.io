@@ -57,6 +57,18 @@ export class CreateOrder extends BaseComponent {
     }
 
     async initialize(readOnlyMode = true) {
+        if (this.isInitializing) {
+            this.debug('Already initializing, skipping...');
+            return;
+        }
+
+        if (this.isInitialized) {
+            this.debug('Already initialized, skipping...');
+            return;
+        }
+
+        this.isInitializing = true;
+
         try {
             this.debug('Starting initialization...');
             
@@ -65,14 +77,32 @@ export class CreateOrder extends BaseComponent {
                 return;
             }
 
+            // Wait for WebSocket to be fully initialized
+            if (!window.webSocket?.isInitialized) {
+                this.debug('Waiting for WebSocket initialization...');
+                await new Promise(resolve => {
+                    const checkInterval = setInterval(() => {
+                        if (window.webSocket?.isInitialized) {
+                            clearInterval(checkInterval);
+                            resolve();
+                        }
+                    }, 100);
+                });
+            }
+
             // Clear existing content before re-populating
             const sellContainer = document.getElementById('sellContainer');
             const buyContainer = document.getElementById('buyContainer');
             if (sellContainer) sellContainer.innerHTML = '';
             if (buyContainer) buyContainer.innerHTML = '';
 
-            // Initialize contract and load fees
-            await this.initializeContract();
+            // Use WebSocket's contract instance
+            this.contract = window.webSocket.contract;
+            this.provider = window.webSocket.provider;
+
+            if (!this.contract) {
+                throw new Error('Contract not initialized');
+            }
             
             // Enable form when wallet is connected
             this.setConnectedMode();
@@ -82,72 +112,107 @@ export class CreateOrder extends BaseComponent {
             this.setupTokenInputListeners();
             this.setupCreateOrderListener();
             
-            // Load data asynchronously
-            Promise.all([
+            // Wait for contract to be ready
+            await this.waitForContract();
+            
+            // Load data with retries
+            await Promise.all([
                 this.loadOrderCreationFee(),
                 this.loadTokens()
-            ]).catch(error => {
-                console.error('[CreateOrder] Error loading data:', error);
-            });
+            ]);
+
+            this.updateFeeDisplay();
             
+            this.isInitialized = true;
             this.debug('Initialization complete');
-            this.initialized = true;
+
         } catch (error) {
-            console.error('[CreateOrder] Error in initialization:', error);
-            this.showError('Failed to initialize. Please refresh the page.');
+            this.debug('Error in initialization:', error);
+            this.showError('Failed to initialize. Please try again.');
+        } finally {
+            this.isInitializing = false;
         }
     }
 
     async loadOrderCreationFee() {
         try {
-            this.debug('Loading order creation fee...');
-            
-            // Get fee token address first
-            const feeTokenAddress = await this.contract.feeToken();
-            this.debug('Fee token address:', feeTokenAddress);
-            
-            // Get fee amount - using correct function name
-            const feeAmount = await this.contract.orderCreationFeeAmount();
-            this.debug('Fee amount:', feeAmount);
-
-            // Get token details
-            const tokenDetails = await this.getTokenDetails([feeTokenAddress]);
-            const feeToken = tokenDetails[0];
-            
-            if (!feeToken) {
-                throw new Error("Failed to load fee token details");
+            // Check if we have a cached value
+            if (this.feeToken?.address && this.feeToken?.amount &&this.feeToken?.symbol) {
+                this.debug('Using cached fee token data');
+                return;
             }
 
-            // Store fee details
-            this.feeToken = {
-                address: feeTokenAddress,
-                symbol: feeToken.symbol,
-                decimals: feeToken.decimals,
-                amount: feeAmount
-            };
+            const maxRetries = 3;
+            let retryCount = 0;
+            let lastError;
 
-            // Create fee element if it doesn't exist
-            let feeElement = document.getElementById('orderFee');
-            if (!feeElement) {
-                const feeContainer = document.getElementById('orderCreationFee');
-                if (feeContainer) {
-                    feeElement = document.createElement('span');
-                    feeElement.id = 'orderFee';
-                    feeContainer.appendChild(feeElement);
+            while (retryCount < maxRetries) {
+                try {
+                    const feeTokenAddress = await this.contract.feeToken();
+                    this.debug('Fee token address:', feeTokenAddress);
+
+                    const feeAmount = await this.contract.orderCreationFeeAmount();
+                    this.debug('Fee amount:', feeAmount);
+
+                    // Get token details
+                    const tokenContract = new ethers.Contract(
+                        feeTokenAddress,
+                        [
+                            'function symbol() view returns (string)',
+                            'function decimals() view returns (uint8)'
+                        ],
+                        this.provider
+                    );
+
+                    const [symbol, decimals] = await Promise.all([
+                       tokenContract.symbol(),
+                        tokenContract.decimals()
+                    ]);
+
+                    // Cache the results
+                    this.feeToken = {
+                        address: feeTokenAddress,
+                        amount: feeAmount,
+                        symbol: symbol,
+                        decimals: decimals
+                    };
+
+                    // Update the fee display
+                    const feeDisplay = document.querySelector('.fee-amount');
+                    if (feeDisplay) {
+                        const formattedAmount = ethers.utils.formatUnits(feeAmount, decimals);
+                        feeDisplay.textContent = `${formattedAmount} ${symbol}`;
+                    }
+
+                    return;
+                } catch (error) {
+                    lastError = error;
+                    retryCount++;
+                    if (retryCount < maxRetries) {
+                        // Exponential backoff: 1s, 2s, 4s, etc.
+                        const delay = Math.pow(2, retryCount - 1) * 1000;
+                        this.debug(`Retry ${retryCount}/${maxRetries} after ${delay}ms`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
                 }
             }
-            
-            if (feeElement) {
-                const formattedFee = ethers.utils.formatUnits(feeAmount, feeToken.decimals);
-                feeElement.textContent = `${formattedFee} ${feeToken.symbol}`;
-            } else {
-                this.debug('Warning: orderFee element not found in DOM');
-            }
-
+            throw lastError;
         } catch (error) {
             this.debug('Error loading fee:', error);
             throw error;
         }
+    }
+
+    // Add a method to check if contract is ready
+    async waitForContract(timeout = 10000) {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            if (this.contract && await this.contract.provider.getNetwork()) {
+                return true;
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        throw new Error('Contract not ready after timeout');
     }
 
     setReadOnlyMode() {
@@ -845,6 +910,9 @@ export class CreateOrder extends BaseComponent {
     }
 
     cleanup() {
+        this.debug('Cleaning up CreateOrder component');
+        this.isInitialized = false;
+        this.isInitializing = false;
         // Remove event listeners
         if (this.boundCreateOrderHandler) {
             const createOrderBtn = document.getElementById('createOrderBtn');
@@ -979,6 +1047,20 @@ export class CreateOrder extends BaseComponent {
         } catch (error) {
             this.debug('Token approval error:', error);
             throw new Error(`Failed to approve token: ${error.message}`);
+        }
+    }
+
+    // Update the fee display in the UI
+    updateFeeDisplay() {
+        if (!this.feeToken?.amount || !this.feeToken?.symbol || !this.feeToken?.decimals) {
+            this.debug('Fee token data not complete:', this.feeToken);
+            return;
+        }
+
+        const feeDisplay = document.querySelector('.fee-amount');
+        if (feeDisplay) {
+            const formattedAmount = ethers.utils.formatUnits(this.feeToken.amount, this.feeToken.decimals);
+            feeDisplay.textContent = `${formattedAmount} ${this.feeToken.symbol}`;
         }
     }
 }
