@@ -1,6 +1,6 @@
 import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
-import { getNetworkConfig, isDebugEnabled } from '../config.js';
+import { getNetworkConfig, isDebugEnabled, walletManager } from '../config.js';
 import { erc20Abi } from '../abi/erc20.js';
 import { getTokenList } from '../utils/tokens.js';
 
@@ -37,11 +37,13 @@ export class CreateOrder extends BaseComponent {
                 throw new Error('Contract ABI is undefined');
             }
             
-            // Get provider and signer
-            this.provider = new ethers.providers.Web3Provider(window.ethereum);
-            const signer = this.provider.getSigner();
+            // Get provider and signer from walletManager
+            const signer = walletManager.getSigner();
+            if (!signer) {
+                throw new Error('No signer available - wallet may be disconnected');
+            }
             
-            // Initialize contract with explicit ABI check
+            // Initialize contract with signer from walletManager
             this.contract = new ethers.Contract(
                 networkConfig.contractAddress,
                 networkConfig.contractABI,
@@ -382,10 +384,20 @@ export class CreateOrder extends BaseComponent {
                 throw new Error('Invalid taker address format');
             }
 
-            // Get fee details - using orderCreationFeeAmount instead of orderCreationFee
-            const feeAmount = await this.contract.orderCreationFeeAmount();
-            const feeToken = await this.contract.feeToken();
-            
+            // Get signer from walletManager
+            const signer = walletManager.getSigner();
+            if (!signer) {
+                throw new Error('No signer available - wallet may be disconnected');
+            }
+
+            // Reinitialize contract with signer
+            const networkConfig = getNetworkConfig();
+            this.contract = new ethers.Contract(
+                networkConfig.contractAddress,
+                networkConfig.contractABI,
+                signer
+            );
+
             // Convert amounts to wei
             const sellTokenDecimals = await this.getTokenDecimals(sellToken);
             const buyTokenDecimals = await this.getTokenDecimals(buyToken);
@@ -393,15 +405,8 @@ export class CreateOrder extends BaseComponent {
             const buyAmountWei = ethers.utils.parseUnits(buyAmount, buyTokenDecimals);
 
             // Check and approve tokens
-            if (sellToken.toLowerCase() === this.feeToken.address.toLowerCase()) {
-                // If tokens are the same, make single approval with combined amount
-                await this.checkAndApproveToken(sellToken, sellAmountWei);
-            } else {
-                // If tokens are different, approve separately
-                await this.checkAndApproveToken(this.feeToken.address, this.feeToken.amount);
-                await this.checkAndApproveToken(sellToken, sellAmountWei);
-            }
-
+            await this.checkAndApproveToken(sellToken, sellAmountWei);
+            
             // Create order
             this.showStatus('Creating order...', 'pending');
             const tx = await this.contract.createOrder(
@@ -412,18 +417,19 @@ export class CreateOrder extends BaseComponent {
                 buyAmountWei
             );
 
-            this.showStatus('Transaction submitted...', 'pending');
-            const receipt = await tx.wait();
+            this.showStatus('Waiting for confirmation...', 'pending');
+            await tx.wait();
             
             this.showStatus('Order created successfully!', 'success');
-            this.debug('Transaction receipt:', receipt);
-
-            // Clear all inputs including taker address
-            this.resetForm();
+            
+            // Reset form or redirect as needed
+            if (window.app?.loadOrders) {
+                window.app.loadOrders();
+            }
 
         } catch (error) {
             this.debug('Create order error:', error);
-            this.showStatus(error.message || 'Failed to create order', 'error');
+            this.showStatus(error.message, 'error');
         } finally {
             this.isSubmitting = false;
             createOrderBtn.disabled = false;
@@ -992,47 +998,40 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug(`Checking allowance for token: ${tokenAddress}`);
             
-            // Get sell token and amount for comparison
-            const sellToken = document.getElementById('sellToken')?.value;
-            const sellAmountStr = document.getElementById('sellAmount')?.value;
-            
-            // Calculate required amount
-            let requiredAmount = amount;
-            
-            // If this token is both fee token and sell token, combine amounts
-            if (tokenAddress.toLowerCase() === this.feeToken?.address?.toLowerCase() &&
-                sellToken?.toLowerCase() === tokenAddress.toLowerCase()) {
-                
-                const sellTokenDecimals = await this.getTokenDecimals(sellToken);
-                const sellAmountWei = ethers.utils.parseUnits(sellAmountStr || '0', sellTokenDecimals);
-                
-                // Always combine amounts when tokens are the same
-                requiredAmount = this.feeToken.amount.add(sellAmountWei);
-                this.debug(`Token is both fee and sell token. Combined amount for approval: ${requiredAmount}`);
+            // Get signer from walletManager instead of using this.provider
+            const signer = walletManager.getSigner();
+            if (!signer) {
+                throw new Error('No signer available - wallet may be disconnected');
             }
 
-            // Create token contract instance
+            // Get the current address using walletManager
+            const currentAddress = await walletManager.getCurrentAddress();
+            if (!currentAddress) {
+                throw new Error('No wallet address available');
+            }
+
+            // Create token contract instance with the correct signer
             const tokenContract = new ethers.Contract(
                 tokenAddress,
                 [
                     'function allowance(address owner, address spender) view returns (uint256)',
                     'function approve(address spender, uint256 amount) returns (bool)'
                 ],
-                this.provider.getSigner()
+                signer  // Use the signer from walletManager
             );
 
             // Get current allowance
             const currentAllowance = await tokenContract.allowance(
-                await this.provider.getSigner().getAddress(),
+                currentAddress,  // Use the current address we got earlier
                 this.contract.address
             );
 
             // If allowance is insufficient, request approval
-            if (currentAllowance.lt(requiredAmount)) {
-                this.debug(`Insufficient allowance for token ${tokenAddress}. Current: ${currentAllowance}, Required: ${requiredAmount}`);
+            if (currentAllowance.lt(amount)) {
+                this.debug(`Insufficient allowance for token ${tokenAddress}. Current: ${currentAllowance}, Required: ${amount}`);
                 this.showStatus('Requesting token approval...', 'pending');
                 
-                const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
+                const approveTx = await tokenContract.approve(this.contract.address, amount);
                 
                 this.showStatus('Waiting for approval confirmation...', 'pending');
                 await approveTx.wait();
