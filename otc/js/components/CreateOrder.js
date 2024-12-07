@@ -117,14 +117,12 @@ export class CreateOrder extends BaseComponent {
             
             // Load data with retries
             await Promise.all([
-                this.loadOrderCreationFee().catch(error => {
-                    this.debug('Error loading fee, will retry on next update:', error);
-                }),
-                this.loadTokens().catch(error => {
-                    this.debug('Error loading tokens, will retry on next update:', error);
-                })
+                this.loadOrderCreationFee(),
+                this.loadTokens()
             ]);
 
+            this.updateFeeDisplay();
+            
             this.isInitialized = true;
             this.debug('Initialization complete');
 
@@ -138,30 +136,54 @@ export class CreateOrder extends BaseComponent {
 
     async loadOrderCreationFee() {
         try {
-            // Add retry logic with exponential backoff
+            // Check if we have a cached value
+            if (this.feeToken?.address && this.feeToken?.amount &&this.feeToken?.symbol) {
+                this.debug('Using cached fee token data');
+                return;
+            }
+
             const maxRetries = 3;
             let retryCount = 0;
             let lastError;
 
             while (retryCount < maxRetries) {
                 try {
-                    // Check if we have a cached value
-                    if (this.feeToken?.address && this.feeToken?.amount) {
-                        this.debug('Using cached fee token data');
-                        return;
-                    }
-
                     const feeTokenAddress = await this.contract.feeToken();
                     this.debug('Fee token address:', feeTokenAddress);
 
                     const feeAmount = await this.contract.orderCreationFeeAmount();
                     this.debug('Fee amount:', feeAmount);
 
+                    // Get token details
+                    const tokenContract = new ethers.Contract(
+                        feeTokenAddress,
+                        [
+                            'function symbol() view returns (string)',
+                            'function decimals() view returns (uint8)'
+                        ],
+                        this.provider
+                    );
+
+                    const [symbol, decimals] = await Promise.all([
+                       tokenContract.symbol(),
+                        tokenContract.decimals()
+                    ]);
+
                     // Cache the results
                     this.feeToken = {
                         address: feeTokenAddress,
-                        amount: feeAmount
+                        amount: feeAmount,
+                        symbol: symbol,
+                        decimals: decimals
                     };
+
+                    // Update the fee display
+                    const feeDisplay = document.querySelector('.fee-amount');
+                    if (feeDisplay) {
+                        const formattedAmount = ethers.utils.formatUnits(feeAmount, decimals);
+                        feeDisplay.textContent = `${formattedAmount} ${symbol}`;
+                    }
+
                     return;
                 } catch (error) {
                     lastError = error;
@@ -1025,6 +1047,20 @@ export class CreateOrder extends BaseComponent {
         } catch (error) {
             this.debug('Token approval error:', error);
             throw new Error(`Failed to approve token: ${error.message}`);
+        }
+    }
+
+    // Update the fee display in the UI
+    updateFeeDisplay() {
+        if (!this.feeToken?.amount || !this.feeToken?.symbol || !this.feeToken?.decimals) {
+            this.debug('Fee token data not complete:', this.feeToken);
+            return;
+        }
+
+        const feeDisplay = document.querySelector('.fee-amount');
+        if (feeDisplay) {
+            const formattedAmount = ethers.utils.formatUnits(this.feeToken.amount, this.feeToken.decimals);
+            feeDisplay.textContent = `${formattedAmount} ${this.feeToken.symbol}`;
         }
     }
 }
