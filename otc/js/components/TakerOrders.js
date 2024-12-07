@@ -6,6 +6,7 @@ import { erc20Abi } from '../abi/erc20.js';
 export class TakerOrders extends ViewOrders {
     constructor() {
         super('taker-orders');
+        this.isInitializing = false;  // Add initialization flag
         
         // Initialize debug logger
         this.debug = (message, ...args) => {
@@ -16,6 +17,14 @@ export class TakerOrders extends ViewOrders {
     }
 
     async initialize(readOnlyMode = true) {
+        // Prevent multiple simultaneous initializations
+        if (this.isInitializing) {
+            this.debug('Already initializing, skipping...');
+            return;
+        }
+
+        this.isInitializing = true;
+
         try {
             this.debug('Initializing TakerOrders component');
 
@@ -55,6 +64,9 @@ export class TakerOrders extends ViewOrders {
             // Initialize WebSocket and base functionality from ViewOrders
             await super.initialize(readOnlyMode);
 
+            // Clear existing orders before adding new ones
+            this.orders.clear();
+
             // Get and filter orders for the current taker
             const cachedOrders = window.webSocket?.getOrders() || [];
             const filteredOrders = cachedOrders.filter(order => 
@@ -62,14 +74,12 @@ export class TakerOrders extends ViewOrders {
                 order.taker.toLowerCase() === userAddress.toLowerCase()
             );
 
+            this.debug('Loading filtered orders from cache:', filteredOrders);
+            
             // Initialize orders Map with filtered orders
-            this.orders.clear();
-            if (filteredOrders.length > 0) {
-                this.debug('Loading filtered orders from cache:', filteredOrders);
-                filteredOrders.forEach(order => {
-                    this.orders.set(order.id, order);
-                });
-            }
+            filteredOrders.forEach(order => {
+                this.orders.set(order.id, order);
+            });
 
             // Update view
             await this.refreshOrdersView();
@@ -81,6 +91,8 @@ export class TakerOrders extends ViewOrders {
                     <h2>Orders for Me</h2>
                     <p class="error-message">Failed to load orders. Please try again later.</p>
                 </div>`;
+        } finally {
+            this.isInitializing = false;  // Reset initialization flag
         }
     }
 
