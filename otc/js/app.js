@@ -475,9 +475,9 @@ populateNetworkOptions();
 
 // Function to show application parameters in a popup
 function showAppParametersPopup() {
-    const networkConfigs = getNetworkConfig(); // Fetch network configurations
-    const contractAddress = networkConfigs.contractAddress || 'N/A'; // Get contract address
-    const currentChainId = networkConfigs.chainId || 'N/A'; // Get current chain ID
+    const networkConfigs = getNetworkConfig();
+    const contractAddress = networkConfigs.contractAddress || 'N/A';
+    const currentChainId = networkConfigs.chainId || 'N/A';
 
     const popup = document.createElement('div');
     popup.className = 'network-config-popup';
@@ -495,10 +495,10 @@ function showAppParametersPopup() {
             <button class="close-popup">Close</button>
         </div>
     `;
+    
+    // Add event listener before adding to DOM
+    const closeButton = popup.querySelector('.close-popup');
+    closeButton.addEventListener('click', () => popup.remove());
+    
     document.body.appendChild(popup);
-
-    // Add event listener to close the popup
-    popup.querySelector('.close-popup').addEventListener('click', () => {
-        document.body.removeChild(popup);
-    });
 }
