@@ -404,8 +404,9 @@ export class CreateOrder extends BaseComponent {
             const sellAmountWei = ethers.utils.parseUnits(sellAmount, sellTokenDecimals);
             const buyAmountWei = ethers.utils.parseUnits(buyAmount, buyTokenDecimals);
 
-            // Check and approve tokens
+            // Before creating the order, check and approve both tokens
             await this.checkAndApproveToken(sellToken, sellAmountWei);
+            await this.checkAndApproveToken(this.feeToken.address, this.feeToken.amount);
             
             // Create order
             this.showStatus('Creating order...', 'pending');
@@ -422,7 +423,10 @@ export class CreateOrder extends BaseComponent {
             
             this.showStatus('Order created successfully!', 'success');
             
-            // Reset form or redirect as needed
+            // Reset form after successful order creation
+            this.resetForm();
+            
+            // Reload orders if needed
             if (window.app?.loadOrders) {
                 window.app.loadOrders();
             }
@@ -469,7 +473,7 @@ export class CreateOrder extends BaseComponent {
     }
 
     resetForm() {
-        // Clear token inputs
+        // Clear token inputs and amounts
         document.getElementById('sellToken').value = '';
         document.getElementById('sellAmount').value = '';
         document.getElementById('buyToken').value = '';
@@ -486,6 +490,26 @@ export class CreateOrder extends BaseComponent {
         const buyTokenBalance = document.getElementById('buyTokenBalance');
         if (sellTokenBalance) sellTokenBalance.textContent = '';
         if (buyTokenBalance) buyTokenBalance.textContent = '';
+        
+        // Reset token selectors to default state
+        ['sell', 'buy'].forEach(type => {
+            const selector = document.getElementById(`${type}TokenSelector`);
+            if (selector) {
+                selector.innerHTML = `
+                    <span class="token-selector-content">
+                        <span>Select Token</span>
+                        <svg width="12" height="12" viewBox="0 0 12 12">
+                            <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                    </span>
+                `;
+            }
+        });
+        
+        // Remove any token address tooltips
+        document.querySelectorAll('.token-address-tooltip').forEach(tooltip => {
+            tooltip.remove();
+        });
     }
 
     async loadTokens() {
