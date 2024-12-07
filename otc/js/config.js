@@ -21,10 +21,10 @@ const networkConfig = {
             symbol: "MATIC",
             decimals: 18
         },
-        wsUrl: "wss://polygon-bor-rpc.publicnode.com",
+        wsUrl: "wss://polygon.gateway.tenderly.co",
         fallbackWsUrls: [
             "wss://polygon-bor.publicnode.com",
-            "wss://polygon.gateway.tenderly.co",
+            "wss://polygon-bor-rpc.publicnode.com",
             "wss://polygon.api.onfinality.io/public-ws"
         ]
     },
