@@ -408,6 +408,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.app.initializeEventListeners();
         window.app.showTab(window.app.currentTab);
         
+        // Add network config button event listener here
+        const networkConfigButton = document.querySelector('.network-config-button');
+        if (networkConfigButton) {
+            networkConfigButton.addEventListener('click', showAppParametersPopup);
+        }
+        
         // Wait for wallet initialization to complete
         await window.app.initialize().catch(error => {
             console.error('[App] Failed to initialize wallet:', error);
@@ -496,6 +502,3 @@ function showAppParametersPopup() {
         document.body.removeChild(popup);
     });
 }
-
-// Add event listener for the network config button
-document.querySelector('.network-config-button').addEventListener('click', showAppParametersPopup);
