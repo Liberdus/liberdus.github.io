@@ -17,7 +17,6 @@ export class TakerOrders extends ViewOrders {
     }
 
     async initialize(readOnlyMode = true) {
-        // Prevent multiple simultaneous initializations
         if (this.isInitializing) {
             this.debug('Already initializing, skipping...');
             return;
@@ -30,15 +29,18 @@ export class TakerOrders extends ViewOrders {
 
             // Clear any existing content first
             this.cleanup();
-            this.container.innerHTML = '';
+            
+            // Always create the wrapper with status container
+            this.container.innerHTML = `
+                <div class="tab-content-wrapper">
+                    <h2>Orders for Me</h2>
+                    <div class="status-container"></div>
+                    ${readOnlyMode || !window.walletManager?.provider ? 
+                        '<p class="connect-prompt">Connect wallet to view orders targeted to you</p>' :
+                        '<div class="orders-table-container"></div>'}
+                </div>`;
 
-            // Show connect wallet message if in read-only mode
             if (readOnlyMode || !window.walletManager?.provider) {
-                this.container.innerHTML = `
-                    <div class="tab-content-wrapper">
-                        <h2>Orders for Me</h2>
-                        <p class="connect-prompt">Connect wallet to view orders targeted to you</p>
-                    </div>`;
                 return;
             }
 
@@ -56,6 +58,7 @@ export class TakerOrders extends ViewOrders {
                 this.container.innerHTML = `
                     <div class="tab-content-wrapper">
                         <h2>Orders for Me</h2>
+                        <div class="status-container"></div>
                         <p class="connect-prompt">Connect wallet to view orders targeted to you</p>
                     </div>`;
                 return;
@@ -89,10 +92,11 @@ export class TakerOrders extends ViewOrders {
             this.container.innerHTML = `
                 <div class="tab-content-wrapper">
                     <h2>Orders for Me</h2>
+                    <div class="status-container"></div>
                     <p class="error-message">Failed to load orders. Please try again later.</p>
                 </div>`;
         } finally {
-            this.isInitializing = false;  // Reset initialization flag
+            this.isInitializing = false;
         }
     }
 
@@ -193,7 +197,10 @@ export class TakerOrders extends ViewOrders {
                 button.textContent = 'Filling...';
             }
 
-            const order = this.orders.get(orderId);
+            const order = this.orders.get(Number(orderId));
+            if (!order) {
+                throw new Error(`Order ${orderId} not found`);
+            }
             this.debug('Order details:', order);
 
             // Use ERC20 ABI for token contract
@@ -217,34 +224,33 @@ export class TakerOrders extends ViewOrders {
             this.debug('Current allowance:', allowance.toString());
 
             if (allowance.lt(order.buyAmount)) {
-                this.showStatus('Requesting token approval...', 'pending');
+                this.showStatus('Token approval required...');
                 
                 try {
                     const approveTx = await buyToken.connect(window.walletManager.getProvider().getSigner()).approve(
                         this.contract.address,
                         order.buyAmount,
                         {
-                            gasLimit: 70000,  // Standard gas limit for ERC20 approvals
+                            gasLimit: 70000,
                             gasPrice: await window.walletManager.getProvider().getGasPrice()
                         }
                     );
                     
                     this.debug('Approval transaction sent:', approveTx.hash);
+                    this.showStatus('Waiting for approval confirmation...');
                     
                     try {
                         await approveTx.wait();
-                        this.showStatus('Token approval granted', 'success');
+                        this.showSuccess('Token approval confirmed');
                     } catch (waitError) {
-                        // Handle transaction replacement
                         if (waitError.code === 'TRANSACTION_REPLACED') {
                             if (waitError.cancelled) {
                                 throw new Error('Approval transaction was cancelled');
                             } else {
-                                // Transaction was replaced (speed up)
                                 this.debug('Approval transaction was sped up:', waitError.replacement.hash);
                                 if (waitError.receipt.status === 1) {
                                     this.debug('Replacement approval transaction successful');
-                                    this.showStatus('Token approval granted', 'success');
+                                    this.showSuccess('Token approval confirmed');
                                 } else {
                                     throw new Error('Replacement approval transaction failed');
                                 }
@@ -254,7 +260,7 @@ export class TakerOrders extends ViewOrders {
                         }
                     }
                 } catch (error) {
-                    if (error.code === 4001) { // MetaMask user rejection
+                    if (error.code === 4001) {
                         this.showError('Token approval was rejected');
                         return;
                     }
@@ -265,24 +271,26 @@ export class TakerOrders extends ViewOrders {
             // Estimate gas for filling the order
             let gasLimit;
             try {
+                this.showStatus('Estimating transaction cost...');
                 await this.contract.callStatic.fillOrder(orderId);
                 const gasEstimate = await this.contract.estimateGas.fillOrder(orderId);
                 gasLimit = gasEstimate.mul(120).div(100);
                 this.debug('Gas estimate with buffer:', gasLimit.toString());
             } catch (error) {
                 this.debug('Gas estimation failed:', error);
-                gasLimit = ethers.BigNumber.from(300000); // Conservative fallback
+                gasLimit = ethers.BigNumber.from(300000);
                 this.debug('Using fallback gas limit:', gasLimit.toString());
             }
 
             // Fill order with estimated gas limit
+            this.showStatus('Please confirm the transaction...');
             const tx = await this.contract.fillOrder(orderId, {
                 gasLimit,
                 gasPrice: await window.walletManager.getProvider().getGasPrice()
             });
             
             this.debug('Fill order transaction sent:', tx.hash);
-            this.showStatus('Order fill transaction submitted', 'pending');
+            this.showStatus('Waiting for transaction confirmation...');
             
             try {
                 const receipt = await tx.wait();
@@ -292,19 +300,17 @@ export class TakerOrders extends ViewOrders {
                     throw new Error('Transaction reverted by contract');
                 }
 
-                this.showSuccess('Order filled successfully');
+                this.showSuccess('Order filled successfully!');
                 await this.refreshOrdersView();
             } catch (waitError) {
-                // Handle transaction replacement
                 if (waitError.code === 'TRANSACTION_REPLACED') {
                     if (waitError.cancelled) {
                         throw new Error('Fill order transaction was cancelled');
                     } else {
-                        // Transaction was replaced (speed up)
                         this.debug('Fill order transaction was sped up:', waitError.replacement.hash);
                         if (waitError.receipt.status === 1) {
                             this.debug('Replacement fill transaction successful');
-                            this.showSuccess('Order filled successfully');
+                            this.showSuccess('Order filled successfully!');
                             await this.refreshOrdersView();
                             return;
                         } else {
@@ -317,33 +323,8 @@ export class TakerOrders extends ViewOrders {
             }
 
         } catch (error) {
-            this.debug('Fill order error details:', {
-                message: error.message,
-                code: error.code,
-                data: error?.error?.data,
-                reason: error?.reason,
-                stack: error.stack
-            });
-            
-            let errorMessage = 'Failed to fill order: ';
-            
-            if (error?.error?.data) {
-                try {
-                    const decodedError = this.contract.interface.parseError(error.error.data);
-                    errorMessage += `${decodedError.name}: ${decodedError.args}`;
-                    this.debug('Decoded error:', decodedError);
-                } catch (e) {
-                    if (error.code === -32603) {
-                        errorMessage += 'Transaction would fail. Check order status and token approvals.';
-                    } else {
-                        errorMessage += error.message;
-                    }
-                }
-            } else {
-                errorMessage += error.message;
-            }
-            
-            this.showError(errorMessage);
+            this.debug('Fill order error details:', error);
+            this.showError(this.getReadableError(error));
         } finally {
             if (button) {
                 button.disabled = false;
@@ -499,5 +480,78 @@ export class TakerOrders extends ViewOrders {
 
         // Use parent's debouncedRefresh instead of direct refreshOrdersView call
         this.debouncedRefresh();
+    }
+
+    // Helper method to get or create status container
+    getStatusContainer() {
+        this.debug('Getting status container');
+        let statusContainer = this.container.querySelector('.status-container');
+        if (!statusContainer) {
+            this.debug('Creating new status container');
+            statusContainer = document.createElement('div');
+            statusContainer.className = 'status-container';
+            
+            // Insert it after the h2 but before the table
+            const h2 = this.container.querySelector('h2');
+            if (h2) {
+                h2.insertAdjacentElement('afterend', statusContainer);
+            } else {
+                this.debug('No h2 found, appending to tab-content-wrapper');
+                const wrapper = this.container.querySelector('.tab-content-wrapper');
+                if (wrapper) {
+                    wrapper.insertBefore(statusContainer, wrapper.firstChild);
+                }
+            }
+        }
+        return statusContainer;
+    }
+
+    // Override parent class methods to use our status container
+    showStatus(message) {
+        this.debug('Showing status:', message);
+        const statusContainer = this.getStatusContainer();
+        let statusElement = statusContainer.querySelector('.status-message');
+        if (!statusElement) {
+            this.debug('Creating new status element');
+            statusElement = document.createElement('div');
+            statusElement.className = 'status-message';
+            statusContainer.appendChild(statusElement);
+        }
+        
+        statusElement.textContent = message;
+        statusElement.className = 'status-message status-pending';
+        this.debug('Status element updated:', statusElement.outerHTML);
+    }
+
+    showError(message) {
+        this.debug('Showing error:', message);
+        const statusContainer = this.getStatusContainer();
+        let statusElement = statusContainer.querySelector('.status-message');
+        if (!statusElement) {
+            this.debug('Creating new status element');
+            statusElement = document.createElement('div');
+            statusElement.className = 'status-message';
+            statusContainer.appendChild(statusElement);
+        }
+        
+        statusElement.textContent = message;
+        statusElement.className = 'status-message status-error';
+        this.debug('Status element updated:', statusElement.outerHTML);
+    }
+
+    showSuccess(message) {
+        this.debug('Showing success:', message);
+        const statusContainer = this.getStatusContainer();
+        let statusElement = statusContainer.querySelector('.status-message');
+        if (!statusElement) {
+            this.debug('Creating new status element');
+            statusElement = document.createElement('div');
+            statusElement.className = 'status-message';
+            statusContainer.appendChild(statusElement);
+        }
+        
+        statusElement.textContent = message;
+        statusElement.className = 'status-message status-success';
+        this.debug('Status element updated:', statusElement.outerHTML);
     }
 }
