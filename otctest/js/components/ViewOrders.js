@@ -792,18 +792,44 @@ export class ViewOrders extends BaseComponent {
                 });
                 
                 this.debug('Transaction sent:', tx.hash);
-                const receipt = await tx.wait();
-                this.debug('Transaction receipt:', receipt);
+                
+                // Handle transaction replacement
+                try {
+                    const receipt = await tx.wait();
+                    this.debug('Transaction receipt:', receipt);
 
-                if (receipt.status === 0) {
-                    throw new Error('Transaction reverted by contract');
+                    if (receipt.status === 0) {
+                        throw new Error('Transaction reverted by contract');
+                    }
+
+                    order.status = 'Filled';
+                    this.orders.set(Number(orderId), order);
+                    await this.refreshOrdersView();
+
+                    this.showSuccess(`Order ${orderId} filled successfully!`);
+                } catch (waitError) {
+                    // Handle transaction replacement
+                    if (waitError.code === 'TRANSACTION_REPLACED') {
+                        if (waitError.cancelled) {
+                            // Transaction was cancelled
+                            throw new Error('Fill order transaction was cancelled');
+                        } else {
+                            // Transaction was replaced (speed up)
+                            this.debug('Fill order transaction was sped up:', waitError.replacement.hash);
+                            // Check if replacement transaction was successful
+                            if (waitError.receipt.status === 1) {
+                                this.debug('Replacement fill transaction successful');
+                                this.showSuccess(`Order ${orderId} filled successfully!`);
+                                await this.refreshOrdersView();
+                                return;
+                            } else {
+                                throw new Error('Replacement fill transaction failed');
+                            }
+                        }
+                    } else {
+                        throw waitError;
+                    }
                 }
-
-                order.status = 'Filled';
-                this.orders.set(Number(orderId), order);
-                await this.refreshOrdersView();
-
-                this.showSuccess(`Order ${orderId} filled successfully!`);
             } catch (error) {
                 this.debug('Gas estimation/transaction error:', error);
                 throw error;
@@ -812,13 +838,10 @@ export class ViewOrders extends BaseComponent {
         } catch (error) {
             this.debug('Fill order error details:', error);
             
-            // Handle replaced transactions that succeeded
-            if (error.code === 'TRANSACTION_REPLACED' && !error.cancelled) {
-                if (error.receipt?.status === 1) {
-                    this.showSuccess('Order filled successfully!');
-                    await this.refreshOrders();
-                    return;
-                }
+            // Handle user rejection
+            if (error.code === 4001) {
+                this.showError('Transaction rejected by user');
+                return;
             }
             
             this.showError('Failed to fill order');

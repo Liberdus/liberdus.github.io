@@ -205,7 +205,7 @@ export class TakerOrders extends ViewOrders {
             this.debug('Current allowance:', allowance.toString());
 
             if (allowance.lt(order.buyAmount)) {
-                this.showSuccess('Requesting token approval...');
+                this.showStatus('Requesting token approval...', 'pending');
                 
                 try {
                     const approveTx = await buyToken.connect(window.walletManager.getProvider().getSigner()).approve(
@@ -218,10 +218,31 @@ export class TakerOrders extends ViewOrders {
                     );
                     
                     this.debug('Approval transaction sent:', approveTx.hash);
-                    await approveTx.wait();
-                    this.showSuccess('Token approval granted');
+                    
+                    try {
+                        await approveTx.wait();
+                        this.showStatus('Token approval granted', 'success');
+                    } catch (waitError) {
+                        // Handle transaction replacement
+                        if (waitError.code === 'TRANSACTION_REPLACED') {
+                            if (waitError.cancelled) {
+                                throw new Error('Approval transaction was cancelled');
+                            } else {
+                                // Transaction was replaced (speed up)
+                                this.debug('Approval transaction was sped up:', waitError.replacement.hash);
+                                if (waitError.receipt.status === 1) {
+                                    this.debug('Replacement approval transaction successful');
+                                    this.showStatus('Token approval granted', 'success');
+                                } else {
+                                    throw new Error('Replacement approval transaction failed');
+                                }
+                            }
+                        } else {
+                            throw waitError;
+                        }
+                    }
                 } catch (error) {
-                    if (error.code === 4001) { // MetaMask user rejected
+                    if (error.code === 4001) { // MetaMask user rejection
                         this.showError('Token approval was rejected');
                         return;
                     }
@@ -232,11 +253,8 @@ export class TakerOrders extends ViewOrders {
             // Estimate gas for filling the order
             let gasLimit;
             try {
-                // First try with static call to check if transaction would fail
                 await this.contract.callStatic.fillOrder(orderId);
-
                 const gasEstimate = await this.contract.estimateGas.fillOrder(orderId);
-                // Add 20% buffer to the estimated gas
                 gasLimit = gasEstimate.mul(120).div(100);
                 this.debug('Gas estimate with buffer:', gasLimit.toString());
             } catch (error) {
@@ -252,10 +270,39 @@ export class TakerOrders extends ViewOrders {
             });
             
             this.debug('Fill order transaction sent:', tx.hash);
-            this.showSuccess('Order fill transaction submitted');
+            this.showStatus('Order fill transaction submitted', 'pending');
             
-            await tx.wait();
-            this.debug('Transaction confirmed');
+            try {
+                const receipt = await tx.wait();
+                this.debug('Transaction receipt:', receipt);
+
+                if (receipt.status === 0) {
+                    throw new Error('Transaction reverted by contract');
+                }
+
+                this.showSuccess('Order filled successfully');
+                await this.refreshOrdersView();
+            } catch (waitError) {
+                // Handle transaction replacement
+                if (waitError.code === 'TRANSACTION_REPLACED') {
+                    if (waitError.cancelled) {
+                        throw new Error('Fill order transaction was cancelled');
+                    } else {
+                        // Transaction was replaced (speed up)
+                        this.debug('Fill order transaction was sped up:', waitError.replacement.hash);
+                        if (waitError.receipt.status === 1) {
+                            this.debug('Replacement fill transaction successful');
+                            this.showSuccess('Order filled successfully');
+                            await this.refreshOrdersView();
+                            return;
+                        } else {
+                            throw new Error('Replacement fill transaction failed');
+                        }
+                    }
+                } else {
+                    throw waitError;
+                }
+            }
 
         } catch (error) {
             this.debug('Fill order error details:', {
@@ -268,20 +315,20 @@ export class TakerOrders extends ViewOrders {
             
             let errorMessage = 'Failed to fill order: ';
             
-            // Try to decode the error
             if (error?.error?.data) {
                 try {
                     const decodedError = this.contract.interface.parseError(error.error.data);
                     errorMessage += `${decodedError.name}: ${decodedError.args}`;
                     this.debug('Decoded error:', decodedError);
                 } catch (e) {
-                    // If we can't decode the error, fall back to basic messages
                     if (error.code === -32603) {
                         errorMessage += 'Transaction would fail. Check order status and token approvals.';
                     } else {
                         errorMessage += error.message;
                     }
                 }
+            } else {
+                errorMessage += error.message;
             }
             
             this.showError(errorMessage);

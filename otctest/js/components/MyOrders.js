@@ -201,21 +201,23 @@ export class MyOrders extends ViewOrders {
                 this.debug('Using fallback gas limit:', gasLimit.toString());
             }
 
-            // Execute the cancel order transaction with retry mechanism
-            const maxRetries = 3;
-            let attempt = 0;
-            let lastError;
-
-            while (attempt < maxRetries) {
+            // Execute the cancel order transaction
+            try {
+                const tx = await this.contract.cancelOrder(orderId, {
+                    gasLimit,
+                    gasPrice
+                });
+                
+                this.debug('Transaction sent:', tx.hash);
+                
+                // Handle transaction replacement
                 try {
-                    const tx = await this.contract.cancelOrder(orderId, {
-                        gasLimit,
-                        gasPrice
-                    });
-                    
-                    this.debug('Transaction sent:', tx.hash);
-                    await tx.wait();
-                    this.debug('Transaction confirmed');
+                    const receipt = await tx.wait();
+                    this.debug('Transaction receipt:', receipt);
+
+                    if (receipt.status === 0) {
+                        throw new Error('Transaction reverted by contract');
+                    }
 
                     // Update order status in memory
                     const orderToUpdate = this.orders.get(Number(orderId));
@@ -226,21 +228,51 @@ export class MyOrders extends ViewOrders {
                     }
 
                     this.showSuccess(`Order ${orderId} canceled successfully!`);
-                    return;
-                } catch (error) {
-                    lastError = error;
-                    attempt++;
-                    if (attempt < maxRetries) {
-                        this.debug(`Attempt ${attempt} failed, retrying...`, error);
-                        await new Promise(resolve => setTimeout(resolve, 1000));
+                } catch (waitError) {
+                    // Handle transaction replacement
+                    if (waitError.code === 'TRANSACTION_REPLACED') {
+                        if (waitError.cancelled) {
+                            // Transaction was cancelled
+                            throw new Error('Cancel order transaction was cancelled');
+                        } else {
+                            // Transaction was replaced (speed up)
+                            this.debug('Cancel order transaction was sped up:', waitError.replacement.hash);
+                            // Check if replacement transaction was successful
+                            if (waitError.receipt.status === 1) {
+                                this.debug('Replacement cancel transaction successful');
+                                
+                                // Update order status in memory
+                                const orderToUpdate = this.orders.get(Number(orderId));
+                                if (orderToUpdate) {
+                                    orderToUpdate.status = 'Canceled';
+                                    this.orders.set(Number(orderId), orderToUpdate);
+                                    await this.refreshOrdersView();
+                                }
+                                
+                                this.showSuccess(`Order ${orderId} canceled successfully!`);
+                                return;
+                            } else {
+                                throw new Error('Replacement cancel transaction failed');
+                            }
+                        }
+                    } else {
+                        throw waitError;
                     }
                 }
+            } catch (error) {
+                this.debug('Transaction error:', error);
+                throw error;
             }
-
-            throw lastError;
 
         } catch (error) {
             this.debug('Cancel order error:', error);
+            
+            // Handle user rejection
+            if (error.code === 4001) {
+                this.showError('Transaction rejected by user');
+                return;
+            }
+            
             this.showError(this.getReadableError(error));
         } finally {
             if (button) {
