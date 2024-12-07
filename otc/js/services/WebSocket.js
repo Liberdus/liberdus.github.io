@@ -22,10 +22,21 @@ export class WebSocketService {
     }
 
     async initialize() {
+        // Prevent multiple initializations
+        if (this.isInitialized) {
+            console.log('[WebSocket] Already initialized, skipping...');
+            return;
+        }
+
         try {
-            if (this.isInitialized) return true;
-            this.debug('Starting initialization...');
+            console.log('[WebSocket] Starting initialization...');
             
+            // Add connection attempt tracking
+            this.reconnectAttempts++;
+            if (this.reconnectAttempts > this.maxReconnectAttempts) {
+                throw new Error(`Max connection attempts (${this.maxReconnectAttempts}) exceeded`);
+            }
+
             const config = getNetworkConfig();
             this.debug('Network config loaded, attempting WebSocket connection...');
             

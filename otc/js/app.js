@@ -13,6 +13,7 @@ console.log('App.js loaded');
 
 class App {
     constructor() {
+        this.isInitializing = false;
         this.debug = (message, ...args) => {
             if (isDebugEnabled('APP')) {
                 console.log('[App]', message, ...args);
@@ -176,6 +177,13 @@ class App {
     }
 
     async initialize() {
+        // Prevent concurrent initializations
+        if (this.isInitializing) {
+            console.log('[App] Already initializing, skipping...');
+            return;
+        }
+
+        this.isInitializing = true;
         try {
             this.debug('Starting initialization...');
             // Initialize wallet manager with autoConnect parameter
@@ -195,6 +203,8 @@ class App {
             this.debug('Initialization complete');
         } catch (error) {
             this.debug('Initialization error:', error);
+        } finally {
+            this.isInitializing = false;
         }
     }
 
@@ -317,6 +327,12 @@ class App {
         try {
             this.debug('Switching to tab:', tabId);
             
+            // Cleanup previous tab's component if it exists
+            const previousComponent = this.components[this.currentTab];
+            if (previousComponent?.cleanup) {
+                previousComponent.cleanup();
+            }
+            
             // Hide all tab content
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.classList.remove('active');
@@ -361,10 +377,12 @@ class App {
         try {
             this.debug('Reinitializing components with wallet...');
             
-            // Clean up existing CreateOrder component if it exists
-            if (this.components['create-order']?.cleanup) {
-                this.components['create-order'].cleanup();
-            }
+            // Clean up all components first
+            Object.values(this.components).forEach(component => {
+                if (component?.cleanup) {
+                    component.cleanup();
+                }
+            });
             
             // Create and initialize CreateOrder component when wallet is connected
             const createOrderComponent = new CreateOrder();

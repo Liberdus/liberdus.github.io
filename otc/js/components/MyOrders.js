@@ -19,9 +19,20 @@ export class MyOrders extends ViewOrders {
                 console.log('[MyOrders]', message, ...args);
             }
         };
+
+        this.isInitializing = false;
+        this.isInitialized = false;
     }
 
     async initialize(readOnlyMode = true) {
+        // Prevent concurrent initializations
+        if (this.isInitializing) {
+            this.debug('Already initializing, skipping...');
+            return;
+        }
+
+        this.isInitializing = true;
+
         try {
             this.debug('Initializing MyOrders component');
             
@@ -53,40 +64,77 @@ export class MyOrders extends ViewOrders {
                 return;
             }
 
+            // Wait for WebSocket to be fully initialized
+            if (!window.webSocket?.isInitialized) {
+                this.debug('Waiting for WebSocket initialization...');
+                await new Promise(resolve => {
+                    const checkInterval = setInterval(() => {
+                        if (window.webSocket?.isInitialized) {
+                            clearInterval(checkInterval);
+                            resolve();
+                        }
+                    }, 100);
+                });
+            }
+
             // Cleanup previous state
             this.cleanup();
             this.container.innerHTML = '';
             
+            // Setup table structure
             await this.setupTable();
 
             // Setup WebSocket handlers after table setup
             this.setupWebSocket();
 
             // Get initial orders from cache and filter for maker
-            const cachedOrders = window.webSocket?.getOrders() || [];
-            const filteredOrders = cachedOrders.filter(order => 
-                order?.maker && userAddress && 
-                order.maker.toLowerCase() === userAddress.toLowerCase()
-            );
-
-            // Clear existing orders and add filtered ones
-            this.orders.clear();
-            if (filteredOrders.length > 0) {
-                this.debug('Loading orders from cache:', filteredOrders);
-                filteredOrders.forEach(order => {
-                    this.orders.set(order.id, order);
-                });
+            try {
+                const orders = window.webSocket.getOrders();
+                const filteredOrders = orders.filter(order => 
+                    order.maker.toLowerCase() === userAddress.toLowerCase()
+                );
+                await this.refreshOrdersView(filteredOrders);
+            } catch (error) {
+                this.debug('Error refreshing orders view:', error);
+                throw error; // Propagate error for handling
             }
 
-            await this.refreshOrdersView();
+            this.isInitialized = true;
+            this.debug('Initialization complete');
 
         } catch (error) {
-            console.error('[MyOrders] Initialization error:', error);
-            this.container.innerHTML = `
-                <div class="tab-content-wrapper">
-                    <h2>My Orders</h2>
-                    <p class="error-message">Failed to load orders. Please try again later.</p>
-                </div>`;
+            this.debug('Initialization error:', error);
+            this.showError(`Failed to load orders: ${error.message}`);
+        } finally {
+            this.isInitializing = false;
+        }
+    }
+
+    cleanup() {
+        this.debug('Cleaning up MyOrders component');
+        super.cleanup(); // Call parent cleanup
+        this.isInitialized = false;
+        this.isInitializing = false;
+    }
+
+    // Override refreshOrdersView to handle errors
+    async refreshOrdersView(orders) {
+        try {
+            if (!window.webSocket?.contract) {
+                throw new Error('WebSocket or contract not initialized');
+            }
+
+            // Get contract parameters needed for order status
+            const [orderExpiry, gracePeriod] = await Promise.all([
+                window.webSocket.contract.ORDER_EXPIRY(),
+                window.webSocket.contract.GRACE_PERIOD()
+            ]);
+
+            // Continue with existing refresh logic
+            await super.refreshOrdersView(orders, orderExpiry, gracePeriod);
+        } catch (error) {
+            this.debug('Error refreshing orders view:', error);
+            throw error;
         }
     }
 
@@ -263,140 +311,6 @@ export class MyOrders extends ViewOrders {
         tr.appendChild(newActionCell);
 
         return tr;
-    }
-
-    async refreshOrdersView() {
-        try {
-            // Get contract instance first
-            this.contract = await this.getContract();
-            if (!this.contract) {
-                throw new Error('Contract not initialized');
-            }
-
-            // Get current account
-            const userAddress = await window.walletManager.getAccount();
-            if (!userAddress) {
-                throw new Error('No wallet connected');
-            }
-
-            // Clear existing orders from table
-            const tbody = this.container.querySelector('tbody');
-            if (!tbody) {
-                console.warn('[MyOrders] Table body not found');
-                return;
-            }
-            tbody.innerHTML = '';
-
-            // Get ALL orders from WebSocket cache without filtering
-            const allOrders = window.webSocket?.getOrders() || [];
-            
-            // Filter orders only by maker address
-            let ordersToDisplay = allOrders.filter(order => 
-                order?.maker && 
-                order.maker.toLowerCase() === userAddress.toLowerCase()
-            );
-
-            // Check if we should filter for cancellable orders
-            const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked;
-            if (showOnlyCancellable) {
-                // Filter for active orders that can be cancelled
-                const currentTime = Math.floor(Date.now() / 1000);
-                const contract = await this.getContract();
-                const orderExpiry = await contract.ORDER_EXPIRY();
-                const gracePeriod = await contract.GRACE_PERIOD();
-
-                ordersToDisplay = ordersToDisplay.filter(order => {
-                    const orderTime = Number(order.timestamp);
-                    const isExpiredWithoutGrace = currentTime > orderTime + orderExpiry.toNumber();
-                    const isGracePeriodExpired = currentTime > orderTime + orderExpiry.toNumber() + gracePeriod.toNumber();
-
-                    // Show orders that are:
-                    // 1. Active/Open AND not expired, OR
-                    // 2. Active/Open AND expired but still within grace period
-                    return (order.status === 'Active' || order.status === 'Open') && 
-                           (!isExpiredWithoutGrace || !isGracePeriodExpired);
-                });
-            }
-
-            // Get token details for display
-            const tokenAddresses = new Set();
-            ordersToDisplay.forEach(order => {
-                if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
-                if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
-            });
-
-            const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
-            const tokenDetailsMap = new Map();
-            Array.from(tokenAddresses).forEach((address, index) => {
-                if (tokenDetails[index]) {
-                    tokenDetailsMap.set(address, tokenDetails[index]);
-                }
-            });
-
-            // Check if we have any orders after filtering
-            if (!ordersToDisplay.length) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="9" class="no-orders-message">
-                            <div class="placeholder-text">
-                                No orders found
-                            </div>
-                        </td>
-                    </tr>`;
-                return;
-            }
-
-            // Sort orders based on sortConfig
-            ordersToDisplay.sort((a, b) => {
-                if (this.sortConfig.column === 'id') {
-                    return this.sortConfig.direction === 'asc'
-                        ? Number(a.id) - Number(b.id)
-                        : Number(b.id) - Number(a.id);
-                } else if (this.sortConfig.column === 'status') {
-                    const statusPriority = {
-                        'Open': 1,
-                        'Active': 1,
-                        'Pending': 2,
-                        'Filled': 3,
-                        'Canceled': 4,
-                        'Await Cleanup': 5
-                    };
-                    
-                    const priorityA = statusPriority[a.status] || 999;
-                    const priorityB = statusPriority[b.status] || 999;
-                    
-                    return this.sortConfig.direction === 'asc'
-                        ? priorityA - priorityB
-                        : priorityB - priorityA;
-                }
-                
-                // Default to ID sort if no other criteria
-                return this.sortConfig.direction === 'asc'
-                    ? Number(a.id) - Number(b.id)
-                    : Number(b.id) - Number(a.id);
-            });
-
-            // Create and append order rows
-            for (const order of ordersToDisplay) {
-                try {
-                    const orderWithLowercase = {
-                        ...order,
-                        sellToken: order.sellToken.toLowerCase(),
-                        buyToken: order.buyToken.toLowerCase()
-                    };
-                    const row = await this.createOrderRow(orderWithLowercase, tokenDetailsMap);
-                    if (row) {
-                        tbody.appendChild(row);
-                    }
-                } catch (error) {
-                    console.error('[MyOrders] Error creating row for order:', order.id, error);
-                }
-            }
-
-        } catch (error) {
-            this.debug('Error refreshing orders view:', error);
-            throw error;
-        }
     }
 
     handleSort(column) {
