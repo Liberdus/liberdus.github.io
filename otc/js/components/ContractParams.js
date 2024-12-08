@@ -32,7 +32,7 @@ export class ContractParams extends BaseComponent {
                 this.debug('Using cached parameters');
                 this.container.innerHTML = `
                     <div class="tab-content-wrapper">
-                        <h2>Contract Parameters</h2>
+                        <h2 class="main-heading">Contract Parameters</h2>
                         <div class="params-container">
                             ${this.generateParametersHTML(this.cachedParams)}
                         </div>
@@ -45,10 +45,12 @@ export class ContractParams extends BaseComponent {
             // Create basic structure
             this.container.innerHTML = `
                 <div class="tab-content-wrapper">
-                    <h2>Contract Parameters</h2>
+                    <h2 class="main-heading">Contract Parameters</h2>
                     <div class="params-container">
-                        <div class="loading-spinner"></div>
-                        <div class="loading-text">Loading parameters...</div>
+                        ${this.cachedParams ? this.generateParametersHTML(this.cachedParams) : `
+                            <div class="loading-spinner"></div>
+                            <div class="loading-text">Loading parameters...</div>
+                        `}
                     </div>
                 </div>`;
 

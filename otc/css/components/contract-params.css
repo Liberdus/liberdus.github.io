@@ -14,10 +14,18 @@
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
+.param-section h2 {
+    color: var(--text-primary);
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0 0 1.5rem 0;
+}
+
 .param-section h3 {
-    margin: 0 0 1.25rem 0;
     color: var(--text-primary);
     font-size: 1.3rem;
+    font-weight: 600;
+    margin: 0 0 1.25rem 0;
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 0.75rem;
 }
@@ -35,9 +43,9 @@
 
 .param-item h4 {
     margin: 0 0 0.35rem 0;
-    color: var(--text-secondary);
-    font-size: 0.95rem;
-    font-weight: 500;
+    color: var(--text-primary);
+    font-size: 1rem;
+    font-weight: 600;
 }
 
 .param-item p {
@@ -65,4 +73,14 @@
     .param-section {
         padding: 1.5rem;
     }
+} 
+
+/* Main heading style */
+.tab-content-wrapper h2 {
+    color: var(--text-primary);
+    font-size: 1.75rem;
+    font-weight: 600;
+    margin: 0 0 2rem 0;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
 } 
