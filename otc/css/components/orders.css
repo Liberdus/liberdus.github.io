@@ -408,7 +408,8 @@ th[data-sort].active-sort .sort-icon {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: 100%; /* Ensure it fits in table cell */
+  max-width: 100%;
+  flex-direction: row;
 }
 
 .token-icon {
@@ -416,7 +417,8 @@ th[data-sort].active-sort .sort-icon {
   height: 24px;
   border-radius: 50%;
   overflow: hidden;
-  flex-shrink: 0; /* Prevent icon from shrinking */
+  flex-shrink: 0;
+  order: -1;
 }
 
 .token-icon.small {
@@ -445,11 +447,12 @@ th[data-sort].active-sort .sort-icon {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #374151; /* Match existing table text color */
+  color: #374151;
   text-decoration: none;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
 }
 
 .token-link:hover {

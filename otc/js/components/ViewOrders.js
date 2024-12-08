@@ -3,6 +3,7 @@ import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
 import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
 import { isDebugEnabled, getNetworkConfig } from '../config.js';
+import { NETWORK_TOKENS } from '../utils/tokens.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
@@ -264,24 +265,33 @@ export class ViewOrders extends BaseComponent {
             
             this.debug('Orders before filtering:', ordersToDisplay);
 
-            // Get all token details at once
+            // Get all token details at once, but check cache first
             const tokenAddresses = new Set();
             ordersToDisplay.forEach(order => {
-                if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
-                if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
-            });
-
-            const [tokenDetails] = await Promise.all([
-                this.getTokenDetails(Array.from(tokenAddresses))
-            ]);
-
-            // Process token details
-            const tokenDetailsMap = new Map();
-            Array.from(tokenAddresses).forEach((address, index) => {
-                if (tokenDetails[index]) {
-                    tokenDetailsMap.set(address, tokenDetails[index]);
+                if (order?.sellToken && !this.tokenCache.has(order.sellToken.toLowerCase())) {
+                    tokenAddresses.add(order.sellToken.toLowerCase());
+                }
+                if (order?.buyToken && !this.tokenCache.has(order.buyToken.toLowerCase())) {
+                    tokenAddresses.add(order.buyToken.toLowerCase());
                 }
             });
+
+            // Only fetch details for uncached tokens
+            if (tokenAddresses.size > 0) {
+                const [tokenDetails] = await Promise.all([
+                    this.getTokenDetails(Array.from(tokenAddresses))
+                ]);
+
+                // Add new tokens to cache
+                Array.from(tokenAddresses).forEach((address, index) => {
+                    if (tokenDetails[index]) {
+                        this.tokenCache.set(address, tokenDetails[index]);
+                    }
+                });
+            }
+
+            // Use the cached token details for all operations
+            const tokenDetailsMap = this.tokenCache;
 
             // Do all async operations before touching the DOM
             if (showOnlyActive && this.contract) {
@@ -308,16 +318,32 @@ export class ViewOrders extends BaseComponent {
                         break;
                     case 'buy':
                         ordersToDisplay.sort((a, b) => {
-                            const tokenA = tokenDetailsMap.get(a.buyToken.toLowerCase())?.symbol || '';
-                            const tokenB = tokenDetailsMap.get(b.buyToken.toLowerCase())?.symbol || '';
+                            const networkTokens = NETWORK_TOKENS[getNetworkConfig().name] || [];
+                            const getTokenSymbol = (address) => {
+                                const token = networkTokens.find(t => 
+                                    t.address.toLowerCase() === address.toLowerCase()
+                                );
+                                return token?.symbol || tokenDetailsMap.get(address.toLowerCase())?.symbol || 'UNK';
+                            };
+                            
+                            const tokenA = getTokenSymbol(a.buyToken);
+                            const tokenB = getTokenSymbol(b.buyToken);
                             const compare = tokenA.localeCompare(tokenB);
                             return this.sortConfig.direction === 'asc' ? compare : -compare;
                         });
                         break;
                     case 'sell':
                         ordersToDisplay.sort((a, b) => {
-                            const tokenA = tokenDetailsMap.get(a.sellToken.toLowerCase())?.symbol || '';
-                            const tokenB = tokenDetailsMap.get(b.sellToken.toLowerCase())?.symbol || '';
+                            const networkTokens = NETWORK_TOKENS[getNetworkConfig().name] || [];
+                            const getTokenSymbol = (address) => {
+                                const token = networkTokens.find(t => 
+                                    t.address.toLowerCase() === address.toLowerCase()
+                                );
+                                return token?.symbol || tokenDetailsMap.get(address.toLowerCase())?.symbol || 'UNK';
+                            };
+                            
+                            const tokenA = getTokenSymbol(a.sellToken);
+                            const tokenB = getTokenSymbol(b.sellToken);
                             const compare = tokenA.localeCompare(tokenB);
                             return this.sortConfig.direction === 'asc' ? compare : -compare;
                         });
@@ -936,8 +962,26 @@ export class ViewOrders extends BaseComponent {
         tr.dataset.timestamp = order.timestamp;
         tr.dataset.status = order.status;
 
-        const sellTokenDetails = tokenDetailsMap.get(order.sellToken);
-        const buyTokenDetails = tokenDetailsMap.get(order.buyToken);
+        // Get network tokens
+        const networkConfig = getNetworkConfig();
+        const networkTokens = NETWORK_TOKENS[networkConfig.name] || [];
+
+        // Get token details, first checking NETWORK_TOKENS, then fallback to tokenDetailsMap
+        const getSafeTokenDetails = (tokenAddress) => {
+            const predefinedToken = networkTokens.find(
+                t => t.address.toLowerCase() === tokenAddress.toLowerCase()
+            );
+            if (predefinedToken) {
+                return {
+                    ...predefinedToken,
+                    ...tokenDetailsMap.get(tokenAddress)
+                };
+            }
+            return tokenDetailsMap.get(tokenAddress) || { symbol: 'UNK', decimals: 18 };
+        };
+
+        const sellTokenDetails = getSafeTokenDetails(order.sellToken);
+        const buyTokenDetails = getSafeTokenDetails(order.buyToken);
         const canFill = await this.canFillOrder(order);
         const expiryTime = await this.getExpiryTime(order.timestamp);
         const status = this.getOrderStatus(order, expiryTime);
@@ -1319,10 +1363,26 @@ export class ViewOrders extends BaseComponent {
     getTokenIcon(token) {
         if (!token) return '';
         
-        if (token.iconUrl) {
+        // First check if token exists in NETWORK_TOKENS
+        const networkConfig = getNetworkConfig();
+        const predefinedToken = NETWORK_TOKENS[networkConfig.name]?.find(
+            t => t.address.toLowerCase() === token.address.toLowerCase()
+        );
+        
+        // Use predefined token icon if available
+        if (predefinedToken?.logoURI) {
             return `
                 <div class="token-icon">
-                    <img src="${token.iconUrl}" alt="${token.symbol}" class="token-icon-image">
+                    <img src="${predefinedToken.logoURI}" alt="${token.symbol}" class="token-icon-image">
+                </div>
+            `;
+        }
+        
+        // Fallback to token's own icon if available
+        if (token.iconUrl || token.logoURI) {
+            return `
+                <div class="token-icon">
+                    <img src="${token.iconUrl || token.logoURI}" alt="${token.symbol}" class="token-icon-image">
                 </div>
             `;
         }
@@ -1335,7 +1395,6 @@ export class ViewOrders extends BaseComponent {
             '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
         ];
         
-        // Generate consistent color based on address
         const colorIndex = parseInt(token.address.slice(-6), 16) % colors.length;
         const backgroundColor = colors[colorIndex];
         

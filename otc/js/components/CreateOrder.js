@@ -345,29 +345,49 @@ export class CreateOrder extends BaseComponent {
     async handleCreateOrder(event) {
         event.preventDefault();
         
-        const createOrderBtn = document.getElementById('createOrderBtn');
         if (this.isSubmitting) {
             this.debug('Already processing a transaction');
             return;
         }
         
         try {
-            // Get form values first
-            let taker = document.getElementById('takerAddress')?.value.trim() || '';
-            const sellToken = document.getElementById('sellToken').value.trim();
-            const sellAmount = document.getElementById('sellAmount').value.trim();
-            const buyToken = document.getElementById('buyToken').value.trim();
-            const buyAmount = document.getElementById('buyAmount').value.trim();
+            // Debug logs to check token state
+            this.debug('Current sellToken:', this.sellToken);
+            this.debug('Current buyToken:', this.buyToken);
             
-            // Validate inputs
-            if (!sellToken || !ethers.utils.isAddress(sellToken)) {
+            // Get form values
+            let taker = document.getElementById('takerAddress')?.value.trim() || '';
+            
+            // Validate sell token
+            if (!this.sellToken || !this.sellToken.address) {
+                this.debug('Invalid sell token:', this.sellToken);
                 this.showStatus('Please select a valid token to sell', 'error');
                 return;
             }
-            if (!buyToken || !ethers.utils.isAddress(buyToken)) {
+
+            // Validate buy token
+            if (!this.buyToken || !this.buyToken.address) {
+                this.debug('Invalid buy token:', this.buyToken);
                 this.showStatus('Please select a valid token to buy', 'error');
                 return;
             }
+
+            // Validate addresses
+            if (!ethers.utils.isAddress(this.sellToken.address)) {
+                this.debug('Invalid sell token address:', this.sellToken.address);
+                this.showStatus('Invalid sell token address', 'error');
+                return;
+            }
+            if (!ethers.utils.isAddress(this.buyToken.address)) {
+                this.debug('Invalid buy token address:', this.buyToken.address);
+                this.showStatus('Invalid buy token address', 'error');
+                return;
+            }
+
+            const sellAmount = document.getElementById('sellAmount')?.value.trim();
+            const buyAmount = document.getElementById('buyAmount')?.value.trim();
+
+            // Validate inputs
             if (!sellAmount || isNaN(sellAmount) || parseFloat(sellAmount) <= 0) {
                 this.showStatus('Please enter a valid sell amount', 'error');
                 return;
@@ -405,22 +425,22 @@ export class CreateOrder extends BaseComponent {
             );
 
             // Convert amounts to wei
-            const sellTokenDecimals = await this.getTokenDecimals(sellToken);
-            const buyTokenDecimals = await this.getTokenDecimals(buyToken);
+            const sellTokenDecimals = await this.getTokenDecimals(this.sellToken.address);
+            const buyTokenDecimals = await this.getTokenDecimals(this.buyToken.address);
             const sellAmountWei = ethers.utils.parseUnits(sellAmount, sellTokenDecimals);
             const buyAmountWei = ethers.utils.parseUnits(buyAmount, buyTokenDecimals);
 
             // Before creating the order, check and approve both tokens
-            await this.checkAndApproveToken(sellToken, sellAmountWei);
+            await this.checkAndApproveToken(this.sellToken.address, sellAmountWei);
             await this.checkAndApproveToken(this.feeToken.address, this.feeToken.amount);
             
             // Create order
             this.showStatus('Creating order...', 'pending');
             const tx = await this.contract.createOrder(
                 taker,
-                sellToken,
+                this.sellToken.address,
                 sellAmountWei,
-                buyToken,
+                this.buyToken.address,
                 buyAmountWei
             );
 
@@ -1134,48 +1154,46 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug(`Token selected for ${type}:`, token);
             
-            const selector = document.querySelector(`#${type}TokenSelector`);
-            if (!selector) {
-                this.debug(`No selector found for ${type}`);
-                return;
-            }
-
-            // Update the selector content with token info and balance
-            const content = selector.querySelector('.token-selector-content');
-            if (content) {
-                const formattedBalance = token.balance ? 
-                    `${Number(token.balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}` : '0.00';
-                
-                content.innerHTML = `
-                    <div class="token-selector-left">
-                        <div class="token-icon small">
-                            ${token.logoURI ? 
-                                `<img src="${token.logoURI}" alt="${token.symbol}" class="token-icon-image">` :
-                                `<div class="token-icon-fallback">${token.symbol.charAt(0)}</div>`
-                            }
+            // Store token in the component
+            this[`${type}Token`] = {
+                address: token.address,
+                symbol: token.symbol,
+                decimals: token.decimals || 18,
+                balance: token.balance || '0',
+                logoURI: token.logoURI
+            };
+            
+            this.debug(`Updated ${type}Token:`, this[`${type}Token`]);
+            // Update the selector display
+            const selector = document.getElementById(`${type}TokenSelector`);
+            if (selector) {
+                // Update the selector content to show selected token
+                selector.innerHTML = `
+                    <div class="token-selector-content">
+                        <div class="token-selector-left">
+                            <div class="token-icon small">
+                                ${token.logoURI ? 
+                                    `<img src="${token.logoURI}" alt="${token.symbol}" class="token-icon-image">` :
+                                    `<div class="token-icon-fallback">${token.symbol.charAt(0)}</div>`
+                                }
+                            </div>
+                            <div class="token-info">
+                                <span class="token-symbol">${token.symbol}</span>
+                                <span class="token-balance">Balance: ${token.balance || '0.00'}</span>
+                            </div>
                         </div>
-                        <div class="token-info">
-                            <span class="token-symbol">${token.symbol}</span>
-                            <span class="token-balance">Balance: ${formattedBalance}</span>
-                        </div>
+                        <svg width="12" height="12" viewBox="0 0 12 12">
+                            <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+                        </svg>
                     </div>
-                    <svg width="12" height="12" viewBox="0 0 12 12">
-                        <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
-                    </svg>
                 `;
             }
 
-            // Store the selected token with its balance
-            this[`${type}Token`] = token;
-            
             // Close the modal
             const modal = document.getElementById(`${type}TokenModal`);
             if (modal) {
                 modal.style.display = 'none';
             }
-
-            // Re-initialize token selector click listeners
-            this.initializeTokenSelectors();
 
             // Update other UI elements
             if (type === 'sell') {
@@ -1183,9 +1201,10 @@ export class CreateOrder extends BaseComponent {
             }
             this.updateCreateButtonState();
             this.updateTokenAmounts(type);
+
         } catch (error) {
             this.debug('Error in handleTokenSelect:', error);
-            this.showError('Failed to select token');
+            this.showStatus(`Failed to select ${type} token: ${error.message}`, 'error');
         }
     }
 
