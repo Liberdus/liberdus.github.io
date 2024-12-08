@@ -133,6 +133,20 @@ class App {
             this.classList.toggle('active');
             document.querySelector('.taker-input-content').classList.toggle('hidden');
         });
+
+        // Add new property to track WebSocket readiness
+        this.wsInitialized = false;
+
+        // Add loading overlay to main content
+        const mainContent = document.querySelector('.main-content');
+        this.loadingOverlay = document.createElement('div');
+        this.loadingOverlay.className = 'loading-overlay';
+        this.loadingOverlay.innerHTML = `
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading orders...</div>
+        `;
+        mainContent.style.position = 'relative';
+        mainContent.appendChild(this.loadingOverlay);
     }
 
     initializeEventListeners() {
@@ -177,7 +191,6 @@ class App {
     }
 
     async initialize() {
-        // Prevent concurrent initializations
         if (this.isInitializing) {
             console.log('[App] Already initializing, skipping...');
             return;
@@ -186,31 +199,38 @@ class App {
         this.isInitializing = true;
         try {
             this.debug('Starting initialization...');
-            // Initialize wallet manager with autoConnect parameter
             window.walletManager = walletManager;
             await walletManager.init(true);
             
             // Initialize WebSocket service
             window.webSocket = new WebSocketService();
+            
+            // Subscribe to orderSyncComplete event before initialization
+            window.webSocket.subscribe('orderSyncComplete', () => {
+                this.wsInitialized = true;
+                this.loadingOverlay.remove();
+                this.debug('WebSocket order sync complete, showing content');
+            });
+            
             const wsInitialized = await window.webSocket.initialize();
             if (!wsInitialized) {
                 this.debug('WebSocket initialization failed, falling back to HTTP');
+                // Still remove overlay in case of failure
+                this.loadingOverlay.remove();
             }
             
-            // Initialize components in read-only mode initially
             await this.initializeComponents(true);
             
-            // Initialize ContractParams early
             this.contractParams = new ContractParams();
-            
-            // Start loading the data in the background
-            this.contractParams.initialize().catch(err => {
+            await this.contractParams.initialize().catch(err => {
                 console.error('Failed to initialize ContractParams:', err);
             });
             
             this.debug('Initialization complete');
         } catch (error) {
             this.debug('Initialization error:', error);
+            // Remove overlay in case of error
+            this.loadingOverlay.remove();
         } finally {
             this.isInitializing = false;
         }
