@@ -12,7 +12,6 @@ const networkConfig = {
         fallbackRpcUrls: [
             "https://rpc-mainnet.matic.network",
             "https://polygon-bor.publicnode.com",
-            "https://polygon.llamarpc.com",
             "https://polygon.api.onfinality.io/public"
         ],
         chainId: "0x89",

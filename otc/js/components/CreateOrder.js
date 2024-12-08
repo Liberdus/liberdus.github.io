@@ -642,7 +642,7 @@ export class CreateOrder extends BaseComponent {
                     </span>
                     <input type="text" 
                            class="token-search-input" 
-                           placeholder="0x... or search token name"
+                           placeholder="0x..."
                            id="${type}TokenSearch">
                 </div>
                 <div class="token-sections">
