@@ -48,6 +48,10 @@ async function getUserWalletTokens() {
         // Get token details
         for (const tokenAddress of tokenAddresses) {
             try {
+                // First check if the contract exists and has code
+                const code = await provider.getCode(tokenAddress);
+                if (code === '0x') continue; // Skip if no contract code exists
+
                 const tokenContract = new ethers.Contract(
                     tokenAddress,
                     [
@@ -59,12 +63,16 @@ async function getUserWalletTokens() {
                     provider
                 );
 
+                // Use Promise.all with individual try/catch blocks
                 const [symbol, name, decimals, balance] = await Promise.all([
-                    tokenContract.symbol(),
-                    tokenContract.name(),
-                    tokenContract.decimals(),
-                    tokenContract.balanceOf(address)
+                    tokenContract.symbol().catch(() => null),
+                    tokenContract.name().catch(() => null),
+                    tokenContract.decimals().catch(() => 18), // Default to 18 if decimals() fails
+                    tokenContract.balanceOf(address).catch(() => ethers.BigNumber.from(0))
                 ]);
+
+                // Skip if we couldn't get the basic token info
+                if (!symbol || !name) continue;
 
                 // Only add tokens with non-zero balance
                 if (balance.gt(0)) {
@@ -77,7 +85,9 @@ async function getUserWalletTokens() {
                     });
                 }
             } catch (error) {
+                // Log the error but continue processing other tokens
                 console.warn(`Error loading token at ${tokenAddress}:`, error);
+                continue;
             }
         }
 
