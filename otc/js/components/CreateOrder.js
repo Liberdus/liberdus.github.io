@@ -2,7 +2,7 @@ import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { getNetworkConfig, isDebugEnabled, walletManager } from '../config.js';
 import { erc20Abi } from '../abi/erc20.js';
-import { getTokenList } from '../utils/tokens.js';
+import { getTokenList, NETWORK_TOKENS } from '../utils/tokens.js';
 
 export class CreateOrder extends BaseComponent {
     constructor() {
@@ -14,6 +14,9 @@ export class CreateOrder extends BaseComponent {
         this.boundCreateOrderHandler = this.handleCreateOrder.bind(this);
         this.isSubmitting = false;
         this.tokens = [];
+        this.sellToken = null;
+        this.buyToken = null;
+        this.tokenSelectorListeners = {};  // Store listeners to prevent duplicates
         
         // Initialize debug logger
         this.debug = (message, ...args) => {
@@ -124,6 +127,9 @@ export class CreateOrder extends BaseComponent {
             ]);
 
             this.updateFeeDisplay();
+            
+            // Initialize token selectors
+            this.initializeTokenSelectors();
             
             this.isInitialized = true;
             this.debug('Initialization complete');
@@ -514,40 +520,52 @@ export class CreateOrder extends BaseComponent {
 
     async loadTokens() {
         try {
+            this.debug('Loading tokens...');
+            // This gets tokens with balances from tokens.js
             this.tokens = await getTokenList();
-            
+            this.debug('Loaded tokens:', this.tokens);
+
             ['sell', 'buy'].forEach(type => {
                 const modal = document.getElementById(`${type}TokenModal`);
-                if (!modal) return;
+                if (!modal) {
+                    this.debug(`No modal found for ${type}`);
+                    return;
+                }
 
-                // Get references to token lists
+                const commonList = modal.querySelector(`#${type}CommonTokenList`);
                 const userList = modal.querySelector(`#${type}UserTokenList`);
-                const allList = modal.querySelector(`#${type}AllTokenList`);
 
-                // Remove filtering for native token
-                const tokens = this.tokens.filter(t => t.address);
+                if (commonList && userList) {
+                    // Get network config for predefined tokens
+                    const networkConfig = getNetworkConfig();
+                    const predefinedTokens = NETWORK_TOKENS[networkConfig.name] || [];
 
-                // Display tokens in wallet (tokens with balance)
-                const walletTokens = tokens.filter(t => t.balance && Number(t.balance) > 0);
-                this.displayTokens(walletTokens, userList);
-
-                // Display all other tokens
-                this.displayTokens(tokens, allList);
-
-                // Add click handlers
-                modal.querySelectorAll('.token-item').forEach(item => {
-                    item.addEventListener('click', () => {
-                        const address = item.dataset.address;
-                        const input = document.getElementById(`${type}Token`);
-                        input.value = address;
-                        this.updateTokenBalance(address, `${type}TokenBalance`);
-                        modal.classList.remove('show');
+                    // We should merge predefined tokens with their balances from this.tokens
+                    const predefinedTokensWithBalances = predefinedTokens.map(token => {
+                        const tokenWithBalance = this.tokens.find(t => 
+                            t.address.toLowerCase() === token.address.toLowerCase()
+                        );
+                        return {
+                            ...token,
+                            balance: tokenWithBalance?.balance || '0'
+                        };
                     });
-                });
+
+                    // Display predefined tokens with balances
+                    this.displayTokens(predefinedTokensWithBalances, commonList, type);
+
+                    // Display wallet tokens (tokens with balance)
+                    const walletTokens = this.tokens.filter(t => 
+                        t.balance && 
+                        Number(t.balance) > 0 &&
+                        !predefinedTokens.some(p => p.address.toLowerCase() === t.address.toLowerCase())
+                    );
+                    this.displayTokens(walletTokens, userList, type);
+                }
             });
         } catch (error) {
-            console.error('[CreateOrder] Error loading tokens:', error);
-            this.showError('Failed to load tokens. Please try again.');
+            this.debug('Error loading tokens:', error);
+            this.showStatus('Failed to load tokens. Please try again.', 'error');
         }
     }
 
@@ -637,47 +655,26 @@ export class CreateOrder extends BaseComponent {
                     <button class="token-modal-close">&times;</button>
                 </div>
                 <div class="token-modal-search">
-                    <span class="search-info-text">
-                        Search by token name, symbol, or paste contract address
-                    </span>
                     <input type="text" 
                            class="token-search-input" 
-                           placeholder="0x..."
+                           placeholder="Search by name or paste address"
                            id="${type}TokenSearch">
                 </div>
                 <div class="token-sections">
                     <div id="${type}ContractResult"></div>
                     <div class="token-section">
-                        <div class="token-section-header">
-                            <h4>Tokens in Wallet</h4>
-                            <span class="token-section-subtitle">Your available tokens</span>
-                        </div>
-                        <div class="token-list" id="${type}UserTokenList">
-                            <div class="token-list-loading">
-                                <div class="spinner"></div>
-                                <div>Loading tokens...</div>
-                            </div>
-                        </div>
+                        <h4>Common tokens</h4>
+                        <div class="token-list" id="${type}CommonTokenList"></div>
+                    </div>
+                    <div class="token-section">
+                        <h4>Tokens in wallet (used in past 30)</h4>
+                        <div class="token-list" id="${type}UserTokenList"></div>
                     </div>
                 </div>
             </div>
         `;
 
-        // Add search functionality
-        const searchInput = modal.querySelector(`#${type}TokenSearch`);
-        searchInput.addEventListener('input', (e) => this.handleTokenSearch(e.target.value, type));
-        
-        // Add modal close handlers
-        modal.querySelector('.token-modal-close').addEventListener('click', () => {
-            modal.classList.remove('show');
-        });
-        
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.classList.remove('show');
-            }
-        });
-        
+        // Add event listeners...
         return modal;
     }
 
@@ -790,7 +787,7 @@ export class CreateOrder extends BaseComponent {
 
         // Filter and display wallet tokens
         const searchTermLower = searchTerm.toLowerCase().trim();
-        const filteredWalletTokens = this.walletTokens.filter(token => 
+        const filteredWalletTokens = this.tokens.filter(token => 
             (token.symbol.toLowerCase().includes(searchTermLower) ||
              token.name.toLowerCase().includes(searchTermLower) ||
              token.address.toLowerCase().includes(searchTermLower))
@@ -833,8 +830,8 @@ export class CreateOrder extends BaseComponent {
         }
     }
 
-    displayTokens(tokens, container) {
-        if (!container) return; // Guard against null container
+    displayTokens(tokens, container, type) {
+        if (!container) return;
 
         if (!tokens || tokens.length === 0) {
             container.innerHTML = `
@@ -845,58 +842,52 @@ export class CreateOrder extends BaseComponent {
             return;
         }
 
-        try {
-            container.innerHTML = tokens.map(token => `
-                <div class="token-item" data-address="${token.address}">
+        // Clear existing content
+        container.innerHTML = '';
+
+        // Add each token to the container
+        tokens.forEach(token => {
+            const tokenElement = document.createElement('div');
+            tokenElement.className = 'token-item';
+            tokenElement.dataset.address = token.address;
+            
+            // Format balance if it exists
+            const formattedBalance = token.balance ? 
+                Number(token.balance).toLocaleString(undefined, { 
+                    minimumFractionDigits: 2, 
+                    maximumFractionDigits: 6 
+                }) : '0.00';
+            
+            tokenElement.innerHTML = `
+                <div class="token-item-content">
                     <div class="token-item-left">
                         <div class="token-icon">
-                            ${this.getTokenIcon(token)}
+                            ${token.logoURI ? 
+                                `<img src="${token.logoURI}" alt="${token.symbol}" class="token-icon-image">` :
+                                `<div class="token-icon-fallback" style="background: #FFEEAD">
+                                    ${token.symbol.charAt(0)}
+                                </div>`
+                            }
                         </div>
                         <div class="token-item-info">
                             <div class="token-item-symbol">${token.symbol}</div>
-                            <div class="token-item-name">
-                                ${token.name}
-                                <a href="${this.getExplorerUrl(token.address)}" 
-                                   class="token-explorer-link"
-                                   target="_blank"
-                                   title="View contract on explorer">
-                                    <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                        <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                                    </svg>
-                                </a>
-                            </div>
+                            <div class="token-item-name">${token.name}</div>
                         </div>
                     </div>
-                    ${token.balance ? `
-                        <div class="token-item-balance">
-                            ${Number(token.balance).toFixed(4)}
-                        </div>
-                    ` : ''}
-                </div>
-            `).join('');
-
-            // Add click handlers
-            container.querySelectorAll('.token-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    const address = item.dataset.address;
-                    const type = container.id.includes('sell') ? 'sell' : 'buy';
-                    const input = document.getElementById(`${type}Token`);
-                    if (input) {
-                        input.value = address;
-                        this.updateTokenBalance(address, `${type}TokenBalance`);
-                        const modal = document.getElementById(`${type}TokenModal`);
-                        if (modal) modal.classList.remove('show');
-                    }
-                });
-            });
-        } catch (error) {
-            console.error('Error displaying tokens:', error);
-            container.innerHTML = `
-                <div class="token-list-empty">
-                    Error loading tokens
+                    <div class="token-item-right">
+                        ${formattedBalance}
+                    </div>
                 </div>
             `;
-        }
+
+            // Add click event listener to the token element
+            tokenElement.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.handleTokenItemClick(type, tokenElement);
+            });
+
+            container.appendChild(tokenElement);
+        });
     }
 
     getExplorerUrl(address) {
@@ -1137,6 +1128,176 @@ export class CreateOrder extends BaseComponent {
             const formattedAmount = ethers.utils.formatUnits(this.feeToken.amount, this.feeToken.decimals);
             feeDisplay.textContent = `${formattedAmount} ${this.feeToken.symbol}`;
         }
+    }
+
+    handleTokenSelect(type, token) {
+        try {
+            this.debug(`Token selected for ${type}:`, token);
+            
+            const selector = document.querySelector(`#${type}TokenSelector`);
+            if (!selector) {
+                this.debug(`No selector found for ${type}`);
+                return;
+            }
+
+            // Update the selector content with token info and balance
+            const content = selector.querySelector('.token-selector-content');
+            if (content) {
+                const formattedBalance = token.balance ? 
+                    `${Number(token.balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}` : '0.00';
+                
+                content.innerHTML = `
+                    <div class="token-selector-left">
+                        <div class="token-icon small">
+                            ${token.logoURI ? 
+                                `<img src="${token.logoURI}" alt="${token.symbol}" class="token-icon-image">` :
+                                `<div class="token-icon-fallback">${token.symbol.charAt(0)}</div>`
+                            }
+                        </div>
+                        <div class="token-info">
+                            <span class="token-symbol">${token.symbol}</span>
+                            <span class="token-balance">Balance: ${formattedBalance}</span>
+                        </div>
+                    </div>
+                    <svg width="12" height="12" viewBox="0 0 12 12">
+                        <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+                    </svg>
+                `;
+            }
+
+            // Store the selected token with its balance
+            this[`${type}Token`] = token;
+            
+            // Close the modal
+            const modal = document.getElementById(`${type}TokenModal`);
+            if (modal) {
+                modal.style.display = 'none';
+            }
+
+            // Re-initialize token selector click listeners
+            this.initializeTokenSelectors();
+
+            // Update other UI elements
+            if (type === 'sell') {
+                this.updateSellAmountMax();
+            }
+            this.updateCreateButtonState();
+            this.updateTokenAmounts(type);
+        } catch (error) {
+            this.debug('Error in handleTokenSelect:', error);
+            this.showError('Failed to select token');
+        }
+    }
+
+    handleTokenItemClick(type, tokenItem) {
+        try {
+            const address = tokenItem.dataset.address;
+            const token = this.tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
+            
+            this.debug('Token item clicked:', {
+                type,
+                address,
+                token
+            });
+            
+            if (token) {
+                this.handleTokenSelect(type, token);
+            }
+        } catch (error) {
+            this.debug('Error in handleTokenItemClick:', error);
+            this.showError('Failed to select token');
+        }
+    }
+
+    updateCreateButtonState() {
+        try {
+            const createButton = document.getElementById('createOrderButton');
+            if (!createButton) return;
+
+            // Check if we have both tokens selected and valid amounts
+            const hasTokens = this.sellToken && this.buyToken;
+            const sellAmount = document.getElementById('sellAmount')?.value;
+            const buyAmount = document.getElementById('buyAmount')?.value;
+            const hasAmounts = sellAmount && buyAmount && 
+                             Number(sellAmount) > 0 && 
+                             Number(buyAmount) > 0;
+
+            // Enable button only if we have both tokens and valid amounts
+            createButton.disabled = !(hasTokens && hasAmounts);
+        } catch (error) {
+            this.debug('Error updating create button state:', error);
+        }
+    }
+
+    updateSellAmountMax() {
+        try {
+            if (!this.sellToken) return;
+            
+            const maxButton = document.getElementById('sellAmountMax');
+            if (!maxButton) return;
+
+            // Update max button visibility based on token balance
+            if (this.sellToken.balance) {
+                maxButton.style.display = 'inline';
+                maxButton.onclick = () => {
+                    const sellAmount = document.getElementById('sellAmount');
+                    if (sellAmount) {
+                        sellAmount.value = this.sellToken.balance;
+                        this.updateTokenAmounts('sell');
+                    }
+                };
+            } else {
+                maxButton.style.display = 'none';
+            }
+        } catch (error) {
+            this.debug('Error updating sell amount max:', error);
+        }
+    }
+
+    updateTokenAmounts(type) {
+        try {
+            // Add your token amount update logic here
+            this.updateCreateButtonState();
+        } catch (error) {
+            this.debug('Error updating token amounts:', error);
+        }
+    }
+
+    initializeTokenSelectors() {
+        ['sell', 'buy'].forEach(type => {
+            const selector = document.getElementById(`${type}TokenSelector`);
+            const modal = document.getElementById(`${type}TokenModal`);
+            const closeButton = modal?.querySelector('.token-modal-close');
+            
+            if (selector && modal) {
+                // Remove existing listener if any
+                if (this.tokenSelectorListeners[type]) {
+                    selector.removeEventListener('click', this.tokenSelectorListeners[type]);
+                }
+
+                // Create new listener for opening modal
+                this.tokenSelectorListeners[type] = () => {
+                    modal.style.display = 'block';
+                };
+
+                // Add new listener
+                selector.addEventListener('click', this.tokenSelectorListeners[type]);
+
+                // Add close button listener
+                if (closeButton) {
+                    closeButton.onclick = () => {
+                        modal.style.display = 'none';
+                    };
+                }
+
+                // Close modal when clicking outside
+                window.onclick = (event) => {
+                    if (event.target === modal) {
+                        modal.style.display = 'none';
+                    }
+                };
+            }
+        });
     }
 }
 
