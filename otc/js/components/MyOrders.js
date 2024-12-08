@@ -49,6 +49,7 @@ export class MyOrders extends ViewOrders {
             let userAddress;
             try {
                 userAddress = await window.walletManager.getAccount();
+                this.debug('Current user address:', userAddress);
             } catch (error) {
                 this.debug('Error getting account:', error);
                 userAddress = null;
@@ -77,11 +78,7 @@ export class MyOrders extends ViewOrders {
                 });
             }
 
-            // Cleanup previous state
-            this.cleanup();
-            this.container.innerHTML = '';
-            
-            // Setup table structure
+            // Setup table structure first
             await this.setupTable();
 
             // Setup WebSocket handlers after table setup
@@ -90,13 +87,29 @@ export class MyOrders extends ViewOrders {
             // Get initial orders from cache and filter for maker
             try {
                 const orders = window.webSocket.getOrders();
-                const filteredOrders = orders.filter(order => 
-                    order.maker.toLowerCase() === userAddress.toLowerCase()
-                );
+                this.debug('Orders before filtering:', orders);
+                
+                if (!Array.isArray(orders)) {
+                    this.debug('Invalid orders data received:', orders);
+                    throw new Error('Invalid orders data received');
+                }
+
+                const filteredOrders = orders.filter(order => {
+                    const matches = order.maker.toLowerCase() === userAddress.toLowerCase();
+                    this.debug(`Order ${order.id} maker ${order.maker} matches user ${userAddress}: ${matches}`);
+                    return matches;
+                });
+                
+                this.debug('Filtered orders:', filteredOrders);
+                
+                // Store filtered orders in local cache
+                this.orders = new Map(filteredOrders.map(order => [order.id, order]));
+                
+                // Now refresh the view with our cached orders
                 await this.refreshOrdersView(filteredOrders);
             } catch (error) {
                 this.debug('Error refreshing orders view:', error);
-                throw error; // Propagate error for handling
+                throw error;
             }
 
             this.isInitialized = true;
@@ -112,17 +125,28 @@ export class MyOrders extends ViewOrders {
 
     cleanup() {
         this.debug('Cleaning up MyOrders component');
-        super.cleanup(); // Call parent cleanup
+        // Don't clear the orders cache during cleanup
         this.isInitialized = false;
         this.isInitializing = false;
+        // Clear event subscriptions and DOM elements
+        if (this.eventSubscriptions) {
+            this.eventSubscriptions.clear();
+        }
+        if (this.container) {
+            this.container.innerHTML = '';
+        }
     }
 
-    // Override refreshOrdersView to handle errors
-    async refreshOrdersView(orders) {
+    // Override refreshOrdersView to use local cache
+    async refreshOrdersView(orders = null) {
         try {
             if (!window.webSocket?.contract) {
                 throw new Error('WebSocket or contract not initialized');
             }
+
+            // Use provided orders or get from local cache
+            const ordersToDisplay = orders || Array.from(this.orders.values());
+            this.debug('Refreshing orders view with:', ordersToDisplay);
 
             // Get contract parameters needed for order status
             const [orderExpiry, gracePeriod] = await Promise.all([
@@ -131,7 +155,7 @@ export class MyOrders extends ViewOrders {
             ]);
 
             // Continue with existing refresh logic
-            await super.refreshOrdersView(orders, orderExpiry, gracePeriod);
+            await super.refreshOrdersView(ordersToDisplay, orderExpiry, gracePeriod);
         } catch (error) {
             this.debug('Error refreshing orders view:', error);
             throw error;

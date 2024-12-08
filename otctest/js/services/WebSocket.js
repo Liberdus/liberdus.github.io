@@ -240,6 +240,10 @@ export class WebSocketService {
         try {
             this.debug('Getting orders with filter:', filterStatus);
             const orders = Array.from(this.orderCache.values());
+            this.debug('Current order cache:', {
+                size: this.orderCache.size,
+                orders: orders
+            });
             
             if (filterStatus) {
                 return orders.filter(order => order.status === filterStatus);
