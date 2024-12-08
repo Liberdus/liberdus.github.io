@@ -51,7 +51,11 @@ body {
   align-items: center;
   padding: 1rem 2rem;
   background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  margin-bottom: 20px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .header-left .logo-container {
@@ -105,17 +109,17 @@ body {
 }
 
 .main-content {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
+  padding: 0;
+  width: 100%;
 }
 
 .content-wrapper {
   background: var(--bg-secondary);
   border-radius: 16px;
   box-shadow: var(--card-shadow);
-  margin-top: 20px;
   overflow: hidden;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .tab-content-wrapper {
@@ -350,8 +354,8 @@ label {
   background: var(--bg-secondary);
   border-radius: 16px;
   box-shadow: var(--card-shadow);
-  margin-top: 20px;
   overflow: hidden;
+  width: 100%;
 }
 
 /* Update form container background */
