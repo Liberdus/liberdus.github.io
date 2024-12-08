@@ -363,7 +363,13 @@ export class CreateOrder extends BaseComponent {
             return;
         }
         
+        const createOrderBtn = document.getElementById('createOrderBtn');
+        
         try {
+            this.isSubmitting = true;
+            createOrderBtn.disabled = true;
+            createOrderBtn.classList.add('disabled');
+            
             // Debug logs to check token state
             this.debug('Current sellToken:', this.sellToken);
             this.debug('Current buyToken:', this.buyToken);
@@ -410,11 +416,6 @@ export class CreateOrder extends BaseComponent {
                 return;
             }
 
-            this.isSubmitting = true;
-            createOrderBtn.disabled = true;
-            createOrderBtn.classList.add('disabled');
-            this.showStatus('Processing...', 'pending');
-            
             // If taker is empty, use zero address for public order
             if (!taker) {
                 taker = ethers.constants.AddressZero;
@@ -443,10 +444,19 @@ export class CreateOrder extends BaseComponent {
             const sellAmountWei = ethers.utils.parseUnits(sellAmount, sellTokenDecimals);
             const buyAmountWei = ethers.utils.parseUnits(buyAmount, buyTokenDecimals);
 
-            // Before creating the order, check and approve both tokens
-            await this.checkAndApproveToken(this.sellToken.address, sellAmountWei);
-            await this.checkAndApproveToken(this.feeToken.address, this.feeToken.amount);
-            
+            // Check and approve tokens
+            const sellTokenApproved = await this.checkAndApproveToken(this.sellToken.address, sellAmountWei);
+            if (!sellTokenApproved) {
+                // User rejected or approval failed - exit gracefully
+                return;
+            }
+
+            const feeTokenApproved = await this.checkAndApproveToken(this.feeToken.address, this.feeToken.amount);
+            if (!feeTokenApproved) {
+                // User rejected or approval failed - exit gracefully
+                return;
+            }
+
             // Create order
             this.showStatus('Creating order...', 'pending');
             const tx = await this.contract.createOrder(
@@ -455,14 +465,20 @@ export class CreateOrder extends BaseComponent {
                 sellAmountWei,
                 this.buyToken.address,
                 buyAmountWei
-            );
+            ).catch(error => {
+                if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
+                    this.showStatus('Order creation declined', 'warning');
+                    return null;
+                }
+                throw error;
+            });
+
+            if (!tx) return; // User rejected the transaction
 
             this.showStatus('Waiting for confirmation...', 'pending');
             await tx.wait();
             
             this.showStatus('Order created successfully!', 'success');
-            
-            // Reset form after successful order creation
             this.resetForm();
             
             // Reload orders if needed
@@ -472,7 +488,8 @@ export class CreateOrder extends BaseComponent {
 
         } catch (error) {
             this.debug('Create order error:', error);
-            this.showStatus(error.message, 'error');
+            const userMessage = this.getUserFriendlyError(error);
+            this.showStatus(userMessage, 'error');
         } finally {
             this.isSubmitting = false;
             createOrderBtn.disabled = false;
@@ -1051,59 +1068,86 @@ export class CreateOrder extends BaseComponent {
 
             // If allowance is insufficient, request approval
             if (currentAllowance.lt(requiredAmount)) {
-                this.debug(`Insufficient allowance for token ${tokenAddress}. Current: ${currentAllowance}, Required: ${requiredAmount}`);
+                this.debug(`Insufficient allowance for token ${tokenAddress}`);
                 this.showStatus('Requesting token approval...', 'pending');
                 
                 try {
                     const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
-                    this.showStatus('Waiting for approval confirmation...', 'pending');
+                    this.showStatus('Please confirm the approval in your wallet...', 'pending');
                     
-                    // Wait for transaction and handle replacement
                     try {
                         await approveTx.wait();
+                        this.showStatus('Token approved successfully', 'success');
                     } catch (waitError) {
-                        // Check if transaction was replaced
                         if (waitError.code === 'TRANSACTION_REPLACED') {
                             if (waitError.cancelled) {
-                                // Transaction was cancelled (dropped)
-                                throw new Error('Approval transaction was cancelled');
+                                this.showStatus('Approval was cancelled', 'warning');
+                                return false;
                             } else {
-                                // Transaction was replaced (speed up)
                                 this.debug('Approval transaction was sped up:', waitError.replacement.hash);
-                                // Check if replacement transaction was successful
                                 if (waitError.receipt.status === 1) {
-                                    this.debug('Replacement approval transaction successful');
                                     this.showStatus('Token approved successfully', 'success');
                                     return true;
-                                } else {
-                                    throw new Error('Replacement approval transaction failed');
                                 }
                             }
-                        } else {
-                            // Other error occurred
-                            throw waitError;
                         }
+                        throw waitError;
                     }
-                    
-                    this.debug(`Token ${tokenAddress} approved successfully`);
-                    this.showStatus('Token approved successfully', 'success');
                 } catch (error) {
-                    // Handle user rejection or other errors
-                    if (error.code === 4001) { // MetaMask user rejection error code
-                        throw new Error('User rejected the approval transaction');
+                    // Handle specific error cases
+                    if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
+                        this.showStatus('Approval declined - please try again', 'warning');
+                        return false;
+                    } else if (error.code === -32603) {
+                        this.showStatus('Transaction failed - please check your balance', 'error');
+                        return false;
+                    } else if (error.message?.includes('insufficient funds')) {
+                        this.showStatus('Insufficient funds for gas', 'error');
+                        return false;
+                    } else if (error.message?.includes('nonce')) {
+                        this.showStatus('Transaction error - please refresh and try again', 'error');
+                        return false;
+                    } else if (error.message?.includes('gas required exceeds allowance')) {
+                        this.showStatus('Transaction requires too much gas', 'error');
+                        return false;
                     }
                     throw error;
                 }
-            } else {
-                this.debug(`Token ${tokenAddress} already has sufficient allowance`);
             }
 
             return true;
         } catch (error) {
             this.debug('Token approval error:', error);
-            this.showStatus(error.message || 'Failed to approve token', 'error');
-            throw error;
+            
+            // Don't show technical error messages to users
+            const userMessage = this.getUserFriendlyError(error);
+            this.showStatus(userMessage, 'error');
+            
+            return false;
         }
+    }
+
+    // Add new helper method for user-friendly error messages
+    getUserFriendlyError(error) {
+        // Check for common error codes and messages
+        if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
+            return 'Transaction was declined';
+        }
+        if (error.code === -32603) {
+            return 'Transaction failed - please try again';
+        }
+        if (error.message?.includes('insufficient funds')) {
+            return 'Insufficient funds for gas fees';
+        }
+        if (error.message?.includes('nonce')) {
+            return 'Transaction error - please refresh and try again';
+        }
+        if (error.message?.includes('gas required exceeds allowance')) {
+            return 'Transaction requires too much gas';
+        }
+        
+        // Default generic message
+        return 'Transaction failed - please try again';
     }
 
     // Update the fee display in the UI

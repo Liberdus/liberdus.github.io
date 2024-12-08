@@ -59,6 +59,27 @@ export const NETWORK_TOKENS = {
     ]
 };
 
+// Add a debug logging utility that only logs in development
+const DEBUG = false;
+const debugLog = (...args) => {
+    if (DEBUG) {
+        console.log(...args);
+    }
+};
+
+// Add token icon sources configuration
+const TOKEN_ICON_SOURCES = {
+    // Update with working token list URL
+    POLYGON_TOKEN_LIST: 'https://tokens.1inch.io/v1.1/137',
+    COINGECKO_API: 'https://api.coingecko.com/api/v3',
+    // Add fallback icon URL if needed
+    FALLBACK_ICON: 'path/to/fallback/icon.png'
+};
+
+// Create an in-memory cache for token data
+const tokenCache = new Map();
+const iconCache = new Map();
+
 export async function getTokenList() {
     try {
         const networkConfig = getNetworkConfig();
@@ -108,14 +129,14 @@ export async function getTokenList() {
 }
 async function getUserWalletTokens() {
     if (!window.ethereum) {
-        console.log('No ethereum provider found');
+        debugLog('No ethereum provider found');
         return [];
     }
 
     try {
         const provider = new ethers.providers.Web3Provider(window.ethereum);
         const address = await provider.getSigner().getAddress();
-        console.log('Getting tokens for address:', address);
+        debugLog('Getting tokens for address:', address);
 
         // Get predefined tokens for current network
         const networkConfig = getNetworkConfig();
@@ -125,6 +146,16 @@ async function getUserWalletTokens() {
         // Check balances for predefined tokens first
         for (const token of predefinedTokens) {
             try {
+                // Check cache first
+                const cacheKey = `${token.address}-${address}`;
+                if (tokenCache.has(cacheKey)) {
+                    const cachedToken = tokenCache.get(cacheKey);
+                    if (Date.now() - cachedToken.timestamp < 60000) { // 1 minute cache
+                        tokens.push(cachedToken.data);
+                        continue;
+                    }
+                }
+
                 const tokenContract = new ethers.Contract(
                     token.address,
                     [
@@ -134,48 +165,56 @@ async function getUserWalletTokens() {
                     provider
                 );
 
-                try {
-                    const [rawBalance, decimals] = await Promise.all([
-                        tokenContract.balanceOf(address),
-                        tokenContract.decimals()
-                    ]);
+                // Use Promise.race with timeout
+                const timeout = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Timeout')), 5000)
+                );
 
-                    // Format balance using the correct decimals
-                    const balance = ethers.utils.formatUnits(rawBalance, decimals);
+                const [rawBalance, decimals] = await Promise.race([
+                    Promise.all([
+                        tokenContract.balanceOf(address).catch(() => ethers.BigNumber.from(0)),
+                        tokenContract.decimals().catch(() => token.decimals || 18)
+                    ]),
+                    timeout
+                ]);
 
-                    if (rawBalance.gt(0)) {
-                        tokens.push({
-                            ...token,
-                            balance
-                        });
-                        console.log(`Found ${token.symbol} balance: ${balance}`);
-                    } else {
-                        console.log(`No ${token.symbol} balance found`);
-                        tokens.push({
-                            ...token,
-                            balance: '0'
-                        });
-                    }
-                } catch (balanceError) {
-                    console.log(`No ${token.symbol} balance or first interaction needed`);
-                    tokens.push({
+                const balance = ethers.utils.formatUnits(rawBalance, decimals);
+
+                if (rawBalance.gt(0)) {
+                    const tokenData = {
                         ...token,
-                        balance: '0'
+                        balance,
+                        logoURI: await getTokenIcon(token.address)
+                    };
+                    tokens.push(tokenData);
+                    
+                    // Cache the result
+                    tokenCache.set(cacheKey, {
+                        timestamp: Date.now(),
+                        data: tokenData
                     });
+                    
+                    debugLog(`Added ${token.symbol} with balance ${balance}`);
                 }
             } catch (error) {
-                console.warn(`Error loading token contract at ${token.address}:`, error.message);
+                debugLog(`Error loading predefined token at ${token.address}:`, error.message);
                 continue;
             }
         }
 
-        // Get transfer events to find other tokens the user might have
+        // Skip transfer event scanning if we already have tokens
+        if (tokens.length > 0) {
+            debugLog(`Found ${tokens.length} tokens with non-zero balance`);
+            return tokens;
+        }
+
+        // Calculate block range for last 30 days (for discovering other tokens)
         const BLOCKS_PER_DAY = 34560;
         const DAYS = 30;
         const currentBlock = await provider.getBlockNumber();
         const fromBlock = currentBlock - (BLOCKS_PER_DAY * DAYS);
 
-        // Create filters for both incoming and outgoing transfers
+        // Get transfer events with error handling
         const filters = [
             {
                 fromBlock,
@@ -183,7 +222,7 @@ async function getUserWalletTokens() {
                 topics: [
                     ethers.utils.id('Transfer(address,address,uint256)'),
                     null,
-                    ethers.utils.hexZeroPad(address, 32) // To address
+                    ethers.utils.hexZeroPad(address, 32)
                 ]
             },
             {
@@ -191,14 +230,32 @@ async function getUserWalletTokens() {
                 toBlock: 'latest',
                 topics: [
                     ethers.utils.id('Transfer(address,address,uint256)'),
-                    ethers.utils.hexZeroPad(address, 32), // From address
+                    ethers.utils.hexZeroPad(address, 32),
                     null
                 ]
             }
         ];
 
-        // Get all transfer events
-        const allLogs = await Promise.all(filters.map(filter => provider.getLogs(filter)));
+        // Get all transfer events with timeout and retry
+        const getLogs = async (filter, retries = 3) => {
+            try {
+                return await Promise.race([
+                    provider.getLogs(filter),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Timeout')), 10000)
+                    )
+                ]);
+            } catch (error) {
+                if (retries > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    return getLogs(filter, retries - 1);
+                }
+                console.warn('Failed to get logs after retries:', error);
+                return [];
+            }
+        };
+
+        const allLogs = await Promise.all(filters.map(filter => getLogs(filter)));
         const tokenAddresses = [...new Set(allLogs.flat().map(log => log.address))];
         
         console.log(`Found ${tokenAddresses.length} unique token addresses from transfers`);
@@ -260,94 +317,33 @@ async function getUserWalletTokens() {
 }
 
 async function getTokenIcon(address) {
-    // Skip icon fetch for test tokens (you can adjust this check based on your needs)
-    if (address.toLowerCase().includes('test')) {
-        return null;
-    }
-
-    const iconCache = new Map();
+    // Check cache first
     if (iconCache.has(address)) {
         return iconCache.get(address);
     }
 
-    const sources = [
-        // Chain-specific token lists (most reliable)
-        async () => {
-            try {
-                return await getChainTokenList(address);
-            } catch {
-                return null;
-            }
-        },
-        // CoinGecko
-        async () => {
-            try {
-                return await getCoinGeckoIcon(address);
-            } catch {
-                return null;
-            }
-        },
-        // Trust Wallet
-        async () => {
-            try {
-                const icon = getTrustWalletIcon(address);
-                const exists = await checkImageExists(icon);
-                return exists ? icon : null;
-            } catch {
-                return null;
-            }
-        }
-    ];
-
-    for (const getIcon of sources) {
-        const icon = await getIcon();
-        if (icon) {
-            iconCache.set(address, icon);
-            return icon;
-        }
+    // Skip icon fetch for test tokens
+    if (address.toLowerCase().includes('test')) {
+        iconCache.set(address, null);
+        return null;
     }
 
-    // Cache null result to avoid future requests
+    try {
+        // Try 1inch token list first (more reliable)
+        const response = await fetch(TOKEN_ICON_SOURCES.POLYGON_TOKEN_LIST);
+        if (response.ok) {
+            const data = await response.json();
+            const token = data[address.toLowerCase()];
+            if (token?.logoURI) {
+                iconCache.set(address, token.logoURI);
+                return token.logoURI;
+            }
+        }
+    } catch (error) {
+        debugLog('Error fetching from 1inch token list:', error.message);
+    }
+
+    // Return null for now - we can add more sources if needed
     iconCache.set(address, null);
     return null;
-}
-
-// Helper function to get token icon from chain-specific token list
-async function getChainTokenList(address) {
-    try {
-        const response = await fetch('https://raw.githubusercontent.com/maticnetwork/polygon-token-list/master/src/tokens.json');
-        if (!response.ok) return null;
-        const data = await response.json();
-        const token = data.tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
-        return token?.logoURI || null;
-    } catch {
-        return null;
-    }
-}
-
-// Helper function to get token icon from CoinGecko
-async function getCoinGeckoIcon(address) {
-    try {
-        const response = await fetch(`https://api.coingecko.com/api/v3/coins/polygon/contract/${address}`);
-        if (!response.ok) return null;
-        const data = await response.json();
-        return data.image?.small || null;
-    } catch {
-        return null;
-    }
-}
-
-// Helper function to get token icon from Trust Wallet
-function getTrustWalletIcon(address) {
-    return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/polygon/assets/${address}/logo.png`;
-}
-
-// Helper function to check if an image exists
-async function checkImageExists(url) {
-    try {
-        const response = await fetch(url, { method: 'HEAD' });
-        return response.ok;
-    } catch {
-        return false;
-    }
 } 
