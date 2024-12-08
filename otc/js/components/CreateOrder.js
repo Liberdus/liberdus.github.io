@@ -26,6 +26,19 @@ export class CreateOrder extends BaseComponent {
         };
     }
 
+    // Add debounce as a class method
+    debounce(func, wait) {
+        let timeout;
+        return (...args) => {
+            const later = () => {
+                clearTimeout(timeout);
+                func.apply(this, args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
     async initializeContract() {
         try {
             this.debug('Initializing contract...');
@@ -687,166 +700,123 @@ export class CreateOrder extends BaseComponent {
                         <div class="token-list" id="${type}CommonTokenList"></div>
                     </div>
                     <div class="token-section">
-                        <h4>Tokens in wallet (used in past 30)</h4>
+                        <h4>Tokens in wallet</h4>
                         <div class="token-list" id="${type}UserTokenList"></div>
                     </div>
                 </div>
             </div>
         `;
 
-        // Add event listeners...
+        // Update to use the class method debounce
+        const searchInput = modal.querySelector(`#${type}TokenSearch`);
+        searchInput.addEventListener('input', this.debounce((e) => {
+            this.handleTokenSearch(e.target.value, type);
+        }, 300));
+
         return modal;
     }
 
     async handleTokenSearch(searchTerm, type) {
-        const contractResult = document.getElementById(`${type}ContractResult`);
-        
-        // Clear previous results
-        contractResult.innerHTML = '';
-        
-        // If input looks like an address
-        if (ethers.utils.isAddress(searchTerm)) {
-            const POL_NativeToken_Address = '0x0000000000000000000000000000000000001010';
-            if (searchTerm.toLowerCase() === POL_NativeToken_Address.toLowerCase()) {
-                contractResult.innerHTML = `
-                  <div class="contract-address-result">
-                    <div class="contract-not-supported">
-                      <span>POL Native Token is not supported. Please use ERC20 tokens.</span>
-                    </div>
-                  </div>
-                `;
+        try {
+            const contractResult = document.getElementById(`${type}ContractResult`);
+            
+            searchTerm = searchTerm.trim().toLowerCase();
+            
+            // Clear previous contract result only
+            contractResult.innerHTML = '';
+
+            // If search is empty, just clear the contract result
+            if (!searchTerm) {
                 return;
             }
-            // Show loading state first
-            contractResult.innerHTML = `
-                <div class="contract-address-result">
-                    <div class="contract-loading">
-                        <div class="spinner"></div>
-                        <span>Checking contract...</span>
+
+            // Check if input is an address
+            if (ethers.utils.isAddress(searchTerm)) {
+                // Show loading state for contract result
+                contractResult.innerHTML = `
+                    <div class="token-section">
+                        <h4>Token Contract</h4>
+                        <div class="contract-loading">
+                            <div class="spinner"></div>
+                            <span>Loading token info...</span>
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
 
-            try {
-                const tokenContract = new ethers.Contract(
-                    searchTerm,
-                    [
-                        'function name() view returns (string)',
-                        'function symbol() view returns (string)',
-                        'function decimals() view returns (uint8)',
-                        'function balanceOf(address) view returns (uint256)'
-                    ],
-                    this.provider
-                );
+                try {
+                    const tokenContract = new ethers.Contract(
+                        searchTerm,
+                        erc20Abi,
+                        this.provider
+                    );
 
-                const [name, symbol, decimals, balance] = await Promise.all([
-                    tokenContract.name().catch(() => null),
-                    tokenContract.symbol().catch(() => null),
-                    tokenContract.decimals().catch(() => null),
-                    tokenContract.balanceOf(this.account).catch(() => null)
-                ]);
+                    const [name, symbol, decimals, balance] = await Promise.all([
+                        tokenContract.name().catch(() => null),
+                        tokenContract.symbol().catch(() => null),
+                        tokenContract.decimals().catch(() => null),
+                        tokenContract.balanceOf(await walletManager.getCurrentAddress()).catch(() => null)
+                    ]);
 
-                if (name && symbol && decimals !== null) {
-                    // Format balance if available
-                    const formattedBalance = balance ? 
-                        ethers.utils.formatUnits(balance, decimals) : '0';
+                    if (name && symbol && decimals !== null) {
+                        const token = {
+                            address: searchTerm,
+                            name,
+                            symbol,
+                            decimals,
+                            balance: balance ? ethers.utils.formatUnits(balance, decimals) : '0'
+                        };
 
-                    // Create token object matching the structure used in tokens.js
-                    const token = {
-                        address: searchTerm,
-                        name,
-                        symbol,
-                        decimals,
-                        balance: formattedBalance
-                    };
-
-                    // Display the token in the same format as listed tokens
-                    contractResult.innerHTML = `
-                        <div class="token-item" data-address="${searchTerm}">
-                            <div class="token-item-left">
-                                <div class="token-icon">
-                                    ${this.getTokenIcon(token)}
-                                </div>
-                                <div class="token-item-info">
-                                    <div class="token-item-symbol">${symbol}</div>
-                                    <div class="token-item-name">
-                                        ${name}
-                                        <a href="${this.getExplorerUrl(searchTerm)}" 
-                                           class="token-explorer-link"
-                                           target="_blank"
-                                           title="View contract on explorer">
-                                            <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                                <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                                            </svg>
-                                        </a>
+                        contractResult.innerHTML = `
+                            <div class="token-section">
+                                <h4>Token Contract</h4>
+                                <div class="token-list">
+                                    <div class="token-item" data-address="${token.address}">
+                                        <div class="token-item-left">
+                                            <div class="token-icon">
+                                                ${this.getTokenIcon(token)}
+                                            </div>
+                                            <div class="token-item-info">
+                                                <div class="token-item-symbol">${token.symbol}</div>
+                                                <div class="token-item-name">
+                                                    ${token.name}
+                                                    <a href="${this.getExplorerUrl(token.address)}" 
+                                                       target="_blank"
+                                                       class="token-explorer-link">
+                                                        <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                                            <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                                        </svg>
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        ${balance ? `
+                                            <div class="token-item-balance">
+                                                ${Number(ethers.utils.formatUnits(balance, decimals)).toFixed(4)}
+                                            </div>
+                                        ` : ''}
                                     </div>
                                 </div>
                             </div>
-                            ${balance ? `
-                                <div class="token-item-balance">
-                                    ${Number(formattedBalance).toFixed(4)}
-                                </div>
-                            ` : ''}
-                        </div>
-                    `;
+                        `;
 
-                    // Add click handler
-                    const tokenItem = contractResult.querySelector('.token-item');
-                    tokenItem.addEventListener('click', () => {
-                        const input = document.getElementById(`${type}Token`);
-                        input.value = searchTerm;
-                        this.updateTokenBalance(searchTerm, `${type}TokenBalance`);
-                        document.getElementById(`${type}TokenModal`).classList.remove('show');
-                    });
-                }
-            } catch (error) {
-                // Just clear the contract result if there's an error
-                contractResult.innerHTML = '';
-            }
-        }
-
-        // Filter and display wallet tokens
-        const searchTermLower = searchTerm.toLowerCase().trim();
-        const filteredWalletTokens = this.tokens.filter(token => 
-            (token.symbol.toLowerCase().includes(searchTermLower) ||
-             token.name.toLowerCase().includes(searchTermLower) ||
-             token.address.toLowerCase().includes(searchTermLower))
-        );
-
-        // Display wallet tokens
-        if (filteredWalletTokens.length > 0) {
-            userTokenList.innerHTML = filteredWalletTokens.map(token => `
-                <div class="token-item" data-address="${token.address}">
-                    <div class="token-item-left">
-                        <div class="token-icon">
-                            ${this.getTokenIcon(token)}
-                        </div>
-                        <div class="token-item-info">
-                            <div class="token-item-symbol">${token.symbol}</div>
-                            <div class="token-item-name">
-                                ${token.name}
-                                <a href="${this.getExplorerUrl(token.address)}" 
-                                   class="token-explorer-link"
-                                   target="_blank"
-                                   title="View contract on explorer">
-                                    <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                        <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                                    </svg>
-                                </a>
+                        // Add click handler
+                        const tokenItem = contractResult.querySelector('.token-item');
+                        tokenItem.addEventListener('click', () => this.handleTokenItemClick(type, tokenItem));
+                    }
+                } catch (error) {
+                    contractResult.innerHTML = `
+                        <div class="token-section">
+                            <h4>Token Contract</h4>
+                            <div class="contract-error">
+                                Invalid or unsupported token contract
                             </div>
                         </div>
-                    </div>
-                    <div class="token-item-balance">
-                        ${Number(token.balance).toFixed(4)}
-                    </div>
-                </div>
-            `).join('');
-        } else {
-            userTokenList.innerHTML = `
-                <div class="token-list-empty">
-                    No tokens found in wallet
-                </div>
-            `;
+                    `;
+                }
+            }
+        } catch (error) {
+            this.debug('Search error:', error);
+            this.showError('Error searching for token');
         }
     }
 

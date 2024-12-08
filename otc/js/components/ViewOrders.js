@@ -239,6 +239,17 @@ export class ViewOrders extends BaseComponent {
                 return;
             }
 
+            // Use WebSocket's contract instance instead of this.contract
+            const contract = window.webSocket.contract;
+            if (!contract) {
+                throw new Error('Contract not available');
+            }
+
+            // Get contract expiry times using WebSocket's contract
+            const orderExpiry = await contract.ORDER_EXPIRY();
+            const gracePeriod = await contract.GRACE_PERIOD();
+            const currentTime = Math.floor(Date.now() / 1000);
+
             // Add order cache check
             const cachedOrders = Array.from(this.orders.values());
             this.debug('Current order cache:', {
@@ -247,14 +258,6 @@ export class ViewOrders extends BaseComponent {
             });
 
             this.showLoadingState();
-
-            // Get contract instance first
-            this.contract = await this.getContract();
-            
-            // Get contract expiry times
-            const orderExpiry = (await this.contract.ORDER_EXPIRY()).toNumber();
-            const gracePeriod = (await this.contract.GRACE_PERIOD()).toNumber();
-            const currentTime = Math.floor(Date.now() / 1000);
 
             // Get filter and pagination state
             const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked;
@@ -294,7 +297,7 @@ export class ViewOrders extends BaseComponent {
             const tokenDetailsMap = this.tokenCache;
 
             // Do all async operations before touching the DOM
-            if (showOnlyActive && this.contract) {
+            if (showOnlyActive && contract) {
                 ordersToDisplay = ordersToDisplay.filter(order => {
                     // Check if order is not filled or canceled
                     if (order.status === 'Filled' || order.status === 'Canceled') {
@@ -302,7 +305,7 @@ export class ViewOrders extends BaseComponent {
                     }
 
                     // Check if order is not expired
-                    const expiryTime = Number(order.timestamp) + orderExpiry;
+                    const expiryTime = Number(order.timestamp) + orderExpiry.toNumber();
                     return currentTime < expiryTime;
                 });
             }
@@ -360,7 +363,7 @@ export class ViewOrders extends BaseComponent {
 
                         // Check if Active order is expired
                         const orderTime = Number(order.timestamp);
-                        const expiryTime = orderTime + orderExpiry;
+                        const expiryTime = orderTime + orderExpiry.toNumber();
                         
                         if (currentTime >= expiryTime) {
                             return 3; // Expired orders have lowest priority
@@ -1415,5 +1418,12 @@ export class ViewOrders extends BaseComponent {
             3: 'Expired'
         };
         return statusMap[status] || `Unknown (${status})`;
+    }
+
+    async getContract() {
+        if (!window.webSocket?.contract) {
+            throw new Error('WebSocket contract not initialized');
+        }
+        return window.webSocket.contract;
     }
 }
