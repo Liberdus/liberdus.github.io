@@ -12,24 +12,34 @@ export class ContractParams extends BaseComponent {
         };
         this.isInitializing = false;
         this.isInitialized = false;
+        this.cachedParams = null;
+        this.lastFetchTime = 0;
+        this.CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
     }
 
     async initialize(readOnlyMode = true) {
-        // Prevent concurrent initializations
         if (this.isInitializing) {
             this.debug('Already initializing, skipping...');
-            return;
-        }
-
-        // Skip if already initialized
-        if (this.isInitialized) {
-            this.debug('Already initialized, skipping...');
             return;
         }
 
         this.isInitializing = true;
 
         try {
+            // Check if we have valid cached data
+            const now = Date.now();
+            if (this.cachedParams && (now - this.lastFetchTime) < this.CACHE_DURATION) {
+                this.debug('Using cached parameters');
+                this.container.innerHTML = `
+                    <div class="tab-content-wrapper">
+                        <h2>Contract Parameters</h2>
+                        <div class="params-container">
+                            ${this.generateParametersHTML(this.cachedParams)}
+                        </div>
+                    </div>`;
+                return;
+            }
+
             this.debug('Initializing ContractParams component');
 
             // Create basic structure
@@ -112,6 +122,10 @@ export class ContractParams extends BaseComponent {
             // Update UI with available parameters
             const paramsContainer = this.container.querySelector('.params-container');
             paramsContainer.innerHTML = this.generateParametersHTML(params);
+
+            // Cache the fetched parameters
+            this.cachedParams = params;
+            this.lastFetchTime = now;
 
             this.isInitialized = true;
             this.debug('Initialization complete');
@@ -221,9 +235,9 @@ export class ContractParams extends BaseComponent {
         return ethers.utils.formatEther(wei);
     }
 
-    // No need for cleanup since we'renot managing the contract instance
     cleanup() {
         this.debug('Cleaning up ContractParams component');
+        // Don't clear the cache on cleanup
         this.isInitialized = false;
         this.isInitializing = false;
     }

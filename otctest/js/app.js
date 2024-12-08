@@ -200,6 +200,14 @@ class App {
             // Initialize components in read-only mode initially
             await this.initializeComponents(true);
             
+            // Initialize ContractParams early
+            this.contractParams = new ContractParams();
+            
+            // Start loading the data in the background
+            this.contractParams.initialize().catch(err => {
+                console.error('Failed to initialize ContractParams:', err);
+            });
+            
             this.debug('Initialization complete');
         } catch (error) {
             this.debug('Initialization error:', error);
