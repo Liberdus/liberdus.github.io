@@ -904,7 +904,7 @@
 
 .unified-token-input {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   background: var(--bg-tertiary);
   border-radius: 12px;
   padding: 16px;
@@ -937,7 +937,7 @@
 }
 
 .token-selector-button {
-  padding: 6px 12px;
+  padding: 8px 12px;
   min-width: 120px;
   display: flex;
   align-items: center;
@@ -947,6 +947,8 @@
   cursor: pointer;
   transition: background-color 0.2s;
   font-size: 14px;
+  height: 40px;
+  justify-content: center;
 }
 
 .token-selector-button:hover {
@@ -1037,11 +1039,13 @@
 /* Unified token input */
 .unified-token-input {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   background: var(--bg-tertiary);
   border-radius: 12px;
   padding: 16px;
   gap: 12px;
+  position: relative;
+  z-index: 1;
 }
 
 /* Fee container spacing */
