@@ -203,12 +203,17 @@ export class TakerOrders extends ViewOrders {
             }
             this.debug('Order details:', order);
 
-            // Use ERC20 ABI for token contract
+            // Get contract and connect to signer
+            const contract = await this.getContract();
+            const signer = window.walletManager.provider.getSigner();
+            const contractWithSigner = contract.connect(signer);
+
+            // Use ERC20 ABI for token contract with signer
             const buyToken = new ethers.Contract(
                 order.buyToken,
                 erc20Abi,
-                window.walletManager.getProvider()
-            );
+                window.walletManager.provider
+            ).connect(signer);
             
             const userAddress = await window.walletManager.getAccount();
             const balance = await buyToken.balanceOf(userAddress);
@@ -220,19 +225,19 @@ export class TakerOrders extends ViewOrders {
             }
 
             // Check allowance using ERC20 contract
-            const allowance = await buyToken.allowance(userAddress, this.contract.address);
+            const allowance = await buyToken.allowance(userAddress, contractWithSigner.address);
             this.debug('Current allowance:', allowance.toString());
 
             if (allowance.lt(order.buyAmount)) {
                 this.showStatus('Token approval required...');
                 
                 try {
-                    const approveTx = await buyToken.connect(window.walletManager.getProvider().getSigner()).approve(
-                        this.contract.address,
+                    const approveTx = await buyToken.approve(
+                        contractWithSigner.address,
                         order.buyAmount,
                         {
                             gasLimit: 70000,
-                            gasPrice: await window.walletManager.getProvider().getGasPrice()
+                            gasPrice: await window.walletManager.provider.getGasPrice()
                         }
                     );
                     
@@ -272,8 +277,8 @@ export class TakerOrders extends ViewOrders {
             let gasLimit;
             try {
                 this.showStatus('Estimating transaction cost...');
-                await this.contract.callStatic.fillOrder(orderId);
-                const gasEstimate = await this.contract.estimateGas.fillOrder(orderId);
+                await contractWithSigner.callStatic.fillOrder(orderId);
+                const gasEstimate = await contractWithSigner.estimateGas.fillOrder(orderId);
                 gasLimit = gasEstimate.mul(120).div(100);
                 this.debug('Gas estimate with buffer:', gasLimit.toString());
             } catch (error) {
@@ -282,11 +287,11 @@ export class TakerOrders extends ViewOrders {
                 this.debug('Using fallback gas limit:', gasLimit.toString());
             }
 
-            // Fill order with estimated gas limit
+            // Fill order with estimated gas limit using signed contract
             this.showStatus('Please confirm the transaction...');
-            const tx = await this.contract.fillOrder(orderId, {
+            const tx = await contractWithSigner.fillOrder(orderId, {
                 gasLimit,
-                gasPrice: await window.walletManager.getProvider().getGasPrice()
+                gasPrice: await window.walletManager.provider.getGasPrice()
             });
             
             this.debug('Fill order transaction sent:', tx.hash);

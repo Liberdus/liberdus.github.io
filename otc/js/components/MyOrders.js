@@ -206,89 +206,85 @@ export class MyOrders extends ViewOrders {
 
             this.debug('Starting cancel order process for orderId:', orderId);
 
-            // Get contract from WebSocket
+            // Get contract from WebSocket and connect it to the signer
             const contract = await this.getContract();
             if (!contract) {
                 throw new Error('Contract not available');
             }
+            
+            // Connect contract to signer
+            const signer = window.walletManager.provider.getSigner();
+            const contractWithSigner = contract.connect(signer);
 
             // Get current gas price
-            const gasPrice = await this.provider.getGasPrice();
+            const gasPrice = await window.walletManager.provider.getGasPrice();
             
             // Estimate gas for the cancelOrder transaction
             let gasLimit;
             try {
-                // First try with static call to check if transaction would fail
-                await contract.callStatic.cancelOrder(orderId);
-                
-                gasLimit = await contract.estimateGas.cancelOrder(orderId);
-                // Add 20% buffer to the estimated gas
+                await contractWithSigner.callStatic.cancelOrder(orderId);
+                gasLimit = await contractWithSigner.estimateGas.cancelOrder(orderId);
                 gasLimit = gasLimit.mul(120).div(100);
                 this.debug('Estimated gas limit with buffer:', gasLimit.toString());
             } catch (error) {
                 this.debug('Gas estimation failed:', error);
-                gasLimit = ethers.BigNumber.from(200000); // Conservative fallback for cancel
+                gasLimit = ethers.BigNumber.from(200000);
                 this.debug('Using fallback gas limit:', gasLimit.toString());
             }
 
-            // Execute the cancel order transaction
+            // Execute the cancel order transaction with the signer
+            const tx = await contractWithSigner.cancelOrder(orderId, {
+                gasLimit,
+                gasPrice
+            });
+            
+            this.debug('Transaction sent:', tx.hash);
+            
+            // Handle transaction replacement
             try {
-                const tx = await contract.cancelOrder(orderId, {
-                    gasLimit,
-                    gasPrice
-                });
-                
-                this.debug('Transaction sent:', tx.hash);
-                
-                // Handle transaction replacement
-                try {
-                    const receipt = await tx.wait();
-                    this.debug('Transaction receipt:', receipt);
+                const receipt = await tx.wait();
+                this.debug('Transaction receipt:', receipt);
 
-                    if (receipt.status === 0) {
-                        throw new Error('Transaction reverted by contract');
-                    }
-
-                    // Update order status in memory
-                    const orderToUpdate = this.orders.get(Number(orderId));
-                    if (orderToUpdate) {
-                        orderToUpdate.status = 'Canceled';
-                        this.orders.set(Number(orderId), orderToUpdate);
-                        await this.refreshOrdersView();
-                    }
-
-                    this.showSuccess(`Order ${orderId} canceled successfully!`);
-                } catch (waitError) {
-                    // Handle transaction replacement
-                    if (waitError.code === 'TRANSACTION_REPLACED') {
-                        if (waitError.cancelled) {
-                            throw new Error('Cancel order transaction was cancelled');
-                        } else {
-                            this.debug('Cancel order transaction was sped up:', waitError.replacement.hash);
-                            if (waitError.receipt.status === 1) {
-                                this.debug('Replacement cancel transaction successful');
-                                
-                                // Update order status in memory
-                                const orderToUpdate = this.orders.get(Number(orderId));
-                                if (orderToUpdate) {
-                                    orderToUpdate.status = 'Canceled';
-                                    this.orders.set(Number(orderId), orderToUpdate);
-                                    await this.refreshOrdersView();
-                                }
-                                
-                                this.showSuccess(`Order ${orderId} canceled successfully!`);
-                                return;
-                            } else {
-                                throw new Error('Replacement cancel transaction failed');
-                            }
-                        }
-                    } else {
-                        throw waitError;
-                    }
+                if (receipt.status === 0) {
+                    throw new Error('Transaction reverted by contract');
                 }
-            } catch (error) {
-                this.debug('Transaction error:', error);
-                throw error;
+
+                // Update order status in memory
+                const orderToUpdate = this.orders.get(Number(orderId));
+                if (orderToUpdate) {
+                    orderToUpdate.status = 'Canceled';
+                    this.orders.set(Number(orderId), orderToUpdate);
+                    await this.refreshOrdersView();
+                }
+
+                this.showSuccess(`Order ${orderId} canceled successfully!`);
+            } catch (waitError) {
+                // Handle transaction replacement
+                if (waitError.code === 'TRANSACTION_REPLACED') {
+                    if (waitError.cancelled) {
+                        throw new Error('Cancel order transaction was cancelled');
+                    } else {
+                        this.debug('Cancel order transaction was sped up:', waitError.replacement.hash);
+                        if (waitError.receipt.status === 1) {
+                            this.debug('Replacement cancel transaction successful');
+                            
+                            // Update order status in memory
+                            const orderToUpdate = this.orders.get(Number(orderId));
+                            if (orderToUpdate) {
+                                orderToUpdate.status = 'Canceled';
+                                this.orders.set(Number(orderId), orderToUpdate);
+                                await this.refreshOrdersView();
+                            }
+                            
+                            this.showSuccess(`Order ${orderId} canceled successfully!`);
+                            return;
+                        } else {
+                            throw new Error('Replacement cancel transaction failed');
+                        }
+                    }
+                } else {
+                    throw waitError;
+                }
             }
 
         } catch (error) {
