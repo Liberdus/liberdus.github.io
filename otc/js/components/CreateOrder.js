@@ -75,18 +75,12 @@ export class CreateOrder extends BaseComponent {
     }
 
     async initialize(readOnlyMode = true) {
-        if (this.isInitializing) {
+        if (this.initializing) {
             this.debug('Already initializing, skipping...');
             return;
         }
-
-        if (this.isInitialized) {
-            this.debug('Already initialized, skipping...');
-            return;
-        }
-
-        this.isInitializing = true;
-
+        this.initializing = true;
+        
         try {
             this.debug('Starting initialization...');
             
@@ -144,14 +138,14 @@ export class CreateOrder extends BaseComponent {
             // Initialize token selectors
             this.initializeTokenSelectors();
             
-            this.isInitialized = true;
+            this.initialized = true;
             this.debug('Initialization complete');
 
         } catch (error) {
             this.debug('Error in initialization:', error);
             this.showError('Failed to initialize. Please try again.');
         } finally {
-            this.isInitializing = false;
+            this.initializing = false;
         }
     }
 
@@ -941,8 +935,8 @@ export class CreateOrder extends BaseComponent {
 
     cleanup() {
         this.debug('Cleaning up CreateOrder component');
-        this.isInitialized = false;
-        this.isInitializing = false;
+        this.initialized = false;
+        this.initializing = false;
         // Remove event listeners
         if (this.boundCreateOrderHandler) {
             const createOrderBtn = document.getElementById('createOrderBtn');

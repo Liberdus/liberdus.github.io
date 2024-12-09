@@ -150,6 +150,48 @@ class App {
 
         // Initialize theme handling
         this.initializeTheme();
+
+        // Add a debounce mechanism for reinitialization
+        let reinitializationTimeout = null;
+        let isReinitializing = false;
+
+        async function reinitializeComponents(walletAddress) {
+            // Prevent multiple concurrent reinitializations
+            if (isReinitializing) {
+                console.log('[App] Already reinitializing, skipping...');
+                return;
+            }
+
+            // Clear any pending reinitialization
+            if (reinitializationTimeout) {
+                clearTimeout(reinitializationTimeout);
+            }
+
+            // Set flag and schedule reinitialization
+            isReinitializing = true;
+            reinitializationTimeout = setTimeout(async () => {
+                try {
+                    console.log('[App] Reinitializing components with wallet...');
+                    // ... existing reinitialization code ...
+                } finally {
+                    isReinitializing = false;
+                    reinitializationTimeout = null;
+                }
+            }, 100); // Small delay to coalesce multiple events
+        }
+
+        // Update the wallet event handlers to use the debounced reinitialization
+        window.addEventListener('walletConnected', (event) => {
+            const { address } = event.detail;
+            console.log('[App] Wallet connected:', address);
+            reinitializeComponents(address);
+        });
+
+        window.addEventListener('chainChanged', (event) => {
+            const { chainId } = event.detail;
+            console.log('[App] Chain changed:', chainId);
+            reinitializeComponents(window.ethereum.selectedAddress);
+        });
     }
 
     initializeEventListeners() {

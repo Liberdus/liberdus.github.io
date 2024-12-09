@@ -14,8 +14,11 @@ export class WalletUI extends BaseComponent {
         
         try {
             this.debug('Constructor starting...');
-            this.initializeElements();
-            this.init();
+            if (!this.initialized) {
+                this.initializeElements();
+                this.init();
+                this.initialized = true;
+            }
             this.debug('Constructor completed');
         } catch (error) {
             console.error('[WalletUI] Error in constructor:', error);
@@ -120,11 +123,13 @@ export class WalletUI extends BaseComponent {
             // Setup event listeners
             this.setupEventListeners();
             
-            // Check if already connected
-            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-            if (accounts && accounts.length > 0) {
-                this.debug('Found existing connection, connecting...');
-                await this.connectWallet();
+            // Check if already connected, but only if not already connecting
+            if (!walletManager.isConnecting) {
+                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                if (accounts && accounts.length > 0) {
+                    this.debug('Found existing connection, connecting...');
+                    await this.connectWallet();
+                }
             }
             
             return true;
