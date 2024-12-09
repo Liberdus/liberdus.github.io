@@ -6,6 +6,9 @@ export class Cleanup extends BaseComponent {
     constructor(containerId) {
         super('cleanup-container');
         this.webSocket = window.webSocket;
+        this.contract = null;
+        this.isInitializing = false;
+        this.isInitialized = false;
         
         this.debug = (message, ...args) => {
             if (isDebugEnabled('CLEANUP_ORDERS')) {
@@ -15,49 +18,46 @@ export class Cleanup extends BaseComponent {
     }
 
     async initialize(readOnlyMode = true) {
+        if (this.isInitializing) {
+            this.debug('Already initializing, skipping...');
+            return;
+        }
+
+        if (this.isInitialized) {
+            this.debug('Already initialized, skipping...');
+            return;
+        }
+
+        this.isInitializing = true;
+
         try {
             this.debug('Starting Cleanup initialization...');
             this.debug('ReadOnly mode:', readOnlyMode);
             
-            // Wait for both WebSocket and Contract to be ready
-            if (!this.webSocket?.isInitialized || !this.webSocket?.contract) {
-                this.debug('WebSocket status:', {
-                    exists: !!this.webSocket,
-                    isInitialized: this.webSocket?.isInitialized,
-                    hasContract: !!this.webSocket?.contract
+            // Wait for WebSocket to be fully initialized
+            if (!window.webSocket?.isInitialized) {
+                this.debug('Waiting for WebSocket initialization...');
+                await new Promise(resolve => {
+                    const checkInterval = setInterval(() => {
+                        if (window.webSocket?.isInitialized) {
+                            clearInterval(checkInterval);
+                            resolve();
+                        }
+                    }, 100);
                 });
-                
-                let attempts = 0;
-                while (attempts < 10) {
-                    if (window.webSocket?.isInitialized && window.webSocket?.contract) {
-                        this.webSocket = window.webSocket;
-                        this.debug('WebSocket connection successful:', {
-                            isInitialized: this.webSocket.isInitialized,
-                            contractAddress: this.webSocket.contract.address
-                        });
-                        break;
-                    }
-                    this.debug(`Attempt ${attempts + 1}: WebSocket status:`, {
-                        windowWebSocket: !!window.webSocket,
-                        isInitialized: window.webSocket?.isInitialized,
-                        hasContract: !!window.webSocket?.contract
-                    });
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    attempts++;
-                }
             }
 
-            // Verify both WebSocket and Contract are available
-            if (!this.webSocket?.isInitialized || !this.webSocket?.contract) {
-                const error = new Error('WebSocket service or contract not properly initialized');
-                this.debug('Initialization failed:', {
-                    webSocketExists: !!this.webSocket,
-                    isInitialized: this.webSocket?.isInitialized,
-                    hasContract: !!this.webSocket?.contract,
-                    error
-                });
-                throw error;
+            // Update WebSocket reference and get contract
+            this.webSocket = window.webSocket;
+            this.contract = this.webSocket.contract;
+
+            // Verify contract is available
+            if (!this.contract) {
+                throw new Error('Contract not initialized');
             }
+
+            // Wait for contract to be ready
+            await this.waitForContract();
 
             // Setup WebSocket event listeners
             this.setupWebSocket();
@@ -144,6 +144,15 @@ export class Cleanup extends BaseComponent {
             
             this.intervalId = setInterval(() => this.checkCleanupOpportunities(), 5 * 60 * 1000);
             this.debug('Initialization complete');
+
+            this.isInitialized = true;
+            this.debug('Initialization complete');
+
+            this.debug('WebSocket connection successful:', {
+                isInitialized: this.webSocket.isInitialized,
+                contractAddress: this.webSocket.contract.address
+            });
+
         } catch (error) {
             this.debug('Initialization error details:', {
                 error,
@@ -156,21 +165,28 @@ export class Cleanup extends BaseComponent {
             });
             this.showError('Failed to initialize cleanup component');
             this.updateUIForError();
+        } finally {
+            this.isInitializing = false;
         }
     }
 
-    cleanup() {
-        if (this.intervalId) {
-            this.debug('Cleaning up interval');
-            clearInterval(this.intervalId);
+    // Add method to check if contract is ready (similar to CreateOrder)
+    async waitForContract(timeout = 10000) {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            if (this.contract && await this.contract.provider.getNetwork()) {
+                return true;
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
+        throw new Error('Contract not ready after timeout');
     }
 
+    // Update cleanup method to use class contract reference
     async checkCleanupOpportunities() {
         try {
-            // Verify WebSocket and contract before proceeding
-            if (!this.webSocket?.contract) {
-                throw new Error('Contract not available for cleanup check');
+            if (!this.contract) {
+                throw new Error('Contract not initialized');
             }
 
             const orders = this.webSocket.getOrders();
@@ -188,9 +204,8 @@ export class Cleanup extends BaseComponent {
             let filledFees = 0;
             
             const currentTime = Math.floor(Date.now() / 1000);
-            const contract = await this.getContract();
-            const orderExpiry = await contract.ORDER_EXPIRY();
-            const gracePeriod = await contract.GRACE_PERIOD();
+            const orderExpiry = await this.contract.ORDER_EXPIRY();
+            const gracePeriod = await this.contract.GRACE_PERIOD();
 
             for (const order of orders) {
                 // Check if grace period has passed (now 14 minutes total)
@@ -528,5 +543,17 @@ export class Cleanup extends BaseComponent {
             this.disableContractButton.disabled = false;
             this.disableContractButton.textContent = 'Disable Contract';
         }
+    }
+
+    cleanup() {
+        this.debug('Cleaning up Cleanup component');
+        if (this.intervalId) {
+            this.debug('Cleaning up cleanup check interval');
+            clearInterval(this.intervalId);
+        }
+        this.debug('Resetting component state');
+        this.isInitialized = false;
+        this.isInitializing = false;
+        this.contract = null;
     }
 } 
