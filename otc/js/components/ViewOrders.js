@@ -786,7 +786,24 @@ export class ViewOrders extends BaseComponent {
             });
 
             if (buyTokenBalance.lt(order.buyAmount)) {
-                throw new Error(`Insufficient balance of buy token. Have: ${ethers.utils.formatEther(buyTokenBalance)}, Need: ${ethers.utils.formatEther(order.buyAmount)}`);
+                // Get token details for proper decimals and symbol
+                const buyTokenDecimals = await buyToken.decimals();
+                const buyTokenSymbol = await buyToken.symbol();
+                
+                // Format the numbers with proper decimals and rounding
+                const formattedBalance = Number(
+                    ethers.utils.formatUnits(buyTokenBalance, buyTokenDecimals)
+                ).toLocaleString(undefined, { maximumFractionDigits: 6 });
+                
+                const formattedRequired = Number(
+                    ethers.utils.formatUnits(order.buyAmount, buyTokenDecimals)
+                ).toLocaleString(undefined, { maximumFractionDigits: 6 });
+                
+                throw new Error(
+                    `Insufficient ${buyTokenSymbol} balance.\n` +
+                    `Required: ${formattedRequired} ${buyTokenSymbol}\n` +
+                    `Available: ${formattedBalance} ${buyTokenSymbol}`
+                );
             }
 
             // Check allowances
@@ -875,7 +892,7 @@ export class ViewOrders extends BaseComponent {
                 return;
             }
             
-            this.showError('Failed to fill order');
+            this.showError(error.message || 'Failed to fill order');
         } finally {
             if (button) {
                 button.disabled = false;
