@@ -740,14 +740,16 @@ export class ViewOrders extends BaseComponent {
                 throw new Error('Order not found');
             }
 
-            // Get contract from WebSocket
+            // Get contract from WebSocket and connect to signer
             const contract = await this.getContract();
             if (!contract) {
                 throw new Error('Contract not available');
             }
+            const signer = this.provider.getSigner();
+            const contractWithSigner = contract.connect(signer);
 
             // Check order status first
-            const currentOrder = await contract.orders(orderId);
+            const currentOrder = await contractWithSigner.orders(orderId);
             this.debug('Current order state:', currentOrder);
             
             if (currentOrder.status !== 0) {
@@ -839,7 +841,7 @@ export class ViewOrders extends BaseComponent {
                 // Add 20% buffer to gas estimate
                 const gasLimit = gasEstimate.mul(120).div(100);
                 
-                const tx = await contract.fillOrder(orderId, {
+                const tx = await contractWithSigner.fillOrder(orderId, {
                     gasLimit
                 });
                 
