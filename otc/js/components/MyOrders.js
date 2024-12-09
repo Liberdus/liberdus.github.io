@@ -206,6 +206,12 @@ export class MyOrders extends ViewOrders {
 
             this.debug('Starting cancel order process for orderId:', orderId);
 
+            // Get contract from WebSocket
+            const contract = await this.getContract();
+            if (!contract) {
+                throw new Error('Contract not available');
+            }
+
             // Get current gas price
             const gasPrice = await this.provider.getGasPrice();
             
@@ -213,9 +219,9 @@ export class MyOrders extends ViewOrders {
             let gasLimit;
             try {
                 // First try with static call to check if transaction would fail
-                await this.contract.callStatic.cancelOrder(orderId);
+                await contract.callStatic.cancelOrder(orderId);
                 
-                gasLimit = await this.contract.estimateGas.cancelOrder(orderId);
+                gasLimit = await contract.estimateGas.cancelOrder(orderId);
                 // Add 20% buffer to the estimated gas
                 gasLimit = gasLimit.mul(120).div(100);
                 this.debug('Estimated gas limit with buffer:', gasLimit.toString());
@@ -227,7 +233,7 @@ export class MyOrders extends ViewOrders {
 
             // Execute the cancel order transaction
             try {
-                const tx = await this.contract.cancelOrder(orderId, {
+                const tx = await contract.cancelOrder(orderId, {
                     gasLimit,
                     gasPrice
                 });
@@ -256,12 +262,9 @@ export class MyOrders extends ViewOrders {
                     // Handle transaction replacement
                     if (waitError.code === 'TRANSACTION_REPLACED') {
                         if (waitError.cancelled) {
-                            // Transaction was cancelled
                             throw new Error('Cancel order transaction was cancelled');
                         } else {
-                            // Transaction was replaced (speed up)
                             this.debug('Cancel order transaction was sped up:', waitError.replacement.hash);
-                            // Check if replacement transaction was successful
                             if (waitError.receipt.status === 1) {
                                 this.debug('Replacement cancel transaction successful');
                                 
