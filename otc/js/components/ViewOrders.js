@@ -780,6 +780,10 @@ export class ViewOrders extends BaseComponent {
 
             const currentAccount = await this.provider.getSigner().getAddress();
 
+            // Get token details for proper formatting
+            const buyTokenDecimals = await buyToken.decimals();
+            const buyTokenSymbol = await buyToken.symbol();
+            
             // Check balances first
             const buyTokenBalance = await buyToken.balanceOf(currentAccount);
             this.debug('Buy token balance:', {
@@ -788,23 +792,13 @@ export class ViewOrders extends BaseComponent {
             });
 
             if (buyTokenBalance.lt(order.buyAmount)) {
-                // Get token details for proper decimals and symbol
-                const buyTokenDecimals = await buyToken.decimals();
-                const buyTokenSymbol = await buyToken.symbol();
-                
-                // Format the numbers with proper decimals and rounding
-                const formattedBalance = Number(
-                    ethers.utils.formatUnits(buyTokenBalance, buyTokenDecimals)
-                ).toLocaleString(undefined, { maximumFractionDigits: 6 });
-                
-                const formattedRequired = Number(
-                    ethers.utils.formatUnits(order.buyAmount, buyTokenDecimals)
-                ).toLocaleString(undefined, { maximumFractionDigits: 6 });
+                const formattedBalance = ethers.utils.formatUnits(buyTokenBalance, buyTokenDecimals);
+                const formattedRequired = ethers.utils.formatUnits(order.buyAmount, buyTokenDecimals);
                 
                 throw new Error(
                     `Insufficient ${buyTokenSymbol} balance.\n` +
-                    `Required: ${formattedRequired} ${buyTokenSymbol}\n` +
-                    `Available: ${formattedBalance} ${buyTokenSymbol}`
+                    `Required: ${Number(formattedRequired).toLocaleString()} ${buyTokenSymbol}\n` +
+                    `Available: ${Number(formattedBalance).toLocaleString()} ${buyTokenSymbol}`
                 );
             }
 
@@ -817,9 +811,12 @@ export class ViewOrders extends BaseComponent {
 
             if (buyTokenAllowance.lt(order.buyAmount)) {
                 this.debug('Requesting buy token approval');
-                const approveTx = await buyToken.approve(contract.address, order.buyAmount);
+                const approveTx = await buyToken.approve(
+                    contract.address, 
+                    ethers.constants.MaxUint256  // Approve maximum amount to prevent future approvals
+                );
                 await approveTx.wait();
-                this.showSuccess('Token approval granted');
+                this.showSuccess(`${buyTokenSymbol} approval granted`);
             }
 
             // Verify contract has enough sell tokens
@@ -830,71 +827,60 @@ export class ViewOrders extends BaseComponent {
             });
 
             if (contractSellBalance.lt(order.sellAmount)) {
-                throw new Error('Contract does not have enough tokens to fill order');
+                const sellTokenSymbol = await sellToken.symbol();
+                const sellTokenDecimals = await sellToken.decimals();
+                const formattedBalance = ethers.utils.formatUnits(contractSellBalance, sellTokenDecimals);
+                const formattedRequired = ethers.utils.formatUnits(order.sellAmount, sellTokenDecimals);
+                
+                throw new Error(
+                    `Contract has insufficient ${sellTokenSymbol} balance.\n` +
+                    `Required: ${Number(formattedRequired).toLocaleString()} ${sellTokenSymbol}\n` +
+                    `Available: ${Number(formattedBalance).toLocaleString()} ${sellTokenSymbol}`
+                );
             }
 
-            // Estimate gas first
-            try {
-                const gasEstimate = await contract.estimateGas.fillOrder(orderId);
-                this.debug('Gas estimate:', gasEstimate.toString());
-                
-                // Add 20% buffer to gas estimate
-                const gasLimit = gasEstimate.mul(120).div(100);
-                
-                const tx = await contractWithSigner.fillOrder(orderId, {
-                    gasLimit
-                });
-                
-                this.debug('Transaction sent:', tx.hash);
-                
-                // Handle transaction replacement
-                try {
-                    const receipt = await tx.wait();
-                    this.debug('Transaction receipt:', receipt);
+            // Add gas buffer and execute transaction
+            const gasEstimate = await contractWithSigner.estimateGas.fillOrder(orderId);
+            this.debug('Gas estimate:', gasEstimate.toString());
+            
+            const gasLimit = gasEstimate.mul(120).div(100); // Add 20% buffer
+            const tx = await contractWithSigner.fillOrder(orderId, { gasLimit });
+            this.debug('Transaction sent:', tx.hash);
+            
+            const receipt = await tx.wait();
+            this.debug('Transaction receipt:', receipt);
 
-                    if (receipt.status === 0) {
-                        throw new Error('Transaction reverted by contract');
-                    }
-
-                    order.status = 'Filled';
-                    this.orders.set(Number(orderId), order);
-                    await this.refreshOrdersView();
-
-                    this.showSuccess(`Order ${orderId} filled successfully!`);
-                } catch (waitError) {
-                    // Handle transaction replacement
-                    if (waitError.code === 'TRANSACTION_REPLACED') {
-                        if (waitError.cancelled) {
-                            throw new Error('Fill order transaction was cancelled');
-                        } else {
-                            this.debug('Fill order transaction was sped up:', waitError.replacement.hash);
-                            if (waitError.receipt.status === 1) {
-                                this.debug('Replacement fill transaction successful');
-                                this.showSuccess(`Order ${orderId} filled successfully!`);
-                                await this.refreshOrdersView();
-                                return;
-                            } else {
-                                throw new Error('Replacement fill transaction failed');
-                            }
-                        }
-                    } else {
-                        throw waitError;
-                    }
-                }
-            } catch (error) {
-                this.debug('Gas estimation/transaction error:', error);
-                throw error;
+            if (receipt.status === 0) {
+                throw new Error('Transaction reverted by contract');
             }
+
+            order.status = 'Filled';
+            this.orders.set(Number(orderId), order);
+            await this.refreshOrdersView();
+
+            this.showSuccess(`Order ${orderId} filled successfully!`);
 
         } catch (error) {
             this.debug('Fill order error details:', error);
             
+            // Handle specific error cases
             if (error.code === 4001) {
                 this.showError('Transaction rejected by user');
                 return;
             }
             
-            this.showError(error.message || 'Failed to fill order');
+            // Check for revert reason in error data
+            if (error.error?.data) {
+                try {
+                    const decodedError = ethers.utils.toUtf8String(error.error.data);
+                    this.showError(`Transaction failed: ${decodedError}`);
+                    return;
+                } catch (e) {
+                    // If we can't decode the error, fall through to default handling
+                }
+            }
+            
+            this.showError(this.getReadableError(error));
         } finally {
             if (button) {
                 button.disabled = false;
