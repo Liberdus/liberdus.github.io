@@ -43,6 +43,12 @@ export class ViewOrders extends BaseComponent {
             direction: null,
             isColumnClick: false
         };
+
+        // Add cache for contract values
+        this.contractValues = {
+            orderExpiry: null,
+            gracePeriod: null
+        };
     }
 
     setupErrorHandling() {
@@ -123,6 +129,16 @@ export class ViewOrders extends BaseComponent {
                 if (!window.webSocket.isInitialized) {
                     throw new Error('WebSocket failed to initialize');
                 }
+            }
+
+            // Wait for contract to be available and cache values
+            if (!this.contractValues.orderExpiry || !this.contractValues.gracePeriod) {
+                const contract = await this.getContract();
+                this.contractValues = {
+                    orderExpiry: (await contract.ORDER_EXPIRY()).toNumber(),
+                    gracePeriod: (await contract.GRACE_PERIOD()).toNumber()
+                };
+                this.debug('Cached contract values:', this.contractValues);
             }
 
             // Get initial orders from cache
@@ -1060,21 +1076,16 @@ export class ViewOrders extends BaseComponent {
     }
 
     async getContractExpiryTimes() {
-        try {
-            const contract = await this.getContract();
-            if (!contract) {
-                throw new Error('Contract not initialized');
-            }
-            const orderExpiry = await contract.ORDER_EXPIRY();
-            const gracePeriod = await contract.GRACE_PERIOD();
-            return {
-                orderExpiry: orderExpiry.toNumber(),
-                gracePeriod: gracePeriod.toNumber()
-            };
-        } catch (error) {
-            console.error('[ViewOrders] Error fetching expiry times:', error);
-            throw error;
+        if (this.contractValues.orderExpiry && this.contractValues.gracePeriod) {
+            return this.contractValues;
         }
+        
+        const contract = await this.getContract();
+        this.contractValues = {
+            orderExpiry: (await contract.ORDER_EXPIRY()).toNumber(),
+            gracePeriod: (await contract.GRACE_PERIOD()).toNumber()
+        };
+        return this.contractValues;
     }
 
     async getExpiryTime(timestamp) {

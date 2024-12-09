@@ -14,11 +14,46 @@ export class WebSocketService {
         this.contractABI = null;
         this.contract = null;
         
+        // Add rate limiting properties
+        this.requestQueue = [];
+        this.processingQueue = false;
+        this.lastRequestTime = 0;
+        this.minRequestInterval = 100; // 100ms between requests
+        this.maxConcurrentRequests = 3;
+        this.activeRequests = 0;
+        
         this.debug = (message, ...args) => {
             if (isDebugEnabled('WEBSOCKET')) {
                 console.log('[WebSocket]', message, ...args);
             }
         };
+    }
+
+    async queueRequest(callback) {
+        while (this.activeRequests >= this.maxConcurrentRequests) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        const now = Date.now();
+        const timeSinceLastRequest = now - this.lastRequestTime;
+        
+        if (timeSinceLastRequest < this.minRequestInterval) {
+            await new Promise(resolve => 
+                setTimeout(resolve, this.minRequestInterval - timeSinceLastRequest)
+            );
+        }
+        
+        try {
+            this.activeRequests++;
+            const result = await callback();
+            this.lastRequestTime = Date.now();
+            return result;
+        } catch (error) {
+            this.debug('Request failed:', error);
+            throw error;
+        } finally {
+            this.activeRequests--;
+        }
     }
 
     async initialize() {
@@ -118,8 +153,10 @@ export class WebSocketService {
             this.debug('Created filter:', filter);
             
             // Listen for new blocks to ensure connection is alive
-            this.provider.on("block", (blockNumber) => {
-                this.debug('New block received:', blockNumber);
+            this.provider.on("block", async (blockNumber) => {
+                await this.queueRequest(async () => {
+                    this.debug('New block received:', blockNumber);
+                });
             });
 
             contract.on("OrderCreated", (...args) => {
@@ -189,7 +226,7 @@ export class WebSocketService {
             
             let nextOrderId = 0;
             try {
-                nextOrderId = await contract.nextOrderId();
+                nextOrderId = await this.queueRequest(() => contract.nextOrderId());
                 this.debug('nextOrderId result:', nextOrderId.toString());
             } catch (error) {
                 this.debug('nextOrderId call failed, using default value:', error);
@@ -201,7 +238,7 @@ export class WebSocketService {
             // Sync all orders that have a valid maker address
             for (let i = 0; i < nextOrderId; i++) {
                 try {
-                    const order = await contract.orders(i);
+                    const order = await this.queueRequest(() => contract.orders(i));
                     // Only filter out zero-address makers (non-existent orders)
                     if (order.maker !== ethers.constants.AddressZero) {
                         const orderData = {
