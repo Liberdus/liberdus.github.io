@@ -75,8 +75,8 @@ export class CreateOrder extends BaseComponent {
     }
 
     async initialize(readOnlyMode = true) {
-        if (this.initializing) {
-            this.debug('Already initializing, skipping...');
+        if (this.initializing || this.initialized) {
+            this.debug('Already initializing or initialized, skipping...');
             return;
         }
         this.initializing = true;
