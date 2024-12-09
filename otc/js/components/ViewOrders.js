@@ -740,8 +740,14 @@ export class ViewOrders extends BaseComponent {
                 throw new Error('Order not found');
             }
 
+            // Get contract from WebSocket
+            const contract = await this.getContract();
+            if (!contract) {
+                throw new Error('Contract not available');
+            }
+
             // Check order status first
-            const currentOrder = await this.contract.orders(orderId);
+            const currentOrder = await contract.orders(orderId);
             this.debug('Current order state:', currentOrder);
             
             if (currentOrder.status !== 0) {
@@ -750,7 +756,7 @@ export class ViewOrders extends BaseComponent {
 
             // Check expiry
             const now = Math.floor(Date.now() / 1000);
-            const orderExpiry = await this.contract.ORDER_EXPIRY();
+            const orderExpiry = await contract.ORDER_EXPIRY();
             const expiryTime = Number(order.timestamp) + orderExpiry.toNumber();
             
             if (now >= expiryTime) {
@@ -784,7 +790,7 @@ export class ViewOrders extends BaseComponent {
             }
 
             // Check allowances
-            const buyTokenAllowance = await buyToken.allowance(currentAccount, this.contract.address);
+            const buyTokenAllowance = await buyToken.allowance(currentAccount, contract.address);
             this.debug('Buy token allowance:', {
                 current: buyTokenAllowance.toString(),
                 required: order.buyAmount.toString()
@@ -792,13 +798,13 @@ export class ViewOrders extends BaseComponent {
 
             if (buyTokenAllowance.lt(order.buyAmount)) {
                 this.debug('Requesting buy token approval');
-                const approveTx = await buyToken.approve(this.contract.address, order.buyAmount);
+                const approveTx = await buyToken.approve(contract.address, order.buyAmount);
                 await approveTx.wait();
                 this.showSuccess('Token approval granted');
             }
 
             // Verify contract has enough sell tokens
-            const contractSellBalance = await sellToken.balanceOf(this.contract.address);
+            const contractSellBalance = await sellToken.balanceOf(contract.address);
             this.debug('Contract sell token balance:', {
                 balance: contractSellBalance.toString(),
                 required: order.sellAmount.toString()
@@ -810,13 +816,13 @@ export class ViewOrders extends BaseComponent {
 
             // Estimate gas first
             try {
-                const gasEstimate = await this.contract.estimateGas.fillOrder(orderId);
+                const gasEstimate = await contract.estimateGas.fillOrder(orderId);
                 this.debug('Gas estimate:', gasEstimate.toString());
                 
                 // Add 20% buffer to gas estimate
                 const gasLimit = gasEstimate.mul(120).div(100);
                 
-                const tx = await this.contract.fillOrder(orderId, {
+                const tx = await contract.fillOrder(orderId, {
                     gasLimit
                 });
                 
@@ -840,12 +846,9 @@ export class ViewOrders extends BaseComponent {
                     // Handle transaction replacement
                     if (waitError.code === 'TRANSACTION_REPLACED') {
                         if (waitError.cancelled) {
-                            // Transaction was cancelled
                             throw new Error('Fill order transaction was cancelled');
                         } else {
-                            // Transaction was replaced (speed up)
                             this.debug('Fill order transaction was sped up:', waitError.replacement.hash);
-                            // Check if replacement transaction was successful
                             if (waitError.receipt.status === 1) {
                                 this.debug('Replacement fill transaction successful');
                                 this.showSuccess(`Order ${orderId} filled successfully!`);
@@ -867,7 +870,6 @@ export class ViewOrders extends BaseComponent {
         } catch (error) {
             this.debug('Fill order error details:', error);
             
-            // Handle user rejection
             if (error.code === 4001) {
                 this.showError('Transaction rejected by user');
                 return;
