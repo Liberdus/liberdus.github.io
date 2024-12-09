@@ -444,16 +444,18 @@ export class CreateOrder extends BaseComponent {
             const sellAmountWei = ethers.utils.parseUnits(sellAmount, sellTokenDecimals);
             const buyAmountWei = ethers.utils.parseUnits(buyAmount, buyTokenDecimals);
 
+            // Debug logs to check amounts and allowance
+            this.debug('Sell amount in wei:', sellAmountWei.toString());
+            this.debug('Buy amount in wei:', buyAmountWei.toString());
+
             // Check and approve tokens
             const sellTokenApproved = await this.checkAndApproveToken(this.sellToken.address, sellAmountWei);
             if (!sellTokenApproved) {
-                // User rejected or approval failed - exit gracefully
                 return;
             }
 
             const feeTokenApproved = await this.checkAndApproveToken(this.feeToken.address, this.feeToken.amount);
             if (!feeTokenApproved) {
-                // User rejected or approval failed - exit gracefully
                 return;
             }
 
@@ -1020,37 +1022,29 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug(`Checking allowance for token: ${tokenAddress}`);
             
-            // Get signer from walletManager
+            // Get signer and current address
             const signer = walletManager.getSigner();
-            if (!signer) {
-                throw new Error('No signer available - wallet may be disconnected');
-            }
-
-            // Get the current address using walletManager
             const currentAddress = await walletManager.getCurrentAddress();
-            if (!currentAddress) {
-                throw new Error('No wallet address available');
+            if (!signer || !currentAddress) {
+                throw new Error('Wallet not connected');
             }
 
             // Calculate required amount, accounting for fee token if same as sell token
-            let requiredAmount = amount;
+            let requiredAmount = ethers.BigNumber.from(amount);
             
-            if (tokenAddress.toLowerCase() === this.feeToken?.address?.toLowerCase()) {
-                // If this is the fee token, we need to account for both fee and potential sell amount
-                const sellToken = document.getElementById('sellToken')?.value;
+            if (tokenAddress.toLowerCase() === this.feeToken?.address?.toLowerCase() &&
+                tokenAddress.toLowerCase() === this.sellToken?.address?.toLowerCase()) {
                 const sellAmountStr = document.getElementById('sellAmount')?.value;
-                
-                if (sellToken?.toLowerCase() === tokenAddress.toLowerCase() && sellAmountStr) {
-                    const sellTokenDecimals = await this.getTokenDecimals(sellToken);
-                    const sellAmountWei = ethers.utils.parseUnits(sellAmountStr, sellTokenDecimals);
-                    
-                    // Add fee amount and sell amount together
-                    requiredAmount = this.feeToken.amount.add(sellAmountWei);
-                    this.debug(`Token is both fee and sell token. Combined amount for approval: ${requiredAmount.toString()}`);
+                if (sellAmountStr) {
+                    const tokenDecimals = await this.getTokenDecimals(tokenAddress);
+                    const sellAmountWei = ethers.utils.parseUnits(sellAmountStr, tokenDecimals);
+                    const feeAmountWei = ethers.BigNumber.from(this.feeToken.amount);
+                    requiredAmount = sellAmountWei.add(feeAmountWei);
+                    this.debug(`Combined amount for approval (sell + fee): ${requiredAmount.toString()}`);
                 }
             }
 
-            // Create token contract instance with the correct signer
+            // Create token contract instance
             const tokenContract = new ethers.Contract(
                 tokenAddress,
                 [
@@ -1065,64 +1059,34 @@ export class CreateOrder extends BaseComponent {
                 currentAddress,
                 this.contract.address
             );
+            this.debug(`Current allowance: ${currentAllowance.toString()}`);
+            this.debug(`Required amount: ${requiredAmount.toString()}`);
 
-            // If allowance is insufficient, request approval
+            // If allowance is insufficient, reset and approve new amount
             if (currentAllowance.lt(requiredAmount)) {
-                this.debug(`Insufficient allowance for token ${tokenAddress}`);
-                this.showStatus('Requesting token approval...', 'pending');
-                
-                try {
-                    const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
-                    this.showStatus('Please confirm the approval in your wallet...', 'pending');
-                    
-                    try {
-                        await approveTx.wait();
-                        this.showStatus('Token approved successfully', 'success');
-                    } catch (waitError) {
-                        if (waitError.code === 'TRANSACTION_REPLACED') {
-                            if (waitError.cancelled) {
-                                this.showStatus('Approval was cancelled', 'warning');
-                                return false;
-                            } else {
-                                this.debug('Approval transaction was sped up:', waitError.replacement.hash);
-                                if (waitError.receipt.status === 1) {
-                                    this.showStatus('Token approved successfully', 'success');
-                                    return true;
-                                }
-                            }
-                        }
-                        throw waitError;
-                    }
-                } catch (error) {
-                    // Handle specific error cases
-                    if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
-                        this.showStatus('Approval declined - please try again', 'warning');
-                        return false;
-                    } else if (error.code === -32603) {
-                        this.showStatus('Transaction failed - please check your balance', 'error');
-                        return false;
-                    } else if (error.message?.includes('insufficient funds')) {
-                        this.showStatus('Insufficient funds for gas', 'error');
-                        return false;
-                    } else if (error.message?.includes('nonce')) {
-                        this.showStatus('Transaction error - please refresh and try again', 'error');
-                        return false;
-                    } else if (error.message?.includes('gas required exceeds allowance')) {
-                        this.showStatus('Transaction requires too much gas', 'error');
-                        return false;
-                    }
-                    throw error;
+                if (!currentAllowance.isZero()) {
+                    this.debug('Resetting existing allowance');
+                    const resetTx = await tokenContract.approve(this.contract.address, 0);
+                    await resetTx.wait();
+                    this.debug('Allowance reset successful');
                 }
+
+                this.showStatus('Requesting token approval...', 'pending');
+                const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
+                this.showStatus('Please confirm the approval in your wallet...', 'pending');
+                
+                await approveTx.wait();
+                this.showStatus('Token approved successfully', 'success');
+
+                const newAllowance = await tokenContract.allowance(currentAddress, this.contract.address);
+                this.debug(`New allowance after approval: ${newAllowance.toString()}`);
             }
 
             return true;
         } catch (error) {
             this.debug('Token approval error:', error);
-            
-            // Don't show technical error messages to users
             const userMessage = this.getUserFriendlyError(error);
             this.showStatus(userMessage, 'error');
-            
             return false;
         }
     }
