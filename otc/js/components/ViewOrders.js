@@ -113,26 +113,32 @@ export class ViewOrders extends BaseComponent {
                     throw new Error('WebSocket initialization failed');
                 }
             }
+            this.debug('WebSocket available');
+            
+            // Store WebSocket reference
+            this.webSocket = window.webSocket;
 
             // Wait for WebSocket to be fully initialized
-            if (!window.webSocket.isInitialized) {
+            if (!this.webSocket.isInitialized) {
                 this.debug('WebSocket not yet initialized, waiting...');
                 let attempts = 0;
                 const maxAttempts = 10;
                 
-                while (!window.webSocket.isInitialized && attempts < maxAttempts) {
+                while (!this.webSocket.isInitialized && attempts < maxAttempts) {
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     attempts++;
                     this.debug(`Waiting for WebSocket initialization... Attempt ${attempts}/${maxAttempts}`);
                 }
                 
-                if (!window.webSocket.isInitialized) {
+                if (!this.webSocket.isInitialized) {
                     throw new Error('WebSocket failed to initialize');
                 }
             }
+            this.debug('WebSocket initialized');
 
             // Wait for contract to be available and cache values
             if (!this.contractValues.orderExpiry || !this.contractValues.gracePeriod) {
+                this.debug('Getting contract values...');
                 const contract = await this.getContract();
                 this.contractValues = {
                     orderExpiry: (await contract.ORDER_EXPIRY()).toNumber(),
@@ -149,13 +155,16 @@ export class ViewOrders extends BaseComponent {
             });
             
             // Cleanup previous state
+            this.debug('Cleaning up previous state...');
             this.cleanup();
             this.container.innerHTML = '';
             
             // Setup the table structure
+            this.debug('Setting up table structure...');
             await this.setupTable();
             
             // Setup WebSocket subscriptions
+            this.debug('Setting up WebSocket subscriptions...');
             await this.setupWebSocket();
 
             // Initialize orders Map with cached orders
@@ -168,12 +177,15 @@ export class ViewOrders extends BaseComponent {
             }
 
             // Refresh the view
+            this.debug('Refreshing orders view...');
             await this.refreshOrdersView();
 
+            this.debug('Initialization complete');
+            return true;
         } catch (error) {
             this.debug('Initialization error:', error);
             this.showError('Failed to initialize orders view. Please try again.');
-            throw error;
+            return false;
         }
     }
 
@@ -248,204 +260,99 @@ export class ViewOrders extends BaseComponent {
         try {
             this.debug('Refreshing orders view');
             
-            // Add WebSocket state check
-            if (!window.webSocket?.isInitialized) {
-                this.debug('ERROR: WebSocket not initialized during refresh');
-                this.showError('WebSocket connection not available');
-                return;
-            }
-
-            // Use WebSocket's contract instance instead of this.contract
-            const contract = window.webSocket.contract;
-            if (!contract) {
-                throw new Error('Contract not available');
-            }
-
-            // Get contract expiry times using WebSocket's contract
-            const orderExpiry = await contract.ORDER_EXPIRY();
-            const gracePeriod = await contract.GRACE_PERIOD();
-            const currentTime = Math.floor(Date.now() / 1000);
-
-            // Add order cache check
-            const cachedOrders = Array.from(this.orders.values());
-            this.debug('Current order cache:', {
-                size: this.orders.size,
-                orders: cachedOrders
-            });
-
+            // Add debug logging for orders
+            this.debug('Current orders in cache:', Array.from(this.orders.values()));
+            
+            // Show loading state first
             this.showLoadingState();
 
-            // Get filter and pagination state
-            const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked;
-            const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
-            
-            // Process all orders first
+            // Get all orders and convert to array
             let ordersToDisplay = Array.from(this.orders.values());
             
-            this.debug('Orders before filtering:', ordersToDisplay);
+            // Get filter state
+            const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked;
+            const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '50');
+            
+            // Get contract values for filtering
+            const contract = await this.getContract();
+            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
+            const currentTime = Math.floor(Date.now() / 1000);
 
-            // Get all token details at once, but check cache first
-            const tokenAddresses = new Set();
-            ordersToDisplay.forEach(order => {
-                if (order?.sellToken && !this.tokenCache.has(order.sellToken.toLowerCase())) {
-                    tokenAddresses.add(order.sellToken.toLowerCase());
-                }
-                if (order?.buyToken && !this.tokenCache.has(order.buyToken.toLowerCase())) {
-                    tokenAddresses.add(order.buyToken.toLowerCase());
-                }
-            });
-
-            // Only fetch details for uncached tokens
-            if (tokenAddresses.size > 0) {
-                const [tokenDetails] = await Promise.all([
-                    this.getTokenDetails(Array.from(tokenAddresses))
-                ]);
-
-                // Add new tokens to cache
-                Array.from(tokenAddresses).forEach((address, index) => {
-                    if (tokenDetails[index]) {
-                        this.tokenCache.set(address, tokenDetails[index]);
-                    }
-                });
-            }
-
-            // Use the cached token details for all operations
-            const tokenDetailsMap = this.tokenCache;
-
-            // Do all async operations before touching the DOM
-            if (showOnlyActive && contract) {
+            // Filter active orders if needed
+            if (showOnlyActive) {
                 ordersToDisplay = ordersToDisplay.filter(order => {
-                    // Check if order is not filled or canceled
-                    if (order.status === 'Filled' || order.status === 'Canceled') {
-                        return false;
-                    }
-
-                    // Check if order is not expired
-                    const expiryTime = Number(order.timestamp) + orderExpiry.toNumber();
+                    if (order.status === 'Filled' || order.status === 'Canceled') return false;
+                    const expiryTime = Number(order.timestamp) + orderExpiry;
                     return currentTime < expiryTime;
                 });
             }
 
-            // Sort orders based on whether this is a column click or initial load
-            if (this.sortConfig.isColumnClick) {
-                switch (this.sortConfig.column) {
-                    case 'id':
-                        ordersToDisplay.sort((a, b) => {
-                            const idCompare = Number(a.id) - Number(b.id);
-                            return this.sortConfig.direction === 'asc' ? idCompare : -idCompare;
-                        });
-                        break;
-                    case 'buy':
-                        ordersToDisplay.sort((a, b) => {
-                            const networkTokens = NETWORK_TOKENS[getNetworkConfig().name] || [];
-                            const getTokenSymbol = (address) => {
-                                const token = networkTokens.find(t => 
-                                    t.address.toLowerCase() === address.toLowerCase()
-                                );
-                                return token?.symbol || tokenDetailsMap.get(address.toLowerCase())?.symbol || 'UNK';
-                            };
-                            
-                            const tokenA = getTokenSymbol(a.buyToken);
-                            const tokenB = getTokenSymbol(b.buyToken);
-                            const compare = tokenA.localeCompare(tokenB);
-                            return this.sortConfig.direction === 'asc' ? compare : -compare;
-                        });
-                        break;
-                    case 'sell':
-                        ordersToDisplay.sort((a, b) => {
-                            const networkTokens = NETWORK_TOKENS[getNetworkConfig().name] || [];
-                            const getTokenSymbol = (address) => {
-                                const token = networkTokens.find(t => 
-                                    t.address.toLowerCase() === address.toLowerCase()
-                                );
-                                return token?.symbol || tokenDetailsMap.get(address.toLowerCase())?.symbol || 'UNK';
-                            };
-                            
-                            const tokenA = getTokenSymbol(a.sellToken);
-                            const tokenB = getTokenSymbol(b.sellToken);
-                            const compare = tokenA.localeCompare(tokenB);
-                            return this.sortConfig.direction === 'asc' ? compare : -compare;
-                        });
-                        break;
-                }
-            } else {
-                // Default status-based sorting
-                ordersToDisplay.sort((a, b) => {
-                    // Define status priority (Active = 0, Filled = 1, Canceled = 2, Expired = 3)
-                    const getStatusPriority = (order) => {
-                        // If order is explicitly Filled or Canceled, use that status
-                        if (order.status === 'Filled') return 1;
-                        if (order.status === 'Canceled') return 2;
+            // Get token details for all orders at once
+            const tokenAddresses = new Set();
+            ordersToDisplay.forEach(order => {
+                if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
+                if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
+            });
 
-                        // Check if Active order is expired
-                        const orderTime = Number(order.timestamp);
-                        const expiryTime = orderTime + orderExpiry.toNumber();
-                        
-                        if (currentTime >= expiryTime) {
-                            return 3; // Expired orders have lowest priority
-                        }
-
-                        return 0; // Active and not expired
-                    };
-
-                    const priorityA = getStatusPriority(a);
-                    const priorityB = getStatusPriority(b);
-
-                    // First sort by status priority
-                    if (priorityA !== priorityB) {
-                        return priorityA - priorityB;
+            // Fetch token details for uncached tokens
+            for (const address of tokenAddresses) {
+                if (!this.tokenCache.has(address)) {
+                    try {
+                        const tokenContract = new ethers.Contract(
+                            address,
+                            erc20Abi,
+                            this.provider
+                        );
+                        const [symbol, decimals] = await Promise.all([
+                            tokenContract.symbol(),
+                            tokenContract.decimals()
+                        ]);
+                        this.tokenCache.set(address, { symbol, decimals });
+                    } catch (error) {
+                        this.debug(`Error fetching token details for ${address}:`, error);
+                        this.tokenCache.set(address, { symbol: 'UNK', decimals: 18 });
                     }
-
-                    // Within same status, sort by ID descending
-                    return Number(b.id) - Number(a.id);
-                });
+                }
             }
 
-            const totalOrders = ordersToDisplay.length;
-            
             // Apply pagination
+            const totalOrders = ordersToDisplay.length;
             if (pageSize !== -1) {
                 const startIndex = (this.currentPage - 1) * pageSize;
                 ordersToDisplay = ordersToDisplay.slice(startIndex, startIndex + pageSize);
             }
 
-            // Create all rows before touching the DOM
-            const rows = await Promise.all(ordersToDisplay.map(async order => {
-                const orderWithLowercase = {
-                    ...order,
-                    sellToken: order.sellToken.toLowerCase(),
-                    buyToken: order.buyToken.toLowerCase()
-                };
-                return this.createOrderRow(orderWithLowercase, tokenDetailsMap);
-            }));
-
-            // Only update the DOM once all processing is complete
+            // Create table rows
             const tbody = this.container.querySelector('tbody');
-            if (!tbody) return;
+            if (!tbody) {
+                this.debug('ERROR: tbody not found');
+                return;
+            }
 
-            // Update pagination before showing orders
-            this.updatePaginationControls(totalOrders);
-
-            // Show no orders message or display the rows
-            if (!rows.length) {
+            if (ordersToDisplay.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="10" class="no-orders-message">
-                            <div class="placeholder-text">
-                                ${showOnlyActive ? 'No fillable orders found' : 'No orders found'}
-                            </div>
+                        <td colspan="8" class="no-orders-message">
+                            ${showOnlyActive ? 'No active orders found' : 'No orders found'}
                         </td>
                     </tr>`;
             } else {
+                // Clear existing rows
                 tbody.innerHTML = '';
-                rows.forEach(row => {
+                
+                // Add new rows
+                for (const order of ordersToDisplay) {
+                    const row = await this.createOrderRow(order, this.tokenCache);
                     if (row) tbody.appendChild(row);
-                });
+                }
             }
+
+            // Update pagination controls
+            this.updatePaginationControls(totalOrders);
 
         } catch (error) {
             this.debug('Error refreshing orders:', error);
-            this.showError('Failed to refresh orders');
+            this.showError('Failed to refresh orders view');
         } finally {
             this.isLoading = false;
         }
@@ -1129,62 +1036,77 @@ export class ViewOrders extends BaseComponent {
 
     async canFillOrder(order) {
         try {
-            // Get current account
-            const accounts = await window.ethereum.request({ 
-                method: 'eth_accounts' 
-            });
-            if (!accounts || accounts.length === 0) {
-                this.debug('No wallet connected');
-                return false;
-            }
-            const currentAccount = accounts[0].toLowerCase();
-
-            // Convert status from number to string if needed
-            const statusMap = ['Active', 'Filled', 'Canceled'];
-            const orderStatus = typeof order.status === 'number' ? 
-                statusMap[order.status] : order.status;
-            
-            if (orderStatus !== 'Active') {
-                this.debug('Order not active:', orderStatus);
+            if (!this.webSocket) {
+                this.debug('WebSocket not available for canFillOrder');
                 return false;
             }
 
-            // Check if order is expired - using the contract's ORDER_EXPIRY
-            const contract = await this.getContract();
-            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
-            const now = Math.floor(Date.now() / 1000);
-            const expiryTime = Number(order.timestamp) + orderExpiry;
+            const result = await this.webSocket.queueRequest(async () => {
+                // Ensure WebSocket is initialized
+                if (!this.webSocket.isInitialized) {
+                    this.debug('WebSocket not initialized, waiting...');
+                    await this.webSocket?.initialize();
+                }
 
-            if (now >= expiryTime) {
-                this.debug('Order expired', {
-                    now,
-                    timestamp: order.timestamp,
-                    orderExpiry,
-                    expiryTime
+                // Get current account
+                const accounts = await window.ethereum.request({ 
+                    method: 'eth_accounts' 
                 });
-                return false;
-            }
+                if (!accounts || accounts.length === 0) {
+                    this.debug('No wallet connected');
+                    return false;
+                }
+                const currentAccount = accounts[0].toLowerCase();
 
-            // Check if user is the maker (can't fill own orders)
-            if (order.maker?.toLowerCase() === currentAccount) {
-                this.debug('User is maker of order');
-                return false;
-            }
+                // Convert status from number to string if needed
+                const statusMap = ['Active', 'Filled', 'Canceled'];
+                const orderStatus = typeof order.status === 'number' ? 
+                    statusMap[order.status] : order.status;
+                
+                if (orderStatus !== 'Active') {
+                    this.debug('Order not active:', orderStatus);
+                    return false;
+                }
 
-            // Check if order is open to all or if user is the specified taker
-            const isOpenOrder = order.taker === ethers.constants.AddressZero;
-            const isSpecifiedTaker = order.taker?.toLowerCase() === currentAccount;
-            const canFill = isOpenOrder || isSpecifiedTaker;
+                // Call ORDER_EXPIRY as a method
+                const orderExpiry = await this.webSocket.contract.ORDER_EXPIRY();
+                this.debug('Order expiry:', orderExpiry.toString());
 
-            this.debug('Can fill order:', {
-                isOpenOrder,
-                isSpecifiedTaker,
-                canFill
+                const now = Math.floor(Date.now() / 1000);
+                const expiryTime = Number(order.timestamp) + orderExpiry.toNumber();
+
+                if (now >= expiryTime) {
+                    this.debug('Order expired', {
+                        now,
+                        timestamp: order.timestamp,
+                        orderExpiry: orderExpiry.toNumber(),
+                        expiryTime
+                    });
+                    return false;
+                }
+
+                // Check if user is the maker (can't fill own orders)
+                if (order.maker?.toLowerCase() === currentAccount) {
+                    this.debug('User is maker of order');
+                    return false;
+                }
+
+                // Check if order is open to all or if user is the specified taker
+                const isOpenOrder = order.taker === ethers.constants.AddressZero;
+                const isSpecifiedTaker = order.taker?.toLowerCase() === currentAccount;
+                const canFill = isOpenOrder || isSpecifiedTaker;
+
+                this.debug('Can fill order:', {
+                    isOpenOrder,
+                    isSpecifiedTaker,
+                    canFill
+                });
+                
+                return canFill;
             });
-            
-            return canFill;
+            return result;
         } catch (error) {
-            console.error('[ViewOrders] Error in canFillOrder:', error);
+            this.debug('Error in canFillOrder:', error);
             return false;
         }
     }
