@@ -411,15 +411,17 @@ th[data-sort].active-sort .sort-icon {
   gap: 8px;
   max-width: 100%;
   flex-direction: row;
+  background: transparent;
 }
 
 .token-icon {
   width: 24px;
   height: 24px;
-  border-radius: 50%;
-  overflow: hidden;
-  flex-shrink: 0;
-  order: -1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
 }
 
 .token-icon.small {
@@ -430,18 +432,23 @@ th[data-sort].active-sort .sort-icon {
 .token-icon-image {
   width: 100%;
   height: 100%;
+  border-radius: 50%;
   object-fit: cover;
+  background: transparent;
 }
 
 .token-icon-fallback {
   width: 100%;
   height: 100%;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
   font-weight: bold;
   font-size: 12px;
+  border: none;
+  background: transparent;
 }
 
 .token-link {
@@ -535,4 +542,9 @@ th[data-sort].active-sort .sort-icon {
 /* Make sure the table doesn't overlap */
 .orders-table-container {
     margin-top: 20px;
+}
+
+.token-icon.small > * {
+    border: none;
+    background: transparent;
 }
