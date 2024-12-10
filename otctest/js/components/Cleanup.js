@@ -109,20 +109,47 @@ export class Cleanup extends BaseComponent {
                     </button>
                 </div>
                 <div class="admin-controls-toggle">
-                    <button id="toggle-admin" class="toggle-button">
-                        <span>Admin Controls</span>
+                    <button id="toggle-fee-config" class="toggle-button">
+                        <span>Fee Configuration</span>
                         <svg class="chevron-icon" viewBox="0 0 24 24">
                             <path d="M7 10l5 5 5-5z"/>
                         </svg>
                     </button>
                 </div>
-                <div id="admin-section" class="admin-section collapsed">
+                <div id="fee-config-section" class="admin-section collapsed">
                     <p class="admin-note">Note: These actions can only be performed by the contract owner</p>
-                    <button id="disable-contract-button" class="action-button warning">
-                        Disable Contract
+                    <div class="fee-config-form">
+                        <h3>Update Fee Configuration</h3>
+                        <div class="form-group">
+                            <label for="fee-token">Fee Token Address:</label>
+                            <input type="text" id="fee-token" placeholder="0x..." />
+                        </div>
+                        <div class="form-group">
+                            <label for="fee-amount">Fee Amount (in wei):</label>
+                            <input type="text" id="fee-amount" placeholder="1000000000000000000" />
+                        </div>
+                        <button id="update-fee-config" class="action-button">
+                            Update Fee Config
+                        </button>
+                    </div>
+                </div>
+
+                <div class="admin-controls-toggle">
+                    <button id="toggle-contract-controls" class="toggle-button">
+                        <span>Contract Controls</span>
+                        <svg class="chevron-icon" viewBox="0 0 24 24">
+                            <path d="M7 10l5 5 5-5z"/>
+                        </svg>
                     </button>
                 </div>
-            `;
+                <div id="contract-controls-section" class="admin-section collapsed">
+                    <p class="admin-note">Note: These actions can only be performed by the contract owner</p>
+                    <div class="admin-button-wrapper">
+                        <button id="disable-contract-button" class="action-button warning">
+                            Disable Contract
+                        </button>
+                    </div>
+                </div>`;
             
             this.container.appendChild(wrapper);
 
@@ -132,12 +159,22 @@ export class Cleanup extends BaseComponent {
             this.disableContractButton = document.getElementById('disable-contract-button');
             this.disableContractButton.addEventListener('click', () => this.disableContract());
 
-            this.toggleAdminButton = document.getElementById('toggle-admin');
-            this.adminSection = document.getElementById('admin-section');
-            this.toggleAdminButton.addEventListener('click', () => {
-                this.adminSection.classList.toggle('collapsed');
-                this.toggleAdminButton.classList.toggle('active');
+            this.toggleFeeConfigButton = document.getElementById('toggle-fee-config');
+            this.feeConfigSection = document.getElementById('fee-config-section');
+            this.toggleFeeConfigButton.addEventListener('click', () => {
+                this.feeConfigSection.classList.toggle('collapsed');
+                this.toggleFeeConfigButton.classList.toggle('active');
             });
+
+            this.toggleContractControlsButton = document.getElementById('toggle-contract-controls');
+            this.contractControlsSection = document.getElementById('contract-controls-section');
+            this.toggleContractControlsButton.addEventListener('click', () => {
+                this.contractControlsSection.classList.toggle('collapsed');
+                this.toggleContractControlsButton.classList.toggle('active');
+            });
+
+            this.updateFeeConfigButton = document.getElementById('update-fee-config');
+            this.updateFeeConfigButton.addEventListener('click', () => this.updateFeeConfig());
 
             this.debug('Starting cleanup opportunities check');
             await this.checkCleanupOpportunities();
@@ -500,12 +537,64 @@ export class Cleanup extends BaseComponent {
 
     showSuccess(message) {
         this.debug('Success:', message);
-        // Implement your success notification
+        
+        // Create success message element
+        const successMessage = document.createElement('div');
+        successMessage.className = 'success-message';
+        successMessage.textContent = message;
+
+        // Find the fee config form and add message
+        const feeConfigForm = document.querySelector('.fee-config-form');
+        if (feeConfigForm) {
+            // Remove any existing messages
+            const existingMessage = feeConfigForm.querySelector('.success-message, .error-message');
+            if (existingMessage) {
+                existingMessage.remove();
+            }
+
+            // Add new message
+            feeConfigForm.appendChild(successMessage);
+            feeConfigForm.classList.add('update-success');
+
+            // Clear form inputs
+            const feeTokenInput = document.getElementById('fee-token');
+            const feeAmountInput = document.getElementById('fee-amount');
+            if (feeTokenInput) feeTokenInput.value = '';
+            if (feeAmountInput) feeAmountInput.value = '';
+
+            // Remove message and animation after delay
+            setTimeout(() => {
+                successMessage.remove();
+                feeConfigForm.classList.remove('update-success');
+            }, 3000);
+        }
     }
 
     showError(message) {
         this.debug('Error:', message);
-        // Implement your error notification
+        
+        // Create error message element
+        const errorMessage = document.createElement('div');
+        errorMessage.className = 'error-message';
+        errorMessage.textContent = message;
+
+        // Find the fee config form and add message
+        const feeConfigForm = document.querySelector('.fee-config-form');
+        if (feeConfigForm) {
+            // Remove any existing messages
+            const existingMessage = feeConfigForm.querySelector('.success-message, .error-message');
+            if (existingMessage) {
+                existingMessage.remove();
+            }
+
+            // Add new message
+            feeConfigForm.appendChild(errorMessage);
+
+            // Remove message after delay
+            setTimeout(() => {
+                errorMessage.remove();
+            }, 3000);
+        }
     }
 
     // Add helper method to format ETH values
@@ -555,5 +644,66 @@ export class Cleanup extends BaseComponent {
         this.isInitialized = false;
         this.isInitializing = false;
         this.contract = null;
+    }
+
+    async updateFeeConfig() {
+        try {
+            const contract = this.webSocket?.contract;
+            if (!contract) {
+                throw new Error('Contract not initialized');
+            }
+
+            const signer = await window.walletManager.getSigner();
+            if (!signer) {
+                throw new Error('No signer available');
+            }
+
+            const contractWithSigner = contract.connect(signer);
+
+            const feeToken = document.getElementById('fee-token').value;
+            const feeAmount = document.getElementById('fee-amount').value;
+
+            if (!ethers.utils.isAddress(feeToken)) {
+                throw new Error('Invalid fee token address');
+            }
+
+            if (!feeAmount || isNaN(feeAmount)) {
+                throw new Error('Invalid fee amount');
+            }
+
+            this.updateFeeConfigButton.disabled = true;
+            this.updateFeeConfigButton.textContent = 'Updating...';
+
+            const tx = await contractWithSigner.updateFeeConfig(feeToken, feeAmount);
+            await tx.wait();
+
+            // Clear the form
+            document.getElementById('fee-token').value = '';
+            document.getElementById('fee-amount').value = '';
+
+            // Add success message
+            const feeConfigForm = document.querySelector('.fee-config-form');
+            const successMessage = document.createElement('div');
+            successMessage.className = 'success-message';
+            successMessage.textContent = 'Fee configuration updated successfully!';
+            feeConfigForm.appendChild(successMessage);
+
+            // Add success animation class
+            feeConfigForm.classList.add('update-success');
+
+            // Remove success message and animation after 3 seconds
+            setTimeout(() => {
+                successMessage.remove();
+                feeConfigForm.classList.remove('update-success');
+            }, 3000);
+
+            this.showSuccess('Fee configuration updated successfully');
+        } catch (error) {
+            this.debug('Error updating fee config:', error);
+            this.showError(`Failed to update fee config: ${error.message}`);
+        } finally {
+            this.updateFeeConfigButton.disabled = false;
+            this.updateFeeConfigButton.textContent = 'Update Fee Config';
+        }
     }
 } 

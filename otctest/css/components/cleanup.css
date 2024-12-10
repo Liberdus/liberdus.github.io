@@ -69,6 +69,7 @@
 /* New admin section styles */
 .admin-section {
     margin-top: 2rem;
+    padding-bottom: 20px;
 }
 
 .admin-section h3 {
@@ -176,4 +177,60 @@
     font-size: 1.3rem;
     font-weight: 600;
     margin-bottom: 1rem;
+}
+
+.admin-button-wrapper {
+    margin-top: 20px;
+    margin-bottom: 20px;
+}
+
+.admin-controls-toggle {
+    margin-top: 20px;
+}
+
+.admin-section {
+    padding-bottom: 20px;
+}
+
+.fee-config-form {
+    margin-bottom: 20px;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.success-message,
+.error-message {
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.success-message {
+    background-color: rgba(75, 181, 67, 0.1);
+    border: 1px solid #4BB543;
+    color: #4BB543;
+}
+
+.error-message {
+    background-color: rgba(220, 53, 69, 0.1);
+    border: 1px solid #dc3545;
+    color: #dc3545;
+}
+
+.update-success {
+    animation: successPulse 1s ease-in-out;
+}
+
+@keyframes successPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(75, 181, 67, 0.4);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(75, 181, 67, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(75, 181, 67, 0);
+    }
 }
