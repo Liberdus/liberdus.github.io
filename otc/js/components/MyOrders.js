@@ -41,7 +41,8 @@ export class MyOrders extends ViewOrders {
             this.tokenList = await getTokenList();
             this.debug('Loaded token list:', this.tokenList);
 
-            if (readOnlyMode || !window.walletManager?.provider) {
+            // Check wallet connection
+            if (!window.walletManager.isWalletConnected()) {
                 this.container.innerHTML = `
                     <div class="tab-content-wrapper">
                         <h2>My Orders</h2>
@@ -51,15 +52,7 @@ export class MyOrders extends ViewOrders {
             }
 
             // Get current account
-            let userAddress;
-            try {
-                userAddress = await window.walletManager.getAccount();
-                this.debug('Current user address:', userAddress);
-            } catch (error) {
-                this.debug('Error getting account:', error);
-                userAddress = null;
-            }
-
+            let userAddress = window.walletManager.getAccount();
             if (!userAddress) {
                 this.debug('No account connected');
                 this.container.innerHTML = `
@@ -83,10 +76,13 @@ export class MyOrders extends ViewOrders {
                 });
             }
 
-            // Setup table structure first
+            // Clear previous content
+            this.container.innerHTML = '';
+            
+            // Setup table structure (don't call parent's setupTable)
             await this.setupTable();
 
-            // Setup WebSocket handlers after table setup
+            // Setup WebSocket handlers
             this.setupWebSocket();
 
             // Get initial orders from cache and filter for maker
@@ -143,42 +139,91 @@ export class MyOrders extends ViewOrders {
     }
 
     // Override refreshOrdersView to use local cache
-    async refreshOrdersView(orders = null) {
+    async refreshOrdersView(orders) {
+        if (this.isLoading) return;
+        this.isLoading = true;
+        
         try {
-            if (!window.webSocket?.contract) {
-                throw new Error('WebSocket or contract not initialized');
-            }
+            this.debug('Refreshing orders view');
+            
+            // Show loading state first
+            this.showLoadingState();
 
-            // Use provided orders or get from local cache
-            const ordersToDisplay = orders || Array.from(this.orders.values());
-            this.debug('Refreshing orders view with:', ordersToDisplay);
+            // Use passed orders or get from this.orders
+            let ordersToDisplay = orders || Array.from(this.orders.values());
+            
+            // Get filter state
+            const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
+            const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '50');
+            
+            // Get token details for all orders at once
+            const tokenAddresses = new Set();
+            ordersToDisplay.forEach(order => {
+                if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
+                if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
+            });
 
-            // Add retry logic for contract parameter fetching
-            const getContractParams = async (retries = 3, delay = 1000) => {
-                for (let i = 0; i < retries; i++) {
+            // Fetch token details for uncached tokens
+            for (const address of tokenAddresses) {
+                if (!this.tokenCache.has(address)) {
                     try {
-                        const [orderExpiry, gracePeriod] = await Promise.all([
-                            window.webSocket.contract.ORDER_EXPIRY(),
-                            window.webSocket.contract.GRACE_PERIOD()
+                        const tokenContract = new ethers.Contract(
+                            address,
+                            erc20Abi,
+                            this.provider
+                        );
+                        const [symbol, decimals] = await Promise.all([
+                            tokenContract.symbol(),
+                            tokenContract.decimals()
                         ]);
-                        return [orderExpiry, gracePeriod];
+                        this.tokenCache.set(address, { symbol, decimals });
                     } catch (error) {
-                        if (i === retries - 1) throw error;
-                        this.debug(`Retry ${i + 1}/${retries} getting contract params:`, error);
-                        await new Promise(resolve => setTimeout(resolve, delay));
+                        this.debug(`Error fetching token details for ${address}:`, error);
+                        this.tokenCache.set(address, { symbol: 'UNK', decimals: 18 });
                     }
                 }
-            };
+            }
 
-            // Get contract parameters with retry logic
-            const [orderExpiry, gracePeriod] = await getContractParams();
+            // Apply pagination
+            const totalOrders = ordersToDisplay.length;
+            if (pageSize !== -1) {
+                const startIndex = (this.currentPage - 1) * pageSize;
+                ordersToDisplay = ordersToDisplay.slice(startIndex, startIndex + pageSize);
+            }
 
-            // Continue with existing refresh logic
-            await super.refreshOrdersView(ordersToDisplay, orderExpiry, gracePeriod);
+            // Create table rows
+            const tbody = this.container.querySelector('tbody');
+            if (!tbody) {
+                this.debug('ERROR: tbody not found');
+                return;
+            }
+
+            if (ordersToDisplay.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="9" class="no-orders-message">
+                            No orders found
+                        </td>
+                    </tr>`;
+            } else {
+                // Clear existing rows
+                tbody.innerHTML = '';
+                
+                // Add new rows
+                for (const order of ordersToDisplay) {
+                    const row = await this.createOrderRow(order, this.tokenCache);
+                    if (row) tbody.appendChild(row);
+                }
+            }
+
+            // Update pagination controls
+            this.updatePaginationControls(totalOrders);
+
         } catch (error) {
-            this.debug('Error refreshing orders view:', error);
-            // Don't throw the error, just log it and continue
-            this.showError('Unable to refresh order details. Please try again later.');
+            this.debug('Error refreshing orders:', error);
+            this.showError('Failed to refresh orders view');
+        } finally {
+            this.isLoading = false;
         }
     }
 
@@ -414,40 +459,99 @@ export class MyOrders extends ViewOrders {
         this.debouncedRefresh();
     }
 
+    // Override setupTable to not call parent's method
     async setupTable() {
-        // Call parent's setupTable to get basic structure
-        await super.setupTable();
-        
-        // Update the filter toggle text to be more specific
-        const filterToggleSpan = this.container.querySelector('.filter-toggle span');
-        if (filterToggleSpan) {
-            filterToggleSpan.textContent = 'Show only cancellable orders';
+        const paginationControls = `
+            <div class="pagination-controls">
+                <select id="page-size-select" class="page-size-select">
+                    <option value="10">10 per page</option>
+                    <option value="25">25 per page</option>
+                    <option value="50" selected>50 per page</option>
+                    <option value="100">100 per page</option>
+                    <option value="-1">View all</option>
+                </select>
+                
+                <div class="pagination-buttons">
+                    <button class="pagination-button prev-page" title="Previous page" disabled>
+                        ←
+                    </button>
+                    <span class="page-info">Page 1 of 0</span>
+                    <button class="pagination-button next-page" title="Next page">
+                        →
+                    </button>
+                </div>
+            </div>
+        `;
+
+        const bottomControls = `
+            <div class="filter-controls bottom-controls">
+                <div class="filter-row">
+                    ${paginationControls}
+                </div>
+            </div>
+        `;
+
+        this.container.innerHTML = `
+            <div class="table-container">
+                <div class="filter-controls">
+                    <div class="filter-row">
+                        <label class="filter-toggle" style="display: flex;">
+                            <input type="checkbox" id="fillable-orders-toggle" checked>
+                            <span>Show only cancellable orders</span>
+                        </label>
+                        ${paginationControls}
+                    </div>
+                </div>
+                <table class="orders-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="id">ID <span class="sort-icon">↕</span></th>
+                            <th>Sell</th>
+                            <th>Amount</th>
+                            <th>Buy</th>
+                            <th>Amount</th>
+                            <th>Expires</th>
+                            <th data-sort="status">Status <span class="sort-icon">↕</span></th>
+                            <th>Taker</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+                ${bottomControls}
+            </div>`;
+
+        // Add click handlers for sorting
+        this.container.querySelectorAll('th[data-sort]').forEach(th => {
+            th.addEventListener('click', () => this.handleSort(th.dataset.sort));
+        });
+
+        // Add pagination event listeners
+        const pageSize = this.container.querySelector('.page-size-select');
+        if (pageSize) {
+            pageSize.addEventListener('change', () => this.debouncedRefresh());
         }
 
-        // Show the filter toggle
-        const filterToggle = this.container.querySelector('.filter-toggle');
-        if (filterToggle) {
-            filterToggle.style.display = 'flex';
+        // Add pagination button listeners
+        const prevButton = this.container.querySelector('.prev-page');
+        const nextButton = this.container.querySelector('.next-page');
+        
+        if (prevButton) {
+            prevButton.addEventListener('click', () => {
+                if (this.currentPage > 1) {
+                    this.currentPage--;
+                    this.debouncedRefresh();
+                }
+            });
         }
         
-        // Update the table header to show maker's perspective
-        const thead = this.container.querySelector('thead tr');
-        if (thead) {
-            thead.innerHTML = `
-                <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th>Sell</th>
-                <th>Amount</th>
-                <th>Buy</th>
-                <th>Amount</th>
-                <th>Expires</th>
-                <th data-sort="status">Status <span class="sort-icon">↕</span></th>
-                <th>Taker</th>
-                <th>Action</th>
-            `;
-
-            // Re-add click handlers for sorting
-            thead.querySelectorAll('th[data-sort]').forEach(th => {
-                th.addEventListener('click', () => this.handleSort(th.dataset.sort));
+        if (nextButton) {
+            nextButton.addEventListener('click', () => {
+                const totalPages = this.getTotalPages();
+                if (this.currentPage < totalPages) {
+                    this.currentPage++;
+                    this.debouncedRefresh();
+                }
             });
         }
     }
