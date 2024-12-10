@@ -110,14 +110,19 @@ export class ContractParams extends BaseComponent {
                 try {
                     const tokenContract = new ethers.Contract(
                         params.feeToken,
-                        ['function symbol() view returns (string)'],
+                        [
+                            'function symbol() view returns (string)',
+                            'function decimals() view returns (uint8)'
+                        ],
                         contract.provider
                     );
                     params.tokenSymbol = await tokenContract.symbol();
-                    this.debug('Fetched token symbol:', params.tokenSymbol);
+                    params.tokenDecimals = await tokenContract.decimals();
+                    this.debug('Fetched token details:', { symbol: params.tokenSymbol, decimals: params.tokenDecimals });
                 } catch (e) {
-                    this.debug('Error fetching token symbol:', e);
+                    this.debug('Error fetching token details:', e);
                     params.tokenSymbol = 'Unknown';
+                    params.tokenDecimals = 18; // fallback to 18 decimals
                 }
             }
 
@@ -156,7 +161,7 @@ export class ContractParams extends BaseComponent {
                     <h3>Contract State</h3>
                     <div class="param-item">
                         <h4>Order Creation Fee</h4>
-                        <p>${safe(params.orderCreationFee, (v) => this.formatEther(v))} ${safe(params.tokenSymbol)}</p>
+                        <p>${safe(params.orderCreationFee, (v) => this.formatTokenAmount(v, params.tokenDecimals))} ${safe(params.tokenSymbol)}</p>
                     </div>
                     <div class="param-item">
                         <h4>Fee Token</h4>
@@ -164,7 +169,7 @@ export class ContractParams extends BaseComponent {
                     </div>
                     <div class="param-item">
                         <h4>Accumulated Fees</h4>
-                        <p>${safe(params.accumulatedFees, (v) => this.formatEther(v))} ${safe(params.tokenSymbol)}</p>
+                        <p>${safe(params.accumulatedFees, (v) => this.formatTokenAmount(v, params.tokenDecimals))} ${safe(params.tokenSymbol)}</p>
                     </div>
                     <div class="param-item">
                         <h4>Contract Status</h4>
@@ -233,8 +238,8 @@ export class ContractParams extends BaseComponent {
         return `${days}d ${hours}h ${minutes}m`;
     }
 
-    formatEther(wei) {
-        return ethers.utils.formatEther(wei);
+    formatTokenAmount(amount, decimals = 18) {
+        return ethers.utils.formatUnits(amount, decimals);
     }
 
     cleanup() {

@@ -4,6 +4,7 @@ import { erc20Abi } from '../abi/erc20.js';
 import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
 import { isDebugEnabled, getNetworkConfig } from '../config.js';
 import { NETWORK_TOKENS } from '../utils/tokens.js';
+import { getTokenList } from '../utils/tokens.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
@@ -15,6 +16,7 @@ export class ViewOrders extends BaseComponent {
         this.setupErrorHandling();
         this.eventSubscriptions = new Set();
         this.expiryTimers = new Map();
+        this.tokenList = [];
         
         // Initialize debug logger with VIEW_ORDERS flag
         this.debug = (message, ...args) => {
@@ -51,6 +53,11 @@ export class ViewOrders extends BaseComponent {
         };
     }
 
+    async init() {
+        const { getTokenList } = await import('../utils/tokens.js');
+        this.tokenList = await getTokenList();
+    }
+
     async getTokenInfo(address) {
         try {
             if (this.tokenCache.has(address)) {
@@ -76,6 +83,29 @@ export class ViewOrders extends BaseComponent {
                 return this.getDefaultTokenIcon();
             }
 
+            // First check if the token exists in our token list
+            const tokenFromList = this.tokenList.find(t => 
+                t.address.toLowerCase() === token.address.toLowerCase()
+            );
+
+            this.debug('Token from list:', tokenFromList);
+
+            // If we found a token with a logo URI, use it
+            if (tokenFromList?.logoURI) {
+                return `
+                    <div class="token-icon">
+                        <img src="${tokenFromList.logoURI}" 
+                             alt="${tokenFromList.symbol}" 
+                             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
+                             class="token-icon-image" />
+                        <div class="token-icon-fallback" style="display:none">
+                            ${tokenFromList.symbol.charAt(0).toUpperCase()}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Fallback to the existing color-based icon
             const cachedToken = this.tokenCache.get(token.address);
             const symbol = cachedToken?.symbol || token.symbol || '?';
             const firstLetter = symbol.charAt(0).toUpperCase();
@@ -157,6 +187,10 @@ export class ViewOrders extends BaseComponent {
         try {
             this.debug('Initializing ViewOrders component');
             
+            // Load token list first
+            this.tokenList = await getTokenList();
+            this.debug('Loaded token list:', this.tokenList);
+
             // Wait for WebSocket initialization with timeout
             if (!window.webSocket) {
                 this.debug('WebSocket not available, waiting for initialization...');

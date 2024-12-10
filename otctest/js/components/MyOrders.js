@@ -1,6 +1,7 @@
 import { ViewOrders } from './ViewOrders.js';
 import { ethers } from 'ethers';
 import { isDebugEnabled } from '../config.js';
+import { getTokenList } from '../utils/tokens.js';
 
 export class MyOrders extends ViewOrders {
     constructor() {
@@ -36,6 +37,10 @@ export class MyOrders extends ViewOrders {
         try {
             this.debug('Initializing MyOrders component');
             
+            // Load token list first
+            this.tokenList = await getTokenList();
+            this.debug('Loaded token list:', this.tokenList);
+
             if (readOnlyMode || !window.walletManager?.provider) {
                 this.container.innerHTML = `
                     <div class="tab-content-wrapper">
