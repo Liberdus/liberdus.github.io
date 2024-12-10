@@ -363,7 +363,21 @@ export class CreateOrder extends BaseComponent {
             this.isSubmitting = true;
             createOrderBtn.disabled = true;
             createOrderBtn.classList.add('disabled');
-            
+
+            // Get fresh signer and reinitialize contract
+            const signer = walletManager.getSigner();
+            if (!signer) {
+                throw new Error('No signer available - wallet may be disconnected');
+            }
+
+            // Reinitialize contract with fresh signer
+            const networkConfig = getNetworkConfig();
+            this.contract = new ethers.Contract(
+                networkConfig.contractAddress,
+                networkConfig.contractABI,
+                signer
+            );
+
             // Debug logs to check token state
             this.debug('Current sellToken:', this.sellToken);
             this.debug('Current buyToken:', this.buyToken);
@@ -418,20 +432,6 @@ export class CreateOrder extends BaseComponent {
                 throw new Error('Invalid taker address format');
             }
 
-            // Get signer from walletManager
-            const signer = walletManager.getSigner();
-            if (!signer) {
-                throw new Error('No signer available - wallet may be disconnected');
-            }
-
-            // Reinitialize contract with signer
-            const networkConfig = getNetworkConfig();
-            this.contract = new ethers.Contract(
-                networkConfig.contractAddress,
-                networkConfig.contractABI,
-                signer
-            );
-
             // Convert amounts to wei
             const sellTokenDecimals = await this.getTokenDecimals(this.sellToken.address);
             const buyTokenDecimals = await this.getTokenDecimals(this.buyToken.address);
@@ -442,38 +442,65 @@ export class CreateOrder extends BaseComponent {
             this.debug('Sell amount in wei:', sellAmountWei.toString());
             this.debug('Buy amount in wei:', buyAmountWei.toString());
 
-            // Check and approve tokens
-            const sellTokenApproved = await this.checkAndApproveToken(this.sellToken.address, sellAmountWei);
-            if (!sellTokenApproved) {
-                return;
-            }
+            // Check and approve tokens with retry mechanism
+            let retryCount = 0;
+            const maxRetries = 2;
 
-            const feeTokenApproved = await this.checkAndApproveToken(this.feeToken.address, this.feeToken.amount);
-            if (!feeTokenApproved) {
-                return;
-            }
+            while (retryCount <= maxRetries) {
+                try {
+                    // Check and approve tokens
+                    const sellTokenApproved = await this.checkAndApproveToken(this.sellToken.address, sellAmountWei);
+                    if (!sellTokenApproved) {
+                        return;
+                    }
 
-            // Create order
-            this.showStatus('Creating order...', 'pending');
-            const tx = await this.contract.createOrder(
-                taker,
-                this.sellToken.address,
-                sellAmountWei,
-                this.buyToken.address,
-                buyAmountWei
-            ).catch(error => {
-                if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
-                    this.showStatus('Order creation declined', 'warning');
-                    return null;
+                    const feeTokenApproved = await this.checkAndApproveToken(this.feeToken.address, this.feeToken.amount);
+                    if (!feeTokenApproved) {
+                        return;
+                    }
+
+                    // Add small delay after approvals
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+
+                    // Create order
+                    this.showStatus('Creating order...', 'pending');
+                    const tx = await this.contract.createOrder(
+                        taker,
+                        this.sellToken.address,
+                        sellAmountWei,
+                        this.buyToken.address,
+                        buyAmountWei
+                    ).catch(error => {
+                        if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
+                            this.showStatus('Order creation declined', 'warning');
+                            return null;
+                        }
+                        throw error;
+                    });
+
+                    if (!tx) return; // User rejected the transaction
+
+                    this.showStatus('Waiting for confirmation...', 'pending');
+                    await tx.wait();
+                    
+                    // If we get here, the transaction was successful
+                    break;
+
+                } catch (error) {
+                    retryCount++;
+                    this.debug(`Create order attempt ${retryCount} failed:`, error);
+
+                    if (retryCount <= maxRetries && 
+                        (error.message?.includes('nonce') || 
+                         error.message?.includes('replacement fee too low'))) {
+                        this.showStatus('Retrying transaction...', 'pending');
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        continue;
+                    }
+                    throw error;
                 }
-                throw error;
-            });
+            }
 
-            if (!tx) return; // User rejected the transaction
-
-            this.showStatus('Waiting for confirmation...', 'pending');
-            await tx.wait();
-            
             this.showStatus('Order created successfully!', 'success');
             this.resetForm();
             

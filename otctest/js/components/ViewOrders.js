@@ -51,6 +51,66 @@ export class ViewOrders extends BaseComponent {
         };
     }
 
+    async getTokenInfo(address) {
+        try {
+            if (this.tokenCache.has(address)) {
+                return this.tokenCache.get(address);
+            }
+
+            const tokenContract = new ethers.Contract(address, erc20Abi, this.provider);
+            const symbol = await tokenContract.symbol();
+            const decimals = await tokenContract.decimals();
+
+            const tokenInfo = { address, symbol, decimals };
+            this.tokenCache.set(address, tokenInfo);
+            return tokenInfo;
+        } catch (error) {
+            this.debug('Error getting token info:', error);
+            return { address, symbol: 'UNK', decimals: 18 };
+        }
+    }
+
+    getTokenIcon(token) {
+        try {
+            if (!token?.address) {
+                return this.getDefaultTokenIcon();
+            }
+
+            const cachedToken = this.tokenCache.get(token.address);
+            const symbol = cachedToken?.symbol || token.symbol || '?';
+            const firstLetter = symbol.charAt(0).toUpperCase();
+            
+            const colors = [
+                '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
+                '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
+            ];
+            
+            const colorIndex = token.address ? 
+                parseInt(token.address.slice(-6), 16) % colors.length :
+                Math.floor(Math.random() * colors.length);
+            const backgroundColor = colors[colorIndex];
+            
+            return `
+                <div class="token-icon">
+                    <div class="token-icon-fallback" style="background: ${backgroundColor}">
+                        ${firstLetter}
+                    </div>
+                </div>
+            `;
+        } catch (error) {
+            this.debug('Error generating token icon:', error);
+            return this.getDefaultTokenIcon();
+        }
+    }
+
+    getDefaultTokenIcon() {
+        return `
+            <div class="token-icon">
+                <div class="token-icon-fallback" style="background: #FF6B6B">?</div>
+            </div>
+        `;
+    }
+
     setupErrorHandling() {
         if (!window.webSocket) {
             if (!this._retryAttempt) {
@@ -736,7 +796,7 @@ export class ViewOrders extends BaseComponent {
                 this.debug('Requesting buy token approval');
                 const approveTx = await buyToken.approve(
                     contract.address, 
-                    ethers.constants.MaxUint256  // Approve maximum amount to prevent future approvals
+                    order.buyAmount  // Use exact order amount instead of MaxUint256
                 );
                 await approveTx.wait();
                 this.showSuccess(`${buyTokenSymbol} approval granted`);
@@ -889,97 +949,114 @@ export class ViewOrders extends BaseComponent {
         }
     }
 
-    async createOrderRow(order, tokenDetailsMap) {
-        const tr = this.createElement('tr');
-        tr.dataset.orderId = order.id.toString();
-        tr.dataset.timestamp = order.timestamp;
-        tr.dataset.status = order.status;
+    async createOrderRow(order) {
+        try {
+            // Get token info for both tokens in the order
+            const sellTokenInfo = await this.getTokenInfo(order.sellToken);
+            const buyTokenInfo = await this.getTokenInfo(order.buyToken);
 
-        // Get network tokens
-        const networkConfig = getNetworkConfig();
-        const networkTokens = NETWORK_TOKENS[networkConfig.name] || [];
+            // Now you can use the token info when creating the row
+            const sellTokenIcon = this.getTokenIcon(sellTokenInfo);
+            const buyTokenIcon = this.getTokenIcon(buyTokenInfo);
 
-        // Get token details, first checking NETWORK_TOKENS, then fallback to tokenDetailsMap
-        const getSafeTokenDetails = (tokenAddress) => {
-            const predefinedToken = networkTokens.find(
-                t => t.address.toLowerCase() === tokenAddress.toLowerCase()
-            );
-            if (predefinedToken) {
-                return {
-                    ...predefinedToken,
-                    ...tokenDetailsMap.get(tokenAddress)
-                };
+            // Use the token symbols from tokenInfo instead of raw addresses
+            const sellTokenSymbol = sellTokenInfo.symbol;
+            const buyTokenSymbol = buyTokenInfo.symbol;
+
+            const tr = this.createElement('tr');
+            tr.dataset.orderId = order.id.toString();
+            tr.dataset.timestamp = order.timestamp;
+            tr.dataset.status = order.status;
+
+            // Get network tokens
+            const networkConfig = getNetworkConfig();
+            const networkTokens = NETWORK_TOKENS[networkConfig.name] || [];
+
+            // Get token details, first checking NETWORK_TOKENS, then fallback to tokenDetailsMap
+            const getSafeTokenDetails = (tokenAddress) => {
+                const predefinedToken = networkTokens.find(
+                    t => t.address.toLowerCase() === tokenAddress.toLowerCase()
+                );
+                if (predefinedToken) {
+                    return {
+                        ...predefinedToken,
+                        ...this.tokenCache.get(tokenAddress)
+                    };
+                }
+                return this.tokenCache.get(tokenAddress) || { symbol: 'UNK', decimals: 18 };
+            };
+
+            const sellTokenDetails = getSafeTokenDetails(order.sellToken);
+            const buyTokenDetails = getSafeTokenDetails(order.buyToken);
+            const canFill = await this.canFillOrder(order);
+            const expiryTime = await this.getExpiryTime(order.timestamp);
+            const status = this.getOrderStatus(order, expiryTime);
+            const formattedExpiry = await this.formatExpiry(order.timestamp);
+            
+            // Get current account first
+            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+            const currentAccount = accounts[0]?.toLowerCase();
+            const isUserOrder = order.maker?.toLowerCase() === currentAccount;
+
+            tr.innerHTML = `
+                <td>${order.id}</td>
+                <td>
+                    <div class="token-info">
+                        <div class="token-icon small">
+                            ${sellTokenIcon}
+                        </div>
+                        <a href="${this.getExplorerUrl(order.sellToken)}" 
+                           class="token-link" 
+                           target="_blank" 
+                           title="View token contract">
+                            ${sellTokenSymbol}
+                            <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                            </svg>
+                        </a>
+                    </div>
+                </td>
+                <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
+                <td>
+                    <div class="token-info">
+                        <div class="token-icon small">
+                            ${buyTokenIcon}
+                        </div>
+                        <a href="${this.getExplorerUrl(order.buyToken)}" 
+                           class="token-link" 
+                           target="_blank" 
+                           title="View token contract">
+                            ${buyTokenSymbol}
+                            <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                            </svg>
+                        </a>
+                    </div>
+                </td>
+                <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
+                <td>${formattedExpiry}</td>
+                <td class="order-status">${status}</td>
+                <td class="action-column">${canFill ? 
+                    `<button class="fill-button" data-order-id="${order.id}">Fill Order</button>` : 
+                    isUserOrder ?
+                    '<span class="your-order">Your Order</span>' : 
+                    ''
+                }</td>`;
+
+            // Add click handler for fill button
+            const fillButton = tr.querySelector('.fill-button');
+            if (fillButton) {
+                fillButton.addEventListener('click', () => this.fillOrder(order.id));
             }
-            return tokenDetailsMap.get(tokenAddress) || { symbol: 'UNK', decimals: 18 };
-        };
 
-        const sellTokenDetails = getSafeTokenDetails(order.sellToken);
-        const buyTokenDetails = getSafeTokenDetails(order.buyToken);
-        const canFill = await this.canFillOrder(order);
-        const expiryTime = await this.getExpiryTime(order.timestamp);
-        const status = this.getOrderStatus(order, expiryTime);
-        const formattedExpiry = await this.formatExpiry(order.timestamp);
-        
-        // Get current account first
-        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-        const currentAccount = accounts[0]?.toLowerCase();
-        const isUserOrder = order.maker?.toLowerCase() === currentAccount;
-
-        tr.innerHTML = `
-            <td>${order.id}</td>
-            <td>
-                <div class="token-info">
-                    <div class="token-icon small">
-                        ${this.getTokenIcon(sellTokenDetails)}
-                    </div>
-                    <a href="${this.getExplorerUrl(order.sellToken)}" 
-                       class="token-link" 
-                       target="_blank" 
-                       title="View token contract">
-                        ${sellTokenDetails?.symbol || 'Unknown'}
-                        <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                            <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                        </svg>
-                    </a>
-                </div>
-            </td>
-            <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
-            <td>
-                <div class="token-info">
-                    <div class="token-icon small">
-                        ${this.getTokenIcon(buyTokenDetails)}
-                    </div>
-                    <a href="${this.getExplorerUrl(order.buyToken)}" 
-                       class="token-link" 
-                       target="_blank" 
-                       title="View token contract">
-                        ${buyTokenDetails?.symbol || 'Unknown'}
-                        <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                            <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                        </svg>
-                    </a>
-                </div>
-            </td>
-            <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
-            <td>${formattedExpiry}</td>
-            <td class="order-status">${status}</td>
-            <td class="action-column">${canFill ? 
-                `<button class="fill-button" data-order-id="${order.id}">Fill Order</button>` : 
-                isUserOrder ?
-                '<span class="your-order">Your Order</span>' : 
-                ''
-            }</td>`;
-
-        // Add click handler for fill button
-        const fillButton = tr.querySelector('.fill-button');
-        if (fillButton) {
-            fillButton.addEventListener('click', () => this.fillOrder(order.id));
+            // Start the expiry timer for this row
+            this.startExpiryTimer(tr);
+            
+            return tr;
+        } catch (error) {
+            this.debug('Error creating order row:', error);
+            return ''; // or some error row representation
         }
-
-        // Start the expiry timer for this row
-        this.startExpiryTimer(tr);
-        
-        return tr;
     }
 
     async getContractExpiryTimes() {
@@ -1301,53 +1378,6 @@ export class ViewOrders extends BaseComponent {
             return '#';
         }
         return `${networkConfig.explorer}/address/${ethers.utils.getAddress(address)}`;
-    }
-
-    getTokenIcon(token) {
-        if (!token) return '';
-        
-        // First check if token exists in NETWORK_TOKENS
-        const networkConfig = getNetworkConfig();
-        const predefinedToken = NETWORK_TOKENS[networkConfig.name]?.find(
-            t => t.address.toLowerCase() === token.address.toLowerCase()
-        );
-        
-        // Use predefined token icon if available
-        if (predefinedToken?.logoURI) {
-            return `
-                <div class="token-icon">
-                    <img src="${predefinedToken.logoURI}" alt="${token.symbol}" class="token-icon-image">
-                </div>
-            `;
-        }
-        
-        // Fallback to token's own icon if available
-        if (token.iconUrl || token.logoURI) {
-            return `
-                <div class="token-icon">
-                    <img src="${token.iconUrl || token.logoURI}" alt="${token.symbol}" class="token-icon-image">
-                </div>
-            `;
-        }
-
-        // Fallback to letter-based icon
-        const symbol = token.symbol || '?';
-        const firstLetter = symbol.charAt(0).toUpperCase();
-        const colors = [
-            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
-            '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
-        ];
-        
-        const colorIndex = parseInt(token.address.slice(-6), 16) % colors.length;
-        const backgroundColor = colors[colorIndex];
-        
-        return `
-            <div class="token-icon">
-                <div class="token-icon-fallback" style="background: ${backgroundColor}">
-                    ${firstLetter}
-                </div>
-            </div>
-        `;
     }
 
     getOrderStatusText(status) {

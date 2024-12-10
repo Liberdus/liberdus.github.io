@@ -148,17 +148,32 @@ export class MyOrders extends ViewOrders {
             const ordersToDisplay = orders || Array.from(this.orders.values());
             this.debug('Refreshing orders view with:', ordersToDisplay);
 
-            // Get contract parameters needed for order status
-            const [orderExpiry, gracePeriod] = await Promise.all([
-                window.webSocket.contract.ORDER_EXPIRY(),
-                window.webSocket.contract.GRACE_PERIOD()
-            ]);
+            // Add retry logic for contract parameter fetching
+            const getContractParams = async (retries = 3, delay = 1000) => {
+                for (let i = 0; i < retries; i++) {
+                    try {
+                        const [orderExpiry, gracePeriod] = await Promise.all([
+                            window.webSocket.contract.ORDER_EXPIRY(),
+                            window.webSocket.contract.GRACE_PERIOD()
+                        ]);
+                        return [orderExpiry, gracePeriod];
+                    } catch (error) {
+                        if (i === retries - 1) throw error;
+                        this.debug(`Retry ${i + 1}/${retries} getting contract params:`, error);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                }
+            };
+
+            // Get contract parameters with retry logic
+            const [orderExpiry, gracePeriod] = await getContractParams();
 
             // Continue with existing refresh logic
             await super.refreshOrdersView(ordersToDisplay, orderExpiry, gracePeriod);
         } catch (error) {
             this.debug('Error refreshing orders view:', error);
-            throw error;
+            // Don't throw the error, just log it and continue
+            this.showError('Unable to refresh order details. Please try again later.');
         }
     }
 

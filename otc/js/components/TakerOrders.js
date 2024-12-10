@@ -6,7 +6,8 @@ import { erc20Abi } from '../abi/erc20.js';
 export class TakerOrders extends ViewOrders {
     constructor() {
         super('taker-orders');
-        this.isInitializing = false;  // Add initialization flag
+        this.isInitializing = false;
+        this.initialLoadComplete = false;  // Add flag for initial load
         
         // Initialize debug logger
         this.debug = (message, ...args) => {
@@ -30,48 +31,28 @@ export class TakerOrders extends ViewOrders {
             // Clear any existing content first
             this.cleanup();
             
-            // Always create the wrapper with status container
-            this.container.innerHTML = `
-                <div class="tab-content-wrapper">
-                    <h2>Orders for Me</h2>
-                    <div class="status-container"></div>
-                    ${readOnlyMode || !window.walletManager?.provider ? 
-                        '<p class="connect-prompt">Connect wallet to view orders targeted to you</p>' :
-                        '<div class="orders-table-container"></div>'}
-                </div>`;
+            // Store original refresh function
+            const originalRefresh = this.refreshOrdersView.bind(this);
+            this.refreshOrdersView = () => {
+                this.debug('Skipping refresh during parent initialization');
+            };
+
+            // Initialize base functionality
+            await super.initialize(readOnlyMode);
+
+            // Restore original refresh function
+            this.refreshOrdersView = originalRefresh;
 
             if (readOnlyMode || !window.walletManager?.provider) {
                 return;
             }
 
-            // Get current account
-            let userAddress;
-            try {
-                userAddress = await window.walletManager.getAccount();
-            } catch (error) {
-                this.debug('Error getting account:', error);
-                userAddress = null;
-            }
-
-            if (!userAddress) {
-                this.debug('No account connected');
-                this.container.innerHTML = `
-                    <div class="tab-content-wrapper">
-                        <h2>Orders for Me</h2>
-                        <div class="status-container"></div>
-                        <p class="connect-prompt">Connect wallet to view orders targeted to you</p>
-                    </div>`;
-                return;
-            }
-
-            // Initialize WebSocket and base functionality from ViewOrders
-            await super.initialize(readOnlyMode);
-
-            // Clear existing orders before adding new ones
-            this.orders.clear();
-
+            // Use WebSocket's contract instead of creating a new one
+            this.contract = this.webSocket.contract;
+            
             // Get and filter orders for the current taker
-            const cachedOrders = window.webSocket?.getOrders() || [];
+            const userAddress = await window.walletManager.getAccount();
+            const cachedOrders = this.webSocket.getOrders() || [];
             const filteredOrders = cachedOrders.filter(order => 
                 order?.taker && userAddress && 
                 order.taker.toLowerCase() === userAddress.toLowerCase()
@@ -80,12 +61,15 @@ export class TakerOrders extends ViewOrders {
             this.debug('Loading filtered orders from cache:', filteredOrders);
             
             // Initialize orders Map with filtered orders
+            this.orders.clear();
             filteredOrders.forEach(order => {
                 this.orders.set(order.id, order);
             });
 
-            // Update view
+            // Do a single refresh with restored function
             await this.refreshOrdersView();
+            
+            this.debug('Initialization complete');
 
         } catch (error) {
             this.debug('Initialization error:', error);
@@ -103,6 +87,11 @@ export class TakerOrders extends ViewOrders {
     setupWebSocket() {
         // Use parent's debounced refresh mechanism
         const debouncedRefresh = () => {
+            // Skip WebSocket-triggered refreshes during initial load
+            if (!this.initialLoadComplete) {
+                this.debug('Skipping WebSocket refresh during initial load');
+                return;
+            }
             this.debouncedRefresh();
         };
 
@@ -116,10 +105,11 @@ export class TakerOrders extends ViewOrders {
         this.eventSubscriptions.add({
             event: 'orderSyncComplete',
             callback: async (orders) => {
+                if (this.isProcessingFill || !this.initialLoadComplete) return;
+                
                 const userAddress = await window.walletManager.getAccount();
                 this.orders.clear();
                 
-                // Filter orders where user is specifically set as taker
                 Object.values(orders)
                     .filter(order => order.taker.toLowerCase() === userAddress.toLowerCase())
                     .forEach(order => {
@@ -135,6 +125,9 @@ export class TakerOrders extends ViewOrders {
             this.eventSubscriptions.add({
                 event,
                 callback: (order) => {
+                    // Skip if we initiated the fill
+                    if (this.isProcessingFill && event === 'OrderFilled') return;
+                    
                     if (this.orders.has(order.id)) {
                         this.debug(`Order ${event.toLowerCase()}:`, order);
                         this.orders.get(order.id).status = event === 'OrderFilled' ? 'Filled' : 'Canceled';
@@ -190,7 +183,9 @@ export class TakerOrders extends ViewOrders {
 
     // Override fillOrder to add specific handling for taker orders
     async fillOrder(orderId) {
+        this.isProcessingFill = true;
         const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
+        
         try {
             if (button) {
                 button.disabled = true;
@@ -307,6 +302,7 @@ export class TakerOrders extends ViewOrders {
 
                 this.showSuccess('Order filled successfully!');
                 await this.refreshOrdersView();
+
             } catch (waitError) {
                 if (waitError.code === 'TRANSACTION_REPLACED') {
                     if (waitError.cancelled) {
@@ -327,6 +323,11 @@ export class TakerOrders extends ViewOrders {
                 }
             }
 
+            // Update order status locally
+            if (this.orders.has(Number(orderId))) {
+                this.orders.get(Number(orderId)).status = 'Filled';
+            }
+
         } catch (error) {
             this.debug('Fill order error details:', error);
             this.showError(this.getReadableError(error));
@@ -335,18 +336,24 @@ export class TakerOrders extends ViewOrders {
                 button.disabled = false;
                 button.textContent = 'Fill Order';
             }
+            // Reset processing flag after a short delay to ensure websocket events are handled properly
+            setTimeout(() => {
+                this.isProcessingFill = false;
+            }, 1000);
         }
     }
 
     async refreshOrdersView() {
         try {
-            // Get contract instance first
-            this.contract = await this.getContract();
+            // Get contract instance only if not already initialized
             if (!this.contract) {
-                throw new Error('Contract not initialized');
+                this.contract = await this.getContract();
+                if (!this.contract) {
+                    throw new Error('Contract not initialized');
+                }
             }
 
-            // Get current account
+            // Cache user address to avoid multiple calls
             const userAddress = await window.walletManager.getAccount();
             if (!userAddress) {
                 throw new Error('No wallet connected');
@@ -558,5 +565,13 @@ export class TakerOrders extends ViewOrders {
         statusElement.textContent = message;
         statusElement.className = 'status-message status-success';
         this.debug('Status element updated:', statusElement.outerHTML);
+    }
+
+    // Override getContract to use WebSocket's contract
+    async getContract() {
+        if (this.webSocket?.contract) {
+            return this.webSocket.contract;
+        }
+        return super.getContract();
     }
 }
