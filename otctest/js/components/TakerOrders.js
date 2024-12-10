@@ -152,28 +152,36 @@ export class TakerOrders extends ViewOrders {
         
         if (actionCell && statusCell) {
             try {
-                const currentTime = Math.floor(Date.now() / 1000);
-                const orderTime = Number(order.timestamp);
-                const contract = await this.getContract();
-                
-                const orderExpiry = await contract.ORDER_EXPIRY();
-                const isExpired = currentTime > orderTime + orderExpiry.toNumber();
-                
-                if (!isExpired && order.status === 'Active') {
-                    actionCell.innerHTML = `
-                        <button class="fill-button" data-order-id="${order.id}">Fill Order</button>
-                    `;
+                // Only proceed with button creation if order is Active
+                if (order.status === 'Active') {
+                    const currentTime = Math.floor(Date.now() / 1000);
+                    const orderTime = Number(order.timestamp);
                     
-                    // Add click handler for fill button
-                    const fillButton = actionCell.querySelector('.fill-button');
-                    if (fillButton) {
-                        fillButton.addEventListener('click', () => this.fillOrder(order.id));
+                    // Get expiry from WebSocket service or contract
+                    const orderExpiry = this.webSocket?.contractValues?.orderExpiry || 
+                        (await this.contract.ORDER_EXPIRY()).toNumber();
+                    
+                    const isExpired = currentTime > orderTime + orderExpiry;
+                    
+                    if (!isExpired) {
+                        actionCell.innerHTML = `
+                            <button class="fill-button" data-order-id="${order.id}">Fill Order</button>
+                        `;
+                        
+                        // Add click handler for fill button
+                        const fillButton = actionCell.querySelector('.fill-button');
+                        if (fillButton) {
+                            fillButton.addEventListener('click', () => this.fillOrder(order.id));
+                        }
+                    } else {
+                        actionCell.innerHTML = '<span class="order-status">Expired</span>';
                     }
                 } else {
+                    // For non-active orders, just show the status
                     actionCell.innerHTML = '<span class="order-status"></span>';
                 }
             } catch (error) {
-                console.error('[TakerOrders] Error in createOrderRow:', error);
+                this.debug('Error in createOrderRow:', error);
                 actionCell.innerHTML = '<span class="order-status error">Error</span>';
             }
         }

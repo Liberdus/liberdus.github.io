@@ -334,8 +334,7 @@ export class ViewOrders extends BaseComponent {
             const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '50');
             
             // Get contract values for filtering
-            const contract = await this.getContract();
-            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
+            const { orderExpiry } = await this.getContractExpiryTimes();
             const currentTime = Math.floor(Date.now() / 1000);
 
             // Filter active orders if needed
@@ -648,29 +647,27 @@ export class ViewOrders extends BaseComponent {
         });
     }
 
-    async formatExpiry(timestamp) {
+    async formatExpiry(timestamp, orderExpiry = null) {
         try {
-            const contract = await this.getContract();
-            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();  // 420 seconds (7 minutes)
-            // Don't add gracePeriod here since we only want to show when it expires
-            
-            const expiryTime = Number(timestamp) + orderExpiry;  // Just use orderExpiry
+            // Use provided orderExpiry or cached value
+            const expiryValue = orderExpiry || this.contractValues?.orderExpiry || 420;
+            const expiryTime = Number(timestamp) + expiryValue;
             const now = Math.floor(Date.now() / 1000);
             const timeLeft = expiryTime - now;
-
+            
             this.debug('Expiry calculation:', {
                 timestamp,
-                orderExpiry,
+                orderExpiry: expiryValue,
                 expiryTime,
                 now,
                 timeLeft,
                 timeLeftMinutes: timeLeft / 60
             });
-
+            
             if (timeLeft <= 0) {
                 return 'Expired';
             }
-
+            
             const minutes = Math.ceil(timeLeft / 60);
             return `${minutes}m`;
         } catch (error) {
@@ -1282,28 +1279,6 @@ export class ViewOrders extends BaseComponent {
             this.debug('Error displaying orders:', error);
             throw error;
         }
-    }
-
-    formatExpiryTime(timestamp, orderExpiry) {
-        const expiryTime = timestamp + orderExpiry;
-        const now = Math.floor(Date.now() / 1000);
-        const timeLeft = expiryTime - now;
-        
-        this.debug('Expiry calculation:', {
-            timestamp,
-            orderExpiry,
-            expiryTime,
-            now,
-            timeLeft,
-            timeLeftMinutes: timeLeft / 60
-        });
-        
-        if (timeLeft <= 0) {
-            return 'Expired';
-        }
-        
-        const minutes = Math.ceil(timeLeft / 60);
-        return `${minutes}m`;
     }
 
     startExpiryTimer(row) {
