@@ -236,7 +236,7 @@ export class ViewOrders extends BaseComponent {
                 });
             }
 
-            // Refresh the view
+            // Refresh the view with the current filter state
             this.debug('Refreshing orders view...');
             await this.refreshOrdersView();
 
@@ -320,9 +320,6 @@ export class ViewOrders extends BaseComponent {
         try {
             this.debug('Refreshing orders view');
             
-            // Add debug logging for orders
-            this.debug('Current orders in cache:', Array.from(this.orders.values()));
-            
             // Show loading state first
             this.showLoadingState();
 
@@ -330,7 +327,7 @@ export class ViewOrders extends BaseComponent {
             let ordersToDisplay = Array.from(this.orders.values());
             
             // Get filter state
-            const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked;
+            const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
             const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '50');
             
             // Get contract values for filtering
@@ -339,11 +336,24 @@ export class ViewOrders extends BaseComponent {
 
             // Filter active orders if needed
             if (showOnlyActive) {
-                ordersToDisplay = ordersToDisplay.filter(order => {
-                    if (order.status === 'Filled' || order.status === 'Canceled') return false;
+                ordersToDisplay = await Promise.all(ordersToDisplay.map(async order => {
+                    const canFill = await this.canFillOrder(order);
                     const expiryTime = Number(order.timestamp) + orderExpiry;
-                    return currentTime < expiryTime;
-                });
+                    return {
+                        order,
+                        canFill,
+                        isExpired: currentTime >= expiryTime
+                    };
+                }));
+
+                ordersToDisplay = ordersToDisplay
+                    .filter(({ order, canFill, isExpired }) => 
+                        canFill && 
+                        !isExpired && 
+                        order.status !== 'Filled' && 
+                        order.status !== 'Canceled'
+                    )
+                    .map(({ order }) => order);
             }
 
             // Get token details for all orders at once
