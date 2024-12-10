@@ -442,13 +442,41 @@ export class TakerOrders extends ViewOrders {
 
     // Override setupTable to customize for taker orders
     async setupTable() {
-        // Call parent's setupTable first
-        await super.setupTable();
+        const tableContainer = this.createElement('div', 'table-container');
         
-        // Customize the table header for taker orders
-        const thead = this.container.querySelector('thead tr');
-        if (thead) {
-            thead.innerHTML = `
+        // Add filter controls with pagination
+        const filterControls = this.createElement('div', 'filter-controls');
+        filterControls.innerHTML = `
+            <div class="filter-row">
+                <label class="filter-toggle">
+                    <input type="checkbox" id="fillable-orders-toggle" checked>
+                    <span>Show only fillable orders</span>
+                </label>
+                <div class="pagination-controls">
+                    <select id="page-size-select" class="page-size-select">
+                        <option value="10">10 per page</option>
+                        <option value="25">25 per page</option>
+                        <option value="50" selected>50 per page</option>
+                        <option value="100">100 per page</option>
+                        <option value="-1">View all</option>
+                    </select>
+                    
+                    <div class="pagination-buttons">
+                        <button class="pagination-button prev-page" title="Previous page">←</button>
+                        <span class="page-info">Page 1 of 1</span>
+                        <button class="pagination-button next-page" title="Next page">→</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        tableContainer.appendChild(filterControls);
+        
+        // Add table with custom headers for taker orders
+        const table = this.createElement('table', 'orders-table');
+        const thead = this.createElement('thead');
+        thead.innerHTML = `
+            <tr>
                 <th data-sort="id">ID <span class="sort-icon">↕</span></th>
                 <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
                 <th>Amount</th>
@@ -457,14 +485,79 @@ export class TakerOrders extends ViewOrders {
                 <th>Expires</th>
                 <th>Status</th>
                 <th>Action</th>
-            `;
-        }
+            </tr>
+        `;
+        
+        // Add click handlers for sorting
+        thead.querySelectorAll('th[data-sort]').forEach(th => {
+            th.addEventListener('click', () => this.handleSort(th.dataset.sort));
+        });
+        
+        table.appendChild(thead);
+        table.appendChild(this.createElement('tbody'));
+        tableContainer.appendChild(table);
+        
+        // Add bottom pagination
+        const bottomControls = this.createElement('div', 'filter-controls bottom-controls');
+        bottomControls.innerHTML = `
+            <div class="filter-row">
+                <div class="pagination-controls">
+                    <button class="pagination-button prev-page" title="Previous page">←</button>
+                    <span class="page-info">Page 1 of 1</span>
+                    <button class="pagination-button next-page" title="Next page">→</button>
+                </div>
+            </div>
+        `;
+        tableContainer.appendChild(bottomControls);
+        
+        // Add pagination event listeners
+        this.setupPaginationListeners(filterControls, bottomControls);
+        
+        // Add filter toggle listener
+        const toggle = filterControls.querySelector('#fillable-orders-toggle');
+        toggle.addEventListener('change', () => this.refreshOrdersView());
+        
+        this.container.appendChild(tableContainer);
+    }
 
-        // Remove the "Show only fillable orders" toggle since all orders are for this taker
-        const filterToggle = this.container.querySelector('.filter-toggle');
-        if (filterToggle) {
-            filterToggle.remove();
-        }
+    // Helper method to setup pagination listeners
+    setupPaginationListeners(topControls, bottomControls) {
+        const addListeners = (container, isTop) => {
+            if (isTop) {
+                const pageSizeSelect = container.querySelector('.page-size-select');
+                if (pageSizeSelect) {
+                    pageSizeSelect.addEventListener('change', () => {
+                        this.currentPage = 1;
+                        this.refreshOrdersView();
+                    });
+                }
+            }
+            
+            const prevButton = container.querySelector('.prev-page');
+            const nextButton = container.querySelector('.next-page');
+            
+            if (prevButton) {
+                prevButton.addEventListener('click', () => {
+                    if (this.currentPage > 1) {
+                        this.currentPage--;
+                        this.refreshOrdersView();
+                    }
+                });
+            }
+            
+            if (nextButton) {
+                nextButton.addEventListener('click', () => {
+                    const totalPages = this.getTotalPages();
+                    if (this.currentPage < totalPages) {
+                        this.currentPage++;
+                        this.refreshOrdersView();
+                    }
+                });
+            }
+        };
+        
+        addListeners(topControls, true);
+        addListeners(bottomControls, false);
     }
 
     // Override handleSort to use parent's debouncedRefresh
