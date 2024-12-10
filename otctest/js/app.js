@@ -147,6 +147,51 @@ class App {
         `;
         mainContent.style.position = 'relative';
         mainContent.appendChild(this.loadingOverlay);
+
+        // Initialize theme handling
+        this.initializeTheme();
+
+        // Add a debounce mechanism for reinitialization
+        let reinitializationTimeout = null;
+        let isReinitializing = false;
+
+        async function reinitializeComponents(walletAddress) {
+            // Prevent multiple concurrent reinitializations
+            if (isReinitializing) {
+                console.log('[App] Already reinitializing, skipping...');
+                return;
+            }
+
+            // Clear any pending reinitialization
+            if (reinitializationTimeout) {
+                clearTimeout(reinitializationTimeout);
+            }
+
+            // Set flag and schedule reinitialization
+            isReinitializing = true;
+            reinitializationTimeout = setTimeout(async () => {
+                try {
+                    console.log('[App] Reinitializing components with wallet...');
+                    // ... existing reinitialization code ...
+                } finally {
+                    isReinitializing = false;
+                    reinitializationTimeout = null;
+                }
+            }, 100); // Small delay to coalesce multiple events
+        }
+
+        // Update the wallet event handlers to use the debounced reinitialization
+        window.addEventListener('walletConnected', (event) => {
+            const { address } = event.detail;
+            console.log('[App] Wallet connected:', address);
+            reinitializeComponents(address);
+        });
+
+        window.addEventListener('chainChanged', (event) => {
+            const { chainId } = event.detail;
+            console.log('[App] Chain changed:', chainId);
+            reinitializeComponents(window.ethereum.selectedAddress);
+        });
     }
 
     initializeEventListeners() {
@@ -443,6 +488,30 @@ class App {
         if (activeComponent?.initialize) {
             this.debug('Refreshing active component:', this.currentTab);
             await activeComponent.initialize(false);
+        }
+    }
+
+    // Add this new method
+    initializeTheme() {
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+
+        const themeToggle = document.getElementById('theme-toggle');
+        if (themeToggle) {
+            themeToggle.addEventListener('click', () => {
+                const currentTheme = document.documentElement.getAttribute('data-theme');
+                const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+                
+                document.documentElement.setAttribute('data-theme', newTheme);
+                localStorage.setItem('theme', newTheme);
+            });
+        }
+
+        // Optional: Check system preference on first visit
+        if (!localStorage.getItem('theme')) {
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+            localStorage.setItem('theme', prefersDark ? 'dark' : 'light');
         }
     }
 }

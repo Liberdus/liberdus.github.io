@@ -3,11 +3,11 @@
     gap: 24px;
     margin: 32px 0;
     padding: 0 24px;
-    border-bottom: 2px solid #e9ecef;
+    border-bottom: 2px solid var(--border-color);
     justify-content: center;
     align-items: center;
     width: 100%;
-    background: white;
+    background: var(--bg-secondary);
 }
 
 .tab-button {
@@ -16,7 +16,7 @@
     background: none;
     cursor: pointer;
     font-weight: 600;
-    color: #64748b;
+    color: var(--text-secondary);
     position: relative;
     white-space: nowrap;
     transition: all 0.3s ease;
@@ -50,7 +50,7 @@
     display: none;
     padding: 24px;
     margin: 24px;
-    background: white;
+    background: var(--bg-secondary);
     border-radius: 16px;
     opacity: 0;
     transform: translateY(10px);

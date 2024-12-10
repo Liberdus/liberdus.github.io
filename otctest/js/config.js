@@ -78,6 +78,7 @@ export class WalletManager {
         this.contractAddress = networkConfig["80002"].contractAddress;
         this.contractABI = CONTRACT_ABI;
         this.isInitialized = false;
+        this.contractInitialized = false;
         this.debug = (message, ...args) => {
             if (isDebugEnabled('WALLET')) {
                 console.log('[WalletManager]', message, ...args);
@@ -150,6 +151,11 @@ export class WalletManager {
     }
 
     async initializeContract() {
+        if (this.contractInitialized) {
+            this.debug('Contract already initialized, skipping...');
+            return this.contract;
+        }
+
         try {
             const networkConfig = getNetworkConfig();
             this.contract = new ethers.Contract(
@@ -158,8 +164,9 @@ export class WalletManager {
                 this.signer
             );
             
-            console.log('[WalletManager] Contract initialized with ABI:', 
+            this.debug('Contract initialized with ABI:', 
                 this.contract.interface.format());
+            this.contractInitialized = true;
             return this.contract;
         } catch (error) {
             console.error('[WalletManager] Error initializing contract:', error);
@@ -198,13 +205,15 @@ export class WalletManager {
             this.chainId = chainId;
             this.isConnected = true;
 
+            // Initialize signer before notifying listeners
+            await this.initializeSigner(this.account);
+
             this.debug('Notifying listeners of connection');
             this.notifyListeners('connect', {
                 account: this.account,
                 chainId: this.chainId
             });
 
-            const result = await this.initializeSigner(this.account);
             return {
                 account: this.account,
                 chainId: this.chainId

@@ -2,7 +2,7 @@ import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { getNetworkConfig, isDebugEnabled, walletManager } from '../config.js';
 import { erc20Abi } from '../abi/erc20.js';
-import { getTokenList } from '../utils/tokens.js';
+import { getTokenList, NETWORK_TOKENS } from '../utils/tokens.js';
 
 export class CreateOrder extends BaseComponent {
     constructor() {
@@ -14,12 +14,28 @@ export class CreateOrder extends BaseComponent {
         this.boundCreateOrderHandler = this.handleCreateOrder.bind(this);
         this.isSubmitting = false;
         this.tokens = [];
+        this.sellToken = null;
+        this.buyToken = null;
+        this.tokenSelectorListeners = {};  // Store listeners to prevent duplicates
         
         // Initialize debug logger
         this.debug = (message, ...args) => {
             if (isDebugEnabled('CREATE_ORDER')) {
                 console.log('[CreateOrder]', message, ...args);
             }
+        };
+    }
+
+    // Add debounce as a class method
+    debounce(func, wait) {
+        let timeout;
+        return (...args) => {
+            const later = () => {
+                clearTimeout(timeout);
+                func.apply(this, args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
         };
     }
 
@@ -59,18 +75,12 @@ export class CreateOrder extends BaseComponent {
     }
 
     async initialize(readOnlyMode = true) {
-        if (this.isInitializing) {
-            this.debug('Already initializing, skipping...');
+        if (this.initializing || this.initialized) {
+            this.debug('Already initializing or initialized, skipping...');
             return;
         }
-
-        if (this.isInitialized) {
-            this.debug('Already initialized, skipping...');
-            return;
-        }
-
-        this.isInitializing = true;
-
+        this.initializing = true;
+        
         try {
             this.debug('Starting initialization...');
             
@@ -125,14 +135,17 @@ export class CreateOrder extends BaseComponent {
 
             this.updateFeeDisplay();
             
-            this.isInitialized = true;
+            // Initialize token selectors
+            this.initializeTokenSelectors();
+            
+            this.initialized = true;
             this.debug('Initialization complete');
 
         } catch (error) {
             this.debug('Error in initialization:', error);
             this.showError('Failed to initialize. Please try again.');
         } finally {
-            this.isInitializing = false;
+            this.initializing = false;
         }
     }
 
@@ -339,29 +352,55 @@ export class CreateOrder extends BaseComponent {
     async handleCreateOrder(event) {
         event.preventDefault();
         
-        const createOrderBtn = document.getElementById('createOrderBtn');
         if (this.isSubmitting) {
             this.debug('Already processing a transaction');
             return;
         }
         
+        const createOrderBtn = document.getElementById('createOrderBtn');
+        
         try {
-            // Get form values first
-            let taker = document.getElementById('takerAddress')?.value.trim() || '';
-            const sellToken = document.getElementById('sellToken').value.trim();
-            const sellAmount = document.getElementById('sellAmount').value.trim();
-            const buyToken = document.getElementById('buyToken').value.trim();
-            const buyAmount = document.getElementById('buyAmount').value.trim();
+            this.isSubmitting = true;
+            createOrderBtn.disabled = true;
+            createOrderBtn.classList.add('disabled');
             
-            // Validate inputs
-            if (!sellToken || !ethers.utils.isAddress(sellToken)) {
+            // Debug logs to check token state
+            this.debug('Current sellToken:', this.sellToken);
+            this.debug('Current buyToken:', this.buyToken);
+            
+            // Get form values
+            let taker = document.getElementById('takerAddress')?.value.trim() || '';
+            
+            // Validate sell token
+            if (!this.sellToken || !this.sellToken.address) {
+                this.debug('Invalid sell token:', this.sellToken);
                 this.showStatus('Please select a valid token to sell', 'error');
                 return;
             }
-            if (!buyToken || !ethers.utils.isAddress(buyToken)) {
+
+            // Validate buy token
+            if (!this.buyToken || !this.buyToken.address) {
+                this.debug('Invalid buy token:', this.buyToken);
                 this.showStatus('Please select a valid token to buy', 'error');
                 return;
             }
+
+            // Validate addresses
+            if (!ethers.utils.isAddress(this.sellToken.address)) {
+                this.debug('Invalid sell token address:', this.sellToken.address);
+                this.showStatus('Invalid sell token address', 'error');
+                return;
+            }
+            if (!ethers.utils.isAddress(this.buyToken.address)) {
+                this.debug('Invalid buy token address:', this.buyToken.address);
+                this.showStatus('Invalid buy token address', 'error');
+                return;
+            }
+
+            const sellAmount = document.getElementById('sellAmount')?.value.trim();
+            const buyAmount = document.getElementById('buyAmount')?.value.trim();
+
+            // Validate inputs
             if (!sellAmount || isNaN(sellAmount) || parseFloat(sellAmount) <= 0) {
                 this.showStatus('Please enter a valid sell amount', 'error');
                 return;
@@ -371,11 +410,6 @@ export class CreateOrder extends BaseComponent {
                 return;
             }
 
-            this.isSubmitting = true;
-            createOrderBtn.disabled = true;
-            createOrderBtn.classList.add('disabled');
-            this.showStatus('Processing...', 'pending');
-            
             // If taker is empty, use zero address for public order
             if (!taker) {
                 taker = ethers.constants.AddressZero;
@@ -399,31 +433,48 @@ export class CreateOrder extends BaseComponent {
             );
 
             // Convert amounts to wei
-            const sellTokenDecimals = await this.getTokenDecimals(sellToken);
-            const buyTokenDecimals = await this.getTokenDecimals(buyToken);
+            const sellTokenDecimals = await this.getTokenDecimals(this.sellToken.address);
+            const buyTokenDecimals = await this.getTokenDecimals(this.buyToken.address);
             const sellAmountWei = ethers.utils.parseUnits(sellAmount, sellTokenDecimals);
             const buyAmountWei = ethers.utils.parseUnits(buyAmount, buyTokenDecimals);
 
-            // Before creating the order, check and approve both tokens
-            await this.checkAndApproveToken(sellToken, sellAmountWei);
-            await this.checkAndApproveToken(this.feeToken.address, this.feeToken.amount);
-            
+            // Debug logs to check amounts and allowance
+            this.debug('Sell amount in wei:', sellAmountWei.toString());
+            this.debug('Buy amount in wei:', buyAmountWei.toString());
+
+            // Check and approve tokens
+            const sellTokenApproved = await this.checkAndApproveToken(this.sellToken.address, sellAmountWei);
+            if (!sellTokenApproved) {
+                return;
+            }
+
+            const feeTokenApproved = await this.checkAndApproveToken(this.feeToken.address, this.feeToken.amount);
+            if (!feeTokenApproved) {
+                return;
+            }
+
             // Create order
             this.showStatus('Creating order...', 'pending');
             const tx = await this.contract.createOrder(
                 taker,
-                sellToken,
+                this.sellToken.address,
                 sellAmountWei,
-                buyToken,
+                this.buyToken.address,
                 buyAmountWei
-            );
+            ).catch(error => {
+                if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
+                    this.showStatus('Order creation declined', 'warning');
+                    return null;
+                }
+                throw error;
+            });
+
+            if (!tx) return; // User rejected the transaction
 
             this.showStatus('Waiting for confirmation...', 'pending');
             await tx.wait();
             
             this.showStatus('Order created successfully!', 'success');
-            
-            // Reset form after successful order creation
             this.resetForm();
             
             // Reload orders if needed
@@ -433,7 +484,8 @@ export class CreateOrder extends BaseComponent {
 
         } catch (error) {
             this.debug('Create order error:', error);
-            this.showStatus(error.message, 'error');
+            const userMessage = this.getUserFriendlyError(error);
+            this.showStatus(userMessage, 'error');
         } finally {
             this.isSubmitting = false;
             createOrderBtn.disabled = false;
@@ -514,40 +566,52 @@ export class CreateOrder extends BaseComponent {
 
     async loadTokens() {
         try {
+            this.debug('Loading tokens...');
+            // This gets tokens with balances from tokens.js
             this.tokens = await getTokenList();
-            
+            this.debug('Loaded tokens:', this.tokens);
+
             ['sell', 'buy'].forEach(type => {
                 const modal = document.getElementById(`${type}TokenModal`);
-                if (!modal) return;
+                if (!modal) {
+                    this.debug(`No modal found for ${type}`);
+                    return;
+                }
 
-                // Get references to token lists
+                const commonList = modal.querySelector(`#${type}CommonTokenList`);
                 const userList = modal.querySelector(`#${type}UserTokenList`);
-                const allList = modal.querySelector(`#${type}AllTokenList`);
 
-                // Remove filtering for native token
-                const tokens = this.tokens.filter(t => t.address);
+                if (commonList && userList) {
+                    // Get network config for predefined tokens
+                    const networkConfig = getNetworkConfig();
+                    const predefinedTokens = NETWORK_TOKENS[networkConfig.name] || [];
 
-                // Display tokens in wallet (tokens with balance)
-                const walletTokens = tokens.filter(t => t.balance && Number(t.balance) > 0);
-                this.displayTokens(walletTokens, userList);
-
-                // Display all other tokens
-                this.displayTokens(tokens, allList);
-
-                // Add click handlers
-                modal.querySelectorAll('.token-item').forEach(item => {
-                    item.addEventListener('click', () => {
-                        const address = item.dataset.address;
-                        const input = document.getElementById(`${type}Token`);
-                        input.value = address;
-                        this.updateTokenBalance(address, `${type}TokenBalance`);
-                        modal.classList.remove('show');
+                    // We should merge predefined tokens with their balances from this.tokens
+                    const predefinedTokensWithBalances = predefinedTokens.map(token => {
+                        const tokenWithBalance = this.tokens.find(t => 
+                            t.address.toLowerCase() === token.address.toLowerCase()
+                        );
+                        return {
+                            ...token,
+                            balance: tokenWithBalance?.balance || '0'
+                        };
                     });
-                });
+
+                    // Display predefined tokens with balances
+                    this.displayTokens(predefinedTokensWithBalances, commonList, type);
+
+                    // Display wallet tokens (tokens with balance)
+                    const walletTokens = this.tokens.filter(t => 
+                        t.balance && 
+                        Number(t.balance) > 0 &&
+                        !predefinedTokens.some(p => p.address.toLowerCase() === t.address.toLowerCase())
+                    );
+                    this.displayTokens(walletTokens, userList, type);
+                }
             });
         } catch (error) {
-            console.error('[CreateOrder] Error loading tokens:', error);
-            this.showError('Failed to load tokens. Please try again.');
+            this.debug('Error loading tokens:', error);
+            this.showStatus('Failed to load tokens. Please try again.', 'error');
         }
     }
 
@@ -637,204 +701,140 @@ export class CreateOrder extends BaseComponent {
                     <button class="token-modal-close">&times;</button>
                 </div>
                 <div class="token-modal-search">
-                    <span class="search-info-text">
-                        Search by token name, symbol, or paste contract address
-                    </span>
                     <input type="text" 
                            class="token-search-input" 
-                           placeholder="0x... or search token name"
+                           placeholder="Search by name or paste address"
                            id="${type}TokenSearch">
                 </div>
                 <div class="token-sections">
                     <div id="${type}ContractResult"></div>
                     <div class="token-section">
-                        <div class="token-section-header">
-                            <h4>Tokens in Wallet</h4>
-                            <span class="token-section-subtitle">Your available tokens</span>
-                        </div>
-                        <div class="token-list" id="${type}UserTokenList">
-                            <div class="token-list-loading">
-                                <div class="spinner"></div>
-                                <div>Loading tokens...</div>
-                            </div>
-                        </div>
+                        <h4>Common tokens</h4>
+                        <div class="token-list" id="${type}CommonTokenList"></div>
+                    </div>
+                    <div class="token-section">
+                        <h4>Tokens in wallet</h4>
+                        <div class="token-list" id="${type}UserTokenList"></div>
                     </div>
                 </div>
             </div>
         `;
 
-        // Add search functionality
+        // Update to use the class method debounce
         const searchInput = modal.querySelector(`#${type}TokenSearch`);
-        searchInput.addEventListener('input', (e) => this.handleTokenSearch(e.target.value, type));
-        
-        // Add modal close handlers
-        modal.querySelector('.token-modal-close').addEventListener('click', () => {
-            modal.classList.remove('show');
-        });
-        
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.classList.remove('show');
-            }
-        });
-        
+        searchInput.addEventListener('input', this.debounce((e) => {
+            this.handleTokenSearch(e.target.value, type);
+        }, 300));
+
         return modal;
     }
 
     async handleTokenSearch(searchTerm, type) {
-        const contractResult = document.getElementById(`${type}ContractResult`);
-        
-        // Clear previous results
-        contractResult.innerHTML = '';
-        
-        // If input looks like an address
-        if (ethers.utils.isAddress(searchTerm)) {
-            const POL_NativeToken_Address = '0x0000000000000000000000000000000000001010';
-            if (searchTerm.toLowerCase() === POL_NativeToken_Address.toLowerCase()) {
-                contractResult.innerHTML = `
-                  <div class="contract-address-result">
-                    <div class="contract-not-supported">
-                      <span>POL Native Token is not supported. Please use ERC20 tokens.</span>
-                    </div>
-                  </div>
-                `;
+        try {
+            const contractResult = document.getElementById(`${type}ContractResult`);
+            
+            searchTerm = searchTerm.trim().toLowerCase();
+            
+            // Clear previous contract result only
+            contractResult.innerHTML = '';
+
+            // If search is empty, just clear the contract result
+            if (!searchTerm) {
                 return;
             }
-            // Show loading state first
-            contractResult.innerHTML = `
-                <div class="contract-address-result">
-                    <div class="contract-loading">
-                        <div class="spinner"></div>
-                        <span>Checking contract...</span>
+
+            // Check if input is an address
+            if (ethers.utils.isAddress(searchTerm)) {
+                // Show loading state for contract result
+                contractResult.innerHTML = `
+                    <div class="token-section">
+                        <h4>Token Contract</h4>
+                        <div class="contract-loading">
+                            <div class="spinner"></div>
+                            <span>Loading token info...</span>
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
 
-            try {
-                const tokenContract = new ethers.Contract(
-                    searchTerm,
-                    [
-                        'function name() view returns (string)',
-                        'function symbol() view returns (string)',
-                        'function decimals() view returns (uint8)',
-                        'function balanceOf(address) view returns (uint256)'
-                    ],
-                    this.provider
-                );
+                try {
+                    const tokenContract = new ethers.Contract(
+                        searchTerm,
+                        erc20Abi,
+                        this.provider
+                    );
 
-                const [name, symbol, decimals, balance] = await Promise.all([
-                    tokenContract.name().catch(() => null),
-                    tokenContract.symbol().catch(() => null),
-                    tokenContract.decimals().catch(() => null),
-                    tokenContract.balanceOf(this.account).catch(() => null)
-                ]);
+                    const [name, symbol, decimals, balance] = await Promise.all([
+                        tokenContract.name().catch(() => null),
+                        tokenContract.symbol().catch(() => null),
+                        tokenContract.decimals().catch(() => null),
+                        tokenContract.balanceOf(await walletManager.getCurrentAddress()).catch(() => null)
+                    ]);
 
-                if (name && symbol && decimals !== null) {
-                    // Format balance if available
-                    const formattedBalance = balance ? 
-                        ethers.utils.formatUnits(balance, decimals) : '0';
+                    if (name && symbol && decimals !== null) {
+                        const token = {
+                            address: searchTerm,
+                            name,
+                            symbol,
+                            decimals,
+                            balance: balance ? ethers.utils.formatUnits(balance, decimals) : '0'
+                        };
 
-                    // Create token object matching the structure used in tokens.js
-                    const token = {
-                        address: searchTerm,
-                        name,
-                        symbol,
-                        decimals,
-                        balance: formattedBalance
-                    };
-
-                    // Display the token in the same format as listed tokens
-                    contractResult.innerHTML = `
-                        <div class="token-item" data-address="${searchTerm}">
-                            <div class="token-item-left">
-                                <div class="token-icon">
-                                    ${this.getTokenIcon(token)}
-                                </div>
-                                <div class="token-item-info">
-                                    <div class="token-item-symbol">${symbol}</div>
-                                    <div class="token-item-name">
-                                        ${name}
-                                        <a href="${this.getExplorerUrl(searchTerm)}" 
-                                           class="token-explorer-link"
-                                           target="_blank"
-                                           title="View contract on explorer">
-                                            <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                                <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                                            </svg>
-                                        </a>
+                        contractResult.innerHTML = `
+                            <div class="token-section">
+                                <h4>Token Contract</h4>
+                                <div class="token-list">
+                                    <div class="token-item" data-address="${token.address}">
+                                        <div class="token-item-left">
+                                            <div class="token-icon">
+                                                ${this.getTokenIcon(token)}
+                                            </div>
+                                            <div class="token-item-info">
+                                                <div class="token-item-symbol">${token.symbol}</div>
+                                                <div class="token-item-name">
+                                                    ${token.name}
+                                                    <a href="${this.getExplorerUrl(token.address)}" 
+                                                       target="_blank"
+                                                       class="token-explorer-link">
+                                                        <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                                            <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                                        </svg>
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        ${balance ? `
+                                            <div class="token-item-balance">
+                                                ${Number(ethers.utils.formatUnits(balance, decimals)).toFixed(4)}
+                                            </div>
+                                        ` : ''}
                                     </div>
                                 </div>
                             </div>
-                            ${balance ? `
-                                <div class="token-item-balance">
-                                    ${Number(formattedBalance).toFixed(4)}
-                                </div>
-                            ` : ''}
-                        </div>
-                    `;
+                        `;
 
-                    // Add click handler
-                    const tokenItem = contractResult.querySelector('.token-item');
-                    tokenItem.addEventListener('click', () => {
-                        const input = document.getElementById(`${type}Token`);
-                        input.value = searchTerm;
-                        this.updateTokenBalance(searchTerm, `${type}TokenBalance`);
-                        document.getElementById(`${type}TokenModal`).classList.remove('show');
-                    });
-                }
-            } catch (error) {
-                // Just clear the contract result if there's an error
-                contractResult.innerHTML = '';
-            }
-        }
-
-        // Filter and display wallet tokens
-        const searchTermLower = searchTerm.toLowerCase().trim();
-        const filteredWalletTokens = this.walletTokens.filter(token => 
-            (token.symbol.toLowerCase().includes(searchTermLower) ||
-             token.name.toLowerCase().includes(searchTermLower) ||
-             token.address.toLowerCase().includes(searchTermLower))
-        );
-
-        // Display wallet tokens
-        if (filteredWalletTokens.length > 0) {
-            userTokenList.innerHTML = filteredWalletTokens.map(token => `
-                <div class="token-item" data-address="${token.address}">
-                    <div class="token-item-left">
-                        <div class="token-icon">
-                            ${this.getTokenIcon(token)}
-                        </div>
-                        <div class="token-item-info">
-                            <div class="token-item-symbol">${token.symbol}</div>
-                            <div class="token-item-name">
-                                ${token.name}
-                                <a href="${this.getExplorerUrl(token.address)}" 
-                                   class="token-explorer-link"
-                                   target="_blank"
-                                   title="View contract on explorer">
-                                    <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                        <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                                    </svg>
-                                </a>
+                        // Add click handler
+                        const tokenItem = contractResult.querySelector('.token-item');
+                        tokenItem.addEventListener('click', () => this.handleTokenItemClick(type, tokenItem));
+                    }
+                } catch (error) {
+                    contractResult.innerHTML = `
+                        <div class="token-section">
+                            <h4>Token Contract</h4>
+                            <div class="contract-error">
+                                Invalid or unsupported token contract
                             </div>
                         </div>
-                    </div>
-                    <div class="token-item-balance">
-                        ${Number(token.balance).toFixed(4)}
-                    </div>
-                </div>
-            `).join('');
-        } else {
-            userTokenList.innerHTML = `
-                <div class="token-list-empty">
-                    No tokens found in wallet
-                </div>
-            `;
+                    `;
+                }
+            }
+        } catch (error) {
+            this.debug('Search error:', error);
+            this.showError('Error searching for token');
         }
     }
 
-    displayTokens(tokens, container) {
-        if (!container) return; // Guard against null container
+    displayTokens(tokens, container, type) {
+        if (!container) return;
 
         if (!tokens || tokens.length === 0) {
             container.innerHTML = `
@@ -845,58 +845,52 @@ export class CreateOrder extends BaseComponent {
             return;
         }
 
-        try {
-            container.innerHTML = tokens.map(token => `
-                <div class="token-item" data-address="${token.address}">
+        // Clear existing content
+        container.innerHTML = '';
+
+        // Add each token to the container
+        tokens.forEach(token => {
+            const tokenElement = document.createElement('div');
+            tokenElement.className = 'token-item';
+            tokenElement.dataset.address = token.address;
+            
+            // Format balance if it exists
+            const formattedBalance = token.balance ? 
+                Number(token.balance).toLocaleString(undefined, { 
+                    minimumFractionDigits: 2, 
+                    maximumFractionDigits: 6 
+                }) : '0.00';
+            
+            tokenElement.innerHTML = `
+                <div class="token-item-content">
                     <div class="token-item-left">
                         <div class="token-icon">
-                            ${this.getTokenIcon(token)}
+                            ${token.logoURI ? 
+                                `<img src="${token.logoURI}" alt="${token.symbol}" class="token-icon-image">` :
+                                `<div class="token-icon-fallback" style="background: #FFEEAD">
+                                    ${token.symbol.charAt(0)}
+                                </div>`
+                            }
                         </div>
                         <div class="token-item-info">
                             <div class="token-item-symbol">${token.symbol}</div>
-                            <div class="token-item-name">
-                                ${token.name}
-                                <a href="${this.getExplorerUrl(token.address)}" 
-                                   class="token-explorer-link"
-                                   target="_blank"
-                                   title="View contract on explorer">
-                                    <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                        <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                                    </svg>
-                                </a>
-                            </div>
+                            <div class="token-item-name">${token.name}</div>
                         </div>
                     </div>
-                    ${token.balance ? `
-                        <div class="token-item-balance">
-                            ${Number(token.balance).toFixed(4)}
-                        </div>
-                    ` : ''}
-                </div>
-            `).join('');
-
-            // Add click handlers
-            container.querySelectorAll('.token-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    const address = item.dataset.address;
-                    const type = container.id.includes('sell') ? 'sell' : 'buy';
-                    const input = document.getElementById(`${type}Token`);
-                    if (input) {
-                        input.value = address;
-                        this.updateTokenBalance(address, `${type}TokenBalance`);
-                        const modal = document.getElementById(`${type}TokenModal`);
-                        if (modal) modal.classList.remove('show');
-                    }
-                });
-            });
-        } catch (error) {
-            console.error('Error displaying tokens:', error);
-            container.innerHTML = `
-                <div class="token-list-empty">
-                    Error loading tokens
+                    <div class="token-item-right">
+                        ${formattedBalance}
+                    </div>
                 </div>
             `;
-        }
+
+            // Add click event listener to the token element
+            tokenElement.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.handleTokenItemClick(type, tokenElement);
+            });
+
+            container.appendChild(tokenElement);
+        });
     }
 
     getExplorerUrl(address) {
@@ -941,8 +935,8 @@ export class CreateOrder extends BaseComponent {
 
     cleanup() {
         this.debug('Cleaning up CreateOrder component');
-        this.isInitialized = false;
-        this.isInitializing = false;
+        this.initialized = false;
+        this.initializing = false;
         // Remove event listeners
         if (this.boundCreateOrderHandler) {
             const createOrderBtn = document.getElementById('createOrderBtn');
@@ -1022,37 +1016,29 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug(`Checking allowance for token: ${tokenAddress}`);
             
-            // Get signer from walletManager
+            // Get signer and current address
             const signer = walletManager.getSigner();
-            if (!signer) {
-                throw new Error('No signer available - wallet may be disconnected');
-            }
-
-            // Get the current address using walletManager
             const currentAddress = await walletManager.getCurrentAddress();
-            if (!currentAddress) {
-                throw new Error('No wallet address available');
+            if (!signer || !currentAddress) {
+                throw new Error('Wallet not connected');
             }
 
             // Calculate required amount, accounting for fee token if same as sell token
-            let requiredAmount = amount;
+            let requiredAmount = ethers.BigNumber.from(amount);
             
-            if (tokenAddress.toLowerCase() === this.feeToken?.address?.toLowerCase()) {
-                // If this is the fee token, we need to account for both fee and potential sell amount
-                const sellToken = document.getElementById('sellToken')?.value;
+            if (tokenAddress.toLowerCase() === this.feeToken?.address?.toLowerCase() &&
+                tokenAddress.toLowerCase() === this.sellToken?.address?.toLowerCase()) {
                 const sellAmountStr = document.getElementById('sellAmount')?.value;
-                
-                if (sellToken?.toLowerCase() === tokenAddress.toLowerCase() && sellAmountStr) {
-                    const sellTokenDecimals = await this.getTokenDecimals(sellToken);
-                    const sellAmountWei = ethers.utils.parseUnits(sellAmountStr, sellTokenDecimals);
-                    
-                    // Add fee amount and sell amount together
-                    requiredAmount = this.feeToken.amount.add(sellAmountWei);
-                    this.debug(`Token is both fee and sell token. Combined amount for approval: ${requiredAmount.toString()}`);
+                if (sellAmountStr) {
+                    const tokenDecimals = await this.getTokenDecimals(tokenAddress);
+                    const sellAmountWei = ethers.utils.parseUnits(sellAmountStr, tokenDecimals);
+                    const feeAmountWei = ethers.BigNumber.from(this.feeToken.amount);
+                    requiredAmount = sellAmountWei.add(feeAmountWei);
+                    this.debug(`Combined amount for approval (sell + fee): ${requiredAmount.toString()}`);
                 }
             }
 
-            // Create token contract instance with the correct signer
+            // Create token contract instance
             const tokenContract = new ethers.Contract(
                 tokenAddress,
                 [
@@ -1067,62 +1053,59 @@ export class CreateOrder extends BaseComponent {
                 currentAddress,
                 this.contract.address
             );
+            this.debug(`Current allowance: ${currentAllowance.toString()}`);
+            this.debug(`Required amount: ${requiredAmount.toString()}`);
 
-            // If allowance is insufficient, request approval
+            // If allowance is insufficient, reset and approve new amount
             if (currentAllowance.lt(requiredAmount)) {
-                this.debug(`Insufficient allowance for token ${tokenAddress}. Current: ${currentAllowance}, Required: ${requiredAmount}`);
-                this.showStatus('Requesting token approval...', 'pending');
-                
-                try {
-                    const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
-                    this.showStatus('Waiting for approval confirmation...', 'pending');
-                    
-                    // Wait for transaction and handle replacement
-                    try {
-                        await approveTx.wait();
-                    } catch (waitError) {
-                        // Check if transaction was replaced
-                        if (waitError.code === 'TRANSACTION_REPLACED') {
-                            if (waitError.cancelled) {
-                                // Transaction was cancelled (dropped)
-                                throw new Error('Approval transaction was cancelled');
-                            } else {
-                                // Transaction was replaced (speed up)
-                                this.debug('Approval transaction was sped up:', waitError.replacement.hash);
-                                // Check if replacement transaction was successful
-                                if (waitError.receipt.status === 1) {
-                                    this.debug('Replacement approval transaction successful');
-                                    this.showStatus('Token approved successfully', 'success');
-                                    return true;
-                                } else {
-                                    throw new Error('Replacement approval transaction failed');
-                                }
-                            }
-                        } else {
-                            // Other error occurred
-                            throw waitError;
-                        }
-                    }
-                    
-                    this.debug(`Token ${tokenAddress} approved successfully`);
-                    this.showStatus('Token approved successfully', 'success');
-                } catch (error) {
-                    // Handle user rejection or other errors
-                    if (error.code === 4001) { // MetaMask user rejection error code
-                        throw new Error('User rejected the approval transaction');
-                    }
-                    throw error;
+                if (!currentAllowance.isZero()) {
+                    this.debug('Resetting existing allowance');
+                    const resetTx = await tokenContract.approve(this.contract.address, 0);
+                    await resetTx.wait();
+                    this.debug('Allowance reset successful');
                 }
-            } else {
-                this.debug(`Token ${tokenAddress} already has sufficient allowance`);
+
+                this.showStatus('Requesting token approval...', 'pending');
+                const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
+                this.showStatus('Please confirm the approval in your wallet...', 'pending');
+                
+                await approveTx.wait();
+                this.showStatus('Token approved successfully', 'success');
+
+                const newAllowance = await tokenContract.allowance(currentAddress, this.contract.address);
+                this.debug(`New allowance after approval: ${newAllowance.toString()}`);
             }
 
             return true;
         } catch (error) {
             this.debug('Token approval error:', error);
-            this.showStatus(error.message || 'Failed to approve token', 'error');
-            throw error;
+            const userMessage = this.getUserFriendlyError(error);
+            this.showStatus(userMessage, 'error');
+            return false;
         }
+    }
+
+    // Add new helper method for user-friendly error messages
+    getUserFriendlyError(error) {
+        // Check for common error codes and messages
+        if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
+            return 'Transaction was declined';
+        }
+        if (error.code === -32603) {
+            return 'Transaction failed - please try again';
+        }
+        if (error.message?.includes('insufficient funds')) {
+            return 'Insufficient funds for gas fees';
+        }
+        if (error.message?.includes('nonce')) {
+            return 'Transaction error - please refresh and try again';
+        }
+        if (error.message?.includes('gas required exceeds allowance')) {
+            return 'Transaction requires too much gas';
+        }
+        
+        // Default generic message
+        return 'Transaction failed - please try again';
     }
 
     // Update the fee display in the UI
@@ -1137,6 +1120,175 @@ export class CreateOrder extends BaseComponent {
             const formattedAmount = ethers.utils.formatUnits(this.feeToken.amount, this.feeToken.decimals);
             feeDisplay.textContent = `${formattedAmount} ${this.feeToken.symbol}`;
         }
+    }
+
+    handleTokenSelect(type, token) {
+        try {
+            this.debug(`Token selected for ${type}:`, token);
+            
+            // Store token in the component
+            this[`${type}Token`] = {
+                address: token.address,
+                symbol: token.symbol,
+                decimals: token.decimals || 18,
+                balance: token.balance || '0',
+                logoURI: token.logoURI
+            };
+            
+            this.debug(`Updated ${type}Token:`, this[`${type}Token`]);
+            // Update the selector display
+            const selector = document.getElementById(`${type}TokenSelector`);
+            if (selector) {
+                // Update the selector content to show selected token
+                selector.innerHTML = `
+                    <div class="token-selector-content">
+                        <div class="token-selector-left">
+                            <div class="token-icon small">
+                                ${token.logoURI ? 
+                                    `<img src="${token.logoURI}" alt="${token.symbol}" class="token-icon-image">` :
+                                    `<div class="token-icon-fallback">${token.symbol.charAt(0)}</div>`
+                                }
+                            </div>
+                            <div class="token-info">
+                                <span class="token-symbol">${token.symbol}</span>
+                                <span class="token-balance">Balance: ${token.balance || '0.00'}</span>
+                            </div>
+                        </div>
+                        <svg width="12" height="12" viewBox="0 0 12 12">
+                            <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+                        </svg>
+                    </div>
+                `;
+            }
+
+            // Close the modal
+            const modal = document.getElementById(`${type}TokenModal`);
+            if (modal) {
+                modal.style.display = 'none';
+            }
+
+            // Update other UI elements
+            if (type === 'sell') {
+                this.updateSellAmountMax();
+            }
+            this.updateCreateButtonState();
+            this.updateTokenAmounts(type);
+
+        } catch (error) {
+            this.debug('Error in handleTokenSelect:', error);
+            this.showStatus(`Failed to select ${type} token: ${error.message}`, 'error');
+        }
+    }
+
+    handleTokenItemClick(type, tokenItem) {
+        try {
+            const address = tokenItem.dataset.address;
+            const token = this.tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
+            
+            this.debug('Token item clicked:', {
+                type,
+                address,
+                token
+            });
+            
+            if (token) {
+                this.handleTokenSelect(type, token);
+            }
+        } catch (error) {
+            this.debug('Error in handleTokenItemClick:', error);
+            this.showError('Failed to select token');
+        }
+    }
+
+    updateCreateButtonState() {
+        try {
+            const createButton = document.getElementById('createOrderButton');
+            if (!createButton) return;
+
+            // Check if we have both tokens selected and valid amounts
+            const hasTokens = this.sellToken && this.buyToken;
+            const sellAmount = document.getElementById('sellAmount')?.value;
+            const buyAmount = document.getElementById('buyAmount')?.value;
+            const hasAmounts = sellAmount && buyAmount && 
+                             Number(sellAmount) > 0 && 
+                             Number(buyAmount) > 0;
+
+            // Enable button only if we have both tokens and valid amounts
+            createButton.disabled = !(hasTokens && hasAmounts);
+        } catch (error) {
+            this.debug('Error updating create button state:', error);
+        }
+    }
+
+    updateSellAmountMax() {
+        try {
+            if (!this.sellToken) return;
+            
+            const maxButton = document.getElementById('sellAmountMax');
+            if (!maxButton) return;
+
+            // Update max button visibility based on token balance
+            if (this.sellToken.balance) {
+                maxButton.style.display = 'inline';
+                maxButton.onclick = () => {
+                    const sellAmount = document.getElementById('sellAmount');
+                    if (sellAmount) {
+                        sellAmount.value = this.sellToken.balance;
+                        this.updateTokenAmounts('sell');
+                    }
+                };
+            } else {
+                maxButton.style.display = 'none';
+            }
+        } catch (error) {
+            this.debug('Error updating sell amount max:', error);
+        }
+    }
+
+    updateTokenAmounts(type) {
+        try {
+            // Add your token amount update logic here
+            this.updateCreateButtonState();
+        } catch (error) {
+            this.debug('Error updating token amounts:', error);
+        }
+    }
+
+    initializeTokenSelectors() {
+        ['sell', 'buy'].forEach(type => {
+            const selector = document.getElementById(`${type}TokenSelector`);
+            const modal = document.getElementById(`${type}TokenModal`);
+            const closeButton = modal?.querySelector('.token-modal-close');
+            
+            if (selector && modal) {
+                // Remove existing listener if any
+                if (this.tokenSelectorListeners[type]) {
+                    selector.removeEventListener('click', this.tokenSelectorListeners[type]);
+                }
+
+                // Create new listener for opening modal
+                this.tokenSelectorListeners[type] = () => {
+                    modal.style.display = 'block';
+                };
+
+                // Add new listener
+                selector.addEventListener('click', this.tokenSelectorListeners[type]);
+
+                // Add close button listener
+                if (closeButton) {
+                    closeButton.onclick = () => {
+                        modal.style.display = 'none';
+                    };
+                }
+
+                // Close modal when clicking outside
+                window.onclick = (event) => {
+                    if (event.target === modal) {
+                        modal.style.display = 'none';
+                    }
+                };
+            }
+        });
     }
 }
 
