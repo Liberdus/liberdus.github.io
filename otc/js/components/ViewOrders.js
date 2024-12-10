@@ -354,9 +354,6 @@ export class ViewOrders extends BaseComponent {
         try {
             this.debug('Refreshing orders view');
             
-            // Show loading state first
-            this.showLoadingState();
-
             // Get all orders and convert to array
             let ordersToDisplay = Array.from(this.orders.values());
             
@@ -390,34 +387,6 @@ export class ViewOrders extends BaseComponent {
                     .map(({ order }) => order);
             }
 
-            // Get token details for all orders at once
-            const tokenAddresses = new Set();
-            ordersToDisplay.forEach(order => {
-                if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
-                if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
-            });
-
-            // Fetch token details for uncached tokens
-            for (const address of tokenAddresses) {
-                if (!this.tokenCache.has(address)) {
-                    try {
-                        const tokenContract = new ethers.Contract(
-                            address,
-                            erc20Abi,
-                            this.provider
-                        );
-                        const [symbol, decimals] = await Promise.all([
-                            tokenContract.symbol(),
-                            tokenContract.decimals()
-                        ]);
-                        this.tokenCache.set(address, { symbol, decimals });
-                    } catch (error) {
-                        this.debug(`Error fetching token details for ${address}:`, error);
-                        this.tokenCache.set(address, { symbol: 'UNK', decimals: 18 });
-                    }
-                }
-            }
-
             // Apply pagination
             const totalOrders = ordersToDisplay.length;
             if (pageSize !== -1) {
@@ -425,28 +394,54 @@ export class ViewOrders extends BaseComponent {
                 ordersToDisplay = ordersToDisplay.slice(startIndex, startIndex + pageSize);
             }
 
-            // Create table rows
+            // Get tbody reference
             const tbody = this.container.querySelector('tbody');
             if (!tbody) {
                 this.debug('ERROR: tbody not found');
                 return;
             }
 
-            if (ordersToDisplay.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="8" class="no-orders-message">
-                            ${showOnlyActive ? 'No active orders found' : 'No orders found'}
-                        </td>
-                    </tr>`;
-            } else {
-                // Clear existing rows
-                tbody.innerHTML = '';
-                
-                // Add new rows
-                for (const order of ordersToDisplay) {
-                    const row = await this.createOrderRow(order, this.tokenCache);
-                    if (row) tbody.appendChild(row);
+            // Compare existing rows with new orders
+            const existingRows = Array.from(tbody.children);
+            const existingOrderIds = new Set(existingRows.map(row => row.dataset.orderId));
+            const newOrderIds = new Set(ordersToDisplay.map(order => order.id.toString()));
+
+            // Remove rows that are no longer present
+            existingRows.forEach(row => {
+                if (!newOrderIds.has(row.dataset.orderId)) {
+                    row.remove();
+                }
+            });
+
+            // Update or add rows
+            for (let i = 0; i < ordersToDisplay.length; i++) {
+                const order = ordersToDisplay[i];
+                const orderId = order.id.toString();
+                const existingRow = tbody.querySelector(`tr[data-order-id="${orderId}"]`);
+
+                if (existingRow) {
+                    // Update existing row if needed (e.g., status or expiry)
+                    const status = existingRow.querySelector('.order-status');
+                    if (status) status.textContent = order.status || 'Active';
+                    
+                    // Update expiry
+                    const expiryCell = existingRow.querySelector('td:nth-child(6)');
+                    if (expiryCell) {
+                        const formattedExpiry = await this.formatExpiry(order.timestamp);
+                        expiryCell.textContent = formattedExpiry;
+                    }
+                } else {
+                    // Create and insert new row
+                    const newRow = await this.createOrderRow(order);
+                    if (newRow) {
+                        // Insert at correct position
+                        const nextRow = tbody.children[i];
+                        if (nextRow) {
+                            tbody.insertBefore(newRow, nextRow);
+                        } else {
+                            tbody.appendChild(newRow);
+                        }
+                    }
                 }
             }
 

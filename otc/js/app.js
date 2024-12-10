@@ -286,27 +286,24 @@ class App {
             this.debug('Initializing components in ' + 
                 (readOnlyMode ? 'read-only' : 'connected') + ' mode');
             
-            // Initialize each component
-            for (const [id, component] of Object.entries(this.components)) {
-                if (component && typeof component.initialize === 'function') {
-                    this.debug(`Initializing component: ${id}`);
-                    try {
-                        await component.initialize(readOnlyMode);
-                    } catch (error) {
-                        // Log error but continue with other components
-                        console.error(`[App] Error initializing ${id}:`, error);
-                    }
+            // Only initialize the current tab's component
+            const currentComponent = this.components[this.currentTab];
+            if (currentComponent && typeof currentComponent.initialize === 'function') {
+                this.debug(`Initializing current component: ${this.currentTab}`);
+                try {
+                    await currentComponent.initialize(readOnlyMode);
+                } catch (error) {
+                    console.error(`[App] Error initializing ${this.currentTab}:`, error);
                 }
             }
             
             // Show the current tab
             this.showTab(this.currentTab);
             
-            this.debug('Components initialized');
+            this.debug('Component initialized');
         } catch (error) {
-            console.error('[App] Error initializing components:', error);
-            // Continue execution instead of throwing
-            this.showError("Some components failed to initialize. Limited functionality available.");
+            console.error('[App] Error initializing component:', error);
+            this.showError("Component failed to initialize. Limited functionality available.");
         }
     }
 
@@ -419,12 +416,12 @@ class App {
                 }
             });
             
-            // Show selected tab
+            // Show and initialize selected tab
             const tabContent = document.getElementById(tabId);
             if (tabContent) {
                 tabContent.classList.add('active');
                 
-                // Initialize component if it exists
+                // Initialize component if it exists and hasn't been initialized
                 const component = this.components[tabId];
                 if (component?.initialize) {
                     const readOnlyMode = !window.walletManager?.provider;
