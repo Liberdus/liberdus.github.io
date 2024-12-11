@@ -308,11 +308,7 @@ class App {
     }
 
     async connectWallet() {
-        const loader = document.createElement('div');
-        loader.className = 'loader-overlay';
-        loader.innerHTML = '<div class="loader"></div>';
-        document.body.appendChild(loader);
-        
+        const loader = this.showLoader();
         try {
             await walletManager.connect();
         } catch (error) {
@@ -363,11 +359,18 @@ class App {
         
     }
 
-    showLoader() {
+    showLoader(container = document.body) {
         const loader = document.createElement('div');
-        loader.className = 'loader-overlay';
-        loader.innerHTML = '<div class="loader"></div>';
-        document.body.appendChild(loader);
+        loader.className = 'loading-overlay';
+        loader.innerHTML = `
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading...</div>
+        `;
+        
+        if (container !== document.body) {
+            container.style.position = 'relative';
+        }
+        container.appendChild(loader);
         return loader;
     }
 
@@ -397,6 +400,19 @@ class App {
         try {
             this.debug('Switching to tab:', tabId);
             
+            // Add loading overlay before initialization
+            const tabContent = document.getElementById(tabId);
+            const loadingOverlay = document.createElement('div');
+            loadingOverlay.className = 'loading-overlay';
+            loadingOverlay.innerHTML = `
+                <div class="loading-spinner"></div>
+                <div class="loading-text">Loading...</div>
+            `;
+            if (tabContent) {
+                tabContent.style.position = 'relative';
+                tabContent.appendChild(loadingOverlay);
+            }
+            
             // Cleanup previous tab's component if it exists
             const previousComponent = this.components[this.currentTab];
             if (previousComponent?.cleanup) {
@@ -417,7 +433,6 @@ class App {
             });
             
             // Show and initialize selected tab
-            const tabContent = document.getElementById(tabId);
             if (tabContent) {
                 tabContent.classList.add('active');
                 
@@ -427,12 +442,18 @@ class App {
                     const readOnlyMode = !window.walletManager?.provider;
                     await component.initialize(readOnlyMode);
                 }
+                
+                // Remove loading overlay after initialization
+                loadingOverlay.remove();
             }
             
             this.currentTab = tabId;
             this.debug('Tab switch complete:', tabId);
         } catch (error) {
             console.error('[App] Error showing tab:', error);
+            // Ensure loading overlay is removed even if there's an error
+            const loadingOverlay = document.querySelector('.loading-overlay');
+            if (loadingOverlay) loadingOverlay.remove();
         }
     }
 
