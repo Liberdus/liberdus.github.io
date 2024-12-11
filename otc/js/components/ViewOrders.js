@@ -357,6 +357,44 @@ export class ViewOrders extends BaseComponent {
             // Get all orders and convert to array
             let ordersToDisplay = Array.from(this.orders.values());
             
+            // Apply sorting if configured
+            if (this.sortConfig.column && this.sortConfig.direction) {
+                this.debug('Applying sort:', this.sortConfig);
+                ordersToDisplay.sort((a, b) => {
+                    let comparison = 0;
+                    
+                    switch (this.sortConfig.column) {
+                        case 'id':
+                            comparison = Number(a.id) - Number(b.id);
+                            break;
+                        case 'buy':
+                            // Get token symbols for comparison
+                            const buyTokenA = this.tokenCache.get(a.buyToken)?.symbol || a.buyToken;
+                            const buyTokenB = this.tokenCache.get(b.buyToken)?.symbol || b.buyToken;
+                            comparison = buyTokenA.toLowerCase().localeCompare(buyTokenB.toLowerCase());
+                            break;
+                        case 'sell':
+                            // Get token symbols for comparison
+                            const sellTokenA = this.tokenCache.get(a.sellToken)?.symbol || a.sellToken;
+                            const sellTokenB = this.tokenCache.get(b.sellToken)?.symbol || b.sellToken;
+                            comparison = sellTokenA.toLowerCase().localeCompare(sellTokenB.toLowerCase());
+                            break;
+                        default:
+                            comparison = 0;
+                    }
+                    
+                    this.debug('Sort comparison:', {
+                        column: this.sortConfig.column,
+                        a: a.id,
+                        b: b.id,
+                        comparison,
+                        direction: this.sortConfig.direction
+                    });
+                    
+                    return this.sortConfig.direction === 'asc' ? comparison : -comparison;
+                });
+            }
+            
             // Get filter state
             const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
             const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '50');
@@ -387,66 +425,24 @@ export class ViewOrders extends BaseComponent {
                     .map(({ order }) => order);
             }
 
-            // Apply pagination
-            const totalOrders = ordersToDisplay.length;
-            if (pageSize !== -1) {
-                const startIndex = (this.currentPage - 1) * pageSize;
-                ordersToDisplay = ordersToDisplay.slice(startIndex, startIndex + pageSize);
-            }
-
-            // Get tbody reference
+            // Clear existing rows
             const tbody = this.container.querySelector('tbody');
             if (!tbody) {
                 this.debug('ERROR: tbody not found');
                 return;
             }
+            tbody.innerHTML = '';
 
-            // Compare existing rows with new orders
-            const existingRows = Array.from(tbody.children);
-            const existingOrderIds = new Set(existingRows.map(row => row.dataset.orderId));
-            const newOrderIds = new Set(ordersToDisplay.map(order => order.id.toString()));
-
-            // Remove rows that are no longer present
-            existingRows.forEach(row => {
-                if (!newOrderIds.has(row.dataset.orderId)) {
-                    row.remove();
-                }
-            });
-
-            // Update or add rows
-            for (let i = 0; i < ordersToDisplay.length; i++) {
-                const order = ordersToDisplay[i];
-                const orderId = order.id.toString();
-                const existingRow = tbody.querySelector(`tr[data-order-id="${orderId}"]`);
-
-                if (existingRow) {
-                    // Update existing row if needed (e.g., status or expiry)
-                    const status = existingRow.querySelector('.order-status');
-                    if (status) status.textContent = order.status || 'Active';
-                    
-                    // Update expiry
-                    const expiryCell = existingRow.querySelector('td:nth-child(6)');
-                    if (expiryCell) {
-                        const formattedExpiry = await this.formatExpiry(order.timestamp);
-                        expiryCell.textContent = formattedExpiry;
-                    }
-                } else {
-                    // Create and insert new row
-                    const newRow = await this.createOrderRow(order);
-                    if (newRow) {
-                        // Insert at correct position
-                        const nextRow = tbody.children[i];
-                        if (nextRow) {
-                            tbody.insertBefore(newRow, nextRow);
-                        } else {
-                            tbody.appendChild(newRow);
-                        }
-                    }
+            // Add all rows in the new sorted order
+            for (const order of ordersToDisplay) {
+                const newRow = await this.createOrderRow(order);
+                if (newRow) {
+                    tbody.appendChild(newRow);
                 }
             }
 
             // Update pagination controls
-            this.updatePaginationControls(totalOrders);
+            this.updatePaginationControls(ordersToDisplay.length);
 
         } catch (error) {
             this.debug('Error refreshing orders:', error);
@@ -632,36 +628,31 @@ export class ViewOrders extends BaseComponent {
     handleSort(column) {
         this.debug('Sorting by column:', column);
         
-        // If clicking same column and already in a sorted state
-        if (this.sortConfig.column === column && this.sortConfig.isColumnClick) {
-            // Cycle through: asc -> desc -> default (null)
+        // If clicking same column, toggle direction
+        if (this.sortConfig.column === column) {
             if (this.sortConfig.direction === 'asc') {
                 this.sortConfig.direction = 'desc';
             } else if (this.sortConfig.direction === 'desc') {
-                // Reset to default sorting
-                this.sortConfig.direction = null;
+                // Reset sorting
                 this.sortConfig.column = null;
-                this.sortConfig.isColumnClick = false;
+                this.sortConfig.direction = null;
+            } else {
+                // No current direction, start with ascending
+                this.sortConfig.direction = 'asc';
             }
         } else {
-            // First click - start with ascending
+            // New column, start with ascending
             this.sortConfig.column = column;
             this.sortConfig.direction = 'asc';
-            this.sortConfig.isColumnClick = true;
         }
 
-        // Update sort icons and active states
+        // Update sort icons
         const headers = this.container.querySelectorAll('th[data-sort]');
         headers.forEach(header => {
             const icon = header.querySelector('.sort-icon');
-            if (header.dataset.sort === column) {
-                if (this.sortConfig.direction) {
-                    header.classList.add('active-sort');
-                    icon.textContent = this.sortConfig.direction === 'asc' ? '↑' : '↓';
-                } else {
-                    header.classList.remove('active-sort');
-                    icon.textContent = '↕';
-                }
+            if (header.dataset.sort === column && this.sortConfig.direction) {
+                header.classList.add('active-sort');
+                icon.textContent = this.sortConfig.direction === 'asc' ? '↑' : '↓';
             } else {
                 header.classList.remove('active-sort');
                 icon.textContent = '↕';
