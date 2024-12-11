@@ -1,13 +1,13 @@
-tagline: It's time you govern your own money.
+tagline: "Privacy is necessary for an open society in the electronic age."
 
 maintext: >
-  As a participant in the Liberdus payment network, you become a member of a democracy and get to make decisions about the future of the cryptocurrency.
+  -- Eric Hughes (from A Cypherpunk's Manifesto)
 
-closeemphasis: You decide
-restofclose: how Liberdus will work.
+closeemphasis: Your privacy matters.
+restofclose: Liberdus is a decentralized, open source, encypted texting app.
 button1:
   href: '#why'
   text: Learn more&nbsp;<i class="fa fa-angle-down"></i> 
 button2:
-  href: 'Liberdus-Whitepaper-19.10.19.pdf'
-  text: Whitepaper
+  href: 'Liberdus-Litepaper.pdf'
+  text: Litepaper
