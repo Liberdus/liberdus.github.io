@@ -329,6 +329,7 @@ export class MyOrders extends ViewOrders {
                 try {
                     cancelButton.disabled = true;
                     cancelButton.textContent = 'Cancelling...';
+                    this.showError(`Cancelling order ${order.id}...`);
 
                     // Get contract from WebSocket and connect to signer
                     const contract = window.webSocket.contract;
@@ -345,37 +346,29 @@ export class MyOrders extends ViewOrders {
                     const gasLimit = gasEstimate.mul(120).div(100); // Add 20% buffer
                     
                     const tx = await contractWithSigner.cancelOrder(order.id, { gasLimit });
-                    console.log('Cancel transaction sent:', tx.hash);
+                    this.showError(`Cancelling order ${order.id}... Transaction sent`);
                     
                     const receipt = await tx.wait();
-                    console.log('Transaction receipt:', receipt);
-
                     if (receipt.status === 0) {
                         throw new Error('Transaction reverted by contract');
                     }
 
+                    // Show success notification
                     this.showSuccess(`Order ${order.id} cancelled successfully!`);
+
+                    // Update the row status immediately
+                    const statusCell = row.querySelector('td.order-status');
+                    if (statusCell) {
+                        statusCell.textContent = 'Cancelled';
+                        statusCell.classList.add('cancelled');
+                    }
+
+                    // Remove the cancel button
+                    actionCell.textContent = '-';
+
                     this.debouncedRefresh();
                 } catch (error) {
                     console.error('Error cancelling order:', error);
-                    
-                    // Use the same error handling as ViewOrders
-                    if (error.code === 4001) {
-                        this.showError('Transaction rejected by user');
-                        return;
-                    }
-                    
-                    // Check for revert reason
-                    if (error.error?.data) {
-                        try {
-                            const decodedError = ethers.utils.toUtf8String(error.error.data);
-                            this.showError(`Transaction failed: ${decodedError}`);
-                            return;
-                        } catch (e) {
-                            // Fall through to default handling
-                        }
-                    }
-                    
                     this.showError(this.getReadableError(error));
                 } finally {
                     cancelButton.disabled = false;
