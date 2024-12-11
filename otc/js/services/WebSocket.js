@@ -31,6 +31,8 @@ export class WebSocketService {
                 console.log('[WebSocket]', message, ...args);
             }
         };
+        
+        this.tokenCache = new Map();  // Add token cache
     }
 
     async queueRequest(callback) {

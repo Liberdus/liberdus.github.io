@@ -117,8 +117,7 @@ export class MyOrders extends ViewOrders {
         try {
             this.debug('Refreshing orders view');
             const ordersToDisplay = orders || Array.from(this.orders.values());
-            this.debug('Refreshing orders view with:', ordersToDisplay);
-
+            
             // Get filter state
             const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
             
@@ -126,11 +125,18 @@ export class MyOrders extends ViewOrders {
             const filteredOrders = showOnlyCancellable 
                 ? ordersToDisplay.filter(order => {
                     // Show only Active orders that haven't expired
-                    const isActive = order.status === 0; // 0 = Active
-                    const currentTime = Math.floor(Date.now() / 1000);
-                    const orderExpiry = Number(order.timestamp) + this.contractValues.orderExpiry;
-                    const isNotExpired = currentTime < orderExpiry;
-                    return isActive && isNotExpired;
+                    const isActive = order.status === 'Active';
+                    const isExpired = window.webSocket.isOrderExpired(order);
+                    
+                    this.debug(`Order ${order.id} filtering:`, {
+                        isActive,
+                        status: order.status,
+                        isExpired,
+                        timestamp: order.timestamp,
+                        expiryTime: window.webSocket.getOrderExpiryTime(order)
+                    });
+                    
+                    return isActive && !isExpired;
                 })
                 : ordersToDisplay;
 
@@ -144,7 +150,7 @@ export class MyOrders extends ViewOrders {
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="9" class="no-orders-message">
-                            No ${showOnlyCancellable ? 'cancellable' : 'active'} orders found
+                            No ${showOnlyCancellable ? 'cancellable' : ''} orders found
                         </td>
                     </tr>`;
             } else {

@@ -60,86 +60,37 @@ export class ViewOrders extends BaseComponent {
 
     async getTokenInfo(tokenAddress) {
         try {
-            // 1. First try to get from NETWORK_TOKENS (predefined list)
-            const networkConfig = getNetworkConfig();
-            const predefinedToken = NETWORK_TOKENS[networkConfig.name]?.find(t => 
-                t.address.toLowerCase() === tokenAddress.toLowerCase()
-            );
-            
-            if (predefinedToken) {
-                this.debug('Token found in predefined list:', predefinedToken);
-                return predefinedToken;
-            }
+            // Use WebSocket's queueRequest to handle rate limiting
+            return await window.webSocket.queueRequest(async () => {
+                // 1. First try to get from NETWORK_TOKENS (predefined list)
+                const predefinedToken = NETWORK_TOKENS[tokenAddress.toLowerCase()];
+                if (predefinedToken) {
+                    return predefinedToken;
+                }
 
-            // 2. Try to get from WebSocket's orderCache
-            const cachedOrders = Array.from(this.webSocket.orderCache.values());
-            const orderWithToken = cachedOrders.find(order => 
-                order.sellToken.toLowerCase() === tokenAddress.toLowerCase() ||
-                order.buyToken.toLowerCase() === tokenAddress.toLowerCase()
-            );
+                // 2. Then check WebSocket's token cache
+                if (window.webSocket.tokenCache?.has(tokenAddress)) {
+                    return window.webSocket.tokenCache.get(tokenAddress);
+                }
 
-            if (orderWithToken) {
-                // If we have cached token info from a previous successful RPC call
-                const tokenFromCache = {
-                    address: tokenAddress,
-                    symbol: orderWithToken.sellToken === tokenAddress ? 
-                        orderWithToken.sellTokenSymbol : orderWithToken.buyTokenSymbol,
-                    decimals: orderWithToken.sellToken === tokenAddress ? 
-                        orderWithToken.sellTokenDecimals : orderWithToken.buyTokenDecimals
-                };
+                // 3. If not found, fetch from contract
+                const contract = new ethers.Contract(tokenAddress, erc20Abi, this.provider);
+                const [symbol, decimals] = await Promise.all([
+                    contract.symbol(),
+                    contract.decimals()
+                ]);
+
+                const tokenInfo = { address: tokenAddress, symbol, decimals };
                 
-                if (tokenFromCache.symbol && tokenFromCache.decimals) {
-                    this.debug('Token found in order cache:', tokenFromCache);
-                    return tokenFromCache;
+                // Cache in WebSocket service
+                if (window.webSocket.tokenCache) {
+                    window.webSocket.tokenCache.set(tokenAddress, tokenInfo);
                 }
-            }
 
-            // 3. Finally, try RPC call with rate limiting
-            return await this.webSocket.queueRequest(async () => {
-                const tokenContract = new ethers.Contract(
-                    tokenAddress,
-                    ['function symbol() view returns (string)', 'function decimals() view returns (uint8)'],
-                    this.webSocket.provider
-                );
-
-                try {
-                    const [symbol, decimals] = await Promise.all([
-                        tokenContract.symbol(),
-                        tokenContract.decimals()
-                    ]);
-
-                    const tokenInfo = {
-                        address: tokenAddress,
-                        symbol,
-                        decimals
-                    };
-
-                    // Cache the result in the order for future use
-                    if (orderWithToken) {
-                        if (orderWithToken.sellToken === tokenAddress) {
-                            orderWithToken.sellTokenSymbol = symbol;
-                            orderWithToken.sellTokenDecimals = decimals;
-                        } else {
-                            orderWithToken.buyTokenSymbol = symbol;
-                            orderWithToken.buyTokenDecimals = decimals;
-                        }
-                        this.webSocket.updateOrderCache(orderWithToken.id, orderWithToken);
-                    }
-
-                    this.debug('Token info fetched from RPC:', tokenInfo);
-                    return tokenInfo;
-                } catch (error) {
-                    this.debug('Error getting token info from RPC:', error);
-                    // Return a formatted address as fallback
-                    return {
-                        address: tokenAddress,
-                        symbol: `${tokenAddress.slice(0, 4)}...${tokenAddress.slice(-4)}`,
-                        decimals: 18
-                    };
-                }
+                return tokenInfo;
             });
         } catch (error) {
-            this.debug('Error in getTokenInfo:', error);
+            this.debug('Error getting token info:', error);
             return {
                 address: tokenAddress,
                 symbol: `${tokenAddress.slice(0, 4)}...${tokenAddress.slice(-4)}`,
