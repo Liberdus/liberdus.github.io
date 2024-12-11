@@ -4,7 +4,7 @@ maintext: >
   -- Eric Hughes (from A Cypherpunk's Manifesto)
 
 closeemphasis: Your privacy matters.
-restofclose: Liberdus is a decentralized, open source, encypted messaging and payment app.
+restofclose: Liberdus is a decentralized, open source, encrypted messaging and payment app.
 button1:
   href: '#why'
   text: Learn more&nbsp;<i class="fa fa-angle-down"></i> 
