@@ -761,10 +761,6 @@ export class ViewOrders extends BaseComponent {
                 timeLeftMinutes: timeLeft / 60
             });
             
-            if (timeLeft <= 0) {
-                return 'Expired';
-            }
-            
             const minutes = Math.ceil(timeLeft / 60);
             return `${minutes}m`;
         } catch (error) {
