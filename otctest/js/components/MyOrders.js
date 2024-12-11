@@ -124,19 +124,23 @@ export class MyOrders extends ViewOrders {
             // Filter orders based on cancellable status
             const filteredOrders = showOnlyCancellable 
                 ? ordersToDisplay.filter(order => {
-                    // Show only Active orders that haven't expired
+                    // Show Active orders that haven't expired or are in grace period
                     const isActive = order.status === 'Active';
-                    const isExpired = window.webSocket.isOrderExpired(order);
+                    const currentTime = Math.floor(Date.now() / 1000);
+                    const expiryTime = window.webSocket.getOrderExpiryTime(order);
+                    const gracePeriod = window.webSocket.gracePeriod?.toNumber() || 0;
+                    const isWithinGracePeriod = currentTime < (expiryTime + gracePeriod);
                     
                     this.debug(`Order ${order.id} filtering:`, {
                         isActive,
                         status: order.status,
-                        isExpired,
-                        timestamp: order.timestamp,
-                        expiryTime: window.webSocket.getOrderExpiryTime(order)
+                        currentTime,
+                        expiryTime,
+                        gracePeriod,
+                        isWithinGracePeriod
                     });
                     
-                    return isActive && !isExpired;
+                    return isActive && isWithinGracePeriod;
                 })
                 : ordersToDisplay;
 
@@ -271,5 +275,119 @@ export class MyOrders extends ViewOrders {
                 this.debouncedRefresh();
             });
         }
+    }
+
+    async createOrderRow(order) {
+        const row = await super.createOrderRow(order);
+        if (!row) return null;
+
+        // Update Taker column (8th column)
+        const takerCell = row.querySelector('td:nth-child(8)');
+        if (takerCell) {
+            takerCell.textContent = '';
+            const yourOrderSpan = document.createElement('span');
+            yourOrderSpan.className = 'your-order';
+            yourOrderSpan.textContent = 'Your Order';
+            takerCell.appendChild(yourOrderSpan);
+        }
+
+        // Create or get the action cell (9th column)
+        let actionCell = row.querySelector('td:nth-child(9)');
+        if (!actionCell) {
+            actionCell = document.createElement('td');
+            row.appendChild(actionCell);
+        }
+
+        // Clear existing content
+        actionCell.textContent = '';
+        actionCell.className = '';
+
+        const isActive = order.status === 'Active' || order.status === 0;
+        const currentTime = Math.floor(Date.now() / 1000);
+        const expiryTime = window.webSocket.getOrderExpiryTime(order);
+        const gracePeriod = window.webSocket.gracePeriod?.toNumber() || 0;
+        const totalPeriod = expiryTime + gracePeriod;
+
+        console.log('Cancel button check:', {
+            orderId: order.id,
+            isActive,
+            currentTime,
+            expiryTime,
+            gracePeriod,
+            totalPeriod,
+            isWithinGracePeriod: currentTime < totalPeriod,
+            timeLeft: totalPeriod - currentTime
+        });
+
+        // Show cancel button if order is active and within grace period
+        if (isActive && currentTime < totalPeriod) {
+            const cancelButton = document.createElement('button');
+            cancelButton.className = 'cancel-order-btn';
+            cancelButton.textContent = 'Cancel';
+            
+            cancelButton.addEventListener('click', async () => {
+                try {
+                    cancelButton.disabled = true;
+                    cancelButton.textContent = 'Cancelling...';
+
+                    // Get contract from WebSocket and connect to signer
+                    const contract = window.webSocket.contract;
+                    if (!contract) {
+                        throw new Error('Contract not available');
+                    }
+
+                    // Get signer from provider
+                    const signer = this.provider.getSigner();
+                    const contractWithSigner = contract.connect(signer);
+                    
+                    // Add gas buffer like in ViewOrders
+                    const gasEstimate = await contractWithSigner.estimateGas.cancelOrder(order.id);
+                    const gasLimit = gasEstimate.mul(120).div(100); // Add 20% buffer
+                    
+                    const tx = await contractWithSigner.cancelOrder(order.id, { gasLimit });
+                    console.log('Cancel transaction sent:', tx.hash);
+                    
+                    const receipt = await tx.wait();
+                    console.log('Transaction receipt:', receipt);
+
+                    if (receipt.status === 0) {
+                        throw new Error('Transaction reverted by contract');
+                    }
+
+                    this.showSuccess(`Order ${order.id} cancelled successfully!`);
+                    this.debouncedRefresh();
+                } catch (error) {
+                    console.error('Error cancelling order:', error);
+                    
+                    // Use the same error handling as ViewOrders
+                    if (error.code === 4001) {
+                        this.showError('Transaction rejected by user');
+                        return;
+                    }
+                    
+                    // Check for revert reason
+                    if (error.error?.data) {
+                        try {
+                            const decodedError = ethers.utils.toUtf8String(error.error.data);
+                            this.showError(`Transaction failed: ${decodedError}`);
+                            return;
+                        } catch (e) {
+                            // Fall through to default handling
+                        }
+                    }
+                    
+                    this.showError(this.getReadableError(error));
+                } finally {
+                    cancelButton.disabled = false;
+                    cancelButton.textContent = 'Cancel';
+                }
+            });
+            
+            actionCell.appendChild(cancelButton);
+        } else {
+            actionCell.textContent = '-';
+        }
+
+        return row;
     }
 }

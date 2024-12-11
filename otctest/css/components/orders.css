@@ -548,3 +548,22 @@ th[data-sort].active-sort .sort-icon {
     border: none;
     background: transparent;
 }
+
+.cancel-order-btn {
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.cancel-order-btn:hover {
+  background-color: #c82333;
+}
+
+.cancel-order-btn:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+}
