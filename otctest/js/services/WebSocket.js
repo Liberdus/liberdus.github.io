@@ -18,9 +18,13 @@ export class WebSocketService {
         this.requestQueue = [];
         this.processingQueue = false;
         this.lastRequestTime = 0;
-        this.minRequestInterval = 100; // 100ms between requests
-        this.maxConcurrentRequests = 3;
+        this.minRequestInterval = 100; // Increase from 100ms to 500ms between requests
+        this.maxConcurrentRequests = 3; // Reduce from 3 to 1 concurrent request
         this.activeRequests = 0;
+        
+        // Add contract constants
+        this.orderExpiry = null;
+        this.gracePeriod = null;
         
         this.debug = (message, ...args) => {
             if (isDebugEnabled('WEBSOCKET')) {
@@ -31,7 +35,7 @@ export class WebSocketService {
 
     async queueRequest(callback) {
         while (this.activeRequests >= this.maxConcurrentRequests) {
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 100)); // Increase wait time
         }
         
         const now = Date.now();
@@ -45,10 +49,17 @@ export class WebSocketService {
         
         try {
             this.activeRequests++;
+            this.debug(`Making request (active: ${this.activeRequests})`);
             const result = await callback();
             this.lastRequestTime = Date.now();
             return result;
         } catch (error) {
+            if (error?.error?.code === -32005) {
+                // If we hit rate limit, wait longer before retrying
+                this.debug('Rate limit hit, waiting before retry...');
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                return this.queueRequest(callback); // Retry the request
+            }
             this.debug('Request failed:', error);
             throw error;
         } finally {
@@ -113,6 +124,14 @@ export class WebSocketService {
             this.debug('Contract initialized:', {
                 address: this.contract.address,
                 abi: this.contract.interface.format()
+            });
+
+            this.debug('Fetching contract constants...');
+            this.orderExpiry = await this.contract.ORDER_EXPIRY();
+            this.gracePeriod = await this.contract.GRACE_PERIOD();
+            this.debug('Contract constants loaded:', {
+                orderExpiry: this.orderExpiry.toString(),
+                gracePeriod: this.gracePeriod.toString()
             });
 
             this.debug('Contract initialized, starting order sync...');
@@ -416,8 +435,8 @@ export class WebSocketService {
     // Add this method to check if orders are eligible for cleanup
     async checkCleanupEligibility(orderId) {
         try {
-            if (!this.contract) {
-                throw new Error('Contract not initialized');
+            if (!this.contract || !this.orderExpiry || !this.gracePeriod) {
+                throw new Error('Contract or constants not initialized');
             }
 
             const order = this.orderCache.get(orderId);
@@ -426,26 +445,22 @@ export class WebSocketService {
                 return { isEligible: false };
             }
 
-            const orderExpiry = await this.contract.ORDER_EXPIRY();
-            const gracePeriod = await this.contract.GRACE_PERIOD();
-
             const currentTime = Math.floor(Date.now() / 1000);
             const orderTime = order.timestamp;
             const age = currentTime - orderTime;
             
-            // Consider both active and cancelled orders that are past expiry + grace period
             const isEligible = (order.status === 'Active' || 
                                order.status === 'Canceled' || 
                                order.status === 'Filled') && 
-                              age > (orderExpiry.toNumber() + gracePeriod.toNumber());
+                              age > (this.orderExpiry.toNumber() + this.gracePeriod.toNumber());
 
             this.debug('Cleanup eligibility check:', {
                 orderId,
                 orderTime,
                 currentTime,
                 age,
-                orderExpiry: orderExpiry.toNumber(),
-                gracePeriod: gracePeriod.toNumber(),
+                orderExpiry: this.orderExpiry.toNumber(),
+                gracePeriod: this.gracePeriod.toNumber(),
                 status: order.status,
                 isEligible
             });
@@ -458,5 +473,29 @@ export class WebSocketService {
             this.debug('Error checking cleanup eligibility:', error);
             return { isEligible: false, error };
         }
+    }
+
+    isOrderExpired(order) {
+        try {
+            if (!this.orderExpiry) {
+                this.debug('Order expiry not initialized');
+                return false;
+            }
+
+            const currentTime = Math.floor(Date.now() / 1000);
+            const expiryTime = order.timestamp + this.orderExpiry.toNumber();
+            
+            return currentTime > expiryTime;
+        } catch (error) {
+            this.debug('Error checking order expiry:', error);
+            return false;
+        }
+    }
+
+    getOrderExpiryTime(order) {
+        if (!this.orderExpiry) {
+            return null;
+        }
+        return order.timestamp + this.orderExpiry.toNumber();
     }
 }

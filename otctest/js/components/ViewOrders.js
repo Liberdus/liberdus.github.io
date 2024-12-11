@@ -357,6 +357,12 @@ export class ViewOrders extends BaseComponent {
             // Get all orders and convert to array
             let ordersToDisplay = Array.from(this.orders.values());
             
+            // Get contract and orderExpiry value first
+            const contract = await this.getContract();
+            const orderExpiry = window.webSocket?.orderExpiry?.toNumber() || 
+                               (await contract.ORDER_EXPIRY()).toNumber();
+            const currentTime = Math.floor(Date.now() / 1000);
+            
             // Apply sorting if configured
             if (this.sortConfig.column && this.sortConfig.direction) {
                 this.debug('Applying sort:', this.sortConfig);
@@ -1405,5 +1411,33 @@ export class ViewOrders extends BaseComponent {
             throw new Error('WebSocket contract not initialized');
         }
         return window.webSocket.contract;
+    }
+
+    updateExpiryTimer(row, order) {
+        if (!window.webSocket?.orderExpiry) {
+            return;
+        }
+
+        const expiresCell = row.querySelector('.expires');
+        if (!expiresCell) return;
+
+        const expiryTime = window.webSocket.getOrderExpiryTime(order);
+        if (!expiryTime) return;
+
+        const updateExpiry = () => {
+            const currentTime = Math.floor(Date.now() / 1000);
+            const timeDiff = expiryTime - currentTime;
+
+            const newExpiryText = formatTimeDiff(timeDiff);
+
+            if (expiresCell.textContent !== newExpiryText) {
+                expiresCell.textContent = newExpiryText;
+            }
+        };
+
+        // Update immediately and then every minute
+        updateExpiry();
+        const timerId = setInterval(updateExpiry, 60000); // Update every minute
+        this.expiryTimers.set(row.dataset.orderId, timerId);
     }
 }
