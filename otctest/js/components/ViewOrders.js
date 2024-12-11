@@ -461,7 +461,7 @@ export class ViewOrders extends BaseComponent {
             
             // Get filter state
             const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
-            const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '50');
+            const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
             
             // Filter active orders if needed
             if (showOnlyActive) {
@@ -559,8 +559,8 @@ export class ViewOrders extends BaseComponent {
             <div class="pagination-controls">
                 <select id="page-size-select" class="page-size-select">
                     <option value="10">10 per page</option>
-                    <option value="25">25 per page</option>
-                    <option value="50" selected>50 per page</option>
+                    <option value="25" selected>25 per page</option>
+                    <option value="50">50 per page</option>
                     <option value="100">100 per page</option>
                     <option value="-1">View all</option>
                 </select>
@@ -1289,7 +1289,7 @@ export class ViewOrders extends BaseComponent {
     }
 
     updatePaginationControls(totalOrders) {
-        const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '50');
+        const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
         
         const updateControls = (container) => {
             const prevButton = container.querySelector('.prev-page');
