@@ -58,22 +58,93 @@ export class ViewOrders extends BaseComponent {
         this.tokenList = await getTokenList();
     }
 
-    async getTokenInfo(address) {
+    async getTokenInfo(tokenAddress) {
         try {
-            if (this.tokenCache.has(address)) {
-                return this.tokenCache.get(address);
+            // 1. First try to get from NETWORK_TOKENS (predefined list)
+            const networkConfig = getNetworkConfig();
+            const predefinedToken = NETWORK_TOKENS[networkConfig.name]?.find(t => 
+                t.address.toLowerCase() === tokenAddress.toLowerCase()
+            );
+            
+            if (predefinedToken) {
+                this.debug('Token found in predefined list:', predefinedToken);
+                return predefinedToken;
             }
 
-            const tokenContract = new ethers.Contract(address, erc20Abi, this.provider);
-            const symbol = await tokenContract.symbol();
-            const decimals = await tokenContract.decimals();
+            // 2. Try to get from WebSocket's orderCache
+            const cachedOrders = Array.from(this.webSocket.orderCache.values());
+            const orderWithToken = cachedOrders.find(order => 
+                order.sellToken.toLowerCase() === tokenAddress.toLowerCase() ||
+                order.buyToken.toLowerCase() === tokenAddress.toLowerCase()
+            );
 
-            const tokenInfo = { address, symbol, decimals };
-            this.tokenCache.set(address, tokenInfo);
-            return tokenInfo;
+            if (orderWithToken) {
+                // If we have cached token info from a previous successful RPC call
+                const tokenFromCache = {
+                    address: tokenAddress,
+                    symbol: orderWithToken.sellToken === tokenAddress ? 
+                        orderWithToken.sellTokenSymbol : orderWithToken.buyTokenSymbol,
+                    decimals: orderWithToken.sellToken === tokenAddress ? 
+                        orderWithToken.sellTokenDecimals : orderWithToken.buyTokenDecimals
+                };
+                
+                if (tokenFromCache.symbol && tokenFromCache.decimals) {
+                    this.debug('Token found in order cache:', tokenFromCache);
+                    return tokenFromCache;
+                }
+            }
+
+            // 3. Finally, try RPC call with rate limiting
+            return await this.webSocket.queueRequest(async () => {
+                const tokenContract = new ethers.Contract(
+                    tokenAddress,
+                    ['function symbol() view returns (string)', 'function decimals() view returns (uint8)'],
+                    this.webSocket.provider
+                );
+
+                try {
+                    const [symbol, decimals] = await Promise.all([
+                        tokenContract.symbol(),
+                        tokenContract.decimals()
+                    ]);
+
+                    const tokenInfo = {
+                        address: tokenAddress,
+                        symbol,
+                        decimals
+                    };
+
+                    // Cache the result in the order for future use
+                    if (orderWithToken) {
+                        if (orderWithToken.sellToken === tokenAddress) {
+                            orderWithToken.sellTokenSymbol = symbol;
+                            orderWithToken.sellTokenDecimals = decimals;
+                        } else {
+                            orderWithToken.buyTokenSymbol = symbol;
+                            orderWithToken.buyTokenDecimals = decimals;
+                        }
+                        this.webSocket.updateOrderCache(orderWithToken.id, orderWithToken);
+                    }
+
+                    this.debug('Token info fetched from RPC:', tokenInfo);
+                    return tokenInfo;
+                } catch (error) {
+                    this.debug('Error getting token info from RPC:', error);
+                    // Return a formatted address as fallback
+                    return {
+                        address: tokenAddress,
+                        symbol: `${tokenAddress.slice(0, 4)}...${tokenAddress.slice(-4)}`,
+                        decimals: 18
+                    };
+                }
+            });
         } catch (error) {
-            this.debug('Error getting token info:', error);
-            return { address, symbol: 'UNK', decimals: 18 };
+            this.debug('Error in getTokenInfo:', error);
+            return {
+                address: tokenAddress,
+                symbol: `${tokenAddress.slice(0, 4)}...${tokenAddress.slice(-4)}`,
+                decimals: 18
+            };
         }
     }
 
@@ -364,41 +435,28 @@ export class ViewOrders extends BaseComponent {
             const currentTime = Math.floor(Date.now() / 1000);
             
             // Apply sorting if configured
-            if (this.sortConfig.column && this.sortConfig.direction) {
-                this.debug('Applying sort:', this.sortConfig);
+            if (this.sortConfig.column === 'sell' || this.sortConfig.column === 'buy') {
                 ordersToDisplay.sort((a, b) => {
-                    let comparison = 0;
+                    const tokenA = this.sortConfig.column === 'sell' ? a.sellToken : a.buyToken;
+                    const tokenB = this.sortConfig.column === 'sell' ? b.sellToken : b.buyToken;
                     
-                    switch (this.sortConfig.column) {
-                        case 'id':
-                            comparison = Number(a.id) - Number(b.id);
-                            break;
-                        case 'buy':
-                            // Get token symbols for comparison
-                            const buyTokenA = this.tokenCache.get(a.buyToken)?.symbol || a.buyToken;
-                            const buyTokenB = this.tokenCache.get(b.buyToken)?.symbol || b.buyToken;
-                            comparison = buyTokenA.toLowerCase().localeCompare(buyTokenB.toLowerCase());
-                            break;
-                        case 'sell':
-                            // Get token symbols for comparison
-                            const sellTokenA = this.tokenCache.get(a.sellToken)?.symbol || a.sellToken;
-                            const sellTokenB = this.tokenCache.get(b.sellToken)?.symbol || b.sellToken;
-                            comparison = sellTokenA.toLowerCase().localeCompare(sellTokenB.toLowerCase());
-                            break;
-                        default:
-                            comparison = 0;
-                    }
+                    const symbolA = this.tokenCache.get(tokenA)?.symbol || '';
+                    const symbolB = this.tokenCache.get(tokenB)?.symbol || '';
                     
-                    this.debug('Sort comparison:', {
-                        column: this.sortConfig.column,
-                        a: a.id,
-                        b: b.id,
-                        comparison,
-                        direction: this.sortConfig.direction
-                    });
-                    
-                    return this.sortConfig.direction === 'asc' ? comparison : -comparison;
+                    if (symbolA < symbolB) return -1;
+                    if (symbolA > symbolB) return 1;
+                    return 0;
                 });
+            } else if (this.sortConfig.column === 'id') {
+                // Sort numerically by ID
+                ordersToDisplay.sort((a, b) => {
+                    return Number(a.id) - Number(b.id);
+                });
+            }
+
+            // If descending, reverse the entire array
+            if (this.sortConfig.direction === 'desc') {
+                ordersToDisplay.reverse();
             }
             
             // Get filter state

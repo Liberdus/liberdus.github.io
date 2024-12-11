@@ -19,7 +19,7 @@ export class WebSocketService {
         this.processingQueue = false;
         this.lastRequestTime = 0;
         this.minRequestInterval = 100; // Increase from 100ms to 500ms between requests
-        this.maxConcurrentRequests = 3; // Reduce from 3 to 1 concurrent request
+        this.maxConcurrentRequests = 2; // Reduce from 3 to 1 concurrent request
         this.activeRequests = 0;
         
         // Add contract constants
