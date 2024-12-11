@@ -399,10 +399,6 @@ export class ViewOrders extends BaseComponent {
             const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
             const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '50');
             
-            // Get contract values for filtering
-            const { orderExpiry } = await this.getContractExpiryTimes();
-            const currentTime = Math.floor(Date.now() / 1000);
-
             // Filter active orders if needed
             if (showOnlyActive) {
                 ordersToDisplay = await Promise.all(ordersToDisplay.map(async order => {
@@ -425,6 +421,13 @@ export class ViewOrders extends BaseComponent {
                     .map(({ order }) => order);
             }
 
+            // Apply pagination
+            const startIndex = (this.currentPage - 1) * pageSize;
+            const endIndex = pageSize === -1 ? ordersToDisplay.length : startIndex + pageSize;
+            const paginatedOrders = pageSize === -1 ? 
+                ordersToDisplay : 
+                ordersToDisplay.slice(startIndex, endIndex);
+
             // Clear existing rows
             const tbody = this.container.querySelector('tbody');
             if (!tbody) {
@@ -433,15 +436,15 @@ export class ViewOrders extends BaseComponent {
             }
             tbody.innerHTML = '';
 
-            // Add all rows in the new sorted order
-            for (const order of ordersToDisplay) {
+            // Add paginated rows
+            for (const order of paginatedOrders) {
                 const newRow = await this.createOrderRow(order);
                 if (newRow) {
                     tbody.appendChild(newRow);
                 }
             }
 
-            // Update pagination controls
+            // Update pagination controls with total count before filtering
             this.updatePaginationControls(ordersToDisplay.length);
 
         } catch (error) {
@@ -519,7 +522,7 @@ export class ViewOrders extends BaseComponent {
                     </button>
                     <span class="page-info">Page 1 of 1</span>
                     <button class="pagination-button next-page" title="Next page">
-                        
+                        →
                     </button>
                 </div>
             </div>
@@ -1221,32 +1224,34 @@ export class ViewOrders extends BaseComponent {
         return Math.ceil(this.orders.size / pageSize);
     }
 
-    updatePaginationControls(filteredOrdersCount) {
-        const pageSize = parseInt(this.container.querySelector('.page-size-select').value);
+    updatePaginationControls(totalOrders) {
+        const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '50');
+        
         const updateControls = (container) => {
             const prevButton = container.querySelector('.prev-page');
             const nextButton = container.querySelector('.next-page');
             const pageInfo = container.querySelector('.page-info');
-            const pageSizeSelect = container.querySelector('.page-size-select');
             
             if (pageSize === -1) {
+                // Show all orders
                 prevButton.disabled = true;
                 nextButton.disabled = true;
-                pageInfo.textContent = `Showing all ${filteredOrdersCount} orders`;
+                pageInfo.textContent = `Showing all ${totalOrders} orders`;
                 return;
             }
             
-            const totalPages = Math.ceil(filteredOrdersCount / pageSize);
+            const totalPages = Math.max(1, Math.ceil(totalOrders / pageSize));
             
-            prevButton.disabled = this.currentPage === 1;
-            nextButton.disabled = this.currentPage === totalPages;
+            // Ensure current page is within bounds
+            this.currentPage = Math.min(Math.max(1, this.currentPage), totalPages);
             
-            pageInfo.textContent = `Page ${this.currentPage} of ${totalPages}`;
+            prevButton.disabled = this.currentPage <= 1;
+            nextButton.disabled = this.currentPage >= totalPages;
             
-            // Keep page size selects in sync
-            if (pageSizeSelect) {
-                pageSizeSelect.value = pageSize;
-            }
+            const startItem = ((this.currentPage - 1) * pageSize) + 1;
+            const endItem = Math.min(this.currentPage * pageSize, totalOrders);
+            
+            pageInfo.textContent = `${startItem}-${endItem} of ${totalOrders} orders (Page ${this.currentPage} of ${totalPages})`;
         };
         
         // Update both top and bottom controls
