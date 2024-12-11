@@ -116,8 +116,39 @@ export class MyOrders extends ViewOrders {
 
         try {
             this.debug('Refreshing orders view');
-            const ordersToDisplay = orders || Array.from(this.orders.values());
+            let ordersToDisplay = orders || Array.from(this.orders.values());
             
+            // Apply sorting if configured
+            if (this.sortConfig.column) {
+                ordersToDisplay.sort((a, b) => {
+                    let compareA, compareB;
+                    
+                    switch (this.sortConfig.column) {
+                        case 'id':
+                            compareA = Number(a.id);
+                            compareB = Number(b.id);
+                            break;
+                        case 'status':
+                            compareA = a.status;
+                            compareB = b.status;
+                            break;
+                        default:
+                            compareA = a[this.sortConfig.column];
+                            compareB = b[this.sortConfig.column];
+                    }
+
+                    // Compare the values
+                    if (compareA < compareB) return -1;
+                    if (compareA > compareB) return 1;
+                    return 0;
+                });
+
+                // If direction is desc, reverse the array
+                if (this.sortConfig.direction === 'desc') {
+                    ordersToDisplay.reverse();
+                }
+            }
+
             // Get filter state
             const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
             
