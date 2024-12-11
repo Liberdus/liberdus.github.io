@@ -278,49 +278,49 @@ export class MyOrders extends ViewOrders {
     }
 
     async createOrderRow(order) {
-        const row = await super.createOrderRow(order);
-        if (!row) return null;
+        // Instead of using super.createOrderRow, create the row directly
+        const tr = document.createElement('tr');
+        tr.dataset.orderId = order.id.toString();
+        tr.dataset.timestamp = order.timestamp;
+        tr.dataset.status = order.status;
 
-        // Update Taker column (8th column)
-        const takerCell = row.querySelector('td:nth-child(8)');
-        if (takerCell) {
-            takerCell.textContent = '';
-            const yourOrderSpan = document.createElement('span');
-            yourOrderSpan.className = 'your-order';
-            yourOrderSpan.textContent = 'Your Order';
-            takerCell.appendChild(yourOrderSpan);
-        }
+        // Get token info (reusing parent class methods)
+        const sellTokenInfo = await this.getTokenInfo(order.sellToken);
+        const buyTokenInfo = await this.getTokenInfo(order.buyToken);
 
-        // Create or get the action cell (9th column)
-        let actionCell = row.querySelector('td:nth-child(9)');
-        if (!actionCell) {
-            actionCell = document.createElement('td');
-            row.appendChild(actionCell);
-        }
+        // Create our specific columns
+        tr.innerHTML = `
+            <td>${order.id}</td>
+            <td>
+                <div class="token-info">
+                    ${this.getTokenIcon(sellTokenInfo)}
+                    <span>${sellTokenInfo.symbol}</span>
+                </div>
+            </td>
+            <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenInfo.decimals)}</td>
+            <td>
+                <div class="token-info">
+                    ${this.getTokenIcon(buyTokenInfo)}
+                    <span>${buyTokenInfo.symbol}</span>
+                </div>
+            </td>
+            <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals)}</td>
+            <td>${await this.formatExpiry(order.timestamp)}</td>
+            <td class="order-status">${order.status}</td>
+            <td><span class="your-order">Your Order</span></td>
+            <td class="action-column"></td>`;
 
-        // Clear existing content
-        actionCell.textContent = '';
-        actionCell.className = '';
-
+        // Rest of your existing action button logic
+        const actionCell = tr.querySelector('.action-column');
         const isActive = order.status === 'Active' || order.status === 0;
         const currentTime = Math.floor(Date.now() / 1000);
         const expiryTime = window.webSocket.getOrderExpiryTime(order);
         const gracePeriod = window.webSocket.gracePeriod?.toNumber() || 0;
         const totalPeriod = expiryTime + gracePeriod;
 
-        console.log('Cancel button check:', {
-            orderId: order.id,
-            isActive,
-            currentTime,
-            expiryTime,
-            gracePeriod,
-            totalPeriod,
-            isWithinGracePeriod: currentTime < totalPeriod,
-            timeLeft: totalPeriod - currentTime
-        });
-
         // Show cancel button if order is active and within grace period
         if (isActive && currentTime < totalPeriod) {
+            // Your existing cancel button logic
             const cancelButton = document.createElement('button');
             cancelButton.className = 'cancel-order-btn';
             cancelButton.textContent = 'Cancel';
@@ -381,6 +381,9 @@ export class MyOrders extends ViewOrders {
             actionCell.textContent = '-';
         }
 
-        return row;
+        // Start the expiry timer
+        this.startExpiryTimer(tr);
+
+        return tr;
     }
 }
