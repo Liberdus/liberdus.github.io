@@ -394,31 +394,60 @@ export class ViewOrders extends BaseComponent {
                                (await contract.ORDER_EXPIRY()).toNumber();
             const currentTime = Math.floor(Date.now() / 1000);
             
-            // Apply sorting if configured
-            if (this.sortConfig.column === 'sell' || this.sortConfig.column === 'buy') {
-                ordersToDisplay.sort((a, b) => {
-                    const tokenA = this.sortConfig.column === 'sell' ? a.sellToken : a.buyToken;
-                    const tokenB = this.sortConfig.column === 'sell' ? b.sellToken : b.buyToken;
-                    
-                    const symbolA = this.tokenCache.get(tokenA)?.symbol || '';
-                    const symbolB = this.tokenCache.get(tokenB)?.symbol || '';
-                    
-                    if (symbolA < symbolB) return -1;
-                    if (symbolA > symbolB) return 1;
-                    return 0;
-                });
-            } else if (this.sortConfig.column === 'id') {
-                // Sort numerically by ID
-                ordersToDisplay.sort((a, b) => {
-                    return Number(a.id) - Number(b.id);
-                });
+            // Apply token filters
+            const sellTokenFilter = this.container.querySelector('#sell-token-filter')?.value;
+            const buyTokenFilter = this.container.querySelector('#buy-token-filter')?.value;
+            const orderSort = this.container.querySelector('#order-sort')?.value;
+
+            if (sellTokenFilter) {
+                ordersToDisplay = ordersToDisplay.filter(order => 
+                    order.sellToken.toLowerCase() === sellTokenFilter.toLowerCase()
+                );
             }
 
-            // If descending, reverse the entire array
-            if (this.sortConfig.direction === 'desc') {
-                ordersToDisplay.reverse();
+            if (buyTokenFilter) {
+                ordersToDisplay = ordersToDisplay.filter(order => 
+                    order.buyToken.toLowerCase() === buyTokenFilter.toLowerCase()
+                );
             }
-            
+
+            // Apply sorting
+            switch (orderSort) {
+                case 'newest':
+                    ordersToDisplay.sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
+                    break;
+                case 'best-deal':
+                    // Calculate and sort by deal value
+                    ordersToDisplay.sort((a, b) => {
+                        const getDealValue = (order) => {
+                            // Get USD prices, fallback to 1 if not available
+                            const sellTokenUsdPrice = this.pricingService.getPrice(order.sellToken) || 1;
+                            const buyTokenUsdPrice = this.pricingService.getPrice(order.buyToken) || 1;
+                            
+                            // Get token amounts in their native decimals
+                            const sellAmount = ethers.utils.formatUnits(
+                                order.sellAmount, 
+                                this.tokenCache.get(order.sellToken)?.decimals || 18
+                            );
+                            const buyAmount = ethers.utils.formatUnits(
+                                order.buyAmount, 
+                                this.tokenCache.get(order.buyToken)?.decimals || 18
+                            );
+
+                            // Calculate value ratio
+                            // What you get (sell token) in USD / What you pay (buy token) in USD
+                            const valueRatio = (Number(sellAmount) * sellTokenUsdPrice) / 
+                                             (Number(buyAmount) * buyTokenUsdPrice);
+
+                            return valueRatio;
+                        };
+
+                        // Sort in descending order (higher ratio = better deal)
+                        return getDealValue(b) - getDealValue(a);
+                    });
+                    break;
+            }
+
             // Get filter state
             const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
             const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
@@ -531,6 +560,25 @@ export class ViewOrders extends BaseComponent {
         const filterControls = this.createElement('div', 'filter-controls');
         filterControls.innerHTML = `
             <div class="filter-row">
+                <div class="token-filters">
+                    <select id="sell-token-filter" class="token-filter">
+                        <option value="">All Sell Tokens</option>
+                        ${this.tokenList.map(token => 
+                            `<option value="${token.address}">${token.symbol}</option>`
+                        ).join('')}
+                    </select>
+                    <select id="buy-token-filter" class="token-filter">
+                        <option value="">All Buy Tokens</option>
+                        ${this.tokenList.map(token => 
+                            `<option value="${token.address}">${token.symbol}</option>`
+                        ).join('')}
+                    </select>
+                    <select id="order-sort" class="order-sort">
+                        <option value="newest">Newest First</option>
+                        <option value="best-deal">Best Deal First</option>
+                    </select>
+                </div>
+
                 <label class="filter-toggle">
                     <input type="checkbox" id="fillable-orders-toggle" checked>
                     <span>Show only fillable orders</span>
@@ -658,6 +706,15 @@ export class ViewOrders extends BaseComponent {
             column: 'id',
             direction: 'asc'
         };
+
+        // Add event listeners for new filters
+        const sellTokenFilter = filterControls.querySelector('#sell-token-filter');
+        const buyTokenFilter = filterControls.querySelector('#buy-token-filter');
+        const orderSort = filterControls.querySelector('#order-sort');
+
+        sellTokenFilter.addEventListener('change', () => this.refreshOrdersView());
+        buyTokenFilter.addEventListener('change', () => this.refreshOrdersView());
+        orderSort.addEventListener('change', () => this.refreshOrdersView());
     }
 
     handleSort(column) {
