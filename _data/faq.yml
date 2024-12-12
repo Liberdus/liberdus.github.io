@@ -27,7 +27,7 @@
 -
   question: How do I support the project?
   answer:
-    - "Hey, we're glad you want to support Liberdus! There are a few ways you can help out: "
+    - > "Hey, we're glad you want to support Liberdus! There are a few ways you can help out: "
     - >
       1. Join our <a href="https://discord.gg/2cpJzFnwCR" target=_blank>Discord server</a> and engage with us! We need your support and feedback to make Liberdus happen,
       because Liberdus is the community!
@@ -42,6 +42,7 @@
       4. Become a liquidity provider and stake your LP tokens. More info on how to do this coming soon.
     - >
       5. Help test the network during development. We regularly have bounties and rewards for community members that actively use the testnet.
+-
   question: How can I run a node?
   answer:
     - >
