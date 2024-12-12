@@ -590,14 +590,11 @@ export class ViewOrders extends BaseComponent {
                 <th>Amount</th>
                 <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
                 <th>Amount</th>
-                <th>Price</th>
-                <th>Rate</th>
                 <th>Deal</th>
                 <th>Expires</th>
                 <th>Status</th>
                 <th>Action</th>
-            </tr>
-        `;
+            </tr>`;
         
         // Add refresh button to filter controls
         const refreshButton = document.createElement('button');
@@ -1103,6 +1100,17 @@ export class ViewOrders extends BaseComponent {
             // Calculate Deal (Price * Rate)
             const deal = price * rate;
             
+            // Format USD prices with appropriate precision
+            const formatUsdPrice = (price) => {
+                if (price >= 100) return `$${price.toFixed(0)}`;
+                if (price >= 1) return `$${price.toFixed(2)}`;
+                return `$${price.toFixed(4)}`;
+            };
+
+            // Add price-estimate class if using default price
+            const sellPriceClass = this.pricingService.getPrice(order.buyToken) ? '' : 'price-estimate';
+            const buyPriceClass = this.pricingService.getPrice(order.sellToken) ? '' : 'price-estimate';
+
             tr.innerHTML = `
                 <td>${order.id}</td>
                 <td>
@@ -1110,15 +1118,18 @@ export class ViewOrders extends BaseComponent {
                         <div class="token-icon small">
                             ${sellTokenIcon}
                         </div>
-                        <a href="${this.getExplorerUrl(order.sellToken)}" 
-                           class="token-link" 
-                           target="_blank" 
-                           title="View token contract">
-                            ${sellTokenSymbol}
-                            <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                            </svg>
-                        </a>
+                        <div class="token-details">
+                            <a href="${this.getExplorerUrl(order.sellToken)}" 
+                               class="token-link" 
+                               target="_blank" 
+                               title="View token contract">
+                                ${sellTokenSymbol}
+                                <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                    <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                </svg>
+                            </a>
+                            <span class="token-price ${sellPriceClass}">${formatUsdPrice(buyTokenUsdPrice)}</span>
+                        </div>
                     </div>
                 </td>
                 <td>${Number(sellAmount).toFixed(1)}</td>
@@ -1127,20 +1138,21 @@ export class ViewOrders extends BaseComponent {
                         <div class="token-icon small">
                             ${buyTokenIcon}
                         </div>
-                        <a href="${this.getExplorerUrl(order.buyToken)}" 
-                           class="token-link" 
-                           target="_blank" 
-                           title="View token contract">
-                            ${buyTokenSymbol}
-                            <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                            </svg>
-                        </a>
+                        <div class="token-details">
+                            <a href="${this.getExplorerUrl(order.buyToken)}" 
+                               class="token-link" 
+                               target="_blank" 
+                               title="View token contract">
+                                ${buyTokenSymbol}
+                                <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                    <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                </svg>
+                            </a>
+                            <span class="token-price ${buyPriceClass}">${formatUsdPrice(sellTokenUsdPrice)}</span>
+                        </div>
                     </div>
                 </td>
                 <td>${Number(buyAmount).toFixed(1)}</td>
-                <td>${price.toFixed(6)}</td>
-                <td class="${rateClass}">${rate.toFixed(6)}</td>
                 <td class="${rateClass}">${deal.toFixed(6)}</td>
                 <td>${formattedExpiry}</td>
                 <td class="order-status">${status}</td>
@@ -1410,24 +1422,8 @@ export class ViewOrders extends BaseComponent {
             this.expiryTimers = new Map();
         }
 
-        const formatTimeDiff = (timeDiff) => {
-            const absDiff = Math.abs(timeDiff);
-            const days = Math.floor(absDiff / 86400); // 86400 seconds in a day
-            const hours = Math.floor((absDiff % 86400) / 3600);
-            const minutes = Math.floor((absDiff % 3600) / 60);
-            const sign = timeDiff < 0 ? '-' : '';
-
-            // If less than 24 hours, show only hours and minutes
-            if (days === 0) {
-                return `${sign}${hours}h ${minutes}m`;
-            }
-            
-            // If days exist, show days and hours (minutes omitted for clarity)
-            return `${sign}${days}d ${hours}h`;
-        };
-
         const updateExpiry = async () => {
-            const expiresCell = row.querySelector('td:nth-child(9)'); // Expires column
+            const expiresCell = row.querySelector('td:nth-child(7)'); // Updated index for Expires column
             if (!expiresCell) return;
 
             const timestamp = row.dataset.timestamp;
@@ -1437,8 +1433,20 @@ export class ViewOrders extends BaseComponent {
             const expiryTime = Number(timestamp) + orderExpiry;
             const timeDiff = expiryTime - currentTime;
 
-            const newExpiryText = formatTimeDiff(timeDiff);
+            const formatTimeDiff = (timeDiff) => {
+                const absDiff = Math.abs(timeDiff);
+                const days = Math.floor(absDiff / 86400);
+                const hours = Math.floor((absDiff % 86400) / 3600);
+                const minutes = Math.floor((absDiff % 3600) / 60);
+                const sign = timeDiff < 0 ? '-' : '';
 
+                if (days > 0) {
+                    return `${sign}${days}d ${hours}h`;
+                }
+                return `${sign}${hours}h ${minutes}m`;
+            };
+
+            const newExpiryText = formatTimeDiff(timeDiff);
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
             }

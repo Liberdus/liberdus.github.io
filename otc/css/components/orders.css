@@ -27,34 +27,28 @@
   width: 5%;
 } /* ID */
 .orders-table th:nth-child(2) {
-  width: 12%;
-} /* Buy Token */
+  width: 15%;
+} /* Buy Token (increased to accommodate price) */
 .orders-table th:nth-child(3) {
-  width: 8%;
+  width: 10%;
 } /* Buy Amount */
 .orders-table th:nth-child(4) {
-  width: 12%;
-} /* Sell Token */
+  width: 15%;
+} /* Sell Token (increased to accommodate price) */
 .orders-table th:nth-child(5) {
-  width: 8%;
+  width: 10%;
 } /* Sell Amount */
 .orders-table th:nth-child(6) {
-  width: 8%;
-} /* Price */
-.orders-table th:nth-child(7) {
-  width: 8%;
-} /* Rate */
-.orders-table th:nth-child(8) {
-  width: 8%;
+  width: 10%;
 } /* Deal */
-.orders-table th:nth-child(9) {
-  width: 8%;
-} /* Expires */
-.orders-table th:nth-child(10) {
-  width: 8%;
-} /* Status */
-.orders-table th:nth-child(11) {
+.orders-table th:nth-child(7) {
   width: 15%;
+} /* Expires */
+.orders-table th:nth-child(8) {
+  width: 10%;
+} /* Status */
+.orders-table th:nth-child(9) {
+  width: 10%;
 } /* Action */
 
 /* Cell styles */
@@ -590,4 +584,21 @@ th[data-sort].active-sort .sort-icon {
   font-size: 0.7em;
   color: #ff9900;
   opacity: 0.7;
+}
+
+.token-details {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.token-price {
+    font-size: 0.8em;
+    color: #666;
+    margin-top: 2px;
+}
+
+.price-estimate {
+    color: #999;
+    font-style: italic;
 }
