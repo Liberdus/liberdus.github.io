@@ -34,7 +34,7 @@
       Also join our social media channels which are linked at the bottom of the page.
     - >
       2. Contribute! We're always looking for strong developers and passionate people to help the project.
-      If you would like to be considered for the Liberdus core team, click <a href="https://forms.gle/S4msLE2ANm1dyGpM8">here</a>.
+      Join our Discord and tell us how you would like to help.
     - >
       3. Run a node! Liberdus will need community members to run nodes in the network so that there is a good amount of decentralization
       in the network. No special or expensive hardware is needed; a standard computer will do. You will earn Liberdus coins while you sleep.
@@ -44,6 +44,13 @@
       5. Help test the network during development. We regularly have bounties and rewards for community members that actively use the testnet.
 -
   question: How can I run a node?
+  answer:
+    - >
+      Just follow the instructions <a href="https://gitlab.com/liberdus/validator-docker" target=_blank>here</a>.
+    - >
+      If you have any issues support is available in our <a href="https://discord.gg/2cpJzFnwCR" target=_blank>Discord server</a>.
+-
+  question: Test can I run a node?
   answer:
     - >
       Just follow the instructions <a href="https://gitlab.com/liberdus/validator-docker" target=_blank>here</a>.
