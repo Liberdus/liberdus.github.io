@@ -1,12 +1,4 @@
 -
-  question: What is Liberdus?
-  answer:
-    - > 
-      From a user perspective Liberdus is a simple, easy to use messaging app that protects your privacy by using end-to-end encryption and 
-      a decentralized network of nodes to transfer the messages. Unlike most messaging apps the source code for Liberdus is open for anyone 
-      to view and verify. Anyone can also run a Liberdus validator node to confirm that the network is truly decentralized and earn a reward 
-      in the process. The Liberdus validator software uses the Shardus protocol so the network can scale easily to accommodate the load efficiently. 
--
   question: How can I run a node?
   answer:
     - >
