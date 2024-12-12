@@ -5,6 +5,7 @@ import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
 import { isDebugEnabled, getNetworkConfig } from '../config.js';
 import { NETWORK_TOKENS } from '../utils/tokens.js';
 import { getTokenList } from '../utils/tokens.js';
+import { PricingService } from '../services/PricingService.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
@@ -51,11 +52,19 @@ export class ViewOrders extends BaseComponent {
             orderExpiry: null,
             gracePeriod: null
         };
+
+        // Add pricing service
+        this.pricingService = new PricingService();
     }
 
     async init() {
         const { getTokenList } = await import('../utils/tokens.js');
         this.tokenList = await getTokenList();
+        await super.init();
+        await this.pricingService.initialize();
+        
+        // Subscribe to price updates
+        this.pricingService.subscribe(() => this.refreshOrdersView());
     }
 
     async getTokenInfo(tokenAddress) {
@@ -581,11 +590,21 @@ export class ViewOrders extends BaseComponent {
                 <th>Amount</th>
                 <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
                 <th>Amount</th>
+                <th>Price</th>
+                <th>Rate</th>
+                <th>Deal</th>
                 <th>Expires</th>
                 <th>Status</th>
                 <th>Action</th>
             </tr>
         `;
+        
+        // Add refresh button to filter controls
+        const refreshButton = document.createElement('button');
+        refreshButton.className = 'refresh-prices-button';
+        refreshButton.innerHTML = '↻ Refresh Prices';
+        refreshButton.addEventListener('click', () => this.pricingService.refreshPrices());
+        filterControls.querySelector('.filter-row').appendChild(refreshButton);
         
         // Add click handlers for sorting
         thead.querySelectorAll('th[data-sort]').forEach(th => {
@@ -1005,6 +1024,29 @@ export class ViewOrders extends BaseComponent {
 
     async createOrderRow(order) {
         try {
+            // Ensure prices are loaded
+            await this.pricingService.refreshPrices();
+            
+            // Get USD prices from pricing service, default to 1 if not available
+            const buyTokenUsdPrice = this.pricingService.getPrice(order.sellToken) || 1;
+            const sellTokenUsdPrice = this.pricingService.getPrice(order.buyToken) || 1;
+
+            // Debug the actual values
+            this.debug('Token prices:', {
+                sellToken: order.buyToken,
+                sellTokenUsdPrice,
+                buyToken: order.sellToken,
+                buyTokenUsdPrice,
+                pricesMap: this.pricingService.prices,
+                usingEstimates: !this.pricingService.getPrice(order.sellToken) || !this.pricingService.getPrice(order.buyToken)
+            });
+
+            // Calculate Rate (sellTokenUSD/buyTokenUsdPrice)
+            const rate = sellTokenUsdPrice / buyTokenUsdPrice;
+
+            // Add estimated-price class if either price is using the default $1
+            const rateClass = (!this.pricingService.getPrice(order.sellToken) || !this.pricingService.getPrice(order.buyToken)) ? 'estimated-price' : '';
+
             // Get token info for both tokens in the order
             const sellTokenInfo = await this.getTokenInfo(order.sellToken);
             const buyTokenInfo = await this.getTokenInfo(order.buyToken);
@@ -1051,7 +1093,16 @@ export class ViewOrders extends BaseComponent {
             const accounts = await window.ethereum.request({ method: 'eth_accounts' });
             const currentAccount = accounts[0]?.toLowerCase();
             const isUserOrder = order.maker?.toLowerCase() === currentAccount;
+    
+            const sellAmount = ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18);
+            const buyAmount = ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18);
 
+            // Calculate Price (sellAmount/buyAmount) due to taker view
+            const price = Number(sellAmount) / Number(buyAmount);
+
+            // Calculate Deal (Price * Rate)
+            const deal = price * rate;
+            
             tr.innerHTML = `
                 <td>${order.id}</td>
                 <td>
@@ -1070,7 +1121,7 @@ export class ViewOrders extends BaseComponent {
                         </a>
                     </div>
                 </td>
-                <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
+                <td>${Number(sellAmount).toFixed(1)}</td>
                 <td>
                     <div class="token-info">
                         <div class="token-icon small">
@@ -1087,7 +1138,10 @@ export class ViewOrders extends BaseComponent {
                         </a>
                     </div>
                 </td>
-                <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
+                <td>${Number(buyAmount).toFixed(1)}</td>
+                <td>${price.toFixed(6)}</td>
+                <td class="${rateClass}">${rate.toFixed(6)}</td>
+                <td class="${rateClass}">${deal.toFixed(6)}</td>
                 <td>${formattedExpiry}</td>
                 <td class="order-status">${status}</td>
                 <td class="action-column">${canFill ? 
@@ -1373,7 +1427,7 @@ export class ViewOrders extends BaseComponent {
         };
 
         const updateExpiry = async () => {
-            const expiresCell = row.querySelector('td:nth-child(6)'); // Expires column
+            const expiresCell = row.querySelector('td:nth-child(9)'); // Expires column
             if (!expiresCell) return;
 
             const timestamp = row.dataset.timestamp;

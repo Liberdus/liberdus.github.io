@@ -22,30 +22,39 @@
   background-color: var(--bg-tertiary);
 }
 
-/* Column widths - with wider ID column */
+/* Column widths */
 .orders-table th:nth-child(1) {
-  width: 10%;
+  width: 5%;
 } /* ID */
 .orders-table th:nth-child(2) {
-  width: 15%;
+  width: 12%;
 } /* Buy Token */
 .orders-table th:nth-child(3) {
-  width: 15%;
+  width: 8%;
 } /* Buy Amount */
 .orders-table th:nth-child(4) {
-  width: 15%;
+  width: 12%;
 } /* Sell Token */
 .orders-table th:nth-child(5) {
-  width: 15%;
+  width: 8%;
 } /* Sell Amount */
 .orders-table th:nth-child(6) {
-  width: 10%;
-} /* Expires */
+  width: 8%;
+} /* Price */
 .orders-table th:nth-child(7) {
-  width: 10%;
-} /* Status */
+  width: 8%;
+} /* Rate */
 .orders-table th:nth-child(8) {
-  width: 10%;
+  width: 8%;
+} /* Deal */
+.orders-table th:nth-child(9) {
+  width: 8%;
+} /* Expires */
+.orders-table th:nth-child(10) {
+  width: 8%;
+} /* Status */
+.orders-table th:nth-child(11) {
+  width: 15%;
 } /* Action */
 
 /* Cell styles */
@@ -566,4 +575,19 @@ th[data-sort].active-sort .sort-icon {
 .cancel-order-btn:disabled {
   background-color: #6c757d;
   cursor: not-allowed;
+}
+
+.estimated-price {
+  background-color: rgba(255, 247, 230, 0.5) !important;  /* Light orange background */
+  position: relative;
+}
+
+.estimated-price::after {
+  content: "est";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 0.7em;
+  color: #ff9900;
+  opacity: 0.7;
 }
