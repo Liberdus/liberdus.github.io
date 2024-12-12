@@ -1,35 +1,36 @@
 -
-  name: On-Chain Governance
+  name: Simple
   desc: >
-    A built-in voting system allows for the parameters and features of Liberdus to be customized by the coin holders in a way that is not only fair, but secure and verifiable.
+    A clean and simple messaging interface with a built in wallet; human friendly usernames can be used instead of addresses; no download or 
+    installation required; no spam messages; users can set a message toll
+  icon: car
+-
+  name: Privacy
+  desc: >
+    Encrypted messages can be sent directly or along with payments; multiple encryption algorithms available; 
+    quantum resistant encryption; conseal sender and receiver
+  icon: business-and-finance
+-
+  name: Decentralized
+  desc: >
+    The Liberdus network is operated by thousands of community run validator nodes; validators can be run on standard computers; 
+    no ASICs or GPUs required; host the user interface on your own website; no dependency on liberdus.com
+  icon: ecology
+-
+  name: Tokonomics
+  desc: >
+    210 Million max supply; fair launch; many ways to earn rewards; transaction and voting fees are burned; 
+    node operators earn rewards; liquidity providers earn rewards; low transaction fees; native bridge to other networks for DeFi
+  icon: swap
+-
+  name: Governance
+  desc: >
+    Decentralized Autonomous Organization (DAO) votes on network parameters and funding proposals; 
+    anyone holding enough coins can participate in voting; on-chain governance that is fair, secure and verifiable
   icon: vote
 -
   name: Scalability
   desc: >
-    Due to the underlying <a href="https://shardus.com">Shardus</a> infrastructure, Liberdus is scalable by design and transaction throughput (TPS) grows as the network grows. 
-    This ensures that the network can always keep up with usage.
+    Shardus protocol layer used for consensus and data storage; network throughput grows with number of nodes; 
+    dynamic state sharding used for linear scaling; network can autoscale based on usage; sustain low transaction fees; energy efficient
   icon: scalable
--
-  name: Sustainability
-  desc: >
-    Liberdus is energy-efficient and sustainable. It's not only sustainable environmentally, but also in terms of software development and network hosting. 
-    With a maintenence fund and ensured periodic payments to node runners, Liberdus is set up to be self-sustaining and eco-friendly.
-  icon: ecology
--
-  name: Quantum Resistance
-  desc: >
-    Advances in quantum computing are making quantum attacks a bigger and bigger threat on cryptographic security. We've designed Liberdus to be future-proof
-    with quantum-resistant cryptography from the beginning so that your coins are safe.
-  icon: business-and-finance
--
-  name: Atomic Swaps
-  desc: >
-    As use of different cryptocurrencies increases, we know that Liberdus users will want to transact with others holding different cryptocurrencies.
-    We've designed Liberdus to support cross-chain atomic swaps so that users can swap between coins without having to go through a 3rd party.
-  icon: swap
--
-  name: Instant Finality
-  desc: >
-    No one wants to wait for their transaction to confirm so they can get their coffee. We've designed Liberdus to have near-instant finality so that
-    it can easily be used at any POS so that you don't have to wait 10 minutes for your latte.
-  icon: car
