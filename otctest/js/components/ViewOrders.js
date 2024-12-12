@@ -387,7 +387,7 @@ export class ViewOrders extends BaseComponent {
                                (await contract.ORDER_EXPIRY()).toNumber();
             const currentTime = Math.floor(Date.now() / 1000);
             
-            // Apply token filters
+            // Apply token filters first
             const sellTokenFilter = this.container.querySelector('#sell-token-filter')?.value;
             const buyTokenFilter = this.container.querySelector('#buy-token-filter')?.value;
             const orderSort = this.container.querySelector('#order-sort')?.value;
@@ -404,11 +404,55 @@ export class ViewOrders extends BaseComponent {
                 );
             }
 
+            // Apply sorting based on selected option - and ONLY this sorting
+            if (orderSort === 'newest') {
+                ordersToDisplay.sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
+            } else if (orderSort === 'best-deal') {
+                const ordersWithDeals = await Promise.all(ordersToDisplay.map(async order => {
+                    const buyTokenInfo = await this.getTokenInfo(order.buyToken);
+                    const sellTokenInfo = await this.getTokenInfo(order.sellToken);
+
+                    const buyTokenUsdPrice = this.pricingService.getPrice(order.buyToken) || 1;
+                    const sellTokenUsdPrice = this.pricingService.getPrice(order.sellToken) || 1;
+
+                    // Format amounts using correct decimals for each token
+                    const sellAmount = ethers.utils.formatUnits(order.sellAmount, sellTokenInfo.decimals);
+                    const buyAmount = ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals);
+
+                    // Calculate Price (sellAmount/buyAmount) due to taker view
+                    const price = Number(sellAmount) / Number(buyAmount);
+                    
+                    // Calculate Rate (sellTokenUSD/buyTokenUsdPrice)
+                    const rate = sellTokenUsdPrice / buyTokenUsdPrice;
+                    
+                    // Calculate Deal (Price * Rate) - same as display calculation
+                    const deal = price * rate;
+
+                    this.debug('Deal calculation:', {
+                        orderId: order.id,
+                        sellToken: sellTokenInfo.symbol,
+                        buyToken: buyTokenInfo.symbol,
+                        sellAmount,
+                        buyAmount,
+                        price,
+                        rate,
+                        deal,
+                        explanation: `Deal = (${sellAmount}/${buyAmount}) * (${sellTokenUsdPrice}/${buyTokenUsdPrice}) = ${deal}`
+                    });
+
+                    return { order, deal };
+                }));
+
+                // Sort by deal value (highest first - best deals at top)
+                ordersWithDeals.sort((a, b) => Number(b.deal) - Number(a.deal));
+                ordersToDisplay = ordersWithDeals.map(item => item.order);
+            }
+
             // Get filter state
             const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
             const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
             
-            // Filter active orders if needed
+            // Filter active orders if needed - but don't sort again!
             if (showOnlyActive) {
                 ordersToDisplay = await Promise.all(ordersToDisplay.map(async order => {
                     const canFill = await this.canFillOrder(order);
@@ -430,14 +474,14 @@ export class ViewOrders extends BaseComponent {
                     .map(({ order }) => order);
             }
 
-            // Apply pagination
+            // Apply pagination without changing the order
             const startIndex = (this.currentPage - 1) * pageSize;
             const endIndex = pageSize === -1 ? ordersToDisplay.length : startIndex + pageSize;
             const paginatedOrders = pageSize === -1 ? 
                 ordersToDisplay : 
                 ordersToDisplay.slice(startIndex, endIndex);
 
-            // Clear existing rows
+            // Display orders in their current order
             const tbody = this.container.querySelector('tbody');
             if (!tbody) {
                 this.debug('ERROR: tbody not found');
@@ -445,7 +489,6 @@ export class ViewOrders extends BaseComponent {
             }
             tbody.innerHTML = '';
 
-            // Add paginated rows
             for (const order of paginatedOrders) {
                 const newRow = await this.createOrderRow(order);
                 if (newRow) {
@@ -453,7 +496,7 @@ export class ViewOrders extends BaseComponent {
                 }
             }
 
-            // Update pagination controls with total count before filtering
+            // Update pagination controls
             this.updatePaginationControls(ordersToDisplay.length);
 
             if (ordersToDisplay.length === 0) {
@@ -708,6 +751,7 @@ export class ViewOrders extends BaseComponent {
             // Use provided orderExpiry or cached value
             const expiryValue = orderExpiry || this.contractValues?.orderExpiry || 420;
             const now = Math.floor(Date.now() / 1000);
+            const expiryTime = Number(timestamp) + expiryValue;
             const timeLeft = expiryTime - now;
             
             this.debug('Expiry calculation:', {
@@ -1003,17 +1047,17 @@ export class ViewOrders extends BaseComponent {
             await this.pricingService.refreshPrices();
             
             // Get USD prices from pricing service, default to 1 if not available
-            const buyTokenUsdPrice = this.pricingService.getPrice(order.sellToken) || 1;
-            const sellTokenUsdPrice = this.pricingService.getPrice(order.buyToken) || 1;
+            const buyTokenUsdPrice = this.pricingService.getPrice(order.buyToken) || 1;
+            const sellTokenUsdPrice = this.pricingService.getPrice(order.sellToken) || 1;
 
             // Debug the actual values
             this.debug('Token prices:', {
-                sellToken: order.buyToken,
+                sellToken: order.sellToken,
                 sellTokenUsdPrice,
-                buyToken: order.sellToken,
+                buyToken: order.buyToken,
                 buyTokenUsdPrice,
                 pricesMap: this.pricingService.prices,
-                usingEstimates: !this.pricingService.getPrice(order.sellToken) || !this.pricingService.getPrice(order.buyToken)
+                usingEstimates: !this.pricingService.getPrice(order.buyToken) || !this.pricingService.getPrice(order.sellToken)
             });
 
             // Calculate Rate (sellTokenUSD/buyTokenUsdPrice)
@@ -1106,7 +1150,7 @@ export class ViewOrders extends BaseComponent {
                                     <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
                                 </svg>
                             </a>
-                            <span class="token-price ${sellPriceClass}">${formatUsdPrice(buyTokenUsdPrice)}</span>
+                            <span class="token-price ${sellPriceClass}">${formatUsdPrice(sellTokenUsdPrice)}</span>
                         </div>
                     </div>
                 </td>
@@ -1126,7 +1170,7 @@ export class ViewOrders extends BaseComponent {
                                     <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
                                 </svg>
                             </a>
-                            <span class="token-price ${buyPriceClass}">${formatUsdPrice(sellTokenUsdPrice)}</span>
+                            <span class="token-price ${buyPriceClass}">${formatUsdPrice(buyTokenUsdPrice)}</span>
                         </div>
                     </div>
                 </td>
