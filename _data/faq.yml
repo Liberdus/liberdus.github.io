@@ -7,6 +7,13 @@
       to view and verify. Anyone can also run a Liberdus validator node to confirm that the network is truly decentralized and earn a reward 
       in the process. The Liberdus validator software uses the Shardus protocol so the network can scale easily to accommodate the load efficiently. 
 -
+  question: How can I run a node?
+  answer:
+    - >
+      Just follow the instructions <a href="https://gitlab.com/liberdus/validator-docker" target=_blank>here</a>.
+    - >
+      If you have any issues support is available in our <a href="https://discord.gg/2cpJzFnwCR" target=_blank>Discord server</a>.
+-
   question: What is Shardus?
   answer:
     - >
@@ -25,6 +32,13 @@
     - >
       If you're interested in learning more about Liberdus tokenomics, check out the <a href="Liberdus-Litepaper.pdf" target=_blank>Litepaper</a>.
 -
+  question: How can I run a node?
+  answer:
+    - >
+      Just follow the instructions <a href="https://gitlab.com/liberdus/validator-docker" target=_blank>here</a>.
+    - >
+      If you have any issues support is available in our <a href="https://discord.gg/2cpJzFnwCR" target=_blank>Discord server</a>.
+-
   question: How do I support the project?
   answer:
     - > "Hey, we're glad you want to support Liberdus! There are a few ways you can help out: "
@@ -42,13 +56,6 @@
       4. Become a liquidity provider and stake your LP tokens. More info on how to do this coming soon.
     - >
       5. Help test the network during development. We regularly have bounties and rewards for community members that actively use the testnet.
--
-  question: How can I run a node?
-  answer:
-    - >
-      Just follow the instructions <a href="https://gitlab.com/liberdus/validator-docker" target=_blank>here</a>.
-    - >
-      If you have any issues support is available in our <a href="https://discord.gg/2cpJzFnwCR" target=_blank>Discord server</a>.
 -
   question: Test can I run a node?
   answer:
