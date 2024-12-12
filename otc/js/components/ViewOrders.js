@@ -419,13 +419,13 @@ export class ViewOrders extends BaseComponent {
                     const sellAmount = ethers.utils.formatUnits(order.sellAmount, sellTokenInfo.decimals);
                     const buyAmount = ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals);
 
-                    // Calculate Price (sellAmount/buyAmount) due to taker view
-                    const price = Number(sellAmount) / Number(buyAmount);
+                    // Calculate Price (what you get / what you give from taker perspective)
+                    const price = Number(buyAmount) / Number(sellAmount);
                     
-                    // Calculate Rate (sellTokenUSD/buyTokenUsdPrice)
+                    // Calculate Rate (market rate comparison)
                     const rate = sellTokenUsdPrice / buyTokenUsdPrice;
                     
-                    // Calculate Deal (Price * Rate) - same as display calculation
+                    // Calculate Deal (Price * Rate)
                     const deal = price * rate;
 
                     this.debug('Deal calculation:', {
@@ -437,14 +437,14 @@ export class ViewOrders extends BaseComponent {
                         price,
                         rate,
                         deal,
-                        explanation: `Deal = (${sellAmount}/${buyAmount}) * (${sellTokenUsdPrice}/${buyTokenUsdPrice}) = ${deal}`
+                        explanation: `Deal = (${buyAmount}/${sellAmount}) * (${buyTokenUsdPrice}/${sellTokenUsdPrice}) = ${deal}`
                     });
 
                     return { order, deal };
                 }));
 
-                // Sort by deal value (highest first - best deals at top)
-                ordersWithDeals.sort((a, b) => Number(b.deal) - Number(a.deal));
+                // Sort by deal value (lowest first - best deals at top)
+                ordersWithDeals.sort((a, b) => Number(a.deal) - Number(b.deal));
                 ordersToDisplay = ordersWithDeals.map(item => item.order);
             }
 
@@ -1118,11 +1118,23 @@ export class ViewOrders extends BaseComponent {
             const sellAmount = ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18);
             const buyAmount = ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18);
 
-            // Calculate Price (sellAmount/buyAmount) due to taker view
-            const price = Number(sellAmount) / Number(buyAmount);
+            // Calculate Price (what you get / what you give from taker perspective)
+            const price = Number(buyAmount) / Number(sellAmount);
 
             // Calculate Deal (Price * Rate)
             const deal = price * rate;
+            
+            this.debug('Deal calculation:', {
+                orderId: order.id,
+                sellToken: sellTokenInfo.symbol,
+                buyToken: buyTokenInfo.symbol,
+                sellAmount,
+                buyAmount,
+                price,
+                rate,
+                deal,
+                explanation: `Deal = (${buyAmount}/${sellAmount}) * (${buyTokenUsdPrice}/${sellTokenUsdPrice}) = ${deal}`
+            });
             
             // Format USD prices with appropriate precision
             const formatUsdPrice = (price) => {
