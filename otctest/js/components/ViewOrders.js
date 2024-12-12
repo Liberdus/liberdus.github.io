@@ -559,15 +559,21 @@ export class ViewOrders extends BaseComponent {
         const filterControls = this.createElement('div', 'filter-controls');
         filterControls.innerHTML = `
             <div class="filter-row">
-                <button class="advanced-filters-toggle">
-                    <svg class="filter-icon" viewBox="0 0 24 24" width="16" height="16">
-                        <path fill="currentColor" d="M14,12V19.88C14.04,20.18 13.94,20.5 13.71,20.71C13.32,21.1 12.69,21.1 12.3,20.71L10.29,18.7C10.06,18.47 9.96,18.16 10,17.87V12H9.97L4.21,4.62C3.87,4.19 3.95,3.56 4.38,3.22C4.57,3.08 4.78,3 5,3V3H19V3C19.22,3 19.43,3.08 19.62,3.22C20.05,3.56 20.13,4.19 19.79,4.62L14.03,12H14Z"/>
-                    </svg>
-                    Filters
-                    <svg class="chevron-icon" viewBox="0 0 24 24" width="16" height="16">
-                        <path fill="currentColor" d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
-                    </svg>
-                </button>
+                <div class="filters-group">
+                    <button class="advanced-filters-toggle">
+                        <svg class="filter-icon" viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M14,12V19.88C14.04,20.18 13.94,20.5 13.71,20.71C13.32,21.1 12.69,21.1 12.3,20.71L10.29,18.7C10.06,18.47 9.96,18.16 10,17.87V12H9.97L4.21,4.62C3.87,4.19 3.95,3.56 4.38,3.22C4.57,3.08 4.78,3 5,3V3H19V3C19.22,3 19.43,3.08 19.62,3.22C20.05,3.56 20.13,4.19 19.79,4.62L14.03,12H14Z"/>
+                        </svg>
+                        Filters
+                        <svg class="chevron-icon" viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
+                        </svg>
+                    </button>
+                    <label class="filter-toggle">
+                        <input type="checkbox" id="fillable-orders-toggle" checked>
+                        <span>Show only fillable orders</span>
+                    </label>
+                </div>
 
                 <div class="pagination-controls">
                     <select id="page-size-select" class="page-size-select">
@@ -610,10 +616,6 @@ export class ViewOrders extends BaseComponent {
                         <option value="best-deal">Best Deal First</option>
                     </select>
                 </div>
-                                <label class="filter-toggle">
-                    <input type="checkbox" id="fillable-orders-toggle" checked>
-                    <span>Show only fillable orders</span>
-                </label>
             </div>
         `;
 

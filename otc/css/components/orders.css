@@ -825,3 +825,15 @@ th[data-sort].active-sort {
 th[data-sort].active-sort .sort-icon {
   display: none;
 }
+
+.filters-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
