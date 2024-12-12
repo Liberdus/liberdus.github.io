@@ -527,45 +527,7 @@ export class ViewOrders extends BaseComponent {
     async setupTable() {
         const tableContainer = this.createElement('div', 'table-container');
         
-        // Create top pagination controls with dropdown
-        const createTopControls = () => `
-            <div class="pagination-controls">
-                <select id="page-size-select" class="page-size-select">
-                    <option value="10">10 per page</option>
-                    <option value="25" selected>25 per page</option>
-                    <option value="50">50 per page</option>
-                    <option value="100">100 per page</option>
-                    <option value="-1">View all</option>
-                </select>
-                
-                <div class="pagination-buttons">
-                    <button class="pagination-button prev-page" title="Previous page">
-                        ←
-                    </button>
-                    <span class="page-info">Page 1 of 1</span>
-                    <button class="pagination-button next-page" title="Next page">
-                        →
-                    </button>
-                </div>
-            </div>
-        `;
-
-        // Create bottom pagination controls without dropdown
-        const createBottomControls = () => `
-            <div class="pagination-controls">
-                <div class="pagination-buttons">
-                    <button class="pagination-button prev-page" title="Previous page">
-                        ←
-                    </button>
-                    <span class="page-info">Page 1 of 1</span>
-                    <button class="pagination-button next-page" title="Next page">
-                        →
-                    </button>
-                </div>
-            </div>
-        `;
-        
-        // Add top filter controls with pagination
+        // Top filter controls
         const filterControls = this.createElement('div', 'filter-controls');
         filterControls.innerHTML = `
             <div class="filter-row">
@@ -573,10 +535,25 @@ export class ViewOrders extends BaseComponent {
                     <input type="checkbox" id="fillable-orders-toggle" checked>
                     <span>Show only fillable orders</span>
                 </label>
-                ${createTopControls()}
+
+                <div class="pagination-controls">
+                    <select id="page-size-select" class="page-size-select">
+                        <option value="10">10 per page</option>
+                        <option value="25" selected>25 per page</option>
+                        <option value="50">50 per page</option>
+                        <option value="100">100 per page</option>
+                        <option value="-1">View all</option>
+                    </select>
+                    
+                    <div class="pagination-buttons">
+                        <button class="pagination-button prev-page" title="Previous page">←</button>
+                        <span class="page-info">Page 1 of 1</span>
+                        <button class="pagination-button next-page" title="Next page">→</button>
+                    </div>
+                </div>
             </div>
         `;
-        
+
         tableContainer.appendChild(filterControls);
         
         // Add table
@@ -596,13 +573,6 @@ export class ViewOrders extends BaseComponent {
                 <th>Action</th>
             </tr>`;
         
-        // Add refresh button to filter controls
-        const refreshButton = document.createElement('button');
-        refreshButton.className = 'refresh-prices-button';
-        refreshButton.innerHTML = '↻ Refresh Prices';
-        refreshButton.addEventListener('click', () => this.pricingService.refreshPrices());
-        filterControls.querySelector('.filter-row').appendChild(refreshButton);
-        
         // Add click handlers for sorting
         thead.querySelectorAll('th[data-sort]').forEach(th => {
             th.addEventListener('click', () => this.handleSort(th.dataset.sort));
@@ -612,54 +582,72 @@ export class ViewOrders extends BaseComponent {
         table.appendChild(this.createElement('tbody'));
         tableContainer.appendChild(table);
         
-        // Add bottom pagination
+        // Bottom controls with refresh button
         const bottomControls = this.createElement('div', 'filter-controls bottom-controls');
         bottomControls.innerHTML = `
             <div class="filter-row">
-                ${createBottomControls()}
+                <div class="refresh-container">
+                    <button id="refresh-prices-btn" class="refresh-prices-button">↻ Refresh Prices</button>
+                    <span class="refresh-status"></span>
+                </div>
+
+                <div class="pagination-controls">
+                    <div class="pagination-buttons">
+                        <button class="pagination-button prev-page" title="Previous page">←</button>
+                        <span class="page-info">Page 1 of 1</span>
+                        <button class="pagination-button next-page" title="Next page">→</button>
+                    </div>
+                </div>
             </div>
         `;
+        
         tableContainer.appendChild(bottomControls);
+
+        // Setup refresh button functionality
+        const refreshButton = bottomControls.querySelector('#refresh-prices-btn');
+        const statusIndicator = bottomControls.querySelector('.refresh-status');
         
-        // Add event listeners
-        const addPaginationListeners = (container, isTop) => {
-            if (isTop) {
-                const pageSizeSelect = container.querySelector('.page-size-select');
-                if (pageSizeSelect) {
-                    pageSizeSelect.addEventListener('change', () => {
-                        this.currentPage = 1;
-                        this.refreshOrdersView();
-                    });
+        let refreshTimeout;
+        refreshButton.addEventListener('click', async () => {
+            if (refreshTimeout) return;
+            
+            refreshButton.disabled = true;
+            refreshButton.innerHTML = '↻ Refreshing...';
+            statusIndicator.className = 'refresh-status loading';
+            statusIndicator.style.opacity = 1;
+            
+            try {
+                const result = await this.pricingService.refreshPrices();
+                if (result.success) {
+                    statusIndicator.className = 'refresh-status success';
+                    statusIndicator.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+                } else {
+                    statusIndicator.className = 'refresh-status error';
+                    statusIndicator.textContent = result.message;
                 }
+            } catch (error) {
+                statusIndicator.className = 'refresh-status error';
+                statusIndicator.textContent = 'Failed to refresh prices';
+            } finally {
+                refreshButton.disabled = false;
+                refreshButton.innerHTML = '↻ Refresh Prices';
+                
+                refreshTimeout = setTimeout(() => {
+                    refreshTimeout = null;
+                    statusIndicator.style.opacity = 0;
+                }, 2000);
             }
-            
-            const prevButton = container.querySelector('.prev-page');
-            const nextButton = container.querySelector('.next-page');
-            
-            if (prevButton) {
-                prevButton.addEventListener('click', () => {
-                    if (this.currentPage > 1) {
-                        this.currentPage--;
-                        this.refreshOrdersView();
-                    }
-                });
-            }
-            
-            if (nextButton) {
-                nextButton.addEventListener('click', () => {
-                    const totalPages = this.getTotalPages();
-                    if (this.currentPage < totalPages) {
-                        this.currentPage++;
-                        this.refreshOrdersView();
-                    }
-                });
-            }
-        };
+        });
+
+        // Sync both page size selects
+        const topSelect = filterControls.querySelector('#page-size-select');
         
-        // Add listeners to both top and bottom controls
-        addPaginationListeners(filterControls, true);
-        addPaginationListeners(bottomControls, false);
-        
+        topSelect.addEventListener('change', () => {
+            this.currentPage = 1;
+            this.refreshOrdersView();
+        });
+
+        // Add event listeners for pagination
         const toggle = filterControls.querySelector('#fillable-orders-toggle');
         toggle.addEventListener('change', () => this.refreshOrdersView());
         

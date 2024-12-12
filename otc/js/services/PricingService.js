@@ -15,6 +15,8 @@ export class PricingService {
                 console.log('[PricingService]', message, ...args);
             }
         };
+
+        this.refreshPromise = null; // Track current refresh promise
     }
 
     async initialize() {
@@ -29,8 +31,8 @@ export class PricingService {
         this.subscribers.delete(callback);
     }
 
-    notifySubscribers() {
-        this.subscribers.forEach(callback => callback());
+    notifySubscribers(event, data) {
+        this.subscribers.forEach(callback => callback(event, data));
     }
 
     async fetchTokenPrices(tokenAddresses) {
@@ -95,41 +97,53 @@ export class PricingService {
     }
 
     async refreshPrices() {
-        if (this.updating) return;
-        this.updating = true;
-
-        try {
-            // Get unique token addresses from orders
-            const tokenAddresses = new Set();
-            if (window.webSocket?.orderCache) {
-                for (const order of window.webSocket.orderCache.values()) {
-                    tokenAddresses.add(order.sellToken.toLowerCase());
-                    tokenAddresses.add(order.buyToken.toLowerCase());
-                }
-            }
-
-            if (tokenAddresses.size === 0) {
-                this.debug('No tokens to fetch prices for');
-                return;
-            }
-
-            const prices = await this.fetchTokenPrices([...tokenAddresses]);
-            
-            // Update internal price map
-            this.prices.clear();
-            for (const [address, data] of prices.entries()) {
-                this.prices.set(address, data.price);
-            }
-            
-            this.lastUpdate = Date.now();
-            this.notifySubscribers();
-            
-            this.debug('Prices updated:', this.prices);
-        } catch (error) {
-            this.debug('Error refreshing prices:', error);
-        } finally {
-            this.updating = false;
+        if (this.updating) {
+            return this.refreshPromise; // Return existing promise if refresh in progress
         }
+        
+        this.updating = true;
+        this.notifySubscribers('refreshStart'); // Notify start of refresh
+
+        this.refreshPromise = (async () => {
+            try {
+                // Get unique token addresses from orders
+                const tokenAddresses = new Set();
+                if (window.webSocket?.orderCache) {
+                    for (const order of window.webSocket.orderCache.values()) {
+                        tokenAddresses.add(order.sellToken.toLowerCase());
+                        tokenAddresses.add(order.buyToken.toLowerCase());
+                    }
+                }
+
+                if (tokenAddresses.size === 0) {
+                    this.debug('No tokens to fetch prices for');
+                    return { success: true, message: 'No tokens to update' };
+                }
+
+                const prices = await this.fetchTokenPrices([...tokenAddresses]);
+                
+                // Update internal price map
+                this.prices.clear();
+                for (const [address, data] of prices.entries()) {
+                    this.prices.set(address, data.price);
+                }
+                
+                this.lastUpdate = Date.now();
+                this.notifySubscribers('refreshComplete'); // Notify successful completion
+                
+                this.debug('Prices updated:', this.prices);
+                return { success: true, message: 'Prices updated successfully' };
+            } catch (error) {
+                this.debug('Error refreshing prices:', error);
+                this.notifySubscribers('refreshError', error); // Notify error
+                return { success: false, message: 'Failed to update prices' };
+            } finally {
+                this.updating = false;
+                this.refreshPromise = null;
+            }
+        })();
+
+        return this.refreshPromise;
     }
 
     getPrice(tokenAddress) {
