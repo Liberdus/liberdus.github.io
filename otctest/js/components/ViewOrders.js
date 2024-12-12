@@ -40,13 +40,6 @@ export class ViewOrders extends BaseComponent {
         // Add loading state
         this.isLoading = false;
 
-        // Initialize sorting state with null values
-        this.sortConfig = {
-            column: null,
-            direction: null,
-            isColumnClick: false
-        };
-
         // Add cache for contract values
         this.contractValues = {
             orderExpiry: null,
@@ -411,43 +404,6 @@ export class ViewOrders extends BaseComponent {
                 );
             }
 
-            // Apply sorting
-            switch (orderSort) {
-                case 'newest':
-                    ordersToDisplay.sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
-                    break;
-                case 'best-deal':
-                    // Calculate and sort by deal value
-                    ordersToDisplay.sort((a, b) => {
-                        const getDealValue = (order) => {
-                            // Get USD prices, fallback to 1 if not available
-                            const sellTokenUsdPrice = this.pricingService.getPrice(order.sellToken) || 1;
-                            const buyTokenUsdPrice = this.pricingService.getPrice(order.buyToken) || 1;
-                            
-                            // Get token amounts in their native decimals
-                            const sellAmount = ethers.utils.formatUnits(
-                                order.sellAmount, 
-                                this.tokenCache.get(order.sellToken)?.decimals || 18
-                            );
-                            const buyAmount = ethers.utils.formatUnits(
-                                order.buyAmount, 
-                                this.tokenCache.get(order.buyToken)?.decimals || 18
-                            );
-
-                            // Calculate value ratio
-                            // What you get (sell token) in USD / What you pay (buy token) in USD
-                            const valueRatio = (Number(sellAmount) * sellTokenUsdPrice) / 
-                                             (Number(buyAmount) * buyTokenUsdPrice);
-
-                            return valueRatio;
-                        };
-
-                        // Sort in descending order (higher ratio = better deal)
-                        return getDealValue(b) - getDealValue(a);
-                    });
-                    break;
-            }
-
             // Get filter state
             const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
             const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
@@ -556,33 +512,19 @@ export class ViewOrders extends BaseComponent {
     async setupTable() {
         const tableContainer = this.createElement('div', 'table-container');
         
-        // Top filter controls
+        // Main filter controls
         const filterControls = this.createElement('div', 'filter-controls');
         filterControls.innerHTML = `
             <div class="filter-row">
-                <div class="token-filters">
-                    <select id="sell-token-filter" class="token-filter">
-                        <option value="">All Sell Tokens</option>
-                        ${this.tokenList.map(token => 
-                            `<option value="${token.address}">${token.symbol}</option>`
-                        ).join('')}
-                    </select>
-                    <select id="buy-token-filter" class="token-filter">
-                        <option value="">All Buy Tokens</option>
-                        ${this.tokenList.map(token => 
-                            `<option value="${token.address}">${token.symbol}</option>`
-                        ).join('')}
-                    </select>
-                    <select id="order-sort" class="order-sort">
-                        <option value="newest">Newest First</option>
-                        <option value="best-deal">Best Deal First</option>
-                    </select>
-                </div>
-
-                <label class="filter-toggle">
-                    <input type="checkbox" id="fillable-orders-toggle" checked>
-                    <span>Show only fillable orders</span>
-                </label>
+                <button class="advanced-filters-toggle">
+                    <svg class="filter-icon" viewBox="0 0 24 24" width="16" height="16">
+                        <path fill="currentColor" d="M14,12V19.88C14.04,20.18 13.94,20.5 13.71,20.71C13.32,21.1 12.69,21.1 12.3,20.71L10.29,18.7C10.06,18.47 9.96,18.16 10,17.87V12H9.97L4.21,4.62C3.87,4.19 3.95,3.56 4.38,3.22C4.57,3.08 4.78,3 5,3V3H19V3C19.22,3 19.43,3.08 19.62,3.22C20.05,3.56 20.13,4.19 19.79,4.62L14.03,12H14Z"/>
+                    </svg>
+                    Filters
+                    <svg class="chevron-icon" viewBox="0 0 24 24" width="16" height="16">
+                        <path fill="currentColor" d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
+                    </svg>
+                </button>
 
                 <div class="pagination-controls">
                     <select id="page-size-select" class="page-size-select">
@@ -602,6 +544,56 @@ export class ViewOrders extends BaseComponent {
             </div>
         `;
 
+        // Advanced filters section
+        const advancedFilters = this.createElement('div', 'advanced-filters');
+        advancedFilters.style.display = 'none';
+        advancedFilters.innerHTML = `
+            <div class="filter-row">
+                <div class="token-filters">
+                    <select id="sell-token-filter" class="token-filter">
+                        <option value="">All Sell Tokens</option>
+                        ${this.tokenList.map(token => 
+                            `<option value="${token.address}">${token.symbol}</option>`
+                        ).join('')}
+                    </select>
+                    <select id="buy-token-filter" class="token-filter">
+                        <option value="">All Buy Tokens</option>
+                        ${this.tokenList.map(token => 
+                            `<option value="${token.address}">${token.symbol}</option>`
+                        ).join('')}
+                    </select>
+                    <select id="order-sort" class="order-sort">
+                        <option value="newest">Newest First</option>
+                        <option value="best-deal">Best Deal First</option>
+                    </select>
+                </div>
+                                <label class="filter-toggle">
+                    <input type="checkbox" id="fillable-orders-toggle" checked>
+                    <span>Show only fillable orders</span>
+                </label>
+            </div>
+        `;
+
+        // Add the advanced filters section after the main controls
+        filterControls.appendChild(advancedFilters);
+        
+        // Setup advanced filters toggle
+        const advancedFiltersToggle = filterControls.querySelector('.advanced-filters-toggle');
+        advancedFiltersToggle.addEventListener('click', () => {
+            const isExpanded = advancedFilters.style.display !== 'none';
+            advancedFilters.style.display = isExpanded ? 'none' : 'block';
+            advancedFiltersToggle.classList.toggle('expanded', !isExpanded);
+        });
+
+        // Add event listeners for filters
+        const sellTokenFilter = advancedFilters.querySelector('#sell-token-filter');
+        const buyTokenFilter = advancedFilters.querySelector('#buy-token-filter');
+        const orderSort = advancedFilters.querySelector('#order-sort');
+
+        sellTokenFilter.addEventListener('change', () => this.refreshOrdersView());
+        buyTokenFilter.addEventListener('change', () => this.refreshOrdersView());
+        orderSort.addEventListener('change', () => this.refreshOrdersView());
+
         tableContainer.appendChild(filterControls);
         
         // Add table
@@ -610,21 +602,16 @@ export class ViewOrders extends BaseComponent {
         const thead = this.createElement('thead');
         thead.innerHTML = `
             <tr>
-                <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
+                <th>ID</th>
+                <th>Buy</th>
                 <th>Amount</th>
-                <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
+                <th>Sell</th>
                 <th>Amount</th>
                 <th>Deal</th>
                 <th>Expires</th>
                 <th>Status</th>
                 <th>Action</th>
             </tr>`;
-        
-        // Add click handlers for sorting
-        thead.querySelectorAll('th[data-sort]').forEach(th => {
-            th.addEventListener('click', () => this.handleSort(th.dataset.sort));
-        });
         
         table.appendChild(thead);
         table.appendChild(this.createElement('tbody'));
@@ -700,59 +687,6 @@ export class ViewOrders extends BaseComponent {
         toggle.addEventListener('change', () => this.refreshOrdersView());
         
         this.container.appendChild(tableContainer);
-
-        // Initialize sorting state
-        this.sortConfig = {
-            column: 'id',
-            direction: 'asc'
-        };
-
-        // Add event listeners for new filters
-        const sellTokenFilter = filterControls.querySelector('#sell-token-filter');
-        const buyTokenFilter = filterControls.querySelector('#buy-token-filter');
-        const orderSort = filterControls.querySelector('#order-sort');
-
-        sellTokenFilter.addEventListener('change', () => this.refreshOrdersView());
-        buyTokenFilter.addEventListener('change', () => this.refreshOrdersView());
-        orderSort.addEventListener('change', () => this.refreshOrdersView());
-    }
-
-    handleSort(column) {
-        this.debug('Sorting by column:', column);
-        
-        // If clicking same column, toggle direction
-        if (this.sortConfig.column === column) {
-            if (this.sortConfig.direction === 'asc') {
-                this.sortConfig.direction = 'desc';
-            } else if (this.sortConfig.direction === 'desc') {
-                // Reset sorting
-                this.sortConfig.column = null;
-                this.sortConfig.direction = null;
-            } else {
-                // No current direction, start with ascending
-                this.sortConfig.direction = 'asc';
-            }
-        } else {
-            // New column, start with ascending
-            this.sortConfig.column = column;
-            this.sortConfig.direction = 'asc';
-        }
-
-        // Update sort icons
-        const headers = this.container.querySelectorAll('th[data-sort]');
-        headers.forEach(header => {
-            const icon = header.querySelector('.sort-icon');
-            if (header.dataset.sort === column && this.sortConfig.direction) {
-                header.classList.add('active-sort');
-                icon.textContent = this.sortConfig.direction === 'asc' ? '↑' : '↓';
-            } else {
-                header.classList.remove('active-sort');
-                icon.textContent = '↕';
-            }
-        });
-
-        this.debug('Sort config after update:', this.sortConfig);
-        this.refreshOrdersView();
     }
 
     formatAddress(address) {
@@ -773,7 +707,6 @@ export class ViewOrders extends BaseComponent {
         try {
             // Use provided orderExpiry or cached value
             const expiryValue = orderExpiry || this.contractValues?.orderExpiry || 420;
-            const expiryTime = Number(timestamp) + expiryValue;
             const now = Math.floor(Date.now() / 1000);
             const timeLeft = expiryTime - now;
             
