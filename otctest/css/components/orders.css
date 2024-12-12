@@ -486,67 +486,67 @@ th[data-sort].active-sort .sort-icon {
 }
 
 .tab-content-wrapper {
-    position: relative;
-    padding: 20px;
+  position: relative;
+  padding: 20px;
 }
 
 .status-container {
-    margin: 15px 0;
-    padding: 0 20px;
-    min-height: 60px;
-    position: relative;
+  margin: 15px 0;
+  padding: 0 20px;
+  min-height: 60px;
+  position: relative;
 }
 
 .status-message {
-    padding: 15px 20px;
-    margin-bottom: 15px;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 500;
-    text-align: center;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    animation: slideIn 0.3s ease-out;
-    display: block;
-    opacity: 1;
+  padding: 15px 20px;
+  margin-bottom: 15px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  animation: slideIn 0.3s ease-out;
+  display: block;
+  opacity: 1;
 }
 
 @keyframes slideIn {
-    from {
-        transform: translateY(-10px);
-        opacity: 0;
-    }
-    to {
-        transform: translateY(0);
-        opacity: 1;
-    }
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .status-message.status-pending {
-    background-color: rgba(25, 118, 210, 0.1);
-    color: #1976d2;
-    border: 2px solid rgba(25, 118, 210, 0.2);
+  background-color: rgba(25, 118, 210, 0.1);
+  color: #1976d2;
+  border: 2px solid rgba(25, 118, 210, 0.2);
 }
 
 .status-message.status-success {
-    background-color: rgba(46, 125, 50, 0.1);
-    color: #2e7d32;
-    border: 2px solid rgba(46, 125, 50, 0.2);
+  background-color: rgba(46, 125, 50, 0.1);
+  color: #2e7d32;
+  border: 2px solid rgba(46, 125, 50, 0.2);
 }
 
 .status-message.status-error {
-    background-color: rgba(211, 47, 47, 0.1);
-    color: #d32f2f;
-    border: 2px solid rgba(211, 47, 47, 0.2);
+  background-color: rgba(211, 47, 47, 0.1);
+  color: #d32f2f;
+  border: 2px solid rgba(211, 47, 47, 0.2);
 }
 
 /* Make sure the table doesn't overlap */
 .orders-table-container {
-    margin-top: 20px;
+  margin-top: 20px;
 }
 
 .token-icon.small > * {
-    border: none;
-    background: transparent;
+  border: none;
+  background: transparent;
 }
 
 .cancel-order-btn {

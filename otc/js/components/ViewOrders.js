@@ -462,6 +462,19 @@ export class ViewOrders extends BaseComponent {
             // Update pagination controls with total count before filtering
             this.updatePaginationControls(ordersToDisplay.length);
 
+            if (ordersToDisplay.length === 0) {
+                tbody.innerHTML = `
+                    <tr class="empty-message">
+                        <td colspan="8" class="no-orders-message">
+                            <div class="placeholder-text">
+                                ${showOnlyActive ? 
+                                    'No fillable orders available at this time' : 
+                                    'No orders found'}
+                            </div>
+                        </td>
+                    </tr>`;
+            }
+
         } catch (error) {
             this.debug('Error refreshing orders:', error);
             this.showError('Failed to refresh orders view');
@@ -740,7 +753,7 @@ export class ViewOrders extends BaseComponent {
                 ['function allowance(address owner, address spender) view returns (uint256)'],
                 this.provider
             );
-            const allowance = await tokenContract.allowance(owner, this.contract.address);
+            const allowance = await tokenContract.allowance(owner, this.webSocket.contractAddress);
             return allowance.gte(amount);
         } catch (error) {
             console.error('[ViewOrders] Error checking allowance:', error);
@@ -1186,9 +1199,13 @@ export class ViewOrders extends BaseComponent {
                     return false;
                 }
 
-                // Call ORDER_EXPIRY as a method
-                const orderExpiry = await this.webSocket.contract.ORDER_EXPIRY();
-                this.debug('Order expiry:', orderExpiry.toString());
+                // Use cached orderExpiry from WebSocket
+                const orderExpiry = this.webSocket.orderExpiry;
+                if (!orderExpiry) {
+                    this.debug('Order expiry not available in WebSocket cache');
+                    return false;
+                }
+                this.debug('Using cached order expiry:', orderExpiry.toString());
 
                 const now = Math.floor(Date.now() / 1000);
                 const expiryTime = Number(order.timestamp) + orderExpiry.toNumber();
