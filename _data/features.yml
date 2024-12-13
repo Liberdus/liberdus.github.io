@@ -8,7 +8,7 @@
   name: Privacy
   desc: >
     Encrypted messages can be sent directly or along with payments; multiple encryption algorithms available; 
-    quantum resistant encryption; conseal sender and receiver
+    quantum resistant encryption; conceal sender and receiver
   icon: business-and-finance
 -
   name: Decentralized
