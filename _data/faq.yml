@@ -25,12 +25,17 @@
     - >
       If you're interested in learning more about Liberdus tokenomics, check out the <a href="Liberdus-Litepaper.pdf" target=_blank>Litepaper</a>.
 -
-  question: How can I run a node?
+  question: How can I run a node to earn rewards?
   answer:
     - >
       Just follow the instructions <a href="https://gitlab.com/liberdus/validator-docker" target=_blank>here</a>.
     - >
       If you have any issues, support is available in our <a href="https://discord.gg/2cpJzFnwCR" target=_blank>Discord server</a>.
+-
+  question: How can I add liquidity to earn rewards?
+  answer:
+    - >
+      Coming soon !!
 -
   question: How do I support the project?
   answer:
