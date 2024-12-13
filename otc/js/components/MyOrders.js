@@ -169,9 +169,18 @@ export class MyOrders extends ViewOrders {
                     const sellValueUsd = sellAmount * (this.pricingService?.getPrice(order.sellToken) || 1);
                     const buyValueUsd = buyAmount * (this.pricingService?.getPrice(order.buyToken) || 1);
                     
+                    // Calculate Price (what you get / what you give)
+                    const price = buyAmount / sellAmount;
+
+                    // Calculate Rate (market rate comparison)
+                    const rate = sellValueUsd / buyValueUsd;
+
+                    // Calculate Deal (Price * Rate)
+                    const deal = price * rate;
+
                     return {
                         orderId: order.id,
-                        deal: buyValueUsd / sellValueUsd
+                        deal: deal
                     };
                 }));
 
@@ -480,12 +489,26 @@ export class MyOrders extends ViewOrders {
             const sellTokenUsdPrice = this.pricingService?.getPrice(order.sellToken) || 1;
             const buyTokenUsdPrice = this.pricingService?.getPrice(order.buyToken) || 1;
 
-            // Calculate USD values
-            const sellValueUSD = Number(sellAmount) * sellTokenUsdPrice;
-            const buyValueUSD = Number(buyAmount) * buyTokenUsdPrice;
+            // Calculate Price (what you get / what you give)
+            const price = Number(buyAmount) / Number(sellAmount);
 
-            // Calculate deal as ratio of USD values (receiving/giving)
-            const deal = buyValueUSD / sellValueUSD;
+            // Calculate Rate (market rate comparison)
+            const rate = sellTokenUsdPrice / buyTokenUsdPrice;
+
+            // Calculate Deal (Price * Rate)
+            const deal = price * rate;
+
+            this.debug('Deal calculation:', {
+                orderId: order.id,
+                sellToken: sellTokenInfo.symbol,
+                buyToken: buyTokenInfo.symbol,
+                sellAmount,
+                buyAmount,
+                price,
+                rate,
+                deal,
+                explanation: `Deal = (${buyAmount}/${sellAmount}) * (${sellTokenUsdPrice}/${buyTokenUsdPrice}) = ${deal}`
+            });
 
             // Format USD prices with appropriate precision
             const formatUsdPrice = (price) => {
