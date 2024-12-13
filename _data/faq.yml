@@ -1,10 +1,11 @@
 -
-  question: How can I run a node?
+  question: What is Liberdus?
   answer:
-    - >
-      Just follow the instructions <a href="https://gitlab.com/liberdus/validator-docker" target=_blank>here</a>.
-    - >
-      If you have any issues support is available in our <a href="https://discord.gg/2cpJzFnwCR" target=_blank>Discord server</a>.
+    - > 
+      From a user perspective Liberdus is a simple, easy to use messaging app that protects your privacy by using end-to-end encryption and 
+      a decentralized network of nodes to transfer the messages. Unlike most messaging apps the source code for Liberdus is open for anyone 
+      to view and verify. Anyone can also run a Liberdus validator node to confirm that the network is truly decentralized and earn a reward 
+      in the process. The Liberdus validator software uses the Shardus protocol so the network can scale easily to accommodate the load efficiently. 
 -
   question: What is Shardus?
   answer:
