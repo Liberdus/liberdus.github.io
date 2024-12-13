@@ -1,8 +1,17 @@
--   question: What is Shardus?
-    answer:
-        - |
-          Shardus is a linearly-scaling blockchain framework that enables Liberdus to scale TPS (transactions-per-second) with the growth of the network size,
-          and provides the blockchain infrastructure for the Liberdus node software.
-        - |
-          If you're interested in learning more about Shardus and how it works, check out the site <a href="https://shardus.com">here.</a>
-
+-
+  question: What is Liberdus?
+  answer:
+    - > 
+      From a user perspective Liberdus is a simple, easy to use messaging app that protects your privacy by using end-to-end encryption and 
+      a decentralized network of nodes to transfer the messages. Unlike most messaging apps the source code for Liberdus is open for anyone 
+      to view and verify. Anyone can also run a Liberdus validator node to confirm that the network is truly decentralized and earn a reward 
+      in the process. The Liberdus validator software uses the Shardus protocol so the network can scale easily to accommodate the load efficiently. 
+-
+  question: What is Shardus?
+  answer:
+    - >
+      Shardus is the protocol layer software to enable application specific chains. Liberdus uses the Shardus software to handle consensus 
+      and data storage so the Liberdus software can focus on the application logic. The Shardus team initially developed Liberdus 
+      before it was spun off as its own project.
+    - >
+      If you're interested in learning more about Shardus and how it works, check out the <a href="https://shardus.com" target=_blank>Shardus website</a>.
