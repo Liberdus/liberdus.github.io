@@ -32,24 +32,6 @@
     - >
       If you have any issues support is available in our <a href="https://discord.gg/2cpJzFnwCR" target=_blank>Discord server</a>.
 -
-  question: How do I support the project?
-  answer:
-    - "Hey, we're glad you want to support Liberdus! There are a few ways you can help out: "
-    - >
-      1. Join our <a href="https://discord.gg/2cpJzFnwCR" target=_blank>Discord server</a> and engage with us! We need your support and feedback to make Liberdus happen,
-      because Liberdus is the community!
-      Also join our social media channels which are linked at the bottom of the page.
-    - >
-      2. Contribute! We're always looking for strong developers and passionate people to help the project.
-      Join our Discord and tell us how you would like to help.
-    - >
-      3. Run a node! Liberdus will need community members to run nodes in the network so that there is a good amount of decentralization
-      in the network. No special or expensive hardware is needed; a standard computer will do. You will earn Liberdus coins while you sleep.
-    - >
-      4. Become a liquidity provider and stake your LP tokens. More info on how to do this coming soon.
-    - >
-      5. Help test the network during development. We regularly have bounties and rewards for community members that actively use the testnet.
--
   question: Test can I run a node?
   answer:
     - >
