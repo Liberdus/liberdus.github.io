@@ -15,26 +15,3 @@
       before it was spun off as its own project.
     - >
       If you're interested in learning more about Shardus and how it works, check out the <a href="https://shardus.com" target=_blank>Shardus website</a>.
--
-  question: What are the tokenomics for Liberdus?
-  answer:
-    - >
-      Liberdus has a max supply of 210 million coins. Transaction fees and other fees collected by the network are burned to reduce the 
-      supply. New coins are minted to pay validator nodes, liquidity providers and other operating expenses. The actual circulating supply will
-      level out well below 210 million.
-    - >
-      If you're interested in learning more about Liberdus tokenomics, check out the <a href="Liberdus-Litepaper.pdf" target=_blank>Litepaper</a>.
--
-  question: How can I run a node?
-  answer:
-    - >
-      Just follow the instructions <a href="https://gitlab.com/liberdus/validator-docker" target=_blank>here</a>.
-    - >
-      If you have any issues support is available in our <a href="https://discord.gg/2cpJzFnwCR" target=_blank>Discord server</a>.
--
-  question: Test can I run a node?
-  answer:
-    - >
-      Just follow the instructions <a href="https://gitlab.com/liberdus/validator-docker" target=_blank>here</a>.
-    - >
-      If you have any issues support is available in our <a href="https://discord.gg/2cpJzFnwCR" target=_blank>Discord server</a>.
