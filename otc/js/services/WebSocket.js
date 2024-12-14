@@ -182,7 +182,6 @@ export class WebSocketService {
 
             contract.on("OrderCreated", (...args) => {
                 try {
-                    this.debug('OrderCreated event received (raw):', args);
                     const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee, event] = args;
                     
                     const orderData = {
@@ -195,19 +194,12 @@ export class WebSocketService {
                         buyAmount,
                         timestamp: timestamp.toNumber(),
                         orderCreationFee: fee,
-                        status: 'Active'
+                        status: 'Active',
+                        tries: 0
                     };
                     
-                    this.debug('Processed OrderCreated data:', orderData);
-                    
-                    // Update cache
                     this.orderCache.set(orderId.toNumber(), orderData);
                     this.debug('Cache updated:', Array.from(this.orderCache.entries()));
-                    
-                    // Log subscribers before notification
-                    this.debug('Current subscribers for OrderCreated:', 
-                        this.subscribers.get("OrderCreated")?.size || 0);
-                    
                     this.notifySubscribers("OrderCreated", orderData);
                 } catch (error) {
                     this.debug('Error in OrderCreated handler:', error);
@@ -227,11 +219,39 @@ export class WebSocketService {
             });
 
             contract.on("OrderCanceled", (orderId, maker, timestamp, event) => {
-                const order = this.orderCache.get(orderId.toNumber());
+                const orderIdNum = orderId.toNumber();
+                const order = this.orderCache.get(orderIdNum);
                 if (order) {
                     order.status = 'Canceled';
-                    this.updateOrderCache(orderId.toNumber(), order);
+                    this.orderCache.set(orderIdNum, order);
+                    this.debug('Updated order to Canceled:', orderIdNum);
                     this.notifySubscribers("OrderCanceled", order);
+                }
+            });
+
+            contract.on("OrderCleanedUp", (orderId) => {
+                const orderIdNum = orderId.toNumber();
+                if (this.orderCache.has(orderIdNum)) {
+                    this.orderCache.delete(orderIdNum);
+                    this.debug('Removed cleaned up order:', orderIdNum);
+                    this.notifySubscribers("OrderCleanedUp", { id: orderIdNum });
+                }
+            });
+            
+            contract.on("RetryOrder", (oldOrderId, newOrderId, maker, tries, timestamp) => {
+                const oldOrderIdNum = oldOrderId.toNumber();
+                const newOrderIdNum = newOrderId.toNumber();
+                
+                const order = this.orderCache.get(oldOrderIdNum);
+                if (order) {
+                    order.id = newOrderIdNum;
+                    order.tries = tries.toNumber();
+                    order.timestamp = timestamp.toNumber();
+                    
+                    this.orderCache.delete(oldOrderIdNum);
+                    this.orderCache.set(newOrderIdNum, order);
+                    this.debug('Updated retried order:', {oldId: oldOrderIdNum, newId: newOrderIdNum, tries: tries.toString()});
+                    this.notifySubscribers("RetryOrder", order);
                 }
             });
             
@@ -245,46 +265,122 @@ export class WebSocketService {
         try {
             this.debug('Starting order sync with contract:', contract.address);
             
-            let nextOrderId = 0;
-            try {
-                nextOrderId = await this.queueRequest(() => contract.nextOrderId());
-                this.debug('nextOrderId result:', nextOrderId.toString());
-            } catch (error) {
-                this.debug('nextOrderId call failed, using default value:', error);
-            }
-
+            // Get current block and calculate 20 days ago
+            const currentBlock = await this.provider.getBlockNumber();
+            const blocksPerDay = (24 * 60 * 60) / 2; // ~43,200 blocks per day
+            const startBlock = currentBlock - (blocksPerDay * 20); // Look back 20 days
+            
+            this.debug('Fetching events from block', startBlock, 'to', currentBlock);
+            
             // Clear existing cache before sync
             this.orderCache.clear();
-            
-            // Sync all orders that have a valid maker address
-            for (let i = 0; i < nextOrderId; i++) {
-                try {
-                    const order = await this.queueRequest(() => contract.orders(i));
-                    // Only filter out zero-address makers (non-existent orders)
-                    if (order.maker !== ethers.constants.AddressZero) {
-                        const orderData = {
-                            id: i,
-                            maker: order.maker,
-                            taker: order.taker,
-                            sellToken: order.sellToken,
-                            sellAmount: order.sellAmount,
-                            buyToken: order.buyToken,
-                            buyAmount: order.buyAmount,
-                            timestamp: order.timestamp.toNumber(),
-                            status: ['Active', 'Filled', 'Canceled'][order.status], // Map enum to string
-                            orderCreationFee: order.orderCreationFee,
-                            tries: order.tries
-                        };
-                        this.orderCache.set(i, orderData);
-                        this.debug('Added order to cache:', orderData);
-                    }
-                } catch (error) {
-                    this.debug(`Failed to read order ${i}:`, error);
-                    continue;
+
+            // Fetch all relevant events
+            const [createdEvents, filledEvents, canceledEvents, cleanedEvents, retryEvents] = await Promise.all([
+                contract.queryFilter(contract.filters.OrderCreated(), startBlock, currentBlock),
+                contract.queryFilter(contract.filters.OrderFilled(), startBlock, currentBlock),
+                contract.queryFilter(contract.filters.OrderCanceled(), startBlock, currentBlock),
+                contract.queryFilter(contract.filters.OrderCleanedUp(), startBlock, currentBlock),
+                contract.queryFilter(contract.filters.RetryOrder(), startBlock, currentBlock)
+            ]);
+
+            this.debug('Events fetched:', {
+                created: createdEvents.length,
+                filled: filledEvents.length,
+                canceled: canceledEvents.length,
+                cleaned: cleanedEvents.length,
+                retry: retryEvents.length
+            });
+
+            // Process OrderCreated events first to build the base state
+            for (const event of createdEvents) {
+                const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee] = event.args;
+                const orderData = {
+                    id: orderId.toNumber(),
+                    maker,
+                    taker,
+                    sellToken,
+                    sellAmount,
+                    buyToken,
+                    buyAmount,
+                    timestamp: timestamp.toNumber(),
+                    status: 'Active',
+                    orderCreationFee: fee,
+                    tries: 0
+                };
+                this.orderCache.set(orderData.id, orderData);
+                this.debug('Added order to cache:', orderData);
+            }
+
+            this.debug('After processing created events, cache size:', this.orderCache.size);
+
+            // Then process status changes
+            for (const event of filledEvents) {
+                const [orderId] = event.args;
+                const orderIdNum = orderId.toNumber();
+                const order = this.orderCache.get(orderIdNum);
+                if (order) {
+                    order.status = 'Filled';
+                    this.orderCache.set(orderIdNum, order);
+                    this.debug('Updated order to Filled:', orderIdNum);
+                } else {
+                    this.debug('Filled event for unknown order:', orderIdNum);
                 }
             }
-            
-            this.debug('Order sync complete. Cache size:', this.orderCache.size);
+
+            for (const event of canceledEvents) {
+                const [orderId] = event.args;
+                const orderIdNum = orderId.toNumber();
+                const order = this.orderCache.get(orderIdNum);
+                if (order) {
+                    order.status = 'Canceled';
+                    this.orderCache.set(orderIdNum, order);
+                    this.debug('Updated order to Canceled:', orderIdNum);
+                } else {
+                    this.debug('Canceled event for unknown order:', orderIdNum);
+                }
+            }
+
+            // Process cleanup events (remove orders)
+            for (const event of cleanedEvents) {
+                const [orderId] = event.args;
+                const orderIdNum = orderId.toNumber();
+                if (this.orderCache.has(orderIdNum)) {
+                    this.orderCache.delete(orderIdNum);
+                    this.debug('Removed cleaned up order:', orderIdNum);
+                }
+            }
+
+            // Process retry events (update order ID and tries)
+            for (const event of retryEvents) {
+                const [oldOrderId, newOrderId, maker, tries, timestamp] = event.args;
+                const oldOrderIdNum = oldOrderId.toNumber();
+                const newOrderIdNum = newOrderId.toNumber();
+                
+                const order = this.orderCache.get(oldOrderIdNum);
+                if (order) {
+                    // Update order with new ID and tries count
+                    order.id = newOrderIdNum;
+                    order.tries = tries.toNumber();
+                    order.timestamp = timestamp.toNumber();
+                    
+                    // Remove old order ID and add with new ID
+                    this.orderCache.delete(oldOrderIdNum);
+                    this.orderCache.set(newOrderIdNum, order);
+                    this.debug('Updated retried order:', {oldId: oldOrderIdNum, newId: newOrderIdNum, tries: tries.toString()});
+                }
+            }
+
+            // Log final cache state
+            this.debug('Final order cache:', {
+                size: this.orderCache.size,
+                orders: Array.from(this.orderCache.entries()).map(([id, order]) => ({
+                    id,
+                    status: order.status,
+                    timestamp: order.timestamp
+                }))
+            });
+
             this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
             
         } catch (error) {
@@ -298,9 +394,15 @@ export class WebSocketService {
         try {
             this.debug('Getting orders with filter:', filterStatus);
             const orders = Array.from(this.orderCache.values());
+            
+            // Add detailed logging of order cache
             this.debug('Current order cache:', {
                 size: this.orderCache.size,
-                orders: orders
+                orderStatuses: orders.map(o => ({
+                    id: o.id,
+                    status: o.status,
+                    timestamp: o.timestamp
+                }))
             });
             
             if (filterStatus) {
@@ -395,85 +497,6 @@ export class WebSocketService {
             });
         } else {
             this.debug('No subscribers found for event:', eventName);
-        }
-    }
-
-    async checkContractState(contract) {
-        try {
-            // Get deployer/owner address
-            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-            const currentAccount = accounts[0];
-            
-            this.debug('Contract state check:', {
-                address: contract.address,
-                currentAccount,
-                bytecodeExists: await contract.provider.getCode(contract.address) !== '0x'
-            });
-            
-            return true;
-        } catch (error) {
-            this.debug('Contract state check failed:', error);
-            return false;
-        }
-    }
-
-    // Add this method to verify specific order state
-    async verifyOrderState(orderId) {
-        try {
-            const order = await this.contract.orders(orderId);
-            this.debug('Direct order state check:', {
-                orderId,
-                exists: order.maker !== ethers.constants.AddressZero,
-                status: ['Active', 'Filled', 'Canceled'][order.status],
-                timestamp: order.timestamp.toNumber()
-            });
-            return order;
-        } catch (error) {
-            this.debug('Error verifying order state:', error);
-            return null;
-        }
-    }
-
-    // Add this method to check if orders are eligible for cleanup
-    async checkCleanupEligibility(orderId) {
-        try {
-            if (!this.contract || !this.orderExpiry || !this.gracePeriod) {
-                throw new Error('Contract or constants not initialized');
-            }
-
-            const order = this.orderCache.get(orderId);
-            if (!order) {
-                this.debug('Order not found in cache:', orderId);
-                return { isEligible: false };
-            }
-
-            const currentTime = Math.floor(Date.now() / 1000);
-            const orderTime = order.timestamp;
-            const age = currentTime - orderTime;
-            
-            const isEligible = (order.status === 'Active' || 
-                               order.status === 'Canceled' || 
-                               order.status === 'Filled') && 
-                              age > (this.orderExpiry.toNumber() + this.gracePeriod.toNumber());
-
-            this.debug('Cleanup eligibility check:', {
-                orderId,
-                orderTime,
-                currentTime,
-                age,
-                orderExpiry: this.orderExpiry.toNumber(),
-                gracePeriod: this.gracePeriod.toNumber(),
-                status: order.status,
-                isEligible
-            });
-
-            return {
-                isEligible,
-                order
-            };
-        } catch (error) {
-            this.debug('Error checking cleanup eligibility:', error);
-            return { isEligible: false, error };
         }
     }
 
