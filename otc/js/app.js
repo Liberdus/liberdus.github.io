@@ -8,6 +8,7 @@ import { MyOrders } from './components/MyOrders.js';
 import { TakerOrders } from './components/TakerOrders.js';
 import { Cleanup } from './components/Cleanup.js';
 import { ContractParams } from './components/ContractParams.js';
+import { PricingService } from './services/PricingService.js';
 
 console.log('App.js loaded');
 
@@ -90,7 +91,6 @@ class App {
         this.initializeEventListeners();
 
         // Initialize cleanup component
-        const cleanup = new Cleanup();
 
         // Add WebSocket event handlers for order updates
         window.webSocket?.subscribe('OrderCreated', () => {
@@ -247,8 +247,14 @@ class App {
             window.walletManager = walletManager;
             await walletManager.init(true);
             
-            // Initialize WebSocket service
-            window.webSocket = new WebSocketService();
+            // Initialize PricingService first and make it globally available
+            window.pricingService = new PricingService();
+            await window.pricingService.initialize();
+            
+            // Initialize WebSocket with the global pricingService
+            window.webSocket = new WebSocketService({ 
+                pricingService: window.pricingService 
+            });
             
             // Subscribe to orderSyncComplete event before initialization
             window.webSocket.subscribe('orderSyncComplete', () => {
@@ -265,11 +271,6 @@ class App {
             }
             
             await this.initializeComponents(true);
-            
-            this.contractParams = new ContractParams();
-            await this.contractParams.initialize().catch(err => {
-                console.error('Failed to initialize ContractParams:', err);
-            });
             
             this.debug('Initialization complete');
         } catch (error) {
@@ -470,8 +471,12 @@ class App {
             
             // Clean up all components first
             Object.values(this.components).forEach(component => {
-                if (component?.cleanup) {
-                    component.cleanup();
+                if (component?.cleanup && component.initialized) {
+                    try {
+                        component.cleanup();
+                    } catch (error) {
+                        console.warn(`Error cleaning up component:`, error);
+                    }
                 }
             });
             
@@ -495,6 +500,8 @@ class App {
             await this.showTab(this.currentTab);
             
             this.debug('Components reinitialized');
+        } catch (error) {
+            console.error('[App] Error reinitializing components:', error);
         } finally {
             this.isReinitializing = false;
         }

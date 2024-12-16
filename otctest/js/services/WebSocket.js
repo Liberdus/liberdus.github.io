@@ -1,5 +1,7 @@
 import { ethers } from 'ethers';
 import { getNetworkConfig, isDebugEnabled } from '../config.js';
+import { NETWORK_TOKENS } from '../utils/tokens.js';
+import { erc20Abi } from '../abi/erc20.js';
 
 export class WebSocketService {
     constructor() {
@@ -33,6 +35,11 @@ export class WebSocketService {
         };
         
         this.tokenCache = new Map();  // Add token cache
+
+        // Subscribe to price updates
+        if (window.pricingService) {
+            window.pricingService.subscribe(() => this.updateAllDeals());
+        }
     }
 
     async queueRequest(callback) {
@@ -180,11 +187,11 @@ export class WebSocketService {
                 });
             });
 
-            contract.on("OrderCreated", (...args) => {
+            contract.on("OrderCreated", async (...args) => {
                 try {
                     const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee, event] = args;
                     
-                    const orderData = {
+                    let orderData = {
                         id: orderId.toNumber(),
                         maker,
                         taker,
@@ -192,11 +199,17 @@ export class WebSocketService {
                         sellAmount,
                         buyToken,
                         buyAmount,
-                        timestamp: timestamp.toNumber(),
-                        orderCreationFee: fee,
+                        timings: {
+                            createdAt: timestamp.toNumber(),
+                            expiresAt: timestamp.toNumber() + this.orderExpiry.toNumber(),
+                            graceEndsAt: timestamp.toNumber() + this.orderExpiry.toNumber() + this.gracePeriod.toNumber()
+                        },
                         status: 'Active',
                         tries: 0
                     };
+
+                    // Calculate and add deal metrics
+                    orderData = await this.calculateDealMetrics(orderData);
                     
                     this.orderCache.set(orderId.toNumber(), orderData);
                     this.debug('Cache updated:', Array.from(this.orderCache.entries()));
@@ -295,7 +308,7 @@ export class WebSocketService {
             // Process OrderCreated events first to build the base state
             for (const event of createdEvents) {
                 const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee] = event.args;
-                const orderData = {
+                let orderData = {
                     id: orderId.toNumber(),
                     maker,
                     taker,
@@ -303,11 +316,18 @@ export class WebSocketService {
                     sellAmount,
                     buyToken,
                     buyAmount,
-                    timestamp: timestamp.toNumber(),
+                    timings: {
+                        createdAt: timestamp.toNumber(),
+                        expiresAt: timestamp.toNumber() + this.orderExpiry.toNumber(),
+                        graceEndsAt: timestamp.toNumber() + this.orderExpiry.toNumber() + this.gracePeriod.toNumber()
+                    },
                     status: 'Active',
                     orderCreationFee: fee,
                     tries: 0
                 };
+
+                // Calculate and add deal metrics
+                orderData = await this.calculateDealMetrics(orderData);
                 this.orderCache.set(orderData.id, orderData);
                 this.debug('Added order to cache:', orderData);
             }
@@ -522,5 +542,165 @@ export class WebSocketService {
             return null;
         }
         return order.timestamp + this.orderExpiry.toNumber();
+    }
+
+    // Add this helper method to WebSocketService class
+    async calculateDealMetrics(orderData) {
+        try {
+            const buyTokenInfo = await this.getTokenInfo(orderData.buyToken);
+            const sellTokenInfo = await this.getTokenInfo(orderData.sellToken);
+
+            const buyTokenUsdPrice = window.pricingService.getPrice(orderData.buyToken);
+            const sellTokenUsdPrice = window.pricingService.getPrice(orderData.sellToken);
+
+            // Format amounts using correct decimals
+            const sellAmount = ethers.utils.formatUnits(orderData.sellAmount, sellTokenInfo.decimals);
+            const buyAmount = ethers.utils.formatUnits(orderData.buyAmount, buyTokenInfo.decimals);
+
+            // Calculate Price (what you get / what you give from taker perspective)
+            const price = Number(buyAmount) / Number(sellAmount);
+            
+            // Calculate Rate (market rate comparison)
+            const rate = sellTokenUsdPrice / buyTokenUsdPrice;
+            
+            // Calculate Deal (Price * Rate)
+            const deal = price * rate;
+
+            return {
+                ...orderData,
+                dealMetrics: {
+                    price,
+                    rate,
+                    deal,
+                    formattedSellAmount: sellAmount,
+                    formattedBuyAmount: buyAmount,
+                    sellTokenUsdPrice,
+                    buyTokenUsdPrice,
+                    lastUpdated: Date.now()
+                }
+            };
+        } catch (error) {
+            this.debug('Error calculating deal metrics:', error);
+            return orderData;
+        }
+    }
+
+    async getTokenInfo(tokenAddress) {
+        try {
+            // Normalize address to lowercase for consistent comparison
+            const normalizedAddress = tokenAddress.toLowerCase();
+
+            // 1. First check our tokenCache
+            if (this.tokenCache.has(normalizedAddress)) {
+                this.debug('Token info found in cache:', normalizedAddress);
+                return this.tokenCache.get(normalizedAddress);
+            }
+
+            // 2. Then check NETWORK_TOKENS (predefined list)
+            const networkConfig = getNetworkConfig();
+            const predefinedToken = NETWORK_TOKENS[networkConfig.name]?.[normalizedAddress];
+            if (predefinedToken) {
+                this.debug('Token info found in predefined list:', normalizedAddress);
+                this.tokenCache.set(normalizedAddress, predefinedToken);
+                return predefinedToken;
+            }
+
+            // 3. If not found, fetch from contract using queueRequest
+            this.debug('Fetching token info from contract:', normalizedAddress);
+            return await this.queueRequest(async () => {
+                const contract = new ethers.Contract(tokenAddress, erc20Abi, this.provider);
+                const [symbol, decimals, name] = await Promise.all([
+                    contract.symbol(),
+                    contract.decimals(),
+                    contract.name()
+                ]);
+
+                const tokenInfo = {
+                    address: normalizedAddress,
+                    symbol,
+                    decimals: Number(decimals),
+                    name
+                };
+
+                // Cache the result
+                this.tokenCache.set(normalizedAddress, tokenInfo);
+                this.debug('Added token to cache:', tokenInfo);
+
+                return tokenInfo;
+            });
+
+        } catch (error) {
+            this.debug('Error getting token info:', error);
+            // Return a basic fallback object
+            const fallback = {
+                address: tokenAddress.toLowerCase(),
+                symbol: `${tokenAddress.slice(0, 4)}...${tokenAddress.slice(-4)}`,
+                decimals: 18,
+                name: 'Unknown Token'
+            };
+            this.tokenCache.set(tokenAddress.toLowerCase(), fallback);
+            return fallback;
+        }
+    }
+
+    // Update all deals when prices change
+    // Will be used with refresh button in the UI 
+    async updateAllDeals() {
+        try {
+            this.debug('Updating deals for all orders due to price change');
+            
+            for (const [orderId, order] of this.orderCache.entries()) {
+                const updatedOrder = await this.calculateDealMetrics(order);
+                this.orderCache.set(orderId, updatedOrder);
+            }
+
+            // Notify subscribers that orders have been updated with new deals
+            this.notifySubscribers('ordersUpdated', Array.from(this.orderCache.values()));
+            
+            this.debug('Deals updated for all orders');
+        } catch (error) {
+            this.debug('Error updating deals:', error);
+        }
+    }
+
+    // Check if an order can be filled by the current account
+    // Use this to determine to provide a fill button in the UI
+    canFillOrder(order, currentAccount) {
+        if (order.status !== 'Active') return false;
+        if (Date.now()/1000 > order.timings.expiresAt) return false;
+        if (order.maker?.toLowerCase() === currentAccount?.toLowerCase()) return false;
+        return order.taker === ethers.constants.AddressZero || 
+               order.taker?.toLowerCase() === currentAccount?.toLowerCase();
+    }
+
+    // Check if an order can be canceled by the current account
+    // Use this to determine to provide a cancel button in the UI
+    canCancelOrder(order, currentAccount) {
+        if (order.status !== 'Active') return false;
+        if (Date.now()/1000 > order.timings.graceEndsAt) return false;
+        return order.maker?.toLowerCase() === currentAccount?.toLowerCase();
+    }
+
+    // Get the status of an order
+    // Use this to determine to provide a fill button in the UI
+    getOrderStatus(order) {
+        // Check explicit status first
+        if (order.status === 'Canceled') return 'Canceled';
+        if (order.status === 'Filled') return 'Filled';
+
+        // Then check timing using cached timings
+        const currentTime = Math.floor(Date.now() / 1000);
+
+        if (currentTime > order.timings.graceEndsAt) {
+            this.debug('Order not active: Past grace period');
+            return 'Expired';
+        }
+        if (currentTime > order.timings.expiresAt) {
+            this.debug('Order status: Awaiting Clean');
+            return 'Expired';
+        }
+
+        this.debug('Order status: Active');
+        return 'Active';
     }
 }

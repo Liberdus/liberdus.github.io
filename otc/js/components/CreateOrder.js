@@ -509,6 +509,32 @@ export class CreateOrder extends BaseComponent {
                 window.app.loadOrders();
             }
 
+            // Clear form inputs
+            document.getElementById('sellAmount').value = '';
+            document.getElementById('buyAmount').value = '';
+            document.getElementById('takerAddress').value = '';
+            
+            // Reset token selectors if needed
+            this.sellToken = null;
+            this.buyToken = null;
+            
+            // Update UI to reflect cleared state
+            const sellTokenSelector = document.getElementById('sellTokenSelector');
+            const buyTokenSelector = document.getElementById('buyTokenSelector');
+            
+            if (sellTokenSelector) {
+                sellTokenSelector.innerHTML = 'Select Token';
+            }
+            if (buyTokenSelector) {
+                buyTokenSelector.innerHTML = 'Select Token';
+            }
+            
+            // Reset any other UI elements
+            this.updateCreateButtonState();
+            
+            // Show success message
+            this.showStatus('Order created successfully!', 'success');
+
         } catch (error) {
             this.debug('Create order error:', error);
             const userMessage = this.getUserFriendlyError(error);
@@ -961,26 +987,11 @@ export class CreateOrder extends BaseComponent {
     }
 
     cleanup() {
-        this.debug('Cleaning up CreateOrder component');
-        this.initialized = false;
-        this.initializing = false;
-        // Remove event listeners
-        if (this.boundCreateOrderHandler) {
-            const createOrderBtn = document.getElementById('createOrderBtn');
-            if (createOrderBtn) {
-                createOrderBtn.removeEventListener('click', this.boundCreateOrderHandler);
-            }
+        // Only clear timers, keep table structure
+        if (this.expiryTimers) {
+            this.expiryTimers.forEach(timerId => clearInterval(timerId));
+            this.expiryTimers.clear();
         }
-        
-        // Clear containers
-        const sellContainer = document.getElementById('sellContainer');
-        const buyContainer = document.getElementById('buyContainer');
-        if (sellContainer) sellContainer.innerHTML = '';
-        if (buyContainer) buyContainer.innerHTML = '';
-        
-        // Reset state
-        this.initialized = false;
-        this.isSubmitting = false;
     }
 
     // Add this method to the CreateOrder class
@@ -1309,11 +1320,11 @@ export class CreateOrder extends BaseComponent {
                 }
 
                 // Close modal when clicking outside
-                window.onclick = (event) => {
-                    if (event.target === modal) {
-                        modal.style.display = 'none';
+                window.addEventListener('click', (event) => {
+                    if (event.target.classList.contains('token-modal')) {
+                        event.target.style.display = 'none';
                     }
-                };
+                });
             }
         });
     }
