@@ -1,6 +1,4 @@
 import { ViewOrders } from './ViewOrders.js';
-import { ethers } from 'ethers';
-import { isDebugEnabled } from '../config.js';
 import { getTokenList } from '../utils/tokens.js';
 import { PricingService } from '../services/PricingService.js';
 
@@ -77,32 +75,8 @@ export class MyOrders extends ViewOrders {
             // Setup WebSocket handlers
             this.setupWebSocket();
 
-            // Get initial orders and filter for maker
-            const orders = window.webSocket.getOrders();
-            this.debug('Orders before filtering:', orders);
-            
-            if (!Array.isArray(orders)) {
-                this.debug('Invalid orders data received:', orders);
-                throw new Error('Invalid orders data received');
-            }
-
-            // Filter orders for current user
-            const filteredOrders = orders.filter(order => {
-                const matches = order.maker.toLowerCase() === userAddress.toLowerCase();
-                this.debug(`Order ${order.id} maker ${order.maker} matches user ${userAddress}: ${matches}`);
-                return matches;
-            });
-
-            this.debug('Filtered orders:', filteredOrders);
-
-            // Store filtered orders in the orders Map
-            this.orders.clear();
-            filteredOrders.forEach(order => {
-                this.orders.set(order.id, order);
-            });
-
             // Refresh the view with filtered orders
-            await this.refreshOrdersView(filteredOrders);
+            await this.refreshOrdersView();
 
             // Initialize pricing service
             await this.pricingService.initialize();
@@ -115,120 +89,92 @@ export class MyOrders extends ViewOrders {
         }
     }
 
-    async refreshOrdersView(orders) {
+    async refreshOrdersView() {
         if (this.isLoading) return;
         this.isLoading = true;
-
+        
         try {
-            this.debug('Refreshing orders view');
-            let ordersToDisplay = orders || Array.from(this.orders.values());
+            // Get all orders first
+            let ordersToDisplay = Array.from(window.webSocket.orderCache.values());
             
-            // Get filter state
-            const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
+            // Filter for user's orders only
+            const userAddress = window.walletManager.getAccount()?.toLowerCase();
+            ordersToDisplay = ordersToDisplay.filter(order => 
+                order.maker?.toLowerCase() === userAddress
+            );
+
+            // Apply token filters
             const sellTokenFilter = this.container.querySelector('#sell-token-filter')?.value;
             const buyTokenFilter = this.container.querySelector('#buy-token-filter')?.value;
             const orderSort = this.container.querySelector('#order-sort')?.value;
-            
-            // Apply token filters
-            if (sellTokenFilter) {
-                ordersToDisplay = ordersToDisplay.filter(order => 
-                    order.sellToken.toLowerCase() === sellTokenFilter.toLowerCase()
-                );
-            }
+            const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked;
 
-            if (buyTokenFilter) {
-                ordersToDisplay = ordersToDisplay.filter(order => 
-                    order.buyToken.toLowerCase() === buyTokenFilter.toLowerCase()
-                );
-            }
-            
-            // Filter orders based on cancellable status
-            if (showOnlyCancellable) {
-                ordersToDisplay = ordersToDisplay.filter(order => {
-                    // Show Active orders that haven't expired or are in grace period
-                    const isActive = order.status === 'Active';
-                    const currentTime = Math.floor(Date.now() / 1000);
-                    const expiryTime = window.webSocket.getOrderExpiryTime(order);
-                    const gracePeriod = window.webSocket.gracePeriod?.toNumber() || 0;
-                    const isWithinGracePeriod = currentTime < (expiryTime + gracePeriod);
-                    
-                    return isActive && isWithinGracePeriod;
-                });
-            }
+            // Apply filters
+            ordersToDisplay = ordersToDisplay.filter(order => {
+                // Apply token filters
+                if (sellTokenFilter && order.sellToken.toLowerCase() !== sellTokenFilter.toLowerCase()) return false;
+                if (buyTokenFilter && order.buyToken.toLowerCase() !== buyTokenFilter.toLowerCase()) return false;
+
+                // Apply cancellable filter if checked
+                if (showOnlyCancellable) {
+                    return window.webSocket.canCancelOrder(order, userAddress);
+                }
+                
+                return true;
+            });
+
+            // Set total orders after filtering
+            this.totalOrders = ordersToDisplay.length;
 
             // Apply sorting
-            if (orderSort === 'best-deal') {
-                // First calculate all deals
-                const orderDeals = await Promise.all(ordersToDisplay.map(async (order) => {
-                    const sellTokenInfo = await this.getTokenInfo(order.sellToken);
-                    const buyTokenInfo = await this.getTokenInfo(order.buyToken);
-
-                    const sellAmount = Number(ethers.utils.formatUnits(order.sellAmount, sellTokenInfo.decimals));
-                    const buyAmount = Number(ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals));
-
-                    const sellValueUsd = sellAmount * (this.pricingService?.getPrice(order.sellToken) || 1);
-                    const buyValueUsd = buyAmount * (this.pricingService?.getPrice(order.buyToken) || 1);
-                    
-                    // Calculate Price (what you get / what you give)
-                    const price = buyAmount / sellAmount;
-
-                    // Calculate Rate (market rate comparison)
-                    const rate = sellValueUsd / buyValueUsd;
-
-                    // Calculate Deal (Price * Rate)
-                    const deal = price * rate;
-
-                    return {
-                        orderId: order.id,
-                        deal: deal
-                    };
-                }));
-
-                // Create a map for quick deal lookups
-                const dealMap = new Map(orderDeals.map(item => [item.orderId, item.deal]));
-
-                // Now sort using the pre-calculated deals
-                ordersToDisplay.sort((a, b) => {
-                    const dealA = dealMap.get(a.id);
-                    const dealB = dealMap.get(b.id);
-                    // Sort descending (higher deals first)
-                    return dealB - dealA;
-                });
-            } else {
-                // Default to newest first
-                ordersToDisplay.sort((a, b) => b.timestamp - a.timestamp);
+            if (orderSort === 'newest') {
+                ordersToDisplay.sort((a, b) => b.id - a.id);
+            } else if (orderSort === 'best-deal') {
+                ordersToDisplay.sort((a, b) => 
+                    Number(b.dealMetrics?.deal || 0) - 
+                    Number(a.dealMetrics?.deal || 0)
+                );
             }
 
+            // Apply pagination
+            const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '50');
+            if (pageSize !== -1) {  // -1 means show all
+                const startIndex = (this.currentPage - 1) * pageSize;
+                const endIndex = startIndex + pageSize;
+                ordersToDisplay = ordersToDisplay.slice(startIndex, endIndex);
+            }
+
+            // Update the table
             const tbody = this.container.querySelector('tbody');
             if (!tbody) {
-                this.debug('ERROR: tbody not found');
+                this.debug('No tbody found in table');
                 return;
             }
 
-            if (ordersToDisplay.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="9" class="no-orders-message">
-                            No ${showOnlyCancellable ? 'cancellable' : ''} orders found
-                        </td>
-                    </tr>`;
-            } else {
-                tbody.innerHTML = '';
-                for (const order of ordersToDisplay) {
-                    const row = await this.createOrderRow(order);
-                    if (row) tbody.appendChild(row);
+            tbody.innerHTML = '';
+            
+            for (const order of ordersToDisplay) {
+                const newRow = await this.createOrderRow(order);
+                if (newRow) {
+                    tbody.appendChild(newRow);
                 }
             }
 
-            // Update pagination info
-            this.updatePaginationControls(ordersToDisplay.length);
+            // Update pagination controls
+            this.updatePaginationControls(this.totalOrders);
 
         } catch (error) {
             this.debug('Error refreshing orders:', error);
-            this.showError('Failed to refresh orders');
+            this.showError('Failed to refresh orders view');
         } finally {
             this.isLoading = false;
         }
+    }
+
+    getTotalPages() {
+        const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '50');
+        if (pageSize === -1) return 1; // View all
+        return Math.ceil(this.totalOrders / pageSize);
     }
 
     // Keep the setupTable method as is since it's specific to MyOrders view
@@ -336,59 +282,65 @@ export class MyOrders extends ViewOrders {
                 ${bottomControls}
             </div>`;
 
+        // Setup event listeners immediately after creating the table
+        this.setupEventListeners();
+        
         // Setup advanced filters toggle
         const advancedFiltersToggle = this.container.querySelector('.advanced-filters-toggle');
         const advancedFilters = this.container.querySelector('.advanced-filters');
         
         if (advancedFiltersToggle && advancedFilters) {
             advancedFiltersToggle.addEventListener('click', () => {
-                const isExpanded = advancedFilters.style.display !== 'none';
-                advancedFilters.style.display = isExpanded ? 'none' : 'block';
-                advancedFiltersToggle.classList.toggle('expanded', !isExpanded);
+                const isHidden = advancedFilters.style.display === 'none';
+                advancedFilters.style.display = isHidden ? 'block' : 'none';
+                advancedFiltersToggle.classList.toggle('active');
             });
         }
 
-        // Add event listeners for filters
-        const sellTokenFilter = this.container.querySelector('#sell-token-filter');
-        const buyTokenFilter = this.container.querySelector('#buy-token-filter');
-        const orderSort = this.container.querySelector('#order-sort');
+        // Setup pagination buttons explicitly
+        this.setupPaginationButtons();
+    }
 
-        if (sellTokenFilter) sellTokenFilter.addEventListener('change', () => this.refreshOrdersView());
-        if (buyTokenFilter) buyTokenFilter.addEventListener('change', () => this.refreshOrdersView());
-        if (orderSort) orderSort.addEventListener('change', () => this.refreshOrdersView());
-
-        // Initialize pagination
-        this.currentPage = 1;
-        const pageSize = this.container.querySelector('#page-size-select');
-        if (pageSize) {
-            pageSize.value = '50'; // Set default page size
-        }
-
-        // Sync both page size selects
-        const pageSizeSelects = this.container.querySelectorAll('.page-size-select');
-        pageSizeSelects.forEach(select => {
-            select.addEventListener('change', (event) => {
-                pageSizeSelects.forEach(otherSelect => {
-                    if (otherSelect !== event.target) {
-                        otherSelect.value = event.target.value;
-                    }
-                });
-                this.currentPage = 1;
-                this.refreshOrdersView();
-            });
+    setupPaginationButtons() {
+        // Remove any existing listeners first
+        const allButtons = this.container.querySelectorAll('.pagination-button');
+        allButtons.forEach(button => {
+            const newButton = button.cloneNode(true);
+            button.parentNode.replaceChild(newButton, button);
         });
 
-        // Add filter toggle listener
-        const filterToggles = this.container.querySelectorAll('#fillable-orders-toggle');
-        filterToggles.forEach(toggle => {
-            toggle.addEventListener('change', (event) => {
-                filterToggles.forEach(otherToggle => {
-                    if (otherToggle !== event.target) {
-                        otherToggle.checked = event.target.checked;
+        // Add listeners to all prev/next buttons
+        const controls = this.container.querySelectorAll('.pagination-controls');
+        controls.forEach(control => {
+            const prevButton = control.querySelector('.prev-page');
+            const nextButton = control.querySelector('.next-page');
+            
+            if (prevButton) {
+                prevButton.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.debug('Prev button clicked', { currentPage: this.currentPage });
+                    if (this.currentPage > 1) {
+                        this.currentPage--;
+                        this.refreshOrdersView();
                     }
                 });
-                this.refreshOrdersView();
-            });
+            }
+            
+            if (nextButton) {
+                nextButton.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const totalPages = this.getTotalPages();
+                    this.debug('Next button clicked', { 
+                        currentPage: this.currentPage, 
+                        totalPages, 
+                        totalOrders: this.totalOrders 
+                    });
+                    if (this.currentPage < totalPages) {
+                        this.currentPage++;
+                        this.refreshOrdersView();
+                    }
+                });
+            }
         });
     }
 
@@ -431,42 +383,34 @@ export class MyOrders extends ViewOrders {
             });
         }
 
-        // Add pagination event listeners
-        const pageSize = this.container.querySelector('.page-size-select');
-        if (pageSize) {
-            pageSize.addEventListener('change', () => {
+        // Setup pagination buttons
+        this.setupPaginationButtons();
+
+        // Add filter toggle listener
+        const filterToggle = this.container.querySelector('#fillable-orders-toggle');
+        if (filterToggle) {
+            filterToggle.addEventListener('change', () => {
                 this.currentPage = 1;
                 this.refreshOrdersView();
             });
         }
 
-        // Add pagination button listeners
-        const prevButton = this.container.querySelector('.prev-page');
-        const nextButton = this.container.querySelector('.next-page');
-        
-        if (prevButton) {
-            prevButton.addEventListener('click', () => {
-                if (this.currentPage > 1) {
-                    this.currentPage--;
-                    this.refreshOrdersView();
-                }
+        // Add token filter listeners
+        const tokenFilters = this.container.querySelectorAll('.token-filter');
+        tokenFilters.forEach(filter => {
+            filter.addEventListener('change', () => {
+                this.currentPage = 1;
+                this.refreshOrdersView();
             });
-        }
-        
-        if (nextButton) {
-            nextButton.addEventListener('click', () => {
-                const totalPages = this.getTotalPages();
-                if (this.currentPage < totalPages) {
-                    this.currentPage++;
-                    this.refreshOrdersView();
-                }
-            });
-        }
+        });
 
-        // Add filter toggle listener
-        const filterToggle = this.container.querySelector('#fillable-orders-toggle');
-        if (filterToggle) {
-            filterToggle.addEventListener('change', () => this.refreshOrdersView());
+        // Add sort listener
+        const sortSelect = this.container.querySelector('#order-sort');
+        if (sortSelect) {
+            sortSelect.addEventListener('change', () => {
+                this.currentPage = 1;
+                this.refreshOrdersView();
+            });
         }
     }
 
@@ -475,40 +419,20 @@ export class MyOrders extends ViewOrders {
             // Create the row element first
             const tr = document.createElement('tr');
             tr.dataset.orderId = order.id.toString();
-            tr.dataset.timestamp = order.timestamp.toString();
+            tr.dataset.timestamp = order.timings.createdAt.toString();
             
-            // Get token info for both tokens in the order
-            const sellTokenInfo = await this.getTokenInfo(order.sellToken);
-            const buyTokenInfo = await this.getTokenInfo(order.buyToken);
+            // Get token info from WebSocket cache
+            const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
+            const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
 
-            // Format amounts using correct decimals
-            const sellAmount = ethers.utils.formatUnits(order.sellAmount, sellTokenInfo.decimals);
-            const buyAmount = ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals);
-
-            // Get USD prices from pricing service, default to 1 if not available
-            const sellTokenUsdPrice = this.pricingService?.getPrice(order.sellToken) || 1;
-            const buyTokenUsdPrice = this.pricingService?.getPrice(order.buyToken) || 1;
-
-            // Calculate Price (what you get / what you give)
-            const price = Number(buyAmount) / Number(sellAmount);
-
-            // Calculate Rate (market rate comparison)
-            const rate = sellTokenUsdPrice / buyTokenUsdPrice;
-
-            // Calculate Deal (Price * Rate)
-            const deal = price * rate;
-
-            this.debug('Deal calculation:', {
-                orderId: order.id,
-                sellToken: sellTokenInfo.symbol,
-                buyToken: buyTokenInfo.symbol,
-                sellAmount,
-                buyAmount,
-                price,
-                rate,
+            // Use cached dealMetrics directly from the order
+            const { 
+                formattedSellAmount, 
+                formattedBuyAmount, 
                 deal,
-                explanation: `Deal = (${buyAmount}/${sellAmount}) * (${sellTokenUsdPrice}/${buyTokenUsdPrice}) = ${deal}`
-            });
+                sellTokenUsdPrice,
+                buyTokenUsdPrice 
+            } = order.dealMetrics || {};
 
             // Format USD prices with appropriate precision
             const formatUsdPrice = (price) => {
@@ -518,11 +442,33 @@ export class MyOrders extends ViewOrders {
                 return `$${price.toFixed(4)}`;
             };
 
-            // Add price-estimate class if using default price
-            const sellPriceClass = this.pricingService?.getPrice(order.sellToken) ? '' : 'price-estimate';
-            const buyPriceClass = this.pricingService?.getPrice(order.buyToken) ? '' : 'price-estimate';
+            // Format expiry time
+            const formatTimeDiff = (seconds) => {
+                const days = Math.floor(Math.abs(seconds) / 86400);
+                const hours = Math.floor((Math.abs(seconds) % 86400) / 3600);
+                const minutes = Math.floor((Math.abs(seconds) % 3600) / 60);
+                
+                const prefix = seconds < 0 ? '-' : '';
+                
+                if (days > 0) {
+                    return `${prefix}${days}D ${hours}H ${minutes}M`;
+                } else if (hours > 0) {
+                    return `${prefix}${hours}H ${minutes}M`;
+                } else {
+                    return `${prefix}${minutes}M`;
+                }
+            };
 
-            const formattedExpiry = await this.formatExpiry(order.timestamp);
+            const currentTime = Math.floor(Date.now() / 1000);
+            const timeUntilExpiry = order.timings.expiresAt - currentTime;
+            const expiryText = formatTimeDiff(timeUntilExpiry);
+
+            // Add price-estimate class if using default price
+            const sellPriceClass = sellTokenUsdPrice ? '' : 'price-estimate';
+            const buyPriceClass = buyTokenUsdPrice ? '' : 'price-estimate';
+
+            // Get order status from WebSocket cache
+            const orderStatus = window.webSocket.getOrderStatus(order);
 
             tr.innerHTML = `
                 <td>${order.id}</td>
@@ -535,7 +481,7 @@ export class MyOrders extends ViewOrders {
                         </div>
                     </div>
                 </td>
-                <td>${Number(sellAmount).toFixed(4)}</td>
+                <td>${Number(formattedSellAmount || 0).toFixed(4)}</td>
                 <td>
                     <div class="token-info">
                         ${this.getTokenIcon(buyTokenInfo)}
@@ -545,22 +491,18 @@ export class MyOrders extends ViewOrders {
                         </div>
                     </div>
                 </td>
-                <td>${Number(buyAmount).toFixed(4)}</td>
-                <td>${deal.toFixed(6)}</td>
-                <td>${formattedExpiry}</td>
-                <td class="order-status">${order.status}</td>
+                <td>${Number(formattedBuyAmount || 0).toFixed(4)}</td>
+                <td>${(deal || 0).toFixed(6)}</td>
+                <td>${expiryText}</td>
+                <td class="order-status">${orderStatus}</td>
                 <td class="action-column"></td>`;
 
             // Add cancel button logic to action column
             const actionCell = tr.querySelector('.action-column');
-            const isActive = order.status === 'Active' || order.status === 0;
-            const currentTime = Math.floor(Date.now() / 1000);
-            const expiryTime = window.webSocket.getOrderExpiryTime(order);
-            const gracePeriod = window.webSocket.gracePeriod?.toNumber() || 0;
-            const totalPeriod = expiryTime + gracePeriod;
-
-            // Show cancel button if order is active and within grace period
-            if (isActive && currentTime < totalPeriod) {
+            const userAddress = window.walletManager.getAccount()?.toLowerCase();
+            
+            // Use WebSocket helper to determine if order can be cancelled
+            if (window.webSocket.canCancelOrder(order, userAddress)) {
                 const cancelButton = document.createElement('button');
                 cancelButton.className = 'cancel-order-btn';
                 cancelButton.textContent = 'Cancel';
@@ -669,5 +611,98 @@ export class MyOrders extends ViewOrders {
         // Update both top and bottom controls
         const controls = this.container.querySelectorAll('.filter-controls');
         controls.forEach(updateControls);
+    }
+
+    startExpiryTimer(row) {
+        // Clear any existing timer
+        const existingTimer = this.expiryTimers?.get(row.dataset.orderId);
+        if (existingTimer) {
+            clearInterval(existingTimer);
+        }
+
+        // Initialize timers Map if not exists
+        if (!this.expiryTimers) {
+            this.expiryTimers = new Map();
+        }
+
+        const updateExpiryAndButton = async () => {
+            const expiresCell = row.querySelector('td:nth-child(7)');
+            const actionCell = row.querySelector('.action-column');
+            if (!expiresCell || !actionCell) return;
+
+            const orderId = row.dataset.orderId;
+            const order = window.webSocket.orderCache.get(Number(orderId));
+            if (!order) return;
+
+            const currentTime = Math.floor(Date.now() / 1000);
+            const timeDiff = order.timings.expiresAt - currentTime;
+            const currentAccount = window.walletManager.getAccount()?.toLowerCase();
+
+            // Update expiry text
+            const newExpiryText = this.formatTimeDiff(timeDiff);
+            if (expiresCell.textContent !== newExpiryText) {
+                expiresCell.textContent = newExpiryText;
+            }
+
+            // Update action column content for MyOrders view
+            if (window.webSocket.canCancelOrder(order, currentAccount)) {
+                // Only update if there isn't already a cancel button
+                if (!actionCell.querySelector('.cancel-order-btn')) {
+                    const cancelButton = document.createElement('button');
+                    cancelButton.className = 'cancel-order-btn';
+                    cancelButton.textContent = 'Cancel';
+                    
+                    cancelButton.addEventListener('click', async () => {
+                        try {
+                            cancelButton.disabled = true;
+                            cancelButton.textContent = 'Cancelling...';
+                            
+                            // Get contract from WebSocket and connect to signer
+                            const contract = window.webSocket.contract;
+                            if (!contract) {
+                                throw new Error('Contract not available');
+                            }
+
+                            const signer = this.provider.getSigner();
+                            const contractWithSigner = contract.connect(signer);
+                            
+                            const gasEstimate = await contractWithSigner.estimateGas.cancelOrder(order.id);
+                            const gasLimit = gasEstimate.mul(120).div(100); // Add 20% buffer
+                            
+                            const tx = await contractWithSigner.cancelOrder(order.id, { gasLimit });
+                            this.showError(`Cancelling order ${order.id}... Transaction sent`);
+                            
+                            const receipt = await tx.wait();
+                            if (receipt.status === 0) {
+                                throw new Error('Transaction reverted by contract');
+                            }
+
+                            this.showSuccess(`Order ${order.id} cancelled successfully!`);
+                            actionCell.textContent = '-';
+                            this.debouncedRefresh();
+                        } catch (error) {
+                            console.error('Error cancelling order:', error);
+                            this.showError(this.getReadableError(error));
+                            cancelButton.disabled = false;
+                            cancelButton.textContent = 'Cancel';
+                        }
+                    });
+                    
+                    actionCell.innerHTML = '';
+                    actionCell.appendChild(cancelButton);
+                }
+            } else if (order.maker?.toLowerCase() === currentAccount) {
+                actionCell.innerHTML = '<span class="your-order">Your Order</span>';
+            } else if (currentTime > order.timings.expiresAt) {
+                actionCell.innerHTML = '<span class="expired-order">Expired</span>';
+            } else {
+                actionCell.textContent = '-';
+            }
+        };
+
+        // Update immediately and then every minute
+        updateExpiryAndButton();
+        const timerId = setInterval(updateExpiryAndButton, 60000);
+        this.expiryTimers.set(row.dataset.orderId, timerId);
     }
 }
