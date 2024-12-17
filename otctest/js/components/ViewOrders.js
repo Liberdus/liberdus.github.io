@@ -48,30 +48,41 @@ export class ViewOrders extends BaseComponent {
     async init() {
         try {
             this.debug('Initializing ViewOrders...');
-            // Get current account first
+            
+            // Wait for WebSocket initialization first
+            if (!window.webSocket) {
+                this.debug('WebSocket not available, showing loading state...');
+                this.showLoadingState();
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                return this.init(); // Retry initialization
+            }
+
+            // Wait for WebSocket to be fully initialized
+            await window.webSocket.waitForInitialization();
+            
+            // Get current account
             this.currentAccount = walletManager.getAccount()?.toLowerCase();
             this.debug('Current account:', this.currentAccount);
             
-            this.tokenList = await getTokenList(); // Get full token list with icons
-            console.log('DEBUG: tokenList from getTokenList:', this.tokenList);
-            this.debug('Token list loaded:', {
-                length: this.tokenList?.length || 0,
-                sample: this.tokenList?.[0]
-            });
-            
+            // Initialize table and setup WebSocket
             await super.init();
-            await this.pricingService.initialize();
-            
-            // Subscribe to price updates
-            this.pricingService.subscribe(() => this.refreshOrdersView());
+            await this.setupWebSocket();
+            await this.refreshOrdersView();
             
             this.debug('ViewOrders initialization complete');
         } catch (error) {
             this.debug('Error in ViewOrders initialization:', error);
-            throw error;
+            this.showError('Failed to initialize orders view');
         }
     }
 
+    showLoadingState() {
+        this.container.innerHTML = `
+            <div class="loading-container">
+                <div class="loading-spinner"></div>
+                <div class="loading-text">Loading orders...</div>
+            </div>`;
+    }
 
     getTokenIcon(token) {
         try {

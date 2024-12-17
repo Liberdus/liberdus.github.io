@@ -86,80 +86,92 @@ export class WebSocketService {
         try {
             console.log('[WebSocket] Starting initialization...');
             
-            // Add connection attempt tracking
-            this.reconnectAttempts++;
-            if (this.reconnectAttempts > this.maxReconnectAttempts) {
-                throw new Error(`Max connection attempts (${this.maxReconnectAttempts}) exceeded`);
-            }
-
-            const config = getNetworkConfig();
-            this.debug('Network config loaded, attempting WebSocket connection...');
-            
-            this.contractAddress = config.contractAddress;
-            this.contractABI = config.contractABI;
-            
-            if (!this.contractABI) {
-                throw new Error('Contract ABI not found in network config');
-            }
-            
-            const wsUrls = [config.wsUrl, ...config.fallbackWsUrls];
-            let connected = false;
-            
-            for (const url of wsUrls) {
-                try {
-                    this.debug('Attempting to connect to WebSocket URL:', url);
-                    this.provider = new ethers.providers.WebSocketProvider(url);
-                    
-                    // Wait for provider to be ready
-                    await this.provider.ready;
-                    this.debug('Connected to WebSocket:', url);
-                    connected = true;
-                    break;
-                } catch (error) {
-                    this.debug('Failed to connect to WebSocket URL:', url, error);
+            // Add initialization state tracking
+            this.initializationPromise = (async () => {
+                // Wait for provider connection
+                const config = getNetworkConfig();
+                this.debug('Network config loaded, attempting WebSocket connection...');
+                
+                this.contractAddress = config.contractAddress;
+                this.contractABI = config.contractABI;
+                
+                if (!this.contractABI) {
+                    throw new Error('Contract ABI not found in network config');
                 }
-            }
-            
-            if (!connected) {
-                throw new Error('Failed to connect to any WebSocket URL');
-            }
+                
+                const wsUrls = [config.wsUrl, ...config.fallbackWsUrls];
+                let connected = false;
+                
+                for (const url of wsUrls) {
+                    try {
+                        this.debug('Attempting to connect to WebSocket URL:', url);
+                        this.provider = new ethers.providers.WebSocketProvider(url);
+                        
+                        // Wait for provider to be ready
+                        await this.provider.ready;
+                        this.debug('Connected to WebSocket:', url);
+                        connected = true;
+                        break;
+                    } catch (error) {
+                        this.debug('Failed to connect to WebSocket URL:', url, error);
+                    }
+                }
+                
+                if (!connected) {
+                    throw new Error('Failed to connect to any WebSocket URL');
+                }
 
-            this.contract = new ethers.Contract(
-                this.contractAddress,
-                this.contractABI,
-                this.provider
-            );
+                this.contract = new ethers.Contract(
+                    this.contractAddress,
+                    this.contractABI,
+                    this.provider
+                );
 
-            this.debug('Contract initialized:', {
-                address: this.contract.address,
-                abi: this.contract.interface.format()
-            });
+                this.debug('Contract initialized:', {
+                    address: this.contract.address,
+                    abi: this.contract.interface.format()
+                });
 
-            this.debug('Fetching contract constants...');
-            this.orderExpiry = await this.contract.ORDER_EXPIRY();
-            this.gracePeriod = await this.contract.GRACE_PERIOD();
-            this.debug('Contract constants loaded:', {
-                orderExpiry: this.orderExpiry.toString(),
-                gracePeriod: this.gracePeriod.toString()
-            });
+                this.debug('Fetching contract constants...');
+                this.orderExpiry = await this.contract.ORDER_EXPIRY();
+                this.gracePeriod = await this.contract.GRACE_PERIOD();
+                this.debug('Contract constants loaded:', {
+                    orderExpiry: this.orderExpiry.toString(),
+                    gracePeriod: this.gracePeriod.toString()
+                });
 
-            this.debug('Contract initialized, starting order sync...');
-            await this.syncAllOrders(this.contract);
-            this.debug('Setting up event listeners...');
-            await this.setupEventListeners(this.contract);
-            
-            this.isInitialized = true;
-            this.debug('Initialization complete');
-            this.reconnectAttempts = 0;
-            
-            return true;
+                // Wait for contract initialization
+                this.debug('Contract initialized, starting order sync...');
+                await this.syncAllOrders(this.contract);
+                
+                // Setup event listeners after sync
+                this.debug('Setting up event listeners...');
+                await this.setupEventListeners(this.contract);
+                
+                this.isInitialized = true;
+                this.debug('Initialization complete');
+                this.reconnectAttempts = 0;
+                
+                return true;
+            })();
+
+            return await this.initializationPromise;
         } catch (error) {
             this.debug('Initialization failed:', {
                 message: error.message,
                 stack: error.stack
             });
+            this.initializationPromise = null;
             return this.reconnect();
         }
+    }
+
+    async waitForInitialization() {
+        if (this.isInitialized) return true;
+        if (this.initializationPromise) {
+            return await this.initializationPromise;
+        }
+        return this.initialize();
     }
 
     async setupEventListeners(contract) {
@@ -290,138 +302,151 @@ export class WebSocketService {
     }
 
     async syncAllOrders(contract) {
-        try {
-            this.debug('Starting order sync with contract:', contract.address);
-            
-            // Get current block and calculate 20 days ago
-            const currentBlock = await this.provider.getBlockNumber();
-            const blocksPerDay = (24 * 60 * 60) / 2; // ~43,200 blocks per day
-            const startBlock = currentBlock - (blocksPerDay * 20); // Look back 20 days
-            
-            this.debug('Fetching events from block', startBlock, 'to', currentBlock);
-            
-            // Clear existing cache before sync
-            this.orderCache.clear();
-
-            // Fetch all relevant events
-            const [createdEvents, filledEvents, canceledEvents, cleanedEvents, retryEvents] = await Promise.all([
-                contract.queryFilter(contract.filters.OrderCreated(), startBlock, currentBlock),
-                contract.queryFilter(contract.filters.OrderFilled(), startBlock, currentBlock),
-                contract.queryFilter(contract.filters.OrderCanceled(), startBlock, currentBlock),
-                contract.queryFilter(contract.filters.OrderCleanedUp(), startBlock, currentBlock),
-                contract.queryFilter(contract.filters.RetryOrder(), startBlock, currentBlock)
-            ]);
-
-            this.debug('Events fetched:', {
-                created: createdEvents.length,
-                filled: filledEvents.length,
-                canceled: canceledEvents.length,
-                cleaned: cleanedEvents.length,
-                retry: retryEvents.length
-            });
-
-            // Process OrderCreated events first to build the base state
-            for (const event of createdEvents) {
-                const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee] = event.args;
-                let orderData = {
-                    id: orderId.toNumber(),
-                    maker,
-                    taker,
-                    sellToken,
-                    sellAmount,
-                    buyToken,
-                    buyAmount,
-                    timings: {
-                        createdAt: timestamp.toNumber(),
-                        expiresAt: timestamp.toNumber() + this.orderExpiry.toNumber(),
-                        graceEndsAt: timestamp.toNumber() + this.orderExpiry.toNumber() + this.gracePeriod.toNumber()
-                    },
-                    status: 'Active',
-                    orderCreationFee: fee,
-                    tries: 0
-                };
-
-                // Calculate and add deal metrics
-                orderData = await this.calculateDealMetrics(orderData);
-                this.orderCache.set(orderData.id, orderData);
-                this.debug('Added order to cache:', orderData);
-            }
-
-            this.debug('After processing created events, cache size:', this.orderCache.size);
-
-            // Then process status changes
-            for (const event of filledEvents) {
-                const [orderId] = event.args;
-                const orderIdNum = orderId.toNumber();
-                const order = this.orderCache.get(orderIdNum);
-                if (order) {
-                    order.status = 'Filled';
-                    this.orderCache.set(orderIdNum, order);
-                    this.debug('Updated order to Filled:', orderIdNum);
-                } else {
-                    this.debug('Filled event for unknown order:', orderIdNum);
-                }
-            }
-
-            for (const event of canceledEvents) {
-                const [orderId] = event.args;
-                const orderIdNum = orderId.toNumber();
-                const order = this.orderCache.get(orderIdNum);
-                if (order) {
-                    order.status = 'Canceled';
-                    this.orderCache.set(orderIdNum, order);
-                    this.debug('Updated order to Canceled:', orderIdNum);
-                } else {
-                    this.debug('Canceled event for unknown order:', orderIdNum);
-                }
-            }
-
-            // Process cleanup events (remove orders)
-            for (const event of cleanedEvents) {
-                const [orderId] = event.args;
-                const orderIdNum = orderId.toNumber();
-                if (this.orderCache.has(orderIdNum)) {
-                    this.orderCache.delete(orderIdNum);
-                    this.debug('Removed cleaned up order:', orderIdNum);
-                }
-            }
-
-            // Process retry events (update order ID and tries)
-            for (const event of retryEvents) {
-                const [oldOrderId, newOrderId, maker, tries, timestamp] = event.args;
-                const oldOrderIdNum = oldOrderId.toNumber();
-                const newOrderIdNum = newOrderId.toNumber();
+        let retryCount = 0;
+        const maxRetries = 3;
+        
+        while (retryCount < maxRetries) {
+            try {
+                this.debug('Starting order sync with contract:', contract.address);
                 
-                const order = this.orderCache.get(oldOrderIdNum);
-                if (order) {
-                    // Update order with new ID and tries count
-                    order.id = newOrderIdNum;
-                    order.tries = tries.toNumber();
-                    order.timestamp = timestamp.toNumber();
-                    
-                    // Remove old order ID and add with new ID
-                    this.orderCache.delete(oldOrderIdNum);
-                    this.orderCache.set(newOrderIdNum, order);
-                    this.debug('Updated retried order:', {oldId: oldOrderIdNum, newId: newOrderIdNum, tries: tries.toString()});
+                // Get current block and calculate 20 days ago
+                const currentBlock = await this.provider.getBlockNumber();
+                const blocksPerDay = (24 * 60 * 60) / 2;
+                const startBlock = currentBlock - (blocksPerDay * 20);
+                
+                this.debug('Fetching events from block', startBlock, 'to', currentBlock);
+                
+                // Clear existing cache before sync
+                this.orderCache.clear();
+
+                // Fetch all relevant events
+                const [createdEvents, filledEvents, canceledEvents, cleanedEvents, retryEvents] = await Promise.all([
+                    contract.queryFilter(contract.filters.OrderCreated(), startBlock, currentBlock),
+                    contract.queryFilter(contract.filters.OrderFilled(), startBlock, currentBlock),
+                    contract.queryFilter(contract.filters.OrderCanceled(), startBlock, currentBlock),
+                    contract.queryFilter(contract.filters.OrderCleanedUp(), startBlock, currentBlock),
+                    contract.queryFilter(contract.filters.RetryOrder(), startBlock, currentBlock)
+                ]);
+
+                this.debug('Events fetched:', {
+                    created: createdEvents.length,
+                    filled: filledEvents.length,
+                    canceled: canceledEvents.length,
+                    cleaned: cleanedEvents.length,
+                    retry: retryEvents.length
+                });
+
+                // Process OrderCreated events first to build the base state
+                for (const event of createdEvents) {
+                    const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee] = event.args;
+                    let orderData = {
+                        id: orderId.toNumber(),
+                        maker,
+                        taker,
+                        sellToken,
+                        sellAmount,
+                        buyToken,
+                        buyAmount,
+                        timings: {
+                            createdAt: timestamp.toNumber(),
+                            expiresAt: timestamp.toNumber() + this.orderExpiry.toNumber(),
+                            graceEndsAt: timestamp.toNumber() + this.orderExpiry.toNumber() + this.gracePeriod.toNumber()
+                        },
+                        status: 'Active',
+                        orderCreationFee: fee,
+                        tries: 0
+                    };
+
+                    // Calculate and add deal metrics
+                    orderData = await this.calculateDealMetrics(orderData);
+                    this.orderCache.set(orderData.id, orderData);
+                    this.debug('Added order to cache:', orderData);
                 }
+
+                this.debug('After processing created events, cache size:', this.orderCache.size);
+
+                // Then process status changes
+                for (const event of filledEvents) {
+                    const [orderId] = event.args;
+                    const orderIdNum = orderId.toNumber();
+                    const order = this.orderCache.get(orderIdNum);
+                    if (order) {
+                        order.status = 'Filled';
+                        this.orderCache.set(orderIdNum, order);
+                        this.debug('Updated order to Filled:', orderIdNum);
+                    } else {
+                        this.debug('Filled event for unknown order:', orderIdNum);
+                    }
+                }
+
+                for (const event of canceledEvents) {
+                    const [orderId] = event.args;
+                    const orderIdNum = orderId.toNumber();
+                    const order = this.orderCache.get(orderIdNum);
+                    if (order) {
+                        order.status = 'Canceled';
+                        this.orderCache.set(orderIdNum, order);
+                        this.debug('Updated order to Canceled:', orderIdNum);
+                    } else {
+                        this.debug('Canceled event for unknown order:', orderIdNum);
+                    }
+                }
+
+                // Process cleanup events (remove orders)
+                for (const event of cleanedEvents) {
+                    const [orderId] = event.args;
+                    const orderIdNum = orderId.toNumber();
+                    if (this.orderCache.has(orderIdNum)) {
+                        this.orderCache.delete(orderIdNum);
+                        this.debug('Removed cleaned up order:', orderIdNum);
+                    }
+                }
+
+                // Process retry events (update order ID and tries)
+                for (const event of retryEvents) {
+                    const [oldOrderId, newOrderId, maker, tries, timestamp] = event.args;
+                    const oldOrderIdNum = oldOrderId.toNumber();
+                    const newOrderIdNum = newOrderId.toNumber();
+                    
+                    const order = this.orderCache.get(oldOrderIdNum);
+                    if (order) {
+                        // Update order with new ID and tries count
+                        order.id = newOrderIdNum;
+                        order.tries = tries.toNumber();
+                        order.timestamp = timestamp.toNumber();
+                        
+                        // Remove old order ID and add with new ID
+                        this.orderCache.delete(oldOrderIdNum);
+                        this.orderCache.set(newOrderIdNum, order);
+                        this.debug('Updated retried order:', {oldId: oldOrderIdNum, newId: newOrderIdNum, tries: tries.toString()});
+                    }
+                }
+
+                // Log final cache state
+                this.debug('Final order cache:', {
+                    size: this.orderCache.size,
+                    orders: Array.from(this.orderCache.entries()).map(([id, order]) => ({
+                        id,
+                        status: order.status,
+                        timestamp: order.timestamp
+                    }))
+                });
+
+                this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
+                
+                return true;
+            } catch (error) {
+                retryCount++;
+                this.debug(`Order sync attempt ${retryCount} failed:`, error);
+                
+                if (retryCount >= maxRetries) {
+                    this.debug('Max retry attempts reached, sync failed');
+                    throw error;
+                }
+                
+                // Wait before retrying
+                await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
             }
-
-            // Log final cache state
-            this.debug('Final order cache:', {
-                size: this.orderCache.size,
-                orders: Array.from(this.orderCache.entries()).map(([id, order]) => ({
-                    id,
-                    status: order.status,
-                    timestamp: order.timestamp
-                }))
-            });
-
-            this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
-            
-        } catch (error) {
-            this.debug('Order sync failed:', error);
-            this.orderCache.clear();
-            this.notifySubscribers('orderSyncComplete', {});
         }
     }
 
