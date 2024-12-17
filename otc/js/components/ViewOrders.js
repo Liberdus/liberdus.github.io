@@ -11,7 +11,6 @@ import { walletManager } from '../config.js';
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
         super(containerId);
-        this.tokenCache = new Map();
         this.provider = new ethers.providers.Web3Provider(window.ethereum);
         this.currentPage = 1;
         this.totalOrders = 0;
@@ -53,8 +52,8 @@ export class ViewOrders extends BaseComponent {
             this.currentAccount = walletManager.getAccount()?.toLowerCase();
             this.debug('Current account:', this.currentAccount);
             
-            const { getTokenList } = await import('../utils/tokens.js');
             this.tokenList = await getTokenList(); // Get full token list with icons
+            console.log('DEBUG: tokenList from getTokenList:', this.tokenList);
             this.debug('Token list loaded:', {
                 length: this.tokenList?.length || 0,
                 sample: this.tokenList?.[0]
@@ -395,6 +394,12 @@ export class ViewOrders extends BaseComponent {
                 </div>
             </div>
         `;
+        console.log('DEBUG: tokenList:', this.tokenList);
+        // Get tokens from WebSocket's tokenCache
+        const tokens = Array.from(window.webSocket.tokenCache.values())
+            .sort((a, b) => a.symbol.localeCompare(b.symbol)); // Sort alphabetically by symbol
+        
+        this.debug('Available tokens:', tokens);
 
         // Advanced filters section
         const advancedFilters = this.createElement('div', 'advanced-filters');
@@ -404,13 +409,13 @@ export class ViewOrders extends BaseComponent {
                 <div class="token-filters">
                     <select id="sell-token-filter" class="token-filter">
                         <option value="">All Sell Tokens</option>
-                        ${this.tokenList.map(token => 
+                        ${tokens.map(token => 
                             `<option value="${token.address}">${token.symbol}</option>`
                         ).join('')}
                     </select>
                     <select id="buy-token-filter" class="token-filter">
                         <option value="">All Buy Tokens</option>
-                        ${this.tokenList.map(token => 
+                        ${tokens.map(token => 
                             `<option value="${token.address}">${token.symbol}</option>`
                         ).join('')}
                     </select>
@@ -588,31 +593,6 @@ export class ViewOrders extends BaseComponent {
             minute: '2-digit'
         });
     }
-
-/*     async formatExpiry(timestamp, orderExpiry = null) {
-        try {
-            // Use provided orderExpiry or cached value
-            const expiryValue = orderExpiry || this.contractValues?.orderExpiry || 420;
-            const now = Math.floor(Date.now() / 1000);
-            const expiryTime = Number(timestamp) + expiryValue;
-            const timeLeft = expiryTime - now;
-            
-            this.debug('Expiry calculation:', {
-                timestamp,
-                orderExpiry: expiryValue,
-                expiryTime,
-                now,
-                timeLeft,
-                timeLeftMinutes: timeLeft / 60
-            });
-            
-            const minutes = Math.ceil(timeLeft / 60);
-            return `${minutes}m`;
-        } catch (error) {
-            this.debug('Error formatting expiry:', error);
-            return 'Unknown';
-        }
-    } */
 
     formatTimeUntil(timestamp) {
         const now = Math.floor(Date.now() / 1000);
@@ -848,33 +828,6 @@ export class ViewOrders extends BaseComponent {
         }
     }
 
-/*     async getOrderDetails(orderId) {
-        try {
-            const contract = await this.getContract();
-            if (!contract) {
-                throw new Error('Contract not initialized');
-            }
-
-            const order = await contract.orders(orderId);
-            return {
-                id: orderId,
-                maker: order.maker,
-                taker: order.taker,
-                sellToken: order.sellToken,
-                sellAmount: order.sellAmount,
-                buyToken: order.buyToken,
-                buyAmount: order.buyAmount,
-                timestamp: order.timestamp,
-                status: order.status,
-                orderCreationFee: order.orderCreationFee,
-                tries: order.tries
-            };
-        } catch (error) {
-            console.error('[ViewOrders] Error getting order details:', error);
-            throw error;
-        }
-    } */
-
     cleanup() {
         // Only clear timers, keep table structure
         if (this.expiryTimers) {
@@ -886,33 +839,11 @@ export class ViewOrders extends BaseComponent {
 
     async createOrderRow(order) {
         try {
-            await this.pricingService.refreshPrices();
-            
-            // Get USD prices from pricing service, default to 1 if not available
-            const buyTokenUsdPrice = this.pricingService.getPrice(order.buyToken) || 1;
-            const sellTokenUsdPrice = this.pricingService.getPrice(order.sellToken) || 1;
-
-            // Debug the actual values
-            this.debug('Token prices:', {
-                sellToken: order.sellToken,
-                sellTokenUsdPrice,
-                buyToken: order.buyToken,
-                buyTokenUsdPrice,
-                pricesMap: this.pricingService.prices,
-                usingEstimates: !this.pricingService.getPrice(order.buyToken) || !this.pricingService.getPrice(order.sellToken)
-            });
-
-            // Calculate Rate (sellTokenUSD/buyTokenUsdPrice)
-            const rate = sellTokenUsdPrice / buyTokenUsdPrice;
-
-            // Add estimated-price class if either price is using the default $1
-            const rateClass = (!this.pricingService.getPrice(order.sellToken) || !this.pricingService.getPrice(order.buyToken)) ? 'estimated-price' : '';
-
             // Get token info for both tokens in the order
             const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
             const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
 
-            // Now you can use the token info when creating the row
+            // Get icons
             const sellTokenIcon = this.getTokenIcon(sellTokenInfo);
             const buyTokenIcon = this.getTokenIcon(buyTokenInfo);
 
@@ -926,31 +857,33 @@ export class ViewOrders extends BaseComponent {
             // Use WebSocket's helpers for order status and actions
             const status = window.webSocket.getOrderStatus(order);
             const canFill = window.webSocket.canFillOrder(order, currentAccount);
-            const isUserOrder = order.maker?.toLowerCase() === walletManager.getAccount()?.toLowerCase();
+            const isUserOrder = order.maker?.toLowerCase() === currentAccount;
             const formattedExpiry = this.formatTimeUntil(order.timings.expiresAt);
-    
-            const sellAmount = ethers.utils.formatUnits(order.sellAmount, sellTokenInfo.decimals);
-            const buyAmount = ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals);
 
-            // Calculate Price (what you get / what you give from taker perspective)
-            const price = Number(buyAmount) / Number(sellAmount);
+            // Use cached deal metrics from WebSocket
+            const { dealMetrics } = order;
+            const {
+                formattedSellAmount,
+                formattedBuyAmount,
+                sellTokenUsdPrice,
+                buyTokenUsdPrice,
+                deal
+            } = dealMetrics || {};
 
-            // Calculate Deal (Price * Rate)
-            const deal = price * rate;
-    
             // Format USD prices with appropriate precision
             const formatUsdPrice = (price) => {
+                if (!price) return '$-';
                 if (price >= 100) return `$${price.toFixed(0)}`;
                 if (price >= 1) return `$${price.toFixed(2)}`;
                 return `$${price.toFixed(4)}`;
             };
 
             // Add price-estimate class if using default price
-            const sellPriceClass = this.pricingService.getPrice(order.buyToken) ? '' : 'price-estimate';
-            const buyPriceClass = this.pricingService.getPrice(order.sellToken) ? '' : 'price-estimate';
+            const sellPriceClass = sellTokenUsdPrice ? '' : 'price-estimate';
+            const buyPriceClass = buyTokenUsdPrice ? '' : 'price-estimate';
+            const rateClass = (!sellTokenUsdPrice || !buyTokenUsdPrice) ? 'estimated-price' : '';
 
-            console.log('DEBUG: isUserOrder:', isUserOrder);
-            // Check if user is the maker - IMPORTANT: Do this check first
+            // Check if user is the maker
             const actionContent = isUserOrder ? 
                 '<span class="your-order">Your Order</span>' : 
                 (canFill ? 
@@ -978,7 +911,7 @@ export class ViewOrders extends BaseComponent {
                         </div>
                     </div>
                 </td>
-                <td>${Number(sellAmount).toFixed(1)}</td>
+                <td>${Number(formattedSellAmount || 0).toFixed(1)}</td>
                 <td>
                     <div class="token-info">
                         <div class="token-icon small">
@@ -998,8 +931,8 @@ export class ViewOrders extends BaseComponent {
                         </div>
                     </div>
                 </td>
-                <td>${Number(buyAmount).toFixed(1)}</td>
-                <td class="${rateClass}">${deal.toFixed(6)}</td>
+                <td>${Number(formattedBuyAmount || 0).toFixed(1)}</td>
+                <td class="${rateClass}">${(deal || 0).toFixed(6)}</td>
                 <td>${formattedExpiry}</td>
                 <td class="order-status">${status}</td>
                 <td class="action-column">${actionContent}</td>`;
@@ -1020,7 +953,7 @@ export class ViewOrders extends BaseComponent {
         }
     }
 
-    async getContractExpiryTimes() {
+/*     async getContractExpiryTimes() {
         if (this.contractValues.orderExpiry && this.contractValues.gracePeriod) {
             return this.contractValues;
         }
@@ -1031,9 +964,9 @@ export class ViewOrders extends BaseComponent {
             gracePeriod: (await contract.GRACE_PERIOD()).toNumber()
         };
         return this.contractValues;
-    }
+    } */
 
-    async getExpiryTime(timestamp) {
+/*     async getExpiryTime(timestamp) {
         try {
             const { orderExpiry, gracePeriod } = await this.getContractExpiryTimes();
             return (Number(timestamp) + orderExpiry + gracePeriod) * 1000; // Convert to milliseconds
@@ -1041,14 +974,14 @@ export class ViewOrders extends BaseComponent {
             console.error('[ViewOrders] Error calculating expiry time:', error);
             return Number(timestamp) * 1000; // Fallback to original timestamp
         }
-    }
+    } */
 
-    getTotalPages() {
+/*     getTotalPages() {
         const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
         if (pageSize === -1) return 1; // View all
         return Math.ceil(window.webSocket.orderCache.size / pageSize);
     }
-
+ */
     updatePaginationControls(totalOrders) {
         const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
         
@@ -1084,7 +1017,7 @@ export class ViewOrders extends BaseComponent {
         controls.forEach(updateControls);
     }
 
-    async displayOrders(orders) {
+/*     async displayOrders(orders) {
         try {
             // Remove contract call since we have expiry in WebSocket
             // const contract = await this.getContract();
@@ -1098,7 +1031,7 @@ export class ViewOrders extends BaseComponent {
             this.debug('Error displaying orders:', error);
             throw error;
         }
-    }
+    } */
 
     startExpiryTimer(row) {
         // Clear any existing timer
@@ -1155,7 +1088,7 @@ export class ViewOrders extends BaseComponent {
         this.expiryTimers.set(row.dataset.orderId, timerId);
     }
 
-    showLoadingState() {
+/*     showLoadingState() {
         const tbody = this.container.querySelector('tbody');
         if (tbody) {
             tbody.innerHTML = `
@@ -1166,7 +1099,7 @@ export class ViewOrders extends BaseComponent {
                     </td>
                 </tr>`;
         }
-    }
+    } */
 
     getExplorerUrl(address) {
         const networkConfig = getNetworkConfig();
