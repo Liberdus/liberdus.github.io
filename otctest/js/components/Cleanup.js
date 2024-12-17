@@ -222,8 +222,17 @@ export class Cleanup extends BaseComponent {
     // Update cleanup method to use class contract reference
     async checkCleanupOpportunities() {
         try {
-            if (!this.contract) {
-                throw new Error('Contract not initialized');
+            // Wait for WebSocket to be initialized
+            if (!window.webSocket?.contract) {
+                this.debug('Waiting for WebSocket contract initialization...');
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                return this.checkCleanupOpportunities();
+            }
+
+            // Get contract from WebSocket
+            const contract = window.webSocket.contract;
+            if (!contract) {
+                throw new Error('Contract not available');
             }
 
             const orders = this.webSocket.getOrders();
@@ -241,8 +250,8 @@ export class Cleanup extends BaseComponent {
             let filledFees = 0;
             
             const currentTime = Math.floor(Date.now() / 1000);
-            const orderExpiry = await this.contract.ORDER_EXPIRY();
-            const gracePeriod = await this.contract.GRACE_PERIOD();
+            const orderExpiry = await contract.ORDER_EXPIRY();
+            const gracePeriod = await contract.GRACE_PERIOD();
 
             for (const order of orders) {
                 // Check if grace period has passed (now 14 minutes total)
