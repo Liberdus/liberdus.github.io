@@ -6,6 +6,7 @@ import { isDebugEnabled, getNetworkConfig } from '../config.js';
 import { NETWORK_TOKENS } from '../utils/tokens.js';
 import { getTokenList } from '../utils/tokens.js';
 import { PricingService } from '../services/PricingService.js';
+import { walletManager } from '../config.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
@@ -13,10 +14,12 @@ export class ViewOrders extends BaseComponent {
         this.tokenCache = new Map();
         this.provider = new ethers.providers.Web3Provider(window.ethereum);
         this.currentPage = 1;
+        this.totalOrders = 0;
         this.setupErrorHandling();
         this.eventSubscriptions = new Set();
         this.expiryTimers = new Map();
         this.tokenList = [];
+        this.currentAccount = null;
         
         // Initialize debug logger with VIEW_ORDERS flag
         this.debug = (message, ...args) => {
@@ -46,6 +49,10 @@ export class ViewOrders extends BaseComponent {
     async init() {
         try {
             this.debug('Initializing ViewOrders...');
+            // Get current account first
+            this.currentAccount = walletManager.getAccount()?.toLowerCase();
+            this.debug('Current account:', this.currentAccount);
+            
             const { getTokenList } = await import('../utils/tokens.js');
             this.tokenList = await getTokenList(); // Get full token list with icons
             this.debug('Token list loaded:', {
@@ -268,73 +275,60 @@ export class ViewOrders extends BaseComponent {
         this.isLoading = true;
         
         try {
-            this.debug('Refreshing orders view');
-            
-            // Get orders from WebSocket cache instead of local cache
+            // Get all orders first
             let ordersToDisplay = Array.from(window.webSocket.orderCache.values());
-            
-            // Get orderExpiry from WebSocket
-            const orderExpiry = window.webSocket.orderExpiry.toNumber();
-            const currentTime = Math.floor(Date.now() / 1000);
             
             // Apply token filters
             const sellTokenFilter = this.container.querySelector('#sell-token-filter')?.value;
             const buyTokenFilter = this.container.querySelector('#buy-token-filter')?.value;
             const orderSort = this.container.querySelector('#order-sort')?.value;
+            const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked;
 
-            if (sellTokenFilter) {
-                ordersToDisplay = ordersToDisplay.filter(order => 
-                    order.sellToken.toLowerCase() === sellTokenFilter.toLowerCase()
-                );
-            }
+            // Filter orders based on status and fillable flag
+            ordersToDisplay = ordersToDisplay.filter(order => {
+                const currentTime = Math.floor(Date.now() / 1000);
+                const isExpired = currentTime > order.timings.expiresAt;
+                const isActive = order.status === 'Active' && !isExpired;
+                const canFill = window.webSocket.canFillOrder(order, walletManager.getAccount());
+                const isUserOrder = order.maker?.toLowerCase() === walletManager.getAccount()?.toLowerCase();
 
-            if (buyTokenFilter) {
-                ordersToDisplay = ordersToDisplay.filter(order => 
-                    order.buyToken.toLowerCase() === buyTokenFilter.toLowerCase()
-                );
-            }
+                // Apply token filters
+                if (sellTokenFilter && order.sellToken.toLowerCase() !== sellTokenFilter.toLowerCase()) return false;
+                if (buyTokenFilter && order.buyToken.toLowerCase() !== buyTokenFilter.toLowerCase()) return false;
+
+                // Apply active/fillable filter
+                if (showOnlyActive) {
+                    return isActive && (canFill || isUserOrder);
+                }
+                
+                return true; // Show all orders when checkbox is unchecked
+            });
+
+            // Set total orders after filtering
+            this.totalOrders = ordersToDisplay.length;
 
             // Apply sorting
             if (orderSort === 'newest') {
-                ordersToDisplay.sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
+                ordersToDisplay.sort((a, b) => b.id - a.id);
             } else if (orderSort === 'best-deal') {
-                // Use dealMetrics that are already calculated and cached in WebSocket
                 ordersToDisplay.sort((a, b) => 
                     Number(a.dealMetrics?.deal || Infinity) - 
                     Number(b.dealMetrics?.deal || Infinity)
                 );
             }
 
-            // Get filter state
-            const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
-            const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
-            
-            // Filter active orders using WebSocket helpers
-            if (showOnlyActive) {
-                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-                const currentAccount = accounts[0]?.toLowerCase();
-                
-                ordersToDisplay = ordersToDisplay.filter(order => 
-                    window.webSocket.canFillOrder(order, currentAccount) && 
-                    window.webSocket.getOrderStatus(order) === 'Active'
-                );
-            }
-
             // Apply pagination
+            const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
             const startIndex = (this.currentPage - 1) * pageSize;
             const endIndex = pageSize === -1 ? ordersToDisplay.length : startIndex + pageSize;
             const paginatedOrders = pageSize === -1 ? 
                 ordersToDisplay : 
                 ordersToDisplay.slice(startIndex, endIndex);
 
-            // Display orders
+            // Update the table
             const tbody = this.container.querySelector('tbody');
-            if (!tbody) {
-                this.debug('ERROR: tbody not found');
-                return;
-            }
             tbody.innerHTML = '';
-
+            
             for (const order of paginatedOrders) {
                 const newRow = await this.createOrderRow(order);
                 if (newRow) {
@@ -343,20 +337,7 @@ export class ViewOrders extends BaseComponent {
             }
 
             // Update pagination controls
-            this.updatePaginationControls(ordersToDisplay.length);
-
-            if (ordersToDisplay.length === 0) {
-                tbody.innerHTML = `
-                    <tr class="empty-message">
-                        <td colspan="8" class="no-orders-message">
-                            <div class="placeholder-text">
-                                ${showOnlyActive ? 
-                                    'No fillable orders available at this time' : 
-                                    'No orders found'}
-                            </div>
-                        </td>
-                    </tr>`;
-            }
+            this.updatePaginationControls(this.totalOrders);
 
         } catch (error) {
             this.debug('Error refreshing orders:', error);
@@ -373,29 +354,6 @@ export class ViewOrders extends BaseComponent {
                 <p class="connect-prompt">Connect wallet to view orders</p>
             </div>`;
     }
-
-/*     updateOrderStatus(orderId, status) {
-        const order = window.webSocket.orderCache.get(Number(orderId));
-        if (order) {
-            window.webSocket.updateOrderCache(Number(orderId), { ...order, status });
-            this.debouncedRefresh();
-        }
-    } */
-
-/*     async addOrderToTable(order, tokenDetailsMap) {
-        try {
-            window.webSocket.updateOrderCache(order.id.toString(), order);
-            this.debouncedRefresh();
-        } catch (error) {
-            console.error('[ViewOrders] Error adding order to table:', error);
-            throw error;
-        }
-    } */
-
-/*     removeOrderFromTable(orderId) {
-        this.orders.delete(orderId.toString());
-        this.debouncedRefresh();
-    } */
 
     async setupTable() {
         const tableContainer = this.createElement('div', 'table-container');
@@ -576,6 +534,44 @@ export class ViewOrders extends BaseComponent {
         const toggle = filterControls.querySelector('#fillable-orders-toggle');
         toggle.addEventListener('change', () => this.refreshOrdersView());
         
+        // Add event listeners for pagination
+        const setupPaginationListeners = (controls) => {
+            const prevButton = controls.querySelector('.prev-page');
+            const nextButton = controls.querySelector('.next-page');
+            const pageInfo = controls.querySelector('.page-info');
+            
+            prevButton.addEventListener('click', () => {
+                console.log('Previous clicked, current page:', this.currentPage);
+                if (this.currentPage > 1) {
+                    this.currentPage--;
+                    this.updatePageInfo(pageInfo);
+                    this.refreshOrdersView();
+                }
+            });
+            
+            nextButton.addEventListener('click', () => {
+                const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
+                console.log('Next clicked, current page:', this.currentPage, 'total orders:', this.totalOrders, 'page size:', pageSize);
+                const totalPages = Math.ceil(this.totalOrders / pageSize);
+                if (this.currentPage < totalPages) {
+                    this.currentPage++;
+                    this.updatePageInfo(pageInfo);
+                    this.refreshOrdersView();
+                }
+            });
+        };
+
+        // Add this helper method to your class
+        this.updatePageInfo = (pageInfoElement) => {
+            const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
+            const totalPages = Math.ceil(this.totalOrders / pageSize);
+            pageInfoElement.textContent = `Page ${this.currentPage} of ${totalPages}`;
+        };
+
+        // Setup pagination for both top and bottom controls
+        const controls = tableContainer.querySelectorAll('.filter-controls');
+        controls.forEach(setupPaginationListeners);
+
         this.container.appendChild(tableContainer);
     }
 
@@ -890,7 +886,6 @@ export class ViewOrders extends BaseComponent {
 
     async createOrderRow(order) {
         try {
-            // Ensure prices are loaded
             await this.pricingService.refreshPrices();
             
             // Get USD prices from pricing service, default to 1 if not available
@@ -926,14 +921,12 @@ export class ViewOrders extends BaseComponent {
             tr.dataset.timestamp = order.timestamp;
             tr.dataset.status = order.status;
 
-            // Get current account
-            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-            const currentAccount = accounts[0]?.toLowerCase();
+            const currentAccount = walletManager.getAccount()?.toLowerCase();
 
             // Use WebSocket's helpers for order status and actions
             const status = window.webSocket.getOrderStatus(order);
             const canFill = window.webSocket.canFillOrder(order, currentAccount);
-            const isUserOrder = order.maker?.toLowerCase() === currentAccount;
+            const isUserOrder = order.maker?.toLowerCase() === walletManager.getAccount()?.toLowerCase();
             const formattedExpiry = this.formatTimeUntil(order.timings.expiresAt);
     
             const sellAmount = ethers.utils.formatUnits(order.sellAmount, sellTokenInfo.decimals);
@@ -955,6 +948,14 @@ export class ViewOrders extends BaseComponent {
             // Add price-estimate class if using default price
             const sellPriceClass = this.pricingService.getPrice(order.buyToken) ? '' : 'price-estimate';
             const buyPriceClass = this.pricingService.getPrice(order.sellToken) ? '' : 'price-estimate';
+
+            console.log('DEBUG: isUserOrder:', isUserOrder);
+            // Check if user is the maker - IMPORTANT: Do this check first
+            const actionContent = isUserOrder ? 
+                '<span class="your-order">Your Order</span>' : 
+                (canFill ? 
+                    `<button class="fill-button" data-order-id="${order.id}">Fill Order</button>` : 
+                    '');
 
             tr.innerHTML = `
                 <td>${order.id}</td>
@@ -1001,12 +1002,7 @@ export class ViewOrders extends BaseComponent {
                 <td class="${rateClass}">${deal.toFixed(6)}</td>
                 <td>${formattedExpiry}</td>
                 <td class="order-status">${status}</td>
-                <td class="action-column">${canFill ? 
-                    `<button class="fill-button" data-order-id="${order.id}">Fill Order</button>` : 
-                    isUserOrder ?
-                    '<span class="your-order">Your Order</span>' : 
-                    ''
-                }</td>`;
+                <td class="action-column">${actionContent}</td>`;
 
             // Add click handler for fill button
             const fillButton = tr.querySelector('.fill-button');
@@ -1046,36 +1042,6 @@ export class ViewOrders extends BaseComponent {
             return Number(timestamp) * 1000; // Fallback to original timestamp
         }
     }
-
-/*     getOrderStatus(order, currentTime, orderExpiry, gracePeriod) {
-        this.debug('Order timing:', {
-            currentTime,
-            orderTime: order.timestamp,
-            orderExpiry,  // 420 seconds (7 minutes)
-            gracePeriod   // 420 seconds (7 minutes)
-        });
-
-        // Check explicit status first
-        if (order.status === 'Canceled') return 'Canceled';
-        if (order.status === 'Filled') return 'Filled';
-
-        // Then check timing
-        const totalExpiry = orderExpiry + gracePeriod;
-        const orderTime = Number(order.timestamp);
-
-        if (currentTime > orderTime + totalExpiry) {
-            this.debug('Order not active: Past grace period');
-            return 'Expired';
-        }
-        if (currentTime > orderTime + orderExpiry) {
-            this.debug('Order status: Awaiting Clean');
-            return 'Expired';
-        }
-
-        this.debug('Order status: Active');
-        return 'Active';
-    } */
-
 
     getTotalPages() {
         const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
@@ -1118,47 +1084,6 @@ export class ViewOrders extends BaseComponent {
         controls.forEach(updateControls);
     }
 
-/*     async refreshOrders() {
-        try {
-            this.debug('Refreshing orders view');
-            const orders = this.webSocket.getOrders() || [];
-            this.debug('Orders from WebSocket:', orders);
-
-            const contract = await this.getContract();
-            if (!contract) {
-                throw new Error('Contract not initialized');
-            }
-
-            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
-            const gracePeriod = (await contract.GRACE_PERIOD()).toNumber();
-            const currentTime = Math.floor(Date.now() / 1000);
-
-            // Show all orders including cleaned ones
-            const filteredOrders = orders.filter(order => {
-                const status = this.getOrderStatus(order, currentTime, orderExpiry, gracePeriod);
-                this.debug('Processing order:', {
-                    orderId: order.id,
-                    status,
-                    timestamp: order.timestamp,
-                    currentTime,
-                    orderExpiry,
-                    gracePeriod
-                });
-                return true; // Show all orders
-            });
-
-            this.debug('Orders after filtering:', filteredOrders);
-
-            // Sort orders by timestamp descending
-            const sortedOrders = [...filteredOrders].sort((a, b) => b.timestamp - a.timestamp);
-            await this.displayOrders(sortedOrders);
-
-        } catch (error) {
-            this.debug('Error refreshing orders:', error);
-            this.showError('Failed to refresh orders');
-        }
-    } */
-
     async displayOrders(orders) {
         try {
             // Remove contract call since we have expiry in WebSocket
@@ -1197,33 +1122,28 @@ export class ViewOrders extends BaseComponent {
             if (!order) return;
 
             const currentTime = Math.floor(Date.now() / 1000);
-            
-            // Use WebSocket's cached timing data
             const isExpired = currentTime > order.timings.expiresAt;
             const timeDiff = order.timings.expiresAt - currentTime;
+            const currentAccount = walletManager.getAccount()?.toLowerCase();
+            const isUserOrder = order.maker?.toLowerCase() === currentAccount;
 
-            // Use the class method to format time
+            // Update expiry text
             const newExpiryText = this.formatTimeDiff(timeDiff);
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
             }
 
-            // Update action button based on current state
-            const canFill = window.webSocket.canFillOrder(order, this.currentAccount);
-            const isUserOrder = order.maker?.toLowerCase() === this.currentAccount?.toLowerCase();
-
             // Update action column content
-            if (isExpired) {
+            if (isUserOrder) {
+                actionCell.innerHTML = '<span class="your-order">Your Order</span>';
+            } else if (isExpired) {
                 actionCell.innerHTML = '<span class="expired-order">Expired</span>';
-            } else if (canFill) {
+            } else if (!isUserOrder && window.webSocket.canFillOrder(order, currentAccount)) {
                 actionCell.innerHTML = `<button class="fill-button" data-order-id="${order.id}">Fill Order</button>`;
-                // Reattach click handler
                 const fillButton = actionCell.querySelector('.fill-button');
                 if (fillButton) {
                     fillButton.addEventListener('click', () => this.fillOrder(order.id));
                 }
-            } else if (isUserOrder) {
-                actionCell.innerHTML = '<span class="your-order">Your Order</span>';
             } else {
                 actionCell.innerHTML = '';
             }
@@ -1261,8 +1181,8 @@ export class ViewOrders extends BaseComponent {
         const statusMap = {
             0: 'Active',
             1: 'Filled',
-            2: 'Cancelled',
-            3: 'Expired'
+            2: 'Cancelled'
+            // Removed status 3 (Expired) as we want to keep showing 'Active'
         };
         return statusMap[status] || `Unknown (${status})`;
     }
@@ -1275,18 +1195,18 @@ export class ViewOrders extends BaseComponent {
     }
 
     formatTimeDiff(seconds) {
-        if (seconds <= 0) return 'Expired';
+        const days = Math.floor(Math.abs(seconds) / 86400);
+        const hours = Math.floor((Math.abs(seconds) % 86400) / 3600);
+        const minutes = Math.floor((Math.abs(seconds) % 3600) / 60);
         
-        const days = Math.floor(seconds / 86400);
-        const hours = Math.floor((seconds % 86400) / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
+        const prefix = seconds < 0 ? '-' : '';
         
         if (days > 0) {
-            return `${days}D ${hours}H ${minutes}M`;
+            return `${prefix}${days}D ${hours}H ${minutes}M`;
         } else if (hours > 0) {
-            return `${hours}H ${minutes}M`;
+            return `${prefix}${hours}H ${minutes}M`;
         } else {
-            return `${minutes}M`;
+            return `${prefix}${minutes}M`;
         }
     }
 }

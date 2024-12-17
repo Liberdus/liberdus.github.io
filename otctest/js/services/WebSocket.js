@@ -205,17 +205,32 @@ export class WebSocketService {
                             graceEndsAt: timestamp.toNumber() + this.orderExpiry.toNumber() + this.gracePeriod.toNumber()
                         },
                         status: 'Active',
+                        orderCreationFee: fee,
                         tries: 0
                     };
 
                     // Calculate and add deal metrics
                     orderData = await this.calculateDealMetrics(orderData);
                     
+                    // Add to cache
                     this.orderCache.set(orderId.toNumber(), orderData);
-                    this.debug('Cache updated:', Array.from(this.orderCache.entries()));
+                    
+                    // Debug logging
+                    this.debug('New order added to cache:', {
+                        id: orderData.id,
+                        maker: orderData.maker,
+                        status: orderData.status,
+                        timestamp: orderData.timings.createdAt
+                    });
+                    
+                    // Notify subscribers
                     this.notifySubscribers("OrderCreated", orderData);
+                    
+                    // Force UI update
+                    this.notifySubscribers("ordersUpdated", Array.from(this.orderCache.values()));
                 } catch (error) {
                     this.debug('Error in OrderCreated handler:', error);
+                    console.error('Failed to process OrderCreated event:', error);
                 }
             });
 
@@ -693,7 +708,7 @@ export class WebSocketService {
 
         if (currentTime > order.timings.graceEndsAt) {
             this.debug('Order not active: Past grace period');
-            return 'Expired';
+            return '';
         }
         if (currentTime > order.timings.expiresAt) {
             this.debug('Order status: Awaiting Clean');

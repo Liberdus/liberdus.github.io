@@ -84,6 +84,25 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug('Starting initialization...');
             
+            // Add these lines to subscribe to WebSocket events
+            if (window.webSocket) {
+                window.webSocket.subscribe("OrderCreated", (order) => {
+                    this.debug('New order created:', order);
+                    // Use refreshActiveComponent instead of loadOrders
+                    if (window.app?.refreshActiveComponent) {
+                        window.app.refreshActiveComponent();
+                    }
+                });
+
+                window.webSocket.subscribe("ordersUpdated", (orders) => {
+                    this.debug('Orders updated:', orders);
+                    // Use refreshActiveComponent instead of loadOrders
+                    if (window.app?.refreshActiveComponent) {
+                        window.app.refreshActiveComponent();
+                    }
+                });
+            }
+
             if (readOnlyMode) {
                 this.setReadOnlyMode();
                 return;
@@ -483,6 +502,11 @@ export class CreateOrder extends BaseComponent {
                     this.showStatus('Waiting for confirmation...', 'pending');
                     await tx.wait();
                     
+                    // Force a sync of all orders after successful creation
+                    if (window.webSocket) {
+                        await window.webSocket.syncAllOrders(this.contract);
+                    }
+
                     // If we get here, the transaction was successful
                     break;
 
