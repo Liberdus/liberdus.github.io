@@ -30,36 +30,49 @@ export class TakerOrders extends ViewOrders {
             }
 
             // Get all orders and filter for taker
-            let ordersToDisplay = Array.from(this.orders.values())
+            let ordersToDisplay = Array.from(window.webSocket.orderCache.values())
                 .filter(order => 
                     order?.taker && 
                     order.taker.toLowerCase() === userAddress.toLowerCase()
                 );
 
-            // Get filter state
+            // Get filter states
+            const sellTokenFilter = this.container.querySelector('#sell-token-filter')?.value;
+            const buyTokenFilter = this.container.querySelector('#buy-token-filter')?.value;
+            const orderSort = this.container.querySelector('#order-sort')?.value;
             const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
             const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
 
+            // Apply token filters
+            if (sellTokenFilter) {
+                ordersToDisplay = ordersToDisplay.filter(order => 
+                    order.sellToken.toLowerCase() === sellTokenFilter.toLowerCase()
+                );
+            }
+            if (buyTokenFilter) {
+                ordersToDisplay = ordersToDisplay.filter(order => 
+                    order.buyToken.toLowerCase() === buyTokenFilter.toLowerCase()
+                );
+            }
+
             // Filter active orders if needed
             if (showOnlyActive) {
-                ordersToDisplay = await Promise.all(ordersToDisplay.map(async order => {
-                    const canFill = await this.canFillOrder(order);
-                    const expiryTime = Number(order.timestamp) + this.contractValues.orderExpiry;
-                    return {
-                        order,
-                        canFill,
-                        isExpired: Math.floor(Date.now() / 1000) >= expiryTime
-                    };
-                }));
+                ordersToDisplay = ordersToDisplay.filter(order => 
+                    window.webSocket.canFillOrder(order, userAddress)
+                );
+            }
 
-                ordersToDisplay = ordersToDisplay
-                    .filter(({ order, canFill, isExpired }) => 
-                        canFill && 
-                        !isExpired && 
-                        order.status !== 'Filled' && 
-                        order.status !== 'Canceled'
-                    )
-                    .map(({ order }) => order);
+            // Set total orders after filtering
+            this.totalOrders = ordersToDisplay.length;
+
+            // Apply sorting
+            if (orderSort === 'newest') {
+                ordersToDisplay.sort((a, b) => b.id - a.id);
+            } else if (orderSort === 'best-deal') {
+                ordersToDisplay.sort((a, b) => 
+                    Number(a.dealMetrics?.deal || Infinity) - 
+                    Number(b.dealMetrics?.deal || Infinity)
+                );
             }
 
             // Apply pagination
@@ -93,8 +106,8 @@ export class TakerOrders extends ViewOrders {
                         <td colspan="8" class="no-orders-message">
                             <div class="placeholder-text">
                                 ${showOnlyActive ? 
-                                    'No fillable orders available for you' : 
-                                    'No orders found for you'}
+                                    'No active orders where you are the taker' : 
+                                    'No orders found where you are the taker'}
                             </div>
                         </td>
                     </tr>`;
@@ -134,9 +147,19 @@ export class TakerOrders extends ViewOrders {
         });
     }
 
-    // Override setupTable to customize headers and controls
+    // Override setupTable to customize headers and add advanced filters
     async setupTable() {
         await super.setupTable();
+        
+        // Show advanced filters by default
+        const advancedFilters = this.container.querySelector('.advanced-filters');
+        if (advancedFilters) {
+            advancedFilters.style.display = 'block';
+            const advancedFiltersToggle = this.container.querySelector('.advanced-filters-toggle');
+            if (advancedFiltersToggle) {
+                advancedFiltersToggle.classList.add('expanded');
+            }
+        }
         
         // Customize table header for taker view
         const thead = this.container.querySelector('thead tr');
