@@ -666,11 +666,14 @@ export class ViewOrders extends BaseComponent {
         }
     }
 
-    async fillOrder(orderId, button) {
+    async fillOrder(orderId) {
+        const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
+        
         try {
             if (button) {
                 button.disabled = true;
-                button.textContent = 'Processing...';
+                button.textContent = 'Filling...';
+                button.classList.add('disabled');
             }
 
             this.debug('Starting fill order process for orderId:', orderId);
@@ -797,7 +800,6 @@ export class ViewOrders extends BaseComponent {
             }
 
             order.status = 'Filled';
-            /* this.orders.set(Number(orderId), order); */
             await this.refreshOrdersView();
 
             this.showSuccess(`Order ${orderId} filled successfully!`);
@@ -808,25 +810,14 @@ export class ViewOrders extends BaseComponent {
             // Handle specific error cases
             if (error.code === 4001) {
                 this.showError('Transaction rejected by user');
-                return;
+            } else {
+                this.showError(this.getReadableError(error));
             }
-            
-            // Check for revert reason in error data
-            if (error.error?.data) {
-                try {
-                    const decodedError = ethers.utils.toUtf8String(error.error.data);
-                    this.showError(`Transaction failed: ${decodedError}`);
-                    return;
-                } catch (e) {
-                    // If we can't decode the error, fall through to default handling
-                }
-            }
-            
-            this.showError(this.getReadableError(error));
         } finally {
             if (button) {
                 button.disabled = false;
                 button.textContent = 'Fill Order';
+                button.classList.remove('disabled');
             }
         }
     }

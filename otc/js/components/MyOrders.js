@@ -587,7 +587,7 @@ export class MyOrders extends ViewOrders {
                     try {
                         cancelButton.disabled = true;
                         cancelButton.textContent = 'Cancelling...';
-                        this.showError(`Cancelling order ${order.id}...`);
+                        cancelButton.classList.add('disabled');
 
                         // Get contract from WebSocket and connect to signer
                         const contract = window.webSocket.contract;
@@ -595,7 +595,6 @@ export class MyOrders extends ViewOrders {
                             throw new Error('Contract not available');
                         }
 
-                        // Get signer from provider
                         const signer = this.provider.getSigner();
                         const contractWithSigner = contract.connect(signer);
                         
@@ -603,8 +602,11 @@ export class MyOrders extends ViewOrders {
                         const gasEstimate = await contractWithSigner.estimateGas.cancelOrder(order.id);
                         const gasLimit = gasEstimate.mul(120).div(100); // Add 20% buffer
                         
+                        cancelButton.textContent = 'Approving...';
+                        
                         const tx = await contractWithSigner.cancelOrder(order.id, { gasLimit });
-                        this.showError(`Cancelling order ${order.id}... Transaction sent`);
+                        
+                        cancelButton.textContent = 'Confirming...';
                         
                         const receipt = await tx.wait();
                         if (receipt.status === 0) {
@@ -626,11 +628,16 @@ export class MyOrders extends ViewOrders {
 
                         this.debouncedRefresh();
                     } catch (error) {
-                        console.error('Error cancelling order:', error);
-                        this.showError(this.getReadableError(error));
+                        this.debug('Error cancelling order:', error);
+                        if (error.code === 4001) {
+                            this.showError('Transaction rejected by user');
+                        } else {
+                            this.showError(this.getReadableError(error));
+                        }
                     } finally {
                         cancelButton.disabled = false;
                         cancelButton.textContent = 'Cancel';
+                        cancelButton.classList.remove('disabled');
                     }
                 });
                 
