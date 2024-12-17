@@ -27,11 +27,7 @@ export class MyOrders extends ViewOrders {
         try {
             this.debug('Initializing MyOrders component');
             
-            // Load token list first
-            this.tokenList = await getTokenList();
-            this.debug('Loaded token list:', this.tokenList);
-
-            // Check wallet connection
+            // Check wallet connection first
             if (!window.walletManager.isWalletConnected()) {
                 this.container.innerHTML = `
                     <div class="tab-content-wrapper">
@@ -45,15 +41,18 @@ export class MyOrders extends ViewOrders {
             let userAddress = window.walletManager.getAccount();
             if (!userAddress) {
                 this.debug('No account connected');
-                this.container.innerHTML = `
-                    <div class="tab-content-wrapper">
-                        <h2>My Orders</h2>
-                        <p class="connect-prompt">Connect wallet to view your orders</p>
-                    </div>`;
                 return;
             }
 
-            // Wait for WebSocket to be fully initialized
+            // Check if WebSocket cache is already available
+            if (window.webSocket?.orderCache.size > 0) {
+                this.debug('Using existing WebSocket cache');
+                await this.setupTable();
+                await this.refreshOrdersView();
+                return;
+            }
+
+            // If no cache, then wait for WebSocket initialization
             if (!window.webSocket?.isInitialized) {
                 this.debug('Waiting for WebSocket initialization...');
                 await new Promise(resolve => {
@@ -66,20 +65,9 @@ export class MyOrders extends ViewOrders {
                 });
             }
 
-            // Clear previous content
-            this.container.innerHTML = '';
-            
-            // Setup table structure (don't call parent's setupTable)
+            // Setup table and refresh view
             await this.setupTable();
-
-            // Setup WebSocket handlers
-            this.setupWebSocket();
-
-            // Refresh the view with filtered orders
             await this.refreshOrdersView();
-
-            // Initialize pricing service
-            await this.pricingService.initialize();
 
         } catch (error) {
             this.debug('Initialization error:', error);
@@ -282,65 +270,59 @@ export class MyOrders extends ViewOrders {
                 ${bottomControls}
             </div>`;
 
-        // Setup event listeners immediately after creating the table
-        this.setupEventListeners();
-        
         // Setup advanced filters toggle
         const advancedFiltersToggle = this.container.querySelector('.advanced-filters-toggle');
         const advancedFilters = this.container.querySelector('.advanced-filters');
         
         if (advancedFiltersToggle && advancedFilters) {
             advancedFiltersToggle.addEventListener('click', () => {
-                const isHidden = advancedFilters.style.display === 'none';
-                advancedFilters.style.display = isHidden ? 'block' : 'none';
-                advancedFiltersToggle.classList.toggle('active');
+                const isExpanded = advancedFilters.style.display !== 'none';
+                advancedFilters.style.display = isExpanded ? 'none' : 'block';
+                advancedFiltersToggle.classList.toggle('expanded', !isExpanded);
             });
         }
 
-        // Setup pagination buttons explicitly
-        this.setupPaginationButtons();
-    }
+        // Add event listeners for filters
+        const sellTokenFilter = this.container.querySelector('#sell-token-filter');
+        const buyTokenFilter = this.container.querySelector('#buy-token-filter');
+        const orderSort = this.container.querySelector('#order-sort');
 
-    setupPaginationButtons() {
-        // Remove any existing listeners first
-        const allButtons = this.container.querySelectorAll('.pagination-button');
-        allButtons.forEach(button => {
-            const newButton = button.cloneNode(true);
-            button.parentNode.replaceChild(newButton, button);
+        if (sellTokenFilter) sellTokenFilter.addEventListener('change', () => this.refreshOrdersView());
+        if (buyTokenFilter) buyTokenFilter.addEventListener('change', () => this.refreshOrdersView());
+        if (orderSort) orderSort.addEventListener('change', () => this.refreshOrdersView());
+
+        // Initialize pagination
+        this.currentPage = 1;
+        const pageSize = this.container.querySelector('#page-size-select');
+        if (pageSize) {
+            pageSize.value = '50'; // Set default page size
+        }
+
+        // Sync both page size selects
+        const pageSizeSelects = this.container.querySelectorAll('.page-size-select');
+        pageSizeSelects.forEach(select => {
+            select.addEventListener('change', (event) => {
+                pageSizeSelects.forEach(otherSelect => {
+                    if (otherSelect !== event.target) {
+                        otherSelect.value = event.target.value;
+                    }
+                });
+                this.currentPage = 1;
+                this.refreshOrdersView();
+            });
         });
 
-        // Add listeners to all prev/next buttons
-        const controls = this.container.querySelectorAll('.pagination-controls');
-        controls.forEach(control => {
-            const prevButton = control.querySelector('.prev-page');
-            const nextButton = control.querySelector('.next-page');
-            
-            if (prevButton) {
-                prevButton.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    this.debug('Prev button clicked', { currentPage: this.currentPage });
-                    if (this.currentPage > 1) {
-                        this.currentPage--;
-                        this.refreshOrdersView();
+        // Add filter toggle listener
+        const filterToggles = this.container.querySelectorAll('#fillable-orders-toggle');
+        filterToggles.forEach(toggle => {
+            toggle.addEventListener('change', (event) => {
+                filterToggles.forEach(otherToggle => {
+                    if (otherToggle !== event.target) {
+                        otherToggle.checked = event.target.checked;
                     }
                 });
-            }
-            
-            if (nextButton) {
-                nextButton.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const totalPages = this.getTotalPages();
-                    this.debug('Next button clicked', { 
-                        currentPage: this.currentPage, 
-                        totalPages, 
-                        totalOrders: this.totalOrders 
-                    });
-                    if (this.currentPage < totalPages) {
-                        this.currentPage++;
-                        this.refreshOrdersView();
-                    }
-                });
-            }
+                this.refreshOrdersView();
+            });
         });
     }
 
@@ -383,14 +365,42 @@ export class MyOrders extends ViewOrders {
             });
         }
 
-        // Setup pagination buttons
-        this.setupPaginationButtons();
+        // Add pagination event listeners for both top and bottom controls
+        const controls = this.container.querySelectorAll('.filter-controls');
+        controls.forEach(control => {
+            const prevButton = control.querySelector('.prev-page');
+            const nextButton = control.querySelector('.next-page');
+            
+            if (prevButton) {
+                prevButton.addEventListener('click', () => {
+                    if (this.currentPage > 1) {
+                        this.currentPage--;
+                        this.refreshOrdersView();
+                    }
+                });
+            }
+            
+            if (nextButton) {
+                nextButton.addEventListener('click', () => {
+                    const totalPages = this.getTotalPages();
+                    this.debug('Next button clicked', { 
+                        currentPage: this.currentPage, 
+                        totalPages, 
+                        totalOrders: this.totalOrders 
+                    });
+                    if (this.currentPage < totalPages) {
+                        this.currentPage++;
+                        this.refreshOrdersView();
+                    }
+                });
+            }
+        });
 
         // Add filter toggle listener
         const filterToggle = this.container.querySelector('#fillable-orders-toggle');
         if (filterToggle) {
             filterToggle.addEventListener('change', () => {
-                this.currentPage = 1;
+                this.currentPage = 1; // Reset to first page when filter changes
                 this.refreshOrdersView();
             });
         }
@@ -399,7 +409,7 @@ export class MyOrders extends ViewOrders {
         const tokenFilters = this.container.querySelectorAll('.token-filter');
         tokenFilters.forEach(filter => {
             filter.addEventListener('change', () => {
-                this.currentPage = 1;
+                this.currentPage = 1; // Reset to first page when filter changes
                 this.refreshOrdersView();
             });
         });
@@ -408,7 +418,7 @@ export class MyOrders extends ViewOrders {
         const sortSelect = this.container.querySelector('#order-sort');
         if (sortSelect) {
             sortSelect.addEventListener('change', () => {
-                this.currentPage = 1;
+                this.currentPage = 1; // Reset to first page when sort changes
                 this.refreshOrdersView();
             });
         }
