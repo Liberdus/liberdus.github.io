@@ -294,6 +294,20 @@ export class ViewOrders extends BaseComponent {
             const orderSort = this.container.querySelector('#order-sort')?.value;
             const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked;
 
+            // Reset to page 1 when filters change
+            if (this._lastFilters?.sellToken !== sellTokenFilter ||
+                this._lastFilters?.buyToken !== buyTokenFilter ||
+                this._lastFilters?.showOnlyActive !== showOnlyActive) {
+                this.currentPage = 1;
+            }
+
+            // Store current filter state
+            this._lastFilters = {
+                sellToken: sellTokenFilter,
+                buyToken: buyTokenFilter,
+                showOnlyActive: showOnlyActive
+            };
+
             // Filter orders based on status and fillable flag
             ordersToDisplay = ordersToDisplay.filter(order => {
                 const currentTime = Math.floor(Date.now() / 1000);

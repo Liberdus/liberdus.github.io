@@ -91,11 +91,25 @@ export class MyOrders extends ViewOrders {
                 order.maker?.toLowerCase() === userAddress
             );
 
-            // Apply token filters
+            // Get filter states
             const sellTokenFilter = this.container.querySelector('#sell-token-filter')?.value;
             const buyTokenFilter = this.container.querySelector('#buy-token-filter')?.value;
             const orderSort = this.container.querySelector('#order-sort')?.value;
             const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked;
+
+            // Reset to page 1 when filters change
+            if (this._lastFilters?.sellToken !== sellTokenFilter ||
+                this._lastFilters?.buyToken !== buyTokenFilter ||
+                this._lastFilters?.showOnlyCancellable !== showOnlyCancellable) {
+                this.currentPage = 1;
+            }
+
+            // Store current filter state
+            this._lastFilters = {
+                sellToken: sellTokenFilter,
+                buyToken: buyTokenFilter,
+                showOnlyCancellable: showOnlyCancellable
+            };
 
             // Apply filters
             ordersToDisplay = ordersToDisplay.filter(order => {
@@ -151,6 +165,20 @@ export class MyOrders extends ViewOrders {
             // Update pagination controls
             this.updatePaginationControls(this.totalOrders);
 
+            // Show empty state if no orders
+            if (ordersToDisplay.length === 0) {
+                tbody.innerHTML = `
+                    <tr class="empty-message">
+                        <td colspan="9" class="no-orders-message">
+                            <div class="placeholder-text">
+                                ${showOnlyCancellable ? 
+                                    'No cancellable orders found' : 
+                                    'No orders found'}
+                            </div>
+                        </td>
+                    </tr>`;
+            }
+
         } catch (error) {
             this.debug('Error refreshing orders:', error);
             this.showError('Failed to refresh orders view');
@@ -167,6 +195,12 @@ export class MyOrders extends ViewOrders {
 
     // Keep the setupTable method as is since it's specific to MyOrders view
     async setupTable() {
+        // Get tokens from WebSocket's tokenCache first
+        const tokens = Array.from(window.webSocket.tokenCache.values())
+            .sort((a, b) => a.symbol.localeCompare(b.symbol)); // Sort alphabetically by symbol
+        
+        this.debug('Available tokens:', tokens);
+
         const paginationControls = `
             <div class="pagination-controls">
                 <select id="page-size-select" class="page-size-select">
@@ -217,13 +251,13 @@ export class MyOrders extends ViewOrders {
                         <div class="token-filters">
                             <select id="sell-token-filter" class="token-filter">
                                 <option value="">All Sell Tokens</option>
-                                ${this.tokenList.map(token => 
+                                ${tokens.map(token => 
                                     `<option value="${token.address}">${token.symbol}</option>`
                                 ).join('')}
                             </select>
                             <select id="buy-token-filter" class="token-filter">
                                 <option value="">All Buy Tokens</option>
-                                ${this.tokenList.map(token => 
+                                ${tokens.map(token => 
                                     `<option value="${token.address}">${token.symbol}</option>`
                                 ).join('')}
                             </select>
@@ -298,19 +332,51 @@ export class MyOrders extends ViewOrders {
             pageSize.value = '50'; // Set default page size
         }
 
+        // Setup pagination for both top and bottom controls
+        const setupPaginationListeners = (controls) => {
+            const prevButton = controls.querySelector('.prev-page');
+            const nextButton = controls.querySelector('.next-page');
+            const pageInfo = controls.querySelector('.page-info');
+            
+            if (prevButton) {
+                prevButton.addEventListener('click', () => {
+                    if (this.currentPage > 1) {
+                        this.currentPage--;
+                        this.refreshOrdersView();
+                    }
+                });
+            }
+            
+            if (nextButton) {
+                nextButton.addEventListener('click', () => {
+                    const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
+                    const totalPages = Math.ceil(this.totalOrders / pageSize);
+                    if (this.currentPage < totalPages) {
+                        this.currentPage++;
+                        this.refreshOrdersView();
+                    }
+                });
+            }
+        };
+
         // Sync both page size selects
         const pageSizeSelects = this.container.querySelectorAll('.page-size-select');
         pageSizeSelects.forEach(select => {
             select.addEventListener('change', (event) => {
+                // Update all page size selects to match
                 pageSizeSelects.forEach(otherSelect => {
                     if (otherSelect !== event.target) {
                         otherSelect.value = event.target.value;
                     }
                 });
-                this.currentPage = 1;
+                this.currentPage = 1; // Reset to first page when changing page size
                 this.refreshOrdersView();
             });
         });
+
+        // Setup pagination for both top and bottom controls
+        const controls = this.container.querySelectorAll('.filter-controls');
+        controls.forEach(setupPaginationListeners);
 
         // Add filter toggle listener
         const filterToggles = this.container.querySelectorAll('#fillable-orders-toggle');

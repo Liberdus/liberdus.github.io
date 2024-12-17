@@ -43,6 +43,20 @@ export class TakerOrders extends ViewOrders {
             const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked ?? true;
             const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
 
+            // Reset to page 1 when filters change
+            if (this._lastFilters?.sellToken !== sellTokenFilter ||
+                this._lastFilters?.buyToken !== buyTokenFilter ||
+                this._lastFilters?.showOnlyActive !== showOnlyActive) {
+                this.currentPage = 1;
+            }
+
+            // Store current filter state
+            this._lastFilters = {
+                sellToken: sellTokenFilter,
+                buyToken: buyTokenFilter,
+                showOnlyActive: showOnlyActive
+            };
+
             // Apply token filters
             if (sellTokenFilter) {
                 ordersToDisplay = ordersToDisplay.filter(order => 
