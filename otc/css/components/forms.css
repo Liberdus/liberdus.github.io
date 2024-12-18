@@ -569,11 +569,10 @@
 }
 
 .token-explorer-link {
-  color: #666;
-  font-size: 14px;
   display: inline-flex;
   align-items: center;
-  text-decoration: none;
+  margin-left: 4px;
+  color: var(--text-secondary);
   opacity: 0.7;
   transition: opacity 0.2s;
 }
@@ -585,7 +584,11 @@
 .token-explorer-icon {
   width: 14px;
   height: 14px;
-  margin-left: 4px;
+}
+
+.token-item-symbol {
+  display: flex;
+  align-items: center;
 }
 
 .token-address-tooltip {
