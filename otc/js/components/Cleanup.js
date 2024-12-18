@@ -222,17 +222,10 @@ export class Cleanup extends BaseComponent {
     // Update cleanup method to use class contract reference
     async checkCleanupOpportunities() {
         try {
-            // Wait for WebSocket to be initialized
-            if (!window.webSocket?.contract) {
+            if (!this.webSocket?.contract) {
                 this.debug('Waiting for WebSocket contract initialization...');
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 return this.checkCleanupOpportunities();
-            }
-
-            // Get contract from WebSocket
-            const contract = window.webSocket.contract;
-            if (!contract) {
-                throw new Error('Contract not available');
             }
 
             const orders = this.webSocket.getOrders();
@@ -248,14 +241,11 @@ export class Cleanup extends BaseComponent {
             let activeFees = 0;
             let cancelledFees = 0;
             let filledFees = 0;
-            
+
             const currentTime = Math.floor(Date.now() / 1000);
-            const orderExpiry = await contract.ORDER_EXPIRY();
-            const gracePeriod = await contract.GRACE_PERIOD();
 
             for (const order of orders) {
-                // Check if grace period has passed (now 14 minutes total)
-                if (currentTime > order.timestamp + orderExpiry.toNumber() + gracePeriod.toNumber()) {
+                if (currentTime > order.timings.graceEndsAt) {
                     if (order.status === 'Active') {
                         eligibleOrders.active.push(order);
                         activeFees += Number(order.orderCreationFee || 0);
@@ -268,7 +258,7 @@ export class Cleanup extends BaseComponent {
                     }
                 }
             }
-            
+
             const totalEligible = eligibleOrders.active.length + 
                 eligibleOrders.cancelled.length + 
                 eligibleOrders.filled.length;
@@ -392,7 +382,6 @@ export class Cleanup extends BaseComponent {
                 throw new Error('Wallet not connected');
             }
 
-            // Get signer from wallet manager
             const signer = await window.walletManager.getSigner();
             if (!signer) {
                 throw new Error('No signer available');
@@ -403,14 +392,10 @@ export class Cleanup extends BaseComponent {
             this.cleanupButton.disabled = true;
             this.cleanupButton.textContent = 'Cleaning...';
 
-            // Get eligible orders first
             const orders = this.webSocket.getOrders();
             const currentTime = Math.floor(Date.now() / 1000);
-            const ORDER_EXPIRY = await contract.ORDER_EXPIRY();
-            const GRACE_PERIOD = await contract.GRACE_PERIOD();
-
             const eligibleOrders = orders.filter(order => 
-                currentTime > Number(order.timestamp) + ORDER_EXPIRY.toNumber() + GRACE_PERIOD.toNumber()
+                currentTime > order.timings.graceEndsAt
             );
 
             if (eligibleOrders.length === 0) {

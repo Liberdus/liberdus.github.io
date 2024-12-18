@@ -30,44 +30,16 @@ export class ContractParams extends BaseComponent {
             const now = Date.now();
             if (this.cachedParams && (now - this.lastFetchTime) < this.CACHE_DURATION) {
                 this.debug('Using cached parameters');
-                this.container.innerHTML = `
-                    <div class="tab-content-wrapper">
-                        <h2 class="main-heading">Contract Parameters</h2>
-                        <div class="params-container">
-                            ${this.generateParametersHTML(this.cachedParams)}
-                        </div>
-                    </div>`;
+                this.container.innerHTML = this.generateContainerHTML(this.cachedParams);
                 return;
             }
 
             this.debug('Initializing ContractParams component');
+            this.container.innerHTML = this.generateContainerHTML();
 
-            // Create basic structure
-            this.container.innerHTML = `
-                <div class="tab-content-wrapper">
-                    <h2 class="main-heading">Contract Parameters</h2>
-                    <div class="params-container">
-                        ${this.cachedParams ? this.generateParametersHTML(this.cachedParams) : `
-                            <div class="loading-spinner"></div>
-                            <div class="loading-text">Loading parameters...</div>
-                        `}
-                    </div>
-                </div>`;
+            // Wait for WebSocket initialization using WebSocket's promise
+            await window.webSocket?.waitForInitialization();
 
-            // Wait for WebSocket to be fully initialized
-            if (!window.webSocket?.isInitialized) {
-                this.debug('Waiting for WebSocket initialization...');
-                await new Promise(resolve => {
-                    const checkInterval = setInterval(() => {
-                        if (window.webSocket?.isInitialized) {
-                            clearInterval(checkInterval);
-                            resolve();
-                        }
-                    }, 100);
-                });
-            }
-
-            // Use the existing WebSocket service's contract instance
             const contract = window.webSocket.contract;
             if (!contract) {
                 throw new Error('Contract not initialized');
@@ -77,7 +49,7 @@ export class ContractParams extends BaseComponent {
 
             // Fetch all parameters with individual error handling
             const params = {};
-            for (const [key, method] of Object.entries({
+            const paramMethods = {
                 orderCreationFee: 'orderCreationFeeAmount',
                 firstOrderId: 'firstOrderId',
                 nextOrderId: 'nextOrderId',
@@ -88,14 +60,21 @@ export class ContractParams extends BaseComponent {
                 gracePeriod: 'GRACE_PERIOD',
                 orderExpiry: 'ORDER_EXPIRY',
                 maxRetryAttempts: 'MAX_RETRY_ATTEMPTS'
-            })) {
-                try {
-                    params[key] = await contract[method]();
-                    this.debug(`Fetched ${key}:`, params[key]);
-                } catch (e) {
-                    this.debug(`Error fetching ${key}:`, e);
-                }
-            }
+            };
+
+            // Use WebSocket's queueRequest for rate limiting
+            await Promise.all(
+                Object.entries(paramMethods).map(async ([key, method]) => {
+                    try {
+                        params[key] = await window.webSocket.queueRequest(
+                            async () => contract[method]()
+                        );
+                        this.debug(`Fetched ${key}:`, params[key]);
+                    } catch (e) {
+                        this.debug(`Error fetching ${key}:`, e);
+                    }
+                })
+            );
 
             // Add chain ID and contract address
             try {
@@ -105,24 +84,17 @@ export class ContractParams extends BaseComponent {
                 this.debug('Error fetching network info:', e);
             }
 
-            // Only proceed with token details if we have the fee token
+            // Use WebSocket's token info cache for fee token details
             if (params.feeToken) {
                 try {
-                    const tokenContract = new ethers.Contract(
-                        params.feeToken,
-                        [
-                            'function symbol() view returns (string)',
-                            'function decimals() view returns (uint8)'
-                        ],
-                        contract.provider
-                    );
-                    params.tokenSymbol = await tokenContract.symbol();
-                    params.tokenDecimals = await tokenContract.decimals();
-                    this.debug('Fetched token details:', { symbol: params.tokenSymbol, decimals: params.tokenDecimals });
+                    const tokenInfo = await window.webSocket.getTokenInfo(params.feeToken);
+                    params.tokenSymbol = tokenInfo.symbol;
+                    params.tokenDecimals = tokenInfo.decimals;
+                    this.debug('Fetched token details:', tokenInfo);
                 } catch (e) {
                     this.debug('Error fetching token details:', e);
                     params.tokenSymbol = 'Unknown';
-                    params.tokenDecimals = 18; // fallback to 18 decimals
+                    params.tokenDecimals = 18;
                 }
             }
 
@@ -143,6 +115,19 @@ export class ContractParams extends BaseComponent {
         } finally {
             this.isInitializing = false;
         }
+    }
+
+    generateContainerHTML(params = null) {
+        return `
+            <div class="tab-content-wrapper">
+                <h2 class="main-heading">Contract Parameters</h2>
+                <div class="params-container">
+                    ${params ? this.generateParametersHTML(params) : `
+                        <div class="loading-spinner"></div>
+                        <div class="loading-text">Loading parameters...</div>
+                    `}
+                </div>
+            </div>`;
     }
 
     generateParametersHTML(params) {
