@@ -48,6 +48,7 @@ export const DEBUG_CONFIG = {
     CLEANUP_ORDERS: true,
     WALLET_UI: true,
     BASE_COMPONENT: true,
+    PRICING: true,
     // Add more specific flags as needed
 };
 

@@ -35,11 +35,6 @@ export class WebSocketService {
         };
         
         this.tokenCache = new Map();  // Add token cache
-
-        // Subscribe to price updates
-        if (window.pricingService) {
-            window.pricingService.subscribe(() => this.updateAllDeals());
-        }
     }
 
     async queueRequest(callback) {
@@ -77,7 +72,6 @@ export class WebSocketService {
     }
 
     async initialize() {
-        // Prevent multiple initializations
         if (this.isInitialized) {
             console.log('[WebSocket] Already initialized, skipping...');
             return;
@@ -86,7 +80,6 @@ export class WebSocketService {
         try {
             console.log('[WebSocket] Starting initialization...');
             
-            // Add initialization state tracking
             this.initializationPromise = (async () => {
                 // Wait for provider connection
                 const config = getNetworkConfig();
@@ -147,6 +140,17 @@ export class WebSocketService {
                 // Setup event listeners after sync
                 this.debug('Setting up event listeners...');
                 await this.setupEventListeners(this.contract);
+                
+                // Subscribe to pricing service after everything else is ready
+                if (window.pricingService) {
+                    this.debug('Subscribing to pricing service...');
+                    window.pricingService.subscribe(() => {
+                        this.debug('Price update received, updating all deals...');
+                        this.updateAllDeals();
+                    });
+                } else {
+                    this.debug('Warning: PricingService not available');
+                }
                 
                 this.isInitialized = true;
                 this.debug('Initialization complete');
@@ -686,21 +690,23 @@ export class WebSocketService {
     // Update all deals when prices change
     // Will be used with refresh button in the UI 
     async updateAllDeals() {
-        try {
-            this.debug('Updating deals for all orders due to price change');
-            
-            for (const [orderId, order] of this.orderCache.entries()) {
+        if (!window.pricingService) {
+            this.debug('Cannot update deals: PricingService not available');
+            return;
+        }
+
+        this.debug('Updating deal metrics for all orders...');
+        for (const [orderId, order] of this.orderCache.entries()) {
+            try {
                 const updatedOrder = await this.calculateDealMetrics(order);
                 this.orderCache.set(orderId, updatedOrder);
+            } catch (error) {
+                this.debug('Error updating deal metrics for order:', orderId, error);
             }
-
-            // Notify subscribers that orders have been updated with new deals
-            this.notifySubscribers('ordersUpdated', Array.from(this.orderCache.values()));
-            
-            this.debug('Deals updated for all orders');
-        } catch (error) {
-            this.debug('Error updating deals:', error);
         }
+
+        // Notify subscribers about the updates
+        this.notifySubscribers("ordersUpdated", Array.from(this.orderCache.values()));
     }
 
     // Check if an order can be filled by the current account
