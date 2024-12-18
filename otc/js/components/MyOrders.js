@@ -287,7 +287,19 @@ export class MyOrders extends ViewOrders {
                             <th>Amount</th>
                             <th>Buy</th>
                             <th>Amount</th>
-                            <th>Deal</th>
+                            <th>
+                                Deal
+                                <span class="info-icon" title="Deal = Price × Market Rate
+
+For Your Orders (as Seller):
+• Higher deal number is better
+• Deal > 1: You're getting more than market value
+• Deal < 1: You're getting less than market value
+
+Example:
+Deal = 1.2 means you're selling at 20% above market rate
+Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
+                            </th>
                             <th>Expires</th>
                             <th>Status</th>
                             <th>Action</th>
@@ -497,7 +509,7 @@ export class MyOrders extends ViewOrders {
             const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
             const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
 
-            // Use cached dealMetrics directly from the order
+            // Use pre-formatted values from dealMetrics
             const { 
                 formattedSellAmount, 
                 formattedBuyAmount, 
@@ -542,15 +554,6 @@ export class MyOrders extends ViewOrders {
             // Get order status from WebSocket cache
             const orderStatus = window.webSocket.getOrderStatus(order);
 
-            // Format amounts with up to 4 decimal places
-            const formatAmount = (amount) => {
-                return Number(amount || 0).toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 4,
-                    useGrouping: true
-                });
-            };
-
             tr.innerHTML = `
                 <td>${order.id}</td>
                 <td>
@@ -562,7 +565,7 @@ export class MyOrders extends ViewOrders {
                         </div>
                     </div>
                 </td>
-                <td>${formatAmount(formattedSellAmount)}</td>
+                <td>${formattedSellAmount}</td>
                 <td>
                     <div class="token-info">
                         ${this.getTokenIcon(buyTokenInfo)}
@@ -572,7 +575,7 @@ export class MyOrders extends ViewOrders {
                         </div>
                     </div>
                 </td>
-                <td>${formatAmount(formattedBuyAmount)}</td>
+                <td>${formattedBuyAmount}</td>
                 <td>${(deal || 0).toFixed(6)}</td>
                 <td>${expiryText}</td>
                 <td class="order-status">${orderStatus}</td>

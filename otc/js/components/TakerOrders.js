@@ -1,7 +1,5 @@
 import { ViewOrders } from './ViewOrders.js';
-import { ethers } from 'ethers';
 import { isDebugEnabled } from '../config.js';
-import { erc20Abi } from '../abi/erc20.js';
 
 export class TakerOrders extends ViewOrders {
     constructor() {
@@ -175,7 +173,7 @@ export class TakerOrders extends ViewOrders {
             }
         }
         
-        // Customize table header for taker view
+        // Customize table header for taker view with deal info tooltip
         const thead = this.container.querySelector('thead tr');
         if (thead) {
             thead.innerHTML = `
@@ -184,7 +182,19 @@ export class TakerOrders extends ViewOrders {
                 <th>Amount</th>
                 <th>Sell</th>
                 <th>Amount</th>
-                <th>Deal</th>
+                <th>
+                    Deal
+                    <span class="info-icon" title="Deal = Price × Market Rate
+
+For You as Taker (Buyer):
+• Lower deal number is better
+• Deal > 1: You're paying more than market value
+• Deal < 1: You're paying less than market value
+
+Example:
+Deal = 1.2 means you're paying 20% above market rate
+Deal = 0.8 means you're paying 20% below market rate">ⓘ</span>
+                </th>
                 <th>Expires</th>
                 <th>Status</th>
                 <th>Action</th>

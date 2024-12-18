@@ -529,3 +529,15 @@ input {
 .header-right .wallet-button:hover {
   background: #3a54d6;
 }
+
+.info-icon {
+    display: inline-block;
+    font-size: 14px;
+    color: #888;
+    margin-left: 4px;
+    cursor: help;
+}
+
+.info-icon:hover {
+    color: #fff;
+}

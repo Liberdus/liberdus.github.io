@@ -4,7 +4,6 @@ import { erc20Abi } from '../abi/erc20.js';
 import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
 import { isDebugEnabled, getNetworkConfig } from '../config.js';
 import { NETWORK_TOKENS } from '../utils/tokens.js';
-import { getTokenList } from '../utils/tokens.js';
 import { PricingService } from '../services/PricingService.js';
 import { walletManager } from '../config.js';
 
@@ -505,7 +504,20 @@ export class ViewOrders extends BaseComponent {
                 <th>Amount</th>
                 <th>Sell</th>
                 <th>Amount</th>
-                <th>Deal</th>
+                <th>
+                    Deal
+                    <span class="info-icon" title="Deal = Price × Market Rate
+                    
+For Sellers:
+• Higher deal number is better
+• Deal > 1: Getting more than market value
+• Deal < 1: Getting less than market value
+
+For Buyers:
+• Lower deal number is better
+• Deal > 1: Paying more than market value
+• Deal < 1: Paying less than market value">ⓘ</span>
+                </th>
                 <th>Expires</th>
                 <th>Status</th>
                 <th>Action</th>
@@ -640,25 +652,6 @@ export class ViewOrders extends BaseComponent {
         });
     }
 
-    formatTimeUntil(timestamp) {
-        const now = Math.floor(Date.now() / 1000);
-        const diff = timestamp - now;
-        
-        if (diff <= 0) return 'Expired';
-        
-        const days = Math.floor(diff / 86400); // 86400 seconds in a day
-        const hours = Math.floor((diff % 86400) / 3600); // Remaining hours
-        const minutes = Math.floor((diff % 3600) / 60); // Remaining minutes
-        
-        if (days > 0) {
-            return `${days}D ${hours}H ${minutes}M`;
-        } else if (hours > 0) {
-            return `${hours}H ${minutes}M`;
-        } else {
-            return `${minutes}M`;
-        }
-    }
-
     setupEventListeners() {
         this.tbody.addEventListener('click', async (e) => {
             if (e.target.classList.contains('fill-button')) {
@@ -666,10 +659,6 @@ export class ViewOrders extends BaseComponent {
                 await this.fillOrder(orderId);
             }
         });
-    }
-
-    setupFilters() {
-        // Will implement filtering in next iteration
     }
 
     async checkAllowance(tokenAddress, owner, amount) {
@@ -876,40 +865,26 @@ export class ViewOrders extends BaseComponent {
 
     async createOrderRow(order) {
         try {
-            // Get token info for both tokens in the order
+            const tr = document.createElement('tr');
+            tr.dataset.orderId = order.id.toString();
+            tr.dataset.timestamp = order.timings.createdAt.toString();
+
+            // Get token info from WebSocket cache
             const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
             const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
 
-            // Get icons
-            const sellTokenIcon = this.getTokenIcon(sellTokenInfo);
-            const buyTokenIcon = this.getTokenIcon(buyTokenInfo);
-
-            const tr = this.createElement('tr');
-            tr.dataset.orderId = order.id.toString();
-            tr.dataset.timestamp = order.timestamp;
-            tr.dataset.status = order.status;
-
-            const currentAccount = walletManager.getAccount()?.toLowerCase();
-
-            // Use WebSocket's helpers for order status and actions
-            const status = window.webSocket.getOrderStatus(order);
-            const canFill = window.webSocket.canFillOrder(order, currentAccount);
-            const isUserOrder = order.maker?.toLowerCase() === currentAccount;
-            const formattedExpiry = this.formatTimeUntil(order.timings.expiresAt);
-
-            // Use cached deal metrics from WebSocket
-            const { dealMetrics } = order;
-            const {
+            // Use pre-formatted values from dealMetrics
+            const { 
                 formattedSellAmount,
                 formattedBuyAmount,
+                deal,
                 sellTokenUsdPrice,
-                buyTokenUsdPrice,
-                deal
-            } = dealMetrics || {};
+                buyTokenUsdPrice 
+            } = order.dealMetrics || {};
 
-            // Format USD prices with appropriate precision
+            // Format USD prices
             const formatUsdPrice = (price) => {
-                if (!price) return '$-';
+                if (!price) return '';
                 if (price >= 100) return `$${price.toFixed(0)}`;
                 if (price >= 1) return `$${price.toFixed(2)}`;
                 return `$${price.toFixed(4)}`;
@@ -918,107 +893,47 @@ export class ViewOrders extends BaseComponent {
             // Add price-estimate class if using default price
             const sellPriceClass = sellTokenUsdPrice ? '' : 'price-estimate';
             const buyPriceClass = buyTokenUsdPrice ? '' : 'price-estimate';
-            const rateClass = (!sellTokenUsdPrice || !buyTokenUsdPrice) ? 'estimated-price' : '';
 
-            // Check if user is the maker
-            const actionContent = isUserOrder ? 
-                '<span class="your-order">Your Order</span>' : 
-                (canFill ? 
-                    `<button class="fill-button" data-order-id="${order.id}">Fill Order</button>` : 
-                    '');
+            const orderStatus = window.webSocket.getOrderStatus(order);
+            const expiryText = this.formatTimeDiff(order.timings.expiresAt - Math.floor(Date.now() / 1000));
 
             tr.innerHTML = `
                 <td>${order.id}</td>
                 <td>
                     <div class="token-info">
-                        <div class="token-icon small">
-                            ${sellTokenIcon}
-                        </div>
+                        ${this.getTokenIcon(sellTokenInfo)}
                         <div class="token-details">
-                            <a href="${this.getExplorerUrl(order.sellToken)}" 
-                               class="token-link" 
-                               target="_blank" 
-                               title="View token contract">
-                                ${sellTokenInfo.symbol}
-                                <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                    <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                                </svg>
-                            </a>
+                            <span>${sellTokenInfo.symbol}</span>
                             <span class="token-price ${sellPriceClass}">${formatUsdPrice(sellTokenUsdPrice)}</span>
                         </div>
                     </div>
                 </td>
-                <td>${this.formatAmount(order.buyAmount, buyTokenInfo?.decimals)}</td>
+                <td>${formattedSellAmount}</td>
                 <td>
                     <div class="token-info">
-                        <div class="token-icon small">
-                            ${buyTokenIcon}
-                        </div>
+                        ${this.getTokenIcon(buyTokenInfo)}
                         <div class="token-details">
-                            <a href="${this.getExplorerUrl(order.buyToken)}" 
-                               class="token-link" 
-                               target="_blank" 
-                               title="View token contract">
-                                ${buyTokenInfo.symbol}
-                                <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                    <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                                </svg>
-                            </a>
+                            <span>${buyTokenInfo.symbol}</span>
                             <span class="token-price ${buyPriceClass}">${formatUsdPrice(buyTokenUsdPrice)}</span>
                         </div>
                     </div>
                 </td>
-                <td>${this.formatAmount(order.sellAmount, sellTokenInfo?.decimals)}</td>
-                <td class="${rateClass}">${(deal || 0).toFixed(6)}</td>
-                <td>${formattedExpiry}</td>
-                <td class="order-status">${status}</td>
-                <td class="action-column">${actionContent}</td>`;
+                <td>${formattedBuyAmount}</td>
+                <td>${(deal || 0).toFixed(6)}</td>
+                <td>${expiryText}</td>
+                <td class="order-status">${orderStatus}</td>
+                <td class="action-column"></td>`;
 
-            // Add click handler for fill button
-            const fillButton = tr.querySelector('.fill-button');
-            if (fillButton) {
-                fillButton.addEventListener('click', () => this.fillOrder(order.id));
-            }
-
-            // Start the expiry timer for this row
+            // Start expiry timer for this row
             this.startExpiryTimer(tr);
-            
+
             return tr;
         } catch (error) {
             this.debug('Error creating order row:', error);
-            return '';
+            return null;
         }
     }
 
-/*     async getContractExpiryTimes() {
-        if (this.contractValues.orderExpiry && this.contractValues.gracePeriod) {
-            return this.contractValues;
-        }
-        
-        const contract = await this.getContract();
-        this.contractValues = {
-            orderExpiry: (await contract.ORDER_EXPIRY()).toNumber(),
-            gracePeriod: (await contract.GRACE_PERIOD()).toNumber()
-        };
-        return this.contractValues;
-    } */
-
-/*     async getExpiryTime(timestamp) {
-        try {
-            const { orderExpiry, gracePeriod } = await this.getContractExpiryTimes();
-            return (Number(timestamp) + orderExpiry + gracePeriod) * 1000; // Convert to milliseconds
-        } catch (error) {
-            console.error('[ViewOrders] Error calculating expiry time:', error);
-            return Number(timestamp) * 1000; // Fallback to original timestamp
-        }
-    } */
-
-/*     getTotalPages() {
-        const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
-        if (pageSize === -1) return 1; // View all
-        return Math.ceil(window.webSocket.orderCache.size / pageSize);
-    }
- */
     updatePaginationControls(totalOrders) {
         const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
         
@@ -1053,22 +968,6 @@ export class ViewOrders extends BaseComponent {
         const controls = this.container.querySelectorAll('.filter-controls');
         controls.forEach(updateControls);
     }
-
-/*     async displayOrders(orders) {
-        try {
-            // Remove contract call since we have expiry in WebSocket
-            // const contract = await this.getContract();
-            // const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
-            
-            // Use WebSocket's cached values instead
-            const orderExpiry = window.webSocket.orderExpiry.toNumber();
-            
-            // ... rest of display logic ...
-        } catch (error) {
-            this.debug('Error displaying orders:', error);
-            throw error;
-        }
-    } */
 
     startExpiryTimer(row) {
         // Clear any existing timer
@@ -1125,19 +1024,6 @@ export class ViewOrders extends BaseComponent {
         this.expiryTimers.set(row.dataset.orderId, timerId);
     }
 
-/*     showLoadingState() {
-        const tbody = this.container.querySelector('tbody');
-        if (tbody) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="10" class="loading-message">
-                        <div class="loading-spinner"></div>
-                        <div class="loading-text">Loading orders...</div>
-                    </td>
-                </tr>`;
-        }
-    } */
-
     getExplorerUrl(address) {
         const networkConfig = getNetworkConfig();
         if (!networkConfig?.explorer) {
@@ -1177,25 +1063,6 @@ export class ViewOrders extends BaseComponent {
             return `${prefix}${hours}H ${minutes}M`;
         } else {
             return `${prefix}${minutes}M`;
-        }
-    }
-
-    formatAmount(amount, decimals = 18) {
-        try {
-            const parsedAmount = ethers.utils.formatUnits(amount, decimals);
-            const numAmount = parseFloat(parsedAmount);
-            
-            // Show up to 4 decimal places if they exist, minimum 2
-            const formattedAmount = numAmount.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 4,
-                useGrouping: true
-            });
-            
-            return formattedAmount;
-        } catch (error) {
-            this.debug('Error formatting amount:', error);
-            return '0.00';
         }
     }
 }
