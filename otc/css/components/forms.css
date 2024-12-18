@@ -1187,3 +1187,119 @@
   margin-left: auto;
   padding-left: 1rem;
 }
+
+.amount-usd {
+  font-size: 0.85em;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  padding-left: 8px;
+}
+
+.token-price {
+  font-size: 0.85em;
+  color: var(--text-secondary);
+  display: block;
+  margin-top: 2px;
+}
+
+.token-balance-container {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.token-balance-usd {
+  color: var(--text-secondary);
+  font-size: 0.85em;
+}
+
+.token-balance-with-usd {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.token-balance-amount {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.token-balance-usd {
+  color: var(--text-secondary);
+  font-size: 0.85em;
+}
+
+.token-balance-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.token-balance {
+  color: var(--text-primary);
+  font-size: 0.9em;
+}
+
+.token-balance-usd {
+  color: var(--text-secondary);
+  font-size: 0.85em;
+}
+
+.token-selector-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.token-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.token-symbol {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.token-balance-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.amount-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.token-balance {
+  color: var(--text-primary);
+  font-size: 0.9em;
+}
+
+.token-balance-usd {
+  color: var(--text-secondary);
+  font-size: 0.85em;
+}
+
+.token-selector-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.token-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.token-symbol {
+  font-weight: 500;
+  color: var(--text-primary);
+}

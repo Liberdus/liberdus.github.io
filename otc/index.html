@@ -40,7 +40,7 @@
           <div class="logo-container">
             <img src="assets/1.png" alt="LiberSwap Logo" class="logo-image">
             <h1>LiberOTCSwap</h1>
-            <span class="version">v1.0.23</span>
+            <span class="version">v1.0.24</span>
           </div>
         </div>
         <!-- Header Right -->
@@ -168,7 +168,16 @@
             <div class="form-container">
               <div class="swap-section">
                 <div id="sellContainer" class="swap-input-container">
-                  <!-- Will be populated by JavaScript -->
+                  <div class="amount-input-wrapper">
+                    <input type="number" id="sellAmount" placeholder="0.0" />
+                    <button id="sellAmountMax" class="max-button">MAX</button>
+                  </div>
+                  <div class="amount-usd" id="sellAmountUSD">≈ $0.00</div>
+                  <div id="sellTokenSelector" class="token-selector">
+                    <div class="token-selector-content">
+                      <span>Select Token</span>
+                    </div>
+                  </div>
                 </div>
 
                 <div class="swap-arrow">
@@ -178,7 +187,15 @@
                 </div>
 
                 <div id="buyContainer" class="swap-input-container">
-                  <!-- Will be populated by JavaScript -->
+                  <div class="amount-input-wrapper">
+                    <input type="number" id="buyAmount" placeholder="0.0" />
+                  </div>
+                  <div class="amount-usd" id="buyAmountUSD">≈ $0.00</div>
+                  <div id="buyTokenSelector" class="token-selector">
+                    <div class="token-selector-content">
+                      <span>Select Token</span>
+                    </div>
+                  </div>
                 </div>
 
                 <div class="taker-input-container">

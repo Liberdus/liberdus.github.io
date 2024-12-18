@@ -157,6 +157,9 @@ export class CreateOrder extends BaseComponent {
             // Initialize token selectors
             this.initializeTokenSelectors();
             
+            // Initialize amount input listeners
+            this.initializeAmountInputs();
+            
             this.initialized = true;
             this.debug('Initialization complete');
 
@@ -932,11 +935,21 @@ export class CreateOrder extends BaseComponent {
             tokenElement.dataset.address = token.address;
             
             // Format balance if it exists
-            const formattedBalance = token.balance ? 
-                Number(token.balance).toLocaleString(undefined, { 
-                    minimumFractionDigits: 2, 
-                    maximumFractionDigits: 6 
-                }) : '0.00';
+            const balance = token.balance ? Number(token.balance) : 0;
+            const formattedBalance = balance.toLocaleString(undefined, { 
+                minimumFractionDigits: 2, 
+                maximumFractionDigits: 6 
+            });
+            
+            // Get USD price and calculate USD value
+            const usdPrice = window.pricingService?.getPrice(token.address) || 0;
+            const usdValue = balance * usdPrice;
+            const formattedUsdValue = usdValue.toLocaleString(undefined, {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
             
             tokenElement.innerHTML = `
                 <div class="token-item-content">
@@ -955,7 +968,10 @@ export class CreateOrder extends BaseComponent {
                         </div>
                     </div>
                     <div class="token-item-right">
-                        ${formattedBalance}
+                        <div class="token-balance-with-usd">
+                            <div class="token-balance-amount">${formattedBalance}</div>
+                            <div class="token-balance-usd">${formattedUsdValue}</div>
+                        </div>
                     </div>
                 </div>
             `;
@@ -1188,20 +1204,26 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug(`Token selected for ${type}:`, token);
             
+            // Get USD price from pricing service
+            const usdPrice = window.pricingService.getPrice(token.address);
+            // Handle zero balance case
+            const balance = parseFloat(token.balance) || 0;
+            const balanceUSD = balance > 0 ? (balance * usdPrice).toFixed(2) : '0.00';
+            const formattedBalance = balance.toFixed(2); // Ensure consistent decimal places
+            
             // Store token in the component
             this[`${type}Token`] = {
                 address: token.address,
                 symbol: token.symbol,
                 decimals: token.decimals || 18,
                 balance: token.balance || '0',
-                logoURI: token.logoURI
+                logoURI: token.logoURI,
+                usdPrice: usdPrice
             };
             
-            this.debug(`Updated ${type}Token:`, this[`${type}Token`]);
             // Update the selector display
             const selector = document.getElementById(`${type}TokenSelector`);
             if (selector) {
-                // Update the selector content to show selected token
                 selector.innerHTML = `
                     <div class="token-selector-content">
                         <div class="token-selector-left">
@@ -1213,7 +1235,12 @@ export class CreateOrder extends BaseComponent {
                             </div>
                             <div class="token-info">
                                 <span class="token-symbol">${token.symbol}</span>
-                                <span class="token-balance">Balance: ${token.balance || '0.00'}</span>
+                                <div class="token-balance-info">
+                                    <div class="amount-container">
+                                        <span class="token-balance">${formattedBalance}</span>
+                                        <span class="token-balance-usd">$${balanceUSD}</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <svg width="12" height="12" viewBox="0 0 12 12">
@@ -1223,19 +1250,14 @@ export class CreateOrder extends BaseComponent {
                 `;
             }
 
-            // Close the modal
-            const modal = document.getElementById(`${type}TokenModal`);
-            if (modal) {
-                modal.style.display = 'none';
-            }
-
-            // Update other UI elements
-            if (type === 'sell') {
-                this.updateSellAmountMax();
-            }
-            this.updateCreateButtonState();
+            // Update amount USD value immediately
             this.updateTokenAmounts(type);
 
+            // Add input event listener for amount changes
+            const amountInput = document.getElementById(`${type}Amount`);
+            if (amountInput) {
+                amountInput.addEventListener('input', () => this.updateTokenAmounts(type));
+            }
         } catch (error) {
             this.debug('Error in handleTokenSelect:', error);
             this.showStatus(`Failed to select ${type} token: ${error.message}`, 'error');
@@ -1255,6 +1277,12 @@ export class CreateOrder extends BaseComponent {
             
             if (token) {
                 this.handleTokenSelect(type, token);
+                
+                // Close the modal after selection
+                const modal = document.getElementById(`${type}TokenModal`);
+                if (modal) {
+                    modal.style.display = 'none';
+                }
             }
         } catch (error) {
             this.debug('Error in handleTokenItemClick:', error);
@@ -1309,7 +1337,23 @@ export class CreateOrder extends BaseComponent {
 
     updateTokenAmounts(type) {
         try {
-            // Add your token amount update logic here
+            const amount = document.getElementById(`${type}Amount`)?.value || '0';
+            const token = this[`${type}Token`];
+            
+            if (token && amount) {
+                const usdValue = Number(amount) * token.usdPrice;
+                // Find or create the USD display element
+                let usdDisplay = document.getElementById(`${type}AmountUSD`);
+                if (!usdDisplay) {
+                    usdDisplay = document.createElement('div');
+                    usdDisplay.id = `${type}AmountUSD`;
+                    usdDisplay.className = 'amount-usd';
+                    const amountInput = document.getElementById(`${type}Amount`);
+                    amountInput.parentNode.insertBefore(usdDisplay, amountInput.nextSibling);
+                }
+                usdDisplay.textContent = `$${usdValue.toFixed(2)}`;
+            }
+            
             this.updateCreateButtonState();
         } catch (error) {
             this.debug('Error updating token amounts:', error);
@@ -1349,6 +1393,52 @@ export class CreateOrder extends BaseComponent {
                         event.target.style.display = 'none';
                     }
                 });
+            }
+        });
+    }
+
+    renderTokenList(type, tokens) {
+        const modalContent = document.querySelector(`#${type}TokenModal .token-list`);
+        if (!modalContent) return;
+
+        modalContent.innerHTML = tokens.map(token => {
+            const usdPrice = window.pricingService.getPrice(token.address);
+            const balance = parseFloat(token.balance) || 0;
+            const balanceUSD = balance > 0 ? (balance * usdPrice).toFixed(2) : '0.00';
+            
+            return `
+                <div class="token-item" data-address="${token.address}">
+                    <div class="token-item-left">
+                        <div class="token-icon">
+                            ${token.logoURI ? 
+                                `<img src="${token.logoURI}" alt="${token.symbol}" class="token-icon-image">` :
+                                `<div class="token-icon-fallback">${token.symbol.charAt(0)}</div>`
+                            }
+                        </div>
+                        <div class="token-info">
+                            <span class="token-symbol">${token.symbol}</span>
+                            <span class="token-name">${token.name || ''}</span>
+                        </div>
+                    </div>
+                    <div class="token-balance">
+                        ${balance.toFixed(2)} ($${balanceUSD})
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Add click handlers to token items
+        modalContent.querySelectorAll('.token-item').forEach(item => {
+            item.addEventListener('click', () => this.handleTokenItemClick(type, item));
+        });
+    }
+
+    // Add this method to initialize amount input listeners
+    initializeAmountInputs() {
+        ['sell', 'buy'].forEach(type => {
+            const amountInput = document.getElementById(`${type}Amount`);
+            if (amountInput) {
+                amountInput.addEventListener('input', () => this.updateTokenAmounts(type));
             }
         });
     }
