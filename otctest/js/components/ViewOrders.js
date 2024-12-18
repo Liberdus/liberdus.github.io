@@ -43,6 +43,26 @@ export class ViewOrders extends BaseComponent {
 
         // Add pricing service
         this.pricingService = new PricingService();
+
+        // Subscribe to pricing updates AND WebSocket order updates
+        this.pricingService.subscribe((event) => {
+            if (event === 'refreshComplete') {
+                this.debug('Prices updated, refreshing orders view');
+                this.refreshOrdersView().catch(error => {
+                    this.debug('Error refreshing orders after price update:', error);
+                });
+            }
+        });
+
+        // Add this subscription to WebSocket updates
+        if (window.webSocket) {
+            window.webSocket.subscribe("ordersUpdated", () => {
+                this.debug('Orders updated, refreshing view');
+                this.refreshOrdersView().catch(error => {
+                    this.debug('Error refreshing orders after WebSocket update:', error);
+                });
+            });
+        }
     }
 
     async init() {
@@ -534,6 +554,7 @@ export class ViewOrders extends BaseComponent {
                 if (result.success) {
                     statusIndicator.className = 'refresh-status success';
                     statusIndicator.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+                    await this.refreshOrdersView();
                 } else {
                     statusIndicator.className = 'refresh-status error';
                     statusIndicator.textContent = result.message;

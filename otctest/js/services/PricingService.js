@@ -157,6 +157,10 @@ export class PricingService {
                     this.prices.set(address, data.price);
                 }
                 
+                if (window.webSocket) {
+                    await window.webSocket.updateAllDeals();
+                }
+                
                 this.lastUpdate = Date.now();
                 this.notifySubscribers('refreshComplete');
                 

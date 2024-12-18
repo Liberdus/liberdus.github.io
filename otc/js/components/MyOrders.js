@@ -82,6 +82,9 @@ export class MyOrders extends ViewOrders {
         this.isLoading = true;
         
         try {
+            // Store current filter state before refresh
+            const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked;
+            
             // Get all orders first
             let ordersToDisplay = Array.from(window.webSocket.orderCache.values());
             
@@ -91,11 +94,10 @@ export class MyOrders extends ViewOrders {
                 order.maker?.toLowerCase() === userAddress
             );
 
-            // Get filter states
+            // Get filter states (but preserve the checkbox state)
             const sellTokenFilter = this.container.querySelector('#sell-token-filter')?.value;
             const buyTokenFilter = this.container.querySelector('#buy-token-filter')?.value;
             const orderSort = this.container.querySelector('#order-sort')?.value;
-            const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked;
 
             // Reset to page 1 when filters change
             if (this._lastFilters?.sellToken !== sellTokenFilter ||
@@ -108,7 +110,7 @@ export class MyOrders extends ViewOrders {
             this._lastFilters = {
                 sellToken: sellTokenFilter,
                 buyToken: buyTokenFilter,
-                showOnlyCancellable: showOnlyCancellable
+                showOnlyCancellable
             };
 
             // Apply filters
@@ -390,6 +392,8 @@ export class MyOrders extends ViewOrders {
                 this.refreshOrdersView();
             });
         });
+
+        this.setupEventListeners();
     }
 
     setupEventListeners() {
