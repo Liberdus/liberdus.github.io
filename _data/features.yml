@@ -31,6 +31,6 @@
 -
   name: Scalability
   desc: >
-    Shardus protocol layer used for consensus and data storage; network throughput grows with number of nodes; 
+    Uses the <a href="https://shardus.com/" target=_blank>Shardus</a> protocol layer for consensus and data storage; network throughput grows with number of nodes; 
     dynamic state sharding used for linear scaling; network can autoscale based on usage; sustain low transaction fees; energy efficient
   icon: scalable
