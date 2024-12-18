@@ -1236,7 +1236,11 @@ export class CreateOrder extends BaseComponent {
             // Handle zero balance case
             const balance = parseFloat(token.balance) || 0;
             const balanceUSD = balance > 0 ? (balance * usdPrice).toFixed(2) : '0.00';
-            const formattedBalance = balance.toFixed(2); // Ensure consistent decimal places
+            const formattedBalance = balance.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 4,
+                useGrouping: true
+            });
             
             // Store token in the component
             this[`${type}Token`] = {
@@ -1247,6 +1251,16 @@ export class CreateOrder extends BaseComponent {
                 logoURI: token.logoURI,
                 usdPrice: usdPrice
             };
+
+            // Generate background color for fallback icon
+            const colors = [
+                '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
+                '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
+            ];
+            const colorIndex = token.address ? 
+                parseInt(token.address.slice(-6), 16) % colors.length :
+                Math.floor(Math.random() * colors.length);
+            const backgroundColor = colors[colorIndex];
             
             // Update the selector display
             const selector = document.getElementById(`${type}TokenSelector`);
@@ -1255,9 +1269,17 @@ export class CreateOrder extends BaseComponent {
                     <div class="token-selector-content">
                         <div class="token-selector-left">
                             <div class="token-icon small">
-                                ${token.logoURI ? 
-                                    `<img src="${token.logoURI}" alt="${token.symbol}" class="token-icon-image">` :
-                                    `<div class="token-icon-fallback">${token.symbol.charAt(0)}</div>`
+                                ${token.logoURI ? `
+                                    <img src="${token.logoURI}" 
+                                        alt="${token.symbol}" 
+                                        class="token-icon-image"
+                                        onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
+                                    <div class="token-icon-fallback" style="display:none;background:${backgroundColor}">
+                                        ${token.symbol.charAt(0).toUpperCase()}
+                                    </div>` : `
+                                    <div class="token-icon-fallback" style="background:${backgroundColor}">
+                                        ${token.symbol.charAt(0).toUpperCase()}
+                                    </div>`
                                 }
                             </div>
                             <div class="token-info">
