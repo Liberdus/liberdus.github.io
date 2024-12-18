@@ -17,10 +17,10 @@
     no ASICs or GPUs required; host the user interface on your own website; no dependency on liberdus.com
   icon: ecology
 -
-  name: Tokonomics
+  name: Tokenomics
   desc: >
-    210 Million max supply; fair launch; many ways to earn rewards; transaction and voting fees are burned; 
-    node operators earn rewards; liquidity providers earn rewards; low transaction fees; native bridge to other networks for DeFi
+    210 million maximum supply; fair launch; no presale or team allocation; tokens distributed only when earned; many ways to earn;  
+    node operators earn rewards; liquidity providers earn rewards; low transaction fees; transaction fees are burned; bridge to other networks for DeFi
   icon: swap
 -
   name: Governance
