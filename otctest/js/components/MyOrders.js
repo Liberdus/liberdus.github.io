@@ -83,7 +83,8 @@ export class MyOrders extends ViewOrders {
         
         try {
             // Store current filter state before refresh
-            const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked;
+            const checkbox = this.container.querySelector('#fillable-orders-toggle');
+            const showOnlyCancellable = checkbox?.checked ?? false; // Get current state
             
             // Get all orders first
             let ordersToDisplay = Array.from(window.webSocket.orderCache.values());
@@ -94,24 +95,10 @@ export class MyOrders extends ViewOrders {
                 order.maker?.toLowerCase() === userAddress
             );
 
-            // Get filter states (but preserve the checkbox state)
+            // Get filter states
             const sellTokenFilter = this.container.querySelector('#sell-token-filter')?.value;
             const buyTokenFilter = this.container.querySelector('#buy-token-filter')?.value;
             const orderSort = this.container.querySelector('#order-sort')?.value;
-
-            // Reset to page 1 when filters change
-            if (this._lastFilters?.sellToken !== sellTokenFilter ||
-                this._lastFilters?.buyToken !== buyTokenFilter ||
-                this._lastFilters?.showOnlyCancellable !== showOnlyCancellable) {
-                this.currentPage = 1;
-            }
-
-            // Store current filter state
-            this._lastFilters = {
-                sellToken: sellTokenFilter,
-                buyToken: buyTokenFilter,
-                showOnlyCancellable
-            };
 
             // Apply filters
             ordersToDisplay = ordersToDisplay.filter(order => {
@@ -179,6 +166,11 @@ export class MyOrders extends ViewOrders {
                             </div>
                         </td>
                     </tr>`;
+            }
+
+            // After table is rebuilt, restore checkbox state
+            if (checkbox) {
+                checkbox.checked = showOnlyCancellable;
             }
 
         } catch (error) {
