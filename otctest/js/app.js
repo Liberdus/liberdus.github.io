@@ -145,8 +145,10 @@ class App {
             <div class="loading-spinner"></div>
             <div class="loading-text">Loading orders...</div>
         `;
-        mainContent.style.position = 'relative';
-        mainContent.appendChild(this.loadingOverlay);
+        document.body.appendChild(this.loadingOverlay);
+
+        // Keep main content hidden initially
+        mainContent.style.display = 'none';
 
         // Initialize theme handling
         this.initializeTheme();
@@ -244,6 +246,10 @@ class App {
         this.isInitializing = true;
         try {
             this.debug('Starting initialization...');
+            
+            // Add this line at the start
+            const mainContent = document.querySelector('.main-content');
+            
             window.walletManager = walletManager;
             await walletManager.init(true);
             
@@ -272,9 +278,17 @@ class App {
             
             await this.initializeComponents(true);
             
-            this.debug('Initialization complete');
+            // Add this line near the end, before removing loading overlay
+            setTimeout(() => {
+                this.loadingOverlay.remove();
+                mainContent.style.display = 'block'; // Show content after initialization
+                mainContent.classList.add('initialized');
+                this.debug('Initialization complete');
+            }, 500); // Small delay to ensure loading animation is visible
         } catch (error) {
             this.debug('Initialization error:', error);
+            // Still show content in case of error
+            mainContent?.classList.add('initialized');
             // Remove overlay in case of error
             this.loadingOverlay.remove();
         } finally {

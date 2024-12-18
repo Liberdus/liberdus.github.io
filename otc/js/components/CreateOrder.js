@@ -934,11 +934,12 @@ export class CreateOrder extends BaseComponent {
             tokenElement.className = 'token-item';
             tokenElement.dataset.address = token.address;
             
-            // Format balance if it exists
+            // Format balance with up to 4 decimal places if they exist
             const balance = token.balance ? Number(token.balance) : 0;
             const formattedBalance = balance.toLocaleString(undefined, { 
                 minimumFractionDigits: 2, 
-                maximumFractionDigits: 6 
+                maximumFractionDigits: 4,
+                useGrouping: true // Keeps the thousand separators
             });
             
             // Get USD price and calculate USD value
@@ -950,15 +951,31 @@ export class CreateOrder extends BaseComponent {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
             });
+
+            // Generate background color for fallback icon
+            const colors = [
+                '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
+                '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
+            ];
+            const colorIndex = token.address ? 
+                parseInt(token.address.slice(-6), 16) % colors.length :
+                Math.floor(Math.random() * colors.length);
+            const backgroundColor = colors[colorIndex];
             
             tokenElement.innerHTML = `
                 <div class="token-item-content">
                     <div class="token-item-left">
                         <div class="token-icon">
-                            ${token.logoURI ? 
-                                `<img src="${token.logoURI}" alt="${token.symbol}" class="token-icon-image">` :
-                                `<div class="token-icon-fallback" style="background: #FFEEAD">
-                                    ${token.symbol.charAt(0)}
+                            ${token.logoURI ? `
+                                <img src="${token.logoURI}" 
+                                    alt="${token.symbol}" 
+                                    class="token-icon-image"
+                                    onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
+                                <div class="token-icon-fallback" style="display:none;background:${backgroundColor}">
+                                    ${token.symbol.charAt(0).toUpperCase()}
+                                </div>` : `
+                                <div class="token-icon-fallback" style="background:${backgroundColor}">
+                                    ${token.symbol.charAt(0).toUpperCase()}
                                 </div>`
                             }
                         </div>

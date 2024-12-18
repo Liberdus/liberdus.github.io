@@ -927,7 +927,7 @@ export class ViewOrders extends BaseComponent {
                         </div>
                     </div>
                 </td>
-                <td>${Number(formattedSellAmount || 0).toFixed(1)}</td>
+                <td>${this.formatAmount(order.buyAmount, buyTokenInfo?.decimals)}</td>
                 <td>
                     <div class="token-info">
                         <div class="token-icon small">
@@ -947,7 +947,7 @@ export class ViewOrders extends BaseComponent {
                         </div>
                     </div>
                 </td>
-                <td>${Number(formattedBuyAmount || 0).toFixed(1)}</td>
+                <td>${this.formatAmount(order.sellAmount, sellTokenInfo?.decimals)}</td>
                 <td class="${rateClass}">${(deal || 0).toFixed(6)}</td>
                 <td>${formattedExpiry}</td>
                 <td class="order-status">${status}</td>
@@ -1156,6 +1156,25 @@ export class ViewOrders extends BaseComponent {
             return `${prefix}${hours}H ${minutes}M`;
         } else {
             return `${prefix}${minutes}M`;
+        }
+    }
+
+    formatAmount(amount, decimals = 18) {
+        try {
+            const parsedAmount = ethers.utils.formatUnits(amount, decimals);
+            const numAmount = parseFloat(parsedAmount);
+            
+            // Show up to 4 decimal places if they exist, minimum 2
+            const formattedAmount = numAmount.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 4,
+                useGrouping: true
+            });
+            
+            return formattedAmount;
+        } catch (error) {
+            this.debug('Error formatting amount:', error);
+            return '0.00';
         }
     }
 }

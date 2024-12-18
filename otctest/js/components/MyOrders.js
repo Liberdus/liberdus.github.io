@@ -546,6 +546,15 @@ export class MyOrders extends ViewOrders {
             // Get order status from WebSocket cache
             const orderStatus = window.webSocket.getOrderStatus(order);
 
+            // Format amounts with up to 4 decimal places
+            const formatAmount = (amount) => {
+                return Number(amount || 0).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 4,
+                    useGrouping: true
+                });
+            };
+
             tr.innerHTML = `
                 <td>${order.id}</td>
                 <td>
@@ -557,7 +566,7 @@ export class MyOrders extends ViewOrders {
                         </div>
                     </div>
                 </td>
-                <td>${Number(formattedSellAmount || 0).toFixed(4)}</td>
+                <td>${formatAmount(formattedSellAmount)}</td>
                 <td>
                     <div class="token-info">
                         ${this.getTokenIcon(buyTokenInfo)}
@@ -567,7 +576,7 @@ export class MyOrders extends ViewOrders {
                         </div>
                     </div>
                 </td>
-                <td>${Number(formattedBuyAmount || 0).toFixed(4)}</td>
+                <td>${formatAmount(formattedBuyAmount)}</td>
                 <td>${(deal || 0).toFixed(6)}</td>
                 <td>${expiryText}</td>
                 <td class="order-status">${orderStatus}</td>
