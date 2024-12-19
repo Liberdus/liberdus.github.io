@@ -1,14 +1,22 @@
 .cleanup-container {
     padding: 2rem;
-}
-
-.cleanup-section, .admin-section {
     max-width: 600px;
     margin: 0 auto;
+}
+
+.cleanup-section {
     background: var(--card-bg);
     border-radius: 12px;
     padding: 2rem;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    text-align: center;
+}
+
+.cleanup-section h2 {
+    color: var(--text-primary);
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
 }
 
 .cleanup-info {
@@ -16,49 +24,41 @@
     color: var(--text-secondary);
 }
 
+.cleanup-info p {
+    margin-bottom: 1.5rem;
+}
+
 .cleanup-stats {
-    margin-top: 1rem;
-    padding: 1rem;
+    margin: 1.5rem 0;
+    padding: 1.5rem;
     background: var(--bg-secondary);
     border-radius: 8px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
 }
 
-.cleanup-category {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-
-.cleanup-total {
-    grid-column: 1 / -1;
-    margin-top: 1rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--border-color);
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.cleanup-total h3 {
+.cleanup-rewards h3 {
     color: var(--text-primary);
     font-size: 1.2rem;
     font-weight: 600;
-    margin-bottom: 0.5rem;
+    margin-bottom: 1rem;
 }
 
-.cleanup-stats span {
-    font-weight: bold;
+.cleanup-rewards div {
+    margin: 0.75rem 0;
+    color: var(--text-secondary);
+}
+
+.cleanup-rewards span {
+    font-weight: 600;
     color: var(--text-primary);
 }
 
 #cleanup-button {
     width: 100%;
+    max-width: 300px;
     margin-top: 1.5rem;
+    padding: 0.75rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 600;
 }
 
 #cleanup-button:disabled {
@@ -66,145 +66,20 @@
     cursor: not-allowed;
 }
 
-/* New admin section styles */
-.admin-section {
-    margin-top: 2rem;
-    padding-bottom: 20px;
-}
-
-.admin-section h3 {
-    color: var(--text-primary);
-    font-size: 1.3rem;
-    font-weight: 600;
-    margin-bottom: 1rem;
-}
-
-.admin-note {
+.connect-prompt {
     color: var(--text-secondary);
     font-style: italic;
-    margin-bottom: 1.5rem;
+    margin: 2rem 0;
 }
 
-.action-button.warning {
-    width: 100%;
-    background-color: var(--error, #dc3545);
-    color: white;
-    padding: 0.75rem 1.5rem;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-weight: 600;
-}
-
-.action-button.warning:hover {
-    background-color: var(--error-hover, #c82333);
-}
-
-/* Admin toggle button styling */
-.admin-controls-toggle {
-    max-width: 600px;
-    margin: 2rem auto 0;
-}
-
-.toggle-button {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 1rem;
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    cursor: pointer;
-    color: var(--text-primary);
-    font-weight: 600;
-}
-
-.toggle-button:hover {
-    background: var(--bg-secondary);
-}
-
-.chevron-icon {
-    width: 24px;
-    height: 24px;
-    fill: currentColor;
-    transition: transform 0.2s ease;
-}
-
-.toggle-button.active .chevron-icon {
-    transform: rotate(180deg);
-}
-
-/* Admin section collapse styling */
-.admin-section {
-    max-width: 600px;
-    margin: 1rem auto 0;
-    transition: max-height 0.3s ease-in-out,
-                opacity 0.2s ease-in-out,
-                padding 0.2s ease-in-out,
-                margin 0.2s ease-in-out;
-    overflow: hidden;
-    padding: 2rem;
-    background: var(--card-bg);
-    border-radius: 12px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    max-height: 500px;
-    opacity: 1;
-}
-
-.admin-section.collapsed {
-    max-height: 0;
-    opacity: 0;
-    padding-top: 0;
-    padding-bottom: 0;
-    margin-top: 0;
-    margin-bottom: 0;
-    border: none;
-    box-shadow: none;
-}
-
-.cleanup-section h2, 
-.admin-section h2 {
-    color: var(--text-primary);
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin-bottom: 1.5rem;
-}
-
-.cleanup-section h3, 
-.admin-section h3 {
-    color: var(--text-primary);
-    font-size: 1.3rem;
-    font-weight: 600;
-    margin-bottom: 1rem;
-}
-
-.admin-button-wrapper {
-    margin-top: 20px;
-    margin-bottom: 20px;
-}
-
-.admin-controls-toggle {
-    margin-top: 20px;
-}
-
-.admin-section {
-    padding-bottom: 20px;
-}
-
-.fee-config-form {
-    margin-bottom: 20px;
-    padding: 15px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-}
-
+/* Success/Error Messages */
 .success-message,
 .error-message {
-    margin-top: 15px;
-    padding: 10px;
-    border-radius: 4px;
+    margin-top: 1rem;
+    padding: 0.75rem;
+    border-radius: 6px;
     text-align: center;
+    font-weight: 500;
 }
 
 .success-message {
@@ -217,20 +92,4 @@
     background-color: rgba(220, 53, 69, 0.1);
     border: 1px solid #dc3545;
     color: #dc3545;
-}
-
-.update-success {
-    animation: successPulse 1s ease-in-out;
-}
-
-@keyframes successPulse {
-    0% {
-        box-shadow: 0 0 0 0 rgba(75, 181, 67, 0.4);
-    }
-    70% {
-        box-shadow: 0 0 0 10px rgba(75, 181, 67, 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(75, 181, 67, 0);
-    }
 }

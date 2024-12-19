@@ -80,108 +80,33 @@ export class Cleanup extends BaseComponent {
                 <div class="cleanup-section">
                     <h2>Cleanup Expired Orders</h2>
                     <div class="cleanup-info">
-                        <p>Earn fees by cleaning up expired orders</p>
+                        <p>Help maintain the orderbook by cleaning up expired orders</p>
                         <div class="cleanup-stats">
-                            <div class="cleanup-category">
-                                <h3>Active Orders</h3>
-                                <div>Count: <span id="active-orders-count">Loading...</span></div>
-                                <div>Fees: <span id="active-orders-fees">Loading...</span></div>
-                            </div>
-                            <div class="cleanup-category">
-                                <h3>Cancelled Orders</h3>
-                                <div>Count: <span id="cancelled-orders-count">Loading...</span></div>
-                                <div>Fees: <span id="cancelled-orders-fees">Loading...</span></div>
-                            </div>
-                            <div class="cleanup-category">
-                                <h3>Filled Orders</h3>
-                                <div>Count: <span id="filled-orders-count">Loading...</span></div>
-                                <div>Fees: <span id="filled-orders-fees">Loading...</span></div>
-                            </div>
-                            <div class="cleanup-total">
-                                <h3>Total</h3>
-                                <div>Orders: <span id="cleanup-ready">Loading...</span></div>
-                                <div>Total Reward: <span id="cleanup-reward">Loading...</span></div>
+                            <div class="cleanup-rewards">
+                                <h3>Cleanup Information</h3>
+                                <div>Next cleanup reward: <span id="current-reward">Loading...</span></div>
+                                <div>Orders ready: <span id="cleanup-ready">Loading...</span></div>
                             </div>
                         </div>
                     </div>
                     <button id="cleanup-button" class="action-button" disabled>
                         Clean Orders
                     </button>
-                </div>
-                <div class="admin-controls-toggle">
-                    <button id="toggle-fee-config" class="toggle-button">
-                        <span>Fee Configuration</span>
-                        <svg class="chevron-icon" viewBox="0 0 24 24">
-                            <path d="M7 10l5 5 5-5z"/>
-                        </svg>
-                    </button>
-                </div>
-                <div id="fee-config-section" class="admin-section collapsed">
-                    <p class="admin-note">Note: These actions can only be performed by the contract owner</p>
-                    <div class="fee-config-form">
-                        <h3>Update Fee Configuration</h3>
-                        <div class="form-group">
-                            <label for="fee-token">Fee Token Address:</label>
-                            <input type="text" id="fee-token" placeholder="0x..." />
-                        </div>
-                        <div class="form-group">
-                            <label for="fee-amount">Fee Amount (in wei):</label>
-                            <input type="text" id="fee-amount" placeholder="1000000000000000000" />
-                        </div>
-                        <button id="update-fee-config" class="action-button">
-                            Update Fee Config
-                        </button>
-                    </div>
-                </div>
-
-                <div class="admin-controls-toggle">
-                    <button id="toggle-contract-controls" class="toggle-button">
-                        <span>Contract Controls</span>
-                        <svg class="chevron-icon" viewBox="0 0 24 24">
-                            <path d="M7 10l5 5 5-5z"/>
-                        </svg>
-                    </button>
-                </div>
-                <div id="contract-controls-section" class="admin-section collapsed">
-                    <p class="admin-note">Note: These actions can only be performed by the contract owner</p>
-                    <div class="admin-button-wrapper">
-                        <button id="disable-contract-button" class="action-button warning">
-                            Disable Contract
-                        </button>
-                    </div>
                 </div>`;
             
             this.container.appendChild(wrapper);
 
+            // Only set up the cleanup button event listener
             this.cleanupButton = document.getElementById('cleanup-button');
-            this.cleanupButton.addEventListener('click', () => this.performCleanup());
-
-            this.disableContractButton = document.getElementById('disable-contract-button');
-            this.disableContractButton.addEventListener('click', () => this.disableContract());
-
-            this.toggleFeeConfigButton = document.getElementById('toggle-fee-config');
-            this.feeConfigSection = document.getElementById('fee-config-section');
-            this.toggleFeeConfigButton.addEventListener('click', () => {
-                this.feeConfigSection.classList.toggle('collapsed');
-                this.toggleFeeConfigButton.classList.toggle('active');
-            });
-
-            this.toggleContractControlsButton = document.getElementById('toggle-contract-controls');
-            this.contractControlsSection = document.getElementById('contract-controls-section');
-            this.toggleContractControlsButton.addEventListener('click', () => {
-                this.contractControlsSection.classList.toggle('collapsed');
-                this.toggleContractControlsButton.classList.toggle('active');
-            });
-
-            this.updateFeeConfigButton = document.getElementById('update-fee-config');
-            this.updateFeeConfigButton.addEventListener('click', () => this.updateFeeConfig());
+            if (this.cleanupButton) {
+                this.cleanupButton.addEventListener('click', () => this.performCleanup());
+            }
 
             this.debug('Starting cleanup opportunities check');
             await this.checkCleanupOpportunities();
             
             this.intervalId = setInterval(() => this.checkCleanupOpportunities(), 5 * 60 * 1000);
-            this.debug('Initialization complete');
-
+            
             this.isInitialized = true;
             this.debug('Initialization complete');
 
@@ -228,101 +153,81 @@ export class Cleanup extends BaseComponent {
                 return this.checkCleanupOpportunities();
             }
 
+            // Get all orders from WebSocket cache
             const orders = this.webSocket.getOrders();
-            if (!Array.isArray(orders)) {
-                throw new Error('Invalid orders data received from WebSocket');
-            }
-
-            const eligibleOrders = {
-                active: [],
-                cancelled: [],
-                filled: []
-            };
-            let activeFees = 0;
-            let cancelledFees = 0;
-            let filledFees = 0;
-
             const currentTime = Math.floor(Date.now() / 1000);
-
-            for (const order of orders) {
-                if (currentTime > order.timings.graceEndsAt) {
-                    if (order.status === 'Active') {
-                        eligibleOrders.active.push(order);
-                        activeFees += Number(order.orderCreationFee || 0);
-                    } else if (order.status === 'Canceled') {
-                        eligibleOrders.cancelled.push(order);
-                        cancelledFees += Number(order.orderCreationFee || 0);
-                    } else if (order.status === 'Filled') {
-                        eligibleOrders.filled.push(order);
-                        filledFees += Number(order.orderCreationFee || 0);
-                    }
-                }
-            }
-
-            const totalEligible = eligibleOrders.active.length + 
-                eligibleOrders.cancelled.length + 
-                eligibleOrders.filled.length;
-            const totalFees = activeFees + cancelledFees + filledFees;
             
+            // Filter eligible orders
+            const eligibleOrders = orders.filter(order => 
+                currentTime > order.timings.graceEndsAt
+            );
+
+            // Get the first order that will be cleaned (lowest ID)
+            const nextOrderToClean = eligibleOrders.length > 0 
+                ? eligibleOrders.reduce((lowest, order) => 
+                    (!lowest || order.id < lowest.id) ? order : lowest
+                , null)
+                : null;
+
+            this.debug('Next order to clean:', nextOrderToClean);
+
             // Update UI elements
             const elements = {
-                activeCount: document.getElementById('active-orders-count'),
-                activeFees: document.getElementById('active-orders-fees'),
-                cancelledCount: document.getElementById('cancelled-orders-count'),
-                cancelledFees: document.getElementById('cancelled-orders-fees'),
-                filledCount: document.getElementById('filled-orders-count'),
-                filledFees: document.getElementById('filled-orders-fees'),
-                totalReward: document.getElementById('cleanup-reward'),
-                totalReady: document.getElementById('cleanup-ready'),
-                cleanupButton: document.getElementById('cleanup-button')
+                cleanupButton: document.getElementById('cleanup-button'),
+                cleanupReady: document.getElementById('cleanup-ready'),
+                currentReward: document.getElementById('current-reward')
             };
             
-            if (elements.activeCount) {
-                elements.activeCount.textContent = eligibleOrders.active.length.toString();
-            }
-            if (elements.activeFees) {
-                elements.activeFees.textContent = `${this.formatEth(activeFees)} USDC`;
-            }
-            if (elements.cancelledCount) {
-                elements.cancelledCount.textContent = eligibleOrders.cancelled.length.toString();
-            }
-            if (elements.cancelledFees) {
-                elements.cancelledFees.textContent = `${this.formatEth(cancelledFees)} USDC`;
-            }
-            if (elements.filledCount) {
-                elements.filledCount.textContent = eligibleOrders.filled.length.toString();
-            }
-            if (elements.filledFees) {
-                elements.filledFees.textContent = `${this.formatEth(filledFees)} USDC`;
-            }
-            if (elements.totalReward) {
-                elements.totalReward.textContent = `${this.formatEth(totalFees)} USDC`;
-            }
-            if (elements.totalReady) {
-                elements.totalReady.textContent = totalEligible.toString();
-            }
-            if (elements.cleanupButton) {
-                elements.cleanupButton.disabled = totalEligible === 0;
-                elements.cleanupButton.textContent = 'Clean Order';
+            if (elements.cleanupReady) {
+                elements.cleanupReady.textContent = eligibleOrders.length.toString();
             }
 
-            this.debug('Cleanup stats:', {
-                active: {
-                    count: eligibleOrders.active.length,
-                    fees: this.formatEth(activeFees)
-                },
-                cancelled: {
-                    count: eligibleOrders.cancelled.length,
-                    fees: this.formatEth(cancelledFees)
-                },
-                filled: {
-                    count: eligibleOrders.filled.length,
-                    fees: this.formatEth(filledFees)
-                },
-                total: {
-                    count: totalEligible,
-                    fees: this.formatEth(totalFees)
+            // Display reward for next cleanup
+            if (elements.currentReward && nextOrderToClean) {
+                try {
+                    // Get fee information directly from contract
+                    const [feeToken, feeAmount] = await Promise.all([
+                        this.webSocket.contract.feeToken(),
+                        this.webSocket.contract.orderCreationFeeAmount()
+                    ]);
+
+                    this.debug('Fee info from contract:', { feeToken, feeAmount: feeAmount.toString() });
+
+                    const tokenInfo = await this.webSocket.getTokenInfo(feeToken);
+                    
+                    // Format with proper decimals and round to 6 decimal places
+                    const formattedAmount = parseFloat(
+                        ethers.utils.formatUnits(feeAmount, tokenInfo.decimals)
+                    ).toFixed(6);
+
+                    elements.currentReward.textContent = `${formattedAmount} ${tokenInfo.symbol}`;
+
+                    this.debug('Reward formatting:', {
+                        feeToken,
+                        feeAmount: feeAmount.toString(),
+                        decimals: tokenInfo.decimals,
+                        formatted: formattedAmount,
+                        symbol: tokenInfo.symbol
+                    });
+                } catch (error) {
+                    this.debug('Error formatting reward:', error);
+                    elements.currentReward.textContent = 'Error getting reward amount';
                 }
+            } else if (elements.currentReward) {
+                elements.currentReward.textContent = 'No orders to clean';
+            }
+
+            if (elements.cleanupButton) {
+                elements.cleanupButton.disabled = eligibleOrders.length === 0;
+                elements.cleanupButton.textContent = 'Clean Orders';
+            }
+
+            this.debug('Cleanup opportunities:', {
+                totalEligible: eligibleOrders.length,
+                nextOrderToClean: nextOrderToClean ? {
+                    id: nextOrderToClean.id,
+                    fullOrder: nextOrderToClean
+                } : null
             });
 
         } catch (error) {
