@@ -13,22 +13,22 @@ const pages = {
 function navigate(page) {
   const content = document.getElementById('content');
   content.innerHTML = pages[page]();
-  
+
   document.querySelectorAll('.nav-item').forEach(item => {
     item.classList.toggle('active', item.dataset.page === page);
   });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  navigate('wallet');
-  
+  navigate('chats');
+
   document.querySelectorAll('.nav-item').forEach(item => {
     item.addEventListener('click', (e) => {
       e.preventDefault();
       navigate(item.dataset.page);
     });
   });
-  
+
   document.addEventListener('click', (e) => {
     const chatItem = e.target.closest('.chat-item');
     if (chatItem) {
