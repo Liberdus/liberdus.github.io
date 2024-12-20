@@ -150,6 +150,13 @@ export class WalletUI extends BaseComponent {
                     window.app.components['create-order'].cleanup();
                 }
                 
+                // Add this line to update the create order button
+                const createOrderBtn = document.getElementById('createOrderBtn');
+                if (createOrderBtn) {
+                    createOrderBtn.disabled = true;
+                    createOrderBtn.textContent = 'Connect Wallet to Create Order';
+                }
+                
                 await walletManager.disconnect();
                 this.showConnectButton();
                 
@@ -234,6 +241,8 @@ export class WalletUI extends BaseComponent {
             if (!account) {
                 this.debug('No account provided, showing connect button');
                 this.showConnectButton();
+                // Remove wallet-connected class
+                document.querySelector('.swap-section')?.classList.remove('wallet-connected');
                 return;
             }
 
@@ -243,6 +252,9 @@ export class WalletUI extends BaseComponent {
             this.connectButton.classList.add('hidden');
             this.walletInfo.classList.remove('hidden');
             this.accountAddress.textContent = shortAddress;
+            
+            // Add wallet-connected class
+            document.querySelector('.swap-section')?.classList.add('wallet-connected');
             
             if (walletManager.chainId) {
                 this.updateNetworkBadge(walletManager.chainId);
@@ -259,6 +271,8 @@ export class WalletUI extends BaseComponent {
             this.debug('Showing connect button');
             this.connectButton.classList.remove('hidden');
             this.walletInfo.classList.add('hidden');
+            // Remove wallet-connected class
+            document.querySelector('.swap-section')?.classList.remove('wallet-connected');
             this.debug('Connect button shown');
         } catch (error) {
             console.error('[WalletUI] Error in showConnectButton:', error);
