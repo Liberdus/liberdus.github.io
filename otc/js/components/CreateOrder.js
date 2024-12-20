@@ -642,6 +642,14 @@ export class CreateOrder extends BaseComponent {
         document.querySelectorAll('.token-address-tooltip').forEach(tooltip => {
             tooltip.remove();
         });
+        
+        // Remove USD amount displays
+        ['sell', 'buy'].forEach(type => {
+            const usdDisplay = document.getElementById(`${type}AmountUSD`);
+            if (usdDisplay) {
+                usdDisplay.remove();
+            }
+        });
     }
 
     async loadTokens() {
@@ -1231,6 +1239,16 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug(`Token selected for ${type}:`, token);
             
+            // Clear USD display if no token is selected
+            if (!token) {
+                this[`${type}Token`] = null;
+                const usdDisplay = document.getElementById(`${type}AmountUSD`);
+                if (usdDisplay) {
+                    usdDisplay.remove();
+                }
+                return;
+            }
+            
             // Get USD price from pricing service
             const usdPrice = window.pricingService.getPrice(token.address);
             // Handle zero balance case
@@ -1305,7 +1323,11 @@ export class CreateOrder extends BaseComponent {
             // Add input event listener for amount changes
             const amountInput = document.getElementById(`${type}Amount`);
             if (amountInput) {
-                amountInput.addEventListener('input', () => this.updateTokenAmounts(type));
+                // Remove existing listeners
+                const newInput = amountInput.cloneNode(true);
+                amountInput.parentNode.replaceChild(newInput, amountInput);
+                // Add new listener
+                newInput.addEventListener('input', () => this.updateTokenAmounts(type));
             }
         } catch (error) {
             this.debug('Error in handleTokenSelect:', error);
@@ -1389,10 +1411,20 @@ export class CreateOrder extends BaseComponent {
             const amount = document.getElementById(`${type}Amount`)?.value || '0';
             const token = this[`${type}Token`];
             
+            // Find USD display element
+            let usdDisplay = document.getElementById(`${type}AmountUSD`);
+            
+            // If no token selected or amount is 0/empty, remove the USD display
+            if (!token || !amount || amount === '0') {
+                if (usdDisplay) {
+                    usdDisplay.remove();
+                }
+                return;
+            }
+            
             if (token && amount) {
                 const usdValue = Number(amount) * token.usdPrice;
-                // Find or create the USD display element
-                let usdDisplay = document.getElementById(`${type}AmountUSD`);
+                // Create USD display element if it doesn't exist
                 if (!usdDisplay) {
                     usdDisplay = document.createElement('div');
                     usdDisplay.id = `${type}AmountUSD`;
