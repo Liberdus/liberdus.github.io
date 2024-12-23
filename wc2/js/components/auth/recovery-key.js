@@ -13,7 +13,7 @@ function renderRecoveryKey() {
         <h1>Account Created</h1>
       </header>
         
-        <img src="/public/icon-512x512.png" class="auth-logo" alt="Liberdus logo">
+        <img src="./public/icon-512x512.png" class="auth-logo" alt="Liberdus logo">
         
         <p class="auth-description">
           Use your recovery privateKey to access your account on new devices. 

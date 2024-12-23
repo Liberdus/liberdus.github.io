@@ -3,7 +3,7 @@ function renderGetStarted() {
 
   root.innerHTML = `
     <div class="auth-container">
-      <img src="/public/icon-512x512.png" class="auth-logo" alt="Liberdus logo">
+      <img src="./public/icon-512x512.png" class="auth-logo" alt="Liberdus logo">
       <h1 class="auth-title">Get Started</h1>
       <div class="auth-buttons">
         <button class="auth-button primary" onclick="handleSignIn()">Sign In</button>

@@ -12,7 +12,7 @@ function renderImportAccount() {
         <h1>Enter Seed Phrase</h1>
       </header>
         
-        <img src="/public/icon-512x512.png" class="auth-logo" alt="Liberdus logo">
+        <img src="./public/icon-512x512.png" class="auth-logo" alt="Liberdus logo">
         
         <p class="auth-description">
           Enter your 12-word seed phrase to recover your account.

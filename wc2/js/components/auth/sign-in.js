@@ -12,7 +12,7 @@ function renderCreateAccount() {
         <h1>Choose a username</h1>
       </header>
         
-        <img src="/public/icon-512x512.png" class="auth-logo" alt="Liberdus logo">
+        <img src="./public/icon-512x512.png" class="auth-logo" alt="Liberdus logo">
         
         <p class="auth-description">Pick a unique username or display name.</p>
         
