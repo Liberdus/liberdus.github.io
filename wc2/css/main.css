@@ -29,7 +29,7 @@
 body {
   background-color: white;
   color: hsl(var(--foreground));
-  min-height: 100vh;
+  min-height: 100dvp;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -37,14 +37,29 @@ body {
 
 .app-container {
   position: relative;
-  width: min(100vw, 400px);
-  height: min(100vh, 800px);
+  /* width: min(100vw, 400px);
+  height: min(100vh, 800px); */
   overflow: hidden;
   border: 1px solid hsl(var(--border));
   border-radius: 0.75rem;
   background: white;
   display: flex;
   flex-direction: column;
+}
+
+@media (max-width: 768px) {
+  .app-container {
+      width: 100%;
+      height: 100dvp;
+      border-radius: 0;
+  }
+}
+
+@media (min-width: 769px) {
+  .app-container {
+      width: 400px;
+      height: 800px;
+  }
 }
 
 .content-container {

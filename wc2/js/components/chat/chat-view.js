@@ -133,6 +133,8 @@ function renderChatView(chatId) {
           </div>
         </div>
       </div>
+      <br/>
+      <br/>
   
       <div class="chat-input">
         <div class="message-box">
