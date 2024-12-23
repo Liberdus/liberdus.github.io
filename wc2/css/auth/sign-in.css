@@ -1,0 +1,40 @@
+.create-account-page {
+    text-align: center;
+    padding: 2rem 1rem;
+  }
+  
+  .create-account-input {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    margin: 1rem 0;
+  }
+  
+  .username-status {
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+  }
+  
+  .username-status.available {
+    color: #10b981;
+  }
+  
+  .username-status.error {
+    color: #ef4444;
+  }
+
+  .input-status {
+    display: block;
+    text-align: left;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+  }
+  
+  .input-status.error {
+    color: #ef4444;
+  }
+  
+  .input-status.success {
+    color: #10b981;
+  }

@@ -1,0 +1,135 @@
+.chat-view-header {
+  display: flex;
+  position: sticky;
+  top: 0;
+  background: white;
+  z-index: 100;
+  align-items: center;
+  /* gap: 1rem; */
+  padding-bottom: 1rem;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.back-button {
+  padding: 0.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: hsl(var(--foreground));
+}
+
+.chat-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  /* gap: 0.75rem; */
+}
+
+.chat-title .avatar {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.chat-title h1 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-left: 0.75rem;
+}
+
+.chat-messages {
+  flex: 1;
+  padding: 1rem 0;
+  overflow-y: auto;
+}
+
+.date-separator {
+  text-align: center;
+  color: hsl(var(--gray-500));
+  font-size: 0.875rem;
+  margin: 1rem 0;
+}
+
+.message-group {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.message-content {
+  max-width: 80%;
+}
+
+.message {
+  padding: 0.75rem 1rem;
+  border-radius: 1rem;
+  font-size: 0.9375rem;
+  margin-bottom: 0.25rem;
+}
+
+.message-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: hsl(var(--gray-500));
+  padding: 0 0.5rem;
+}
+
+.received .message {
+  background: hsl(var(--secondary));
+  border-bottom-left-radius: 0.25rem;
+}
+
+.sent {
+  flex-direction: row-reverse;
+}
+
+.sent .message {
+  background: hsl(var(--primary));
+  color: white;
+  border-bottom-right-radius: 0.25rem;
+}
+
+.sent .message-info {
+  flex-direction: row-reverse;
+}
+
+.chat-input {
+  display: flex;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: white;
+  padding: 1rem;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.message-box {
+  flex: 1;
+  background: hsl(var(--secondary));
+  border-radius: 1.5rem;
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  align-items: center;
+}
+
+.message-input {
+  flex: 1;
+  border: none;
+  background: none;
+  font-size: 0.9375rem;
+  padding: 0;
+}
+
+.message-input:focus {
+  outline: none;
+}
+
+.send-button {
+  background: none;
+  border: none;
+  padding: 0.5rem;
+  color: hsl(var(--primary));
+  cursor: pointer;
+}

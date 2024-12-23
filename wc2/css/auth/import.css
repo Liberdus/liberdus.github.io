@@ -1,0 +1,34 @@
+.import-account-page {
+    text-align: center;
+    padding: 2rem 1rem;
+  }
+  
+  .seed-input-container {
+    position: relative;
+    margin: 1.5rem 0;
+  }
+  
+  .seed-input {
+    width: 100%;
+    min-height: 120px;
+    padding: 1rem;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    resize: none;
+    font-family: inherit;
+  }
+  
+  .qr-scanner-button {
+    position: absolute;
+    bottom: 0.75rem;
+    right: 0.75rem;
+    background: none;
+    border: none;
+    padding: 0.5rem;
+    cursor: pointer;
+    color: hsl(var(--gray-500));
+  }
+  
+  .qr-scanner-button:hover {
+    color: hsl(var(--gray-700));
+  }

@@ -1,0 +1,33 @@
+.contact-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.contact-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.contact-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.contact-name {
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.contact-status {
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.contact-actions {
+  padding: 0.5rem;
+  color: #6b7280;
+}
