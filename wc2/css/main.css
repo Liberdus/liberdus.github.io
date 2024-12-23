@@ -29,7 +29,7 @@
 body {
   background-color: white;
   color: hsl(var(--foreground));
-  min-height: 100dvp;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -50,7 +50,7 @@ body {
 @media (max-width: 768px) {
   .app-container {
       width: 100%;
-      height: 100dvp;
+      height: 100dvh;
       border-radius: 0;
   }
 }
