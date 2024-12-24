@@ -5,7 +5,8 @@ const networkConfig = {
     "137": {
         name: "Polygon",
         displayName: "Polygon Mainnet",
-        contractAddress: "0x8F37e9b4980340b9DE777Baa4B9c5B2fc1BDc837", // Update this after deployment
+        isDefault: true,
+        contractAddress: "0x8F37e9b4980340b9DE777Baa4B9c5B2fc1BDc837",
         contractABI: CONTRACT_ABI,
         explorer: "https://polygonscan.com",
         rpcUrl: "https://polygon-rpc.com",
@@ -41,7 +42,7 @@ export const DEBUG_CONFIG = {
     MY_ORDERS: true,
     TAKER_ORDERS: true,
     CLEANUP_ORDERS: true,
-    WALLET_UI: true,
+    WALLET_UI: false,
     BASE_COMPONENT: true,
     PRICING: true,
     // Add more specific flags as needed
@@ -55,6 +56,35 @@ export const isDebugEnabled = (component) => {
         return debugSettings[component] ?? DEBUG_CONFIG[component];
     }
     return DEBUG_CONFIG[component];
+};
+
+export const getDefaultNetwork = () => {
+    // Find the first network marked as default
+    const defaultNetwork = Object.values(networkConfig).find(net => net.isDefault);
+    if (!defaultNetwork) {
+        throw new Error('No default network configured');
+    }
+    return defaultNetwork;
+};
+
+export const getNetworkById = (chainId) => {
+    // Convert hex chainId to decimal if needed
+    const decimalChainId = chainId.startsWith('0x') 
+        ? parseInt(chainId, 16).toString()
+        : chainId.toString();
+    
+    return networkConfig[decimalChainId];
+};
+
+export const getNetworkConfig = (chainId = null) => {
+    if (chainId) {
+        const network = getNetworkById(chainId);
+        if (!network) {
+            throw new Error(`Network configuration not found for chain ID: ${chainId}`);
+        }
+        return network;
+    }
+    return getDefaultNetwork();
 };
 
 export class WalletManager {
@@ -71,8 +101,8 @@ export class WalletManager {
         this.provider = null;
         this.signer = null;
         this.contract = null;
-        this.contractAddress = networkConfig["137"].contractAddress;
-        this.contractABI = CONTRACT_ABI;
+        this.contractAddress = getDefaultNetwork().contractAddress;
+        this.contractABI = getDefaultNetwork().contractABI;
         this.isInitialized = false;
         this.contractInitialized = false;
         this.debug = (message, ...args) => {
@@ -194,7 +224,7 @@ export class WalletManager {
             this.debug('Decimal Chain ID:', decimalChainId);
             
             if (decimalChainId !== "137") {
-                await this.switchToPolygonMainnet();
+                await this.switchToDefaultNetwork();
             }
 
             this.account = accounts[0];
@@ -222,23 +252,23 @@ export class WalletManager {
         }
     }
 
-    async switchToPolygonMainnet() {
-        const config = networkConfig["137"];
+    async switchToDefaultNetwork() {
+        const targetNetwork = getDefaultNetwork();
         try {
             await window.ethereum.request({
                 method: 'wallet_switchEthereumChain',
-                params: [{ chainId: config.chainId }],
+                params: [{ chainId: targetNetwork.chainId }],
             });
         } catch (error) {
             if (error.code === 4902) {
                 await window.ethereum.request({
                     method: 'wallet_addEthereumChain',
                     params: [{
-                        chainId: config.chainId,
-                        chainName: config.name,
-                        nativeCurrency: config.nativeCurrency,
-                        rpcUrls: [config.rpcUrl, ...config.fallbackRpcUrls],
-                        blockExplorerUrls: [config.explorer]
+                        chainId: targetNetwork.chainId,
+                        chainName: targetNetwork.name,
+                        nativeCurrency: targetNetwork.nativeCurrency,
+                        rpcUrls: [targetNetwork.rpcUrl, ...targetNetwork.fallbackRpcUrls],
+                        blockExplorerUrls: [targetNetwork.explorer]
                     }],
                 });
             } else {
@@ -269,9 +299,9 @@ export class WalletManager {
             this.onChainChange(chainId);
         }
         
-        const decimalChainId = parseInt(chainId, 16).toString();
-        if (decimalChainId !== "137") {
-            this.switchToPolygonMainnet();
+        const network = getNetworkById(chainId);
+        if (!network?.isDefault) {
+            this.switchToDefaultNetwork();
         }
     }
 
@@ -397,4 +427,3 @@ export class WalletManager {
 }
 
 export const walletManager = new WalletManager();
-export const getNetworkConfig = () => networkConfig["137"];

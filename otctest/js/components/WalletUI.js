@@ -1,16 +1,15 @@
-import { ethers } from 'ethers';
 import { BaseComponent } from './BaseComponent.js';
-import { walletManager, isDebugEnabled } from '../config.js';
+import { walletManager, getNetworkConfig, getNetworkById } from '../config.js';
+import { createLogger } from '../services/LogService.js';
 
 export class WalletUI extends BaseComponent {
     constructor() {
         super('wallet-container');
         
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('WALLET_UI')) {
-                console.log('[WalletUI]', message, ...args);
-            }
-        };
+        const logger = createLogger('WALLET_UI');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
         
         try {
             this.debug('Constructor starting...');
@@ -21,7 +20,7 @@ export class WalletUI extends BaseComponent {
             }
             this.debug('Constructor completed');
         } catch (error) {
-            console.error('[WalletUI] Error in constructor:', error);
+            this.error('Error in constructor:', error);
         }
     }
 
@@ -31,18 +30,12 @@ export class WalletUI extends BaseComponent {
             
             // Initialize DOM elements with error checking
             this.connectButton = document.getElementById('walletConnect');
-            this.debug('Connect button found:', this.connectButton);
-            
             this.disconnectButton = document.getElementById('walletDisconnect');
-            this.debug('Disconnect button found:', this.disconnectButton);
-            
             this.walletInfo = document.getElementById('walletInfo');
-            this.debug('Wallet info found:', this.walletInfo);
-            
             this.accountAddress = document.getElementById('accountAddress');
-            this.debug('Account address found:', this.accountAddress);
 
             if (!this.connectButton || !this.disconnectButton || !this.walletInfo || !this.accountAddress) {
+                this.error('Required wallet UI elements not found');
                 throw new Error('Required wallet UI elements not found');
             }
 
@@ -56,7 +49,8 @@ export class WalletUI extends BaseComponent {
             this.debug('Click listener added to connect button');
 
         } catch (error) {
-            console.error('Error in initializeElements:', error);
+            this.error('Error in initializeElements:', error);
+            throw error;
         }
     }
 
@@ -80,7 +74,7 @@ export class WalletUI extends BaseComponent {
                 }
             }
         } catch (error) {
-            console.error('[WalletUI] Error in handleConnectClick:', error);
+            this.error('Error in handleConnectClick:', error);
         } finally {
             // Re-enable connect button
             if (this.connectButton) {
@@ -105,7 +99,7 @@ export class WalletUI extends BaseComponent {
             const result = await walletManager.connect();
             return result;
         } catch (error) {
-            console.error('[WalletUI] Failed to connect wallet:', error);
+            this.error('Failed to connect wallet:', error);
             this.showError("Failed to connect wallet: " + error.message);
             return null;
         }
@@ -116,7 +110,7 @@ export class WalletUI extends BaseComponent {
             this.debug('Starting init...');
             
             if (typeof window.ethereum === 'undefined') {
-                console.error('[WalletUI] MetaMask is not installed!');
+                this.error('MetaMask is not installed!');
                 return false;
             }
 
@@ -134,7 +128,7 @@ export class WalletUI extends BaseComponent {
             
             return true;
         } catch (error) {
-            console.error('[WalletUI] Error in init:', error);
+            this.error('Error in init:', error);
             throw error;
         }
     }
@@ -288,11 +282,10 @@ export class WalletUI extends BaseComponent {
                 return;
             }
 
-            const decimalChainId = parseInt(chainId, 16).toString();
-            this.debug('Decimal chain ID:', decimalChainId);
-
-            if (decimalChainId === "80002") {
-                networkBadge.textContent = "Amoy";
+            const network = getNetworkById(chainId);
+            
+            if (network?.isMainnet) {
+                networkBadge.textContent = network.name;
                 networkBadge.classList.remove('wrong-network');
                 networkBadge.classList.add('connected');
             } else {
