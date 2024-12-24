@@ -33,7 +33,7 @@ export const getAllNetworks = () => Object.values(networkConfig);
 
 export const DEBUG_CONFIG = {
     APP: true,
-    WEBSOCKET: true,
+    WEBSOCKET: false,
     COMPONENTS: true,
     WALLET: true,
     VIEW_ORDERS: true,

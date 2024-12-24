@@ -1,7 +1,8 @@
 import { ethers } from 'ethers';
-import { getNetworkConfig, isDebugEnabled } from '../config.js';
+import { getNetworkConfig } from '../config.js';
 import { NETWORK_TOKENS } from '../utils/tokens.js';
 import { erc20Abi } from '../abi/erc20.js';
+import { createLogger } from './LogService.js';
 
 export class WebSocketService {
     constructor() {
@@ -28,11 +29,11 @@ export class WebSocketService {
         this.orderExpiry = null;
         this.gracePeriod = null;
         
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('WEBSOCKET')) {
-                console.log('[WebSocket]', message, ...args);
-            }
-        };
+
+        const logger = createLogger('WEBSOCKET');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
         
         this.tokenCache = new Map();  // Add token cache
     }
@@ -59,12 +60,11 @@ export class WebSocketService {
             return result;
         } catch (error) {
             if (error?.error?.code === -32005) {
-                // If we hit rate limit, wait longer before retrying
-                this.debug('Rate limit hit, waiting before retry...');
+                this.warn('Rate limit hit, waiting before retry...');
                 await new Promise(resolve => setTimeout(resolve, 2000));
-                return this.queueRequest(callback); // Retry the request
+                return this.queueRequest(callback);
             }
-            this.debug('Request failed:', error);
+            this.error('Request failed:', error);
             throw error;
         } finally {
             this.activeRequests--;
@@ -73,12 +73,12 @@ export class WebSocketService {
 
     async initialize() {
         if (this.isInitialized) {
-            console.log('[WebSocket] Already initialized, skipping...');
+            this.debug('Already initialized, skipping...');
             return;
         }
 
         try {
-            console.log('[WebSocket] Starting initialization...');
+            this.debug('Starting initialization...');
             
             this.initializationPromise = (async () => {
                 // Wait for provider connection
@@ -161,7 +161,7 @@ export class WebSocketService {
 
             return await this.initializationPromise;
         } catch (error) {
-            this.debug('Initialization failed:', {
+            this.error('Initialization failed:', {
                 message: error.message,
                 stack: error.stack
             });
@@ -441,14 +441,13 @@ export class WebSocketService {
                 return true;
             } catch (error) {
                 retryCount++;
-                this.debug(`Order sync attempt ${retryCount} failed:`, error);
+                this.warn(`Order sync attempt ${retryCount} failed:`, error);
                 
                 if (retryCount >= maxRetries) {
-                    this.debug('Max retry attempts reached, sync failed');
+                    this.error('Max retry attempts reached, sync failed');
                     throw error;
                 }
                 
-                // Wait before retrying
                 await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
             }
         }
