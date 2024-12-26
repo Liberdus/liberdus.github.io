@@ -44,7 +44,7 @@ export const DEBUG_CONFIG = {
     CLEANUP_ORDERS: true,
     WALLET_UI: false,
     BASE_COMPONENT: true,
-    PRICING: true,
+    PRICING: false,
     // Add more specific flags as needed
 };
 

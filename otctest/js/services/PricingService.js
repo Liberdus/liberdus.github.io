@@ -1,5 +1,6 @@
-import { isDebugEnabled, getNetworkConfig } from '../config.js';
+import { getNetworkConfig } from '../config.js';
 import { NETWORK_TOKENS } from '../utils/tokens.js';
+import { createLogger } from './LogService.js';
 
 export class PricingService {
     constructor() {
@@ -10,11 +11,10 @@ export class PricingService {
         this.rateLimitDelay = 250; // Ensure we stay under 300 requests/minute
         this.networkConfig = getNetworkConfig();
         
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('PRICING')) {
-                console.log('[PricingService]', message, ...args);
-            }
-        };
+        const logger = createLogger('PRICING');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
 
         this.refreshPromise = null; // Track current refresh promise
     }
@@ -52,7 +52,7 @@ export class PricingService {
                 
                 const response = await fetch(url);
                 if (!response.ok) {
-                    this.debug('DexScreener API error:', {
+                    this.error('DexScreener API error:', {
                         status: response.status,
                         statusText: response.statusText
                     });
@@ -101,7 +101,7 @@ export class PricingService {
                 await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay));
                 
             } catch (error) {
-                this.debug('Error fetching chunk prices:', {
+                this.error('Error fetching chunk prices:', {
                     error,
                     message: error.message,
                     chunk,
@@ -142,7 +142,7 @@ export class PricingService {
                 }
 
                 if (tokenAddresses.size === 0) {
-                    this.debug('No tokens to fetch prices for');
+                    this.warn('No tokens to fetch prices for');
                     return { success: true, message: 'No tokens to update' };
                 }
 
@@ -167,7 +167,7 @@ export class PricingService {
                 this.debug('Prices updated:', Object.fromEntries(this.prices));
                 return { success: true, message: 'Prices updated successfully' };
             } catch (error) {
-                this.debug('Error refreshing prices:', error);
+                this.error('Error refreshing prices:', error);
                 this.notifySubscribers('refreshError', error);
                 return { success: false, message: 'Failed to update prices' };
             } finally {
