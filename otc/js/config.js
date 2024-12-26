@@ -33,17 +33,17 @@ const networkConfig = {
 export const getAllNetworks = () => Object.values(networkConfig);
 
 export const DEBUG_CONFIG = {
-    APP: true,
+    APP: false,
     WEBSOCKET: false,
     COMPONENTS: true,
     WALLET: true,
     VIEW_ORDERS: true,
-    CREATE_ORDER: true,
+    CREATE_ORDER: false,
     MY_ORDERS: true,
     TAKER_ORDERS: true,
     CLEANUP_ORDERS: true,
     WALLET_UI: false,
-    BASE_COMPONENT: true,
+    BASE_COMPONENT: false,
     PRICING: false,
     // Add more specific flags as needed
 };

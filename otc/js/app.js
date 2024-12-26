@@ -9,17 +9,17 @@ import { TakerOrders } from './components/TakerOrders.js';
 import { Cleanup } from './components/Cleanup.js';
 import { ContractParams } from './components/ContractParams.js';
 import { PricingService } from './services/PricingService.js';
-
-console.log('App.js loaded');
+import { createLogger } from './services/LogService.js';
 
 class App {
     constructor() {
         this.isInitializing = false;
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('APP')) {
-                console.log('[App]', message, ...args);
-            }
-        };
+        
+        // Replace debug initialization with LogService
+        const logger = createLogger('APP');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
 
         this.debug('App constructor called');
         
@@ -656,3 +656,4 @@ function showAppParametersPopup() {
     
     document.body.appendChild(popup);
 }
+

@@ -1,8 +1,9 @@
 import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
-import { getNetworkConfig, isDebugEnabled, walletManager } from '../config.js';
+import { getNetworkConfig, walletManager } from '../config.js';
 import { erc20Abi } from '../abi/erc20.js';
 import { getTokenList, NETWORK_TOKENS } from '../utils/tokens.js';
+import { createLogger } from '../services/LogService.js';
 
 export class CreateOrder extends BaseComponent {
     constructor() {
@@ -18,12 +19,11 @@ export class CreateOrder extends BaseComponent {
         this.buyToken = null;
         this.tokenSelectorListeners = {};  // Store listeners to prevent duplicates
         
-        // Initialize debug logger
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('CREATE_ORDER')) {
-                console.log('[CreateOrder]', message, ...args);
-            }
-        };
+        // Initialize logger
+        const logger = createLogger('CREATE_ORDER');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
     }
 
     // Add debounce as a class method
@@ -50,12 +50,14 @@ export class CreateOrder extends BaseComponent {
             });
 
             if (!networkConfig.contractABI) {
+                this.error('Contract ABI is undefined');
                 throw new Error('Contract ABI is undefined');
             }
             
             // Get provider and signer from walletManager
             const signer = walletManager.getSigner();
             if (!signer) {
+                this.error('No signer available - wallet may be disconnected');
                 throw new Error('No signer available - wallet may be disconnected');
             }
             
@@ -69,7 +71,7 @@ export class CreateOrder extends BaseComponent {
             this.debug('Contract initialized successfully');
             return this.contract;
         } catch (error) {
-            console.error('[CreateOrder] Contract initialization error:', error);
+            this.error('Contract initialization error:', error);
             throw error;
         }
     }
@@ -164,7 +166,7 @@ export class CreateOrder extends BaseComponent {
             this.debug('Initialization complete');
 
         } catch (error) {
-            this.debug('Error in initialization:', error);
+            this.error('Error in initialization:', error);
             this.showError('Failed to initialize. Please try again.');
         } finally {
             this.initializing = false;
