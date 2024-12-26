@@ -2,10 +2,11 @@ import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
 import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
-import { isDebugEnabled, getNetworkConfig } from '../config.js';
+import { getNetworkConfig } from '../config.js';
 import { NETWORK_TOKENS } from '../utils/tokens.js';
 import { PricingService } from '../services/PricingService.js';
 import { walletManager } from '../config.js';
+import { createLogger } from '../services/LogService.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
@@ -19,12 +20,11 @@ export class ViewOrders extends BaseComponent {
         this.tokenList = [];
         this.currentAccount = null;
         
-        // Initialize debug logger with VIEW_ORDERS flag
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('VIEW_ORDERS')) {
-                console.log('[ViewOrders]', message, ...args);
-            }
-        };
+        // Initialize logger
+        const logger = createLogger('VIEW_ORDERS');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
 
         // Add debounce mechanism
         this._refreshTimeout = null;
@@ -32,7 +32,7 @@ export class ViewOrders extends BaseComponent {
             clearTimeout(this._refreshTimeout);
             this._refreshTimeout = setTimeout(() => {
                 this.refreshOrdersView().catch(error => {
-                    this.debug('Error refreshing orders:', error);
+                    this.error('Error refreshing orders:', error);
                 });
             }, 100);
         };
@@ -43,22 +43,22 @@ export class ViewOrders extends BaseComponent {
         // Add pricing service
         this.pricingService = new PricingService();
 
-        // Subscribe to pricing updates AND WebSocket order updates
+        // Subscribe to pricing updates
         this.pricingService.subscribe((event) => {
             if (event === 'refreshComplete') {
                 this.debug('Prices updated, refreshing orders view');
                 this.refreshOrdersView().catch(error => {
-                    this.debug('Error refreshing orders after price update:', error);
+                    this.error('Error refreshing orders after price update:', error);
                 });
             }
         });
 
-        // Add this subscription to WebSocket updates
+        // Subscribe to WebSocket updates
         if (window.webSocket) {
             window.webSocket.subscribe("ordersUpdated", () => {
-                this.debug('Orders updated, refreshing view');
+                this.debug('Orders updated via WebSocket, refreshing view');
                 this.refreshOrdersView().catch(error => {
-                    this.debug('Error refreshing orders after WebSocket update:', error);
+                    this.error('Error refreshing orders after WebSocket update:', error);
                 });
             });
         }
@@ -201,7 +201,7 @@ export class ViewOrders extends BaseComponent {
     setupErrorHandling() {
         if (!window.webSocket) {
             if (!this._retryAttempt) {
-                this.debug('WebSocket not available, waiting for initialization...');
+                this.warn('WebSocket not available, waiting for initialization...');
                 this._retryAttempt = true;
             }
             setTimeout(() => this.setupErrorHandling(), 1000);
@@ -232,7 +232,7 @@ export class ViewOrders extends BaseComponent {
             }
 
             this.showError(userMessage);
-            this.debug('Order error:', {
+            this.error('Order error:', {
                 code: error.code,
                 message: error.message,
                 details: error.details
@@ -438,7 +438,6 @@ export class ViewOrders extends BaseComponent {
                 </div>
             </div>
         `;
-        console.log('DEBUG: tokenList:', this.tokenList);
         // Get tokens from WebSocket's tokenCache
         const tokens = Array.from(window.webSocket.tokenCache.values())
             .sort((a, b) => a.symbol.localeCompare(b.symbol)); // Sort alphabetically by symbol
@@ -671,7 +670,7 @@ For Buyers:
             const allowance = await tokenContract.allowance(owner, this.webSocket.contractAddress);
             return allowance.gte(amount);
         } catch (error) {
-            console.error('[ViewOrders] Error checking allowance:', error);
+            this.error('Error checking allowance:', error);
             return false;
         }
     }
@@ -929,7 +928,7 @@ For Buyers:
 
             return tr;
         } catch (error) {
-            this.debug('Error creating order row:', error);
+            this.error('Error creating order row:', error);
             return null;
         }
     }

@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { BaseComponent } from './BaseComponent.js';
-import { isDebugEnabled } from '../config.js';
+import { createLogger } from '../services/LogService.js';
 
 export class Cleanup extends BaseComponent {
     constructor(containerId) {
@@ -10,11 +10,11 @@ export class Cleanup extends BaseComponent {
         this.isInitializing = false;
         this.isInitialized = false;
         
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('CLEANUP_ORDERS')) {
-                console.log('[Cleanup]', message, ...args);
-            }
-        };
+        // Initialize logger
+        const logger = createLogger('CLEANUP');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
     }
 
     async initialize(readOnlyMode = true) {
@@ -148,7 +148,7 @@ export class Cleanup extends BaseComponent {
     async checkCleanupOpportunities() {
         try {
             if (!this.webSocket?.contract) {
-                this.debug('Waiting for WebSocket contract initialization...');
+                this.warn('Waiting for WebSocket contract initialization...');
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 return this.checkCleanupOpportunities();
             }
@@ -231,7 +231,7 @@ export class Cleanup extends BaseComponent {
             });
 
         } catch (error) {
-            this.debug('Error checking cleanup opportunities:', error);
+            this.error('Error checking cleanup opportunities:', error);
             this.showError('Failed to check cleanup opportunities');
             this.updateUIForError();
         }
@@ -250,7 +250,7 @@ export class Cleanup extends BaseComponent {
 
     setupWebSocket() {
         if (!this.webSocket) {
-            this.debug('WebSocket not available for setup');
+            this.warn('WebSocket not available for setup');
             return;
         }
 
@@ -280,10 +280,12 @@ export class Cleanup extends BaseComponent {
         try {
             const contract = this.webSocket?.contract;
             if (!contract) {
+                this.error('Contract not initialized');
                 throw new Error('Contract not initialized');
             }
 
             if (!window.walletManager?.provider) {
+                this.warn('Wallet not connected');
                 throw new Error('Wallet not connected');
             }
 
@@ -319,7 +321,7 @@ export class Cleanup extends BaseComponent {
                 gasEstimate = await contractWithSigner.estimateGas.cleanupExpiredOrders();
                 this.debug('Initial gas estimation:', gasEstimate.toString());
             } catch (estimateError) {
-                this.debug('Primary gas estimation failed:', estimateError);
+                this.warn('Primary gas estimation failed:', estimateError);
                 try {
                     // Fallback: Try estimation with higher gas limit
                     gasEstimate = await contractWithSigner.estimateGas.cleanupExpiredOrders({
@@ -327,7 +329,7 @@ export class Cleanup extends BaseComponent {
                     });
                     this.debug('Fallback gas estimation succeeded:', gasEstimate.toString());
                 } catch (fallbackError) {
-                    this.debug('Fallback gas estimation failed:', fallbackError);
+                    this.warn('Fallback gas estimation failed:', fallbackError);
                     // Use calculated estimate as last resort
                     gasEstimate = baseGasEstimate;
                     this.debug('Using base gas estimate:', gasEstimate.toString());
@@ -419,7 +421,7 @@ export class Cleanup extends BaseComponent {
             throw lastError;
 
         } catch (error) {
-            console.error('[Cleanup] Error details:', {
+            this.error('Cleanup failed:', {
                 message: error.message,
                 code: error.code,
                 error: error.error,
@@ -470,7 +472,7 @@ export class Cleanup extends BaseComponent {
     }
 
     showError(message) {
-        this.debug('Error:', message);
+        this.error('Error:', message);
         
         // Create error message element
         const errorMessage = document.createElement('div');

@@ -1,11 +1,17 @@
 import { ViewOrders } from './ViewOrders.js';
-import { getTokenList } from '../utils/tokens.js';
 import { PricingService } from '../services/PricingService.js';
+import { createLogger } from '../services/LogService.js';
 
 export class MyOrders extends ViewOrders {
     constructor() {
         super('my-orders');
         this.pricingService = new PricingService();
+        
+        // Initialize logger
+        const logger = createLogger('MY_ORDERS');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
         
         // Initialize sort config with id as default sort, descending
         this.sortConfig = {
@@ -29,6 +35,7 @@ export class MyOrders extends ViewOrders {
             
             // Check wallet connection first
             if (!window.walletManager.isWalletConnected()) {
+                this.warn('No wallet connected, showing connect prompt');
                 this.container.innerHTML = `
                     <div class="tab-content-wrapper">
                         <h2>My Orders</h2>
@@ -40,7 +47,7 @@ export class MyOrders extends ViewOrders {
             // Get current account
             let userAddress = window.walletManager.getAccount();
             if (!userAddress) {
-                this.debug('No account connected');
+                this.warn('No account connected');
                 return;
             }
 
@@ -54,7 +61,7 @@ export class MyOrders extends ViewOrders {
 
             // If no cache, then wait for WebSocket initialization
             if (!window.webSocket?.isInitialized) {
-                this.debug('Waiting for WebSocket initialization...');
+                this.warn('WebSocket not initialized, waiting...');
                 await new Promise(resolve => {
                     const checkInterval = setInterval(() => {
                         if (window.webSocket?.isInitialized) {
@@ -70,7 +77,7 @@ export class MyOrders extends ViewOrders {
             await this.refreshOrdersView();
 
         } catch (error) {
-            this.debug('Initialization error:', error);
+            this.error('Initialization error:', error);
             this.showError('Failed to initialize orders view');
         } finally {
             this.isInitializing = false;
@@ -138,7 +145,7 @@ export class MyOrders extends ViewOrders {
             // Update the table
             const tbody = this.container.querySelector('tbody');
             if (!tbody) {
-                this.debug('No tbody found in table');
+                this.warn('No tbody found in table');
                 return;
             }
 
@@ -174,7 +181,7 @@ export class MyOrders extends ViewOrders {
             }
 
         } catch (error) {
-            this.debug('Error refreshing orders:', error);
+            this.error('Error refreshing orders:', error);
             this.showError('Failed to refresh orders view');
         } finally {
             this.isLoading = false;
@@ -659,7 +666,7 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
 
             return tr;
         } catch (error) {
-            this.debug('Error creating order row:', error);
+            this.error('Error creating order row:', error);
             return null;
         }
     }

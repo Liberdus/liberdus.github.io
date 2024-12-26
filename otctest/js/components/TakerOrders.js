@@ -1,17 +1,16 @@
 import { ViewOrders } from './ViewOrders.js';
-import { isDebugEnabled } from '../config.js';
+import { createLogger } from '../services/LogService.js';
 
 export class TakerOrders extends ViewOrders {
     constructor() {
         super('taker-orders');
         this.isProcessingFill = false;
         
-        // Initialize debug logger with TAKER_ORDERS flag
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('TAKER_ORDERS')) {
-                console.log('[TakerOrders]', message, ...args);
-            }
-        };
+        // Initialize logger
+        const logger = createLogger('TAKER_ORDERS');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
     }
 
     async refreshOrdersView() {
@@ -24,6 +23,7 @@ export class TakerOrders extends ViewOrders {
             // Get current user address
             const userAddress = await window.walletManager.getAccount();
             if (!userAddress) {
+                this.warn('No wallet connected');
                 throw new Error('No wallet connected');
             }
 
@@ -33,6 +33,8 @@ export class TakerOrders extends ViewOrders {
                     order?.taker && 
                     order.taker.toLowerCase() === userAddress.toLowerCase()
                 );
+
+            this.debug(`Found ${ordersToDisplay.length} taker orders`);
 
             // Get filter states
             const sellTokenFilter = this.container.querySelector('#sell-token-filter')?.value;
@@ -97,9 +99,10 @@ export class TakerOrders extends ViewOrders {
             // Display orders
             const tbody = this.container.querySelector('tbody');
             if (!tbody) {
-                this.debug('ERROR: tbody not found');
+                this.error('tbody element not found in container');
                 return;
             }
+
             tbody.innerHTML = '';
 
             for (const order of paginatedOrders) {
@@ -113,6 +116,7 @@ export class TakerOrders extends ViewOrders {
             this.updatePaginationControls(ordersToDisplay.length);
 
             if (ordersToDisplay.length === 0) {
+                this.debug('No orders to display');
                 tbody.innerHTML = `
                     <tr class="empty-message">
                         <td colspan="8" class="no-orders-message">
@@ -126,7 +130,7 @@ export class TakerOrders extends ViewOrders {
             }
 
         } catch (error) {
-            this.debug('Error refreshing orders:', error);
+            this.error('Error refreshing orders:', error);
             this.showError('Failed to refresh orders view');
         } finally {
             this.isLoading = false;
@@ -135,47 +139,64 @@ export class TakerOrders extends ViewOrders {
 
     // Override setupWebSocket to filter for taker events
     setupWebSocket() {
-        super.setupWebSocket();
+        try {
+            super.setupWebSocket();
 
-        // Add taker-specific event handling
-        this.eventSubscriptions.add({
-            event: 'orderSyncComplete',
-            callback: async (orders) => {
-                if (this.isProcessingFill) return;
-                
-                const userAddress = await window.walletManager.getAccount();
-                this.orders.clear();
-                
-                Object.values(orders)
-                    .filter(order => 
-                        order.taker.toLowerCase() === userAddress.toLowerCase()
-                    )
-                    .forEach(order => {
+            // Add taker-specific event handling
+            this.eventSubscriptions.add({
+                event: 'orderSyncComplete',
+                callback: async (orders) => {
+                    if (this.isProcessingFill) {
+                        this.debug('Skipping sync while processing fill');
+                        return;
+                    }
+                    
+                    const userAddress = await window.walletManager.getAccount();
+                    this.orders.clear();
+                    
+                    const takerOrders = Object.values(orders)
+                        .filter(order => 
+                            order.taker.toLowerCase() === userAddress.toLowerCase()
+                        );
+                    
+                    this.debug(`Synced ${takerOrders.length} taker orders`);
+                    
+                    takerOrders.forEach(order => {
                         this.orders.set(order.id, order);
                     });
-                
-                await this.refreshOrdersView();
-            }
-        });
+                    
+                    await this.refreshOrdersView();
+                }
+            });
+        } catch (error) {
+            this.error('Error setting up WebSocket:', error);
+        }
     }
 
     // Override setupTable to customize headers and add advanced filters
     async setupTable() {
-        await super.setupTable();
-        
-        // Show advanced filters by default
-        const advancedFilters = this.container.querySelector('.advanced-filters');
-        if (advancedFilters) {
-            advancedFilters.style.display = 'block';
-            const advancedFiltersToggle = this.container.querySelector('.advanced-filters-toggle');
-            if (advancedFiltersToggle) {
-                advancedFiltersToggle.classList.add('expanded');
+        try {
+            await super.setupTable();
+            
+            // Show advanced filters by default
+            const advancedFilters = this.container.querySelector('.advanced-filters');
+            if (advancedFilters) {
+                advancedFilters.style.display = 'block';
+                const advancedFiltersToggle = this.container.querySelector('.advanced-filters-toggle');
+                if (advancedFiltersToggle) {
+                    advancedFiltersToggle.classList.add('expanded');
+                }
+            } else {
+                this.warn('Advanced filters element not found');
             }
-        }
-        
-        // Customize table header for taker view with deal info tooltip
-        const thead = this.container.querySelector('thead tr');
-        if (thead) {
+            
+            // Customize table header
+            const thead = this.container.querySelector('thead tr');
+            if (!thead) {
+                this.error('Table header element not found');
+                return;
+            }
+
             thead.innerHTML = `
                 <th>ID</th>
                 <th>Buy</th>
@@ -199,6 +220,8 @@ Deal = 0.8 means you're paying 20% below market rate">ⓘ</span>
                 <th>Status</th>
                 <th>Action</th>
             `;
+        } catch (error) {
+            this.error('Error setting up table:', error);
         }
     }
 }
