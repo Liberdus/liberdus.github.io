@@ -1,7 +1,14 @@
 import { ethers } from 'ethers';
 import { getNetworkConfig } from '../config.js';
+import { createLogger } from '../services/LogService.js';
 
 const LIB_LOGO = new URL('../../assets/32.png', import.meta.url).href;
+
+// Initialize logger
+const logger = createLogger('TOKENS');
+const debug = logger.debug.bind(logger);
+const error = logger.error.bind(logger);
+const warn = logger.warn.bind(logger);
 
 // Export the network tokens constant so it can be imported elsewhere
 export const NETWORK_TOKENS = {
@@ -73,15 +80,15 @@ const iconCache = new Map();
 export async function getTokenList() {
     try {
         const networkConfig = getNetworkConfig();
-        console.log('Getting tokens for network:', networkConfig.name);
+        debug('Getting tokens for network:', networkConfig.name);
         
         // Get predefined tokens for current network
         const networkTokens = NETWORK_TOKENS[networkConfig.name] || [];
-        console.log('Predefined tokens:', networkTokens);
+        debug('Predefined tokens:', networkTokens);
         
         // Get user's wallet tokens with balances
         const walletTokens = await getUserWalletTokens();
-        console.log('Wallet tokens:', walletTokens);
+        debug('Wallet tokens:', walletTokens);
         
         // Combine and merge duplicates, preserving balance information
         let allTokens = [...networkTokens];
@@ -110,23 +117,23 @@ export async function getTokenList() {
             token.address.toLowerCase() !== POL_NativeToken_Address.toLowerCase()
         );
 
-        console.log('Final token list:', allTokens);
+        debug('Final token list:', allTokens);
         return allTokens;
     } catch (error) {
-        console.error('Error getting token list:', error);
+        error('Error getting token list:', error);
         return NETWORK_TOKENS[getNetworkConfig().name] || [];
     }
 }
 async function getUserWalletTokens() {
     if (!window.ethereum) {
-        debugLog('No ethereum provider found');
+        warn('No ethereum provider found');
         return [];
     }
 
     try {
         const provider = new ethers.providers.Web3Provider(window.ethereum);
         const address = await provider.getSigner().getAddress();
-        debugLog('Getting tokens for address:', address);
+        debug('Getting tokens for address:', address);
 
         // Get predefined tokens for current network
         const networkConfig = getNetworkConfig();
@@ -184,17 +191,17 @@ async function getUserWalletTokens() {
                         data: tokenData
                     });
                     
-                    debugLog(`Added ${token.symbol} with balance ${balance}`);
+                    debug(`Added ${token.symbol} with balance ${balance}`);
                 }
             } catch (error) {
-                debugLog(`Error loading predefined token at ${token.address}:`, error.message);
+                warn(`Error loading predefined token at ${token.address}:`, error.message);
                 continue;
             }
         }
 
         // Skip transfer event scanning if we already have tokens
         if (tokens.length > 0) {
-            debugLog(`Found ${tokens.length} tokens with non-zero balance`);
+            debug(`Found ${tokens.length} tokens with non-zero balance`);
             return tokens;
         }
 
@@ -240,7 +247,7 @@ async function getUserWalletTokens() {
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     return getLogs(filter, retries - 1);
                 }
-                console.warn('Failed to get logs after retries:', error);
+                warn('Failed to get logs after retries:', error);
                 return [];
             }
         };
@@ -248,7 +255,7 @@ async function getUserWalletTokens() {
         const allLogs = await Promise.all(filters.map(filter => getLogs(filter)));
         const tokenAddresses = [...new Set(allLogs.flat().map(log => log.address))];
         
-        console.log(`Found ${tokenAddresses.length} unique token addresses from transfers`);
+        debug(`Found ${tokenAddresses.length} unique token addresses from transfers`);
 
         // For each token address, get its details and current balance
         for (const tokenAddress of tokenAddresses) {
@@ -290,18 +297,18 @@ async function getUserWalletTokens() {
                         balance,
                         logoURI: await getTokenIcon(tokenAddress)
                     });
-                    console.log(`Added ${symbol} with balance ${balance}`);
+                    debug(`Added ${symbol} with balance ${balance}`);
                 }
             } catch (error) {
-                console.warn(`Error loading token at ${tokenAddress}:`, error);
+                warn(`Error loading token at ${tokenAddress}:`, error);
                 continue;
             }
         }
 
-        console.log(`Found ${tokens.length} tokens with non-zero balance`);
+        debug(`Found ${tokens.length} tokens with non-zero balance`);
         return tokens;
     } catch (error) {
-        console.error('Error getting user wallet tokens:', error);
+        error('Error getting user wallet tokens:', error);
         return [];
     }
 }
@@ -314,6 +321,7 @@ async function getTokenIcon(address) {
 
     // Skip icon fetch for test tokens
     if (address.toLowerCase().includes('test')) {
+        debug('Skipping icon fetch for test token:', address);
         iconCache.set(address, null);
         return null;
     }
@@ -330,7 +338,7 @@ async function getTokenIcon(address) {
             }
         }
     } catch (error) {
-        debugLog('Error fetching from 1inch token list:', error.message);
+        warn('Error fetching from 1inch token list:', error.message);
     }
 
     // Return null for now - we can add more sources if needed

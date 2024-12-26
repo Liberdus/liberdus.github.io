@@ -1,5 +1,6 @@
 import { abi as CONTRACT_ABI } from './abi/OTCSwap.js';
 import { ethers } from 'ethers';
+import { createLogger } from './services/LogService.js';
 
 const networkConfig = {
     "137": {
@@ -30,13 +31,11 @@ const networkConfig = {
     },
 };
 
-export const getAllNetworks = () => Object.values(networkConfig);
 
 export const DEBUG_CONFIG = {
     APP: false,
     WEBSOCKET: false,
-    COMPONENTS: true,
-    WALLET: true,
+    WALLET: false,
     VIEW_ORDERS: true,
     CREATE_ORDER: false,
     MY_ORDERS: true,
@@ -45,8 +44,11 @@ export const DEBUG_CONFIG = {
     WALLET_UI: false,
     BASE_COMPONENT: false,
     PRICING: false,
+    TOKENS: false,
     // Add more specific flags as needed
 };
+
+export const getAllNetworks = () => Object.values(networkConfig);
 
 export const isDebugEnabled = (component) => {
     // Check if debug mode is forced via localStorage
@@ -89,6 +91,12 @@ export const getNetworkConfig = (chainId = null) => {
 
 export class WalletManager {
     constructor() {
+        // Initialize logger
+        const logger = createLogger('WALLET');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
+
         this.listeners = new Set();
         this.isConnecting = false;
         this.account = null;
@@ -105,11 +113,6 @@ export class WalletManager {
         this.contractABI = getDefaultNetwork().contractABI;
         this.isInitialized = false;
         this.contractInitialized = false;
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('WALLET')) {
-                console.log('[WalletManager]', message, ...args);
-            }
-        };
     }
 
     async init() {
