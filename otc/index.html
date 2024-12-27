@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="css/components/wallet.css" />
     <link rel="stylesheet" href="css/components/cleanup.css" />
     <link rel="stylesheet" href="css/components/contract-params.css" />
+    <link rel="stylesheet" href="css/components/debug.css" />
     <!-- Script -->
     <script type="importmap">
       {
@@ -38,7 +39,7 @@
         <!-- Header Left -->
         <div class="header-left">
           <div class="logo-container">
-            <img src="assets/1.png" alt="LiberSwap Logo" class="logo-image">
+            <img src="assets/1.png" alt="LiberSwap Logo" class="logo-image" />
             <h1>LiberOTCSwap</h1>
             <span class="version">v1.0.25</span>
           </div>
@@ -46,8 +47,19 @@
         <!-- Header Right -->
         <div class="header-right">
           <!-- Add Theme Toggle Button -->
-          <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme">
-            <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <button
+            id="theme-toggle"
+            class="theme-toggle"
+            aria-label="Toggle theme"
+          >
+            <svg
+              class="sun-icon"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+            >
               <circle cx="12" cy="12" r="5"></circle>
               <line x1="12" y1="1" x2="12" y2="3"></line>
               <line x1="12" y1="21" x2="12" y2="23"></line>
@@ -58,11 +70,18 @@
               <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
               <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
             </svg>
-            <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <svg
+              class="moon-icon"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+            >
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
             </svg>
           </button>
-          
+
           <div id="wallet-container" class="wallet-container">
             <div class="network-selector">
               <button class="network-button">
@@ -124,21 +143,98 @@
       <!-- Debug Panel -->
       <div class="debug-panel" style="display: none">
         <div class="debug-controls">
-          <h3>Debug Settings</h3>
-          <!-- Select All Checkbox -->
-          <label>
-            <input type="checkbox" id="selectAll" /> Select All
-          </label>
-          <label><input type="checkbox" data-debug="APP" /> App</label>
-          <label><input type="checkbox" data-debug="WEBSOCKET" /> WebSocket</label>
-          <label><input type="checkbox" data-debug="WALLET" /> Wallet</label>
-          <label><input type="checkbox" data-debug="VIEW_ORDERS" /> View Orders</label>
-          <label><input type="checkbox" data-debug="CREATE_ORDER" /> Create Order</label>
-          <label><input type="checkbox" data-debug="MY_ORDERS" /> My Orders</label>
-          <label><input type="checkbox" data-debug="TAKER_ORDERS" /> Taker Orders</label>
-          <label><input type="checkbox" data-debug="CLEANUP_ORDERS" /> Cleanup Orders</label>
-          <label><input type="checkbox" data-debug="WALLET_UI" /> Wallet UI</label>
-          <button id="applyDebug">Apply</button>
+          <div class="debug-header">
+            <h3>Debug Settings</h3>
+            <div class="debug-header-actions">
+              <button id="selectAllDebug" class="select-all-button">
+                Select All
+              </button>
+              <button
+                id="closeDebug"
+                class="close-button"
+                aria-label="Close debug panel"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
+                  <path
+                    d="M18 6L6 18M6 6l12 12"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="debug-options">
+            <div class="debug-column">
+              <h4>Core</h4>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="APP" />
+                <span>App</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="WEBSOCKET" />
+                <span>WebSocket</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="WALLET" />
+                <span>Wallet</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="WALLET_UI" />
+                <span>Wallet UI</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="BASE_COMPONENT" />
+                <span>Base Component</span>
+              </label>
+            </div>
+
+            <div class="debug-column">
+              <h4>Orders</h4>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="VIEW_ORDERS" />
+                <span>View Orders</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="CREATE_ORDER" />
+                <span>Create Order</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="MY_ORDERS" />
+                <span>My Orders</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="TAKER_ORDERS" />
+                <span>Taker Orders</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="CLEANUP_ORDERS" />
+                <span>Cleanup Orders</span>
+              </label>
+            </div>
+
+            <div class="debug-column">
+              <h4>Other</h4>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="PRICING" />
+                <span>Pricing</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="TOKENS" />
+                <span>Tokens</span>
+              </label>
+            </div>
+          </div>
+          <div class="debug-footer">
+            <button id="applyDebug" class="apply-button">Apply Changes</button>
+          </div>
         </div>
       </div>
       <!-- Main Content -->
@@ -180,8 +276,18 @@
                 </div>
 
                 <div class="swap-arrow">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                    <path d="M12 5l0 14M5 12l7 7 7-7" stroke-width="2" stroke-linecap="round"/>
+                  <svg
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                  >
+                    <path
+                      d="M12 5l0 14M5 12l7 7 7-7"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                    />
                   </svg>
                 </div>
 
@@ -200,25 +306,55 @@
                 <div class="taker-input-container">
                   <button class="taker-toggle">
                     <div class="taker-toggle-content">
-                      <span class="taker-toggle-text">Specify Taker Address</span>
+                      <span class="taker-toggle-text"
+                        >Specify Taker Address</span
+                      >
                       <span class="info-tooltip">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                        >
                           <circle cx="12" cy="12" r="10" stroke-width="2" />
-                          <path d="M12 16v-4" stroke-width="2" stroke-linecap="round" />
+                          <path
+                            d="M12 16v-4"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                          />
                           <circle cx="12" cy="8" r="1" fill="currentColor" />
                         </svg>
                         <span class="tooltip-text">
-                          Specify a wallet address that can take this order. Leave empty to allow anyone to take it.
+                          Specify a wallet address that can take this order.
+                          Leave empty to allow anyone to take it.
                         </span>
                       </span>
                       <span class="optional-text">(optional)</span>
                     </div>
-                    <svg class="chevron-down" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                      <path d="M6 9l6 6 6-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <svg
+                      class="chevron-down"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                    >
+                      <path
+                        d="M6 9l6 6 6-6"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
                     </svg>
                   </button>
                   <div class="taker-input-content hidden">
-                    <input type="text" id="takerAddress" class="taker-address-input" placeholder="0x..." />
+                    <input
+                      type="text"
+                      id="takerAddress"
+                      class="taker-address-input"
+                      placeholder="0x..."
+                    />
                   </div>
                 </div>
 
@@ -243,9 +379,9 @@
                       </svg>
                       <span class="tooltip-text">
                         <strong>Order Creation Fee:</strong> A small fee in USDC
-                        is required to create an order. This helps prevent spam and
-                        incentivizes users who assist in cleaning up expired orders.
-                        <br /><br />
+                        is required to create an order. This helps prevent spam
+                        and incentivizes users who assist in cleaning up expired
+                        orders. <br /><br />
                       </span>
                     </span>
                   </label>
@@ -269,7 +405,10 @@
             </div>
           </div>
           <div id="contract-params" class="tab-content">
-            <div id="contract-params-container" class="contract-params-container">
+            <div
+              id="contract-params-container"
+              class="contract-params-container"
+            >
               <!-- Content will be populated by ContractParams component -->
             </div>
           </div>

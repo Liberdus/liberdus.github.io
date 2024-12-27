@@ -37,80 +37,88 @@ export class PricingService {
 
     async fetchTokenPrices(tokenAddresses) {
         this.debug('Fetching prices for tokens:', tokenAddresses);
-        // DexScreener allows up to 30 addresses per request
+        const prices = new Map();
+        
+        // First try batch request
         const chunks = [];
         for (let i = 0; i < tokenAddresses.length; i += 30) {
             chunks.push(tokenAddresses.slice(i, i + 30));
         }
 
-        const prices = new Map();
-        
         for (const chunk of chunks) {
             try {
                 const addresses = chunk.join(',');
                 const url = `https://api.dexscreener.com/latest/dex/tokens/${addresses}`;
-                
                 const response = await fetch(url);
-                if (!response.ok) {
-                    this.error('DexScreener API error:', {
-                        status: response.status,
-                        statusText: response.statusText
-                    });
-                    throw new Error('Failed to fetch prices');
-                }
-                
                 const data = await response.json();
-                this.debug('DexScreener API response:', {
-                    url,
-                    data,
-                    pairsCount: data.pairs?.length
-                });
                 
-                // Process each pair to get the most liquid price for each token
                 if (data.pairs) {
-                    for (const pair of data.pairs) {
-                        const baseToken = pair.baseToken.address.toLowerCase();
-                        const quoteToken = pair.quoteToken.address.toLowerCase();
-                        
-                        if (pair.priceUsd) {
-                            // Update price if we don't have it or if this pair has more liquidity
-                            if (!prices.has(baseToken) || 
-                                (pair.liquidity?.usd > prices.get(baseToken).liquidity)) {
-                                prices.set(baseToken, {
-                                    price: parseFloat(pair.priceUsd),
-                                    liquidity: pair.liquidity?.usd || 0
-                                });
-                            }
-                            
-                            // If quote token is also in our list, calculate its price
-                            if (chunk.includes(quoteToken)) {
-                                const quotePrice = parseFloat(pair.priceUsd) / parseFloat(pair.priceNative);
-                                if (!prices.has(quoteToken) || 
-                                    (pair.liquidity?.usd > prices.get(quoteToken).liquidity)) {
-                                    prices.set(quoteToken, {
-                                        price: quotePrice,
-                                        liquidity: pair.liquidity?.usd || 0
-                                    });
-                                }
-                            }
-                        }
-                    }
+                    this.processTokenPairs(data.pairs, prices);
                 }
-
-                // Rate limiting
-                await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay));
                 
+                await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay));
             } catch (error) {
-                this.error('Error fetching chunk prices:', {
-                    error,
-                    message: error.message,
-                    chunk,
-                    url
-                });
+                this.error('Error fetching chunk prices:', error);
+            }
+        }
+
+        // For any tokens that didn't get prices, try individual requests
+        const missingTokens = tokenAddresses.filter(addr => !prices.has(addr.toLowerCase()));
+        if (missingTokens.length > 0) {
+            this.debug('Fetching missing token prices individually:', missingTokens);
+            
+            for (const addr of missingTokens) {
+                try {
+                    const url = `https://api.dexscreener.com/latest/dex/tokens/${addr}`;
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    
+                    if (data.pairs && data.pairs.length > 0) {
+                        this.processTokenPairs(data.pairs, prices);
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay));
+                } catch (error) {
+                    this.error('Error fetching individual token price:', { token: addr, error });
+                }
             }
         }
 
         return prices;
+    }
+
+    processTokenPairs(pairs, prices) {
+        // Sort pairs by liquidity
+        const sortedPairs = pairs.sort((a, b) => 
+            (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0)
+        );
+
+        for (const pair of sortedPairs) {
+            const baseAddr = pair.baseToken.address.toLowerCase();
+            const quoteAddr = pair.quoteToken.address.toLowerCase();
+            const priceUsd = parseFloat(pair.priceUsd);
+            
+            if (!isNaN(priceUsd)) {
+                if (!prices.has(baseAddr)) {
+                    prices.set(baseAddr, {
+                        price: priceUsd,
+                        liquidity: pair.liquidity?.usd || 0
+                    });
+                }
+                
+                // Calculate and set quote token price if we don't have it yet
+                if (!prices.has(quoteAddr)) {
+                    const basePrice = prices.get(baseAddr).price;
+                    const priceNative = parseFloat(pair.priceNative);
+                    if (!isNaN(priceNative)) {
+                        prices.set(quoteAddr, {
+                            price: basePrice / priceNative,
+                            liquidity: pair.liquidity?.usd || 0
+                        });
+                    }
+                }
+            }
+        }
     }
 
     async refreshPrices() {

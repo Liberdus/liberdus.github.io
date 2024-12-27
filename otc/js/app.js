@@ -10,6 +10,7 @@ import { Cleanup } from './components/Cleanup.js';
 import { ContractParams } from './components/ContractParams.js';
 import { PricingService } from './services/PricingService.js';
 import { createLogger } from './services/LogService.js';
+import { DebugPanel } from './components/DebugPanel.js';
 
 class App {
     constructor() {
@@ -109,7 +110,7 @@ class App {
         });
 
         // Initialize debug panel
-        this.initializeDebugPanel();
+        const debugPanel = new DebugPanel();
 
         // Add new method to update tab visibility
         this.updateTabVisibility = (isConnected) => {
