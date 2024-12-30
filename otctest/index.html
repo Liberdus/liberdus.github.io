@@ -1,18 +1,23 @@
+<!--
+  LiberOTCSwap - Decentralized OTC Trading Interface
+  A single-page application for creating and managing peer-to-peer token swaps.
+  Features: wallet connection, token swapping, order management, and dark/light themes.
+-->
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
-  <!-- Head -->
+  <!-- Head section contains meta info, styles, and script imports -->
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OTC Swap</title>
-    <!-- Normalize.css -->
+    <!-- Normalize.css for consistent styling across browsers -->
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css"
     />
-    <!-- Styles -->
+    <!-- Core styles -->
     <link rel="stylesheet" href="css/styles.css" />
-    <!-- Components -->
+    <!-- Component-specific styles -->
     <link rel="stylesheet" href="css/components/forms.css" />
     <link rel="stylesheet" href="css/components/orders.css" />
     <link rel="stylesheet" href="css/components/tabs.css" />
@@ -20,7 +25,7 @@
     <link rel="stylesheet" href="css/components/cleanup.css" />
     <link rel="stylesheet" href="css/components/contract-params.css" />
     <link rel="stylesheet" href="css/components/debug.css" />
-    <!-- Script -->
+    <!-- Import map for ethers.js library -->
     <script type="importmap">
       {
         "imports": {
@@ -28,15 +33,15 @@
         }
       }
     </script>
-    <!-- App -->
+    <!-- Main application entry point -->
     <script type="module" src="js/app.js" defer></script>
   </head>
-  <!-- Body -->
+  <!-- Body contains the main application structure -->
   <body>
     <div class="container">
-      <!-- Header -->
+      <!-- Header contains branding, theme toggle, and wallet connection -->
       <header class="header card">
-        <!-- Header Left -->
+        <!-- Logo and app name -->
         <div class="header-left">
           <div class="logo-container">
             <img src="assets/1.png" alt="LiberSwap Logo" class="logo-image" />
@@ -44,14 +49,15 @@
             <span class="version">v1.0.25</span>
           </div>
         </div>
-        <!-- Header Right -->
+        <!-- Theme toggle and wallet connection controls -->
         <div class="header-right">
-          <!-- Add Theme Toggle Button -->
+          <!-- Light/Dark mode toggle -->
           <button
             id="theme-toggle"
             class="theme-toggle"
             aria-label="Toggle theme"
           >
+            <!-- Sun icon for light mode -->
             <svg
               class="sun-icon"
               width="20"
@@ -70,6 +76,7 @@
               <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
               <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
             </svg>
+            <!-- Moon icon for dark mode -->
             <svg
               class="moon-icon"
               width="20"
@@ -82,7 +89,9 @@
             </svg>
           </button>
 
+          <!-- Wallet connection and network selection -->
           <div id="wallet-container" class="wallet-container">
+            <!-- Network dropdown selector -->
             <div class="network-selector">
               <button class="network-button">
                 <span class="network-badge">Polygon</span>
@@ -102,19 +111,17 @@
                   />
                 </svg>
               </button>
-              <!-- Network Dropdown -->
-              <div class="network-dropdown hidden">
-                <!-- Network options will be populated dynamically -->
-              </div>
+              <!-- Network options populated dynamically -->
+              <div class="network-dropdown hidden"></div>
             </div>
-            <!-- Wallet Connect Button -->
+            <!-- Connect wallet button -->
             <button id="walletConnect" class="wallet-button">
               <span class="wallet-button-text">Connect Wallet</span>
             </button>
-            <!-- Wallet Info -->
+            <!-- Wallet info shown when connected -->
             <div id="walletInfo" class="wallet-info hidden">
               <span id="accountAddress" class="account-address"></span>
-              <!-- Wallet Disconnect Button -->
+              <!-- Disconnect wallet button -->
               <button id="walletDisconnect" class="wallet-disconnect">
                 <svg
                   width="16"
@@ -140,8 +147,9 @@
           </div>
         </div>
       </header>
-      <!-- Debug Panel -->
+      <!-- Debug panel for development (hidden by default) -->
       <div class="debug-panel" style="display: none">
+        <!-- Debug controls and options -->
         <div class="debug-controls">
           <div class="debug-header">
             <h3>Debug Settings</h3>
@@ -237,9 +245,10 @@
           </div>
         </div>
       </div>
-      <!-- Main Content -->
+      <!-- Main application content area -->
       <main class="main-content">
         <div class="content-wrapper card">
+          <!-- Navigation tabs for different sections -->
           <nav class="nav-tabs">
             <button class="tab-button active" data-tab="create-order">
               Create Order
@@ -259,9 +268,12 @@
             </button>
           </nav>
 
+          <!-- Create Order tab content -->
           <div id="create-order" class="tab-content active card">
+            <!-- Token swap form interface -->
             <div class="form-container card">
               <div class="swap-section">
+                <!-- Sell token input section -->
                 <div id="sellContainer" class="swap-input-container">
                   <div class="amount-input-wrapper">
                     <input type="number" id="sellAmount" placeholder="0.0" />
@@ -274,7 +286,7 @@
                     </div>
                   </div>
                 </div>
-
+                <!-- Swap direction arrow -->
                 <div class="swap-arrow">
                   <svg
                     width="24"
@@ -290,7 +302,7 @@
                     />
                   </svg>
                 </div>
-
+                <!-- Buy token input section -->
                 <div id="buyContainer" class="swap-input-container">
                   <div class="amount-input-wrapper">
                     <input type="number" id="buyAmount" placeholder="0.0" />
@@ -302,7 +314,7 @@
                     </div>
                   </div>
                 </div>
-
+                <!-- Optional taker address input -->
                 <div class="taker-input-container">
                   <button class="taker-toggle">
                     <div class="taker-toggle-content">
@@ -357,7 +369,7 @@
                     />
                   </div>
                 </div>
-
+                <!-- Fee display section -->
                 <div class="form-group fee-group">
                   <label>
                     Order Creation Fee:
@@ -389,28 +401,27 @@
                     <span class="fee-amount"></span>
                   </div>
                 </div>
+                <!-- Create order button -->
                 <button class="action-button" id="createOrderBtn" disabled>
                   Connect Wallet to Create Order
                 </button>
+                <!-- Status messages -->
                 <div id="status" class="status"></div>
               </div>
             </div>
           </div>
+          <!-- Other tab contents (populated dynamically) -->
           <div id="view-orders" class="tab-content card"></div>
           <div id="my-orders" class="tab-content card"></div>
           <div id="taker-orders" class="tab-content card"></div>
           <div id="cleanup-orders" class="tab-content card">
-            <div id="cleanup-container" class="cleanup-container">
-              <!-- Cleanup component will populate this -->
-            </div>
+            <div id="cleanup-container" class="cleanup-container"></div>
           </div>
           <div id="contract-params" class="tab-content card">
             <div
               id="contract-params-container"
               class="contract-params-container"
-            >
-              <!-- Content will be populated by ContractParams component -->
-            </div>
+            ></div>
           </div>
         </div>
       </main>
