@@ -284,7 +284,7 @@ export class WalletUI extends BaseComponent {
 
             const network = getNetworkById(chainId);
             
-            if (network?.isMainnet) {
+            if (network?.isDefault) {
                 networkBadge.textContent = network.name;
                 networkBadge.classList.remove('wrong-network');
                 networkBadge.classList.add('connected');
