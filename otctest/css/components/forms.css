@@ -970,13 +970,6 @@
   padding: 8px 12px;
 }
 
-/* Update existing token icon styles */
-.token-icon.small {
-  width: 28px;
-  height: 28px;
-  background: transparent;
-}
-
 /* Input container spacing */
 .swap-input-container {
   margin-bottom: 24px;
@@ -1165,12 +1158,13 @@
 .token-info {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 
 .token-symbol {
   font-size: 14px;
   font-weight: 500;
+  color: var(--text-primary);
 }
 
 .token-balance {
@@ -1255,17 +1249,6 @@
   gap: 8px;
 }
 
-.token-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.token-symbol {
-  font-weight: 500;
-  color: var(--text-primary);
-}
-
 .token-balance-info {
   display: flex;
   flex-direction: column;
@@ -1294,15 +1277,4 @@
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.token-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.token-symbol {
-  font-weight: 500;
-  color: var(--text-primary);
 }

@@ -365,14 +365,6 @@ label {
   width: 100%;
 }
 
-/* Update form container background */
-.form-container {
-  background: var(--bg-secondary);
-  border-radius: 16px;
-  padding: 20px;
-  box-shadow: var(--card-shadow);
-}
-
 /* Update tab content background */
 .tab-content {
   background: var(--bg-secondary);
