@@ -1,32 +1,32 @@
 /* At the top of styles.css */
 :root {
   /* Light theme (default) */
-  --bg-primary: #f7f8fa;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #f8f9fe;
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --bg-tertiary: #f1f3f5;
+
+  /* Text colors */
   --text-primary: #1a1a1a;
   --text-secondary: #666666;
-  --border-color: #e9ecef;
-  --card-bg: #ffffff;
-  --card-shadow: 0px 4px 20px rgba(0, 0, 0, 0.05);
-  --hover-bg: #f0f0f0;
-  --input-bg: #f8f9fa;
-  --input-border: #e8ecf4;
+  --text-tertiary: #888888;
+
+  /* Card specific variables */
+  --card-bg: var(--bg-secondary);
+  --card-padding: 24px;
+  --card-radius: 16px;
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --card-border: 1px solid var(--border-color);
 }
 
-/* Dark theme */
 [data-theme="dark"] {
-  --bg-primary: #1a1a1a;
+  --bg-primary: #1a1b1e;
   --bg-secondary: #2d2d2d;
   --bg-tertiary: #363636;
+
+  /* Dark theme text colors */
   --text-primary: #ffffff;
-  --text-secondary: #a0a0a0;
-  --border-color: #404040;
-  --card-bg: #2d2d2d;
-  --card-shadow: 0px 4px 20px rgba(0, 0, 0, 0.2);
-  --hover-bg: #363636;
-  --input-bg: #363636;
-  --input-border: #404040;
+  --text-secondary: #e0e0e0;
+  --text-tertiary: #a0a0a0;
 }
 
 /* Base styles */
@@ -49,13 +49,9 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 2rem;
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 16px;
-  margin-bottom: 20px;
   width: 100%;
   box-sizing: border-box;
+  margin-bottom: 20px;
 }
 
 .header-left .logo-container {
@@ -119,12 +115,8 @@ body {
 }
 
 .content-wrapper {
-  background: var(--bg-secondary);
-  border-radius: 16px;
-  box-shadow: var(--card-shadow);
-  overflow: hidden;
   width: 100%;
-  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .tab-content-wrapper {
@@ -554,4 +546,30 @@ input {
 /* Make sure the swap arrow stays flex when visible */
 .swap-section.wallet-connected .swap-arrow {
   display: flex;
+}
+
+/* Add new standardized card class */
+.card {
+  background: var(--card-bg);
+  padding: var(--card-padding);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  border: var(--card-border);
+  color: var(--text-primary);
+}
+
+/* Base text styles */
+body {
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+
+/* Secondary text */
+.text-secondary {
+  color: var(--text-secondary);
+}
+
+/* Tertiary text */
+.text-tertiary {
+  color: var(--text-tertiary);
 }
