@@ -24,16 +24,18 @@ class App {
 
         this.debug('App constructor called');
         
-        this.walletUI = new WalletUI();
-        
-        this.handleConnectWallet = async (e) => {
-            e && e.preventDefault();
-            await this.connectWallet();
-        };
-
-        // Initialize components
+        // Initialize CreateOrder first
         this.components = {
-            'wallet-info': this.walletUI,
+            'create-order': new CreateOrder()
+        };
+        
+        // Render CreateOrder immediately
+        this.components['create-order'].initialize();
+        
+        // Then initialize other components that might depend on CreateOrder's DOM elements
+        this.components = {
+            ...this.components,  // Keep CreateOrder
+            'wallet-info': new WalletUI(),
             'view-orders': new ViewOrders(),
             'my-orders': new MyOrders(),
             'taker-orders': new TakerOrders(),
@@ -42,7 +44,12 @@ class App {
         };
 
         // Render wallet UI immediately
-        this.walletUI.render();
+        this.walletUI = new WalletUI();
+        
+        this.handleConnectWallet = async (e) => {
+            e && e.preventDefault();
+            await this.connectWallet();
+        };
 
         // Handle other components
         Object.entries(this.components).forEach(([id, component]) => {

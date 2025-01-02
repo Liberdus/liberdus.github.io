@@ -86,7 +86,11 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug('Starting initialization...');
             
-            // Add these lines to subscribe to WebSocket events
+            // Render the HTML first
+            const container = document.getElementById('create-order');
+            container.innerHTML = this.render();
+            
+            // Rest of the existing initialization code...
             if (window.webSocket) {
                 window.webSocket.subscribe("OrderCreated", (order) => {
                     this.debug('New order created:', order);
@@ -1524,6 +1528,106 @@ export class CreateOrder extends BaseComponent {
                 amountInput.addEventListener('input', () => this.updateTokenAmounts(type));
             }
         });
+    }
+
+    // Add new render method
+    render() {
+        return `
+            <!-- Token swap form interface -->
+            <div class="form-container card">
+                <div class="swap-section">
+                    <!-- Sell token input section -->
+                    <div id="sellContainer" class="swap-input-container">
+                        <div class="amount-input-wrapper">
+                            <input type="number" id="sellAmount" placeholder="0.0" />
+                            <button id="sellAmountMax" class="max-button">MAX</button>
+                        </div>
+                        <div class="amount-usd" id="sellAmountUSD">≈ $0.00</div>
+                        <div id="sellTokenSelector" class="token-selector">
+                            <div class="token-selector-content">
+                                <span>Select Token</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Swap direction arrow -->
+                    <div class="swap-arrow">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M12 5l0 14M5 12l7 7 7-7" stroke-width="2" stroke-linecap="round" />
+                        </svg>
+                    </div>
+
+                    <!-- Buy token input section -->
+                    <div id="buyContainer" class="swap-input-container">
+                        <div class="amount-input-wrapper">
+                            <input type="number" id="buyAmount" placeholder="0.0" />
+                        </div>
+                        <div class="amount-usd" id="buyAmountUSD">≈ $0.00</div>
+                        <div id="buyTokenSelector" class="token-selector">
+                            <div class="token-selector-content">
+                                <span>Select Token</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Optional taker address input -->
+                    <div class="taker-input-container">
+                        <button class="taker-toggle">
+                            <div class="taker-toggle-content">
+                                <span class="taker-toggle-text">Specify Taker Address</span>
+                                <span class="info-tooltip">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                        <circle cx="12" cy="12" r="10" stroke-width="2" />
+                                        <path d="M12 16v-4" stroke-width="2" stroke-linecap="round" />
+                                        <circle cx="12" cy="8" r="1" fill="currentColor" />
+                                    </svg>
+                                    <span class="tooltip-text">
+                                        Specify a wallet address that can take this order.
+                                        Leave empty to allow anyone to take it.
+                                    </span>
+                                </span>
+                                <span class="optional-text">(optional)</span>
+                            </div>
+                            <svg class="chevron-down" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M6 9l6 6 6-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                        </button>
+                        <div class="taker-input-content hidden">
+                            <input type="text" id="takerAddress" class="taker-address-input" placeholder="0x..." />
+                        </div>
+                    </div>
+
+                    <!-- Fee display section -->
+                    <div class="form-group fee-group">
+                        <label>
+                            Order Creation Fee:
+                            <span class="info-tooltip">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <circle cx="12" cy="12" r="10" stroke-width="2" />
+                                    <path d="M12 16v-4" stroke-width="2" stroke-linecap="round" />
+                                    <circle cx="12" cy="8" r="1" fill="currentColor" />
+                                </svg>
+                                <span class="tooltip-text">
+                                    <strong>Order Creation Fee:</strong> A small fee in USDC is required to create an order. 
+                                    This helps prevent spam and incentivizes users who assist in cleaning up expired orders.
+                                </span>
+                            </span>
+                        </label>
+                        <div id="orderCreationFee">
+                            <span class="fee-amount"></span>
+                        </div>
+                    </div>
+
+                    <!-- Create order button -->
+                    <button class="action-button" id="createOrderBtn" disabled>
+                        Connect Wallet to Create Order
+                    </button>
+
+                    <!-- Status messages -->
+                    <div id="status" class="status"></div>
+                </div>
+            </div>
+        `;
     }
 }
 
