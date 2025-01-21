@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Liberdus</title>
+    <!--
+      QRCode lib from
+      https://github.com/davidshimjs/qrcodejs
+      https://github.com/davidshimjs/qrcodejs/blob/master/qrcode.js
+    -->
+    <script src="./qrcode.js"></script>
+    <script src="./network.js"></script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header class="header" id="header">
+        <div class="app-name">Liberdus</div>
+        <div class="header-icons">
+          <button class="icon-button" id="search">🔍</button>
+          <button class="icon-button" id="toggleMenu">☰</button>
+        </div>
+      </header>
+
+      <div class="search-container" id="searchBar">
+        <svg
+          class="search-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <circle cx="11" cy="11" r="8" />
+          <path d="M21 21l-4.35-4.35" />
+        </svg>
+        <input
+          type="text"
+          class="search-input"
+          id="searchInput"
+          placeholder="Search..."
+        />
+      </div>
+
+      <div class="welcome-screen" id="welcomeScreen">
+        <img
+          src="./liberdus_logo_250.png"
+          alt="Liberdus Logo"
+          style="margin-bottom: 20px"
+          class="welcome-logo"
+        />
+        <h1>Liberdus</h1>
+        <div class="welcome-buttons">
+          <button id="signInButton" class="secondary-button">Sign In</button>
+          <button id="createAccountButton" class="secondary-button">
+            Create Account
+          </button>
+          <button id="importAccountButton" class="secondary-button">
+            Import Account
+          </button>
+        </div>
+      </div>
+
+      <div class="app-screen" id="chatsScreen">
+        <ul class="chat-list" id="chatList">
+          <!-- Chat items will be inserted here -->
+        </ul>
+      </div>
+      <button class="floating-button" id="newChatButton">+</button>
+
+      <!-- New Chat Modal -->
+      <div class="modal" id="newChatModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeNewChatModal">←</button>
+          <div class="modal-title">New Chat</div>
+        </div>
+        <div class="form-container">
+          <form id="newChatForm">
+            <div class="form-group">
+              <label for="recipient"
+                >Recipient
+                <span
+                  id="recipientError"
+                  style="color: #dc3545; display: none"
+                ></span
+              ></label>
+              <input type="text" id="recipient" class="form-control" required />
+            </div>
+            <button type="submit" class="primary-button">Continue</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="app-screen" id="contactsScreen">
+        <ul class="chat-list" id="contactsList">
+          <!-- Contact items will be inserted here -->
+        </ul>
+      </div>
+
+      <div class="app-screen" id="walletScreen">
+        <div class="wallet-balance">
+          <div class="balance-label">Total Balance</div>
+          <div class="balance-amount">
+            $<span id="walletTotalBalance">0.00</span>
+            <button class="refresh-button" id="refreshBalance">↻</button>
+          </div>
+        </div>
+        <div class="wallet-actions">
+          <button class="wallet-action-button" id="openSendModal">
+            <span class="action-icon">↑</span>
+            <span class="action-label">Send</span>
+          </button>
+          <button class="wallet-action-button" id="openReceiveModal">
+            <span class="action-icon">↓</span>
+            <span class="action-label">Receive</span>
+          </button>
+          <button class="wallet-action-button" id="openHistoryModal">
+            <span class="action-icon">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 6v6l4 2"/>
+              </svg>
+            </span>
+            <span class="action-label">History</span>
+          </button>
+        </div>
+        <div class="wallet-assets">
+          <div class="section-title">Assets</div>
+          <div id="assetsList"></div>
+        </div>
+      </div>
+
+      <footer class="footer" id="footer">
+        <a class="nav-item" id="switchToChats" data-page="chats">
+          <svg
+            class="icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+            />
+          </svg>
+          <span>Chats</span>
+        </a>
+        <a class="nav-item" id="switchToContacts" data-page="contacts">
+          <svg
+            class="icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 00-3-3.87" />
+            <path d="M16 3.13a4 4 0 010 7.75" />
+          </svg>
+          <span>Contacts</span>
+        </a>
+        <a class="nav-item" id="switchToWallet" data-page="wallet">
+          <svg
+            class="icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M19 5H5a2 2 0 00-2 2v10a2 2 0 002 2h14a2 2 0 002-2V7a2 2 0 00-2-2z"
+            />
+            <path d="M3 7l9 6 9-6" />
+          </svg>
+          <span>Wallet</span>
+        </a>
+      </footer>
+
+      <!-- Menu Modal -->
+      <div class="modal" id="menuModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeMenu">←</button>
+          <div class="modal-title">Menu</div>
+        </div>
+        <ul class="menu-list">
+          <li class="menu-item" id="openAccountForm">Account</li>
+          <li class="menu-item" id="openNetwork">Network</li>
+          <li class="menu-item" id="openSettings">Settings</li>
+          <!--
+                <li class="menu-item" id="openImportFormMenu">Import</li>
+-->
+          <li class="menu-item" id="openExportForm">Export</li>
+          <li class="menu-item" id="handleSignOut">Sign Out</li>
+        </ul>
+      </div>
+
+      <!-- Sign In Modal -->
+      <div class="modal" id="signInModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeSignInModal">←</button>
+          <div class="modal-title">Sign In</div>
+        </div>
+        <div class="form-container">
+          <form id="signInForm">
+            <div class="form-group">
+              <label for="username">Select Account</label>
+              <select id="username" class="form-control" required></select>
+            </div>
+            <button type="submit" class="primary-button" disabled>
+              Sign In
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Create Account Modal -->
+      <div class="modal" id="createAccountModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeCreateAccountModal">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
+          <div class="modal-title">Create Account</div>
+        </div>
+        <div class="form-container">
+          <form id="createAccountForm">
+            <div class="form-group">
+              <label for="newUsername"
+                >Username
+                <span
+                  id="newUsernameAvailable"
+                  style="color: #28a745; display: none"
+                  >available</span
+                ></label
+              >
+              <div style="position: relative">
+                <input
+                  type="text"
+                  id="newUsername"
+                  class="form-control"
+                  placeholder="Select a username"
+                  required
+                />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="newPrivateKey">Private Key (hex, optional)</label>
+              <input
+                type="text"
+                id="newPrivateKey"
+                class="form-control"
+                placeholder="Enter private key in hex format"
+              />
+            </div>
+            <button type="submit" class="primary-button" disabled>
+              Create Account
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Account Form Modal -->
+      <div class="modal" id="accountModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeAccountForm">←</button>
+          <div class="modal-title">Account</div>
+        </div>
+        <div class="form-container">
+          <form id="accountForm">
+            <div class="form-group">
+              <label for="name">Name</label>
+              <input type="text" id="name" class="form-control" required />
+            </div>
+            <div class="form-group">
+              <label for="phone">Phone</label>
+              <input type="tel" id="phone" class="form-control" required />
+            </div>
+            <div class="form-group">
+              <label for="gender">Gender</label>
+              <select id="gender" class="form-control" required>
+                <option value="">Select gender</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="cyborg">Cyborg</option>
+                <option value="bot">Bot</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="bio">Bio</label>
+              <textarea id="bio" class="form-control"></textarea>
+            </div>
+            <button type="submit" class="primary-button">Update Profile</button>
+            <div id="successMessage" class="success-message">
+              Profile updated successfully!
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Import Modal -->
+      <div class="modal" id="importModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeImportForm">←</button>
+          <div class="modal-title">Import Account</div>
+        </div>
+        <div class="form-container">
+          <form id="importForm">
+            <div class="form-group">
+              <label for="importFile">Select File</label>
+              <input
+                type="file"
+                id="importFile"
+                class="form-control"
+                accept="application/json"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="importPassword">Password (if encrypted)</label>
+              <input
+                type="password"
+                id="importPassword"
+                class="form-control"
+                placeholder="Enter password for encrypted files"
+              />
+            </div>
+            <button type="submit" class="primary-button">Load Account</button>
+            <div id="importMessage" class="success-message">
+              Account imported successfully!
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Chat Modal -->
+      <div class="modal" id="chatModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeChatModal">←</button>
+          <div class="chat-user-info">
+            <div class="modal-avatar"></div>
+            <div class="modal-title"></div>
+          </div>
+        </div>
+        <div class="messages-container">
+          <div class="messages-list"></div>
+        </div>
+        <div class="message-input-container">
+          <textarea
+            class="message-input"
+            placeholder="Type a message..."
+          ></textarea>
+          <button class="send-button" id="handleSendMessage">
+            <svg viewBox="0 0 24 24">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Receive Modal -->
+      <div class="modal" id="receiveModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeReceiveModal">←</button>
+          <div class="modal-title">Receive</div>
+        </div>
+        <div class="form-container">
+          <div class="form-group">
+            <label for="receiveAsset">Asset</label>
+            <select id="receiveAsset" class="form-control"></select>
+          </div>
+          <div class="form-group">
+            <label for="receiveAddress">Address</label>
+            <select id="receiveAddress" class="form-control"></select>
+          </div>
+          <div class="form-group">
+            <label>Your Address</label>
+            <div style="display: flex; align-items: flex-start; gap: 0.5rem">
+              <div
+                id="displayAddress"
+                class="form-control"
+                style="
+                  flex: 1;
+                  font-size: 0.875rem;
+                  padding: 8px 12px;
+                  word-break: break-all;
+                  line-height: 1.4;
+                  background-color: #f8f9fa;
+                  cursor: default;
+                "
+              ></div>
+              <button
+                id="copyAddress"
+                class="icon-button"
+                style="color: #007bff; margin-top: 4px; flex-shrink: 0"
+              >
+                📋
+              </button>
+            </div>
+            <div
+              id="qrcode"
+              style="margin-top: 1rem; display: flex; justify-content: center"
+            ></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Send Modal -->
+      <div class="modal" id="sendModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeSendModal">←</button>
+          <div class="modal-title">Send</div>
+        </div>
+        <div class="form-container">
+          <form id="sendForm">
+            <div class="form-group">
+              <label for="sendAsset">Asset</label>
+              <select id="sendAsset" class="form-control" required></select>
+            </div>
+            <div class="form-group">
+              <label for="sendFromAddress">From Address</label>
+              <select
+                id="sendFromAddress"
+                class="form-control"
+                required
+              ></select>
+            </div>
+            <div class="form-group">
+              <label for="sendToAddress"
+                >Recipient
+                <span
+                  id="sendToAddressError"
+                  style="color: #dc3545; display: none"
+                ></span
+              ></label>
+              <input
+                type="text"
+                id="sendToAddress"
+                class="form-control"
+                placeholder="Enter username or address"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="sendAmount">Amount</label>
+              <div
+                id="availableBalance"
+                style="margin-bottom: 0.5rem; color: #6c757d; cursor: pointer"
+              >
+                Available: <span id="balanceAmount">0.00</span>
+                <span id="balanceSymbol"></span>
+              </div>
+              <input
+                type="number"
+                id="sendAmount"
+                class="form-control"
+                step="any"
+                min="0"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="sendMemo">Memo (Optional)</label>
+              <textarea id="sendMemo" class="form-control"></textarea>
+            </div>
+            <button type="submit" class="primary-button">Send</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- History Modal -->
+      <div class="modal" id="historyModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeHistoryModal">←</button>
+          <div class="modal-title">Transaction History</div>
+        </div>
+        <div class="form-container">
+          <div class="form-group">
+            <label for="historyAsset">Asset</label>
+            <select id="historyAsset" class="form-control"></select>
+          </div>
+          <div class="form-group">
+            <label for="historyAddress">Address</label>
+            <select id="historyAddress" class="form-control"></select>
+          </div>
+          <div class="transaction-list" id="transactionList">
+            <!-- Transactions will be populated here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Export Modal -->
+      <div class="modal" id="exportModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeExportForm">←</button>
+          <div class="modal-title">Export Data</div>
+        </div>
+        <div class="form-container">
+          <form id="exportForm">
+            <div class="form-group">
+              <label for="exportPassword">Password</label>
+              <input
+                type="password"
+                id="exportPassword"
+                class="form-control"
+                placeholder="Leave empty for unencrypted export"
+              />
+            </div>
+            <button type="submit" class="primary-button">Download Data</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

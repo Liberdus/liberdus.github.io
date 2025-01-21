@@ -1,0 +1,555 @@
+{
+  "timestamp": "2024-12-23T02:33:44.512Z",
+  "account": {
+    "name": "Omar X",
+    "phone": "234",
+    "gender": "male",
+    "bio": "This is me."
+  },
+  "network": {},
+  "wallet": {
+    "balance": 4384.28,
+    "assets": [
+      {
+        "id": "liberdus",
+        "name": "Liberdus",
+        "symbol": "LIB",
+        "img": "images/lib.png",
+        "chainid": 2220,
+        "contract": "",
+        "price": 0.032,
+        "balance": 28.4,
+        "addresses": [
+          {
+            "address": "0x482740e51aad88F6F4ce6aB8827279cffFb9ae2f",
+            "balance": 26.4,
+            "history": [
+              {
+                "txid": "0xfbf6bc33effa11172e9b370129dcc9a00311006581c4436af7b8b5b24d9ffd8c",
+                "amount": 4.2,
+                "sign": -1,
+                "timestamp": 1703261400000,
+                "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+                "memo": "for lunch"
+              }
+            ]
+          },
+          {
+            "address": "0xe663cE5FCF7655eCDBcFD7a9dC30577c6F01e93c",
+            "balance": 2,
+            "history": [
+              {
+                "txid": "0x498081534d236b460e48f852aca8bbe6adcfa0274c0ec48f2eedabadf0ba141a",
+                "amount": 2,
+                "sign": 1,
+                "timestamp": 1704261400000,
+                "address": "0xf6D1B85af155229AcD7B523601148585A1ff67C6",
+                "memo": "thanks"
+              },
+              {
+                "txid": "0x018081534d236b460e48f852aca8bbe6adcfa0274c0ec48f2eedabadf0ba141a",
+                "amount": 3,
+                "sign": 1,
+                "timestamp": 1704262400000,
+                "address": "0xf6D1B85af155229AcD7B523601148585A1ff67C6",
+                "memo": "thanks"
+              },
+              {
+                "txid": "0x498081534d236b460e48f852aca8bbe6adcfa0274c0ec48f2eedabadf0ba141a",
+                "amount": 2,
+                "sign": 1,
+                "timestamp": 1704261400000,
+                "address": "0xf6D1B85af155229AcD7B523601148585A1ff67C6",
+                "memo": "thanks"
+              },
+              {
+                "txid": "0x498081534d236b460e48f852aca8bbe6adcfa0274c0ec48f2eedabadf0ba141a",
+                "amount": 2,
+                "sign": 1,
+                "timestamp": 1704261400000,
+                "address": "0xf6D1B85af155229AcD7B523601148585A1ff67C6",
+                "memo": "thanks"
+              },
+              {
+                "txid": "0x498081534d236b460e48f852aca8bbe6adcfa0274c0ec48f2eedabadf0ba141a",
+                "amount": 2,
+                "sign": 1,
+                "timestamp": 1704261400000,
+                "address": "0xf6D1B85af155229AcD7B523601148585A1ff67C6",
+                "memo": "thanks"
+              },
+              {
+                "txid": "0x498081534d236b460e48f852aca8bbe6adcfa0274c0ec48f2eedabadf0ba141a",
+                "amount": 2,
+                "sign": -1,
+                "timestamp": 1704261400000,
+                "address": "0xf6D1B85af155229AcD7B523601148585A1ff67C6",
+                "memo": "thanks"
+              },
+              {
+                "txid": "0x498081534d236b460e48f852aca8bbe6adcfa0274c0ec48f2eedabadf0ba141a",
+                "amount": 2,
+                "sign": 1,
+                "timestamp": 1704261400000,
+                "address": "0xf6D1B85af155229AcD7B523601148585A1ff67C6",
+                "memo": "thanks"
+              },
+              {
+                "txid": "0x498081534d236b460e48f852aca8bbe6adcfa0274c0ec48f2eedabadf0ba141a",
+                "amount": 2,
+                "sign": 1,
+                "timestamp": 1704261400000,
+                "address": "0xf6D1B85af155229AcD7B523601148585A1ff67C6",
+                "memo": "thanks"
+              },
+              {
+                "txid": "0x498081534d236b460e48f852aca8bbe6adcfa0274c0ec48f2eedabadf0ba141a",
+                "amount": 2,
+                "sign": 1,
+                "timestamp": 1704261400000,
+                "address": "0xf6D1B85af155229AcD7B523601148585A1ff67C6",
+                "memo": "thanks"
+              },
+              {
+                "txid": "0x498081534d236b460e48f852aca8bbe6adcfa0274c0ec48f2eedabadf0ba141a",
+                "amount": 2,
+                "sign": -1,
+                "timestamp": 1704261400000,
+                "address": "0xf6D1B85af155229AcD7B523601148585A1ff67C6",
+                "memo": "thanks you"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "keys": {
+      "0x482740e51aad88F6F4ce6aB8827279cffFb9ae2f": {
+        "public": "0x15a16dbe4bfb77fc5ff13d99deff5ea069deebf3000000000000000000000000",
+        "secret": "0x4b10ee38e4fdac896353b7c0a86b44bfaac5c0e3bb581957045959cd6324ce5a",
+        "type": "secp256k1"
+      },
+      "0xe663cE5FCF7655eCDBcFD7a9dC30577c6F01e93c": {
+        "public": "0x2c72979ac7727a53adfa6db007ad660b718d05fb000000000000000000000000",
+        "secret": "0x13f30cdb0179863c8df572eac4219ca2d2e1e0afd935d8771afd28cfc9c6065a",
+        "type": "secp256k1"
+      }
+    }
+  },
+  "contacts": {
+    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+      "username": "alice_web3",
+      "name": "Alice Johnson",
+      "sort": "Alice Johnson",
+      "img_url": "https://example.com/profiles/alice.jpg",
+      "messages": [
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1701261400000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1701261460000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1703261500000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1703261560000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1703261600000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1703261660000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1703261700000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1703261760000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1703261800000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1703261860000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1703261900000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1703261960000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1703262400000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1703262460000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1703263400000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1703263460000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1703264400000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1703264460000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1703265400000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1703265460000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1703266400000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1703266460000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1703267400000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1703267460000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1703268400000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1703268460000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?",
+          "timestamp": 1703269400000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": "Yes! The artwork is amazing",
+          "timestamp": 1703269460000,
+          "sent_timestamp": 0,
+          "my": true
+        },
+        {
+          "message": "Hey, did you see the latest NFT drop?Hey, did you see the latest NFT drop?Hey, did you see the latest NFT drop?Hey, did you see the latest NFT drop?Hey, did you see the latest NFT drop?Hey, did you see the latest NFT drop?Hey, did you see the latest NFT drop?Hey, did you see the latest NFT drop?Hey, did you see the latest NFT drop?",
+          "timestamp": 1703271400000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        },
+        {
+          "message": " Yes! The artwork is amazing. Yes! The artwork is amazing. Yes! The artwork is amazing. Yes! The artwork is amazing. Yes! The artwork is amazing. Yes! The artwork is amazing. Yes! The artwork is amazing. Yes! The artwork is amazing. Yes! The artwork is amazing. Yes! The artwork is amazing. Yes! The artwork is amazing. Yes! The artwork is amazing. Yes! The artwork is amazing. Yes! The artwork is amazing. Yes! The artwork is amazing. ",
+          "timestamp": 1703271460000,
+          "sent_timestamp": 0,
+          "my": true
+        }
+      ],
+      "email": "alice@example.com",
+      "phone": "+1234567890",
+      "x": "@alice_web3"
+    },
+    "0x70997970C51812dc3A010C7d01b50e0d17dc79C8": {
+      "address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "username": "bob_crypto",
+      "name": "Bob Smith",
+      "sort": "Bob Smith",
+      "img_url": "https://example.com/profiles/bob.jpg",
+      "messages": [
+        {
+          "message": "Can you help me with smart contract deployment?",
+          "timestamp": 1703257800000,
+          "sent_timestamp": 1703257800000,
+          "my": false
+        }
+      ],
+      "email": "bob@example.com",
+      "phone": "+1987654321",
+      "x": "@bob_crypto"
+    },
+    "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC": {
+      "address": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "sort": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+    },
+    "0x90F79bf6EB2c4f870365E785982E1f101E93b906": {
+      "address": "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+      "username": "carol_defi",
+      "name": "Carol Williams",
+      "sort": "Carol Williams",
+      "img_url": "https://example.com/profiles/carol.jpg",
+      "messages": [],
+      "email": "carol@example.com",
+      "x": "@carol_defi"
+    },
+    "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65": {
+      "address": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65",
+      "username": "dave_eth",
+      "name": "David Brown",
+      "sort": "David Brown",
+      "messages": [
+        {
+          "message": "Looking forward to the meetup!",
+          "timestamp": 1703251200000,
+          "sent_timestamp": 0,
+          "my": true
+        }
+      ]
+    },
+    "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc": {
+      "address": "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc",
+      "username": "emma_blockchain",
+      "sort": "emma_blockchain"
+    },
+    "0x976EA74026E726554dB657fA54763abd0C3a0aa9": {
+      "address": "0x976EA74026E726554dB657fA54763abd0C3a0aa9",
+      "name": "Frank Miller",
+      "sort": "Frank Miller",
+      "img_url": "https://example.com/profiles/frank.jpg",
+      "messages": [],
+      "email": "frank@example.com",
+      "phone": "+1122334455"
+    },
+    "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955": {
+      "address": "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955",
+      "username": "grace_web3",
+      "name": "Grace Lee",
+      "sort": "Grace Lee",
+      "messages": [
+        {
+          "message": "Check out this new DeFi protocol",
+          "timestamp": 1703247600000,
+          "sent_timestamp": 1703247600000,
+          "my": false
+        }
+      ]
+    },
+    "0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f": {
+      "address": "0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f",
+      "sort": "0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f"
+    },
+    "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720": {
+      "address": "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720",
+      "username": "ian_crypto",
+      "name": "Ian Clark",
+      "sort": "Ian Clark",
+      "img_url": "https://example.com/profiles/ian.jpg",
+      "email": "ian@example.com",
+      "x": "@ian_crypto"
+    },
+    "0xBcd4042DE499D14e55001CcbB24a551F3b954096": {
+      "address": "0xBcd4042DE499D14e55001CcbB24a551F3b954096",
+      "username": "jane_nft",
+      "sort": "jane_nft",
+      "messages": []
+    },
+    "0x71bE63f3384f5fb98995898A86B02Fb2426c5788": {
+      "address": "0x71bE63f3384f5fb98995898A86B02Fb2426c5788",
+      "name": "Kevin Zhang",
+      "sort": "Kevin Zhang",
+      "img_url": "https://example.com/profiles/kevin.jpg",
+      "phone": "+1654987320"
+    },
+    "0xFABB0ac9d68B0B445fB7357272Ff202C5651694a": {
+      "address": "0xFABB0ac9d68B0B445fB7357272Ff202C5651694a",
+      "username": "lisa_dao",
+      "name": "Lisa Anderson",
+      "sort": "Lisa Anderson",
+      "messages": [
+        {
+          "message": "Voting is live for the proposal",
+          "timestamp": 1703244000000,
+          "sent_timestamp": 1703244000000,
+          "my": false
+        }
+      ]
+    },
+    "0x1CBd3b2770909D4e10f157cABC84C7264073C9Ec": {
+      "address": "0x1CBd3b2770909D4e10f157cABC84C7264073C9Ec",
+      "username": "mark_eth",
+      "name": "Mark Wilson",
+      "sort": "Mark Wilson",
+      "img_url": "https://example.com/profiles/mark.jpg",
+      "email": "mark@example.com",
+      "x": "@mark_eth"
+    },
+    "0xeF3e18d64BC6A983f673Ab319CCaE4f1a57C7097": {
+      "address": "0xeF3e18d64BC6A983f673Ab319CCaE4f1a57C7097",
+      "sort": "0xeF3e18d64BC6A983f673Ab319CCaE4f1a57C7097"
+    },
+    "0xcd3B766CCDd6AE721141F452C550Ca635964ce71": {
+      "address": "0xcd3B766CCDd6AE721141F452C550Ca635964ce71",
+      "username": "olivia_web3",
+      "name": "Olivia Martinez",
+      "sort": "Olivia Martinez",
+      "messages": []
+    },
+    "0x3546BcD3c84621e976D8185a91A922aE77ECEc30": {
+      "address": "0x3546BcD3c84621e976D8185a91A922aE77ECEc30",
+      "username": "paul_defi",
+      "sort": "paul_defi",
+      "img_url": "https://example.com/profiles/paul.jpg"
+    },
+    "0xbDA5747bFD65F08deb54cb465eB87D40e51B197E": {
+      "address": "0xbDA5747bFD65F08deb54cb465eB87D40e51B197E",
+      "name": "Rachel Kim",
+      "sort": "Rachel Kim",
+      "messages": [
+        {
+          "message": "Thanks for the help with MetaMask!",
+          "timestamp": 1703240400000,
+          "sent_timestamp": 1703240400000,
+          "my": false
+        }
+      ]
+    },
+    "0xdD2FD4581271e230360230F9337D5c0430Bf44C0": {
+      "address": "0xdD2FD4581271e230360230F9337D5c0430Bf44C0",
+      "username": "sam_blockchain",
+      "name": "Sam Thompson",
+      "sort": "Sam Thompson",
+      "email": "sam@example.com",
+      "phone": "+1789456123"
+    },
+    "0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199": {
+      "address": "0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199",
+      "sort": "0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199"
+    },
+    "0xdF3e18d64BC6A983f673Ab319CCaE4f1a57C7097": {
+      "address": "0xdF3e18d64BC6A983f673Ab319CCaE4f1a57C7097",
+      "username": "tina_nft",
+      "name": "Tina Chen",
+      "sort": "Tina Chen",
+      "img_url": "https://example.com/profiles/tina.jpg",
+      "messages": [],
+      "x": "@tina_nft"
+    },
+    "0x2546BcD3c84621e976D8185a91A922aE77ECEc30": {
+      "address": "0x2546BcD3c84621e976D8185a91A922aE77ECEc30",
+      "username": "victor_dao",
+      "name": "Victor Garcia",
+      "sort": "Victor Garcia",
+      "messages": [
+        {
+          "message": "Did you see the gas fees today?",
+          "timestamp": 1703236800000,
+          "sent_timestamp": 0,
+          "my": true
+        }
+      ]
+    }
+  },
+  "chats": [
+    {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+      "username": "alice_web3",
+      "name": "Alice Johnson",
+      "img_url": "https://example.com/profiles/alice.jpg",
+      "message": "Yes! The artwork is amazing",
+      "timestamp": 1734972707000,
+      "my": true,
+      "unread": 0
+    },
+    {
+      "address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "username": "bob_crypto",
+      "name": "Bob Smith",
+      "img_url": "https://example.com/profiles/bob.jpg",
+      "message": "Can you help me with smart contract deployment?",
+      "timestamp": 1703257800000,
+      "my": false,
+      "unread": 1
+    },
+    {
+      "address": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "message": "Hey there!",
+      "timestamp": 1703254200000,
+      "my": false,
+      "unread": 1
+    }
+  ],
+  "unread": 2,
+  "settings": {
+    "toll": true,
+    "encrypt": true
+  }
+}

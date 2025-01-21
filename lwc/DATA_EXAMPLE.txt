@@ -1,0 +1,79 @@
+{
+  "contacts": {
+    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+      "username": "alice_web3",
+      "name": "Alice Johnson",
+      "sort": "Alice Johnson",
+      "img_url": "https://example.com/profiles/alice.jpg",
+      "messages": [
+        {
+          "message": "Hello world",
+          "timestamp": 1703261400000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        }
+      ],
+      "email": "alice@example.com",
+      "phone": "+1234567890",
+      "x": "@alice_web3"
+    }
+  },
+  "chats": [
+    {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+      "username": "alice_web3",
+      "name": "Alice Johnson",
+      "img_url": "https://example.com/profiles/alice.jpg",
+      "message": "Hello world",
+      "timestamp": 1703261400000,
+      "my": false,
+      "unread": 1
+    }
+  ],
+  "wallet": {
+    "balance": 4384.28,
+    "assets": [
+      {
+        "id": "liberdus",
+        "name": "Liberdus",
+        "symbol": "LIB",
+        "img": "images/lib.png",
+        "chainid": 2220,
+        "contract": "",
+        "price": 0.032,
+        "balance": 28.4,
+        "addresses": [
+          {
+            "address": "0x482740e51aad88F6F4ce6aB8827279cffFb9ae2f",
+            "balance": 26.4,
+            "history": [
+              {
+                "txid": "0xfbf6bc33effa11172e9b370129dcc9a00311006581c4436af7b8b5b24d9ffd8c",
+                "amount": 4.2,
+                "sign": -1,
+                "timestamp": 1703261400000,
+                "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+                "memo": "for lunch"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "keys": {
+      "0482740e51aad88F6F4ce6aB8827279cffFb9ae2f000000000000000000000000": {
+        "address": "0482740e51aad88F6F4ce6aB8827279cffFb9ae2f000000000000000000000000",
+        "public": "0441b12eaa7cdc9a7c99c290cc9341e3c5721b46dadc4959de36e62174daef93672eaad40525dc1dcb92bd46745d6ab32e6cbf43f3f51032916969fd77f78ea319"
+        "secret": "4b10ee38e4fdac896353b7c0a86b44bfaac5c0e3bb581957045959cd6324ce5a",
+        "type": "secp256k1"
+      }
+    }
+  },
+  "unread": 1,
+  "settings": {
+    "toll": true,
+    "encrypt": true
+  }
+}
+

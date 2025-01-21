@@ -1,0 +1,149 @@
+LocalStore key "accounts"; gets read into myAccount global variable
+{
+  "netids": {
+    "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b": {
+      "usernames": {
+        "omar":{
+          "netid": "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b",
+          "username": "omar",
+          "keys": {
+            "address", "15a16dbe4bfb77fc5ff13d99deff5ea069deebf3",
+            "secret": "a79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+            "public": "472cac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+            "type": "secp256k1"
+          }
+        },
+        "bob": {
+          "netid": "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b",
+          "username": "bob",
+          "keys": {
+            "address", "7fa16dbe4bfb77fc5ff13d99deff5ea069deebf3",
+            "secret": "829d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+            "public": "b32cac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+            "type": "secp256k1"
+          }
+        }
+      }
+    },
+    "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7": {
+      "usernames": {
+        "tom":{
+          "netid": "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7",
+          "username": "tom",
+          "keys": {
+            "address", "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3",
+            "secret": "b829475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+            "public": "93a3ac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+            "type": "secp256k1"
+          }
+        }
+    }
+  } 
+}
+
+LocalStore key "username_netid"; gets read into myData global variable
+{
+  "timestamp": 1703261400000,
+  "account": {
+    "netid": "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7",
+    "username": "tom",
+    "keys": {
+      "address", "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3",
+      "public": "b829475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+      "secret": "93a3ac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+      "type": "secp256k1"
+    }
+  },
+  "network": {
+    "gateways": [
+      {
+        "host": "localhost",
+        "port": 3030
+      }
+    ]
+  }
+  "contacts": {
+    "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266": {
+      "address": "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+      "username": "alice_web3",
+      "name": "Alice Johnson",
+      "sort": "Alice Johnson",
+      "img_url": "https://example.com/profiles/alice.jpg",
+      "messages": [
+        {
+          "message": "Hello world",
+          "timestamp": 1703261400000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        }
+      ],
+      "email": "alice@example.com",
+      "phone": "+1234567890",
+      "x": "@alice_web3"
+    }
+  },
+  "chats": [
+    {
+      "address": "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+      "username": "alice_web3",
+      "name": "Alice Johnson",
+      "img_url": "https://example.com/profiles/alice.jpg",
+      "message": "Hello world",
+      "timestamp": 1703261400000,
+      "my": false,
+      "unread": 1
+    }
+  ],
+  "wallet": {
+    "balance": 4384.28,
+    "timestamp": 1703261400000  - last balance update timestamp
+    "assets": [
+      {
+        "id": "liberdus",
+        "name": "Liberdus",
+        "symbol": "LIB",
+        "img": "images/lib.png",
+        "chainid": 2220,
+        "contract": "",
+        "price": 0.032,
+        "balance": 28.4,
+        "addresses": [
+          {
+            "address": "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3",
+            "balance": 26.4,
+            "history": [
+              {
+                "txid": "fbf6bc33effa11172e9b370129dcc9a00311006581c4436af7b8b5b24d9ffd8c",
+                "amount": 4.2,
+                "sign": -1,
+                "timestamp": 1703261400000,
+                "address": "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+                "memo": "for lunch"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "keys": {
+      "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3": {
+        "address": "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3",
+        "public": "93a3ac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46"
+        "secret": "b829475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+        "type": "secp256k1"
+      }
+    }
+  },
+  "state":{
+    "unread": 1
+  },
+  "settings": {
+    "toll": true,
+    "encrypt": true
+  }
+}
+
+
+
+
+

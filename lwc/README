@@ -1,0 +1,21 @@
+QRCode lib from
+https://github.com/davidshimjs/qrcodejs
+https://github.com/davidshimjs/qrcodejs/blob/master/qrcode.js
+
+secp256k1 from
+https://github.com/paulmillr/noble-secp256k1
+https://github.com/paulmillr/noble-secp256k1/raw/refs/heads/main/index.js
+
+Keccak256 from
+https://github.com/adraffy/keccak.js
+https://github.com/adraffy/keccak.js/blob/main/src/keccak256.js
+permute.js and utils.js were copied into keccak256.js instead of being imported
+
+Blake2b from
+https://github.com/dcposch/blakejs
+https://github.com/dcposch/blakejs/blob/master/blake2b.js
+some functions from util.js were copied into blake2b.js
+
+safeStringify from
+https://github.com/shardus/lib-crypto-web/blob/main/utils/stringify.js
+modified to use export

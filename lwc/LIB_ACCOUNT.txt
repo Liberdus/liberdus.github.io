@@ -1,0 +1,27 @@
+{
+    type: "UserAccount",
+    balance: 123,
+    alias: "user1",
+
+}
+
+
+
+{
+    type: "Anon",
+    balance: 234,
+
+}
+
+
+/account/46bef49f70758bdfd802fa36a7f1aed940321e2779033c395ae3530e2a732d2f
+{
+    "account": {
+        "address": "703f1cb300eb81cf531ad7f6a69554e3b66b6522000000000000000000000000",   // actual user account
+        "hash": "c787aa9c6c632446cd0567459e81c27bb904aba5cab2df285a68076ffabf63d6",      // 
+        "id": "46bef49f70758bdfd802fa36a7f1aed940321e2779033c395ae3530e2a732d2f",        // hash of the username
+        "inbox": "zz3",                                                                  // inbox
+        "timestamp": 1736317288794,
+        "type": "AliasAccount"
+    }
+}

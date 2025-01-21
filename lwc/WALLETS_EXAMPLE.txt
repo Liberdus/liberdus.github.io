@@ -1,0 +1,44 @@
+
+This data structure is in LocalStore with the key "accounts"
+
+{
+  "netids": {
+    "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b": {
+      "usernames": {
+        "omar":{
+          "netid": "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b",
+          "username": "omar",
+          "keys": {
+            "address", "15a16dbe4bfb77fc5ff13d99deff5ea069deebf3",
+            "secret": "a79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+            "public": "472cac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+            "type": "secp256k1"
+          }
+        },
+        "bob": {
+          "netid": "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b",
+          "username": "bob",
+          "keys": {
+            "address", "7fa16dbe4bfb77fc5ff13d99deff5ea069deebf3",
+            "secret": "829d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+            "public": "b32cac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+            "type": "secp256k1"
+          }
+        }
+      }
+    },
+    "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7": {
+      "usernames": {
+        "tom":{
+          "netid": "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7",
+          "username": "tom",
+          "keys": {
+            "address", "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3",
+            "secret": "b829475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+            "public": "93a3ac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+            "type": "secp256k1"
+          }
+        }
+    }
+  } 
+}

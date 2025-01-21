@@ -1,0 +1,65 @@
+CHAT APPLICATION DATA STRUCTURE DOCUMENTATION
+
+OVERVIEW
+This document describes the main data structures used in the chat application: contacts, chats, messages, and settings.
+
+CONTACTS MAP
+A map that stores contact information, keyed by network address.
+
+Fields:
+address - Network address of the user. Used as the unique identifier. Required.
+username - User's chosen username. Optional.
+name - User's full name. Optional.
+sort - String used for sorting the map. Contains either: name, username, or address. Required.
+img_url - URL to user's profile image. Optional.
+messages - Array of messages exchanged with this contact. Required.
+email - User's email address. Optional.
+phone - User's phone number. Optional.
+x - User's X (formerly Twitter) handle. Optional.
+
+CHATS ARRAY
+An array of recent chats, sorted by timestamp of the last message.
+
+Fields:
+address - Network address of the contact. Required.
+username - Duplicated from contacts to avoid lookups. Optional.
+name - Duplicated from contacts to avoid lookups. Optional.
+img_url - Duplicated from contacts to avoid lookups. Optional.
+message - Snippet of the last message. Required.
+timestamp - Timestamp of last message. Required.
+my - Boolean indicating if the last message was sent by the user. Required.
+unread - Number of unread messages in this chat. Required.
+
+MESSAGES
+Individual message objects stored in the contacts' messages array.
+
+Fields:
+message - Full message text. Required.
+timestamp - Timestamp of when the message was sent or received. Required.
+sent_timestamp - Timestamp of when the other person sent the message. Zero if sent by the user. Required.
+my - Boolean indicating if the message was sent by the user. Required.
+
+GLOBAL FIELDS
+unread - Total number of unread messages across all chats. Required.
+
+SETTINGS
+Application settings object.
+
+Fields:
+toll - Boolean setting for toll. Required.
+encrypt - Boolean setting for encryption. Required.
+
+FIELD TYPES AND CONSTRAINTS
+All timestamps are stored as Unix timestamps in milliseconds
+Addresses must be valid network addresses
+URLs should be valid HTTP/HTTPS URLs
+Phone numbers should be in international format with country code
+Email addresses should be valid email format
+X handles should include the @ symbol
+
+RELATIONSHIPS
+Every chat entry must have a corresponding contact entry (by address)
+The total unread count must equal the sum of unread counts across all chats
+Message timestamps in chats must match the latest message timestamp for that contact
+Sort strings must be consistently derived from either name, username, or address
+
