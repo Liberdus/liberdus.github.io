@@ -202,6 +202,8 @@ class App {
             console.log('[App] Chain changed:', chainId);
             reinitializeComponents(window.ethereum.selectedAddress);
         });
+
+        this.lastDisconnectNotification = 0;
     }
 
     initializeEventListeners() {
@@ -355,6 +357,13 @@ class App {
     }
 
     handleWalletDisconnect() {
+        // Debounce notifications by checking last notification time
+        const now = Date.now();
+        if (now - this.lastDisconnectNotification < 1000) { // 1 second debounce
+            return;
+        }
+        this.lastDisconnectNotification = now;
+        
         const walletConnectBtn = document.getElementById('walletConnect');
         const walletInfo = document.getElementById('walletInfo');
         const accountAddress = document.getElementById('accountAddress');
@@ -371,7 +380,12 @@ class App {
             accountAddress.textContent = '';
         }
         
-        this.showSuccess("Wallet disconnected successfully");
+        this.showSuccess(
+            "Wallet disconnected from site. For complete disconnection:\n" +
+            "1. Click MetaMask extension\n" +
+            "2. Click globe icon with a green dot\n" +
+            "3. Select 'Disconnect'"
+        );
     }
 
     handleAccountChange(account) {

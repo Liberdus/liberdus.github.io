@@ -90,7 +90,19 @@ export class CreateOrder extends BaseComponent {
             const container = document.getElementById('create-order');
             container.innerHTML = this.render();
             
-            // Rest of the existing initialization code...
+            // Handle read-only mode first, before any other initialization
+            if (readOnlyMode) {
+                this.setReadOnlyMode();
+                // Clear any existing error messages in read-only mode
+                const statusElement = document.getElementById('status');
+                if (statusElement) {
+                    statusElement.style.display = 'none';
+                }
+                this.initialized = true;
+                return;
+            }
+
+            // Rest of the initialization code for connected mode...
             if (window.webSocket) {
                 window.webSocket.subscribe("OrderCreated", (order) => {
                     this.debug('New order created:', order);
@@ -107,11 +119,6 @@ export class CreateOrder extends BaseComponent {
                         window.app.refreshActiveComponent();
                     }
                 });
-            }
-
-            if (readOnlyMode) {
-                this.setReadOnlyMode();
-                return;
             }
 
             // Wait for WebSocket to be fully initialized
@@ -171,7 +178,10 @@ export class CreateOrder extends BaseComponent {
 
         } catch (error) {
             this.error('Error in initialization:', error);
-            this.showError('Failed to initialize. Please try again.');
+            // Only show errors if not in read-only mode
+            if (!readOnlyMode) {
+                this.showError('Failed to initialize. Please try again.');
+            }
         } finally {
             this.initializing = false;
         }
@@ -259,6 +269,7 @@ export class CreateOrder extends BaseComponent {
     }
 
     setReadOnlyMode() {
+        console.log('[CreateOrder] Setting read-only mode');
         const createOrderBtn = document.getElementById('createOrderBtn');
         const orderCreationFee = document.getElementById('orderCreationFee');
         

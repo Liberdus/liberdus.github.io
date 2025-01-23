@@ -144,23 +144,15 @@ export class WalletUI extends BaseComponent {
                     window.app.components['create-order'].cleanup();
                 }
                 
-                // Add this line to update the create order button
+                // Update create order button
                 const createOrderBtn = document.getElementById('createOrderBtn');
                 if (createOrderBtn) {
                     createOrderBtn.disabled = true;
                     createOrderBtn.textContent = 'Connect Wallet to Create Order';
                 }
                 
+                // Single disconnect call
                 await walletManager.disconnect();
-                this.showConnectButton();
-                
-                // Clear our app's connection state
-                await walletManager.disconnect();
-                
-                // Clean up CreateOrder component
-                if (window.app?.components['create-order']?.cleanup) {
-                    window.app.components['create-order'].cleanup();
-                }
                 
                 // Reset UI
                 this.showConnectButton();
@@ -168,29 +160,17 @@ export class WalletUI extends BaseComponent {
                 
                 // Clear any cached provider state
                 if (window.ethereum) {
-                    // Remove all listeners to ensure clean slate
                     window.ethereum.removeAllListeners();
-                    // Re-initialize necessary listeners
                     this.setupEventListeners();
                 }
                 
                 // Update tab visibility
-                if (window.app && typeof window.app.updateTabVisibility === 'function') {
+                if (window.app?.updateTabVisibility) {
                     window.app.updateTabVisibility(false);
                 }
                 
-                // Show more detailed message to user
-                const message = "Wallet disconnected from this site. For complete security:\n" +
-                              "1. Open MetaMask extension\n" +
-                              "2. Click on your account icon\n" +
-                              "3. Select 'Lock' or 'Disconnect this site'";
-                
-                if (window.app && typeof window.app.showSuccess === 'function') {
-                    window.app.showSuccess(message);
-                }
-                
-                // Trigger app-level disconnect handler
-                if (window.app && typeof window.app.handleWalletDisconnect === 'function') {
+                // Only trigger app-level disconnect handler (which will show the message)
+                if (window.app?.handleWalletDisconnect) {
                     window.app.handleWalletDisconnect();
                 }
             } catch (error) {
