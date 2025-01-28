@@ -1,4 +1,4 @@
-const version = '1.0.8';
+const version = '1.0.9';
 
 // https://github.com/paulmillr/noble-secp256k1
 // https://github.com/paulmillr/noble-secp256k1/raw/refs/heads/main/index.js
@@ -665,6 +665,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         window.navigator.standalone || // iOS
                         document.referrer.includes('android-app://');
 
+    // Add browser detection
+    const isOpera = navigator.userAgent.indexOf("OPR") > -1 || navigator.userAgent.indexOf("Opera") > -1;
+    const isFirefox = navigator.userAgent.indexOf("Firefox") > -1;
+
     // Function to check if the app can be installed
     const canInstall = () => {
         // Already installed as PWA
@@ -673,7 +677,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         }
 
-        // iOS - show button for all browsers (will handle redirect to Safari in click handler)
+        // iOS - show button for all browsers (will handle redirect to Safari)
         if (isIOS) {
             const browser = isChromeIOS ? 'Chrome' : 
                           isFirefoxIOS ? 'Firefox' : 
@@ -683,7 +687,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return true;
         }
 
-        // Desktop/Android - only show if the browser supports installation
+        // For both Desktop and Android, rely on actual install prompt support
         return 'serviceWorker' in navigator && 'BeforeInstallPromptEvent' in window;
     };
 
@@ -767,8 +771,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (outcome === 'accepted') {
                         addToHomeScreenButton.style.display = 'none';
                     }
+                } else if (isOpera) {
+                    alert('Installation is not supported in Opera browser. Please use Google Chrome or Microsoft Edge.');
+                } else if (isFirefox) {
+                    alert('Installation is not supported in Firefox browser. Please use Google Chrome or Microsoft Edge.');
                 } else {
-                    // If already installed or can't install
                     alert('This app is already installed or cannot be installed on this device/browser.');
                 }
             });
