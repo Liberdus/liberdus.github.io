@@ -600,8 +600,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Add unload handler to save myData
     window.addEventListener('unload', handleUnload)
     window.addEventListener('beforeunload', handleBeforeUnload)
-    window.addEventListener('pagehide', handlePageHide)
-    window.addEventListener('popstate', handlePopState)
+    window.addEventListener('freeze', handleFreeze);  // Changed to window
+    document.addEventListener('visibilitychange', handleVisibilityChange);  // Keep as document
 
     
     // Check for existing accounts and arrange welcome buttons
@@ -764,26 +764,26 @@ console.log('stop back button')
 //    }
 }
 
-// handle page hide
-function handlePageHide(e) {
-    console.log('in handlePageHide', e);
+// Add handlers to save state and handle navigation
+function handleFreeze(e) {
+    console.log('in handleFreeze', e);
     saveState();
     if (handleSignOut.exit) {
-        window.removeEventListener('pagehide', handlePageHide);
+        window.removeEventListener('freeze', handleFreeze);
         return;
     }
 }
 
-// handle back button
-function handlePopState(e) {
-    console.log('in handlePopState', e);
-    saveState();
-    if (handleSignOut.exit) {
-        window.removeEventListener('popstate', handlePopState);
-        return;
+function handleVisibilityChange(e) {
+    console.log('in handleVisibilityChange', document.visibilityState);
+    if (document.visibilityState === 'hidden') {
+        saveState();
+        if (handleSignOut.exit) {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            return;
+        }
+        history.pushState(null, '', window.location.href);
     }
-    // Prevent back navigation
-    history.pushState(null, '', window.location.href);
 }
 
 
