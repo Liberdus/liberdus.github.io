@@ -1,11 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- These did not seem to help with avoiding stale pages 
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
+    -->
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="mobile-web-app-capable" content="yes">
     <title>Liberdus</title>
     <!--
       QRCode lib from
@@ -14,11 +20,11 @@
     -->
     <script src="./qrcode.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?version=119">
+    <link rel="stylesheet" href="./styles.css">
     <link rel="manifest" href="./manifest.json">
 </head>
 <body>
-    <script src="./app.js?version=119" type="module"></script>
+    <script src="./app.js" type="module"></script>
     <!-- app.js loads the following additional modules -->
     <xscript src="./lib.js"></xscript>
     <xscript src="./blake2b.js"></xscript>
@@ -30,6 +36,7 @@
     <xscript src=""></xscript>
     <div class="container">
         <header class="header" id="header">
+            <div id="logo"><img src="liberdus_logo_50.png"></div>
             <div class="app-name">Liberdus</div>
             <div class="header-icons">
                 <button class="icon-button" id="search"></button>
@@ -39,12 +46,14 @@
 
         <div class="welcome-screen" id="welcomeScreen">
             <img src="./liberdus_logo_250.png" alt="Liberdus Logo" style="margin-bottom: 20px;">
-            <h1>Liberdus</h1>
+            <h1>Liberdus<br>
+                <div style="font-size: 0.8rem; margin-top: 1px; text-align: center;" id="networkNameDisplay"></div>
+            </h1>
             <div class="welcome-buttons">
-                <button id="createAccountButton" class="primary-button">Create Account</button>
                 <button id="signInButton" class="secondary-button">Sign In</button>
+                <button id="createAccountButton" class="secondary-button">Create Account</button>
                 <button id="importAccountButton" class="secondary-button">Import Account</button>
-                <button id="addToHomeScreenButton" class="secondary-button">Add to Home Screen</button>
+                <button id="addToHomeScreenButton" class="secondary-button">Install</button>
             </div>
             <div style="font-size: 0.8rem; margin-top: 10px; text-align: center;">Version <span id="versionDisplay"></span></div>
         </div>
@@ -65,8 +74,8 @@
             <div class="form-container">
                 <form id="newChatForm">
                     <div class="form-group">
-                        <label for="recipient">Recipient <span id="recipientError" style="color: #dc3545; display: none;"></span></label>
-                        <input type="text" id="recipient" class="form-control" required>
+                        <label for="recipient">Recipient <span id="chatRecipientError" style="color: #dc3545; display: none;"></span></label>
+                        <input type="text" id="chatRecipient" class="form-control" required>
                     </div>
                     <button type="submit" class="update-button">Continue</button>
                 </form>
@@ -125,13 +134,57 @@
                 <li class="menu-item" id="openAccountForm">Account</li>
                 <li class="menu-item" id="openNetwork">Network</li>
                 <li class="menu-item" id="openSettings">Settings</li>
+                <li class="menu-item" id="openExplorer">Explorer</li>
+                <li class="menu-item" id="openMonitor">Monitor</li>
 <!--
                 <li class="menu-item" id="openImportFormMenu">Import</li>
 -->
                 <li class="menu-item" id="openExportForm">Export</li>
                 <li class="menu-item" id="openRemoveAccount">Remove</li>
+                <li class="menu-item" id="openAbout">About</li>
                 <li class="menu-item" id="handleSignOut">Sign Out</li>
             </ul>
+        </div>
+
+        <!-- About Modal -->
+        <div class="modal" id="aboutModal">
+            <div class="modal-header">
+                <button class="back-button" id="closeAboutModal"></button>
+                <div class="modal-title">About Liberdus</div>
+            </div>
+            <div class="form-container">
+                <div style="padding: 1rem;">
+                    <img src="./liberdus_logo_250.png" alt="Liberdus Logo" style="margin-bottom: 20px; width: 100%; max-width: 200px;">
+                    <p>
+                        Liberdus is a decentralized messaging and wallet application.
+                    </p>
+                    <br><br>
+                    <div style="font-size: 0.8rem; margin-top: 10px; text-align: center;">Version <span id="versionDisplayAbout"></span></div>
+                    <div style="font-size: 0.8rem; margin-top: 10px; text-align: center;">Network Name: <span id="networkNameAbout"></span></div>
+                    <div style="font-size: 0.8rem; margin-top: 10px; text-align: center;">Net ID:<br> 
+                        <span style="font-size: 0.7rem;" id="netIdAbout"></span>
+                    </div><br><br>
+                    <div><a href="https://liberdus.com" target="_blank">Liberdus.com</a></div>
+                    <p><a href="https://github.com/liberdus" target="_blank">Source Code</a></p>
+                    <br>
+                    <p><a href="index.html.txt" target="_blank">index.html</a>
+                    <a href="styles.css" target="_blank">styles.css</a>
+                    <a href="app.js" target="_blank">app.js</a></p>
+                    <br>
+                    <a href="network.js" target="_blank">network.js</a>
+                    <a href="lib.js" target="_blank">lib.js</a>
+                    <a href="service-worker.js" target="_blank">service-worker.js</a>
+                    <br>
+                    <p>
+                        <a href="noble-ciphers.js" target="_blank">noble-ciphers.js</a>
+                        <a href="noble-secp256k1.js" target="_blank">noble-secp256k1.js</a>
+                        <a href="blake2b.js" target="_blank">blake2b.js</a>
+                        <a href="keccak256.js" target="_blank">keccak256.js</a>
+                        <a href="stringify-shardus.js" target="_blank">stringify-shardus.js</a>
+                        <a href="qrcode.js" target="_blank">qrcode.js</a>
+                    </p>
+                </div>
+            </div>
         </div>
 
         <!-- Sign In Modal -->
@@ -204,22 +257,6 @@
                         <label for="x">X</label>
                         <input type="text" id="x" class="form-control">
                     </div>
-<!--
-                    <div class="form-group">
-                        <label for="gender">Gender</label>
-                        <select id="gender" class="form-control" required>
-                            <option value="">Select gender</option>
-                            <option value="male">Male</option>
-                            <option value="female">Female</option>
-                            <option value="cyborg">Cyborg</option>
-                            <option value="bot">Bot</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="bio">Bio</label>
-                        <textarea id="bio" class="form-control"></textarea>
-                    </div>
--->
                     <button type="submit" class="update-button">Update Profile</button>
                     <div id="successMessage" class="success-message">Profile updated successfully!</div>
                 </form>
@@ -283,16 +320,6 @@
             </div>
             <div class="form-container">
                 <div class="form-group">
-                    <label for="receiveAsset">Asset</label>
-                    <select id="receiveAsset" class="form-control">
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="receiveAddress">Address</label>
-                    <select id="receiveAddress" class="form-control">
-                    </select>
-                </div>
-                <div class="form-group">
                     <label>Your Address</label>
                     <div style="display: flex; align-items: flex-start; gap: 0.5rem;">
                         <div id="displayAddress" class="form-control" 
@@ -318,11 +345,6 @@
                     <div class="form-group">
                         <label for="sendAsset">Asset</label>
                         <select id="sendAsset" class="form-control" required>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="sendFromAddress">From Address</label>
-                        <select id="sendFromAddress" class="form-control" required>
                         </select>
                     </div>
                     <div class="form-group">
@@ -355,11 +377,6 @@
                 <div class="form-group">
                     <label for="historyAsset">Asset</label>
                     <select id="historyAsset" class="form-control">
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="historyAddress">Address</label>
-                    <select id="historyAddress" class="form-control">
                     </select>
                 </div>
                 <div class="transaction-list" id="transactionList">
@@ -395,7 +412,9 @@
             <div class="form-container">
                 <div style="padding: 1rem;">
                     <p>
-                        Before removing your account, please export your data to ensure you have a backup.
+                        Before removing your account, please export your data to ensure you have a backup. This action
+                        only removes the account from this device and not from the network. You can still use the account
+                        after importing it.
                     </p>
                     <button id="confirmRemoveAccount" class="update-button" style="margin-top: 1rem;">Remove</button>
                 </div>

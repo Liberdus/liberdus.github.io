@@ -1,53 +1,34 @@
-LocalStore key "accounts"; gets read into myAccount global variable
+LocalStore key "accounts"
 {
   "netids": {
-    "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b": {
+    "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b": {     // this could be a testnet
       "usernames": {
         "omar":{
-          "netid": "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b",
-          "username": "omar",
-          "keys": {
-            "address", "15a16dbe4bfb77fc5ff13d99deff5ea069deebf3",
-            "secret": "a79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
-            "public": "472cac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
-            "type": "secp256k1"
-          }
+          "address", "15a16dbe4bfb77fc5ff13d99deff5ea069deebf3"
         },
         "bob": {
-          "netid": "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b",
-          "username": "bob",
-          "keys": {
-            "address", "7fa16dbe4bfb77fc5ff13d99deff5ea069deebf3",
-            "secret": "829d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
-            "public": "b32cac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
-            "type": "secp256k1"
-          }
+          "address", "7fa16dbe4bfb77fc5ff13d99deff5ea069deebf3"
         }
       }
     },
-    "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7": {
+    "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7": {   // this could be a mainnet
       "usernames": {
-        "tom":{
-          "netid": "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7",
-          "username": "tom",
-          "keys": {
-            "address", "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3",
-            "secret": "b829475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
-            "public": "93a3ac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
-            "type": "secp256k1"
-          }
+        "omar":{                                                            // you can have the same username, but on different networks
+          "address", "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3"
         }
+      }
     }
   } 
 }
 
-LocalStore key "username_netid"; gets read into myData global variable
+LocalStore key "username_netid"; gets read into myData global variable in app.js
 {
   "timestamp": 1703261400000,  // not using this; we have a chatTimestamp for when we last requested chat messages
   "account": {
     "netid": "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7",
     "username": "tom",
-    "name": "Tom Sun",
+    "chatTimestamp": 1703261400000    // this is the timestamp of when we last checked for chat messages
+    "name": "Tom Sun",        // maybe we should put this these fields into a info object
     "email": "abc@xyz.com",
     "phone": "2163840993",
     "linkedin": "tomsun",
@@ -59,8 +40,8 @@ LocalStore key "username_netid"; gets read into myData global variable
       "type": "secp256k1"
     }
   },
-  "network": {
-    "use": false,  // if true use the gateways specified here, otherwise the ones specfied in the web client
+  "network": {      // TODO need to implement this
+    "use": false,   // if true use the gateways specified here, otherwise the ones specfied in the web client network.js file
     "gateways": [
       {
         "protocol": "http",
@@ -74,13 +55,15 @@ LocalStore key "username_netid"; gets read into myData global variable
       "address": "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
       "public": "b829475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",  // cached here so we don't have to check the network 
       "username": "alice_web3",
-      "name": "Alice Johnson",      // this is entered by the local web client user, not on network; if not provided, set to claimed values
+      "name": "Alice Johnson",      // this is entered by the local web client user, not on network; if not provided, set to senderInfo values
       "sort": "Alice Johnson",
-      "friend": true,            // this is entered by the local web clicent user, not on network
+      "friend": true,               // this is entered by the local web clicent user, not displayed on network
       "unread": 3,
       "messages": [
         {
           "message": "Hello world",
+          "amount": {value:34n*10n**18n, dataType: "bi"},   // optional, amount of asset that was sent or received
+          "symbol": "LIB",                                  // optional, symbol of asset that was sent or received
           "timestamp": 1703261400000,
           "sent_timestamp": 1703261400000,
           "my": false
@@ -99,23 +82,16 @@ LocalStore key "username_netid"; gets read into myData global variable
       }
     }
   },
-  "chats": [
+  "chats": [    // latest message timestamp sent or received from each contact is listed here; ordered with most recent at the top
     {
       "address": "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
       "timestamp": 1703261400000,   // this will be the sent or received timestamp
-// the following will be removed and this.contacts[address] used to get this data
-      "username": "alice_web3",
-      "name": "Alice Johnson",
-      "unread": 1
-// the following will be removed and this.contacts[address].messages.at(-1) used to get this data
-      "message": "Hello world",
-      "timestamp": 1703261400000,
-      "my": false,
     }
   ],
   "wallet": {
     "networth": 4384.28,   // this is the networth of the wallet in fiat currency; USD for now
     "timestamp": 1703261400000  - last balance update timestamp
+    "priceTimestamp": 1703261400000   // last time when prices were updated
     "assets": [
       {
         "id": "liberdus",
@@ -126,34 +102,20 @@ LocalStore key "username_netid"; gets read into myData global variable
         "contract": "",
         "price": 0.032,
         "networth": 382.5  // this is the networth of the asset in fiat currency; USD for now
-        "balance": 28.4,   // this is the amount of the asset in all addresses
-        "addresses": [
-          {
-            "address": "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3",
-            "balance": 26.4,   // this is the amount of the asset in this address
-            "history": [
-              {
-                "txid": "fbf6bc33effa11172e9b370129dcc9a00311006581c4436af7b8b5b24d9ffd8c",
-                "amount": 4000000000000000000,  // this is the amount in wei as a big int
-                "sign": -1,                     // -1 for send; 1 for received
-                "timestamp": 1703261400000,
-                "address": "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-                "memo": "for lunch"
-              }
-            ]
-          }
-        ]
+        "balance": {value: 34n*10n**18n, dataType: "bi"},   // this is the amount of the asset
       }
     ],
-    "keys": {   // even though we call it keys, it has other info related to the address; should have called it addresses
-      "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3": {
-        "address": "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3",
-        "public": "93a3ac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46"
-        "secret": "b829475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
-        "type": "secp256k1",
-        "chatTimestamp": 1703261400000
+    "history": [
+      {
+        "txid": "fbf6bc33effa11172e9b370129dcc9a00311006581c4436af7b8b5b24d9ffd8c",
+        "asset": "LIB",   // TODO add this field; maybe we should add the id field and keep a map of known assets
+        "amount": 4000000000000000000,  // this is the amount in wei as a big int
+        "sign": -1,                     // -1 for send; 1 for received
+        "timestamp": 1703261400000,
+        "address": "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266",    // either the from or to address
+        "memo": "for lunch"
       }
-    }
+    ]
   },
   "state":{
     "unread": 1

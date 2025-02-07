@@ -1,4 +1,86 @@
-const version = '1.0.9';
+// Check if there is a newer version and load that using a new random url to avoid cache hits
+//   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
+const version = 't'   // Also increment this when you increment version.html
+let myVersion = '0'
+async function checkVersion(){
+    myVersion = localStorage.getItem('version') || '0';
+    let newVersion;
+    try {
+        const response = await fetch(`version.html?${Date.now()}`);
+        if (!response.ok) throw new Error('Version check failed');
+        newVersion = await response.text();
+    } catch (error) {
+        console.error('Version check failed:', error);
+        alert('Version check failed. Your Internet connection may be down.')
+        newVersion = myVersion  // Allow continuing with the old version
+    }
+//console.log('myVersion < newVersion then reload', myVersion, newVersion)
+console.log(parseInt(myVersion.replace(/\D/g, '')), parseInt(newVersion.replace(/\D/g, '')))
+    if (parseInt(myVersion.replace(/\D/g, '')) < parseInt(newVersion.replace(/\D/g, ''))) {
+        if (parseInt(myVersion.replace(/\D/g, '')) > 0){
+            alert('Updating to new version: ' + newVersion)
+        }
+        localStorage.setItem('version', newVersion); // Save new version
+        forceReload(['index.html','styles.css','app.js','lib.js', 'network.js'])
+        const newUrl = window.location.href
+//console.log('reloading', newUrl)
+        window.location.replace(newUrl);
+    }
+}
+
+// Usage examples:
+/*
+// These will all work:
+forceReload([
+    'images/logo.png',           // Relative to current path
+    '/styles/main.css',          // Relative to domain root
+    '../scripts/app.js',         // Parent directory
+    './data/config.json',        // Same directory
+    'https://api.example.com/data'  // Absolute URL
+]);
+*/
+async function forceReload(urls) {
+    try {
+        // Convert relative URLs to absolute
+        const absoluteUrls = urls.map(url => {
+            if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//')) {
+                return url;
+            }
+            // If it starts with /, it's relative to domain root
+            if (url.startsWith('/')) {
+                return `${window.location.origin}${url}`;
+            }
+            // Otherwise, it's relative to current path
+            const base = `${window.location.origin}${window.location.pathname}`;
+            return new URL(url, base).href;
+        });
+        // Remove from all browser caches
+        if (window.caches) {
+            const cacheKeys = await caches.keys();
+            for (const cacheKey of cacheKeys) {
+                const cache = await caches.open(cacheKey);
+                for (const url of absoluteUrls) {
+                    await cache.delete(url);
+                }
+            }
+        }
+        // Fetch with cache-busting headers
+        const fetchPromises = absoluteUrls.map(url => 
+            fetch(url, {
+                cache: 'reload',
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+            })
+        );
+        const results = await Promise.all(fetchPromises);
+        return results;
+    } catch (error) {
+        console.error('Force reload failed:', error);
+        throw error;
+    }
+}
 
 // https://github.com/paulmillr/noble-secp256k1
 // https://github.com/paulmillr/noble-secp256k1/raw/refs/heads/main/index.js
@@ -35,9 +117,14 @@ import { normalizeUsername, generateIdenticon, formatTime,
 const myHashKey = hex2bin('69fa4195670576c0160d660c3be36556ff8d504725be8a59b5a96509e0c994bc')
 const weiDigits = 18; 
 const wei = 10n**BigInt(weiDigits)
+const pollIntervalNormal = 30000 // in millisconds
+const pollIntervalChatting = 5000  // in millseconds
+//network.monitor.url = "http://test.liberdus.com:3000"    // URL of the monitor server
+//network.explorer.url = "http://test.liberdus.com:6001"   // URL of the chain explorer
 
-let myAccount = null
+
 let myData = null
+let myAccount = null        // this is set to myData.account for convience
 
 // TODO - get the parameters from the network
 // mock network parameters
@@ -128,15 +215,17 @@ function openSignInModal() {
             notFoundMessage.style.display = 'none';
             return;
         }
-        const address = netidAccounts.usernames[username].keys.address;
+//        const address = netidAccounts.usernames[username].keys.address;
+        const address = netidAccounts.usernames[username].address;
         const availability = await checkUsernameAvailability(username, address);
 //console.log('usernames.length', usernames.length);
 //console.log('availability', availability);
         const removeButton = document.getElementById('removeAccountButton');
         if (usernames.length === 1 && availability === 'mine') {
-            myAccount = netidAccounts.usernames[username];
+//            myAccount = netidAccounts.usernames[username];
             myData = parse(localStorage.getItem(`${username}_${netid}`));
-            if (!myData) { myData = newDataRecord(myAccount); }
+            if (!myData) { console.log('Account data not found'); return }
+            myAccount = myData.account
             closeSignInModal();
             document.getElementById('welcomeScreen').style.display = 'none';
             switchView('chats');
@@ -168,6 +257,7 @@ function openSignInModal() {
             notFoundMessage.style.display = 'inline';
         }
     });
+    // TODO move the removeButton stuff to its own handleRemoveButton function; it does not belong here
     // Add event listener for remove account button
     const removeButton = document.getElementById('removeAccountButton');
     removeButton.addEventListener('click', async () => {
@@ -348,6 +438,7 @@ async function handleCreateAccount(event) {
     myAccount = {
         netid,
         username,
+        chatTimestamp: 0,
         keys: {
             address: addressHex,
             public: publicKeyHex,
@@ -369,7 +460,8 @@ async function handleCreateAccount(event) {
     }
 
     // Store updated accounts back in localStorage
-    existingAccounts.netids[netid].usernames[username] = myAccount;
+//    existingAccounts.netids[netid].usernames[username] = myAccount;
+    existingAccounts.netids[netid].usernames[username] = {address: myAccount.keys.address};
     localStorage.setItem('accounts', stringify(existingAccounts));
     
     // Store the account data in localStorage
@@ -415,10 +507,9 @@ async function handleSignIn(event) {
         return;
     }
 
-    // Use existing account
-    myAccount = existingAccounts.netids[netid].usernames[username];
     myData = parse(localStorage.getItem(`${username}_${netid}`));
-    if (!myData) { myData = newDataRecord(myAccount); }
+    if (!myData) { console.log('Account data not found'); return }
+    myAccount = myData.account;
     
     // Close modal and proceed to app
     closeSignInModal();
@@ -438,6 +529,7 @@ function newDataRecord(myAccount){
         wallet: {
             networth: 0.0,
             timestamp: 0,           // last balance update timestamp
+            priceTimestamp: 0,      // last time when prices were updated
             assets: [
                 {
                     id: "liberdus",
@@ -445,21 +537,19 @@ function newDataRecord(myAccount){
                     symbol: "LIB",
                     img: "images/lib.png",
                     chainid:2220,
-                    contract: "",
+                    contract: "041e48a5b11c29fdbd92498eb05573c52728398c",
                     price: 1.0,
                     balance: 0n,
                     networth: 0.0,
-                    addresses: [
+                    addresses: [            // TODO remove addresses and only the address in myData.account.keys.address
                         {
                             address: myAccount.keys.address,
                             balance: 0n,
-                            history: [],
                         }
                     ]
                 }
             ],
-            keys: {
-            }
+            history: [],
         },
         state: {
             unread: 0
@@ -468,12 +558,6 @@ function newDataRecord(myAccount){
             encrypt: true,
             toll: 1
         }
-    }
-    myData.wallet.keys[`${myAccount.keys.address}`] = {
-        address: myAccount.keys.address,
-        public: myAccount.keys.public,
-        secret: myAccount.keys.secret,
-        type: myAccount.keys.type
     }
     return myData
 }
@@ -486,16 +570,39 @@ function getColorFromHash(hash, index) {
     return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
 
+// Function to open the About modal
+function openAboutModal() {
+    document.getElementById('aboutModal').classList.add('active');
+    document.getElementById('versionDisplayAbout').textContent = myVersion + ' '+version;
+    document.getElementById('networkNameAbout').textContent = network.name;
+    document.getElementById('netIdAbout').textContent = network.netid;
+}
+
+// Function to close the About modal
+function closeAboutModal() {
+    document.getElementById('aboutModal').classList.remove('active');
+}
+
 // Load saved account data and update chat list on page load
-document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('versionDisplay').textContent = version;
+document.addEventListener('DOMContentLoaded', async () => {
+
+    checkVersion()
+    document.getElementById('versionDisplay').textContent = myVersion + ' '+version;
+    document.getElementById('networkNameDisplay').textContent = network.name;
+
+    // Initialize service worker first
+    if ('serviceWorker' in navigator) {
+        await registerServiceWorker();
+        setupServiceWorkerMessaging(); 
+        setupAppStateManagement();
+    }
 
     // Add unload handler to save myData
-    window.addEventListener('unload', () => {
-        if (myData && myAccount) {
-            localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
-        }
-    });
+    window.addEventListener('unload', handleUnload)
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    window.addEventListener('pagehide', handlePageHide)
+    window.addEventListener('popstate', handlePopState)
+
     
     // Check for existing accounts and arrange welcome buttons
     const usernames = getAvailableUsernames()
@@ -525,11 +632,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Add event listeners
     document.getElementById('search').addEventListener('click', () => {
-        // TODO: Implement search functionality
+        console.log("poll next, last, timer", pollChats.nextPoll, pollChats.lastPoll, pollChats.timer)
     });
     document.getElementById('toggleMenu').addEventListener('click', toggleMenu);
     document.getElementById('closeMenu').addEventListener('click', toggleMenu);
-    
+
+    // About Modal
+    document.getElementById('openAbout').addEventListener('click', openAboutModal);
+    document.getElementById('closeAboutModal').addEventListener('click', closeAboutModal);
+
     // Sign In Modal
     signInBtn.addEventListener('click', openSignInModal);
     document.getElementById('closeSignInModal').addEventListener('click', closeSignInModal);
@@ -552,9 +663,14 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Account Form Modal
     document.getElementById('openAccountForm').addEventListener('click', openAccountForm);
+    document.getElementById('openExplorer').addEventListener('click', () => {
+        window.open(network.explorer.url, '_blank');
+    });
+    document.getElementById('openMonitor').addEventListener('click', () => {
+        window.open(network.monitor.url, '_blank');
+    });
     document.getElementById('closeAccountForm').addEventListener('click', closeAccountForm);
     document.getElementById('accountForm').addEventListener('submit', handleAccountUpdate);
-    
 //            document.getElementById('openImportFormMenu').addEventListener('click', openImportFileModal);
     document.getElementById('closeImportForm').addEventListener('click', closeImportFileModal);
     document.getElementById('importForm').addEventListener('submit', handleImportFile);
@@ -571,27 +687,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // TODO add comment about which send form this is for chat or assets
     document.getElementById('openSendModal').addEventListener('click', openSendModal);
     document.getElementById('closeSendModal').addEventListener('click', closeSendModal);
-    document.getElementById('sendForm').addEventListener('submit', handleSend);
+    document.getElementById('sendForm').addEventListener('submit', handleSendAsset);
+
     document.getElementById('sendAsset').addEventListener('change', () => {
-        updateSendAddresses();
+//        updateSendAddresses();
         updateAvailableBalance();
     });
-    document.getElementById('sendFromAddress').addEventListener('change', updateAvailableBalance);
     document.getElementById('availableBalance').addEventListener('click', fillAmount);
     
     // Add blur event listener for recipient validation
-    document.getElementById('sendToAddress').addEventListener('blur', handleSendToAddressValidation);
+//    document.getElementById('sendToAddress').addEventListener('blur', handleSendToAddressValidation);
     
     document.getElementById('openReceiveModal').addEventListener('click', openReceiveModal);
     document.getElementById('closeReceiveModal').addEventListener('click', closeReceiveModal);
-    document.getElementById('receiveAsset').addEventListener('change', updateReceiveAddresses);
-    document.getElementById('receiveAddress').addEventListener('change', updateDisplayAddress);
     document.getElementById('copyAddress').addEventListener('click', copyAddress);
     
     document.getElementById('openHistoryModal').addEventListener('click', openHistoryModal);
     document.getElementById('closeHistoryModal').addEventListener('click', closeHistoryModal);
     document.getElementById('historyAsset').addEventListener('change', updateHistoryAddresses);
-    document.getElementById('historyAddress').addEventListener('change', updateTransactionHistory);
     
     document.getElementById('switchToChats').addEventListener('click', () => switchView('chats'));
     document.getElementById('switchToContacts').addEventListener('click', () => switchView('contacts'));
@@ -603,7 +716,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Add refresh balance button handler
     document.getElementById('refreshBalance').addEventListener('click', async () => {
-        await updateWalletBalances();
+//        await updateWalletBalances();
         updateWalletView();
     });
     
@@ -611,37 +724,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('newChatButton').addEventListener('click', openNewChatModal);
     document.getElementById('closeNewChatModal').addEventListener('click', closeNewChatModal);
     document.getElementById('newChatForm').addEventListener('submit', handleNewChat);
-    
-    // Add blur event listener to recipient input for validation
-    let recipientCheckTimeout;
-    document.getElementById('recipient').addEventListener('change', (e) => {
-        const input = e.target.value.trim();
-        const errorElement = document.getElementById('recipientError');
-        
-        // Clear previous timeout
-        if (recipientCheckTimeout) {
-            clearTimeout(recipientCheckTimeout);
-        }
-        
-        // Reset display
-        errorElement.style.display = 'none';
-        
-        if (input.length >= 3 && !input.startsWith('0x')) {
-            // Check network availability after 3 seconds
-            recipientCheckTimeout = setTimeout(async () => {
-                const taken = await checkUsernameAvailability(input);
-                if (taken == 'taken') {
-                    errorElement.textContent = 'found';
-                    errorElement.style.color = '#28a745';  // Green color for success
-                    errorElement.style.display = 'inline';
-                } else if (taken == 'available') {
-                    showRecipientError('not found');
-                } else {
-                    showRecipientError('network error');
-                }
-            }, 3000);
-        }
-    });
 
     // Add input event listener for message textarea auto-resize
     document.querySelector('.message-input')?.addEventListener('input', function() {
@@ -649,6 +731,71 @@ document.addEventListener('DOMContentLoaded', () => {
         this.style.height = Math.min(this.scrollHeight, 120) + 'px';
     });
 
+    setupAddToHomeScreen()
+});
+
+
+function handleUnload(e){
+    console.log('in handleUnload')
+    if (handleSignOut.exit){ 
+//        window.removeEventListener('unload', handleUnload)
+        return 
+    } // User selected to Signout; state was already saved
+    else{
+        saveState()
+//        e.preventDefault()
+    }
+}
+
+
+// Add unload handler to save myData
+function handleBeforeUnload(e){
+console.log('in handleBeforeUnload', e)
+    saveState()
+    if (handleSignOut.exit){ 
+        window.removeEventListener('beforeunload', handleBeforeUnload)
+        return 
+    }  // user selected to Signout; state was already saved
+console.log('stop back button')
+    e.preventDefault();
+//    const shouldLeave = confirm('Do you want to leave this page?');
+//    if (shouldLeave == false) {
+        history.pushState(null, '', window.location.href);
+//    }
+}
+
+// handle page hide
+function handlePageHide(e) {
+    console.log('in handlePageHide', e);
+    saveState();
+    if (handleSignOut.exit) {
+        window.removeEventListener('pagehide', handlePageHide);
+        return;
+    }
+}
+
+// handle back button
+function handlePopState(e) {
+    console.log('in handlePopState', e);
+    saveState();
+    if (handleSignOut.exit) {
+        window.removeEventListener('popstate', handlePopState);
+        return;
+    }
+    // Prevent back navigation
+    history.pushState(null, '', window.location.href);
+}
+
+
+function saveState(){
+console.log('in saveState')
+    if (myData && myAccount && myAccount.username && myAccount.netid) {
+console.log('saving state')
+        localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
+    }
+}
+
+function setupAddToHomeScreen(){
     // Add to home screen functionality
     let deferredInstallPrompt;
     let addToHomeScreenButton = document.getElementById('addToHomeScreenButton');
@@ -712,7 +859,7 @@ document.addEventListener('DOMContentLoaded', () => {
             addToHomeScreenButton = document.createElement('button');
             addToHomeScreenButton.id = 'addToHomeScreenButton';
             addToHomeScreenButton.className = 'secondary-button';
-            addToHomeScreenButton.textContent = 'Add to Home Screen';
+            addToHomeScreenButton.textContent = 'Install';
             welcomeButtons.appendChild(addToHomeScreenButton);
         }
     }
@@ -818,13 +965,13 @@ document.addEventListener('DOMContentLoaded', () => {
             updateButtonVisibility();
         });
     }
-});
+}
 
 // Update chat list UI
 async function updateChatList(force) {
     let gotChats = 0
-    if (myAccount && myAccount.keys && myData && myData.wallet && myData.wallet.keys) {
-        gotChats = await getChats(myData.wallet.keys[myAccount.keys.address]);     // populates myData with new chat messages
+    if (myAccount && myAccount.keys) {
+        gotChats = await getChats(myAccount.keys);     // populates myData with new chat messages
     }
 console.log('force gotChats', force, gotChats)
     if (! (force || gotChats)){ return }
@@ -851,6 +998,7 @@ console.log('updateChatList chats.length', chats.length)
         const identicon = await generateIdenticon(chat.address);
         const contact = contacts[chat.address]
         const message = contact.messages.at(-1)
+        if (!message){ return '' }
         return `
             <li class="chat-item">
                 <div class="chat-avatar">${identicon}</div>
@@ -882,8 +1030,10 @@ async function updateWalletBalances() {
         console.error('No wallet data available');
         return;
     }
+    await updateAssetPricesIfNeeded()
+    const now = Date.now()
     if (!myData.wallet.timestamp){myData.wallet.timestamp = 0}
-    if (Date.now() - myData.wallet.timestamp < 5000){return}
+    if (now - myData.wallet.timestamp < 5000){return}
 
     // TODO - first update the asset prices from a public API
 
@@ -917,7 +1067,7 @@ console.log('balance', data)
 
     // Update total wallet balance
     myData.wallet.networth = totalWalletNetworth;
-    myData.wallet.timestamp = Date.now()
+    myData.wallet.timestamp = now
 }
 
 async function switchView(view) {
@@ -936,9 +1086,9 @@ async function switchView(view) {
     // Update header with username if signed in
     const appName = document.querySelector('.app-name');
     if (myAccount && myAccount.username) {
-        appName.textContent = `Liberdus - ${myAccount.username}`;
+        appName.textContent = `${myAccount.username}`;
     } else {
-        appName.textContent = 'Liberdus';
+        appName.textContent = '';
     }   
 
     // Show/hide new chat button
@@ -952,10 +1102,12 @@ async function switchView(view) {
     // Update lists when switching views
     if (view === 'chats') {
         await updateChatList('force');
+        pollChatInterval(pollIntervalNormal)
     } else if (view === 'contacts') {
         await updateContactsList();
     } else if (view === 'wallet') {
-        await updateWalletBalances();
+//        await updateAssetPricesIfNeeded(); // New function to update asset prices
+//        await updateWalletBalances();
         await updateWalletView();
     }
     
@@ -1208,17 +1360,62 @@ async function handleRemoveAccount() {
         delete existingAccounts.netids[netid].usernames[myAccount.username];
         localStorage.setItem('accounts', stringify(existingAccounts));
     }
-
     // Remove the account data from localStorage
     localStorage.removeItem(`${myAccount.username}_${netid}`);
 
     // Reload the page to redirect to welcome screen
+    myData = null       // need to delete this so that the reload does not save the data into localStore again
     window.location.reload();
 }
 
 function openNewChatModal() {
     document.getElementById('newChatModal').classList.add('active');
     document.getElementById('newChatButton').classList.remove('visible');
+
+    const usernameInput = document.getElementById('chatRecipient');
+    const usernameAvailable = document.getElementById('chatRecipientError');
+    const submitButton = document.querySelector('#newChatForm button[type="submit"]');
+    usernameAvailable.style.display = 'none';
+    submitButton.disabled = true;
+// Check availability on input changes
+    let checkTimeout;
+    usernameInput.addEventListener('input', (e) => {
+        const username = normalizeUsername(e.target.value);
+        
+        // Clear previous timeout
+        if (checkTimeout) {
+            clearTimeout(checkTimeout);
+        }
+                
+        // Check if username is too short
+        if (username.length < 3) {
+            usernameAvailable.textContent = 'too short';
+            usernameAvailable.style.color = '#dc3545';
+            usernameAvailable.style.display = 'inline';
+            return;
+        }
+        
+        // Check network availability
+        checkTimeout = setTimeout(async () => {
+            const taken = await checkUsernameAvailability(username, myAccount.keys.address);
+            if (taken == 'taken') {
+                usernameAvailable.textContent = 'found';
+                usernameAvailable.style.color = '#28a745';
+                usernameAvailable.style.display = 'inline';
+                submitButton.disabled = false;
+            } else if ((taken == 'available') || (taken == 'mine')) {
+                usernameAvailable.textContent = 'not found';
+                usernameAvailable.style.color = '#dc3545';
+                usernameAvailable.style.display = 'inline';
+                submitButton.disabled = true;
+            } else {
+                usernameAvailable.textContent = 'network error';
+                usernameAvailable.style.color = '#dc3545';
+                usernameAvailable.style.display = 'inline';
+                submitButton.disabled = true;
+            }
+        }, 1000);
+    });    
 }
 
 function closeNewChatModal() {
@@ -1231,7 +1428,7 @@ function closeNewChatModal() {
 
 // Show error message in the new chat form
 function showRecipientError(message) {
-    const errorElement = document.getElementById('recipientError');
+    const errorElement = document.getElementById('chatRecipientError');
     errorElement.textContent = message;
     errorElement.style.color = '#dc3545';  // Always red for errors
     errorElement.style.display = 'inline';
@@ -1284,13 +1481,13 @@ async function handleSendToAddressValidation(e) {
 
 // Hide error message in the new chat form
 function hideRecipientError() {
-    const errorElement = document.getElementById('recipientError');
+    const errorElement = document.getElementById('chatRecipientError');
     errorElement.style.display = 'none';
 }
 
 async function handleNewChat(event) {
     event.preventDefault();
-    const input = document.getElementById('recipient').value.trim();
+    const input = document.getElementById('chatRecipient').value.trim();
     let recipientAddress;
     let username;
     
@@ -1333,7 +1530,7 @@ async function handleNewChat(event) {
     
     // Check if contact exists
     if (!chatsData.contacts[recipientAddress]) { createNewContact(recipientAddress) }
-    chatsData.contacts[recipientAddress].username = !input.startsWith('0x') ? username : undefined
+    chatsData.contacts[recipientAddress].username = username
 
 // TODO - maybe we don't need this; this is just adding a blank entry into the chats table
     // Add to chats if not already present
@@ -1350,6 +1547,7 @@ async function handleNewChat(event) {
     openChatModal(recipientAddress);
 }
 
+// create new contact
 function createNewContact(addr, username){
     const address = normalizeAddress(addr)
     if (myData.contacts[address]){ return }  // already exists
@@ -1404,7 +1602,7 @@ function openChatModal(address) {
     // Setup to update new messages
     appendChatModal.address = address
     appendChatModal.len = messages.length
-    pollChatInterval(5000) // poll for messages every 5 seconds
+    pollChatInterval(pollIntervalChatting) // poll for messages at a faster rate
 }
 
 function appendChatModal(){
@@ -1446,7 +1644,7 @@ function closeChatModal() {
     }
     appendChatModal.address = null
     appendChatModal.len = 0
-    pollChatInterval(0)
+    pollChatInterval(pollIntervalNormal) // back to polling at slower rate
 }
 
 function openReceiveModal() {
@@ -1456,12 +1654,6 @@ function openReceiveModal() {
     // Get wallet data
     const walletData = myData.wallet
 
-    // Populate assets dropdown
-    const assetSelect = document.getElementById('receiveAsset');
-    assetSelect.innerHTML = walletData.assets.map((asset, index) => 
-        `<option value="${index}">${asset.name} (${asset.symbol})</option>`
-    ).join('');
-    
     // Update addresses for first asset
     updateReceiveAddresses();
 }
@@ -1471,59 +1663,18 @@ function closeReceiveModal() {
 }
 
 function updateReceiveAddresses() {
-    const walletData = myData.wallet
-    const assetIndex = document.getElementById('receiveAsset').value;
-    const addressSelect = document.getElementById('receiveAddress');
-
-    // Check if we have any assets
-    if (!walletData.assets || walletData.assets.length === 0) {
-        addressSelect.innerHTML = '<option value="">No addresses available</option>';
-        return;
-    }
-
-    const asset = walletData.assets[assetIndex];
-    
-    // Check if asset exists and has addresses
-    if (!asset || !asset.addresses || asset.addresses.length === 0) {
-        addressSelect.innerHTML = '<option value="">No addresses available</option>';
-        return;
-    }
-    
-    // Populate addresses dropdown
-    addressSelect.innerHTML = asset.addresses.map((addr, index) =>
-        `<option value="${index}">${addr.address} (${(Number(addr.balance)/Number(wei)).toPrecision(4)} ${asset.symbol})</option>`
-    ).join('');
-
     // Update display address
     updateDisplayAddress();
 }
 
 function updateDisplayAddress() {
-    const walletData = myData.wallet
-    
-    const assetIndex = document.getElementById('receiveAsset').value;
-    const addressIndex = document.getElementById('receiveAddress').value;
     const displayAddress = document.getElementById('displayAddress');
     const qrcodeContainer = document.getElementById('qrcode');
     
     // Clear previous QR code
     qrcodeContainer.innerHTML = '';
 
-    // Check if we have any assets
-    if (!walletData.assets || walletData.assets.length === 0) {
-        displayAddress.textContent = 'No address available';
-        return;
-    }
-
-    const asset = walletData.assets[assetIndex];
-    
-    // Check if asset exists and has addresses
-    if (!asset || !asset.addresses || asset.addresses.length === 0) {
-        displayAddress.textContent = 'No address available';
-        return;
-    }
-
-    const address = asset.addresses[addressIndex].address;
+    const address = myAccount.keys.address;
     displayAddress.textContent = '0x' + address;
     
     // Update QR code
@@ -1552,15 +1703,61 @@ function openSendModal() {
     const modal = document.getElementById('sendModal');
     modal.classList.add('active');
     
+    const usernameInput = document.getElementById('sendToAddress');
+    const usernameAvailable = document.getElementById('sendToAddressError');
+    const submitButton = document.querySelector('#sendForm button[type="submit"]');
+    usernameAvailable.style.display = 'none';
+    submitButton.disabled = true;
+// Check availability on input changes
+    let checkTimeout;
+    usernameInput.addEventListener('input', (e) => {
+        const username = normalizeUsername(e.target.value);
+        
+        // Clear previous timeout
+        if (checkTimeout) {
+            clearTimeout(checkTimeout);
+        }
+                
+        // Check if username is too short
+        if (username.length < 3) {
+            usernameAvailable.textContent = 'too short';
+            usernameAvailable.style.color = '#dc3545';
+            usernameAvailable.style.display = 'inline';
+            return;
+        }
+        
+        // Check network availability
+        checkTimeout = setTimeout(async () => {
+            const taken = await checkUsernameAvailability(username, myAccount.keys.address);
+            if (taken == 'taken') {
+                usernameAvailable.textContent = 'found';
+                usernameAvailable.style.color = '#28a745';
+                usernameAvailable.style.display = 'inline';
+                submitButton.disabled = false;
+            } else if ((taken == 'available') || (taken == 'mine')) {
+                usernameAvailable.textContent = 'not found';
+                usernameAvailable.style.color = '#dc3545';
+                usernameAvailable.style.display = 'inline';
+                submitButton.disabled = true;
+            } else {
+                usernameAvailable.textContent = 'network error';
+                usernameAvailable.style.color = '#dc3545';
+                usernameAvailable.style.display = 'inline';
+                submitButton.disabled = true;
+            }
+        }, 1000);
+    });
+
+
     // Get wallet data
-    const walletData = myData.wallet
-    
+    const wallet = myData.wallet
     // Populate assets dropdown
     const assetSelect = document.getElementById('sendAsset');
-    assetSelect.innerHTML = walletData.assets.map((asset, index) => 
+    assetSelect.innerHTML = wallet.assets.map((asset, index) => 
         `<option value="${index}">${asset.name} (${asset.symbol})</option>`
     ).join('');
-    
+
+
     // Update addresses for first asset
     updateSendAddresses();
 }
@@ -1574,7 +1771,7 @@ async function closeSendModal() {
 function updateSendAddresses() {
     const walletData = myData.wallet
     const assetIndex = document.getElementById('sendAsset').value;
-    const addressSelect = document.getElementById('sendFromAddress');
+//    const addressSelect = document.getElementById('sendFromAddress');
 
     // Check if we have any assets
     if (!walletData.assets || walletData.assets.length === 0) {
@@ -1583,20 +1780,6 @@ function updateSendAddresses() {
         return;
     }
 
-    const asset = walletData.assets[assetIndex];
-    
-    // Check if asset exists and has addresses
-    if (!asset || !asset.addresses || asset.addresses.length === 0) {
-        addressSelect.innerHTML = '<option value="">No addresses available</option>';
-        updateAvailableBalance();
-        return;
-    }
-    
-    // Populate addresses dropdown
-    addressSelect.innerHTML = asset.addresses.map((addr, index) =>
-        `<option value="${index}">${addr.address} (${(Number(addr.balance)/Number(wei)).toPrecision(4)} ${asset.symbol})</option>`
-    ).join('');
-    
     // Update available balance display
     updateAvailableBalance();
 }
@@ -1604,7 +1787,7 @@ function updateSendAddresses() {
 function updateAvailableBalance() {
     const walletData = myData.wallet
     const assetIndex = document.getElementById('sendAsset').value;
-    const addressIndex = document.getElementById('sendFromAddress').value;
+
     const balanceAmount = document.getElementById('balanceAmount');
     const balanceSymbol = document.getElementById('balanceSymbol');
 
@@ -1617,21 +1800,7 @@ function updateAvailableBalance() {
 
     const asset = walletData.assets[assetIndex];
     
-    // Check if asset exists and has addresses
-    if (!asset || !asset.addresses || asset.addresses.length === 0) {
-        balanceAmount.textContent = '0.00';
-        balanceSymbol.textContent = asset ? asset.symbol : '';
-        return;
-    }
-
-    const fromAddress = asset.addresses[addressIndex];
-    if (!fromAddress) {
-        balanceAmount.textContent = '0.00';
-        balanceSymbol.textContent = asset.symbol;
-        return;
-    }
-    
-    balanceAmount.textContent = big2str(fromAddress.balance, weiDigits);
+    balanceAmount.textContent = big2str(asset.balance, weiDigits);
     balanceSymbol.textContent = asset.symbol;
 }
 
@@ -1640,17 +1809,19 @@ function fillAmount() {
     document.getElementById('sendAmount').value = amount;
 }
 
-async function handleSend(event) {
+// The user has filled out the form to send assets to a recipient and clicked the Send button
+// The recipient account may not exist in myData.contacts and might have to be created
+async function handleSendAsset(event) {
     event.preventDefault();
     
-    const walletData = myData.wallet;
-    const assetIndex = document.getElementById('sendAsset').value;
-    const addressIndex = document.getElementById('sendFromAddress').value;
-    const asset = walletData.assets[assetIndex];
-    const fromAddress = asset.addresses[addressIndex];
+    const wallet = myData.wallet;
+    const assetIndex = document.getElementById('sendAsset').value;  // TODO include the asset id and symbol in the tx
+    const fromAddress = myAccount.keys.address;
     const amount = bigxnum2big(wei, document.getElementById('sendAmount').value);
-    const recipientInput = document.getElementById('sendToAddress').value.trim();
-    const memo = document.getElementById('sendMemo').value || '';
+    const username = normalizeUsername(document.getElementById('sendToAddress').value);
+    const memoIn = document.getElementById('sendMemo').value || '';
+    const memo = memoIn.trim()
+    const keys = myAccount.keys;
     let toAddress;
 
     // Validate amount
@@ -1659,55 +1830,108 @@ async function handleSend(event) {
         return;
     }
 
-    // Handle recipient input - could be username or address
-    if (recipientInput.startsWith('0x')) {
-        if (!isValidEthereumAddress(recipientInput)) {
-            alert('Invalid address format');
-            return;
-        }
-        toAddress = normalizeAddress(recipientInput);
-    } else {
-        if (recipientInput.length < 3) {
-            alert('Username too short');
-            return;
-        }
-
-        // Look up username on network
-        const usernameBytes = utf82bin(recipientInput);
-        const usernameHash = blake.blake2bHex(usernameBytes, myHashKey, 32);
-        
-        try {
-            const randomGateway = network.gateways[Math.floor(Math.random() * network.gateways.length)];
-            const response = await fetch(`${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}/address/${usernameHash}`);
-            const data = await response.json();
-            
-            if (!data || !data.address) {
-                alert('Username not found');
-                return;
-            }
-            toAddress = normalizeAddress(data.address);
-        } catch (error) {
-            console.error('Error looking up username:', error);
-            alert('Error looking up username');
-            return;
-        }
+    // Validate username - must be username; address not supported
+    if (username.startsWith('0x')) {
+        alert('Address not supported; enter username instead.');
+        return;
     }
-
-    // Get sender's keys from wallet
-    const keys = walletData.keys[fromAddress.address];
-    if (!keys) {
-        alert('Keys not found for sender address');
+    if (username.length < 3) {
+        alert('Username too short');
+        return;
+    }
+    try {
+        // Look up username on network
+        const usernameBytes = utf82bin(username);
+        const usernameHash = blake.blake2bHex(usernameBytes, myHashKey, 32);
+/*
+        const randomGateway = network.gateways[Math.floor(Math.random() * network.gateways.length)];
+        const response = await fetch(`${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}/address/${usernameHash}`);
+        const data = await response.json();
+*/
+        const data = await queryNetwork(`/address/${usernameHash}`)        
+        if (!data || !data.address) {
+            alert('Username not found');
+            return;
+        }
+        toAddress = normalizeAddress(data.address);
+    } catch (error) {
+        console.error('Error looking up username:', error);
+        alert('Error looking up username');
         return;
     }
 
+    // Get recipient's public key from contacts
+    let recipientPubKey = myData.contacts[toAddress]?.public;
+    if (!recipientPubKey) {
+        const recipientInfo = await queryNetwork(`/account/${longAddress(currentAddress)}`)
+        if (!recipientInfo?.account?.publicKey){
+            console.log(`no public key found for recipient ${currentAddress}`)
+            return
+        }
+        recipientPubKey = recipientInfo.account.publicKey
+        myData.contacts[toAddress].public = recipientPubKey
+    }
+
+    // Generate shared secret using ECDH and take first 32 bytes
+    const dhkey = secp.getSharedSecret(
+        hex2bin(keys.secret),
+        hex2bin(recipientPubKey)
+    ).slice(1, 33);
+
+    // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
+    // Encrypt message using shared secret
+    let encMemo = ''
+    if (memo){
+        encMemo = encryptChacha(dhkey, memo)
+    }
+
+    // Create sender info object
+    const senderInfo = {
+        username: myAccount.username,
+        name: myData.account.name,
+        email: myData.account.email,
+        phone: myData.account.phone,
+        linkedin: myData.account.linkedin,
+        x: myData.account.x
+    };
+    // Encrypt sender info
+    const encSenderInfo = encryptChacha(dhkey, stringify(senderInfo));
+
+    // Create message payload
+    const payload = {
+        message: encMemo,  // we need to call this field message, so we can use decryptMessage()
+        senderInfo: encSenderInfo,
+        encrypted: true,
+        encryptionMethod: 'xchacha20poly1305',
+        sent_timestamp: Date.now()
+    };
+
     try {
-        // Send the transaction using postTransferAsset
-        const response = await postTransferAsset(toAddress, amount, memo, keys);
+console.log('payload is', payload)
+        // Send the transaction using postAssetTransfer
+        const response = await postAssetTransfer(toAddress, amount, payload, keys);
         
         if (!response || !response.result || !response.result.success) {
             alert('Transaction failed: ' + response.result.reason);
             return;
         }
+
+        // Create contact if it doesn't exit
+        if (!myData.contacts[toAddress].messages) {
+            createNewContact(toAddress)
+            myData.contacts[toAddress].username = normalizeUsername(recipientInput)
+        }
+
+        // Add transaction to history
+        const newPayment = {
+            txid: response.txid,
+            amount: amount,
+            sign: -1,
+            timestamp: Date.now(),
+            address: toAddress,
+            memo: memo
+        };
+        wallet.history.unshift(newPayment);
 
 // Don't try to update the balance here; the tx might not have gone through; let user refresh the balance from the wallet page
 // Maybe we can set a timer to check on the status of the tx using txid and update the balance if the txid was processed
@@ -1723,20 +1947,13 @@ async function handleSend(event) {
         document.getElementById('sendToAddress').value = '';
         document.getElementById('sendAmount').value = '';
         document.getElementById('sendMemo').value = '';
+        document.getElementById('sendToAddressError').style.display = 'none'
+/*
         const sendToAddressError = document.getElementById('sendToAddressError');
         if (sendToAddressError) {
             sendToAddressError.style.display = 'none';
         }
-        // Add transaction to history
-        const newTransaction = {
-            txid: response.txid,
-            amount: amount,
-            sign: -1,
-            timestamp: Date.now(),
-            address: toAddress,
-            memo: memo
-        };
-        fromAddress.history.unshift(newTransaction);
+*/
     } catch (error) {
         console.error('Transaction error:', error);
         alert('Transaction failed. Please try again.');
@@ -1744,10 +1961,16 @@ async function handleSend(event) {
 }
 
 function handleSignOut() {
+//    const shouldLeave = confirm('Do you want to leave this page?');
+//    if (shouldLeave == false) { return }
+
     // Save myData to localStorage if it exists
+    saveState()
+/*
     if (myData && myAccount) {
         localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
     }
+*/
 
     // Close all modals
     document.getElementById('menuModal').classList.remove('active');
@@ -1769,12 +1992,18 @@ function handleSignOut() {
     // Show welcome screen
     document.getElementById('welcomeScreen').style.display = 'flex';
     
+    handleSignOut.exit = true
+
     // Reload the page to get fresh welcome page
     window.location.reload();
 }
+handleSignOut.exit = false
 
 // Handle sending a message
+// The user has a chat modal open to a recipient and has typed a message anc clicked the Send button
+// The recipient account already exists in myData.contacts; it was created when the user submitted the New Chat form
 async function handleSendMessage() {
+    await updateChatList()  // before sending the message check and show received messages
     const messageInput = document.querySelector('.message-input');
     const message = messageInput.value.trim();
     if (!message) return;
@@ -1800,8 +2029,9 @@ async function handleSendMessage() {
         return;
     }
 
+///yyy
     // Get recipient's public key from contacts
-    let recipientPubKey = myData.contacts[currentAddress]?.keys?.public;
+    let recipientPubKey = myData.contacts[currentAddress]?.public;
     if (!recipientPubKey) {
         const recipientInfo = await queryNetwork(`/account/${longAddress(currentAddress)}`)
         if (!recipientInfo?.account?.publicKey){
@@ -1822,36 +2052,44 @@ async function handleSendMessage() {
     // Encrypt message using shared secret
     const encMessage = encryptChacha(dhkey, message)
 
+    // Create sender info object
+    const senderInfo = {
+        username: myAccount.username,
+        name: myData.account.name,
+        email: myData.account.email,
+        phone: myData.account.phone,
+        linkedin: myData.account.linkedin,
+        x: myData.account.x
+    };
+    // Encrypt sender info
+    const encSenderInfo = encryptChacha(dhkey, stringify(senderInfo));
+
+    // Create message payload
+    const payload = {
+        message: encMessage,
+        senderInfo: encSenderInfo,
+        encrypted: true,
+        encryptionMethod: 'xchacha20poly1305',
+        sent_timestamp: Date.now()
+    };
+
     try {
-        // Create sender info object
-        const senderInfo = {
-            username: myAccount.username,
-            name: myData.account.name,
-            email: myData.account.email,
-            phone: myData.account.phone,
-            linkedin: myData.account.linkedin,
-            x: myData.account.x
-        };
-
-        // Encrypt sender info
-        const encSenderInfo = encryptChacha(dhkey, stringify(senderInfo));
-
-        // Create message payload
-        const payload = {
-            message: encMessage,
-            senderInfo: encSenderInfo,
-            encrypted: true,
-            encryptionMethod: 'xchacha20poly1305',
-            sent_timestamp: Date.now()
-        };
 //console.log('payload is', payload)
-        // Send the message transaction using postSendMessage with default toll of 1
-        const response = await postSendMessage(currentAddress, payload, 1, keys);
+        // Send the message transaction using postChatMessage with default toll of 1
+        const response = await postChatMessage(currentAddress, payload, 1, keys);
         
         if (!response || !response.result || !response.result.success) {
             alert('Message failed to send: ' + (response.result?.reason || 'Unknown error'));
             return;
         }
+
+        // Not needed since it is created when the New Chat form was submitted
+/*
+        // Create contact if needed
+        if (!chatsData.contacts[currentAddress].messages) {   // TODO check if this is really needed; should be created already
+            createNewContact(currentAddress)
+        }
+*/
 
         // Create new message
         const newMessage = {
@@ -1860,12 +2098,6 @@ async function handleSendMessage() {
             sent_timestamp: Date.now(),
             my: true
         };
-
-        // Update contacts messages
-        if (!chatsData.contacts[currentAddress].messages) {
-            createNewContact(currentAddress)
-//            chatsData.contacts[currentAddress].messages = [];
-        }
         chatsData.contacts[currentAddress].messages.push(newMessage);
 
         // Update or add to chats list
@@ -1886,26 +2118,17 @@ async function handleSendMessage() {
         messageInput.value = '';
         messageInput.style.height = '45px';
 
-/*
-        // Add message to UI
-        messagesList.insertAdjacentHTML('beforeend', `
-            <div class="message sent">
-                <div class="message-content" style="white-space: pre-wrap">${message}</div>
-                <div class="message-time">${formatTime(newMessage.timestamp)}</div>
-            </div>
-        `);
-        // Scroll to bottom
-        messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
-*/
         appendChatModal()
 
-        // Scroll to bottom
+        // Scroll to bottom of chat modal
         messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
 
+/*  This is probably not needed
         // Update chat list if visible
         if (document.getElementById('chatsScreen').classList.contains('active')) {
             updateChatList();
         }
+*/
     } catch (error) {
         console.error('Message error:', error);
         alert('Failed to send message. Please try again.');
@@ -1913,9 +2136,11 @@ async function handleSendMessage() {
 }
 
 // Update wallet view; refresh wallet
-function updateWalletView() {
+async function updateWalletView() {
     const walletData = myData.wallet
     
+    await updateWalletBalances()
+
     // Update total networth
     document.getElementById('walletTotalBalance').textContent = (walletData.networth || 0).toFixed(2);
     
@@ -1936,80 +2161,93 @@ function updateWalletView() {
 console.log('asset balance', asset, asset.balance)
         return `
             <div class="asset-item">
-                <div class="asset-logo">${asset.symbol[0]}</div>
+                <div class="asset-logo"><img src="liberdus_logo_50.png" class="asset-logo"></div>
                 <div class="asset-info">
                     <div class="asset-name">${asset.name}</div>
-                    <div class="asset-symbol">${asset.symbol}</div>
+                    <div class="asset-symbol">$${asset.price} / ${asset.symbol}</div>
                 </div>
-                <div class="asset-balance">${(Number(asset.balance)/Number(wei)).toPrecision(4)}</div>
+                <div class="asset-balance">${(Number(asset.balance)/Number(wei)).toPrecision(4)}<br><span class="asset-symbol">$${asset.networth}</span></div>
             </div>
         `;
     }).join('');
 }
 
-function openHistoryModal() {
-            const modal = document.getElementById('historyModal');
-            modal.classList.add('active');
-            
-            // Get wallet data
-            const walletData = myData.wallet
+async function updateAssetPricesIfNeeded() {
+    if (!myData || !myData.wallet || !myData.wallet.assets) {
+        console.error('No wallet data available to update asset prices');
+        return;
+    }
 
-            const assetSelect = document.getElementById('historyAsset');
-            
-            // Check if we have any assets
-            if (!walletData.assets || walletData.assets.length === 0) {
-                assetSelect.innerHTML = '<option value="">No assets available</option>';
-            } else {
-                // Populate assets dropdown
-                assetSelect.innerHTML = walletData.assets.map((asset, index) =>
-                    `<option value="${index}">${asset.name} (${asset.symbol})</option>`
-                ).join('');
+    const now = Date.now();
+    const priceUpdateInterval = 10 * 60 * 1000; // 10 minutes in milliseconds
+
+    if (now - myData.wallet.priceTimestamp < priceUpdateInterval){ return }
+
+    for (let i = 0; i < myData.wallet.assets.length; i++) {
+        const asset = myData.wallet.assets[i];
+        const contractAddress = '0x' + asset.contract;
+        const apiUrl = `https://api.dexscreener.com/latest/dex/search?q=${contractAddress}`;
+        try {
+            const response = await fetch(apiUrl);
+            if (!response.ok) {
+                console.error(`API request failed for ${asset.symbol} with status ${response.status}`);
+                continue; // Skip to the next asset
             }
-            
-            // Update addresses for first asset
-            updateHistoryAddresses();
+            const data = await response.json();
+            if (data.pairs && data.pairs.length > 0 && data.pairs[0].priceUsd) {
+                asset.price = parseFloat(data.pairs[0].priceUsd);
+//                asset.lastPriceUpdate = now;
+//                myData.wallet.assets[i] = asset; // Update the asset in the array
+                myData.wallet.priceTimestamp = now
+                console.log(`Updated price of ${asset.symbol} to ${asset.price}`);
+console.log(JSON.stringify(data,null,4))
+            } else {
+                console.warn(`No price data found for ${asset.symbol} from API`);
+            }
+        } catch (error) {
+            console.error(`Failed to update price for ${asset.symbol}`, error);
         }
+    }
+}
+
+function openHistoryModal() {
+    const modal = document.getElementById('historyModal');
+    modal.classList.add('active');
+    
+    // Get wallet data
+    const walletData = myData.wallet
+
+    const assetSelect = document.getElementById('historyAsset');
+    
+    // Check if we have any assets
+    if (!walletData.assets || walletData.assets.length === 0) {
+        assetSelect.innerHTML = '<option value="">No assets available</option>';
+        return
+    }
+    // Populate assets dropdown
+    assetSelect.innerHTML = walletData.assets.map((asset, index) =>
+        `<option value="${index}">${asset.name} (${asset.symbol})</option>`
+    ).join('');
+
+    // Update addresses for first asset
+    updateHistoryAddresses();
+}
 
 function closeHistoryModal() {
     document.getElementById('historyModal').classList.remove('active');
 }
 
-function updateHistoryAddresses() {
-            const walletData = myData.wallet
+function updateHistoryAddresses() {         // TODO get rid of this function after changing all refrences 
+    // Update transaction history
+    updateTransactionHistory();
+}
 
-            const assetIndex = document.getElementById('historyAsset').value;
-            const addressSelect = document.getElementById('historyAddress');
+async function updateTransactionHistory() { 
+    await updateChatList();
 
-            // Check if we have any assets
-            if (!walletData.assets || walletData.assets.length === 0) {
-                addressSelect.innerHTML = '<option value="">No addresses available</option>';
-                updateTransactionHistory();
-                return;
-            }
-
-            const asset = walletData.assets[assetIndex];
-            
-            // Check if asset exists and has addresses
-            if (!asset || !asset.addresses || asset.addresses.length === 0) {
-                addressSelect.innerHTML = '<option value="">No addresses available</option>';
-                updateTransactionHistory();
-                return;
-            }
-            
-            // Populate addresses dropdown
-            addressSelect.innerHTML = asset.addresses.map((addr, index) =>
-                `<option value="${index}">${addr.address}</option>`
-            ).join('');
-            
-            // Update transaction history
-            updateTransactionHistory();
-        }
-
-function updateTransactionHistory() {
     const walletData = myData.wallet
 
     const assetIndex = document.getElementById('historyAsset').value;
-    const addressIndex = document.getElementById('historyAddress').value;
     const transactionList = document.getElementById('transactionList');
 
     // Check if we have any assets
@@ -2024,30 +2262,9 @@ function updateTransactionHistory() {
     }
 
     const asset = walletData.assets[assetIndex];
-    
-    // Check if asset exists and has addresses
-    if (!asset || !asset.addresses || asset.addresses.length === 0) {
-        transactionList.innerHTML = `
-            <div class="empty-state">
-                <div style="font-size: 2rem; margin-bottom: 1rem"></div>
-                <div style="font-weight: bold; margin-bottom: 0.5rem">No Transactions</div>
-                <div>Your transaction history will appear here</div>
-            </div>`;
-        return;
-    }
+    const contacts = myData.contacts
 
-    const address = asset.addresses[addressIndex];
-    if (!address || !address.history || address.history.length === 0) {
-        transactionList.innerHTML = `
-            <div class="empty-state">
-                <div style="font-size: 2rem; margin-bottom: 1rem"></div>
-                <div style="font-weight: bold; margin-bottom: 0.5rem">No Transactions</div>
-                <div>Your transaction history will appear here</div>
-            </div>`;
-        return;
-    }
-    
-    transactionList.innerHTML = address.history.map(tx => `
+    transactionList.innerHTML = walletData.history.map(tx => `
         <div class="transaction-item">
             <div class="transaction-info">
                 <div class="transaction-type ${tx.sign === -1 ? 'send' : 'receive'}">
@@ -2059,7 +2276,7 @@ function updateTransactionHistory() {
             </div>
             <div class="transaction-details">
                 <div class="transaction-address">
-                    ${tx.sign === -1 ? 'To: ' : 'From: '}${tx.address}
+                    ${tx.sign === -1 ? 'To:' : 'From:'} ${contacts[tx.address].username}
                 </div>
                 <div class="transaction-time">${formatTime(tx.timestamp)}</div>
             </div>
@@ -2102,6 +2319,7 @@ async function queryNetwork(url) {
     if (! checkOnlineStatus()){ 
 //TODO show user we are not online
         console.log("not online")
+        alert('not online')
         return null 
     }
     const randomGateway = network.gateways[Math.floor(Math.random() * network.gateways.length)];
@@ -2118,19 +2336,21 @@ console.log('response', data)
 }
 
 async function pollChatInterval(milliseconds) {
-    if (pollChats.timer){ clearTimeout(pollChats.timer); pollChats.timer = null }
     pollChats.nextPoll = milliseconds
     pollChats()
 }
 
 async function pollChats(){
-    const now = Date.now()
-    if (pollChats.lastPoll + pollChats.nextPoll > now){ return }
-    updateChatList()
-    pollChats.lastPoll = now
     if (pollChats.nextPoll < 100){ return } // can be used to stop polling; pollChatInterval(0)
+    const now = Date.now()
+    if (pollChats.lastPoll + pollChats.nextPoll <= now){
+        updateChatList()
+        if (document.getElementById('walletScreen').classList.contains('active')) { await updateWalletView() }
+        pollChats.lastPoll = now
+    }
+    if (pollChats.timer){ clearTimeout(pollChats.timer) }
+console.log('in pollChats setting timer', now, pollChats.nextPoll)
     pollChats.timer = setTimeout(pollChats, pollChats.nextPoll)
-
 }
 pollChats.lastPoll = 0
 pollChats.nextPoll = 10000   // milliseconds between polls
@@ -2138,7 +2358,7 @@ pollChats.timer = null
 
 async function getChats(keys) {  // needs to return the number of chats that need to be processed
 //console.log('keys', keys)
-    if (! keys){ console.log('no keys in getChats'); return 0 }
+    if (! keys){ console.log('no keys in getChats'); return 0 }     // TODO don't require passing in keys
     const now = Date.now()
     if (now - getChats.lastCall < 1000){ return 0 }
     getChats.lastCall = now
@@ -2148,7 +2368,7 @@ async function getChats(keys) {  // needs to return the number of chats that nee
 //console.log('messages', myData.contacts[keys.address].messages)
 //console.log('last messages', myData.contacts[keys.address].messages.at(-1))
 //console.log('timestamp', myData.contacts[keys.address].messages.at(-1).timestamp)
-    const timestamp = keys.chatTimestamp || 0
+    const timestamp = myAccount.chatTimestamp || 0
 //    const timestamp = myData.contacts[keys.address]?.messages?.at(-1).timestamp || 0
 
     const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/${timestamp}`) // TODO get this working
@@ -2158,69 +2378,149 @@ console.log('getChats senders', timestamp, chatCount, senders)
     if (senders && senders.chats && chatCount){     // TODO check if above is working
         await processChats(senders.chats, keys)
     }
+    if (appendChatModal.address){   // clear the unread count of address for open chat modal
+        myData.contacts[appendChatModal.address].unread = 0 
+    }
     return chatCount
 }
 getChats.lastCall = 0
 
+// Actually payments also appear in the chats, so we can add these to
 async function processChats(chats, keys) {
     for (let sender in chats) {
-        const timestamp = keys.chatTimestamp || 0
+        const timestamp = myAccount.chatTimestamp || 0
         const res = await queryNetwork(`/messages/${chats[sender]}/${timestamp}`)
 console.log("processChats sender", sender)
-        if (res && res.messages){  // TDDO the messages are actually the whole tx
+        if (res && res.messages){  
             const from = normalizeAddress(sender)
             if (!myData.contacts[from]){ createNewContact(from) }
             const contact = myData.contacts[from]
-            contact.address = from
+//            contact.address = from        // not needed since createNewContact does this
             let added = 0
             let newTimestamp = 0
-            for (let index in res.messages){
-                newTimestamp = res.messages[index].timestamp > newTimestamp ? res.messages[index].timestamp : newTimestamp
-                if (res.messages[index].from == longAddress(keys.address)){ continue }  // skip if the message is from us
-                const payload = parse(res.messages[index].message)  // changed to use .message
-                if (payload.encrypted){ 
-                    let senderPublic = myData.contacts[from]?.public
-                    if (!senderPublic){
-                        const senderInfo = await queryNetwork(`/account/${longAddress(from)}`)
+            for (let i in res.messages){
+                const tx = res.messages[i] // the messages are actually the whole tx
+//console.log('message tx is')
+//console.log(JSON.stringify(message, null, 4))
+                newTimestamp = tx.timestamp > newTimestamp ? tx.timestamp : newTimestamp
+                if (tx.type == 'message'){
+                    if (tx.from == longAddress(keys.address)){ continue }  // skip if the message is from us
+                    const payload = tx.xmessage  // changed to use .message
+                    if (payload.encrypted){ 
+                        let senderPublic = myData.contacts[from]?.public
+                        if (!senderPublic){
+                            const senderInfo = await queryNetwork(`/account/${longAddress(from)}`)
 //console.log('senderInfo.account', senderInfo.account)
-                        if (!senderInfo?.account?.publicKey){
-                            console.log(`no public key found for sender ${sender}`)
-                            continue
+                            if (!senderInfo?.account?.publicKey){
+                                console.log(`no public key found for sender ${sender}`)
+                                continue
+                            }
+                            senderPublic = senderInfo.account.publicKey
+                            if (myData.contacts[from]){
+                                myData.contacts[from].public = senderPublic
+                            }
                         }
-                        senderPublic = senderInfo.account.publicKey
-                        if (myData.contacts[from]){
-                            myData.contacts[from].public = senderPublic
-                        }
+                        payload.public = senderPublic
                     }
-                    payload.public = senderPublic
-                }
 //console.log("payload", payload)
-                decryptMessage(payload, keys)  // modifies the payload object
-                if (payload.senderInfo){
-                    contact.senderInfo = JSON.parse(JSON.stringify(payload.senderInfo))  // make a copy
-                    delete payload.senderInfo
-                    if (! contact.username && contact.senderInfo.username){
-                        // TODO check the network to see if the username given with the message maps to the address of this contact
-                        contact.username = contact.senderInfo.username
+                    decryptMessage(payload, keys)  // modifies the payload object
+                    if (payload.senderInfo){
+                        contact.senderInfo = JSON.parse(JSON.stringify(payload.senderInfo))  // make a copy
+                        delete payload.senderInfo
+                        if (! contact.username && contact.senderInfo.username){
+                            // TODO check the network to see if the username given with the message maps to the address of this contact
+                            contact.username = contact.senderInfo.username
+                        }
                     }
-                }
+                    //  skip if this tx was processed before and is already in contact.messages;
+                    //    messages are the same if the messages[x].sent_timestamp is the same as the tx.timestamp, 
+                    //    and messages[x].my is false and messages[x].message == payload.message
+                    let alreadyExists = false;
+                    for (const existingMessage of contact.messages) {
+                        if (existingMessage.sent_timestamp === payload.sent_timestamp && existingMessage.message === payload.message && existingMessage.my === false) {
+                            alreadyExists = true;
+                            break;
+                        }
+                    }
+                    if (alreadyExists) {
+                        continue; // Skip to the next message
+                    }
+
 //console.log('contact.message', contact.messages)
-                if ((contact.messages.length == 0) || (contact.messages.at(-1).sent_timestamp < payload.sent_timestamp)){
                     payload.my = false
                     payload.timestamp = Date.now()
                     contact.messages.push(payload)
                     added += 1
-                }    
+                } else if (tx.type == 'transfer'){
+//console.log('transfer tx is')
+//console.log(JSON.stringify(message, null, 4))
+                    if (tx.from == longAddress(keys.address)){ continue }  // skip if the message is from us
+                    const payload = tx.xmemo 
+                    if (payload.encrypted){ 
+                        let senderPublic = myData.contacts[from]?.public
+                        if (!senderPublic){
+                            const senderInfo = await queryNetwork(`/account/${longAddress(from)}`)
+                    //console.log('senderInfo.account', senderInfo.account)
+                            if (!senderInfo?.account?.publicKey){
+                                console.log(`no public key found for sender ${sender}`)
+                                continue
+                            }
+                            senderPublic = senderInfo.account.publicKey
+                            if (myData.contacts[from]){
+                                myData.contacts[from].public = senderPublic
+                            }
+                        }
+                        payload.public = senderPublic
+                    }
+                    //console.log("payload", payload)
+                    decryptMessage(payload, keys)  // modifies the payload object
+                    if (payload.senderInfo){
+                        contact.senderInfo = JSON.parse(JSON.stringify(payload.senderInfo))  // make a copy
+                        delete payload.senderInfo
+                        if (! contact.username && contact.senderInfo.username){
+                            // TODO check the network to see if the username given with the message maps to the address of this contact
+                            contact.username = contact.senderInfo.username
+                        }
+                    }
+                    // compute the transaction id (txid)
+                    delete tx.sign
+                    const jstr = stringify(tx)
+                    const jstrBytes = utf82bin(jstr)
+                    const txidHex = blake.blake2bHex(jstrBytes, myHashKey, 32)
+
+                    // skip if this tx was processed before and is already in the history array;
+                    //    txs are the same if the history[x].txid is the same as txidHex
+                    const history = myData.wallet.history
+                    let alreadyInHistory = false;
+                    for (const historyTx of history) {
+                        if (historyTx.txid === txidHex) {
+                            alreadyInHistory = true;
+                            break;
+                        }
+                    }
+                    if (alreadyInHistory) {
+                        continue; // Skip to the next message
+                    }
+                    // add the transfer tx to the wallet history
+                    const newPayment = {
+                        txid: txidHex,
+                        amount: parse(stringify(tx.amount)),  // need to make a copy
+                        sign: 1,
+                        timestamp: payload.sent_timestamp,
+                        address: from,
+                        memo: payload.message
+                    };
+                    history.unshift(newPayment);
+                    //  sort history array based on timestamp field in descending order
+                    history.sort((a, b) => b.timestamp - a.timestamp);
+                }
             }
             if (newTimestamp > 0){
                 // Update the timestamp
-                keys.chatTimestamp = newTimestamp
+                myAccount.chatTimestamp = newTimestamp
             }
             // If messages were added to contact.messages, update myData.chats
             if (added > 0) {
-                // Update the timestamp
-                keys.chatTimestamp = newTimestamp
-
                 // Get the most recent message
                 const latestMessage = contact.messages[contact.messages.length - 1];
                 
@@ -2265,8 +2565,10 @@ async function decryptMessage(payload, keys){
         // Decrypt based on encryption method
         if (payload.encryptionMethod === 'xchacha20poly1305') {
             try {
-                payload.message = decryptChacha(dhkey, payload.message);
-                if (payload.message == null){ payload.message = 'Decryption failed.'}
+                if (payload.message){
+                    payload.message = decryptChacha(dhkey, payload.message);
+                    if (payload.message == null){ payload.message = 'Decryption failed.'}
+                }
             } catch (error) {
                 console.error('xchacha20poly1305 decryption failed:', error);
                 payload.message = 'Decryption failed';
@@ -2290,40 +2592,78 @@ async function decryptMessage(payload, keys){
     return payload;
 }
 
+`
+The main difference between a chat message and an asset transfer is
+    chat message pays a toll to the recipient as determined by recipient, but message length can be long
+    asset transfer pays an amount to the recipient as determined by sender, but message (memo) length is limited
 
-async function postSendMessage(to, payload, toll, keys) {
+    How does toll work
+    When a new contact (chatId) is being established (sending a message or payment for the first time)
+    between two users the sender must include the toll of the recipient
+        * The chatId account toll fields are setup as:
+            toll.required.initialFromAddress = 1
+            toll.required.initialToAddress = 0
+        * This means that the sender who established the chatId will have to keep paying a toll and
+          the receipient can reply or send messages to the sender without paying a toll. 
+        * Either user can submit a tx to not require the other to pay a toll; setting required.otherUser to 0.
+        * Either user can submit a tx to require the other to pay a toll; the client should show the sender the required toll
+        * Either user can block message from the other; this sets the toll field of the blocked user to 2.
+        * Either user can unblock the other user if blocked; this sets the toll field of the unblocked user to 0
+        * If a payment is being sent and it includes a memo and the sender is required to pay a toll than the 
+          amount being sent must be at least the toll amount required by the recipient
+    The actual toll paid by a sender is first stored in the chatId account.
+        * 50% is paid to the recipient for reading the message and 50% is paid when they reply.
+            toll.payOnRead.initialFromAddress = amount
+            toll.payOnRead.initialToAddress
+            toll.payOnReply.initialFromAddress
+            toll.payOnReply.initialToAddress
+    A sender can reclaim the tolls for messages that were not read or replied to after one week
+        * The following fields are used to track the last read and reply time for each user
+            read.initialFromAddress = millisecond timestamp of when initialFromAddress read messages
+            read.initoalToAddress
+            replied.initialFromAddress
+            replied.initialToAddress
+        * Note that the receipient has to submit a tx specifying the read time; downloading the messages does not count as read
+        * When a user sends a message it sets both the read and replied timestamps for the user
+        * If the recipient reads or replies to a message after the sender has reclaimed the toll they do not get the toll
+    A sender can retract a message if it has not been read yet and it has been less than one minute since the message was sent
+        * However, this does not gaurantee that the recipient has not already downloaded the message and may read it later
+`
+
+async function postChatMessage(to, payload, toll, keys) {
     const toAddr = longAddress(to);
     const fromAddr = longAddress(keys.address)
-
     const tx = {
         type: 'message',
         from: fromAddr,
         to: toAddr,
-        amount: BigInt(toll),
+        amount: BigInt(toll),       // not sure if this is used by the backend
         chatId: blake.blake2bHex([fromAddr, toAddr].sort().join``, myHashKey, 32),
-        message: stringify(payload),
+        message: 'x',
+        xmessage: payload,
         timestamp: Date.now(),
         network: '0000000000000000000000000000000000000000000000000000000000000000',
-//                fee: BigInt(parameters.current.transactionFee || 1)           // TODO we should also add a fee
+        fee: BigInt(parameters.current.transactionFee || 1)           // This is not used by the backend
     }
     const res = await injectTx(tx, keys)
-//console.log('res', res)
     return res        
 }
 
-async function postTransferAsset(to, amount, memo, keys) {
-    // Normalize destination address if it's in Ethereum format
-    const normalizedTo = to.startsWith('0x') ? normalizeAddress(to) : to;
-    
+async function postAssetTransfer(to, amount, memo, keys) {
+    const toAddr = longAddress(to)
+    const fromAddr = longAddress(keys.address)
     const tx = {
         type: 'transfer',
-        from: longAddress(keys.address),
-        to: longAddress(normalizedTo),
+        from: fromAddr,
+        to: toAddr,
         amount: BigInt(amount),
-//                memo: memo,                      // TODO encrypt the memo
+        chatId: blake.blake2bHex([fromAddr, toAddr].sort().join``, myHashKey, 32),
+// TODO backend is not allowing memo > 140 characters; by pass using xmemo; we might have to check the total tx size instead
+//        memo: stringify(memo),
+        xmemo: memo,
         timestamp: Date.now(),
         network: '0000000000000000000000000000000000000000000000000000000000000000',
-        fee: BigInt(parameters.current.transactionFee || 1)           
+        fee: BigInt(parameters.current.transactionFee || 1)           // This is not used by the backend
     }
     const res = await injectTx(tx, keys)
     return res
@@ -2437,6 +2777,109 @@ function decryptChacha(key, encrypted) {
     }
 }
 
+// Service Worker Management
+async function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) {
+        console.log('Service Worker not supported');
+        return;
+    }
 
+    try {
+        // Check if there's an existing registration
+        const existingReg = await navigator.serviceWorker.getRegistration();
+        if (existingReg) {
+            // If service worker is already registered and active
+            if (existingReg.active) {
+                console.log('Service Worker already registered and active');
+                return existingReg;
+            }
+            // If not active, unregister and re-register
+            await existingReg.unregister();
+        }
 
+        // Register new service worker with correct path and scope
+        const registration = await navigator.serviceWorker.register('./service-worker.js', {
+            scope: './'
+        });
+        console.log('Service Worker registered successfully:', registration.scope);
+
+        // Wait for the service worker to be ready
+        await navigator.serviceWorker.ready;
+        console.log('Service Worker ready');
+
+        return registration;
+    } catch (error) {
+        console.error('Service Worker registration failed:', error);
+        return null;
+    }
+}
+
+// Add service worker message handling
+function setupServiceWorkerMessaging() {
+    if (!('serviceWorker' in navigator)) return;
+
+    // Listen for messages from service worker
+    navigator.serviceWorker.addEventListener('message', (event) => {
+        const data = event.data;
         
+        // Handle different message types
+        switch (data.type) {
+            case 'error':
+                console.error('Service Worker error:', data.error);
+                break;
+        }
+    });
+}
+
+// App state management
+function setupAppStateManagement() {
+    // Initialize app state
+    localStorage.setItem('appPaused', '0');
+    
+    // Stop polling if service worker was already polling
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then(registration => {
+            registration.active?.postMessage({ type: 'stop_polling' });
+        });
+    }
+
+    // Handle visibility changes
+    document.addEventListener('visibilitychange', async () => {
+        if (!myData || !myAccount) return; // Only manage state if logged in
+        
+        if (document.hidden) {
+            // App is being hidden/closed
+            console.log('📱 App hidden - starting service worker polling');
+            const timestamp = Date.now().toString();
+            localStorage.setItem('appPaused', timestamp);
+            
+            // Prepare account data for service worker
+            const accountData = {
+                address: myAccount.keys.address,
+                network: {
+                    gateways: network.gateways
+                }
+            };
+            
+            
+            // Start polling in service worker with timestamp and account data
+            const registration = await navigator.serviceWorker.ready;
+            registration.active?.postMessage({ 
+                type: 'start_polling',
+                timestamp,
+                account: accountData  
+            });
+        } else {
+            // App is becoming visible/open
+            console.log('📱 App visible - stopping service worker polling');
+            localStorage.setItem('appPaused', '0');
+            
+            // Stop polling in service worker
+            const registration = await navigator.serviceWorker.ready;
+            registration.active?.postMessage({ type: 'stop_polling' });
+
+            await updateChatList('force');
+        }
+    });
+
+}

@@ -66,6 +66,7 @@ export async function generateIdenticon(address, size = 50) {
 
 // Format timestamp to relative time
 export function formatTime(timestamp) {
+    if (!timestamp || timestamp == 0){ return ''}
     const date = new Date(timestamp);
     const now = new Date();
     const diff = now - date;
