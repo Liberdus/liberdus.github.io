@@ -466,6 +466,13 @@ async function handleCreateAccount(event) {
     
     // Store the account data in localStorage
     localStorage.setItem(`${username}_${netid}`, stringify(myData));
+
+    // Request notification permission
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission()
+            .then(permission => console.log('Notification permission result:', permission))
+            .catch(error => console.error('Error during notification permission request:', error));
+    }
     
     // Close modal and proceed to app
     closeCreateAccountModal();
@@ -510,7 +517,14 @@ async function handleSignIn(event) {
     myData = parse(localStorage.getItem(`${username}_${netid}`));
     if (!myData) { console.log('Account data not found'); return }
     myAccount = myData.account;
-    
+
+    // Request notification permission FIRST, before any UI changes
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission()
+            .then(permission => console.log('Notification permission result:', permission))
+            .catch(error => console.error('Error during notification permission request:', error));
+    }
+
     // Close modal and proceed to app
     closeSignInModal();
     document.getElementById('welcomeScreen').style.display = 'none';
@@ -2863,10 +2877,4 @@ function setupAppStateManagement() {
             await updateChatList('force');
         }
     });
-
 }
-
-        
-
-
-        
