@@ -1,0 +1,16 @@
+{
+  "name": "Liberdus",
+  "short_name": "Liberdus",
+  "icons": [
+    {
+      "src": "./liberdus_logo_250.png",
+      "sizes": "250x250",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#007bff"
+}

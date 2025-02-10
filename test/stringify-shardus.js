@@ -1,16 +1,3 @@
-(function(root, factory) {
-    if (typeof define === 'function' && define.amd) {
-        // AMD
-        define([], factory);
-    } else if (typeof module === 'object' && module.exports) {
-        // CommonJS
-        module.exports = factory();
-    } else {
-        // Browser globals
-        root.stringifyUtils = factory();
-    }
-}(typeof self !== 'undefined' ? self : this, function() {
-
     const objToString = Object.prototype.toString
 
     const objKeys = Object.keys || function(obj) {
@@ -184,9 +171,22 @@
         }
     }
 
+    function stringify(val, opt){
+        return safeStringify(val, opt)
+    }
+    function parse(val){
+        return safeJsonParse(val)
+    }
+
+/*
     // Return public API
-    return {
+    export {
         safeStringify,
         safeJsonParse
     }
-}));
+*/
+
+    export {
+       stringify,
+       parse
+    }

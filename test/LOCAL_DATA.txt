@@ -1,0 +1,132 @@
+LocalStore key "accounts"
+{
+  "netids": {
+    "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b": {     // this could be a testnet
+      "usernames": {
+        "omar":{
+          "address", "15a16dbe4bfb77fc5ff13d99deff5ea069deebf3"
+        },
+        "bob": {
+          "address", "7fa16dbe4bfb77fc5ff13d99deff5ea069deebf3"
+        }
+      }
+    },
+    "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7": {   // this could be a mainnet
+      "usernames": {
+        "omar":{                                                            // you can have the same username, but on different networks
+          "address", "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3"
+        }
+      }
+    }
+  } 
+}
+
+LocalStore key "username_netid"; gets read into myData global variable in app.js
+{
+  "timestamp": 1703261400000,  // not using this; we have a chatTimestamp for when we last requested chat messages
+  "account": {
+    "netid": "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7",
+    "username": "tom",
+    "chatTimestamp": 1703261400000    // this is the timestamp of when we last checked for chat messages
+    "name": "Tom Sun",        // maybe we should put this these fields into a info object
+    "email": "abc@xyz.com",
+    "phone": "2163840993",
+    "linkedin": "tomsun",
+    "x": "TomSun",
+    "keys": {
+      "address", "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3",
+      "public": "b829475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+      "secret": "93a3ac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
+      "type": "secp256k1"
+    }
+  },
+  "network": {      // TODO need to implement this
+    "use": false,   // if true use the gateways specified here, otherwise the ones specfied in the web client network.js file
+    "gateways": [
+      {
+        "protocol": "http",
+        "host": "localhost",
+        "port": 3030
+      }
+    ]
+  }
+  "contacts": {
+    "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266": {
+      "address": "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+      "public": "b829475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",  // cached here so we don't have to check the network 
+      "username": "alice_web3",
+      "name": "Alice Johnson",      // this is entered by the local web client user, not on network; if not provided, set to senderInfo values
+      "sort": "Alice Johnson",
+      "friend": true,               // this is entered by the local web clicent user, not displayed on network
+      "unread": 3,
+      "messages": [
+        {
+          "message": "Hello world",
+          "amount": {value:34n*10n**18n, dataType: "bi"},   // optional, amount of asset that was sent or received
+          "symbol": "LIB",                                  // optional, symbol of asset that was sent or received
+          "timestamp": 1703261400000,
+          "sent_timestamp": 1703261400000,
+          "my": false
+        }
+      ],
+      "email": "alice@example.com",
+      "phone": "+1234567890",
+      "linkedin": "alice23",
+      "x": "alice_web3",
+      "senderInfo":{                     // this cannot be edited by the user; set by the contact
+        "name": "Alice Johnson",
+        "email": "a@b.com",
+        "phone": "2163840993",
+        "linkedin": "tomsun",
+        "x": "TomSun"
+      }
+    }
+  },
+  "chats": [    // latest message timestamp sent or received from each contact is listed here; ordered with most recent at the top
+    {
+      "address": "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+      "timestamp": 1703261400000,   // this will be the sent or received timestamp
+    }
+  ],
+  "wallet": {
+    "networth": 4384.28,   // this is the networth of the wallet in fiat currency; USD for now
+    "timestamp": 1703261400000  - last balance update timestamp
+    "priceTimestamp": 1703261400000   // last time when prices were updated
+    "assets": [
+      {
+        "id": "liberdus",
+        "name": "Liberdus",
+        "symbol": "LIB",
+        "img": "images/lib.png",
+        "chainid": 2220,
+        "contract": "",
+        "price": 0.032,
+        "networth": 382.5  // this is the networth of the asset in fiat currency; USD for now
+        "balance": {value: 34n*10n**18n, dataType: "bi"},   // this is the amount of the asset
+      }
+    ],
+    "history": [
+      {
+        "txid": "fbf6bc33effa11172e9b370129dcc9a00311006581c4436af7b8b5b24d9ffd8c",
+        "asset": "LIB",   // TODO add this field; maybe we should add the id field and keep a map of known assets
+        "amount": 4000000000000000000,  // this is the amount in wei as a big int
+        "sign": -1,                     // -1 for send; 1 for received
+        "timestamp": 1703261400000,
+        "address": "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266",    // either the from or to address
+        "memo": "for lunch"
+      }
+    ]
+  },
+  "state":{
+    "unread": 1
+  },
+  "settings": {
+    "toll": 2,
+    "encrypt": true
+  }
+}
+
+
+
+
+

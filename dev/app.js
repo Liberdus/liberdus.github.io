@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'   // Also increment this when you increment version.html
+const version = 'u'   // Also increment this when you increment version.html
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -600,9 +600,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Add unload handler to save myData
     window.addEventListener('unload', handleUnload)
     window.addEventListener('beforeunload', handleBeforeUnload)
-    window.addEventListener('freeze', handleFreeze);  // Changed to window
     document.addEventListener('visibilitychange', handleVisibilityChange);  // Keep as document
-
     
     // Check for existing accounts and arrange welcome buttons
     const usernames = getAvailableUsernames()
@@ -738,15 +736,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 function handleUnload(e){
     console.log('in handleUnload')
     if (handleSignOut.exit){ 
-//        window.removeEventListener('unload', handleUnload)
         return 
     } // User selected to Signout; state was already saved
     else{
         saveState()
-//        e.preventDefault()
     }
 }
-
 
 // Add unload handler to save myData
 function handleBeforeUnload(e){
@@ -758,22 +753,10 @@ console.log('in handleBeforeUnload', e)
     }  // user selected to Signout; state was already saved
 console.log('stop back button')
     e.preventDefault();
-//    const shouldLeave = confirm('Do you want to leave this page?');
-//    if (shouldLeave == false) {
-        history.pushState(null, '', window.location.href);
-//    }
+    history.pushState(null, '', window.location.href);
 }
 
-// Add handlers to save state and handle navigation
-function handleFreeze(e) {
-    console.log('in handleFreeze', e);
-    saveState();
-    if (handleSignOut.exit) {
-        window.removeEventListener('freeze', handleFreeze);
-        return;
-    }
-}
-
+// This is for installed apps where we can't stop the back button; just save the state
 function handleVisibilityChange(e) {
     console.log('in handleVisibilityChange', document.visibilityState);
     if (document.visibilityState === 'hidden') {
@@ -782,7 +765,6 @@ function handleVisibilityChange(e) {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             return;
         }
-        history.pushState(null, '', window.location.href);
     }
 }
 
@@ -2883,3 +2865,8 @@ function setupAppStateManagement() {
     });
 
 }
+
+        
+
+
+        
