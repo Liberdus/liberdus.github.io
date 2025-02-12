@@ -177,6 +177,7 @@ function getAvailableUsernames() {
     return Object.keys(netidAccounts.usernames);
 }
 
+// This is for the sign in button on the welcome page
 function openSignInModal() {
     // Get existing accounts
     const { netid } = network;
@@ -466,7 +467,9 @@ async function handleCreateAccount(event) {
     
     // Store the account data in localStorage
     localStorage.setItem(`${username}_${netid}`, stringify(myData));
-    
+
+    requestNotificationPermission();
+
     // Close modal and proceed to app
     closeCreateAccountModal();
     document.getElementById('welcomeScreen').style.display = 'none';
@@ -474,6 +477,7 @@ async function handleCreateAccount(event) {
     switchView('chats'); // Default view
 }
 
+// This is for the sign in button after selecting an account
 async function handleSignIn(event) {
     event.preventDefault();
     const username = document.getElementById('username').value;
@@ -510,7 +514,9 @@ async function handleSignIn(event) {
     myData = parse(localStorage.getItem(`${username}_${netid}`));
     if (!myData) { console.log('Account data not found'); return }
     myAccount = myData.account;
-    
+
+    requestNotificationPermission();
+
     // Close modal and proceed to app
     closeSignInModal();
     document.getElementById('welcomeScreen').style.display = 'none';
@@ -710,6 +716,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     document.getElementById('handleSignOut').addEventListener('click', handleSignOut);
     document.getElementById('closeChatModal').addEventListener('click', closeChatModal);
+    document.getElementById('closeContactInfoModal').addEventListener('click', closeContactInfoModal);
     document.getElementById('handleSendMessage').addEventListener('click', handleSendMessage);
     
     // Add refresh balance button handler
@@ -1234,12 +1241,18 @@ async function handleImportFile(event) {
         }
         // Get existing accounts or create new structure
         const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+        // Ensure netid exists
+        if (!existingAccounts.netids[myAccount.netid]) {
+            existingAccounts.netids[myAccount.netid] = { usernames: {} };
+        }
         // Store updated accounts back in localStorage
-        existingAccounts.netids[myAccount.netid].usernames[myAccount.username] = myAccount;
+        existingAccounts.netids[myAccount.netid].usernames[myAccount.username] = {address: myAccount.keys.address};
         localStorage.setItem('accounts', stringify(existingAccounts));
 
         // Store the localStore entry for username_netid
         localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
+
+        requestNotificationPermission();
 
 /*
         // Refresh form data and chat list
@@ -1570,6 +1583,15 @@ function openChatModal(address) {
     setTimeout(() => {
         messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
     }, 100);
+
+    // Add click handler for username to show contact info
+    const userInfo = modal.querySelector('.chat-user-info');
+    userInfo.onclick = () => {
+        const contact = myData.contacts[address];
+        if (contact && contact.senderInfo) {
+            openContactInfoModal(contact.senderInfo);
+        }
+    };
 
     // Show modal
     modal.classList.add('active');
@@ -1940,6 +1962,25 @@ console.log('payload is', payload)
         console.error('Transaction error:', error);
         alert('Transaction failed. Please try again.');
     }
+}
+
+function openContactInfoModal(senderInfo) {
+    const modal = document.getElementById('contactInfoModal');
+    
+    // Set values
+    document.getElementById('contactInfoUsername').textContent = senderInfo.username || 'Not provided';
+    document.getElementById('contactInfoName').textContent = senderInfo.name || 'Not provided';
+    document.getElementById('contactInfoEmail').textContent = senderInfo.email || 'Not provided';
+    document.getElementById('contactInfoPhone').textContent = senderInfo.phone || 'Not provided';
+    document.getElementById('contactInfoLinkedin').textContent = senderInfo.linkedin || 'Not provided';
+    document.getElementById('contactInfoX').textContent = senderInfo.x || 'Not provided';
+    
+    // Show modal
+    modal.classList.add('active');
+}
+
+function closeContactInfoModal() {
+    document.getElementById('contactInfoModal').classList.remove('active');
 }
 
 function handleSignOut() {
@@ -2800,6 +2841,9 @@ async function registerServiceWorker() {
 function setupServiceWorkerMessaging() {
     if (!('serviceWorker' in navigator)) return;
 
+    let lastSoundPlayed = 0;
+    const SOUND_COOLDOWN = 1000; // Prevent multiple sounds within 1 second
+
     // Listen for messages from service worker
     navigator.serviceWorker.addEventListener('message', (event) => {
         const data = event.data;
@@ -2808,6 +2852,37 @@ function setupServiceWorkerMessaging() {
         switch (data.type) {
             case 'error':
                 console.error('Service Worker error:', data.error);
+                break;
+            case 'new_notification':
+                console.log('🖥️ Desktop notification handling');
+                // Show desktop notification
+                if (Notification.permission === 'granted') {
+                    const notificationText = data.chatCount === 1 
+                        ? 'You have new messages in a conversation'
+                        : `You have new messages in ${data.chatCount} conversations`;
+                        
+                    new Notification('New Messages', {
+                        body: notificationText,
+                        icon: './liberdus_logo_250.png'
+                    });
+                }
+                
+                // Play sound if tabbed away
+                if (document.hidden) {
+                    // Prevent duplicate sounds
+                    if (data.timestamp - lastSoundPlayed < SOUND_COOLDOWN) {
+                        return;
+                    }
+                    
+                    const audio = new Audio('./noti.wav');
+                    audio.volume = 0.20;
+                    audio.play()
+                        .then(() => {
+                            lastSoundPlayed = Date.now();
+                            console.log('✅ Sound played successfully');
+                        })
+                        .catch(error => console.error('❌ Error playing sound:', error));
+                }
                 break;
         }
     });
@@ -2863,10 +2938,22 @@ function setupAppStateManagement() {
             await updateChatList('force');
         }
     });
-
 }
 
-        
+function requestNotificationPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission()
+            .then(permission => {
+                console.log('Notification permission result:', permission);
+                // Optional: Hide a notification button if granted.
+                if (permission === 'granted') {
+                    const notificationButton = document.getElementById('requestNotificationPermission');
+                    if (notificationButton) {
+                        notificationButton.style.display = 'none';
+                    }
+                }
+            })
+            .catch(error => console.error('Error during notification permission request:', error));
+    }
+}
 
-
-        

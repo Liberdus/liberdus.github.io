@@ -25,15 +25,6 @@
 </head>
 <body>
     <script src="./app.js" type="module"></script>
-    <!-- app.js loads the following additional modules -->
-    <xscript src="./lib.js"></xscript>
-    <xscript src="./blake2b.js"></xscript>
-    <xscript src="./keccak256.js"></xscript>
-    <xscript src="./noble-secp256k1.js"></xscript>
-    <xscript src="./noble-ciphers.js"></xscript>
-    <xscript src="./stringify-shardus.js"></xscript>
-    <xscript src=""></xscript>
-    <xscript src=""></xscript>
     <div class="container">
         <header class="header" id="header">
             <div id="logo"><img src="liberdus_logo_50.png"></div>
@@ -400,6 +391,42 @@
                     </div>
                     <button type="submit" class="update-button">Download Data</button>
                 </form>
+            </div>
+        </div>
+        
+        <!-- Contact Info Modal -->
+        <div class="modal" id="contactInfoModal">
+            <div class="modal-header">
+                <button class="back-button" id="closeContactInfoModal"></button>
+                <div class="modal-title">Contact Info</div>
+            </div>
+            <div class="form-container">
+                <div class="contact-info-list">
+                    <div class="contact-info-item">
+                        <div class="contact-info-label">Username</div>
+                        <div class="contact-info-value" id="contactInfoUsername"></div>
+                    </div>
+                    <div class="contact-info-item">
+                        <div class="contact-info-label">Name</div>
+                        <div class="contact-info-value" id="contactInfoName"></div>
+                    </div>
+                    <div class="contact-info-item">
+                        <div class="contact-info-label">Email</div>
+                        <div class="contact-info-value" id="contactInfoEmail"></div>
+                    </div>
+                    <div class="contact-info-item">
+                        <div class="contact-info-label">Phone</div>
+                        <div class="contact-info-value" id="contactInfoPhone"></div>
+                    </div>
+                    <div class="contact-info-item">
+                        <div class="contact-info-label">LinkedIn</div>
+                        <div class="contact-info-value" id="contactInfoLinkedin"></div>
+                    </div>
+                    <div class="contact-info-item">
+                        <div class="contact-info-label">X</div>
+                        <div class="contact-info-value" id="contactInfoX"></div>
+                    </div>
+                </div>
             </div>
         </div>
         
