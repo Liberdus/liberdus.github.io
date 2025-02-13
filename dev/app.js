@@ -764,14 +764,58 @@ console.log('stop back button')
 }
 
 // This is for installed apps where we can't stop the back button; just save the state
-function handleVisibilityChange(e) {
+async function handleVisibilityChange(e) {
     console.log('in handleVisibilityChange', document.visibilityState);
+    
+    // Only manage state if logged in
+    if (!myData || !myAccount) return;
+
     if (document.visibilityState === 'hidden') {
         saveState();
         if (handleSignOut.exit) {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             return;
         }
+
+        // App is being hidden/closed
+        console.log('📱 App hidden - starting service worker polling');
+        const timestamp = Date.now().toString();
+        localStorage.setItem('appPaused', timestamp);
+        
+        // Clear any existing polling on main thread
+        if (typeof pollChatsTimer !== 'undefined') {
+            clearTimeout(pollChatsTimer);
+        }
+
+        try {
+            // Prepare account data for service worker
+            const accountData = {
+                address: myAccount.keys.address,
+                network: {
+                    gateways: network.gateways
+                }
+            };
+            
+            // Start polling in service worker with timestamp and account data
+            const registration = await navigator.serviceWorker.ready;
+            registration.active?.postMessage({ 
+                type: 'start_polling',
+                timestamp,
+                account: accountData  
+            });
+        } catch (error) {
+            console.error('Error starting background polling:', error);
+        }
+    } else {
+        // App is becoming visible/open
+        console.log('📱 App visible - stopping service worker polling');
+        localStorage.setItem('appPaused', '0');
+        
+        // Stop polling in service worker
+        const registration = await navigator.serviceWorker.ready;
+        registration.active?.postMessage({ type: 'stop_polling' });
+
+        await updateChatList('force');
     }
 }
 
@@ -2353,8 +2397,9 @@ console.log('query', `${randomGateway.protocol}://${randomGateway.host}:${random
 console.log('response', data)
         return data
     } catch (error) {
-        console.error(`Error fetching balance for address ${addr.address}:`, error);
-        return null
+        // Changed error message to not reference undefined addr variable
+        console.error('Network request failed:', error);
+        return null;
     }
 }
 
@@ -2900,45 +2945,6 @@ function setupAppStateManagement() {
             registration.active?.postMessage({ type: 'stop_polling' });
         });
     }
-
-    // Handle visibility changes
-    document.addEventListener('visibilitychange', async () => {
-        if (!myData || !myAccount) return; // Only manage state if logged in
-        
-        if (document.hidden) {
-            // App is being hidden/closed
-            console.log('📱 App hidden - starting service worker polling');
-            const timestamp = Date.now().toString();
-            localStorage.setItem('appPaused', timestamp);
-            
-            // Prepare account data for service worker
-            const accountData = {
-                address: myAccount.keys.address,
-                network: {
-                    gateways: network.gateways
-                }
-            };
-            
-            
-            // Start polling in service worker with timestamp and account data
-            const registration = await navigator.serviceWorker.ready;
-            registration.active?.postMessage({ 
-                type: 'start_polling',
-                timestamp,
-                account: accountData  
-            });
-        } else {
-            // App is becoming visible/open
-            console.log('📱 App visible - stopping service worker polling');
-            localStorage.setItem('appPaused', '0');
-            
-            // Stop polling in service worker
-            const registration = await navigator.serviceWorker.ready;
-            registration.active?.postMessage({ type: 'stop_polling' });
-
-            await updateChatList('force');
-        }
-    });
 }
 
 function requestNotificationPermission() {

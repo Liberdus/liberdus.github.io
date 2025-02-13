@@ -1,4 +1,4 @@
-const SW_VERSION = '1.0.1';
+const SW_VERSION = '1.0.2';
 
 // Simplified state management
 const state = {
