@@ -17,7 +17,7 @@
   "description": "Secure messaging app",
   "orientation": "any",
   "categories": ["social", "communication"],
-  "permissions": ["notifications"],
+  "permissions": ["notifications", "periodic-background-sync"],
   "related_applications": [],
   "prefer_related_applications": false
 }

@@ -1,4 +1,4 @@
-const SW_VERSION = '1.0.3';
+const SW_VERSION = '1.0.4';
 
 // Simplified state management
 const state = {
@@ -63,11 +63,43 @@ self.addEventListener('message', (event) => {
     }
 });
 
+// Request periodic sync permission and register
+async function registerPeriodicSync() {
+    try {
+        if ('periodicSync' in self.registration) {
+            const status = await navigator.permissions.query({
+                name: 'periodic-background-sync',
+            });
+            
+            if (status.state === 'granted') {
+                // Register for minimum allowed interval
+                await self.registration.periodicSync.register('check-messages', {
+                    minInterval: 60 * 1000 // Browser may enforce longer intervals
+                });
+                console.log('Periodic sync registered successfully');
+                return true;
+            }
+        }
+        return false;
+    } catch (error) {
+        console.log('Periodic sync registration failed:', error);
+        return false;
+    }
+}
+
 function startPolling() {
     if (state.pollInterval) return;
     
-    console.log('Starting message polling');
-    state.pollInterval = setInterval(checkForNewMessages, 60000);
+    // Try to register periodic sync first
+    registerPeriodicSync().then(registered => {
+        if (!registered) {
+            // Fall back to interval only if periodic sync isn't available/permitted
+            console.log('Falling back to interval polling');
+            state.pollInterval = setInterval(checkForNewMessages, 60000);
+        }
+    });
+    
+    // Initial check
     checkForNewMessages();
 }
 
