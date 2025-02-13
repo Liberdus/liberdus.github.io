@@ -779,15 +779,20 @@ async function handleVisibilityChange(e) {
 
         // App is being hidden/closed
         console.log('📱 App hidden - starting service worker polling');
-        const timestamp = Date.now().toString();
-        localStorage.setItem('appPaused', timestamp);
         
-        // Clear any existing polling on main thread
+        // Ensure main thread polling is stopped first
         if (typeof pollChatsTimer !== 'undefined') {
             clearTimeout(pollChatsTimer);
+            pollChatsTimer = undefined; // Explicitly clear the timer reference
         }
 
+        // Wait a moment to ensure main thread polling is fully stopped
+        await new Promise(resolve => setTimeout(resolve, 100));
+
         try {
+            const timestamp = Date.now().toString();
+            localStorage.setItem('appPaused', timestamp);
+            
             // Prepare account data for service worker
             const accountData = {
                 address: myAccount.keys.address,
@@ -796,7 +801,7 @@ async function handleVisibilityChange(e) {
                 }
             };
             
-            // Start polling in service worker with timestamp and account data
+            // Start service worker polling only after main thread is stopped
             const registration = await navigator.serviceWorker.ready;
             registration.active?.postMessage({ 
                 type: 'start_polling',
@@ -807,14 +812,17 @@ async function handleVisibilityChange(e) {
             console.error('Error starting background polling:', error);
         }
     } else {
-        // App is becoming visible/open
+        // App becoming visible - ensure clean handoff back to main thread
         console.log('📱 App visible - stopping service worker polling');
-        localStorage.setItem('appPaused', '0');
         
-        // Stop polling in service worker
+        // Stop service worker polling first
         const registration = await navigator.serviceWorker.ready;
-        registration.active?.postMessage({ type: 'stop_polling' });
-
+        await registration.active?.postMessage({ type: 'stop_polling' });
+        
+        // Wait for service worker to stop
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        localStorage.setItem('appPaused', '0');
         await updateChatList('force');
     }
 }
