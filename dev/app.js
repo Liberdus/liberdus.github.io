@@ -1006,6 +1006,42 @@ function setupAddToHomeScreen(){
             updateButtonVisibility();
         });
     }
+
+    // Add handler for successful installation
+    window.addEventListener('appinstalled', async (event) => {
+        console.log('👍 App installed');
+        addToHomeScreenButton.style.display = 'none';
+
+        try {
+            // First request notification permission
+            if ('Notification' in window) {
+                const notificationPermission = await Notification.requestPermission();
+                console.log('📱 Notification permission:', notificationPermission);
+            }
+
+            // Then explicitly request periodic sync permission
+            if ('serviceWorker' in navigator) {
+                const registration = await navigator.serviceWorker.ready;
+                if ('periodicSync' in registration) {
+                    // Explicitly request the permission
+                    const status = await navigator.permissions.request({
+                        name: 'periodic-background-sync'
+                    });
+                    
+                    console.log('📱 Periodic sync permission requested:', status.state);
+                    
+                    if (status.state === 'granted') {
+                        await registration.periodicSync.register('check-messages', {
+                            minInterval: 60 * 1000
+                        });
+                        console.log('📱 Periodic sync registered successfully');
+                    }
+                }
+            }
+        } catch (error) {
+            console.log('📱 Error requesting permissions:', error);
+        }
+    });
 }
 
 // Update chat list UI

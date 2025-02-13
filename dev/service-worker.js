@@ -1,4 +1,4 @@
-const SW_VERSION = '1.0.5';
+const SW_VERSION = '1.0.7';
 
 // Simplified state management
 const state = {
@@ -12,8 +12,17 @@ const state = {
 // Add periodic sync support
 self.addEventListener('periodicsync', (event) => {
     if (event.tag === 'check-messages') {
-        console.log('📱 Periodic sync triggered for check-messages');
-        event.waitUntil(checkForNewMessages());
+        // Use event.waitUntil to keep the service worker alive
+        event.waitUntil(
+            (async () => {
+                try {
+                    console.log('📱 Periodic sync triggered for check-messages');
+                    await checkForNewMessages();
+                } catch (error) {
+                    console.error('📱 Error in periodic sync:', error);
+                }
+            })()
+        );
     }
 });
 
@@ -66,44 +75,40 @@ self.addEventListener('message', (event) => {
 // Request periodic sync permission and register
 async function registerPeriodicSync() {
     try {
-        // Check if periodicSync is available in registration
-        console.log('📱 Checking periodicSync support:', {
-            inRegistration: 'periodicSync' in self.registration,
-            chromeVersion: /Chrome\/([0-9.]+)/.exec(navigator.userAgent)?.[1],
-            isHttps: self.location.protocol === 'https:',
-            scope: self.registration.scope
-        });
+        // First check if periodic sync is supported
+        if (!('periodicSync' in self.registration)) {
+            console.log('📱 Periodic sync not supported');
+            return false;
+        }
 
-        if ('periodicSync' in self.registration) {
-            // Check permission status
-            const status = await navigator.permissions.query({
-                name: 'periodic-background-sync',
-            });
+        // Check permission status first
+        const status = await navigator.permissions.query({
+            name: 'periodic-background-sync',
+        });
+        
+        console.log('📱 Initial periodic sync status:', status.state);
+        
+        // Only proceed if permission is granted
+        if (status.state === 'granted') {
+            // Get existing tags to avoid duplicate registration
+            const tags = await self.registration.periodicSync.getTags();
             
-            console.log('📱 PeriodicSync permission status:', {
-                state: status.state,
-                name: status.name
-            });
-            
-            if (status.state === 'granted') {
+            // Only register if not already registered
+            if (!tags.includes('check-messages')) {
                 await self.registration.periodicSync.register('check-messages', {
-                    minInterval: 60 * 1000
+                    minInterval: 60 * 1000 // Browser may enforce longer intervals
                 });
                 console.log('📱 Periodic sync registered successfully');
-                return true;
             } else {
-                console.log('📱 Periodic sync permission not granted');
+                console.log('📱 Periodic sync already registered');
             }
-        } else {
-            console.log('📱 PeriodicSync not available in this browser');
+            return true;
         }
+        
+        console.log('📱 Periodic sync permission not granted');
         return false;
     } catch (error) {
-        console.log('📱 Periodic sync registration failed:', {
-            error: error.message,
-            type: error.name,
-            stack: error.stack
-        });
+        console.log('📱 Periodic sync registration failed:', error);
         return false;
     }
 }
