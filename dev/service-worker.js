@@ -1,4 +1,4 @@
-const SW_VERSION = '1.0.4';
+const SW_VERSION = '1.0.5';
 
 // Simplified state management
 const state = {
@@ -66,23 +66,44 @@ self.addEventListener('message', (event) => {
 // Request periodic sync permission and register
 async function registerPeriodicSync() {
     try {
+        // Check if periodicSync is available in registration
+        console.log('📱 Checking periodicSync support:', {
+            inRegistration: 'periodicSync' in self.registration,
+            chromeVersion: /Chrome\/([0-9.]+)/.exec(navigator.userAgent)?.[1],
+            isHttps: self.location.protocol === 'https:',
+            scope: self.registration.scope
+        });
+
         if ('periodicSync' in self.registration) {
+            // Check permission status
             const status = await navigator.permissions.query({
                 name: 'periodic-background-sync',
             });
             
+            console.log('📱 PeriodicSync permission status:', {
+                state: status.state,
+                name: status.name
+            });
+            
             if (status.state === 'granted') {
-                // Register for minimum allowed interval
                 await self.registration.periodicSync.register('check-messages', {
-                    minInterval: 60 * 1000 // Browser may enforce longer intervals
+                    minInterval: 60 * 1000
                 });
-                console.log('Periodic sync registered successfully');
+                console.log('📱 Periodic sync registered successfully');
                 return true;
+            } else {
+                console.log('📱 Periodic sync permission not granted');
             }
+        } else {
+            console.log('📱 PeriodicSync not available in this browser');
         }
         return false;
     } catch (error) {
-        console.log('Periodic sync registration failed:', error);
+        console.log('📱 Periodic sync registration failed:', {
+            error: error.message,
+            type: error.name,
+            stack: error.stack
+        });
         return false;
     }
 }
