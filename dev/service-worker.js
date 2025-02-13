@@ -1,4 +1,4 @@
-const SW_VERSION = '1.0.0';
+const SW_VERSION = '1.0.1';
 
 // Simplified state management
 const state = {
@@ -92,40 +92,141 @@ function longAddress(addr) {
 
 async function checkForNewMessages() {
     try {
-        // Simplified state check
+        // Simplified state check with detailed logging
         if (!state.account || !state.timestamp) {
-            console.log('❌ No poll timestamp or account data');
+            console.log('❌ State check failed:', {
+                hasAccount: !!state.account,
+                hasTimestamp: !!state.timestamp,
+                state: JSON.stringify(state)
+            });
             return;
         }
 
         const { address, network } = state.account;
         if (!address || !network?.gateways?.length) {
-            console.log('❌ Invalid account configuration');
+            console.log('❌ Account configuration invalid:', {
+                hasAddress: !!address,
+                hasGateways: !!network?.gateways?.length,
+                account: JSON.stringify(state.account)
+            });
             return;
         }
 
         // Get random gateway and query for messages
         const gateway = network.gateways[Math.floor(Math.random() * network.gateways.length)];
+        
+        // Log the gateway being used
+        console.log('📱 Selected gateway:', {
+            gateway: JSON.stringify(gateway),
+            allGateways: JSON.stringify(network.gateways)
+        });
+
+        // Ensure protocol, host and port are all present
+        if (!gateway.protocol || !gateway.host || !gateway.port) {
+            console.error('❌ Invalid gateway configuration:', gateway);
+            return;
+        }
+
         const url = `${gateway.protocol}://${gateway.host}:${gateway.port}/account/${longAddress(address)}/chats/${state.lastPollTime || state.timestamp}`;
         
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`Network response failed: ${response.status}`);
+        console.log('📱 Attempting fetch:', {
+            url,
+            timestamp: state.lastPollTime || state.timestamp,
+            address: longAddress(address)
+        });
 
-        const { chats } = await response.json();
-        if (!chats) return;
+        // Add fetch options with CORS and cache settings
+        const fetchOptions = {
+            method: 'GET',
+            mode: 'cors',
+            cache: 'no-cache',
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'application/json'
+            }
+        };
 
-        // Track new chats
-        const newChats = new Set(
-            Object.values(chats).filter(chatId => !state.notifiedChats.has(chatId))
-        );
+        try {
+            const response = await fetch(url, fetchOptions);
+            console.log('📱 Fetch response:', {
+                ok: response.ok,
+                status: response.status,
+                statusText: response.statusText,
+                headers: Object.fromEntries(response.headers.entries())
+            });
 
-        if (newChats.size > 0) {
-            await showNotification(newChats.size);
-            newChats.forEach(chatId => state.notifiedChats.add(chatId));
-            state.lastPollTime = parseInt(state.timestamp);
+            if (!response.ok) {
+                throw new Error(`Network response failed: ${response.status} ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            console.log('📱 Response data:', {
+                hasChats: !!data.chats,
+                chatCount: data.chats ? Object.keys(data.chats).length : 0,
+                responseData: JSON.stringify(data)
+            });
+
+            const { chats } = data;
+            if (!chats) return;
+
+            // Track new chats with logging
+            const existingChats = Array.from(state.notifiedChats);
+            const newChats = new Set(
+                Object.values(chats).filter(chatId => !state.notifiedChats.has(chatId))
+            );
+
+            console.log('📱 Chat tracking:', {
+                existingChatsCount: existingChats.length,
+                newChatsCount: newChats.size,
+                existingChats,
+                newChatIds: Array.from(newChats)
+            });
+
+            if (newChats.size > 0) {
+                await showNotification(newChats.size);
+                newChats.forEach(chatId => state.notifiedChats.add(chatId));
+                state.lastPollTime = parseInt(state.timestamp);
+                console.log('📱 Updated state after new chats:', {
+                    notifiedChatsCount: state.notifiedChats.size,
+                    lastPollTime: state.lastPollTime
+                });
+            }
+
+        } catch (fetchError) {
+            // Enhanced fetch error logging
+            console.error('❌ Fetch operation failed:', {
+                error: fetchError.message,
+                type: fetchError.name,
+                url,
+                stack: fetchError.stack,
+                gateway: JSON.stringify(gateway),
+                networkState: {
+                    online: navigator.onLine,
+                    connection: navigator.connection ? {
+                        type: navigator.connection.type,
+                        effectiveType: navigator.connection.effectiveType,
+                        downlink: navigator.connection.downlink
+                    } : 'Not available'
+                }
+            });
+            throw fetchError;
         }
+
     } catch (error) {
-        console.error('❌ Error checking messages:', error);
+        // Main error handler with enhanced context
+        console.error('❌ Message check failed:', {
+            error: error.message,
+            type: error.name,
+            state: {
+                hasAccount: !!state.account,
+                hasTimestamp: !!state.timestamp,
+                hasInterval: !!state.pollInterval,
+                notifiedChatsCount: state.notifiedChats.size,
+                networkConfig: state.account?.network ? JSON.stringify(state.account.network) : 'No network config'
+            },
+            stack: error.stack,
+            serviceWorkerScope: self.registration.scope
+        });
     }
 }
 

@@ -2808,12 +2808,12 @@ async function registerServiceWorker() {
     }
 
     try {
-        // Check if there's an existing registration
-        const existingReg = await navigator.serviceWorker.getRegistration();
+        // Check if there's an existing registration with correct scope
+        const existingReg = await navigator.serviceWorker.getRegistration('/dev/');
         if (existingReg) {
             // If service worker is already registered and active
             if (existingReg.active) {
-                console.log('Service Worker already registered and active');
+                console.log('Service Worker already registered and active:', existingReg.scope);
                 return existingReg;
             }
             // If not active, unregister and re-register
@@ -2821,14 +2821,15 @@ async function registerServiceWorker() {
         }
 
         // Register new service worker with correct path and scope
-        const registration = await navigator.serviceWorker.register('./service-worker.js', {
-            scope: './'
+        const registration = await navigator.serviceWorker.register('/dev/service-worker.js', {
+            scope: '/dev/',
+            updateViaCache: 'none'
         });
         console.log('Service Worker registered successfully:', registration.scope);
 
         // Wait for the service worker to be ready
         await navigator.serviceWorker.ready;
-        console.log('Service Worker ready');
+        console.log('Service Worker ready with scope:', registration.scope);
 
         return registration;
     } catch (error) {
