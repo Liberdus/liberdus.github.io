@@ -92,46 +92,21 @@ function longAddress(addr) {
 
 async function checkForNewMessages() {
     try {
-        // Try to recover state if needed
-        if (!state.account) {
-            console.log('📱 No account state, attempting recovery');
-            const clients = await self.clients.matchAll();
-            console.log('📱 Active clients:', clients.length);
-            
-            if (clients.length === 0) {
-                try {
-                    // Try to get from localStorage
-                    const storedData = localStorage.getItem('lastAccountData');
-                    if (storedData) {
-                        state.account = JSON.parse(storedData);
-                        state.timestamp = Date.now().toString();
-                        console.log('📱 Recovered account data from localStorage');
-                    } else {
-                        console.log('❌ No stored account data found');
-                    }
-                } catch (error) {
-                    console.error('❌ Failed to recover state from localStorage:', error);
-                }
-            }
-        }
-
-        if (!state.timestamp || !state.account) {
-            console.log('❌ No poll timestamp or account data after recovery attempt');
+        // Simplified state check
+        if (!state.account || !state.timestamp) {
+            console.log('❌ No poll timestamp or account data');
             return;
         }
 
         const { address, network } = state.account;
         if (!address || !network?.gateways?.length) {
-            console.log('❌ Invalid account configuration:', { hasAddress: !!address, hasGateways: !!network?.gateways?.length });
+            console.log('❌ Invalid account configuration');
             return;
         }
 
-        // Get random gateway
+        // Get random gateway and query for messages
         const gateway = network.gateways[Math.floor(Math.random() * network.gateways.length)];
-        const paddedAddress = address.padEnd(64, '0');
-        
-        // Query for new messages
-        const url = `${gateway.protocol}://${gateway.host}:${gateway.port}/account/${paddedAddress}/chats/${state.lastPollTime || state.timestamp}`;
+        const url = `${gateway.protocol}://${gateway.host}:${gateway.port}/account/${longAddress(address)}/chats/${state.lastPollTime || state.timestamp}`;
         
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Network response failed: ${response.status}`);
@@ -149,7 +124,6 @@ async function checkForNewMessages() {
             newChats.forEach(chatId => state.notifiedChats.add(chatId));
             state.lastPollTime = parseInt(state.timestamp);
         }
-
     } catch (error) {
         console.error('❌ Error checking messages:', error);
     }
