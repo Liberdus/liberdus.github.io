@@ -791,6 +791,7 @@ console.log('stop back button')
 // This is for installed apps where we can't stop the back button; just save the state
 function handleVisibilityChange(e) {
     console.log('in handleVisibilityChange', document.visibilityState);
+    Logger.log('in handleVisibilityChange', document.visibilityState);
     if (document.visibilityState === 'hidden') {
         saveState();
         Logger.saveState();
@@ -2875,6 +2876,7 @@ async function registerServiceWorker() {
             scope: './'
         });
         console.log('Service Worker registered successfully:', registration.scope);
+        Logger.log('Service Worker registered successfully:', registration.scope);
 
         // Wait for the service worker to be ready
         await navigator.serviceWorker.ready;
@@ -2883,6 +2885,7 @@ async function registerServiceWorker() {
         return registration;
     } catch (error) {
         console.error('Service Worker registration failed:', error);
+        Logger.error('Service Worker registration failed:', error);
         return null;
     }
 }
@@ -2923,6 +2926,7 @@ function setupAppStateManagement() {
         if (document.hidden) {
             // App is being hidden/closed
             console.log('📱 App hidden - starting service worker polling');
+            Logger.log('📱 App hidden - starting service worker polling');
             const timestamp = Date.now().toString();
             localStorage.setItem('appPaused', timestamp);
             
@@ -2945,6 +2949,7 @@ function setupAppStateManagement() {
         } else {
             // App is becoming visible/open
             console.log('📱 App visible - stopping service worker polling');
+            Logger.log('📱 App visible - stopping service worker polling');
             localStorage.setItem('appPaused', '0');
             
             // Stop polling in service worker
@@ -2978,15 +2983,22 @@ function requestNotificationPermission() {
         Notification.requestPermission()
             .then(permission => {
                 console.log('Notification permission result:', permission);
+                Logger.log('Notification permission result:', permission);
                 // Optional: Hide a notification button if granted.
                 if (permission === 'granted') {
                     const notificationButton = document.getElementById('requestNotificationPermission');
                     if (notificationButton) {
                         notificationButton.style.display = 'none';
                     }
+                } else {
+                    console.log('Notification permission denied');
+                    Logger.log('Notification permission denied');
                 }
             })
-            .catch(error => console.error('Error during notification permission request:', error));
+            .catch(error => {
+                console.error('Error during notification permission request:', error);
+                Logger.error('Error during notification permission request:', error);
+            });
     }
 }
 

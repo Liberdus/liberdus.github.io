@@ -4,7 +4,7 @@ try {
   console.error('Failed to import log-utils.js:', e);
 }
 
-const SW_VERSION = '1.0.9';
+const SW_VERSION = '1.0.6';
 
 // Simplified state management
 const state = {
@@ -18,6 +18,7 @@ const state = {
 // Install event - set up any caching needed
 self.addEventListener('install', (event) => {
     console.log('Service Worker installing, version:', SW_VERSION);
+    Logger.log('Service Worker installing, version:', SW_VERSION);
     
     // Skip waiting to become active immediately
     self.skipWaiting();
@@ -26,6 +27,7 @@ self.addEventListener('install', (event) => {
 // Activate event - clean up old caches and take control
 self.addEventListener('activate', (event) => {
     console.log('Service Worker activating, version:', SW_VERSION);
+    Logger.log('Service Worker activating, version:', SW_VERSION);
 
     // Claim all clients immediately
     event.waitUntil(clients.claim());
@@ -53,6 +55,7 @@ function startPolling() {
     if (state.pollInterval) return;
     
     console.log('Starting message polling');
+    Logger.log('Starting message polling');
     state.pollInterval = setInterval(checkForNewMessages, 60000);
     checkForNewMessages();
 }
@@ -68,6 +71,7 @@ function stopPolling() {
             notifiedChats: new Set()
         });
         console.log('[Service Worker] Stopped message polling');
+        Logger.log('[Service Worker] Stopped message polling');
     }
 }
 
@@ -80,6 +84,7 @@ async function checkForNewMessages() {
     try {
         if (!state.timestamp || !state.account) {
             console.log('❌ No poll timestamp or account data');
+            Logger.warn('Message polling failed: No timestamp or account data');
             return;
         }
 
@@ -109,17 +114,22 @@ async function checkForNewMessages() {
 
         if (newChats.size > 0) {
             await showNotification(newChats.size);
+            Logger.log('New messages received:', { count: newChats.size });
             newChats.forEach(chatId => state.notifiedChats.add(chatId));
             state.lastPollTime = parseInt(state.timestamp);
         }
 
     } catch (error) {
         console.error('❌ Error checking messages:', error);
+        Logger.error('Message polling error:', error.message);
     }
 }
 
 async function showNotification(chatCount) {
-    if (self.Notification?.permission !== 'granted') return;
+    if (self.Notification?.permission !== 'granted') {
+        Logger.warn('Notification permission not granted');
+        return;
+    }
 
     try {
         const notificationText = chatCount === 1 
@@ -134,8 +144,10 @@ async function showNotification(chatCount) {
             renotify: true
         });
         console.log('✅ Notification sent successfully');
+        Logger.log('Notification sent:', { chatCount });
     } catch (error) {
         console.error('❌ Error showing notification:', error);
+        Logger.error('Notification error:', error.message);
     }
 }
 

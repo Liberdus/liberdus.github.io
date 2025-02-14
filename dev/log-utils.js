@@ -1,10 +1,19 @@
 /**
- * Logger utility for capturing and storing application logs in IndexedDB
- * - Captures console logs (log, warn, error) with source tracking
+ * Logger utility for storing important application logs in IndexedDB
+ * Usage:
+ * - Store logs: Logger.log(), Logger.warn(), Logger.error()
+ * - View logs: Logger.getLogs()
+ * - Clear logs: Logger.clearLogs()
+ * - Force save: Logger.forceSave()
+ * 
+ * Features:
  * - Batches and queues logs for efficient storage
  * - Auto-saves on errors, page unload, and visibility changes
  * - Handles service worker logs and lifecycle events
  * - Provides UI modal for viewing logs (up to 1000 entries)
+ * 
+ * Note: Use these methods only for logs you want to persist.
+ * For debug-only logs, use console methods directly.
  */
 class Logger {
   static DB_NAME = 'LoggerDB';
@@ -118,7 +127,7 @@ class Logger {
       });
 
     } catch (error) {
-      originalConsole.error('Failed to flush log queue:', error);
+      console.error('Failed to flush log queue:', error);
       // Put logs back in queue if save failed and not force flushing
       if (!force && logsToSave) {
         this._memoryQueue.unshift(...logsToSave);
@@ -160,7 +169,7 @@ class Logger {
       } catch (error) {
         retryCount++;
         if (retryCount >= this.MAX_RETRIES) {
-          originalConsole.error('Max retries reached, some logs may be lost:', error);
+          console.error('Max retries reached, some logs may be lost:', error);
         }
       }
     }
@@ -227,7 +236,7 @@ class Logger {
         request.onerror = () => reject(request.error);
       });
     } catch (error) {
-      originalConsole.error('Failed to get logs:', error);
+      console.error('Failed to get logs:', error);
       return [];
     }
   }
@@ -260,14 +269,26 @@ class Logger {
     // Force save any pending logs
     await this.flushQueue(true);
   }
-}
 
-// Store original console methods
-const originalConsole = {
-  log: console.log.bind(console),
-  warn: console.warn.bind(console),
-  error: console.error.bind(console)
-};
+  // New direct logging methods
+  static log(...args) {
+    const processedArgs = args.map(processValue);
+    const source = getCurrentSource();
+    this.queueLog('info', processedArgs, source);
+  }
+
+  static warn(...args) {
+    const processedArgs = args.map(processValue);
+    const source = getCurrentSource();
+    this.queueLog('warn', processedArgs, source);
+  }
+
+  static error(...args) {
+    const processedArgs = args.map(processValue);
+    const source = getCurrentSource();
+    this.queueLog('error', processedArgs, source);
+  }
+}
 
 // Shared processing function
 const processValue = (arg) => {
@@ -289,59 +310,25 @@ const processValue = (arg) => {
 
 // Helper to get current script source
 const getCurrentSource = () => {
-  // Check if we're in a service worker context more safely
-  try {
-    if (typeof self !== 'undefined' && 
-        typeof ServiceWorkerGlobalScope !== 'undefined' && 
-        self instanceof ServiceWorkerGlobalScope) {
-      return 'service-worker.js';
-    }
-  } catch (e) {
-    // Ignore error - not in service worker context
+  if (typeof ServiceWorkerGlobalScope !== 'undefined' && 
+      self instanceof ServiceWorkerGlobalScope) {
+    return 'service-worker.js';
   }
 
-  // Try to detect source from URL if available
   try {
     const currentScript = document.currentScript;
-    if (currentScript && currentScript.src) {
-      const scriptName = currentScript.src.split('/').pop();
-      return scriptName;
+    if (currentScript?.src) {
+      return currentScript.src.split('/').pop();
     }
   } catch (e) {
     // Ignore error - can't get script source
   }
 
-  // Default fallback
   return 'app.js';
 };
 
-// Override console methods to show logs and use queue
-console.log = (...args) => {
-  originalConsole.log(...args);  // Show in console immediately
-  if (!args.some(arg => String(arg).includes('favicon.ico'))) {
-    const processedArgs = args.map(processValue);
-    const source = { __source: getCurrentSource() };
-    Logger.queueLog('info', processedArgs, source.__source);
-  }
-};
-
-console.warn = (...args) => {
-  originalConsole.warn(...args);  // Show in console immediately
-  const processedArgs = args.map(processValue);
-  const source = { __source: getCurrentSource() };
-  Logger.queueLog('warn', processedArgs, source.__source);
-};
-
-console.error = (...args) => {
-  originalConsole.error(...args);  // Already showing errors
-  const processedArgs = args.map(processValue);
-  const source = { __source: getCurrentSource() };
-  Logger.queueLog('error', processedArgs, source.__source);
-};
-
-// Consolidate these handlers - they're duplicated in initDB() and at bottom of file
+// Keep event listeners for saving
 if (typeof window !== 'undefined') {
-  // Handle page unload and visibility in one place
   window.addEventListener('unload', () => Logger.forceSave());
   window.addEventListener('beforeunload', () => Logger.forceSave());
   document.addEventListener('visibilitychange', () => {
