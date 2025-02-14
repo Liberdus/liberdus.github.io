@@ -752,7 +752,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('refreshLogs').addEventListener('click', async () => {
         updateLogsView();
     });
-
+    document.getElementById('openLogs').addEventListener('click', () => {
+        // Close the menu modal first
+        document.getElementById('menuModal').classList.remove('active');
+        // Then open the logs modal
+        openLogsModal();
+    });
+    
     setupAddToHomeScreen()
 });
 
