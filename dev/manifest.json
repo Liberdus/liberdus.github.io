@@ -5,45 +5,19 @@
   "icons": [
     {
       "src": "./liberdus_logo_192.png",
+      "type": "image/png",
       "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "./liberdus_logo_250.png",
-      "sizes": "250x250",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "./liberdus_logo_512.png",
-      "sizes": "512x512",
       "type": "image/png",
+      "sizes": "512x512",
       "purpose": "any maskable"
-    },
-    {
-      "src": "./liberdus_logo_maskable.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
     }
   ],
   "start_url": "./",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#ffffff",
-  "splash_screen": {
-    "background_color": "#ffffff",
-    "image": "liberdus_logo_250.png",
-    "image_size": "250px",
-    "branding": "Liberdus",
-    "branding_style": {
-      "font_family": "Inter, sans-serif",
-      "font_size": "50px",
-      "font_weight": "700",
-      "color": "#1c1c21",
-      "text_shadow": "0px 4px 4px rgba(0, 0, 0, 0.25)",
-      "position": "bottom"
-    }
-  }
+  "theme_color": "#ffffff"
 }
