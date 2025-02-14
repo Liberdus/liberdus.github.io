@@ -18,6 +18,7 @@
       https://github.com/davidshimjs/qrcodejs
       https://github.com/davidshimjs/qrcodejs/blob/master/qrcode.js
     -->
+    <script src="./log-utils.js"></script>
     <script src="./qrcode.js"></script>
     <script src="./network.js"></script>
     <link rel="stylesheet" href="./styles.css">
@@ -134,6 +135,7 @@
                 <li class="menu-item" id="openRemoveAccount">Remove</li>
                 <li class="menu-item" id="openAbout">About</li>
                 <li class="menu-item" id="handleSignOut">Sign Out</li>
+          <li class="menu-item" id="openLogs">View Logs</li>
             </ul>
         </div>
 
@@ -167,8 +169,9 @@
                     <a href="service-worker.js" target="_blank">service-worker.js</a>
                     <br>
                     <p>
-                        <a href="noble-ciphers.js" target="_blank">noble-ciphers.js</a>
+                        <a href="noble-post-quantum.js" target="_blank">noble-post-quantum.js</a>
                         <a href="noble-secp256k1.js" target="_blank">noble-secp256k1.js</a>
+                        <a href="noble-ciphers.js" target="_blank">noble-ciphers.js</a>
                         <a href="blake2b.js" target="_blank">blake2b.js</a>
                         <a href="keccak256.js" target="_blank">keccak256.js</a>
                         <a href="stringify-shardus.js" target="_blank">stringify-shardus.js</a>
@@ -446,6 +449,19 @@
                     <button id="confirmRemoveAccount" class="update-button" style="margin-top: 1rem;">Remove</button>
                 </div>
             </div>
+        </div>
+
+      <!-- Logs Modal -->
+      <div class="modal" id="logsModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeLogsModal"></button>
+          <div class="modal-title">Application Logs</div>
+          <button id="refreshLogs" class="secondary-button">Refresh</button>
+          <button id="clearLogs" class="secondary-button">Clear</button>
+        </div>
+        <div class="logs-container" id="logsContainer">
+          <!-- Logs will be populated here -->
+        </div>
         </div>
     </div>
     

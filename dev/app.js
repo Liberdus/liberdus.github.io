@@ -82,6 +82,10 @@ async function forceReload(urls) {
     }
 }
 
+// https://github.com/paulmillr/noble-post-quantum
+// https://github.com/paulmillr/noble-post-quantum/releases
+import { ml_kem1024, randomBytes } from './noble-post-quantum.js';
+
 // https://github.com/paulmillr/noble-secp256k1
 // https://github.com/paulmillr/noble-secp256k1/raw/refs/heads/main/index.js
 import * as secp from './noble-secp256k1.js'; 
@@ -112,7 +116,6 @@ import { normalizeUsername, generateIdenticon, formatTime,
     normalizeAddress, longAddress, utf82bin, bin2utf8, hex2big, bigxnum2big,
     big2str, base642bin, bin2base64, hex2bin, bin2hex,
 } from './lib.js';
-
 
 const myHashKey = hex2bin('69fa4195670576c0160d660c3be36556ff8d504725be8a59b5a96509e0c994bc')
 const weiDigits = 18; 
@@ -430,6 +433,7 @@ async function handleCreateAccount(event) {
     // Generate uncompressed public key
     const publicKey = secp.getPublicKey(privateKey, false);
     const publicKeyHex = bin2hex(publicKey);
+    const pqSeed = bin2hex(randomBytes(64));
     
     // Generate address from public key
     const address = keccak256(publicKey.slice(1)).slice(-20);
@@ -444,7 +448,8 @@ async function handleCreateAccount(event) {
             address: addressHex,
             public: publicKeyHex,
             secret: privateKeyHex,
-            type: "secp256k1"
+            type: "secp256k1",
+            pqSeed: pqSeed,  // store only the 64 byte seed instead of 32,000 byte public and secret keys
         }
     };
 
@@ -736,6 +741,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         this.style.height = Math.min(this.scrollHeight, 120) + 'px';
     });
 
+    document.getElementById('openLogs').addEventListener('click', openLogsModal);
+    document.getElementById('closeLogsModal').addEventListener('click', () => {
+        document.getElementById('logsModal').classList.remove('active');
+    });
+    document.getElementById('clearLogs').addEventListener('click', async () => {
+        await Logger.clearLogs();
+        updateLogsView();
+    });
+    document.getElementById('refreshLogs').addEventListener('click', async () => {
+        updateLogsView();
+    });
+
     setupAddToHomeScreen()
 });
 
@@ -747,6 +764,7 @@ function handleUnload(e){
     } // User selected to Signout; state was already saved
     else{
         saveState()
+        Logger.forceSave();
     }
 }
 
@@ -754,6 +772,7 @@ function handleUnload(e){
 function handleBeforeUnload(e){
 console.log('in handleBeforeUnload', e)
     saveState()
+    Logger.saveState();
     if (handleSignOut.exit){ 
         window.removeEventListener('beforeunload', handleBeforeUnload)
         return 
@@ -764,66 +783,15 @@ console.log('stop back button')
 }
 
 // This is for installed apps where we can't stop the back button; just save the state
-async function handleVisibilityChange(e) {
+function handleVisibilityChange(e) {
     console.log('in handleVisibilityChange', document.visibilityState);
-    
-    // Only manage state if logged in
-    if (!myData || !myAccount) return;
-
     if (document.visibilityState === 'hidden') {
         saveState();
+        Logger.saveState();
         if (handleSignOut.exit) {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             return;
         }
-
-        // App is being hidden/closed
-        console.log('📱 App hidden - starting service worker polling');
-        
-        // Ensure main thread polling is stopped first
-        if (typeof pollChatsTimer !== 'undefined') {
-            clearTimeout(pollChatsTimer);
-            pollChatsTimer = undefined; // Explicitly clear the timer reference
-        }
-
-        // Wait a moment to ensure main thread polling is fully stopped
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        try {
-            const timestamp = Date.now().toString();
-            localStorage.setItem('appPaused', timestamp);
-            
-            // Prepare account data for service worker
-            const accountData = {
-                address: myAccount.keys.address,
-                network: {
-                    gateways: network.gateways
-                }
-            };
-            
-            // Start service worker polling only after main thread is stopped
-            const registration = await navigator.serviceWorker.ready;
-            registration.active?.postMessage({ 
-                type: 'start_polling',
-                timestamp,
-                account: accountData  
-            });
-        } catch (error) {
-            console.error('Error starting background polling:', error);
-        }
-    } else {
-        // App becoming visible - ensure clean handoff back to main thread
-        console.log('📱 App visible - stopping service worker polling');
-        
-        // Stop service worker polling first
-        const registration = await navigator.serviceWorker.ready;
-        await registration.active?.postMessage({ type: 'stop_polling' });
-        
-        // Wait for service worker to stop
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        localStorage.setItem('appPaused', '0');
-        await updateChatList('force');
     }
 }
 
@@ -1006,42 +974,6 @@ function setupAddToHomeScreen(){
             updateButtonVisibility();
         });
     }
-
-    // Add handler for successful installation
-    window.addEventListener('appinstalled', async (event) => {
-        console.log('👍 App installed');
-        addToHomeScreenButton.style.display = 'none';
-
-        try {
-            // First request notification permission
-            if ('Notification' in window) {
-                const notificationPermission = await Notification.requestPermission();
-                console.log('📱 Notification permission:', notificationPermission);
-            }
-
-            // Then explicitly request periodic sync permission
-            if ('serviceWorker' in navigator) {
-                const registration = await navigator.serviceWorker.ready;
-                if ('periodicSync' in registration) {
-                    // Explicitly request the permission
-                    const status = await navigator.permissions.request({
-                        name: 'periodic-background-sync'
-                    });
-                    
-                    console.log('📱 Periodic sync permission requested:', status.state);
-                    
-                    if (status.state === 'granted') {
-                        await registration.periodicSync.register('check-messages', {
-                            minInterval: 60 * 1000
-                        });
-                        console.log('📱 Periodic sync registered successfully');
-                    }
-                }
-            }
-        } catch (error) {
-            console.log('📱 Error requesting permissions:', error);
-        }
-    });
 }
 
 // Update chat list UI
@@ -1050,7 +982,8 @@ async function updateChatList(force) {
     if (myAccount && myAccount.keys) {
         gotChats = await getChats(myAccount.keys);     // populates myData with new chat messages
     }
-console.log('force gotChats', force, gotChats)
+    console.log('force gotChats', force === undefined ? 'undefined' : JSON.stringify(force), 
+                             gotChats === undefined ? 'undefined' : JSON.stringify(gotChats))
     if (! (force || gotChats)){ return }
     const chatList = document.getElementById('chatList');
 //            const chatsData = myData
@@ -1069,7 +1002,7 @@ console.log('force gotChats', force, gotChats)
         return;
     }
 
-console.log('updateChatList chats.length', chats.length)
+    console.log('updateChatList chats.length', JSON.stringify(chats.length))
     
     const chatItems = await Promise.all(chats.map(async chat => {
         const identicon = await generateIdenticon(chat.address);
@@ -1954,7 +1887,8 @@ async function handleSendAsset(event) {
 
     // Get recipient's public key from contacts
     let recipientPubKey = myData.contacts[toAddress]?.public;
-    if (!recipientPubKey) {
+    let pqRecPubKey = myData.contacts[toAddress]?.pqPublic
+    if (!recipientPubKey || !pqRecPubKey) {
         const recipientInfo = await queryNetwork(`/account/${longAddress(currentAddress)}`)
         if (!recipientInfo?.account?.publicKey){
             console.log(`no public key found for recipient ${currentAddress}`)
@@ -1962,13 +1896,17 @@ async function handleSendAsset(event) {
         }
         recipientPubKey = recipientInfo.account.publicKey
         myData.contacts[toAddress].public = recipientPubKey
+        pqRecPubKey = recipientInfo.account.pqPublicKey
+        myData.contacts[toAddress].pqPublic = pqRecPubKey
     }
 
     // Generate shared secret using ECDH and take first 32 bytes
-    const dhkey = secp.getSharedSecret(
-        hex2bin(keys.secret),
-        hex2bin(recipientPubKey)
-    ).slice(1, 33);
+    let dhkey = ecSharedKey(keys.secret, recipientPubKey)
+    const  { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey)
+    const combined = new Uint8Array(dhkey.length + sharedSecret.length)
+    combined.set(dhkey).set(sharedSecret, dhkey.length)
+    dhkey = blake.blake2b(combined, myHashKey, 32)
+
 
     // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
     // Encrypt message using shared secret
@@ -1995,6 +1933,7 @@ async function handleSendAsset(event) {
         senderInfo: encSenderInfo,
         encrypted: true,
         encryptionMethod: 'xchacha20poly1305',
+        pqEncSharedKey: bin2base64(cipherText),
         sent_timestamp: Date.now()
     };
 
@@ -2143,7 +2082,8 @@ async function handleSendMessage() {
 ///yyy
     // Get recipient's public key from contacts
     let recipientPubKey = myData.contacts[currentAddress]?.public;
-    if (!recipientPubKey) {
+    let pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
+    if (!recipientPubKey || !pqRecPubKey) {
         const recipientInfo = await queryNetwork(`/account/${longAddress(currentAddress)}`)
         if (!recipientInfo?.account?.publicKey){
             console.log(`no public key found for recipient ${currentAddress}`)
@@ -2151,13 +2091,17 @@ async function handleSendMessage() {
         }
         recipientPubKey = recipientInfo.account.publicKey
         myData.contacts[currentAddress].public = recipientPubKey
+        pqRecPubKey = recipientInfo.account.pqPublicKey
+        myData.contacts[currentAddress].pqPublic = pqRecPubKey
     }
-    
+
     // Generate shared secret using ECDH and take first 32 bytes
-    const dhkey = secp.getSharedSecret(
-        hex2bin(keys.secret),
-        hex2bin(recipientPubKey)
-    ).slice(1, 33);
+    let dhkey = ecSharedKey(keys.secret, recipientPubKey)
+    const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey)
+    const combined = new Uint8Array(dhkey.length + sharedSecret.length)
+    combined.set(dhkey)
+    combined.set(sharedSecret, dhkey.length)
+    dhkey = blake.blake2b(combined, myHashKey, 32)
 
     // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
     // Encrypt message using shared secret
@@ -2181,6 +2125,7 @@ async function handleSendMessage() {
         senderInfo: encSenderInfo,
         encrypted: true,
         encryptionMethod: 'xchacha20poly1305',
+        pqEncSharedKey: bin2base64(cipherText),
         sent_timestamp: Date.now()
     };
 
@@ -2441,9 +2386,8 @@ console.log('query', `${randomGateway.protocol}://${randomGateway.host}:${random
 console.log('response', data)
         return data
     } catch (error) {
-        // Changed error message to not reference undefined addr variable
-        console.error('Network request failed:', error);
-        return null;
+        console.error(`Error fetching balance for address ${addr.address}:`, error);
+        return null
     }
 }
 
@@ -2486,7 +2430,10 @@ async function getChats(keys) {  // needs to return the number of chats that nee
     const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/${timestamp}`) // TODO get this working
 //    const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/0`) // TODO stop using this
     const chatCount = Object.keys(senders.chats).length
-console.log('getChats senders', timestamp, chatCount, senders)
+    console.log('getChats senders', 
+        timestamp === undefined ? 'undefined' : JSON.stringify(timestamp),
+        chatCount === undefined ? 'undefined' : JSON.stringify(chatCount),
+        senders === undefined ? 'undefined' : JSON.stringify(senders))
     if (senders && senders.chats && chatCount){     // TODO check if above is working
         await processChats(senders.chats, keys)
     }
@@ -2522,6 +2469,7 @@ console.log("processChats sender", sender)
                         let senderPublic = myData.contacts[from]?.public
                         if (!senderPublic){
                             const senderInfo = await queryNetwork(`/account/${longAddress(from)}`)
+                            // TODO for security, make sure hash of public key is same as from address; needs to be in other similar situations
 //console.log('senderInfo.account', senderInfo.account)
                             if (!senderInfo?.account?.publicKey){
                                 console.log(`no public key found for sender ${sender}`)
@@ -2669,11 +2617,15 @@ console.log("processChats sender", sender)
 async function decryptMessage(payload, keys){
     if (payload.encrypted) {
         // Generate shared secret using ECDH
-        const dhkey = secp.getSharedSecret(
-            hex2bin(keys.secret),
-            hex2bin(payload.public)
-        ).slice(1, 33);
-        
+        let dhkey = ecSharedKey(keys.secret, payload.public)
+        const { publicKey, secretKey } = ml_kem1024.keygen(hex2bin(keys.pqSeed))
+        const sharedSecret = pqSharedKey(secretKey, payload.pqEncSharedKey)
+        const combined = new Uint8Array(dhkey.length + sharedSecret.length)
+        combined.set(dhkey)
+        combined.set(sharedSecret, dhkey.length)
+        dhkey = blake.blake2b(combined, myHashKey, 32)
+    
+
         // Decrypt based on encryption method
         if (payload.encryptionMethod === 'xchacha20poly1305') {
             try {
@@ -2785,12 +2737,15 @@ async function postAssetTransfer(to, amount, memo, keys) {
 async function postRegisterAlias(alias, keys){
     const aliasBytes = utf82bin(alias)
     const aliasHash = blake.blake2bHex(aliasBytes, myHashKey, 32)
+    const { publicKey, secretKey } = ml_kem1024.keygen(hex2bin(keys.pqSeed))
+    const pqPublicKey = bin2base64(publicKey)
     const tx = {
         type: 'register',
         aliasHash: aliasHash,
         from: longAddress(keys.address),
         alias: alias,
         publicKey: keys.public,
+        pqPublicKey: pqPublicKey,
         timestamp: Date.now()
     }
     const res = await injectTx(tx, keys)
@@ -2897,12 +2852,12 @@ async function registerServiceWorker() {
     }
 
     try {
-        // Check if there's an existing registration with correct scope
-        const existingReg = await navigator.serviceWorker.getRegistration('/dev/');
+        // Check if there's an existing registration
+        const existingReg = await navigator.serviceWorker.getRegistration();
         if (existingReg) {
             // If service worker is already registered and active
             if (existingReg.active) {
-                console.log('Service Worker already registered and active:', existingReg.scope);
+                console.log('Service Worker already registered and active');
                 return existingReg;
             }
             // If not active, unregister and re-register
@@ -2910,15 +2865,14 @@ async function registerServiceWorker() {
         }
 
         // Register new service worker with correct path and scope
-        const registration = await navigator.serviceWorker.register('/dev/service-worker.js', {
-            scope: '/dev/',
-            updateViaCache: 'none'
+        const registration = await navigator.serviceWorker.register('./service-worker.js', {
+            scope: './'
         });
         console.log('Service Worker registered successfully:', registration.scope);
 
         // Wait for the service worker to be ready
         await navigator.serviceWorker.ready;
-        console.log('Service Worker ready with scope:', registration.scope);
+        console.log('Service Worker ready');
 
         return registration;
     } catch (error) {
@@ -2931,9 +2885,6 @@ async function registerServiceWorker() {
 function setupServiceWorkerMessaging() {
     if (!('serviceWorker' in navigator)) return;
 
-    let lastSoundPlayed = 0;
-    const SOUND_COOLDOWN = 1000; // Prevent multiple sounds within 1 second
-
     // Listen for messages from service worker
     navigator.serviceWorker.addEventListener('message', (event) => {
         const data = event.data;
@@ -2942,37 +2893,6 @@ function setupServiceWorkerMessaging() {
         switch (data.type) {
             case 'error':
                 console.error('Service Worker error:', data.error);
-                break;
-            case 'new_notification':
-                console.log('🖥️ Desktop notification handling');
-                // Show desktop notification
-                if (Notification.permission === 'granted') {
-                    const notificationText = data.chatCount === 1 
-                        ? 'You have new messages in a conversation'
-                        : `You have new messages in ${data.chatCount} conversations`;
-                        
-                    new Notification('New Messages', {
-                        body: notificationText,
-                        icon: './liberdus_logo_250.png'
-                    });
-                }
-                
-                // Play sound if tabbed away
-                if (document.hidden) {
-                    // Prevent duplicate sounds
-                    if (data.timestamp - lastSoundPlayed < SOUND_COOLDOWN) {
-                        return;
-                    }
-                    
-                    const audio = new Audio('./noti.wav');
-                    audio.volume = 0.20;
-                    audio.play()
-                        .then(() => {
-                            lastSoundPlayed = Date.now();
-                            console.log('✅ Sound played successfully');
-                        })
-                        .catch(error => console.error('❌ Error playing sound:', error));
-                }
                 break;
         }
     });
@@ -2989,7 +2909,63 @@ function setupAppStateManagement() {
             registration.active?.postMessage({ type: 'stop_polling' });
         });
     }
+
+    // Handle visibility changes
+    document.addEventListener('visibilitychange', async () => {
+        if (!myData || !myAccount) return; // Only manage state if logged in
+        
+        if (document.hidden) {
+            // App is being hidden/closed
+            console.log('📱 App hidden - starting service worker polling');
+            const timestamp = Date.now().toString();
+            localStorage.setItem('appPaused', timestamp);
+            
+            // Prepare account data for service worker
+            const accountData = {
+                address: myAccount.keys.address,
+                network: {
+                    gateways: network.gateways
+                }
+            };
+            
+            
+            // Start polling in service worker with timestamp and account data
+            const registration = await navigator.serviceWorker.ready;
+            registration.active?.postMessage({ 
+                type: 'start_polling',
+                timestamp,
+                account: accountData  
+            });
+        } else {
+            // App is becoming visible/open
+            console.log('📱 App visible - stopping service worker polling');
+            localStorage.setItem('appPaused', '0');
+            
+            // Stop polling in service worker
+            const registration = await navigator.serviceWorker.ready;
+            registration.active?.postMessage({ type: 'stop_polling' });
+
+            await updateChatList('force');
+        }
+    });
 }
+
+function ecSharedKey(sec, pub){
+    return secp.getSharedSecret(
+        hex2bin(sec),
+        hex2bin(pub)
+    ).slice(1, 33);  // TODO - we were taking only first 32 bytes for chacha; now we can return the whole thing
+}
+
+function pqSharedKey(recipientKey, encKey){  // inputs base64 or binary, outputs binary
+    if (typeof(recipientKey) == 'string'){ recipientKey = base642bin(recipientKey)}
+    if (encKey){
+        if (typeof(encKey) == 'string'){ encKey = base642bin(encKey)} 
+        return ml_kem1024.decapsulate(encKey, recipientKey);
+    }
+    return ml_kem1024.encapsulate(recipientKey);  // { cipherText, sharedSecret }
+}
+
 
 function requestNotificationPermission() {
     if ('Notification' in window && Notification.permission === 'default') {
@@ -3006,5 +2982,80 @@ function requestNotificationPermission() {
             })
             .catch(error => console.error('Error during notification permission request:', error));
     }
+}
+
+function openLogsModal() {
+  const modal = document.getElementById('logsModal');
+  modal.classList.add('active');
+  updateLogsView();
+}
+
+async function updateLogsView() {
+    const logsContainer = document.getElementById('logsContainer');
+    const logs = await Logger.getLogs();
+    
+    // Create document fragment for better performance
+    const fragment = document.createDocumentFragment();
+    
+    // Use logs directly without sorting - they'll be in insertion order
+    const dateFormatter = new Intl.DateTimeFormat();
+    const timeFormatter = new Intl.DateTimeFormat(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    
+    logs.forEach(log => {
+        const logEntry = document.createElement('div');
+        logEntry.className = `log-entry ${log.level || 'info'}`;
+        
+        const date = new Date(log.timestamp);
+        logEntry.innerHTML = `
+            <span class="log-timestamp">${dateFormatter.format(date)} ${timeFormatter.format(date)}</span>
+            <span class="log-source">[${log.source || 'app'}]</span>
+            <span class="log-level">${log.level || 'info'}</span>
+            <pre class="log-message">${escapeHtml(formatMessage(log.message))}</pre>
+        `;
+        fragment.appendChild(logEntry);
+    });
+
+    logsContainer.innerHTML = '';
+    logsContainer.appendChild(fragment);
+    logsContainer.scrollTop = logsContainer.scrollHeight;  // This scrolls to bottom
+}
+
+// Helper functions moved outside for reuse
+function formatMessage(message) {
+    // If message is an array (from new format)
+    if (Array.isArray(message)) {
+        return message.map(part => {
+            try {
+                // Try to parse if it looks like JSON
+                if (typeof part === 'string' && 
+                    (part.startsWith('{') || part.startsWith('[') || 
+                     part.startsWith('"') || part === 'null' || 
+                     part === '"undefined"')) {
+                    return JSON.stringify(JSON.parse(part), null, 2);
+                }
+                return part;
+            } catch (e) {
+                return part;
+            }
+        }).join(' ');
+    }
+
+    // Legacy format (string)
+    try {
+        const parsed = JSON.parse(message);
+        return JSON.stringify(parsed, null, 2);
+    } catch (e) {
+        return message;
+    }
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
 }
 

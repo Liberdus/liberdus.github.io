@@ -1439,40 +1439,129 @@ input[type="file"].form-control {
 }
 
 #aboutModal #netIdAbout {
-    word-wrap: break-word;
+  word-wrap: break-word;
 }
 
 /* Contact Info Modal Styles */
 .contact-info-list {
-    padding: 1rem;
+  padding: 1rem;
 }
 
 .contact-info-item {
-    padding: 1rem;
-    border-bottom: 1px solid #dee2e6;
+  padding: 1rem;
+  border-bottom: 1px solid #dee2e6;
 }
 
 .contact-info-item:last-child {
-    border-bottom: none;
+  border-bottom: none;
 }
 
 .contact-info-label {
-    font-family: "Inter", sans-serif;
-    font-size: 14px;
-    color: #666;
-    margin-bottom: 4px;
+  font-family: "Inter", sans-serif;
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 4px;
 }
 
 .contact-info-value {
-    font-family: "Inter", sans-serif;
-    font-size: 16px;
-    color: #1c1c21;
+  font-family: "Inter", sans-serif;
+  font-size: 16px;
+  color: #1c1c21;
 }
 
 .chat-user-info {
-    cursor: pointer;
+  cursor: pointer;
 }
 
 .chat-user-info:hover {
-    opacity: 0.8;
+  opacity: 0.8;
+}
+
+/* Logs Modal Styles */
+.logs-container {
+  padding: 1rem;
+  font-family: monospace;
+  font-size: 0.9rem;
+  overflow-y: auto;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.log-entry {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 4px 0;
+  flex-wrap: wrap;
+  text-align: left;
+}
+
+.log-timestamp {
+  color: #666;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.log-source {
+  color: #0066cc;
+  font-weight: bold;
+  text-align: left;
+}
+
+.log-level {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  font-weight: bold;
+  text-align: left;
+}
+
+.log-entry.info .log-level {
+  background: #e3f2fd;
+  color: #0066cc;
+}
+
+.log-entry.warn .log-level {
+  background: #fff3e0;
+  color: #ef6c00;
+}
+
+.log-entry.error .log-level {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.log-message {
+  flex: 1;
+  min-width: 200px;
+  white-space: pre-wrap;
+  font-family: monospace;
+  margin: 0;
+  text-align: left;
+}
+
+pre.log-message {
+  font-size: 0.9rem;
+  background: #f8f9fa;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin: 2px 0;
+  text-align: left;
+}
+
+/* Clear button in header */
+#clearLogs {
+  margin-left: auto;
+  padding: 6px 12px;
+  font-size: 0.9rem;
+}
+
+/* Refresh and Clear buttons in header */
+#refreshLogs,
+#clearLogs {
+  margin-left: 8px;
+  padding: 6px 12px;
+  font-size: 0.9rem;
 }

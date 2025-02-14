@@ -37,7 +37,8 @@ LocalStore key "username_netid"; gets read into myData global variable in app.js
       "address": "49d26dbe4bfb77fc5ff13d99deff5ea069deebf3",
       "public": "b829475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
       "secret": "93a3ac1f30f392c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",
-      "type": "secp256k1"
+      "type": "secp256k1",
+      "pqSeed": "2c95299894f02103218181429e682d07411d06108b910a8887ea79d475707e9a609246f388e81cc6fcb5cd1b5e1166d84d60002393a3ac1f30f93a3ac1f30f39"
     }
   },
   "network": {      // TODO need to implement this
@@ -53,7 +54,8 @@ LocalStore key "username_netid"; gets read into myData global variable in app.js
   "contacts": {
     "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266": {
       "address": "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-      "public": "b829475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",  // cached here so we don't have to check the network 
+      "public": "b829475707e9a609246f388e81cc6fcb5cd1b5e1166d84d6000235eed05bee46",  // cached here so we don't have to check the network
+      "pqPublic": "base64_encodeing_about_32k_bytes", // cached here to avoid getting from the network; also more secure against Man-i-t-Mid attack
       "username": "alice_web3",
       "name": "Alice Johnson",      // this is entered by the user, not from network; if not provided, set to senderInfo values
       "sort": "Alice Johnson",
