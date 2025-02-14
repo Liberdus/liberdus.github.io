@@ -1,16 +1,23 @@
 {
   "name": "Liberdus",
   "short_name": "Liberdus",
+  "description": "Decentralized messaging and wallet application",
   "icons": [
     {
-      "src": "./liberdus_logo_250.png",
-      "sizes": "250x250",
+      "src": "liberdus_logo_192.png",
       "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "liberdus_logo_512.png",
+      "type": "image/png",
+      "sizes": "512x512",
       "purpose": "any maskable"
     }
   ],
-  "start_url": "./",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#007bff"
+  "theme_color": "#ffffff"
 }

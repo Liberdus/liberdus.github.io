@@ -12,12 +12,25 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="mobile-web-app-capable" content="yes">
+    
+    <!-- Add these new meta tags for splash screen -->
+    <link rel="apple-touch-icon" href="liberdus_logo_512.png">
+    <meta name="apple-mobile-web-app-title" content="Liberdus">
+    
+    <!-- Add splash screen images for different iPhone sizes -->
+    <link rel="apple-touch-startup-image" href="splash_640x1136.png" media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2)">
+    <link rel="apple-touch-startup-image" href="splash_750x1334.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2)">
+    <link rel="apple-touch-startup-image" href="splash_1170x2532.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)">
+    <link rel="apple-touch-startup-image" href="splash_1179x2556.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3)">
+    <link rel="apple-touch-startup-image" href="splash_1290x2796.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)">
+    
     <title>Liberdus</title>
     <!--
       QRCode lib from
       https://github.com/davidshimjs/qrcodejs
       https://github.com/davidshimjs/qrcodejs/blob/master/qrcode.js
     -->
+    <script src="./log-utils.js"></script>
     <script src="./qrcode.js"></script>
     <script src="./network.js"></script>
     <link rel="stylesheet" href="./styles.css">
@@ -25,15 +38,6 @@
 </head>
 <body>
     <script src="./app.js" type="module"></script>
-    <!-- app.js loads the following additional modules -->
-    <xscript src="./lib.js"></xscript>
-    <xscript src="./blake2b.js"></xscript>
-    <xscript src="./keccak256.js"></xscript>
-    <xscript src="./noble-secp256k1.js"></xscript>
-    <xscript src="./noble-ciphers.js"></xscript>
-    <xscript src="./stringify-shardus.js"></xscript>
-    <xscript src=""></xscript>
-    <xscript src=""></xscript>
     <div class="container">
         <header class="header" id="header">
             <div id="logo"><img src="liberdus_logo_50.png"></div>
@@ -142,6 +146,7 @@
 -->
                 <li class="menu-item" id="openRemoveAccount">Remove</li>
                 <li class="menu-item" id="openAbout">About</li>
+                <li class="menu-item" id="openLogs">View Logs</li>
                 <li class="menu-item" id="handleSignOut">Sign Out</li>
             </ul>
         </div>
@@ -176,8 +181,9 @@
                     <a href="service-worker.js" target="_blank">service-worker.js</a>
                     <br>
                     <p>
-                        <a href="noble-ciphers.js" target="_blank">noble-ciphers.js</a>
+                        <a href="noble-post-quantum.js" target="_blank">noble-post-quantum.js</a>
                         <a href="noble-secp256k1.js" target="_blank">noble-secp256k1.js</a>
+                        <a href="noble-ciphers.js" target="_blank">noble-ciphers.js</a>
                         <a href="blake2b.js" target="_blank">blake2b.js</a>
                         <a href="keccak256.js" target="_blank">keccak256.js</a>
                         <a href="stringify-shardus.js" target="_blank">stringify-shardus.js</a>
@@ -403,6 +409,42 @@
             </div>
         </div>
         
+        <!-- Contact Info Modal -->
+        <div class="modal" id="contactInfoModal">
+            <div class="modal-header">
+                <button class="back-button" id="closeContactInfoModal"></button>
+                <div class="modal-title">Contact Info</div>
+            </div>
+            <div class="form-container">
+                <div class="contact-info-list">
+                    <div class="contact-info-item">
+                        <div class="contact-info-label">Username</div>
+                        <div class="contact-info-value" id="contactInfoUsername"></div>
+                    </div>
+                    <div class="contact-info-item">
+                        <div class="contact-info-label">Name</div>
+                        <div class="contact-info-value" id="contactInfoName"></div>
+                    </div>
+                    <div class="contact-info-item">
+                        <div class="contact-info-label">Email</div>
+                        <div class="contact-info-value" id="contactInfoEmail"></div>
+                    </div>
+                    <div class="contact-info-item">
+                        <div class="contact-info-label">Phone</div>
+                        <div class="contact-info-value" id="contactInfoPhone"></div>
+                    </div>
+                    <div class="contact-info-item">
+                        <div class="contact-info-label">LinkedIn</div>
+                        <div class="contact-info-value" id="contactInfoLinkedin"></div>
+                    </div>
+                    <div class="contact-info-item">
+                        <div class="contact-info-label">X</div>
+                        <div class="contact-info-value" id="contactInfoX"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         <!-- Remove Account Modal -->
         <div class="modal" id="removeAccountModal">
             <div class="modal-header">
@@ -419,6 +461,19 @@
                     <button id="confirmRemoveAccount" class="update-button" style="margin-top: 1rem;">Remove</button>
                 </div>
             </div>
+        </div>
+
+      <!-- Logs Modal -->
+      <div class="modal" id="logsModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeLogsModal"></button>
+          <div class="modal-title">Application Logs</div>
+          <button id="refreshLogs" class="secondary-button">Refresh</button>
+          <button id="clearLogs" class="secondary-button">Clear</button>
+        </div>
+        <div class="logs-container" id="logsContainer">
+          <!-- Logs will be populated here -->
+        </div>
         </div>
     </div>
     

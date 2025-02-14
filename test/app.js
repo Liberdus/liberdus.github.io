@@ -82,6 +82,10 @@ async function forceReload(urls) {
     }
 }
 
+// https://github.com/paulmillr/noble-post-quantum
+// https://github.com/paulmillr/noble-post-quantum/releases
+import { ml_kem1024, randomBytes } from './noble-post-quantum.js';
+
 // https://github.com/paulmillr/noble-secp256k1
 // https://github.com/paulmillr/noble-secp256k1/raw/refs/heads/main/index.js
 import * as secp from './noble-secp256k1.js'; 
@@ -112,7 +116,6 @@ import { normalizeUsername, generateIdenticon, formatTime,
     normalizeAddress, longAddress, utf82bin, bin2utf8, hex2big, bigxnum2big,
     big2str, base642bin, bin2base64, hex2bin, bin2hex,
 } from './lib.js';
-
 
 const myHashKey = hex2bin('69fa4195670576c0160d660c3be36556ff8d504725be8a59b5a96509e0c994bc')
 const weiDigits = 18; 
@@ -177,6 +180,7 @@ function getAvailableUsernames() {
     return Object.keys(netidAccounts.usernames);
 }
 
+// This is for the sign in button on the welcome page
 function openSignInModal() {
     // Get existing accounts
     const { netid } = network;
@@ -429,6 +433,7 @@ async function handleCreateAccount(event) {
     // Generate uncompressed public key
     const publicKey = secp.getPublicKey(privateKey, false);
     const publicKeyHex = bin2hex(publicKey);
+    const pqSeed = bin2hex(randomBytes(64));
     
     // Generate address from public key
     const address = keccak256(publicKey.slice(1)).slice(-20);
@@ -443,7 +448,8 @@ async function handleCreateAccount(event) {
             address: addressHex,
             public: publicKeyHex,
             secret: privateKeyHex,
-            type: "secp256k1"
+            type: "secp256k1",
+            pqSeed: pqSeed,  // store only the 64 byte seed instead of 32,000 byte public and secret keys
         }
     };
 
@@ -466,7 +472,9 @@ async function handleCreateAccount(event) {
     
     // Store the account data in localStorage
     localStorage.setItem(`${username}_${netid}`, stringify(myData));
-    
+
+    requestNotificationPermission();
+
     // Close modal and proceed to app
     closeCreateAccountModal();
     document.getElementById('welcomeScreen').style.display = 'none';
@@ -474,6 +482,7 @@ async function handleCreateAccount(event) {
     switchView('chats'); // Default view
 }
 
+// This is for the sign in button after selecting an account
 async function handleSignIn(event) {
     event.preventDefault();
     const username = document.getElementById('username').value;
@@ -510,7 +519,9 @@ async function handleSignIn(event) {
     myData = parse(localStorage.getItem(`${username}_${netid}`));
     if (!myData) { console.log('Account data not found'); return }
     myAccount = myData.account;
-    
+
+    requestNotificationPermission();
+
     // Close modal and proceed to app
     closeSignInModal();
     document.getElementById('welcomeScreen').style.display = 'none';
@@ -710,6 +721,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     document.getElementById('handleSignOut').addEventListener('click', handleSignOut);
     document.getElementById('closeChatModal').addEventListener('click', closeChatModal);
+    document.getElementById('closeContactInfoModal').addEventListener('click', closeContactInfoModal);
     document.getElementById('handleSendMessage').addEventListener('click', handleSendMessage);
     
     // Add refresh balance button handler
@@ -729,6 +741,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         this.style.height = Math.min(this.scrollHeight, 120) + 'px';
     });
 
+    document.getElementById('openLogs').addEventListener('click', openLogsModal);
+    document.getElementById('closeLogsModal').addEventListener('click', () => {
+        document.getElementById('logsModal').classList.remove('active');
+    });
+    document.getElementById('clearLogs').addEventListener('click', async () => {
+        await Logger.clearLogs();
+        updateLogsView();
+    });
+    document.getElementById('refreshLogs').addEventListener('click', async () => {
+        updateLogsView();
+    });
+    document.getElementById('openLogs').addEventListener('click', () => {
+        // Close the menu modal first
+        document.getElementById('menuModal').classList.remove('active');
+        // Then open the logs modal
+        openLogsModal();
+    });
+    
     setupAddToHomeScreen()
 });
 
@@ -740,6 +770,7 @@ function handleUnload(e){
     } // User selected to Signout; state was already saved
     else{
         saveState()
+        Logger.forceSave();
     }
 }
 
@@ -747,6 +778,7 @@ function handleUnload(e){
 function handleBeforeUnload(e){
 console.log('in handleBeforeUnload', e)
     saveState()
+    Logger.saveState();
     if (handleSignOut.exit){ 
         window.removeEventListener('beforeunload', handleBeforeUnload)
         return 
@@ -759,8 +791,10 @@ console.log('stop back button')
 // This is for installed apps where we can't stop the back button; just save the state
 function handleVisibilityChange(e) {
     console.log('in handleVisibilityChange', document.visibilityState);
+    Logger.log('in handleVisibilityChange', document.visibilityState);
     if (document.visibilityState === 'hidden') {
         saveState();
+        Logger.saveState();
         if (handleSignOut.exit) {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             return;
@@ -955,7 +989,8 @@ async function updateChatList(force) {
     if (myAccount && myAccount.keys) {
         gotChats = await getChats(myAccount.keys);     // populates myData with new chat messages
     }
-console.log('force gotChats', force, gotChats)
+    console.log('force gotChats', force === undefined ? 'undefined' : JSON.stringify(force), 
+                             gotChats === undefined ? 'undefined' : JSON.stringify(gotChats))
     if (! (force || gotChats)){ return }
     const chatList = document.getElementById('chatList');
 //            const chatsData = myData
@@ -974,7 +1009,7 @@ console.log('force gotChats', force, gotChats)
         return;
     }
 
-console.log('updateChatList chats.length', chats.length)
+    console.log('updateChatList chats.length', JSON.stringify(chats.length))
     
     const chatItems = await Promise.all(chats.map(async chat => {
         const identicon = await generateIdenticon(chat.address);
@@ -1234,12 +1269,18 @@ async function handleImportFile(event) {
         }
         // Get existing accounts or create new structure
         const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+        // Ensure netid exists
+        if (!existingAccounts.netids[myAccount.netid]) {
+            existingAccounts.netids[myAccount.netid] = { usernames: {} };
+        }
         // Store updated accounts back in localStorage
-        existingAccounts.netids[myAccount.netid].usernames[myAccount.username] = myAccount;
+        existingAccounts.netids[myAccount.netid].usernames[myAccount.username] = {address: myAccount.keys.address};
         localStorage.setItem('accounts', stringify(existingAccounts));
 
         // Store the localStore entry for username_netid
         localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
+
+        requestNotificationPermission();
 
 /*
         // Refresh form data and chat list
@@ -1571,6 +1612,15 @@ function openChatModal(address) {
         messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
     }, 100);
 
+    // Add click handler for username to show contact info
+    const userInfo = modal.querySelector('.chat-user-info');
+    userInfo.onclick = () => {
+        const contact = myData.contacts[address];
+        if (contact && contact.senderInfo) {
+            openContactInfoModal(contact.senderInfo);
+        }
+    };
+
     // Show modal
     modal.classList.add('active');
 
@@ -1844,7 +1894,8 @@ async function handleSendAsset(event) {
 
     // Get recipient's public key from contacts
     let recipientPubKey = myData.contacts[toAddress]?.public;
-    if (!recipientPubKey) {
+    let pqRecPubKey = myData.contacts[toAddress]?.pqPublic
+    if (!recipientPubKey || !pqRecPubKey) {
         const recipientInfo = await queryNetwork(`/account/${longAddress(currentAddress)}`)
         if (!recipientInfo?.account?.publicKey){
             console.log(`no public key found for recipient ${currentAddress}`)
@@ -1852,13 +1903,17 @@ async function handleSendAsset(event) {
         }
         recipientPubKey = recipientInfo.account.publicKey
         myData.contacts[toAddress].public = recipientPubKey
+        pqRecPubKey = recipientInfo.account.pqPublicKey
+        myData.contacts[toAddress].pqPublic = pqRecPubKey
     }
 
     // Generate shared secret using ECDH and take first 32 bytes
-    const dhkey = secp.getSharedSecret(
-        hex2bin(keys.secret),
-        hex2bin(recipientPubKey)
-    ).slice(1, 33);
+    let dhkey = ecSharedKey(keys.secret, recipientPubKey)
+    const  { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey)
+    const combined = new Uint8Array(dhkey.length + sharedSecret.length)
+    combined.set(dhkey).set(sharedSecret, dhkey.length)
+    dhkey = blake.blake2b(combined, myHashKey, 32)
+
 
     // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
     // Encrypt message using shared secret
@@ -1885,6 +1940,7 @@ async function handleSendAsset(event) {
         senderInfo: encSenderInfo,
         encrypted: true,
         encryptionMethod: 'xchacha20poly1305',
+        pqEncSharedKey: bin2base64(cipherText),
         sent_timestamp: Date.now()
     };
 
@@ -1940,6 +1996,25 @@ console.log('payload is', payload)
         console.error('Transaction error:', error);
         alert('Transaction failed. Please try again.');
     }
+}
+
+function openContactInfoModal(senderInfo) {
+    const modal = document.getElementById('contactInfoModal');
+    
+    // Set values
+    document.getElementById('contactInfoUsername').textContent = senderInfo.username || 'Not provided';
+    document.getElementById('contactInfoName').textContent = senderInfo.name || 'Not provided';
+    document.getElementById('contactInfoEmail').textContent = senderInfo.email || 'Not provided';
+    document.getElementById('contactInfoPhone').textContent = senderInfo.phone || 'Not provided';
+    document.getElementById('contactInfoLinkedin').textContent = senderInfo.linkedin || 'Not provided';
+    document.getElementById('contactInfoX').textContent = senderInfo.x || 'Not provided';
+    
+    // Show modal
+    modal.classList.add('active');
+}
+
+function closeContactInfoModal() {
+    document.getElementById('contactInfoModal').classList.remove('active');
 }
 
 function handleSignOut() {
@@ -2014,7 +2089,8 @@ async function handleSendMessage() {
 ///yyy
     // Get recipient's public key from contacts
     let recipientPubKey = myData.contacts[currentAddress]?.public;
-    if (!recipientPubKey) {
+    let pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
+    if (!recipientPubKey || !pqRecPubKey) {
         const recipientInfo = await queryNetwork(`/account/${longAddress(currentAddress)}`)
         if (!recipientInfo?.account?.publicKey){
             console.log(`no public key found for recipient ${currentAddress}`)
@@ -2022,13 +2098,17 @@ async function handleSendMessage() {
         }
         recipientPubKey = recipientInfo.account.publicKey
         myData.contacts[currentAddress].public = recipientPubKey
+        pqRecPubKey = recipientInfo.account.pqPublicKey
+        myData.contacts[currentAddress].pqPublic = pqRecPubKey
     }
-    
+
     // Generate shared secret using ECDH and take first 32 bytes
-    const dhkey = secp.getSharedSecret(
-        hex2bin(keys.secret),
-        hex2bin(recipientPubKey)
-    ).slice(1, 33);
+    let dhkey = ecSharedKey(keys.secret, recipientPubKey)
+    const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey)
+    const combined = new Uint8Array(dhkey.length + sharedSecret.length)
+    combined.set(dhkey)
+    combined.set(sharedSecret, dhkey.length)
+    dhkey = blake.blake2b(combined, myHashKey, 32)
 
     // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
     // Encrypt message using shared secret
@@ -2052,6 +2132,7 @@ async function handleSendMessage() {
         senderInfo: encSenderInfo,
         encrypted: true,
         encryptionMethod: 'xchacha20poly1305',
+        pqEncSharedKey: bin2base64(cipherText),
         sent_timestamp: Date.now()
     };
 
@@ -2356,7 +2437,10 @@ async function getChats(keys) {  // needs to return the number of chats that nee
     const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/${timestamp}`) // TODO get this working
 //    const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/0`) // TODO stop using this
     const chatCount = Object.keys(senders.chats).length
-console.log('getChats senders', timestamp, chatCount, senders)
+    console.log('getChats senders', 
+        timestamp === undefined ? 'undefined' : JSON.stringify(timestamp),
+        chatCount === undefined ? 'undefined' : JSON.stringify(chatCount),
+        senders === undefined ? 'undefined' : JSON.stringify(senders))
     if (senders && senders.chats && chatCount){     // TODO check if above is working
         await processChats(senders.chats, keys)
     }
@@ -2392,6 +2476,7 @@ console.log("processChats sender", sender)
                         let senderPublic = myData.contacts[from]?.public
                         if (!senderPublic){
                             const senderInfo = await queryNetwork(`/account/${longAddress(from)}`)
+                            // TODO for security, make sure hash of public key is same as from address; needs to be in other similar situations
 //console.log('senderInfo.account', senderInfo.account)
                             if (!senderInfo?.account?.publicKey){
                                 console.log(`no public key found for sender ${sender}`)
@@ -2539,11 +2624,15 @@ console.log("processChats sender", sender)
 async function decryptMessage(payload, keys){
     if (payload.encrypted) {
         // Generate shared secret using ECDH
-        const dhkey = secp.getSharedSecret(
-            hex2bin(keys.secret),
-            hex2bin(payload.public)
-        ).slice(1, 33);
-        
+        let dhkey = ecSharedKey(keys.secret, payload.public)
+        const { publicKey, secretKey } = ml_kem1024.keygen(hex2bin(keys.pqSeed))
+        const sharedSecret = pqSharedKey(secretKey, payload.pqEncSharedKey)
+        const combined = new Uint8Array(dhkey.length + sharedSecret.length)
+        combined.set(dhkey)
+        combined.set(sharedSecret, dhkey.length)
+        dhkey = blake.blake2b(combined, myHashKey, 32)
+    
+
         // Decrypt based on encryption method
         if (payload.encryptionMethod === 'xchacha20poly1305') {
             try {
@@ -2655,12 +2744,15 @@ async function postAssetTransfer(to, amount, memo, keys) {
 async function postRegisterAlias(alias, keys){
     const aliasBytes = utf82bin(alias)
     const aliasHash = blake.blake2bHex(aliasBytes, myHashKey, 32)
+    const { publicKey, secretKey } = ml_kem1024.keygen(hex2bin(keys.pqSeed))
+    const pqPublicKey = bin2base64(publicKey)
     const tx = {
         type: 'register',
         aliasHash: aliasHash,
         from: longAddress(keys.address),
         alias: alias,
         publicKey: keys.public,
+        pqPublicKey: pqPublicKey,
         timestamp: Date.now()
     }
     const res = await injectTx(tx, keys)
@@ -2784,6 +2876,7 @@ async function registerServiceWorker() {
             scope: './'
         });
         console.log('Service Worker registered successfully:', registration.scope);
+        Logger.log('Service Worker registered successfully:', registration.scope);
 
         // Wait for the service worker to be ready
         await navigator.serviceWorker.ready;
@@ -2792,6 +2885,7 @@ async function registerServiceWorker() {
         return registration;
     } catch (error) {
         console.error('Service Worker registration failed:', error);
+        Logger.error('Service Worker registration failed:', error);
         return null;
     }
 }
@@ -2832,6 +2926,7 @@ function setupAppStateManagement() {
         if (document.hidden) {
             // App is being hidden/closed
             console.log('📱 App hidden - starting service worker polling');
+            Logger.log('📱 App hidden - starting service worker polling');
             const timestamp = Date.now().toString();
             localStorage.setItem('appPaused', timestamp);
             
@@ -2854,6 +2949,7 @@ function setupAppStateManagement() {
         } else {
             // App is becoming visible/open
             console.log('📱 App visible - stopping service worker polling');
+            Logger.log('📱 App visible - stopping service worker polling');
             localStorage.setItem('appPaused', '0');
             
             // Stop polling in service worker
@@ -2863,10 +2959,121 @@ function setupAppStateManagement() {
             await updateChatList('force');
         }
     });
-
 }
 
-        
+function ecSharedKey(sec, pub){
+    return secp.getSharedSecret(
+        hex2bin(sec),
+        hex2bin(pub)
+    ).slice(1, 33);  // TODO - we were taking only first 32 bytes for chacha; now we can return the whole thing
+}
+
+function pqSharedKey(recipientKey, encKey){  // inputs base64 or binary, outputs binary
+    if (typeof(recipientKey) == 'string'){ recipientKey = base642bin(recipientKey)}
+    if (encKey){
+        if (typeof(encKey) == 'string'){ encKey = base642bin(encKey)} 
+        return ml_kem1024.decapsulate(encKey, recipientKey);
+    }
+    return ml_kem1024.encapsulate(recipientKey);  // { cipherText, sharedSecret }
+}
 
 
+function requestNotificationPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission()
+            .then(permission => {
+                console.log('Notification permission result:', permission);
+                Logger.log('Notification permission result:', permission);
+                // Optional: Hide a notification button if granted.
+                if (permission === 'granted') {
+                    const notificationButton = document.getElementById('requestNotificationPermission');
+                    if (notificationButton) {
+                        notificationButton.style.display = 'none';
+                    }
+                } else {
+                    console.log('Notification permission denied');
+                    Logger.log('Notification permission denied');
+                }
+            })
+            .catch(error => {
+                console.error('Error during notification permission request:', error);
+                Logger.error('Error during notification permission request:', error);
+            });
+    }
+}
+
+function openLogsModal() {
+  const modal = document.getElementById('logsModal');
+  modal.classList.add('active');
+  updateLogsView();
+}
+
+async function updateLogsView() {
+    const logsContainer = document.getElementById('logsContainer');
+    const logs = await Logger.getLogs();
+    
+    // Create document fragment for better performance
+    const fragment = document.createDocumentFragment();
+    
+    // Use logs directly without sorting - they'll be in insertion order
+    const dateFormatter = new Intl.DateTimeFormat();
+    const timeFormatter = new Intl.DateTimeFormat(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    
+    logs.forEach(log => {
+        const logEntry = document.createElement('div');
+        logEntry.className = `log-entry ${log.level || 'info'}`;
         
+        const date = new Date(log.timestamp);
+        logEntry.innerHTML = `
+            <span class="log-timestamp">${dateFormatter.format(date)} ${timeFormatter.format(date)}</span>
+            <span class="log-source">[${log.source || 'app'}]</span>
+            <span class="log-level">${log.level || 'info'}</span>
+            <pre class="log-message">${escapeHtml(formatMessage(log.message))}</pre>
+        `;
+        fragment.appendChild(logEntry);
+    });
+
+    logsContainer.innerHTML = '';
+    logsContainer.appendChild(fragment);
+    logsContainer.scrollTop = logsContainer.scrollHeight;  // This scrolls to bottom
+}
+
+// Helper functions moved outside for reuse
+function formatMessage(message) {
+    // If message is an array (from new format)
+    if (Array.isArray(message)) {
+        return message.map(part => {
+            try {
+                // Try to parse if it looks like JSON
+                if (typeof part === 'string' && 
+                    (part.startsWith('{') || part.startsWith('[') || 
+                     part.startsWith('"') || part === 'null' || 
+                     part === '"undefined"')) {
+                    return JSON.stringify(JSON.parse(part), null, 2);
+                }
+                return part;
+            } catch (e) {
+                return part;
+            }
+        }).join(' ');
+    }
+
+    // Legacy format (string)
+    try {
+        const parsed = JSON.parse(message);
+        return JSON.stringify(parsed, null, 2);
+    } catch (e) {
+        return message;
+    }
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
