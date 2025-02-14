@@ -4,7 +4,7 @@ try {
   console.error('Failed to import log-utils.js:', e);
 }
 
-const SW_VERSION = '1.0.6';
+const SW_VERSION = '1.0.7';
 
 // Simplified state management
 const state = {
