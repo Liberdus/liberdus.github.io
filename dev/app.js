@@ -1211,6 +1211,7 @@ async function switchView(view) {
 // Update contacts list UI
 async function updateContactsList() {
     const contactsList = document.getElementById('contactsList');
+//            const chatsData = myData
     const contacts = myData.contacts;
     
     if (Object.keys(contacts).length === 0) {
@@ -3456,11 +3457,6 @@ function requestNotificationPermission() {
     }
 }
 
-/* function openLogsModal() {
-  const modal = document.getElementById('logsModal');
-  modal.classList.add('active');
-  updateLogsView();
-} */
 
 async function updateLogsView() {
     const logsContainer = document.getElementById('logsContainer');
