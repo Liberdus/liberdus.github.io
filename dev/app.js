@@ -3760,7 +3760,7 @@ function displaySearchResults(results) {
                 <div class="chat-header">
                     <div class="chat-name">${result.username}</div>
                     <div class="chat-time">${formatTime(result.timestamp)}</div>
-                </div>(feature working but need to ask question about encrypting the indexedDB)
+                </div>
                 <div class="chat-message">
                     ${messagePreview}
                 </div>
