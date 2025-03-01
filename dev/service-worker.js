@@ -4,7 +4,7 @@ try {
   console.error('Failed to import log-utils.js:', e);
 }
 
-const SW_VERSION = '1.0.51';
+const SW_VERSION = '1.0.52';
 
 // Cache names with proper versioning
 const CACHE_VERSION = '1.0.0';
@@ -123,6 +123,12 @@ self.addEventListener('activate', (event) => {
         const cachedKeys = await cache.keys();
         console.log('[Service Worker] Available cached resources:', 
           cachedKeys.map(req => req.url));
+          
+        // Clean up old dynamic cache entries
+        await cleanupOldCacheEntries();
+        
+        // Set up periodic cache cleanup
+        setupPeriodicCacheCleanup();
 
       } catch (error) {
         console.error('[Service Worker] Activation tasks failed:', error);
@@ -131,6 +137,47 @@ self.addEventListener('activate', (event) => {
     })()
   );
 });
+
+// Function to clean up old cache entries
+async function cleanupOldCacheEntries() {
+  try {
+    const MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+    const now = Date.now();
+    
+    // Clean up dynamic cache
+    const dynamicCache = await caches.open(DYNAMIC_CACHE);
+    const dynamicRequests = await dynamicCache.keys();
+    
+    const oldEntries = await Promise.all(
+      dynamicRequests.map(async (request) => {
+        const response = await dynamicCache.match(request);
+        const responseDate = response.headers.get('date');
+        
+        if (responseDate) {
+          const date = new Date(responseDate).getTime();
+          if (now - date > MAX_AGE) {
+            return request;
+          }
+        }
+        
+        return null;
+      })
+    );
+    
+    // Filter out null entries and delete old ones
+    const entriesToDelete = oldEntries.filter(entry => entry !== null);
+    await Promise.all(
+      entriesToDelete.map(request => {
+        console.log('[Service Worker] Removing old cached response:', request.url);
+        return dynamicCache.delete(request);
+      })
+    );
+    
+    console.log(`[Service Worker] Cleaned up ${entriesToDelete.length} old cache entries`);
+  } catch (error) {
+    console.error('[Service Worker] Cache cleanup failed:', error);
+  }
+}
 
 // Helper function to determine caching strategy based on request
 function getCacheStrategy(request) {
@@ -145,6 +192,11 @@ function getCacheStrategy(request) {
     PRECACHE_URLS.includes(url.pathname)
   ) {
     return 'cache-first';
+  }
+  
+  // API endpoints that should not be cached - Network Only
+  if (shouldNotCache(request)) {
+    return 'network-only';
   }
   
   // API endpoints - Network First
@@ -171,6 +223,9 @@ self.addEventListener('fetch', (event) => {
       break;
     case 'network-first':
       event.respondWith(networkFirst(event.request));
+      break;
+    case 'network-only':
+      event.respondWith(networkOnly(event.request));
       break;
     default:
       event.respondWith(networkFirst(event.request));
@@ -216,8 +271,8 @@ async function networkFirst(request) {
   try {
     const response = await fetch(request);
     
-    // Only cache GET requests
-    if (request.method === 'GET') {
+    // Only cache GET requests that should be cached
+    if (request.method === 'GET' && !shouldNotCache(request)) {
       try {
         const cache = await caches.open(DYNAMIC_CACHE);
         await cache.put(request, response.clone());
@@ -246,6 +301,57 @@ async function networkFirst(request) {
     
     throw error;
   }
+}
+
+// Network-Only Strategy - No Caching
+async function networkOnly(request) {
+  try {
+    return await fetch(request);
+  } catch (error) {
+    console.warn('[Service Worker] Network request failed:', error);
+    
+    // If offline and navigation request, return offline fallback
+    if (request.mode === 'navigate') {
+      const cache = await caches.open(STATIC_CACHE);
+      const offlineFallback = await cache.match('./offline.html');
+      if (offlineFallback) {
+        return offlineFallback;
+      }
+    }
+    
+    throw error;
+  }
+}
+
+// Helper function to determine if a request should not be cached
+function shouldNotCache(request) {
+  const url = new URL(request.url);
+  
+  // Don't cache API endpoints that are stored in IndexedDB
+  // or contain sensitive/frequently changing data
+  
+  // Don't cache authentication endpoints
+  if (url.pathname.includes('/address/') || url.pathname.includes('/account/')) {
+    return true;
+  }
+  
+  // Don't cache message data (already stored in IndexedDB)
+  if (url.pathname.includes('/messages/') || url.pathname.includes('/chats/')) {
+    return true;
+  }
+  
+  // Don't cache transaction data (already stored in IndexedDB)
+  if (url.pathname.includes('/inject') || url.pathname.includes('/balance')) {
+    return true;
+  }
+  
+  // Don't cache large responses
+  const contentLength = request.headers?.get('content-length');
+  if (contentLength && parseInt(contentLength) > 1024 * 1024) { // > 1MB
+    return true;
+  }
+  
+  return false;
 }
 
 // Background sync event
@@ -395,3 +501,19 @@ self.addEventListener('notificationclick', (event) => {
 self.addEventListener('terminate', event => {
   event.waitUntil(Logger.forceSave());
 });
+
+// Set up periodic cache cleanup
+function setupPeriodicCacheCleanup() {
+  // Clean up cache every 24 hours
+  const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+  
+  // Use setInterval for periodic cleanup
+  setInterval(() => {
+    console.log('[Service Worker] Running periodic cache cleanup');
+    cleanupOldCacheEntries()
+      .then(() => console.log('[Service Worker] Periodic cleanup complete'))
+      .catch(error => console.error('[Service Worker] Periodic cleanup failed:', error));
+  }, CLEANUP_INTERVAL);
+  
+  console.log('[Service Worker] Periodic cache cleanup scheduled');
+}

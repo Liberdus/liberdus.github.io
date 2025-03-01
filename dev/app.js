@@ -168,7 +168,34 @@ async function checkOnlineStatus() {
 }
 
 async function checkUsernameAvailability(username, address) {
-    // Get random gateway
+    // First check if we're offline
+    if (!isOnline) {
+        console.log('Checking username availability offline');
+        // When offline, check local storage only
+        const { netid } = network;
+        const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+        const netidAccounts = existingAccounts.netids[netid];
+        
+        // If we have this username locally and the address matches
+        if (netidAccounts?.usernames && 
+            netidAccounts.usernames[username] && 
+            normalizeAddress(netidAccounts.usernames[username].address) === normalizeAddress(address)) {
+            console.log('Username found locally and matches address');
+            return 'mine';
+        }
+        
+        // If we have the username but address doesn't match
+        if (netidAccounts?.usernames && netidAccounts.usernames[username]) {
+            console.log('Username found locally but address does not match');
+            return 'taken';
+        }
+        
+        // Username not found locally
+        console.log('Username not found locally');
+        return 'available';
+    }
+    
+    // Online flow - existing implementation
     const randomGateway = network.gateways[Math.floor(Math.random() * network.gateways.length)];
     const usernameBytes = utf82bin(normalizeUsername(username))
     const usernameHash = blake.blake2bHex(usernameBytes, myHashKey, 32)
@@ -4151,6 +4178,9 @@ async function handleConnectivityChange(event) {
             updateUIForConnectivity();
             showToast("You're back online!", 3000, "online");
             
+            // Verify username is still valid on the network
+            await verifyUsernameOnReconnect();
+            
             // Sync any pending offline actions
             const registration = await navigator.serviceWorker.getRegistration();
             if (registration && 'sync' in registration) {
@@ -4287,6 +4317,35 @@ async function checkConnectivity() {
     if (isOnline !== wasOffline) {
         // Only trigger change handler if state actually changed
         await handleConnectivityChange({ type: isOnline ? 'online' : 'offline' });
+    }
+}
+
+// Verify username availability when coming back online
+async function verifyUsernameOnReconnect() {
+    // Only proceed if user is logged in
+    if (!myAccount || !myAccount.username) {
+        console.log('No active account to verify');
+        return;
+    }
+    
+    console.log('Verifying username on reconnect:', myAccount.username);
+    
+    // Check if the username is still valid on the network
+    const availability = await checkUsernameAvailability(myAccount.username, myAccount.keys.address);
+    
+    if (availability !== 'mine') {
+        console.log('Username verification failed on reconnect:', availability);
+        
+        // Show a notification to the user
+        showToast('Your account is no longer valid on the network. You will be signed out.', 5000, 'error');
+        
+        // Wait a moment for the user to see the toast
+        setTimeout(() => {
+            // Sign out the user
+            handleSignOut();
+        }, 5000);
+    } else {
+        console.log('Username verified successfully on reconnect');
     }
 }
 
