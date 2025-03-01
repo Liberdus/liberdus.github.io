@@ -165,6 +165,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  position: relative; /* Add position relative to contain the absolute positioned indicator */
 }
 
 .app-name {
@@ -177,6 +178,7 @@ body {
 .header-icons {
   display: flex;
   gap: 16px;
+  align-items: center;
 }
 
 .icon-button {
@@ -411,6 +413,11 @@ button:hover {
   background-color: var(--primary-color);
   color: var(--background-color);
   border: none;
+  font-family: var(--font-primary);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
+  transition: background-color 0.2s;
 }
 
 /* Secondary buttons */
@@ -418,20 +425,16 @@ button:hover {
   background-color: var(--hover-background);
   color: var(--text-color);
   border: none;
+  font-family: var(--font-primary);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
 }
 
 /* Icon buttons */
 .icon-button:hover {
   background-color: rgba(61, 61, 206, 0.08);
   color: #3d3dce;
-}
-
-/* Remove any conflicting hover styles */
-.primary-button:hover,
-.secondary-button:hover,
-.update-button:hover {
-  background-color: inherit;
-  opacity: 0.9;
 }
 
 /* Keep disabled state */
@@ -446,20 +449,54 @@ button:disabled {
   transform: rotate(180deg);
 }
 
+/* Button sizing and shape for primary/secondary buttons */
 .primary-button,
 .secondary-button {
   width: 240px;
   padding: 12px 20px;
   border-radius: 5px;
-  cursor: pointer;
-  font-size: 16px;
 }
 
-.primary-button:hover {
+/* Specific hover states */
+.primary-button:hover,
+.update-button:hover {
   background-color: var(--primary-hover);
+  opacity: 0.9;
 }
 
 .secondary-button:hover {
+  background-color: var(--hover-background-dark);
+  opacity: 0.9;
+}
+
+/* Common button styles - specific for update-button */
+.update-button {
+  width: calc(100% - 32px);
+  height: 48px;
+  border-radius: 24px;
+  margin: 1rem 16px;
+}
+
+.update-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Update button in notification has different styling */
+.update-notification .update-button {
+  background-color: var(--primary-color);
+  color: var(--background-color);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  margin: 0;
+  width: auto;
+  height: auto;
+}
+
+.update-notification .update-button:hover {
   background-color: var(--hover-background);
 }
 
@@ -728,8 +765,8 @@ select.form-control {
 .update-button {
   width: calc(100% - 32px);
   height: 48px;
-  background-color: var(--primary-color);
-  color: var(--background-color);
+  background-color: var(--background-color);
+  color: var(--primary-color);
   border: none;
   border-radius: 24px;
   font-family: var(--font-primary);
@@ -2212,4 +2249,132 @@ mark {
   .toast-container {
     position: absolute;
   }
+}
+
+/* Offline States */
+.offline-disabled {
+  opacity: 0.6;
+  cursor: not-allowed !important;
+  position: relative;
+  pointer-events: none;
+  background-color: var(--hover-background) !important;
+}
+
+/* Offline indicator in header */
+.offline-indicator {
+  background-color: var(--danger-color);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 12px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, width 0.3s ease, padding 0.3s ease;
+  animation: pulse 2s infinite;
+  /* Keep in the normal flow but with zero width when hidden */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  margin-right: 4px;
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* When visible, restore width and padding */
+.offline-indicator[style*="opacity: 1"] {
+  width: auto;
+  padding: 4px 8px;
+  overflow: visible;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Exception for floating button - don't apply position:relative */
+.floating-button.offline-disabled {
+  position: fixed; /* Keep the original positioning */
+}
+
+@media (min-width: 769px) {
+  .floating-button.offline-disabled {
+    position: absolute; /* Match the media query from the original floating-button */
+  }
+}
+
+.offline-disabled::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 10px,
+    rgba(0, 0, 0, 0.05) 10px,
+    rgba(0, 0, 0, 0.05) 20px
+  );
+  pointer-events: none;
+}
+
+.offline-disabled:hover::after {
+  content: "Requires internet connection";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+/* Update Notification */
+.update-notification {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: var(--primary-color);
+  color: white;
+  padding: 12px 24px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.update-button {
+  background-color: var(--primary-color);
+  color: var(--background-color);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background-color 0.2s;
+  border-radius: 24px;
+}
+
+.update-button:hover {
+  background-color: var(--primary-hover);
 }

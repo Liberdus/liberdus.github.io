@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Offline - Liberdus</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <style>
+      /* Use the app's CSS variables for consistent theming */
+      .offline-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        padding: 20px;
+        text-align: center;
+        background-color: var(--background-color);
+      }
+
+      .offline-logo {
+        width: 120px;
+        height: 120px;
+        margin-bottom: 24px;
+        opacity: 0.8;
+      }
+
+      .offline-title {
+        font-family: var(--font-primary);
+        font-size: var(--font-size-xl);
+        font-weight: var(--font-weight-semibold);
+        margin-bottom: 16px;
+        color: var(--text-color);
+      }
+
+      .offline-message {
+        font-family: var(--font-primary);
+        font-size: var(--font-size-base);
+        line-height: 1.5;
+        margin-bottom: 24px;
+        color: var(--secondary-text-color);
+        max-width: 400px;
+      }
+
+      .offline-features {
+        text-align: left;
+        margin: 20px 0;
+        padding: 16px;
+        background-color: rgba(61, 61, 206, 0.08);
+        border-radius: 16px;
+        max-width: 400px;
+        width: 100%;
+      }
+
+      .offline-features h3 {
+        font-family: var(--font-primary);
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        margin-bottom: 12px;
+        color: var(--text-color);
+      }
+
+      .feature-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+
+      .feature-list li {
+        font-family: var(--font-primary);
+        margin: 8px 0;
+        padding-left: 24px;
+        position: relative;
+        color: var(--secondary-text-color);
+      }
+
+      .feature-list li::before {
+        content: "✓";
+        position: absolute;
+        left: 0;
+        color: var(--primary-color);
+      }
+
+      .retry-button {
+        width: 358px;
+        height: 48px;
+        margin: 16px;
+        background-color: var(--primary-color);
+        color: var(--background-color);
+        border: none;
+        border-radius: 24px;
+        font-family: var(--font-primary);
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-bold);
+        cursor: pointer;
+        transition: background-color 0.2s;
+      }
+
+      .retry-button:hover {
+        background-color: var(--primary-hover);
+      }
+
+      .offline-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 16px;
+        color: var(--danger-color);
+        font-family: var(--font-primary);
+        font-size: var(--font-size-sm);
+      }
+
+      .offline-status::before {
+        content: "•";
+        font-size: 24px;
+      }
+
+      @media (max-width: 768px) {
+        .retry-button {
+          width: calc(100% - 32px);
+        }
+
+        .offline-features {
+          margin: 20px 16px;
+        }
+      }
+
+      /* Support for dark mode using the app's variables */
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background-color: #1a1a1a;
+          --surface-color: #2d2d2d;
+          --text-color: #ffffff;
+          --secondary-text-color: #cccccc;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="offline-container">
+      <img
+        src="/liberdus_logo_250.png"
+        alt="Liberdus Logo"
+        class="offline-logo"
+      />
+      <h1 class="offline-title">You're Offline</h1>
+      <p class="offline-message">
+        Don't worry! Liberdus works offline, and you can still access your
+        previously loaded content.
+      </p>
+
+      <div class="offline-features">
+        <h3>Available Offline:</h3>
+        <ul class="feature-list">
+          <li>View existing chats and messages</li>
+          <li>Access your contacts</li>
+          <li>Check your wallet balance</li>
+          <li>View transaction history</li>
+        </ul>
+      </div>
+
+      <div class="offline-features">
+        <h3>Unavailable Features:</h3>
+        <ul class="feature-list">
+          <li>Send new messages</li>
+          <li>Make transactions</li>
+          <li>Update balances</li>
+          <li>Add new contacts</li>
+        </ul>
+      </div>
+
+      <button class="retry-button" onclick="retryConnection()">
+        Try Again
+      </button>
+
+      <div class="offline-status">No Internet Connection</div>
+    </div>
+
+    <script>
+      function retryConnection() {
+        // Attempt to reload the page
+        window.location.reload();
+      }
+
+      // Listen for online status changes
+      window.addEventListener("online", () => {
+        window.location.reload();
+      });
+    </script>
+  </body>
+</html>

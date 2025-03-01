@@ -11,7 +11,14 @@ async function checkVersion(){
         newVersion = await response.text();
     } catch (error) {
         console.error('Version check failed:', error);
-        alert('Version check failed. Your Internet connection may be down.')
+        alert('Version check failed. You are offline.')
+        // Only trigger offline UI if it's a network error
+        if (!navigator.onLine || error instanceof TypeError) {
+            isOnline = false;
+            updateUIForConnectivity();
+            markConnectivityDependentElements();
+            console.log(`DEBUG: about to invoke showToast in checkVersion`)
+        }
         newVersion = myVersion  // Allow continuing with the old version
     }
 //console.log('myVersion < newVersion then reload', myVersion, newVersion)
@@ -116,6 +123,18 @@ import { normalizeUsername, generateIdenticon, formatTime,
     normalizeAddress, longAddress, utf82bin, bin2utf8, hex2big, bigxnum2big,
     big2str, base642bin, bin2base64, hex2bin, bin2hex,
 } from './lib.js';
+
+// Import database functions
+import { STORES, saveData, getData, getAllData } from './db.js';
+
+// Local version function to replace addVersionToData
+function addVersion(data) {
+    return {
+        ...data,
+        version: Date.now(),
+        lastUpdated: Date.now()
+    };
+}
 
 const myHashKey = hex2bin('69fa4195670576c0160d660c3be36556ff8d504725be8a59b5a96509e0c994bc')
 const weiDigits = 18; 
@@ -596,17 +615,17 @@ function closeAboutModal() {
 
 // Load saved account data and update chat list on page load
 document.addEventListener('DOMContentLoaded', async () => {
-
-    checkVersion()
-    document.getElementById('versionDisplay').textContent = myVersion + ' '+version;
-    document.getElementById('networkNameDisplay').textContent = network.name;
-
     // Initialize service worker first
     if ('serviceWorker' in navigator) {
         await registerServiceWorker();
         setupServiceWorkerMessaging(); 
         setupAppStateManagement();
+        setupConnectivityDetection();
     }
+
+    checkVersion()
+    document.getElementById('versionDisplay').textContent = myVersion + ' '+version;
+    document.getElementById('networkNameDisplay').textContent = network.name;
 
     // Add unload handler to save myData
     window.addEventListener('unload', handleUnload)
@@ -1058,7 +1077,35 @@ function setupAddToHomeScreen(){
 async function updateChatList(force) {
     let gotChats = 0
     if (myAccount && myAccount.keys) {
-        gotChats = await getChats(myAccount.keys);     // populates myData with new chat messages
+        if (isOnline) {
+            // Online: Get from network and cache
+            gotChats = await getChats(myAccount.keys);
+            if (gotChats > 0 || force) {
+                // Cache the updated chat data
+                try {
+                    const chatData = addVersion({
+                        chatId: myAccount.keys.address,
+                        chats: myData.chats,
+                        contacts: myData.contacts
+                    });
+                    await saveData(STORES.CHATS, chatData);
+                } catch (error) {
+                    console.error('Failed to cache chat data:', error);
+                }
+            }
+        } else {
+            // Offline: Get from cache
+            try {
+                const cachedData = await getData(STORES.CHATS, myAccount.keys.address);
+                if (cachedData) {
+                    myData.chats = cachedData.chats;
+                    myData.contacts = cachedData.contacts;
+                    console.log('Using cached chat data from:', new Date(cachedData.lastUpdated));
+                }
+            } catch (error) {
+                console.error('Failed to read cached chat data:', error);
+            }
+        }
     }
     console.log('force gotChats', force === undefined ? 'undefined' : JSON.stringify(force), 
                              gotChats === undefined ? 'undefined' : JSON.stringify(gotChats))
@@ -1190,7 +1237,9 @@ async function switchView(view) {
     // Update lists when switching views
     if (view === 'chats') {
         await updateChatList('force');
-        pollChatInterval(pollIntervalNormal)
+        if (isOnline) {
+            pollChatInterval(pollIntervalNormal)
+        }
     } else if (view === 'contacts') {
         await updateContactsList();
     } else if (view === 'wallet') {
@@ -1210,6 +1259,31 @@ async function switchView(view) {
 
 // Update contacts list UI
 async function updateContactsList() {
+    if (isOnline) {
+        // Online: Get from network and cache
+        try {
+            const contactsData = addVersion({
+                address: myAccount.keys.address,
+                contacts: myData.contacts
+            });
+            await saveData(STORES.CONTACTS, contactsData);
+            console.log('Successfully cached contacts data:', contactsData);
+        } catch (error) {
+            console.error('Failed to cache contacts data:', error);
+        }
+    } else {
+        // Offline: Get from cache
+        try {
+            const cachedData = await getData(STORES.CONTACTS, myAccount.keys.address);
+            if (cachedData) {
+                myData.contacts = cachedData.contacts;
+                console.log('Using cached contacts data from:', new Date(cachedData.lastUpdated));
+            }
+        } catch (error) {
+            console.error('Failed to read cached contacts data:', error);
+        }
+    }
+
     const contactsList = document.getElementById('contactsList');
 //            const chatsData = myData
     const contacts = myData.contacts;
@@ -1758,7 +1832,9 @@ function openChatModal(address) {
     // Setup to update new messages
     appendChatModal.address = address
     appendChatModal.len = messages.length
-    pollChatInterval(pollIntervalChatting) // poll for messages at a faster rate
+    if (isOnline) {
+        pollChatInterval(pollIntervalChatting) // poll for messages at a faster rate
+    }
 }
 
 function appendChatModal(){
@@ -1800,7 +1876,9 @@ function closeChatModal() {
     }
     appendChatModal.address = null
     appendChatModal.len = 0
-    pollChatInterval(pollIntervalNormal) // back to polling at slower rate
+    if (isOnline) {
+        pollChatInterval(pollIntervalNormal) // back to polling at slower rate
+    }
 }
 
 function openReceiveModal() {
@@ -2582,20 +2660,25 @@ async function handleSendMessage() {
         sent_timestamp: Date.now()
     };
 
-    // Only include senderInfo if recipient is a friend
+    // Always include username, but only include other info if recipient is a friend
     const contact = myData.contacts[currentAddress];
+    // Create basic sender info with just username
+    const senderInfo = {
+        username: myAccount.username
+    };
+    
+    // Add additional info only if recipient is a friend
     if (contact && contact.friend) {
-        // Create and encrypt sender info
-        const senderInfo = {
-            username: myAccount.username,
-            name: myData.account.name,
-            email: myData.account.email,
-            phone: myData.account.phone,
-            linkedin: myData.account.linkedin,
-            x: myData.account.x
-        };
-        payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
+        // Add more personal details for friends
+        senderInfo.name = myData.account.name;
+        senderInfo.email = myData.account.email;
+        senderInfo.phone = myData.account.phone;
+        senderInfo.linkedin = myData.account.linkedin;
+        senderInfo.x = myData.account.x;
     }
+    
+    // Always encrypt and send senderInfo (which will contain at least the username)
+    payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
 
     try {
 //console.log('payload is', payload)
@@ -2657,7 +2740,31 @@ async function handleSendMessage() {
 async function updateWalletView() {
     const walletData = myData.wallet
     
-    await updateWalletBalances()
+    if (isOnline) {
+        // Online: Get from network and cache
+        await updateWalletBalances();
+        try {
+            const walletCacheData = addVersion({
+                assetId: myAccount.keys.address,
+                wallet: walletData
+            });
+            await saveData(STORES.WALLET, walletCacheData);
+            console.log('Successfully cached wallet data:', walletCacheData);
+        } catch (error) {
+            console.error('Failed to cache wallet data:', error);
+        }
+    } else {
+        // Offline: Get from cache
+        try {
+            const cachedData = await getData(STORES.WALLET, myAccount.keys.address);
+            if (cachedData) {
+                myData.wallet = cachedData.wallet;
+                console.log('Using cached wallet data from:', new Date(cachedData.lastUpdated));
+            }
+        } catch (error) {
+            console.error('Failed to read cached wallet data:', error);
+        }
+    }
 
     // Update total networth
     document.getElementById('walletTotalBalance').textContent = (walletData.networth || 0).toFixed(2);
@@ -2834,7 +2941,7 @@ function handleAccountUpdate(event) {
 
 async function queryNetwork(url) {
 //console.log('query', url)
-    if (! checkOnlineStatus()){ 
+    if (!await checkOnlineStatus()) {
 //TODO show user we are not online
         console.log("not online")
         alert('not online')
@@ -3306,38 +3413,67 @@ function decryptChacha(key, encrypted) {
     }
 }
 
-// Service Worker Management
+// Service Worker Registration and Management
 async function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) {
         console.log('Service Worker not supported');
+        Logger.log('Service Worker not supported');
         return;
     }
 
     try {
-        // Check if there's an existing registration
-        const existingReg = await navigator.serviceWorker.getRegistration();
-        if (existingReg) {
-            // If service worker is already registered and active
-            if (existingReg.active) {
-                console.log('Service Worker already registered and active');
-                return existingReg;
+        // Get the current service worker registration
+        const registration = await navigator.serviceWorker.getRegistration();
+        
+        // If there's an existing service worker
+        if (registration?.active) {
+            console.log('Service Worker already registered and active');
+            Logger.log('Service Worker already registered and active');
+            
+            // Set up message handling for the active worker
+            setupServiceWorkerMessaging(registration.active);
+            
+            // Check if there's a new version waiting
+            if (registration.waiting) {
+                // Notify user about new version
+                showUpdateNotification(registration);
             }
-            // If not active, unregister and re-register
-            await existingReg.unregister();
+            
+            return registration;
         }
 
-        // Register new service worker with correct path and scope
-        const registration = await navigator.serviceWorker.register('./service-worker.js', {
-            scope: './'
+        // Explicitly unregister any existing registration
+        if (registration) {
+            await registration.unregister();
+        }
+
+        // Register new service worker
+        const newRegistration = await navigator.serviceWorker.register('./service-worker.js', {
+            scope: './',
+            updateViaCache: 'none' // Don't cache service worker file
         });
-        console.log('Service Worker registered successfully:', registration.scope);
-        Logger.log('Service Worker registered successfully:', registration.scope);
+
+        console.log('Service Worker registered successfully:', newRegistration.scope);
+        Logger.log('Service Worker registered successfully:', newRegistration.scope);
+
+        // Set up new service worker handling
+        newRegistration.addEventListener('updatefound', () => {
+            const newWorker = newRegistration.installing;
+            
+            newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    // New service worker available
+                    showUpdateNotification(newRegistration);
+                }
+            });
+        });
 
         // Wait for the service worker to be ready
         await navigator.serviceWorker.ready;
         console.log('Service Worker ready');
+        Logger.log('Service Worker ready');
 
-        return registration;
+        return newRegistration;
     } catch (error) {
         console.error('Service Worker registration failed:', error);
         Logger.error('Service Worker registration failed:', error);
@@ -3345,10 +3481,8 @@ async function registerServiceWorker() {
     }
 }
 
-// Add service worker message handling
+// Handle service worker messages
 function setupServiceWorkerMessaging() {
-    if (!('serviceWorker' in navigator)) return;
-
     // Listen for messages from service worker
     navigator.serviceWorker.addEventListener('message', (event) => {
         const data = event.data;
@@ -3357,6 +3491,25 @@ function setupServiceWorkerMessaging() {
         switch (data.type) {
             case 'error':
                 console.error('Service Worker error:', data.error);
+                break;
+            case 'OFFLINE_MODE':
+                console.warn('Service worker detected offline mode:', data.url);
+                Logger.warn('Service worker detected offline mode:', data.url);
+                isOnline = false;
+                updateUIForConnectivity();
+                markConnectivityDependentElements();
+                break;
+            case 'CACHE_UPDATED':
+                console.log('Cache updated:', data.url);
+                break;
+            case 'CACHE_ERROR':
+                console.error('Cache error:', data.error);
+                break;
+            case 'OFFLINE_READY':
+                showToast('App ready for offline use');
+                break;
+            case 'NEW_CONTENT':
+                showUpdateNotification();
                 break;
         }
     });
@@ -3607,7 +3760,7 @@ function displaySearchResults(results) {
                 <div class="chat-header">
                     <div class="chat-name">${result.username}</div>
                     <div class="chat-time">${formatTime(result.timestamp)}</div>
-                </div>
+                </div>(feature working but need to ask question about encrypting the indexedDB)
                 <div class="chat-message">
                     ${messagePreview}
                 </div>
@@ -3737,6 +3890,13 @@ async function handleResultClick(contactAddress) {
         chatModal.classList.remove('active');
     });
 
+    // Add click handler for username to show contact info
+    const userInfo = chatModal.querySelector('.chat-user-info');
+    userInfo.onclick = () => {
+        if (contact) {
+            contactInfoModal.open(createDisplayInfo(contact));
+        }
+    };
 
     // Ensure messages container structure matches
     const messagesContainer = chatModal.querySelector('.messages-container');
@@ -3931,4 +4091,203 @@ function showToast(message, duration = 2000) {
         }, 300); // Match transition duration
     }, duration);
 }
+
+// Show update notification to user
+function showUpdateNotification(registration) {
+    // Create update notification
+    const updateNotification = document.createElement('div');
+    updateNotification.className = 'update-notification';
+    updateNotification.innerHTML = `
+        <div class="update-message">
+            A new version is available
+            <button class="update-button">
+                Update Now
+            </button>
+        </div>
+    `;
+    
+    // Add click handler directly to the button
+    updateNotification.querySelector('.update-button').addEventListener('click', () => {
+        updateServiceWorker();
+    });
+    
+    document.body.appendChild(updateNotification);
+}
+
+// Update the service worker
+async function updateServiceWorker() {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration) return;
+
+    // If there's a waiting worker, activate it
+    if (registration.waiting) {
+        // Send message to service worker to skip waiting
+        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+        
+        // Reload once the new service worker takes over
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            console.log('New service worker activated, reloading...');
+            window.location.reload();
+        });
+    }
+}
+
+// Handle online/offline events
+async function handleConnectivityChange(event) {
+    if (event.type === 'offline') {
+        const wasOnline = isOnline;
+        // Trust offline events immediately
+        isOnline = false;
+        updateUIForConnectivity();
+        if (wasOnline) {
+            showToast("You're offline. Some features are unavailable.", 3000, "offline");
+        }
+    } else {
+        // For online events, verify connectivity before updating UI
+        const wasOffline = !isOnline;
+        isOnline = await checkOnlineStatus();
+
+        if (isOnline && wasOffline) {
+            updateUIForConnectivity();
+            showToast("You're back online!", 3000, "online");
+            
+            // Sync any pending offline actions
+            const registration = await navigator.serviceWorker.getRegistration();
+            if (registration && 'sync' in registration) {
+                try {
+                    await registration.sync.register('sync-messages');
+                    await registration.sync.register('sync-transactions');
+                } catch (err) {
+                    console.error('Background sync registration failed:', err);
+                }
+            }
+        }
+    }
+}
+
+// Setup connectivity detection
+function setupConnectivityDetection() {
+    // Listen for browser online/offline events
+    window.addEventListener('online', handleConnectivityChange);
+    window.addEventListener('offline', handleConnectivityChange);
+
+    // Mark elements that depend on connectivity
+    markConnectivityDependentElements();
+
+    // Check initial status (don't trust the browser's initial state)
+    checkConnectivity();
+
+    // Periodically check connectivity (every 30 seconds)
+    setInterval(checkConnectivity, 30000);
+}
+
+// Mark elements that should be disabled when offline
+function markConnectivityDependentElements() {
+    // Elements that require network connectivity
+    const networkDependentElements = [
+        // Chat related
+        '#handleSendMessage',
+        '.message-input',
+        '#newChatButton',
+        
+        // Wallet related
+        '#openSendModal',
+        '#refreshBalance',
+        '#sendForm button[type="submit"]',
+        
+        // Contact related
+        '#chatRecipient',
+        
+        // Profile related
+        '#accountForm button[type="submit"]',
+        '#createAccountForm button[type="submit"]',
+        '#importForm button[type="submit"]'
+    ];
+
+    // Add data attribute to all network-dependent elements
+    networkDependentElements.forEach(selector => {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(element => {
+            element.setAttribute('data-requires-connection', 'true');
+            
+            // Add tooltip for disabled state
+            element.title = 'This feature requires an internet connection';
+            
+            // Add aria label for accessibility
+            element.setAttribute('aria-disabled', !isOnline);
+        });
+    });
+}
+
+// Update UI elements based on connectivity status
+function updateUIForConnectivity() {
+    const networkDependentElements = document.querySelectorAll('[data-requires-connection]');
+    const offlineIndicator = document.getElementById('offlineIndicator');
+    
+    // Update offline indicator in header
+    if (offlineIndicator) {
+        if (!isOnline) {
+            offlineIndicator.style.opacity = '1';
+            offlineIndicator.style.visibility = 'visible';
+            offlineIndicator.style.width = 'auto';
+            offlineIndicator.style.padding = '4px 8px';
+            offlineIndicator.style.overflow = 'visible';
+        } else {
+            offlineIndicator.style.opacity = '0';
+            offlineIndicator.style.visibility = 'hidden';
+            offlineIndicator.style.width = '0';
+            offlineIndicator.style.padding = '0';
+            offlineIndicator.style.overflow = 'hidden';
+        }
+    }
+    
+    networkDependentElements.forEach(element => {
+        if (!isOnline) {
+            // Disable element
+            element.disabled = true;
+            element.classList.add('offline-disabled');
+            
+            // If it's a form, prevent submission
+            if (element.form) {
+                element.form.addEventListener('submit', preventOfflineSubmit);
+            }
+        } else {
+            // Enable element
+            element.disabled = false;
+            element.classList.remove('offline-disabled');
+            
+            // Remove form submit prevention
+            if (element.form) {
+                element.form.removeEventListener('submit', preventOfflineSubmit);
+            }
+        }
+        
+        // Update aria-disabled state
+        element.setAttribute('aria-disabled', !isOnline);
+    });
+}
+
+// Prevent form submissions when offline
+function preventOfflineSubmit(event) {
+    if (!isOnline) {
+        event.preventDefault();
+        showToast('This action requires an internet connection', 3000, 'error');
+    }
+}
+
+
+// Add global isOnline variable at the top with other globals
+let isOnline = true; // Will be updated by connectivity checks
+
+// Add checkConnectivity function before setupConnectivityDetection
+async function checkConnectivity() {
+    const wasOffline = !isOnline;
+    isOnline = await checkOnlineStatus();
+    
+    if (isOnline !== wasOffline) {
+        // Only trigger change handler if state actually changed
+        await handleConnectivityChange({ type: isOnline ? 'online' : 'offline' });
+    }
+}
+
 

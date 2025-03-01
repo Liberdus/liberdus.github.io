@@ -4,7 +4,37 @@ try {
   console.error('Failed to import log-utils.js:', e);
 }
 
-const SW_VERSION = '1.0.50';
+const SW_VERSION = '1.0.51';
+
+// Cache names with proper versioning
+const CACHE_VERSION = '1.0.0';
+const STATIC_CACHE = `static-${CACHE_VERSION}`;
+const DYNAMIC_CACHE = `dynamic-${CACHE_VERSION}`;
+const DATA_CACHE = `data-${CACHE_VERSION}`;
+
+// Resources to precache
+const PRECACHE_URLS = [
+  './',
+  './index.html',
+  './styles.css',
+  './app.js',
+  './manifest.json',
+  './offline.html',
+  './images/logo.png',
+  './images/lib.png',
+  './lib.js',
+  './network.js',
+  './log-utils.js',
+  './noble-post-quantum.js',
+  './noble-secp256k1.js',
+  './noble-ciphers.js',
+  './blake2b.js',
+  './keccak256.js',
+  './stringify-shardus.js',
+  './qrcode.js',
+  './liberdus_logo_50.png',
+  './liberdus_logo_250.png'
+];
 
 // Simplified state management
 const state = {
@@ -15,40 +45,232 @@ const state = {
     notifiedChats: new Set()
 };
 
-// Install event - set up any caching needed
+// Install event - set up caching
 self.addEventListener('install', (event) => {
-    console.log('Service Worker installing, version:', SW_VERSION);
-    Logger.log('Service Worker installing, version:', SW_VERSION);
-    
-    // Skip waiting to become active immediately
-    self.skipWaiting();
+  console.log('[Service Worker] Installing, version:', CACHE_VERSION);
+  
+  event.waitUntil(
+    (async () => {
+      try {
+        // Open cache
+        const cache = await caches.open(STATIC_CACHE);
+        console.log('[Service Worker] Cache opened');
+
+        // Try to precache resources
+        try {
+          await cache.addAll(PRECACHE_URLS);
+          console.log('[Service Worker] Precaching complete');
+        } catch (precacheError) {
+          console.warn('[Service Worker] Precaching failed, will try individual resources:', precacheError);
+          
+          // If bulk precaching fails, try individual resources
+          const precachePromises = PRECACHE_URLS.map(async (url) => {
+            try {
+              const response = await fetch(url);
+              await cache.put(url, response);
+              console.log(`[Service Worker] Cached: ${url}`);
+            } catch (err) {
+              console.warn(`[Service Worker] Failed to cache: ${url}`, err);
+              // Don't throw - continue with other resources
+            }
+          });
+
+          await Promise.allSettled(precachePromises);
+        }
+
+        // Check what we managed to cache
+        const cachedKeys = await cache.keys();
+        console.log('[Service Worker] Cached resources:', cachedKeys.map(req => req.url));
+
+      } catch (error) {
+        console.error('[Service Worker] Cache initialization failed:', error);
+        // Don't throw - allow installation even if caching fails
+      }
+    })()
+  );
+
+  // Activate immediately
+  self.skipWaiting();
 });
 
-// Activate event - clean up old caches and take control
+// Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
-    console.log('Service Worker activating, version:', SW_VERSION);
-    Logger.log('Service Worker activating, version:', SW_VERSION);
+  console.log('[Service Worker] Activating new service worker');
 
-    // Claim all clients immediately
-    event.waitUntil(clients.claim());
+  event.waitUntil(
+    (async () => {
+      try {
+        // Clean up old caches
+        const cacheNames = await caches.keys();
+        await Promise.all(
+          cacheNames
+            .filter(cacheName => {
+              return cacheName.startsWith('static-') && cacheName !== STATIC_CACHE ||
+                     cacheName.startsWith('dynamic-') && cacheName !== DYNAMIC_CACHE ||
+                     cacheName.startsWith('data-') && cacheName !== DATA_CACHE;
+            })
+            .map(cacheName => {
+              console.log('[Service Worker] Removing old cache:', cacheName);
+              return caches.delete(cacheName);
+            })
+        );
 
-    event.waitUntil(Logger.forceSave());
+        // Take control of all clients immediately
+        await self.clients.claim();
+        
+        // Verify cache contents after activation
+        const cache = await caches.open(STATIC_CACHE);
+        const cachedKeys = await cache.keys();
+        console.log('[Service Worker] Available cached resources:', 
+          cachedKeys.map(req => req.url));
+
+      } catch (error) {
+        console.error('[Service Worker] Activation tasks failed:', error);
+        // Don't throw - allow activation even if cleanup fails
+      }
+    })()
+  );
 });
 
-// Message event - handle messages from the main thread
-self.addEventListener('message', (event) => {
-    const { type, timestamp, account } = event.data;
+// Helper function to determine caching strategy based on request
+function getCacheStrategy(request) {
+  const url = new URL(request.url);
+  
+  // Static assets - Cache First
+  if (
+    request.destination === 'style' ||
+    request.destination === 'script' ||
+    request.destination === 'image' ||
+    request.destination === 'font' ||
+    PRECACHE_URLS.includes(url.pathname)
+  ) {
+    return 'cache-first';
+  }
+  
+  // API endpoints - Network First
+  if (url.pathname.startsWith('/api/')) {
+    return 'network-first';
+  }
+  
+  // HTML navigation - Cache First for offline support
+  if (request.mode === 'navigate') {
+    return 'cache-first';
+  }
+  
+  // Default to network first
+  return 'network-first';
+}
+
+// Fetch event - handle caching strategies
+self.addEventListener('fetch', (event) => {
+  const strategy = getCacheStrategy(event.request);
+  
+  switch (strategy) {
+    case 'cache-first':
+      event.respondWith(cacheFirst(event.request));
+      break;
+    case 'network-first':
+      event.respondWith(networkFirst(event.request));
+      break;
+    default:
+      event.respondWith(networkFirst(event.request));
+  }
+});
+
+// Cache-First Strategy
+async function cacheFirst(request) {
+  try {
+    const cache = await caches.open(STATIC_CACHE);
+    const cached = await cache.match(request);
     
-    switch (type) {
-        case 'start_polling':
-            state.timestamp = timestamp;
-            state.account = account;
-            startPolling();
-            break;
-        case 'stop_polling':
-            stopPolling();
-            break;
+    if (cached) {
+      console.log('[Service Worker] Serving from cache:', request.url);
+      return cached;
     }
+    
+    // If not in cache, try network
+    try {
+      const response = await fetch(request);
+      // Cache the new response
+      cache.put(request, response.clone());
+      return response;
+    } catch (error) {
+      console.warn('[Service Worker] Network fetch failed:', error);
+      // If offline and resource not in cache, return offline fallback
+      if (request.mode === 'navigate') {
+        const offlinePage = await cache.match('./offline.html');
+        if (offlinePage) {
+          return offlinePage;
+        }
+      }
+      throw error;
+    }
+  } catch (error) {
+    console.error('[Service Worker] Cache-first strategy failed:', error);
+    throw error;
+  }
+}
+
+// Network-First Strategy
+async function networkFirst(request) {
+  try {
+    const response = await fetch(request);
+    
+    // Only cache GET requests
+    if (request.method === 'GET') {
+      try {
+        const cache = await caches.open(DYNAMIC_CACHE);
+        await cache.put(request, response.clone());
+      } catch (cacheError) {
+        console.warn('[Service Worker] Failed to cache response:', cacheError);
+        // Continue even if caching fails
+      }
+    }
+    
+    return response;
+  } catch (error) {
+    console.warn('[Service Worker] Network request failed:', error);
+    
+    const cached = await caches.match(request);
+    if (cached) {
+      return cached;
+    }
+    
+    // If offline and no cache, return offline fallback for navigation
+    if (request.mode === 'navigate') {
+      const offlineFallback = await caches.match('./offline.html');
+      if (offlineFallback) {
+        return offlineFallback;
+      }
+    }
+    
+    throw error;
+  }
+}
+
+// Background sync event
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'sync-messages') {
+    event.waitUntil(syncMessages());
+  } else if (event.tag === 'sync-transactions') {
+    event.waitUntil(syncTransactions());
+  }
+});
+
+// Handle messages from the client
+self.addEventListener('message', (event) => {
+  if (event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
+// Error handling and logging
+self.addEventListener('error', (event) => {
+  console.error('[Service Worker] Error:', event.error);
+});
+
+self.addEventListener('unhandledrejection', (event) => {
+  console.error('[Service Worker] Unhandled rejection:', event.reason);
 });
 
 function startPolling() {
