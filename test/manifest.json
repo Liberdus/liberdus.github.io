@@ -4,19 +4,19 @@
   "description": "Decentralized messaging and wallet application",
   "icons": [
     {
-      "src": "liberdus_logo_192.png",
+      "src": "./test/liberdus_logo_192.png",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any"
     },
     {
-      "src": "liberdus_logo_512.png",
+      "src": "./test/liberdus_logo_512.png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any maskable"
     }
   ],
-  "start_url": "./",
+  "start_url": "./test",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#ffffff"
