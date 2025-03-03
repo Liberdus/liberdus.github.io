@@ -686,6 +686,7 @@ button:disabled {
   transition: all 0.2s ease;
   flex: 1;
   border-radius: 8px;
+  position: relative; /* Added for positioning the bottom border */
 }
 
 .nav-button::before {
@@ -722,11 +723,22 @@ button:disabled {
   opacity: 0.7;
 }
 
-/* Active state */
+/* Active state - modified to use bottom border instead of background */
 .nav-button.active {
   color: #3d3dce;
   font-weight: 600;
-  background-color: rgba(61, 61, 206, 0.08);
+  background-color: transparent; /* Remove background highlight */
+}
+
+.nav-button.active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 10%;
+  width: 80%;
+  height: 3px;
+  background-color: #3d3dce;
+  border-radius: 1.5px;
 }
 
 .nav-button.active::before {
