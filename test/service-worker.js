@@ -4,7 +4,7 @@ try {
   console.error('Failed to import log-utils.js:', e);
 }
 
-const SW_VERSION = '1.0.53';
+const SW_VERSION = '1.0.54';
 
 // Simplified state management
 const state = {
@@ -155,16 +155,21 @@ async function showNotification(chatCount) {
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
 
+    // Get the scope of the service worker
+    const swScope = self.registration.scope;
+    
     // Focus existing window or open new one
     event.waitUntil(
         clients.matchAll({ type: 'window' }).then(clientList => {
+            // Try to find a client that matches our scope
             for (const client of clientList) {
-                if (client.url === '/' && 'focus' in client) {
+                if (client.url.startsWith(swScope) && 'focus' in client) {
                     return client.focus();
                 }
             }
+            // If no matching client found, open a new window with the scope URL
             if (clients.openWindow) {
-                return clients.openWindow('/');
+                return clients.openWindow(swScope);
             }
         })
     );
