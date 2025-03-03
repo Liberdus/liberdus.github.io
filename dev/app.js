@@ -1167,10 +1167,10 @@ async function updateChatList(force) {
                 <div class="chat-content">
                     <div class="chat-header">
                         <div class="chat-name">${contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
-                        <div class="chat-time">${formatTime(message.timestamp)}</div>
+                        <div class="chat-time">${formatTime(message.timestamp)}  <span class="chat-time-chevron"></span></div>
                     </div>
                     <div class="chat-message">
-                        ${message.my ? 'You: ' : ''}${message.message}
+                        ${message.message}
                         ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : ''}
                     </div>
                 </div>
@@ -1813,6 +1813,7 @@ function openChatModal(address) {
     const modalAvatar = modal.querySelector('.modal-avatar');
     const modalTitle = modal.querySelector('.modal-title');
     const messagesList = modal.querySelector('.messages-list');
+    const addFriendButton = document.getElementById('chatAddFriendButton');
     document.getElementById('newChatButton').classList.remove('visible');
     const contact = myData.contacts[address]
     // Set user info
@@ -1845,6 +1846,21 @@ function openChatModal(address) {
             contactInfoModal.open(createDisplayInfo(contact));
         }
     };
+
+    // Show or hide add friend button based on friend status
+    const isFriend = contact.friend || false;
+    if (isFriend) {
+        addFriendButton.style.display = 'none';
+    } else {
+        addFriendButton.style.display = 'flex';
+        // Add click handler for add friend button
+        addFriendButton.onclick = () => {
+            contact.friend = true;
+            showToast('Added to friends');
+            addFriendButton.style.display = 'none';
+            saveState();
+        };
+    }
 
     // Show modal
     modal.classList.add('active');
@@ -3910,6 +3926,14 @@ async function handleResultClick(contactAddress) {
             <div class="modal-avatar">${identicon}</div>
             <div class="modal-title">${contact.username || contactAddress}</div>
         </div>
+        <div class="header-actions">
+            <button
+              class="icon-button add-friend-icon"
+              id="chatAddFriendButton"
+              aria-label="Add friend"
+              style="display: ${contact.friend ? 'none' : 'flex'}"
+            ></button>
+        </div>
     `;
 
     // Re-attach close button event listener
@@ -3924,6 +3948,17 @@ async function handleResultClick(contactAddress) {
             contactInfoModal.open(createDisplayInfo(contact));
         }
     };
+
+    // Add click handler for add friend button if visible
+    const addFriendButton = document.getElementById('chatAddFriendButton');
+    if (addFriendButton && !contact.friend) {
+        addFriendButton.onclick = () => {
+            contact.friend = true;
+            showToast('Added to friends');
+            addFriendButton.style.display = 'none';
+            saveState();
+        };
+    }
 
     // Ensure messages container structure matches
     const messagesContainer = chatModal.querySelector('.messages-container');

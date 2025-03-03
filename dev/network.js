@@ -14,4 +14,5 @@ const network = {
   "explorer": {
     "url": "https://test.liberdus.com/explorer"
   }
-};
+}
+
