@@ -4,7 +4,7 @@ try {
   console.error('Failed to import log-utils.js:', e);
 }
 
-const SW_VERSION = '1.0.55';
+const SW_VERSION = '1.0.56';
 
 // Cache names with proper versioning
 const CACHE_VERSION = '1.0.0';
@@ -17,6 +17,7 @@ const PRECACHE_URLS = [
   './index.html',
   './styles.css',
   './app.js',
+  './db.js',
   './manifest.json',
   './offline.html',
   './log-utils.js',

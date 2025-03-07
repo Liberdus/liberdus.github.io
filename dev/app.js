@@ -2669,7 +2669,14 @@ function handleSignOut() {
     
     handleSignOut.exit = true
 
-    // Reload the page to get fresh welcome page
+    // Add offline fallback
+    if (!navigator.onLine) {
+        // Just reset the UI state without clearing storage
+        document.getElementById('welcomeScreen').classList.add('active');
+        return;
+    }
+
+    // Only reload if online
     window.location.reload();
 }
 handleSignOut.exit = false
