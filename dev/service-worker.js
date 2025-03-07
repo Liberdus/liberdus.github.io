@@ -4,13 +4,12 @@ try {
   console.error('Failed to import log-utils.js:', e);
 }
 
-const SW_VERSION = '1.0.54';
+const SW_VERSION = '1.0.55';
 
 // Cache names with proper versioning
 const CACHE_VERSION = '1.0.0';
 const STATIC_CACHE = `static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `dynamic-${CACHE_VERSION}`;
-const DATA_CACHE = `data-${CACHE_VERSION}`;
 
 // Resources to precache
 const PRECACHE_URLS = [
@@ -20,18 +19,7 @@ const PRECACHE_URLS = [
   './app.js',
   './manifest.json',
   './offline.html',
-  './images/logo.png',
-  './images/lib.png',
-  './lib.js',
-  './network.js',
   './log-utils.js',
-  './noble-post-quantum.js',
-  './noble-secp256k1.js',
-  './noble-ciphers.js',
-  './blake2b.js',
-  './keccak256.js',
-  './stringify-shardus.js',
-  './qrcode.js',
   './liberdus_logo_50.png',
   './liberdus_logo_250.png'
 ];
@@ -106,8 +94,7 @@ self.addEventListener('activate', (event) => {
           cacheNames
             .filter(cacheName => {
               return cacheName.startsWith('static-') && cacheName !== STATIC_CACHE ||
-                     cacheName.startsWith('dynamic-') && cacheName !== DYNAMIC_CACHE ||
-                     cacheName.startsWith('data-') && cacheName !== DATA_CACHE;
+                     cacheName.startsWith('dynamic-') && cacheName !== DYNAMIC_CACHE;
             })
             .map(cacheName => {
               console.log('[Service Worker] Removing old cache:', cacheName);
@@ -420,6 +407,34 @@ function longAddress(addr) {
     return addr.padEnd(64, '0');
 }
 
+/**
+ * Gets the appropriate gateway for a request based on configuration
+ * @returns {Object} The selected gateway object
+ */
+function getGatewayForRequest() {
+  // Safety check for state and account
+  if (!state?.account?.network?.gateways?.length) {
+    // Fall back to global network if available
+    if (typeof network !== 'undefined' && network?.gateways?.length) {
+      return network.gateways[Math.floor(Math.random() * network.gateways.length)];
+    }
+    console.error('No gateways available');
+    return null;
+  }
+  
+  const { network } = state.account;
+  
+  // If a default gateway is set and valid, use it
+  if (network.defaultGatewayIndex !== undefined && 
+      network.defaultGatewayIndex >= 0 && 
+      network.defaultGatewayIndex < network.gateways.length) {
+    return network.gateways[network.defaultGatewayIndex];
+  }
+  
+  // Otherwise use random selection
+  return network.gateways[Math.floor(Math.random() * network.gateways.length)];
+}
+
 async function checkForNewMessages() {
     try {
         if (!state.timestamp || !state.account) {
@@ -434,8 +449,12 @@ async function checkForNewMessages() {
             return;
         }
 
-        // Get random gateway
-        const gateway = network.gateways[Math.floor(Math.random() * network.gateways.length)];
+        // Get gateway using the selection function
+        const gateway = getGatewayForRequest();
+        if (!gateway) {
+            console.log('❌ No gateway available');
+            return;
+        }
         const paddedAddress = address.padEnd(64, '0');
         
         // Query for new messages

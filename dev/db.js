@@ -387,7 +387,7 @@ async function getData(storeName, key) {
     });
 }
 
-async function getAllData(storeName) {
+/* async function getAllData(storeName) {
     return retryOperation(async () => {
         try {
             return await withConnection(async (db) => {
@@ -427,13 +427,13 @@ async function getAllData(storeName) {
             throw error;
         }
     });
-}
+} */
 
-// Connection monitoring
+/* // Connection monitoring
 function getConnectionStats() {
     return connectionPool.getStats();
 }
-
+ */
 // Cleanup function for application shutdown
 function closeAllConnections() {
     connectionPool.closeAll();
@@ -448,15 +448,15 @@ function addVersionToData(data) {
     };
 }
 
-// Get error log
+/* // Get error log
 function getErrorLog() {
     return [...errorLog];
-}
+} */
 
-// Clear error log
+/* // Clear error log
 function clearErrorLog() {
     errorLog.length = 0;
-}
+} */
 
 // Validate data against schema
 function validateData(storeName, data) {
@@ -483,11 +483,8 @@ function validateData(storeName, data) {
 // Export functions
 export {
     STORES,
+    addVersionToData,
     saveData,
     getData,
-    getAllData,
-    getErrorLog,
-    clearErrorLog,
-    getConnectionStats,
     closeAllConnections
 }; 

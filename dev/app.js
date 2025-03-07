@@ -11,7 +11,7 @@ async function checkVersion(){
         newVersion = await response.text();
     } catch (error) {
         console.error('Version check failed:', error);
-        alert('Version check failed. You are offline.')
+        alert('Version check failed. Your Internet connection may be down.')
         // Only trigger offline UI if it's a network error
         if (!navigator.onLine || error instanceof TypeError) {
             isOnline = false;
@@ -125,16 +125,7 @@ import { normalizeUsername, generateIdenticon, formatTime,
 } from './lib.js';
 
 // Import database functions
-import { STORES, saveData, getData, getAllData } from './db.js';
-
-// Local version function to replace addVersionToData
-function addVersion(data) {
-    return {
-        ...data,
-        version: Date.now(),
-        lastUpdated: Date.now()
-    };
-}
+import { STORES, saveData, getData, addVersionToData, closeAllConnections } from './db.js';
 
 const myHashKey = hex2bin('69fa4195670576c0160d660c3be36556ff8d504725be8a59b5a96509e0c994bc')
 const weiDigits = 18; 
@@ -196,7 +187,12 @@ async function checkUsernameAvailability(username, address) {
     }
     
     // Online flow - existing implementation
-    const randomGateway = network.gateways[Math.floor(Math.random() * network.gateways.length)];
+    const randomGateway = getGatewayForRequest();
+    if (!randomGateway) {
+        console.error('No gateway available for username check');
+        return 'error';
+    }
+    
     const usernameBytes = utf82bin(normalizeUsername(username))
     const usernameHash = blake.blake2bHex(usernameBytes, myHashKey, 32)
     try {
@@ -575,11 +571,24 @@ async function handleSignIn(event) {
 }
 
 function newDataRecord(myAccount){
+    // Process network gateways first
+    const networkGateways = (typeof network !== 'undefined' && network?.gateways?.length)
+        ? network.gateways.map(gateway => ({
+            protocol: gateway.protocol,
+            host: gateway.host,
+            port: gateway.port,
+            name: `${gateway.host} (System)`,
+            isSystem: true,
+            isDefault: false,
+        }))
+        : [];
+
     const myData = {
         timestamp: Date.now(),
         account: myAccount,
         network: {
-            gateways: []
+            gateways: networkGateways,
+            defaultGatewayIndex: -1,  // -1 means use random selection
         },
         contacts: {},
         chats: [],
@@ -616,6 +625,7 @@ function newDataRecord(myAccount){
             toll: 1
         }
     }
+    
     return myData
 }
 
@@ -735,6 +745,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('openRemoveAccount').addEventListener('click', openRemoveAccountModal);
     document.getElementById('closeRemoveAccountModal').addEventListener('click', closeRemoveAccountModal);
     document.getElementById('confirmRemoveAccount').addEventListener('click', handleRemoveAccount);
+
+    // Gateway Menu
+    document.getElementById('openNetwork').addEventListener('click', openGatewayForm);
+    document.getElementById('closeGatewayForm').addEventListener('click', closeGatewayForm);
+    document.getElementById('gatewayForm').addEventListener('submit', handleGatewayForm);
+    document.getElementById('addGatewayButton').addEventListener('click', openAddGatewayForm);
+    document.getElementById('closeAddEditGatewayForm').addEventListener('click', closeAddEditGatewayForm);
 
     // TODO add comment about which send form this is for chat or assets
     document.getElementById('openSendModal').addEventListener('click', openSendModal);
@@ -888,6 +905,7 @@ function handleUnload(e){
     else{
         saveState()
         Logger.forceSave();
+        closeAllConnections();
     }
 }
 
@@ -1106,19 +1124,39 @@ async function updateChatList(force) {
     if (myAccount && myAccount.keys) {
         if (isOnline) {
             // Online: Get from network and cache
-            gotChats = await getChats(myAccount.keys);
-            if (gotChats > 0 || force) {
-                // Cache the updated chat data
-                try {
-                    const chatData = addVersion({
-                        chatId: myAccount.keys.address,
-                        chats: myData.chats,
-                        contacts: myData.contacts
-                    });
-                    await saveData(STORES.CHATS, chatData);
-                } catch (error) {
-                    console.error('Failed to cache chat data:', error);
+            try {
+                let retryCount = 0;
+                const maxRetries = 2;
+                
+                while (retryCount <= maxRetries) {
+                    try {
+                        gotChats = await getChats(myAccount.keys);
+                        break; // Success, exit the retry loop
+                    } catch (networkError) {
+                        retryCount++;
+                        if (retryCount > maxRetries) {
+                            throw networkError; // Rethrow if max retries reached
+                        }
+                        console.log(`Retry ${retryCount}/${maxRetries} for chat update...`);
+                        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Increasing backoff
+                    }
                 }
+                
+                if (gotChats > 0 || force) {
+                    // Cache the updated chat data
+                    try {
+                        const chatData = addVersionToData({
+                            chatId: myAccount.keys.address,
+                            chats: myData.chats,
+                            contacts: myData.contacts
+                        });
+                        await saveData(STORES.CHATS, chatData);
+                    } catch (error) {
+                        console.error('Failed to cache chat data:', error);
+                    }
+                }
+            } catch (error) {
+                console.error('Error updating chat list:', error);
             }
         } else {
             // Offline: Get from cache
@@ -1289,7 +1327,7 @@ async function updateContactsList() {
     if (isOnline) {
         // Online: Get from network and cache
         try {
-            const contactsData = addVersion({
+            const contactsData = addVersionToData({
                 address: myAccount.keys.address,
                 contacts: myData.contacts
             });
@@ -2787,7 +2825,7 @@ async function updateWalletView() {
         // Online: Get from network and cache
         await updateWalletBalances();
         try {
-            const walletCacheData = addVersion({
+            const walletCacheData = addVersionToData({
                 assetId: myAccount.keys.address,
                 wallet: walletData
             });
@@ -2990,12 +3028,17 @@ async function queryNetwork(url) {
         alert('not online')
         return null 
     }
-    const randomGateway = network.gateways[Math.floor(Math.random() * network.gateways.length)];
+    const randomGateway = getGatewayForRequest();
+    if (!randomGateway) {
+        console.error('No gateway available for network query');
+        return null;
+    }
+    
     try {
         const response = await fetch(`${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}${url}`);
-console.log('query', `${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}${url}`)
+        console.log('query', `${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}${url}`)
         const data = await response.json();
-console.log('response', data)
+        console.log('response', data)
         return data
     } catch (error) {
         console.error(`Error fetching balance for address ${addr.address}:`, error);
@@ -3365,24 +3408,31 @@ async function postRegisterAlias(alias, keys){
 }
 
 async function injectTx(tx, keys){
-    const txid = await signObj(tx, keys)  // add the sign obj to tx
-    // Get random gateway
-    const randomGateway = network.gateways[Math.floor(Math.random() * network.gateways.length)];
-    const options = {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: stringify({tx: stringify(tx)})
+    if (!isOnline) {
+        return null 
     }
+    const randomGateway = getGatewayForRequest();
+    if (!randomGateway) {
+        console.error('No gateway available for transaction injection');
+        return null;
+    }
+    
     try {
+        const txid = await signObj(tx, keys)  // add the sign obj to tx
+        const options = {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: stringify({tx: stringify(tx)})
+        }
         const response = await fetch(`${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}/inject`, options);
         const data = await response.json();     
         data.txid = txid           
         return data
     } catch (error) {
-        console.error('Error injecting tx:', error, tx);
-        return error;
+        console.error('Error injecting transaction:', error);
+        return null
     }
 }
 
@@ -3585,7 +3635,8 @@ function setupAppStateManagement() {
             const accountData = {
                 address: myAccount.keys.address,
                 network: {
-                    gateways: network.gateways
+                    gateways: myData.network.gateways,
+                    defaultGatewayIndex: myData.network.defaultGatewayIndex
                 }
             };
             
@@ -4129,11 +4180,15 @@ function createDisplayInfo(contact) {
 }
 
 // Add this function before the ContactInfoModalManager class
-function showToast(message, duration = 2000) {
+function showToast(message, duration = 2000, type = "default") {
     const toastContainer = document.getElementById('toastContainer');
     const toast = document.createElement('div');
-    toast.className = 'toast';
+    toast.className = `toast ${type}`;
     toast.textContent = message;
+    
+    // Generate a unique ID for this toast
+    const toastId = 'toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+    toast.id = toastId;
     
     toastContainer.appendChild(toast);
     
@@ -4145,13 +4200,28 @@ function showToast(message, duration = 2000) {
         toast.classList.add('show');
     });
     
-    // Hide and remove the toast after duration
-    setTimeout(() => {
-        toast.classList.remove('show');
+    // If duration is provided, auto-hide the toast
+    if (duration > 0) {
         setTimeout(() => {
+            hideToast(toastId);
+        }, duration);
+    }
+    
+    return toastId;
+}
+
+// Function to hide a specific toast by ID
+function hideToast(toastId) {
+    const toast = document.getElementById(toastId);
+    if (!toast) return;
+    
+    toast.classList.remove('show');
+    setTimeout(() => {
+        const toastContainer = document.getElementById('toastContainer');
+        if (toast.parentNode === toastContainer) {
             toastContainer.removeChild(toast);
-        }, 300); // Match transition duration
-    }, duration);
+        }
+    }, 300); // Match transition duration
 }
 
 // Show update notification to user
@@ -4196,37 +4266,52 @@ async function updateServiceWorker() {
 
 // Handle online/offline events
 async function handleConnectivityChange(event) {
-    if (event.type === 'offline') {
-        const wasOnline = isOnline;
-        // Trust offline events immediately
-        isOnline = false;
+    const wasOffline = !isOnline;
+    isOnline = navigator.onLine;
+    
+    console.log(`Connectivity changed. Online: ${isOnline}`);
+    
+    if (isOnline && wasOffline) {
+        // We just came back online
         updateUIForConnectivity();
-        if (wasOnline) {
-            showToast("You're offline. Some features are unavailable.", 3000, "offline");
-        }
-    } else {
-        // For online events, verify connectivity before updating UI
-        const wasOffline = !isOnline;
-        isOnline = await checkOnlineStatus();
+        showToast("You're back online!", 3000, "online");
 
-        if (isOnline && wasOffline) {
-            updateUIForConnectivity();
-            showToast("You're back online!", 3000, "online");
-            
-            // Verify username is still valid on the network
-            await verifyUsernameOnReconnect();
-            
-            // Sync any pending offline actions
-            const registration = await navigator.serviceWorker.getRegistration();
-            if (registration && 'sync' in registration) {
-                try {
-                    await registration.sync.register('sync-messages');
-                    await registration.sync.register('sync-transactions');
-                } catch (err) {
-                    console.error('Background sync registration failed:', err);
-                }
+        // Verify username is still valid on the network
+        await verifyUsernameOnReconnect();
+        
+        // warmup db
+        await getData(STORES.WALLET);
+
+        // Check database health after reconnection
+        const dbHealthy = await checkDatabaseHealth();
+        if (!dbHealthy) {
+            console.warn('Database appears to be in an unhealthy state, reloading app...');
+            showToast("Database issue detected, reloading application...", 3000, "warning");
+            setTimeout(() => window.location.reload(), 3000);
+            return;
+        }
+        
+        // Force update data with reconnection handling
+        if (myAccount && myAccount.keys) {
+            try {
+                // Update chats with reconnection handling
+                await updateChatList('force');
+                
+                // Update contacts with reconnection handling
+                await updateContactsList();
+                
+                // Update wallet with reconnection handling
+                await updateWalletView();
+
+            } catch (error) {
+                console.error('Failed to update data on reconnect:', error);
+                showToast("Some data couldn't be updated. Please refresh if you notice missing information.", 5000, "warning");
             }
         }
+    } else if (!isOnline) {
+        // We just went offline
+        updateUIForConnectivity();
+        showToast("You're offline. Some features are unavailable.", 3000, "offline");
     }
 }
 
@@ -4262,11 +4347,22 @@ function markConnectivityDependentElements() {
         
         // Contact related
         '#chatRecipient',
+        '#chatAddFriendButton',
+        '#addFriendButton',
         
         // Profile related
         '#accountForm button[type="submit"]',
         '#createAccountForm button[type="submit"]',
-        '#importForm button[type="submit"]'
+        '#importForm button[type="submit"]',
+
+        // menu list buttons
+        '.menu-item[id="openAccountForm"]',
+        '.menu-item[id="openNetwork"]',
+        '.menu-item[id="openExplorer"]',
+        '.menu-item[id="openMonitor"]',
+        '.menu-item[id="openAbout"]',
+        '.menu-item[id="openRemoveAccount"]',
+        
     ];
 
     // Add data attribute to all network-dependent elements
@@ -4384,4 +4480,383 @@ async function verifyUsernameOnReconnect() {
     }
 }
 
+async function checkDatabaseHealth() {
+    try {
+        // Try to access each store to verify database is working
+        for (const store of Object.values(STORES)) {
+            try {
+                // Just try to read any data from each store
+                const testKey = await getData(store, null);
+                console.log(`Database store ${store} is accessible`);
+            } catch (error) {
+                console.error(`Database store ${store} access error:`, error);
+                // If there's an error, we might need to reinitialize
+                return false;
+            }
+        }
+        return true;
+    } catch (error) {
+        console.error('Database health check failed:', error);
+        return false;
+    }
+}
 
+// Gateway Management Functions
+
+// Function to initialize the gateway configuration
+// TODO: can remove this eventually since new account creation does this
+function initializeGatewayConfig() {
+    // Safety check for myData
+    if (!myData) {
+        console.error('Cannot initialize gateway config: myData is null');
+        return;
+    }
+
+    // Ensure network property exists
+    if (!myData.network) {
+        myData.network = {};
+    }
+
+    // Ensure gateways array exists
+    if (!myData.network.gateways) {
+        myData.network.gateways = [];
+    }
+
+    // Ensure defaultGatewayIndex property exists and set to -1 (random selection)
+    if (myData.network.defaultGatewayIndex === undefined) {
+        myData.network.defaultGatewayIndex = -1; // -1 means use random selection
+    }
+
+    // If no gateways, initialize with system gateways
+    if (myData.network.gateways.length === 0) {
+        // Add system gateways from the global network object
+        if (network && network.gateways) {
+            network.gateways.forEach(gateway => {
+                myData.network.gateways.push({
+                    protocol: gateway.protocol,
+                    host: gateway.host,
+                    port: gateway.port,
+                    name: `${gateway.host} (System)`,
+                    isSystem: true,
+                    isDefault: false
+                });
+            });
+        }
+    }
+}
+
+// Function to open the gateway form
+function openGatewayForm() {
+    // Close menu modal
+    document.getElementById('menuModal').classList.remove('active');
+
+    // Initialize gateway configuration if needed
+    initializeGatewayConfig();
+
+    // Show gateway modal
+    document.getElementById('gatewayModal').classList.add('active');
+
+    // Populate gateway list
+    updateGatewayList();
+}
+
+// Function to close the gateway form
+function closeGatewayForm() {
+    document.getElementById('gatewayModal').classList.remove('active');
+}
+
+// Function to open the add gateway form
+function openAddGatewayForm() {
+    // Hide gateway modal
+    document.getElementById('gatewayModal').classList.remove('active');
+    
+    // Reset form
+    document.getElementById('gatewayForm').reset();
+    document.getElementById('gatewayEditIndex').value = -1;
+    document.getElementById('addEditGatewayTitle').textContent = 'Add Gateway';
+    
+    // Show add/edit gateway modal
+    document.getElementById('addEditGatewayModal').classList.add('active');
+}
+
+// Function to open the edit gateway form
+function openEditGatewayForm(index) {
+    // Hide gateway modal
+    document.getElementById('gatewayModal').classList.remove('active');
+    
+    // Get gateway data
+    const gateway = myData.network.gateways[index];
+    
+    // Populate form
+    document.getElementById('gatewayName').value = gateway.name;
+    document.getElementById('gatewayProtocol').value = gateway.protocol;
+    document.getElementById('gatewayHost').value = gateway.host;
+    document.getElementById('gatewayPort').value = gateway.port;
+    document.getElementById('gatewayEditIndex').value = index;
+    document.getElementById('addEditGatewayTitle').textContent = 'Edit Gateway';
+    
+    // Show add/edit gateway modal
+    document.getElementById('addEditGatewayModal').classList.add('active');
+}
+
+// Function to close the add/edit gateway form
+function closeAddEditGatewayForm() {
+    document.getElementById('addEditGatewayModal').classList.remove('active');
+    document.getElementById('gatewayModal').classList.add('active');
+    updateGatewayList();
+}
+
+// Function to update the gateway list display
+function updateGatewayList() {
+    const gatewayList = document.getElementById('gatewayList');
+
+    // Clear existing list
+    gatewayList.innerHTML = '';
+
+    // If no gateways, show empty state
+    if (myData.network.gateways.length === 0) {
+        gatewayList.innerHTML = `
+            <div class="empty-state">
+                <div style="font-weight: bold; margin-bottom: 0.5rem">No Gateways</div>
+                <div>Add a gateway to get started</div>
+            </div>`;
+        return;
+    }
+
+    // Add "Use Random Selection" option first
+    const randomOption = document.createElement('div');
+    randomOption.className = 'gateway-item random-option';
+    randomOption.innerHTML = `
+        <div class="gateway-info">
+            <div class="gateway-name">Random Selection</div>
+            <div class="gateway-url">Automatically selects a gateway for each request (recommended for reliability)</div>
+        </div>
+        <div class="gateway-actions">
+            <label class="default-toggle">
+                <input type="radio" name="defaultGateway" ${myData.network.defaultGatewayIndex === -1 ? 'checked' : ''}>
+                <span>Default</span>
+            </label>
+        </div>
+    `;
+
+    // Add event listener for random selection
+    const randomToggle = randomOption.querySelector('input[type="radio"]');
+    randomToggle.addEventListener('change', () => {
+        if (randomToggle.checked) {
+            setDefaultGateway(-1);
+        }
+    });
+
+    gatewayList.appendChild(randomOption);
+
+    // Add each gateway to the list
+    myData.network.gateways.forEach((gateway, index) => {
+        const isDefault = index === myData.network.defaultGatewayIndex;
+        const canRemove = !gateway.isSystem;
+
+        const gatewayItem = document.createElement('div');
+        gatewayItem.className = 'gateway-item';
+        gatewayItem.innerHTML = `
+            <div class="gateway-info">
+                <div class="gateway-name">${escapeHtml(gateway.name)}</div>
+                <div class="gateway-url">${gateway.protocol}://${escapeHtml(gateway.host)}:${gateway.port}</div>
+                ${gateway.isSystem ? '<span class="system-badge">System</span>' : ''}
+            </div>
+            <div class="gateway-actions">
+                <label class="default-toggle">
+                    <input type="radio" name="defaultGateway" ${isDefault ? 'checked' : ''}>
+                    <span>Default</span>
+                </label>
+                <button class="edit-button">Edit</button>
+                ${canRemove ? '<button class="remove-button">Remove</button>' : ''}
+            </div>
+        `;
+
+        // Add event listeners
+        const defaultToggle = gatewayItem.querySelector('input[type="radio"]');
+        defaultToggle.addEventListener('change', () => {
+            if (defaultToggle.checked) {
+                setDefaultGateway(index);
+            }
+        });
+
+        const editButton = gatewayItem.querySelector('.edit-button');
+        editButton.addEventListener('click', () => {
+            openEditGatewayForm(index);
+        });
+
+        if (canRemove) {
+            const removeButton = gatewayItem.querySelector('.remove-button');
+            removeButton.addEventListener('click', () => {
+                confirmRemoveGateway(index);
+            });
+        }
+
+        gatewayList.appendChild(gatewayItem);
+    });
+}
+
+// Function to add a new gateway
+function addGateway(protocol, host, port, name) {
+    // Initialize if needed
+    initializeGatewayConfig();
+
+    // Add the new gateway
+    myData.network.gateways.push({
+        protocol,
+        host,
+        port,
+        name,
+        isSystem: false,
+        isDefault: false
+    });
+
+    // Update the UI
+    updateGatewayList();
+
+    // Show success message
+    showToast('Gateway added successfully');
+}
+
+// Function to update an existing gateway
+function updateGateway(index, protocol, host, port, name) {
+    // Check if index is valid
+    if (index >= 0 && index < myData.network.gateways.length) {
+        const gateway = myData.network.gateways[index];
+
+        // Update gateway properties
+        gateway.protocol = protocol;
+        gateway.host = host;
+        gateway.port = port;
+        gateway.name = name;
+
+        // Update the UI
+        updateGatewayList();
+
+        // Show success message
+        showToast('Gateway updated successfully');
+    }
+}
+
+// Function to confirm gateway removal
+function confirmRemoveGateway(index) {
+    if (confirm('Are you sure you want to remove this gateway?')) {
+        removeGateway(index);
+    }
+}
+
+// Function to remove a gateway
+function removeGateway(index) {
+    // Check if index is valid
+    if (index >= 0 && index < myData.network.gateways.length) {
+        const gateway = myData.network.gateways[index];
+
+        // Only allow removing non-system gateways
+        if (!gateway.isSystem) {
+            // If this was the default gateway, reset to random selection
+            if (myData.network.defaultGatewayIndex === index) {
+                myData.network.defaultGatewayIndex = -1;
+            } else if (myData.network.defaultGatewayIndex > index) {
+                // Adjust default gateway index if needed
+                myData.network.defaultGatewayIndex--;
+            }
+
+            // Remove the gateway
+            myData.network.gateways.splice(index, 1);
+
+            // Update the UI
+            updateGatewayList();
+
+            // Show success message
+            showToast('Gateway removed successfully');
+        }
+    }
+}
+
+// Function to set the default gateway
+function setDefaultGateway(index) {
+    // Reset all gateways to non-default
+    myData.network.gateways.forEach(gateway => {
+        gateway.isDefault = false;
+    });
+
+    // Set the new default gateway index
+    myData.network.defaultGatewayIndex = index;
+
+    // If setting a specific gateway as default, mark it
+    if (index >= 0 && index < myData.network.gateways.length) {
+        myData.network.gateways[index].isDefault = true;
+    }
+
+    // Update the UI
+    updateGatewayList();
+
+    // Show success message
+    const message = index === -1 
+        ? 'Using random gateway selection for better reliability' 
+        : 'Default gateway set';
+    showToast(message);
+}
+
+// Function to get the gateway to use for a request
+function getGatewayForRequest() {
+    //TODO: ask Omar if we should just let use edit network.js or keep current logic where when we sign in it uses network.js and when signed in we use myData.network.gateways
+    // Check if myData exists
+    if (!myData) {
+        // Fall back to global network if available
+        if (typeof network !== 'undefined' && network?.gateways?.length) {
+            return network.gateways[Math.floor(Math.random() * network.gateways.length)];
+        }
+        console.error('No myData or network available');
+        return null;
+    }
+
+    // Initialize if needed
+    initializeGatewayConfig();
+
+    // If we have a default gateway set, use it
+    if (
+        myData.network.defaultGatewayIndex >= 0 &&
+        myData.network.defaultGatewayIndex < myData.network.gateways.length
+    ) {
+        return myData.network.gateways[myData.network.defaultGatewayIndex];
+    }
+
+    // Otherwise use random selection
+    return myData.network.gateways[
+        Math.floor(Math.random() * myData.network.gateways.length)
+    ];
+}
+
+// Function to handle the gateway form submission
+function handleGatewayForm(event) {
+    event.preventDefault();
+
+    // Get form data
+    const formData = {
+        protocol: document.getElementById('gatewayProtocol').value,
+        host: document.getElementById('gatewayHost').value,
+        port: parseInt(document.getElementById('gatewayPort').value),
+        name: document.getElementById('gatewayName').value
+    };
+
+    // Get the edit index (if editing)
+    const editIndex = parseInt(document.getElementById('gatewayEditIndex').value);
+
+    if (editIndex >= 0) {
+        // Update existing gateway
+        updateGateway(
+            editIndex,
+            formData.protocol,
+            formData.host,
+            formData.port,
+            formData.name
+        );
+    } else {
+        // Add new gateway
+        addGateway(formData.protocol, formData.host, formData.port, formData.name);
+    }
+
+    // Close the form
+    closeAddEditGatewayForm();
+}
