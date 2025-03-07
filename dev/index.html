@@ -519,6 +519,61 @@
               id="qrcode"
               style="margin-top: 1rem; display: flex; justify-content: center"
             ></div>
+
+            <!-- QR Code Preview (Moved here) -->
+            <div id="qrDataPreview" class="form-control qr-data-preview">
+              <div class="preview-content">
+                <!-- Will show what data will be encoded in QR -->
+              </div>
+              <button
+                type="button"
+                id="qrDataToggle"
+                class="qr-data-toggle"
+                aria-label="Toggle QR data view"
+              ></button>
+            </div>
+          </div>
+
+          <!-- Toggle for Payment Request Options -->
+          <div class="form-group">
+            <button
+              id="toggleQROptions"
+              class="secondary-button"
+              style="width: 100%"
+            >
+              <span id="toggleQROptionsText">Show Payment Request Options</span>
+              <span id="toggleQROptionsIcon" style="margin-left: 5px">▼</span>
+            </button>
+          </div>
+
+          <!-- Payment Request Options (New) -->
+          <div id="qrOptionsContainer" class="form-group" style="display: none">
+            <div class="form-group">
+              <label for="receiveAsset">Asset</label>
+              <select id="receiveAsset" class="form-control">
+                <!-- Will be populated with assets in JavaScript -->
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="receiveAmount">Amount (Optional)</label>
+              <input
+                type="number"
+                id="receiveAmount"
+                class="form-control"
+                placeholder="Enter amount"
+                step="any"
+                min="0"
+              />
+            </div>
+            <div class="form-group">
+              <label for="receiveMemo">Memo (Optional)</label>
+              <textarea
+                id="receiveMemo"
+                class="form-control"
+                placeholder="Add a note for the payment"
+                maxlength="140"
+              ></textarea>
+            </div>
           </div>
         </div>
       </div>
@@ -543,13 +598,34 @@
                   style="color: #dc3545; display: none"
                 ></span
               ></label>
-              <input
-                type="text"
-                id="sendToAddress"
-                class="form-control"
-                placeholder="Enter username or address"
-                required
-              />
+              <div style="display: flex; align-items: center; gap: 0.5rem">
+                <input
+                  type="text"
+                  id="sendToAddress"
+                  class="form-control"
+                  placeholder="Enter username or address"
+                  required
+                  style="flex: 1"
+                />
+                <button
+                  type="button"
+                  id="scanQRButton"
+                  class="icon-button"
+                  title="Scan QR Code"
+                  style="flex-shrink: 0"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="24"
+                    height="24"
+                    style="fill: currentColor"
+                  >
+                    <path
+                      d="M3,3 L10,3 L10,10 L3,10 Z M5,5 L5,8 L8,8 L8,5 Z M14,3 L21,3 L21,10 L14,10 Z M16,5 L16,8 L19,8 L19,5 Z M3,14 L10,14 L10,21 L3,21 Z M5,16 L5,19 L8,19 L8,16 Z M14,14 L21,14 L21,21 L14,21 Z M16,16 L16,19 L19,19 L19,16 Z M11,3 L13,3 L13,10 L11,10 Z M11,14 L13,14 L13,21 L11,21 Z M3,11 L10,11 L10,13 L3,13 Z M14,11 L21,11 L21,13 L14,13 Z"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
             <div class="form-group">
               <label for="sendAmount">Amount</label>

@@ -1967,14 +1967,186 @@ function openReceiveModal() {
     modal.classList.add('active');
     
     // Get wallet data
-    const walletData = myData.wallet
+    const walletData = myData.wallet;
+
+    // Store references to elements that will have event listeners
+    const assetSelect = document.getElementById('receiveAsset');
+    const amountInput = document.getElementById('receiveAmount');
+    const memoInput = document.getElementById('receiveMemo');
+    const qrDataPreview = document.getElementById('qrDataPreview');
+    const qrDataToggle = document.getElementById('qrDataToggle');
+    const toggleButton = document.getElementById('toggleQROptions');
+    const optionsContainer = document.getElementById('qrOptionsContainer');
+    const toggleText = document.getElementById('toggleQROptionsText');
+    const toggleIcon = document.getElementById('toggleQROptionsIcon');
+    
+    // Store these references on the modal element for later cleanup
+    modal.receiveElements = {
+        assetSelect,
+        amountInput,
+        memoInput,
+        qrDataPreview,
+        qrDataToggle,
+        toggleButton,
+        optionsContainer,
+        toggleText,
+        toggleIcon
+    };
+    
+    // Define event handlers and store references to them
+    const handleAssetChange = () => updateQRCode();
+    const handleAmountInput = () => updateQRCode();
+    const handleMemoInput = () => updateQRCode();
+    
+    const handleQRDataToggle = () => {
+        qrDataPreview.classList.toggle('minimized');
+        
+        // Adjust height based on state
+        if (qrDataPreview.classList.contains('minimized')) {
+            qrDataPreview.style.height = '40px';
+        } else {
+            // Set height to auto to fit content
+            qrDataPreview.style.height = 'auto';
+        }
+    };
+    
+    const handleOptionsToggle = () => {
+        if (optionsContainer.style.display === 'none') {
+            optionsContainer.style.display = 'block';
+            toggleButton.classList.add('active');
+            toggleText.textContent = 'Hide Payment Request Options';
+        } else {
+            optionsContainer.style.display = 'none';
+            toggleButton.classList.remove('active');
+            toggleText.textContent = 'Show Payment Request Options';
+        }
+    };
+    
+    // Store event handlers on the modal for later removal
+    modal.receiveHandlers = {
+        handleAssetChange,
+        handleAmountInput,
+        handleMemoInput,
+        handleQRDataToggle,
+        handleOptionsToggle
+    };
+    
+    // Populate assets dropdown
+    // Clear existing options
+    assetSelect.innerHTML = '';
+    
+    // Check if wallet assets exist
+    if (walletData && walletData.assets && walletData.assets.length > 0) {
+        // Add options for each asset
+        walletData.assets.forEach((asset, index) => {
+            const option = document.createElement('option');
+            option.value = index;
+            option.textContent = `${asset.name} (${asset.symbol})`;
+            assetSelect.appendChild(option);
+        });
+        console.log(`Populated ${walletData.assets.length} assets in dropdown`);
+    } else {
+        // Add a default option if no assets
+        const option = document.createElement('option');
+        option.value = 0;
+        option.textContent = 'Liberdus (LIB)';
+        assetSelect.appendChild(option);
+        console.log('No wallet assets found, using default');
+    }
+
+    // Clear input fields
+    amountInput.value = '';
+    memoInput.value = '';
+
+    // Add event listeners for form fields
+    assetSelect.addEventListener('change', handleAssetChange);
+    amountInput.addEventListener('input', handleAmountInput);
+    memoInput.addEventListener('input', handleMemoInput);
+    
+    // Reset QR data preview state
+    qrDataPreview.classList.remove('minimized');
+    
+    // Add toggle event listener
+    qrDataToggle.addEventListener('click', handleQRDataToggle);
+    
+    // Reset toggle state
+    toggleButton.classList.remove('active');
+    optionsContainer.style.display = 'none';
+    toggleText.textContent = 'Show Payment Request Options';
+    
+    // Add toggle event listener
+    toggleButton.addEventListener('click', handleOptionsToggle);
 
     // Update addresses for first asset
     updateReceiveAddresses();
 }
 
 function closeReceiveModal() {
-    document.getElementById('receiveModal').classList.remove('active');
+    const modal = document.getElementById('receiveModal');
+    
+    // Remove event listeners if they were added
+    if (modal.receiveElements && modal.receiveHandlers) {
+        const { assetSelect, amountInput, memoInput, qrDataToggle, toggleButton } = modal.receiveElements;
+        const { handleAssetChange, handleAmountInput, handleMemoInput, handleQRDataToggle, handleOptionsToggle } = modal.receiveHandlers;
+        
+        // Remove event listeners
+        if (assetSelect) assetSelect.removeEventListener('change', handleAssetChange);
+        if (amountInput) amountInput.removeEventListener('input', handleAmountInput);
+        if (memoInput) memoInput.removeEventListener('input', handleMemoInput);
+        if (qrDataToggle) qrDataToggle.removeEventListener('click', handleQRDataToggle);
+        if (toggleButton) toggleButton.removeEventListener('click', handleOptionsToggle);
+        
+        // Clean up references
+        delete modal.receiveElements;
+        delete modal.receiveHandlers;
+    }
+    
+    // Hide the modal
+    modal.classList.remove('active');
+}
+
+// Show preview of QR data
+function previewQRData(paymentData) {
+    const previewElement = document.getElementById('qrDataPreview');
+    const previewContent = previewElement.querySelector('.preview-content');
+    
+    // Create human-readable preview
+    let preview = `<strong>QR Code Data:</strong><br>`;
+    preview += `<span class="preview-label">Username:</span> ${paymentData.username}<br>`;
+    preview += `<span class="preview-label">Asset:</span> ${paymentData.symbol}<br>`;
+    
+    if (paymentData.amount) {
+        preview += `<span class="preview-label">Amount:</span> ${paymentData.amount} ${paymentData.symbol}<br>`;
+    }
+    
+    if (paymentData.memo) {
+        preview += `<span class="preview-label">Memo:</span> ${paymentData.memo}<br>`;
+    }
+    
+    // Add timestamp in readable format
+    const date = new Date(paymentData.timestamp);
+    preview += `<span class="preview-label">Generated:</span> ${date.toLocaleString()}`;
+    
+    // Create minimized version (single line)
+    let minimizedPreview = `${paymentData.username} • ${paymentData.symbol}`;
+    if (paymentData.amount) {
+        minimizedPreview += ` • ${paymentData.amount} ${paymentData.symbol}`;
+    }
+    if (paymentData.memo) {
+        const shortMemo = paymentData.memo.length > 20 ? 
+            paymentData.memo.substring(0, 20) + '...' : 
+            paymentData.memo;
+        minimizedPreview += ` • Memo: ${shortMemo}`;
+    }
+    
+    // Set preview text
+    previewContent.innerHTML = preview;
+    previewContent.setAttribute('data-minimized', minimizedPreview);
+    
+    // Ensure the container fits the content when maximized
+    if (!previewElement.classList.contains('minimized')) {
+        previewElement.style.height = 'auto';
+    }
 }
 
 function updateReceiveAddresses() {
@@ -1992,12 +2164,121 @@ function updateDisplayAddress() {
     const address = myAccount.keys.address;
     displayAddress.textContent = '0x' + address;
     
-    // Update QR code
-    new QRCode(qrcodeContainer, {
-        text: '0x' + address,
-        width: 200,
-        height: 200
-    });
+    // Generate QR code with payment data
+    try {
+        updateQRCode();
+        console.log("QR code updated with payment data");
+    } catch (error) {
+        console.error("Error updating QR code:", error);
+        
+        // Fallback to basic address QR code if there's an error
+        new QRCode(qrcodeContainer, {
+            text: '0x' + address,
+            width: 200,
+            height: 200
+        });
+        console.log("Fallback to basic address QR code");
+    }
+}
+
+// Create QR payment data object based on form values
+function createQRPaymentData() {
+    // Get selected asset
+    const assetSelect = document.getElementById('receiveAsset');
+    const assetIndex = parseInt(assetSelect.value, 10) || 0;
+    
+    // Default asset info in case we can't find the selected asset
+    let assetId = "liberdus";
+    let symbol = "LIB";
+    
+    // Try to get the selected asset
+    try {
+        if (myData && myData.wallet && myData.wallet.assets && myData.wallet.assets.length > 0) {
+            const asset = myData.wallet.assets[assetIndex];
+            if (asset) {
+                assetId = asset.id || "liberdus";
+                symbol = asset.symbol || "LIB";
+                console.log(`Selected asset: ${asset.name} (${symbol})`);
+            } else {
+                console.log(`Asset not found at index ${assetIndex}, using defaults`);
+            }
+        } else {
+            console.log("Wallet assets not available, using default asset");
+        }
+    } catch (error) {
+        console.error("Error accessing asset data:", error);
+    }
+    
+    // Build payment data object
+    const paymentData = {
+        username: myAccount.username,
+        timestamp: Date.now(),
+        version: "1.0",
+        assetId: assetId,
+        symbol: symbol
+    };
+    
+    // Add optional fields if they have values
+    const amount = document.getElementById('receiveAmount').value.trim();
+    if (amount) {
+        paymentData.amount = amount;
+    }
+    
+    const memo = document.getElementById('receiveMemo').value.trim();
+    if (memo) {
+        paymentData.memo = memo;
+    }
+    
+    return paymentData;
+}
+
+// Update QR code with current payment data
+function updateQRCode() {
+    const qrcodeContainer = document.getElementById('qrcode');
+    qrcodeContainer.innerHTML = '';
+    
+    try {
+        // Get payment data
+        const paymentData = createQRPaymentData();
+        console.log("Created payment data:", JSON.stringify(paymentData, null, 2));
+        
+        // Convert to JSON and encode as base64
+        const jsonData = JSON.stringify(paymentData);
+        const base64Data = btoa(jsonData);
+        
+        // Create URI with liberdus:// prefix
+        const qrText = `liberdus://${base64Data}`;
+        console.log("QR code text length:", qrText.length);
+        console.log("QR code text (first 100 chars):", qrText.substring(0, 100) + (qrText.length > 100 ? "..." : ""));
+        
+        // Generate QR code
+        new QRCode(qrcodeContainer, {
+            text: qrText,
+            width: 200,
+            height: 200
+        });
+        
+        // Update preview
+        previewQRData(paymentData);
+        
+        return qrText;
+    } catch (error) {
+        console.error("Error in updateQRCode:", error);
+        
+        // Fallback to basic address QR code
+        const address = myAccount.keys.address;
+        new QRCode(qrcodeContainer, {
+            text: '0x' + address,
+            width: 200,
+            height: 200
+        });
+        
+        // Show error in preview
+        const previewElement = document.getElementById('qrDataPreview');
+        previewElement.innerHTML = `Error generating QR code: ${error.message}<br>Showing address QR code instead.`;
+        
+        return '0x' + address;
+    }
 }
 
 async function copyAddress() {
@@ -2023,7 +2304,11 @@ function openSendModal() {
     const submitButton = document.querySelector('#sendForm button[type="submit"]');
     usernameAvailable.style.display = 'none';
     submitButton.disabled = true;
-// Check availability on input changes
+    
+    // Add QR code scan button handler
+    document.getElementById('scanQRButton').addEventListener('click', scanQRCode);
+    
+    // Check availability on input changes
     let checkTimeout;
     usernameInput.addEventListener('input', (e) => {
         const username = normalizeUsername(e.target.value);
@@ -2075,6 +2360,228 @@ function openSendModal() {
 
     // Update addresses for first asset
     updateSendAddresses();
+}
+
+// Function to handle QR code scanning
+async function scanQRCode() {
+    try {
+        // Test if BarcodeDetector is actually available
+        console.log("BarcodeDetector in window:", 'BarcodeDetector' in window);
+        
+        if ('BarcodeDetector' in window) {
+            try {
+                // Try to create an instance
+                const testDetector = new BarcodeDetector({ formats: ['qr_code'] });
+                console.log("Successfully created BarcodeDetector instance:", testDetector);
+                
+                // Check if getSupportedFormats is available
+                if (BarcodeDetector.getSupportedFormats) {
+                    const formats = await BarcodeDetector.getSupportedFormats();
+                    console.log("Supported formats:", formats);
+                    
+                    if (!formats.includes('qr_code')) {
+                        showToast("Your browser doesn't support QR code format scanning.", 4000, "error");
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.error("Error creating BarcodeDetector:", e);
+                showToast("Error initializing QR scanner. Your browser may not fully support this feature.", 4000, "error");
+                return;
+            }
+        } else {
+            console.log("BarcodeDetector API is not supported in this browser");
+            showToast("Your browser doesn't support QR code scanning. Please use Chrome or Edge.", 4000, "error");
+            return; // Exit early if not supported
+        }
+        
+        // Proceed with file input for image selection
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        // Don't use capture on desktop as it might cause issues
+        // fileInput.capture = 'environment'; 
+        
+        console.log("Created file input element:", fileInput);
+        
+        // Handle the file selection
+        fileInput.addEventListener('change', async (event) => {
+            console.log("File input change event triggered");
+            if (event.target.files && event.target.files[0]) {
+                const file = event.target.files[0];
+                console.log("File selected:", file.name, "Size:", file.size, "Type:", file.type);
+                
+                // Process the image to read QR code
+                await processQRCodeImage(file);
+            } else {
+                console.log("No file selected or file selection canceled");
+            }
+        });
+        
+        // Trigger the file input
+        console.log("Clicking file input...");
+        fileInput.click();
+    } catch (error) {
+        console.error('Error in scanQRCode:', error);
+        showToast('Failed to scan QR code. Please try again.', 3000, 'error');
+    }
+}
+
+// Process QR code image and extract data
+async function processQRCodeImage(file) {
+    try {
+        // Show processing message
+        showToast("Processing QR code...", 2000);
+        
+        // Process with Barcode Detection API
+        await processWithBarcodeAPI(file);
+    } catch (error) {
+        console.error('Error processing QR code image:', error);
+        showToast('Failed to read QR code. Please try again.', 3000, 'error');
+    }
+}
+
+// Process QR code using the Barcode Detection API
+async function processWithBarcodeAPI(file) {
+    try {
+        console.log("Using Barcode Detection API to scan QR code");
+        
+        // Create a BarcodeDetector with QR code format
+        const barcodeDetector = new BarcodeDetector({ 
+            formats: ['qr_code'] 
+        });
+        
+        // Create a blob URL for the file
+        const imageUrl = URL.createObjectURL(file);
+        console.log("Created blob URL for image");
+        
+        // Load the image
+        const img = new Image();
+        
+        // Create a promise to wait for the image to load
+        const imageLoaded = new Promise((resolve, reject) => {
+            img.onload = () => {
+                console.log(`Image loaded: ${img.width}x${img.height} pixels`);
+                resolve();
+            };
+            img.onerror = (e) => {
+                console.error("Error loading image:", e);
+                reject(new Error('Failed to load image'));
+            };
+        });
+        
+        // Set the image source
+        img.src = imageUrl;
+        
+        // Wait for the image to load
+        await imageLoaded;
+        
+        // Detect barcodes in the image
+        console.log("Detecting barcodes in image...");
+        const barcodes = await barcodeDetector.detect(img);
+        console.log(`Detected ${barcodes.length} barcodes`);
+        
+        // Release the blob URL
+        URL.revokeObjectURL(imageUrl);
+        
+        // Check if any barcodes were detected
+        if (barcodes.length === 0) {
+            console.log("No QR codes found in the image");
+            showToast("No QR code found in the image. Please try again.", 3000, "warning");
+            return;
+        }
+        
+        // Process the first detected barcode
+        const qrData = barcodes[0].rawValue;
+        console.log("QR code detected with Barcode API:", qrData);
+        
+        // Process the QR code data
+        processQRData(qrData);
+    } catch (error) {
+        console.error('Error with Barcode API:', error);
+        showToast('Error processing QR code. Please try again.', 3000, 'error');
+    }
+}
+
+// Process QR data and fill the send form
+function processQRData(qrText) {
+    try {
+        // Check if the QR code has the correct format
+        if (!qrText.startsWith('liberdus://')) {
+            // Try to handle it as a plain address or username
+            if (qrText.startsWith('0x') || /^[a-zA-Z0-9_-]+$/.test(qrText)) {
+                document.getElementById('sendToAddress').value = qrText;
+                document.getElementById('sendToAddress').dispatchEvent(new Event('input'));
+                showToast('QR code processed as address/username', 2000, 'success');
+                return;
+            }
+            
+            showToast('Invalid QR code format', 3000, 'error');
+            return;
+        }
+        
+        // Extract the base64 data
+        const base64Data = qrText.substring('liberdus://'.length);
+        
+        // Decode the base64 data to JSON
+        let jsonData;
+        try {
+            jsonData = atob(base64Data);
+        } catch (e) {
+            console.error('Failed to decode base64 data:', e);
+            showToast('Invalid QR code data format', 3000, 'error');
+            return;
+        }
+        
+        // Parse the JSON data
+        let qrData;
+        try {
+            qrData = JSON.parse(jsonData);
+        } catch (e) {
+            console.error('Failed to parse JSON data:', e);
+            showToast('Invalid QR code data structure', 3000, 'error');
+            return;
+        }
+        
+        // Validate required fields
+        if (!qrData.username) {
+            showToast('QR code missing required username', 3000, 'error');
+            return;
+        }
+        
+        // Fill the form fields
+        document.getElementById('sendToAddress').value = qrData.username;
+        
+        if (qrData.amount) {
+            document.getElementById('sendAmount').value = qrData.amount;
+        }
+        
+        if (qrData.memo) {
+            document.getElementById('sendMemo').value = qrData.memo;
+        }
+        
+        // If asset info provided, select matching asset
+        if (qrData.assetId && qrData.symbol) {
+            const assetSelect = document.getElementById('sendAsset');
+            const assetOption = Array.from(assetSelect.options).find((opt) =>
+                opt.text.includes(qrData.symbol)
+            );
+            if (assetOption) {
+                assetSelect.value = assetOption.value;
+                console.log(`Selected asset: ${assetOption.text} (value: ${assetOption.value})`);
+            } else {
+                console.log(`Asset with symbol ${qrData.symbol} not found in dropdown`);
+            }
+        }
+        
+        // Trigger username validation
+        document.getElementById('sendToAddress').dispatchEvent(new Event('input'));
+        
+        showToast('QR code scanned successfully', 2000, 'success');
+    } catch (error) {
+        console.error('Error processing QR data:', error);
+        showToast('Failed to process QR code data', 3000, 'error');
+    }
 }
 
 async function closeSendModal() {
