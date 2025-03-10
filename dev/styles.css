@@ -289,8 +289,10 @@ body {
   padding: 16px;
   background-color: var(--background-color);
   color: var(--text-color);
-  position: sticky;
-  top: env(safe-area-inset-top, 0);
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
   z-index: 1000;
   margin-top: env(safe-area-inset-top, 0);
 }
@@ -787,6 +789,7 @@ button:disabled {
   flex-direction: column;
   z-index: 1001;
   overflow-y: auto;
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 .modal.active {
@@ -797,10 +800,11 @@ button:disabled {
   display: flex;
   align-items: center;
   padding: 16px;
-  padding-top: calc(16px + env(safe-area-inset-top, 0px));
-  position: sticky;
-  top: 0;
-  background-color: white;
+  position: fixed;
+  top: env(safe-area-inset-top, 0);
+  left: 0;
+  right: 0;
+  background-color: var(--background-color);
   z-index: 1002;
   position: relative;
 }
@@ -3090,3 +3094,4 @@ mark {
 .qr-data-preview.minimized .preview-content strong {
   display: none;
 }
+
