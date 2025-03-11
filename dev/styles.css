@@ -289,10 +289,8 @@ body {
   padding: 16px;
   background-color: var(--background-color);
   color: var(--text-color);
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
+  position: sticky;
+  top: env(safe-area-inset-top, 0);
   z-index: 1000;
   margin-top: env(safe-area-inset-top, 0);
 }
@@ -789,7 +787,6 @@ button:disabled {
   flex-direction: column;
   z-index: 1001;
   overflow-y: auto;
-  padding-top: env(safe-area-inset-top, 0px);
 }
 
 .modal.active {
@@ -802,39 +799,7 @@ button:disabled {
   padding: 16px;
   background-color: var(--background-color);
   z-index: 1002;
-  position: relative; /* Default position for regular modals */
-}
-
-/* Styles for modals with fixed headers */
-.modal.fixed-header {
-  overflow: hidden;
-}
-
-.modal.fixed-header .modal-header {
-  position: fixed;
-  top: env(safe-area-inset-top, 0);
-  left: 0;
-  right: 0;
-  z-index: 1002;
-  transform: translateX(100%); /* Hide when modal is not active */
-  transition: transform 0.3s ease-in-out;
-}
-
-.modal.fixed-header.active .modal-header {
-  transform: translateX(0);
-}
-
-/* Make the form container scrollable instead of the modal */
-.modal.fixed-header .form-container {
-  height: calc(100% - 56px - env(safe-area-inset-top, 0px));
-  margin-top: calc(56px + env(safe-area-inset-top, 0px));
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-/* Reset the contact-info-list padding */
-.contact-info-list {
-  padding: 1rem;
+  position: relative;
 }
 
 .back-button {
@@ -915,8 +880,6 @@ button:disabled {
 .form-container {
   padding: 16px;
   width: 100%;
-  padding-top: 56px;
-  margin-top: env(safe-area-inset-top, 0px);
 }
 
 /* Common form styles */
@@ -1755,7 +1718,6 @@ input[type="file"].form-control {
 /* Contact Info Modal Styles */
 .contact-info-list {
   padding: 1rem;
-  padding-top: 0;
 }
 
 /* Contact Avatar Section */
@@ -1911,6 +1873,13 @@ pre.log-message {
   margin-left: 8px;
   padding: 6px 12px;
   font-size: var(--font-size-sm);
+}
+
+#refreshLogs.secondary-button,
+#clearLogs.secondary-button {
+  background-color: var(--primary-color);
+  color: var(--input-background);
+  width: 100px;
 }
 
 /* Search Bar Container */
@@ -2879,6 +2848,7 @@ mark {
 
 #receiveModal input[type="number"] {
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 #receiveModal input[type="number"]::-webkit-outer-spin-button,
@@ -3048,6 +3018,7 @@ mark {
 
 #receiveModal input[type="number"] {
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 #receiveModal input[type="number"]::-webkit-outer-spin-button,
@@ -3126,3 +3097,130 @@ mark {
   display: none;
 }
 
+/* QR Scanner Styles */
+.qr-scanner-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+
+#qrVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.scanner-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: none;
+}
+
+.scanner-guide {
+  width: 70%;
+  height: 70%;
+  max-width: 500px;
+  max-height: 500px;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-radius: 20px;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.5);
+  position: relative;
+}
+
+.scanner-guide::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 20px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8) inset;
+  animation: scan-animation 2s infinite;
+}
+
+@keyframes scan-animation {
+  0% {
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8) inset;
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.8) inset;
+  }
+  100% {
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8) inset;
+  }
+}
+
+.scanner-controls {
+  position: absolute;
+  bottom: 30px;
+  left: 0;
+  width: 100%;
+  display: flex;
+  justify-content: space-around;
+  padding: 0 20px;
+}
+
+.scanner-button {
+  padding: 12px 24px;
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: none;
+  font-size: 16px;
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+.scanner-button:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Ensure the scanner is properly positioned on iOS */
+@supports (-webkit-touch-callout: none) {
+  .qr-scanner-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 100vh;
+    /* Fix for iOS 100vh issue */
+    height: -webkit-fill-available;
+  }
+}
+.modal.fixed-header {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.modal.fixed-header .form-container {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Remove spinner buttons from number inputs */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* For Firefox */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

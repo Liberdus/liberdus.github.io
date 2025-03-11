@@ -2306,7 +2306,12 @@ function openSendModal() {
     submitButton.disabled = true;
     
     // Add QR code scan button handler
-    document.getElementById('scanQRButton').addEventListener('click', scanQRCode);
+    const scanButton = document.getElementById('scanQRButton');
+    // Remove any existing event listeners first
+    const newScanButton = scanButton.cloneNode(true);
+    scanButton.parentNode.replaceChild(newScanButton, scanButton);
+    newScanButton.addEventListener('click', scanQRCode);
+    console.log("Added click event listener to scan QR button");
     
     // Check availability on input changes
     let checkTimeout;
@@ -2365,66 +2370,208 @@ function openSendModal() {
 // Function to handle QR code scanning
 async function scanQRCode() {
     try {
-        // Test if BarcodeDetector is actually available
-        console.log("BarcodeDetector in window:", 'BarcodeDetector' in window);
+        console.log("scanQRCode function called");
         
-        if ('BarcodeDetector' in window) {
-            try {
-                // Try to create an instance
-                const testDetector = new BarcodeDetector({ formats: ['qr_code'] });
-                console.log("Successfully created BarcodeDetector instance:", testDetector);
-                
-                // Check if getSupportedFormats is available
-                if (BarcodeDetector.getSupportedFormats) {
-                    const formats = await BarcodeDetector.getSupportedFormats();
-                    console.log("Supported formats:", formats);
-                    
-                    if (!formats.includes('qr_code')) {
-                        showToast("Your browser doesn't support QR code format scanning.", 4000, "error");
-                        return;
-                    }
-                }
-            } catch (e) {
-                console.error("Error creating BarcodeDetector:", e);
-                showToast("Error initializing QR scanner. Your browser may not fully support this feature.", 4000, "error");
-                return;
-            }
-        } else {
-            console.log("BarcodeDetector API is not supported in this browser");
-            showToast("Your browser doesn't support QR code scanning. Please use Chrome or Edge.", 4000, "error");
-            return; // Exit early if not supported
+        // Get device capabilities
+        const capabilities = getDeviceCapabilities();
+        console.log("Device capabilities:", capabilities);
+        
+        // Check if BarcodeDetector API is supported
+        if (!capabilities.hasBarcodeDetector) {
+            console.log("BarcodeDetector API not supported, falling back to file input");
+            showToast("Your device doesn't support in-app QR scanning. Using file picker instead.", 3000, "info");
+            fallbackToFileInput();
+            return;
         }
         
-        // Proceed with file input for image selection
-        const fileInput = document.createElement('input');
-        fileInput.type = 'file';
-        fileInput.accept = 'image/*';
-        // Don't use capture on desktop as it might cause issues
-        // fileInput.capture = 'environment'; 
+        // Show the scanner container
+        const scannerContainer = document.getElementById('qrScannerContainer');
+        scannerContainer.style.display = 'block';
         
-        console.log("Created file input element:", fileInput);
+        // Get video element
+        const video = document.getElementById('qrVideo');
         
-        // Handle the file selection
-        fileInput.addEventListener('change', async (event) => {
-            console.log("File input change event triggered");
-            if (event.target.files && event.target.files[0]) {
-                const file = event.target.files[0];
-                console.log("File selected:", file.name, "Size:", file.size, "Type:", file.type);
-                
-                // Process the image to read QR code
-                await processQRCodeImage(file);
-            } else {
-                console.log("No file selected or file selection canceled");
+        // Set up event listeners for scanner controls
+        const closeButton = document.getElementById('closeScanner');
+        const switchButton = document.getElementById('switchCamera');
+        
+        // Store current facing mode
+        let currentFacingMode = 'environment';
+        let scanningAnimationFrame;
+        
+        // Function to stop scanning
+        function stopScanning() {
+            console.log("Stopping QR scanner");
+            
+            // Stop all tracks in the stream
+            if (video.srcObject) {
+                const tracks = video.srcObject.getTracks();
+                tracks.forEach(track => track.stop());
+                video.srcObject = null;
             }
-        });
+            
+            // Hide the scanner container
+            scannerContainer.style.display = 'none';
+            
+            // Remove event listeners
+            closeButton.removeEventListener('click', stopScanning);
+            switchButton.removeEventListener('click', switchCamera);
+            
+            // Stop the scanning loop
+            if (scanningAnimationFrame) {
+                window.cancelAnimationFrame(scanningAnimationFrame);
+            }
+        }
         
-        // Trigger the file input
-        console.log("Clicking file input...");
-        fileInput.click();
+        // Function to switch camera
+        async function switchCamera() {
+            console.log("Switching camera");
+            
+            // Stop current stream
+            if (video.srcObject) {
+                const tracks = video.srcObject.getTracks();
+                tracks.forEach(track => track.stop());
+            }
+            
+            // Toggle facing mode
+            currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+            console.log("New facing mode:", currentFacingMode);
+            
+            try {
+                // Start new stream with toggled facing mode
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: currentFacingMode }
+                });
+                
+                // Set new stream as video source
+                video.srcObject = stream;
+            } catch (error) {
+                console.error("Error switching camera:", error);
+                showToast("Failed to switch camera", 3000, "error");
+            }
+        }
+        
+        // Add event listeners
+        closeButton.addEventListener('click', stopScanning);
+        switchButton.addEventListener('click', switchCamera);
+        
+        // Check if camera access is available
+        if (!capabilities.hasCamera) {
+            console.log("Camera access not available, falling back to file input");
+            stopScanning();
+            fallbackToFileInput();
+            return;
+        }
+        
+        // Try to access the camera
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment' }
+            });
+            
+            // Set the video source to the camera stream
+            video.srcObject = stream;
+            
+            // Wait for video to be ready
+            await new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    resolve();
+                };
+            });
+            
+            // Start playing the video
+            await video.play();
+            
+            console.log("Camera stream started");
+            
+            // Create a BarcodeDetector with QR code format
+            const barcodeDetector = new BarcodeDetector({ 
+                formats: ['qr_code'] 
+            });
+            
+            // Set up scanning loop
+            const scanFrame = async () => {
+                try {
+                    // Check if video is ready
+                    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                        // Detect barcodes in the current video frame
+                        const barcodes = await barcodeDetector.detect(video);
+                        
+                        // If a QR code is found
+                        if (barcodes.length > 0) {
+                            console.log("QR code detected:", barcodes[0].rawValue);
+                            
+                            // Process the QR code data
+                            processQRData(barcodes[0].rawValue);
+                            
+                            // Stop scanning
+                            stopScanning();
+                            
+                            // Show success message
+                            showToast('QR code scanned successfully', 2000, 'success');
+                            
+                            // Exit the scanning loop
+                            return;
+                        }
+                    }
+                    
+                    // Continue scanning
+                    scanningAnimationFrame = requestAnimationFrame(scanFrame);
+                } catch (error) {
+                    console.error("Error in scan frame:", error);
+                    scanningAnimationFrame = requestAnimationFrame(scanFrame);
+                }
+            };
+            
+            // Start the scanning loop
+            scanFrame();
+            
+        } catch (error) {
+            console.error("Error accessing camera:", error);
+            showToast('Failed to access camera. Please check permissions.', 3000, 'error');
+            
+            // Stop scanning
+            stopScanning();
+            
+            // Fall back to file input method
+            fallbackToFileInput();
+        }
     } catch (error) {
         console.error('Error in scanQRCode:', error);
         showToast('Failed to scan QR code. Please try again.', 3000, 'error');
     }
+}
+
+// Detect device capabilities
+function getDeviceCapabilities() {
+    return {
+        hasCamera: 'mediaDevices' in navigator && 'getUserMedia' in navigator.mediaDevices,
+        hasBarcodeDetector: 'BarcodeDetector' in window,
+        isIOS: /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream,
+        isPWA: window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches
+    };
+}
+
+// Fallback to file input method if camera access fails or BarcodeDetector is not supported
+function fallbackToFileInput() {
+    console.log("Falling back to file input method");
+    
+    const fileInput = document.getElementById('qrFileInput');
+    
+    // Clone and replace to remove any existing listeners
+    const newFileInput = fileInput.cloneNode(true);
+    fileInput.parentNode.replaceChild(newFileInput, fileInput);
+    
+    // Add change event listener
+    newFileInput.addEventListener('change', async (event) => {
+        if (event.target.files && event.target.files[0]) {
+            const file = event.target.files[0];
+            await processQRCodeImage(file);
+        }
+    });
+    
+    // Trigger file input
+    newFileInput.click();
 }
 
 // Process QR code image and extract data

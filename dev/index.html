@@ -382,7 +382,7 @@
       </div>
 
       <!-- Account Form Modal -->
-      <div class="modal" id="accountModal">
+      <div class="modal fixed-header" id="accountModal">
         <div class="modal-header">
           <button class="back-button" id="closeAccountForm"></button>
           <div class="modal-title">Account</div>
@@ -487,7 +487,7 @@
       </div>
 
       <!-- Receive Modal -->
-      <div class="modal" id="receiveModal">
+      <div class="modal fixed-header" id="receiveModal">
         <div class="modal-header">
           <button class="back-button" id="closeReceiveModal"></button>
           <div class="modal-title">Receive</div>
@@ -579,7 +579,7 @@
       </div>
 
       <!-- Send Modal -->
-      <div class="modal" id="sendModal">
+      <div class="modal fixed-header" id="sendModal">
         <div class="modal-header">
           <button class="back-button" id="closeSendModal"></button>
           <div class="modal-title">Send</div>
@@ -625,6 +625,21 @@
                     />
                   </svg>
                 </button>
+                <!-- Permanent file input for iOS PWA compatibility -->
+                <input
+                  type="file"
+                  id="qrFileInput"
+                  accept="image/*"
+                  capture="environment"
+                  style="
+                    display: none;
+                    position: absolute;
+                    width: 1px;
+                    height: 1px;
+                    overflow: hidden;
+                  "
+                  aria-hidden="true"
+                />
               </div>
             </div>
             <div class="form-group">
@@ -651,11 +666,29 @@
             </div>
             <button type="submit" class="update-button">Send</button>
           </form>
+
+          <!-- QR Scanner Container -->
+          <div
+            id="qrScannerContainer"
+            class="qr-scanner-container"
+            style="display: none"
+          >
+            <video id="qrVideo" playsinline autoplay></video>
+            <div class="scanner-overlay">
+              <div class="scanner-guide"></div>
+            </div>
+            <div class="scanner-controls">
+              <button id="closeScanner" class="scanner-button">Cancel</button>
+              <button id="switchCamera" class="scanner-button">
+                Switch Camera
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
       <!-- History Modal -->
-      <div class="modal" id="historyModal">
+      <div class="modal fixed-header" id="historyModal">
         <div class="modal-header">
           <button class="back-button" id="closeHistoryModal"></button>
           <div class="modal-title">Transaction History</div>
@@ -858,7 +891,7 @@
       <div class="modal" id="logsModal">
         <div class="modal-header">
           <button class="back-button" id="closeLogsModal"></button>
-          <div class="modal-title">Application Logs</div>
+          <div class="modal-title">Logs</div>
           <button id="refreshLogs" class="secondary-button">Refresh</button>
           <button id="clearLogs" class="secondary-button">Clear</button>
         </div>
