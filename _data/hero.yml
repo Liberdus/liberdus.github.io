@@ -1,9 +1,9 @@
-tagline: "Privacy is necessary for an open society in the electronic age."
+tagline: "Privacy is the foundation of liberty."
 
 maintext: >
-  -- Eric Hughes (from A Cypherpunk's Manifesto)
+  Liberty lives on Liberdus.
 
-closeemphasis: Your privacy matters.
+closeemphasis: 
 restofclose: Liberdus is a decentralized, open source, encrypted messaging and payment app.
 button1:
   href: '#why'
