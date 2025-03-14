@@ -23,7 +23,7 @@ async function checkVersion(){
     }
 //console.log('myVersion < newVersion then reload', myVersion, newVersion)
 console.log(parseInt(myVersion.replace(/\D/g, '')), parseInt(newVersion.replace(/\D/g, '')))
-    if (parseInt(myVersion.replace(/\D/g, '')) < parseInt(newVersion.replace(/\D/g, ''))) {
+    if (parseInt(myVersion.replace(/\D/g, '')) != parseInt(newVersion.replace(/\D/g, ''))) {
         if (parseInt(myVersion.replace(/\D/g, '')) > 0){
             alert('Updating to new version: ' + newVersion)
         }
@@ -91,31 +91,31 @@ async function forceReload(urls) {
 
 // https://github.com/paulmillr/noble-post-quantum
 // https://github.com/paulmillr/noble-post-quantum/releases
-import { ml_kem1024, randomBytes } from './noble-post-quantum.js';
+import { ml_kem1024, randomBytes } from './external/noble-post-quantum.js';
 
 // https://github.com/paulmillr/noble-secp256k1
 // https://github.com/paulmillr/noble-secp256k1/raw/refs/heads/main/index.js
-import * as secp from './noble-secp256k1.js'; 
+import * as secp from './external/noble-secp256k1.js'; 
 
 // https://github.com/adraffy/keccak.js
 // https://github.com/adraffy/keccak.js/blob/main/src/keccak256.js
 //   permute.js and utils.js were copied into keccak256.js instead of being imported
-import keccak256 from './keccak256.js';
+import keccak256 from './external/keccak256.js';
 
 // https://github.com/dcposch/blakejs
 // https://github.com/dcposch/blakejs/blob/master/blake2b.js
 //   some functions from util.js were copied into blake2b.js
-import blake from './blake2b.js';
+import blake from './external/blake2b.js';
 
 // https://github.com/shardus/lib-crypto-web/blob/main/utils/stringify.js
 // Needed to stringify and parse bigints; also deterministic stringify
 //   modified to use export
-import { stringify, parse } from './stringify-shardus.js';
+import { stringify, parse } from './external/stringify-shardus.js';
 
 // We want to use encryption that we can see the source code for; don't use the native browser encryption
 // https://github.com/paulmillr/noble-ciphers/releases
 // https://github.com/paulmillr/noble-ciphers/releases/download/1.2.0/noble-ciphers.js
-import { cbc, xchacha20poly1305 } from './noble-ciphers.js';
+import { cbc, xchacha20poly1305 } from './external/noble-ciphers.js';
 
 // Put standalone conversion function in lib.js
 import { normalizeUsername, generateIdenticon, formatTime, 
@@ -130,14 +130,13 @@ import { STORES, saveData, getData, addVersionToData, closeAllConnections } from
 const myHashKey = hex2bin('69fa4195670576c0160d660c3be36556ff8d504725be8a59b5a96509e0c994bc')
 const weiDigits = 18; 
 const wei = 10n**BigInt(weiDigits)
-const pollIntervalNormal = 30000 // in millisconds
-const pollIntervalChatting = 5000  // in millseconds
 //network.monitor.url = "http://test.liberdus.com:3000"    // URL of the monitor server
 //network.explorer.url = "http://test.liberdus.com:6001"   // URL of the chain explorer
 
 
 let myData = null
 let myAccount = null        // this is set to myData.account for convience
+let wsManager = null        // this is set to new WSManager() for convience
 
 // TODO - get the parameters from the network
 // mock network parameters
@@ -517,6 +516,12 @@ async function handleCreateAccount(event) {
 
     requestNotificationPermission();
 
+    // Initialize WebSocket connection
+    if (!wsManager) {
+        wsManager = new WSManager();
+    }
+    wsManager.connect();
+
     // Close modal and proceed to app
     closeCreateAccountModal();
     document.getElementById('welcomeScreen').style.display = 'none';
@@ -563,6 +568,12 @@ async function handleSignIn(event) {
     myAccount = myData.account;
 
     requestNotificationPermission();
+
+    // Initialize WebSocket connection
+    if (!wsManager) {
+        wsManager = new WSManager();
+    }
+    wsManager.connect();
 
     // Close modal and proceed to app
     closeSignInModal();
@@ -650,14 +661,26 @@ function closeAboutModal() {
     document.getElementById('aboutModal').classList.remove('active');
 }
 
+// Check if app is running as installed PWA
+function checkIsInstalledPWA() {
+    return window.matchMedia('(display-mode: standalone)').matches || 
+           window.navigator.standalone || 
+           document.referrer.includes('android-app://');
+}
+
 // Load saved account data and update chat list on page load
 document.addEventListener('DOMContentLoaded', async () => {
-    // Initialize service worker first
-    if ('serviceWorker' in navigator) {
+    const isInstalledPWA = checkIsInstalledPWA();
+    
+    // Initialize service worker only if running as installed PWA
+    if (isInstalledPWA && 'serviceWorker' in navigator) {
         await registerServiceWorker();
         setupServiceWorkerMessaging(); 
         setupAppStateManagement();
         setupConnectivityDetection();
+    } else {
+        // Web-only mode
+        console.log('Running in web-only mode, skipping service worker initialization');
     }
 
     checkVersion()
@@ -903,6 +926,12 @@ function handleUnload(e){
         return 
     } // User selected to Signout; state was already saved
     else{
+        // Clean up WebSocket connection
+        if (wsManager) {
+            wsManager.unsubscribe();
+            wsManager.disconnect();
+        }
+        
         saveState()
         Logger.forceSave();
         closeAllConnections();
@@ -912,6 +941,12 @@ function handleUnload(e){
 // Add unload handler to save myData
 function handleBeforeUnload(e){
 console.log('in handleBeforeUnload', e)
+    // Clean up WebSocket connection
+    if (wsManager) {
+        wsManager.unsubscribe();
+        wsManager.disconnect();
+    }
+    
     saveState()
     Logger.saveState();
     if (handleSignOut.exit){ 
@@ -933,6 +968,11 @@ function handleVisibilityChange(e) {
         if (handleSignOut.exit) {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             return;
+        }
+    } else if (document.visibilityState === 'visible') {
+        // Reconnect WebSocket if needed
+        if (wsManager && !wsManager.isConnected() && myAccount) {
+            wsManager.connect();
         }
     }
 }
@@ -1302,9 +1342,6 @@ async function switchView(view) {
     // Update lists when switching views
     if (view === 'chats') {
         await updateChatList('force');
-        if (isOnline) {
-            pollChatInterval(pollIntervalNormal)
-        }
     } else if (view === 'contacts') {
         await updateContactsList();
     } else if (view === 'wallet') {
@@ -1913,9 +1950,6 @@ function openChatModal(address) {
     // Setup to update new messages
     appendChatModal.address = address
     appendChatModal.len = messages.length
-    if (isOnline) {
-        pollChatInterval(pollIntervalChatting) // poll for messages at a faster rate
-    }
 }
 
 function appendChatModal(){
@@ -1957,9 +1991,6 @@ function closeChatModal() {
     }
     appendChatModal.address = null
     appendChatModal.len = 0
-    if (isOnline) {
-        pollChatInterval(pollIntervalNormal) // back to polling at slower rate
-    }
 }
 
 function openReceiveModal() {
@@ -2829,13 +2860,28 @@ async function handleSendAsset(event) {
         return;
     }
 
+    // TODO: Check with Omar if we want to add contact before sending the transfer after the confirmation
+    // Check if contact exists, if not, ask user if they want to proceed
+    if (!myData.contacts[toAddress]) {
+        const proceedWithTransfer = confirm(`${username} is not in your contacts. Proceeding will add them to your contacts and send the transfer. Would you like to continue?`);
+        
+        if (!proceedWithTransfer) {
+            showToast('Transfer canceled', 2000, 'info');
+            return;
+        }
+        
+        // Create a new permanent contact
+        createNewContact(toAddress, username);
+        showToast(`${username} added to contacts`, 2000, 'success');
+    }
+
     // Get recipient's public key from contacts
     let recipientPubKey = myData.contacts[toAddress]?.public;
     let pqRecPubKey = myData.contacts[toAddress]?.pqPublic
     if (!recipientPubKey || !pqRecPubKey) {
-        const recipientInfo = await queryNetwork(`/account/${longAddress(currentAddress)}`)
+        const recipientInfo = await queryNetwork(`/account/${longAddress(toAddress)}`)
         if (!recipientInfo?.account?.publicKey){
-            console.log(`no public key found for recipient ${currentAddress}`)
+            console.log(`no public key found for recipient ${toAddress}`)
             return
         }
         recipientPubKey = recipientInfo.account.publicKey
@@ -2848,7 +2894,8 @@ async function handleSendAsset(event) {
     let dhkey = ecSharedKey(keys.secret, recipientPubKey)
     const  { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey)
     const combined = new Uint8Array(dhkey.length + sharedSecret.length)
-    combined.set(dhkey).set(sharedSecret, dhkey.length)
+    combined.set(dhkey)
+    combined.set(sharedSecret, dhkey.length)
     dhkey = blake.blake2b(combined, myHashKey, 32)
 
 
@@ -3293,6 +3340,13 @@ function handleSignOut() {
 //    const shouldLeave = confirm('Do you want to leave this page?');
 //    if (shouldLeave == false) { return }
 
+    // Clean up WebSocket connection
+    if (wsManager) {
+        wsManager.unsubscribe();
+        wsManager.disconnect();
+        wsManager = null;
+    }
+
     // Save myData to localStorage if it exists
     saveState()
 /*
@@ -3528,7 +3582,7 @@ async function updateWalletView() {
 console.log('asset balance', asset, asset.balance)
         return `
             <div class="asset-item">
-                <div class="asset-logo"><img src="liberdus_logo_50.png" class="asset-logo"></div>
+                <div class="asset-logo"><img src="./media/liberdus_logo_50.png" class="asset-logo"></div>
                 <div class="asset-info">
                     <div class="asset-name">${asset.name}</div>
                     <div class="asset-symbol">$${asset.price} / ${asset.symbol}</div>
@@ -3706,28 +3760,6 @@ async function queryNetwork(url) {
         return null
     }
 }
-
-async function pollChatInterval(milliseconds) {
-    pollChats.nextPoll = milliseconds
-    pollChats()
-}
-
-async function pollChats(){
-    if (pollChats.nextPoll < 100){ return } // can be used to stop polling; pollChatInterval(0)
-    const now = Date.now()
-    if (pollChats.lastPoll + pollChats.nextPoll <= now){
-        updateChatList()
-        if (document.getElementById('walletScreen').classList.contains('active')) { await updateWalletView() }
-        pollChats.lastPoll = now
-    }
-    if (pollChats.timer){ clearTimeout(pollChats.timer) }
-console.log('in pollChats setting timer', now, pollChats.nextPoll)
-    pollChats.timer = setTimeout(pollChats, pollChats.nextPoll)
-}
-pollChats.lastPoll = 0
-pollChats.nextPoll = 10000   // milliseconds between polls
-pollChats.timer = null
-
 async function getChats(keys) {  // needs to return the number of chats that need to be processed
 //console.log('keys', keys)
     if (! keys){ console.log('no keys in getChats'); return 0 }     // TODO don't require passing in keys
@@ -3765,7 +3797,7 @@ async function processChats(chats, keys) {
     for (let sender in chats) {
         const timestamp = myAccount.chatTimestamp || 0
         const res = await queryNetwork(`/messages/${chats[sender]}/${timestamp}`)
-console.log("processChats sender", sender)
+        console.log("processChats sender", sender)
         if (res && res.messages){  
             const from = normalizeAddress(sender)
             if (!myData.contacts[from]){ createNewContact(from) }
@@ -3773,6 +3805,11 @@ console.log("processChats sender", sender)
 //            contact.address = from        // not needed since createNewContact does this
             let added = 0
             let newTimestamp = 0
+            let hasNewTransfer = false;
+            
+            // Don't show notifications if we're already in chat with this person
+            const inActiveChatWithSender = appendChatModal.address === from;
+            
             for (let i in res.messages){
                 const tx = res.messages[i] // the messages are actually the whole tx
 //console.log('message tx is')
@@ -3889,6 +3926,14 @@ console.log("processChats sender", sender)
                     history.unshift(newPayment);
                     //  sort history array based on timestamp field in descending order
                     history.sort((a, b) => b.timestamp - a.timestamp);
+                    
+                    // Mark that we have a new transfer for toast notification
+                    hasNewTransfer = true
+                    
+                    // Update wallet view if it's active
+                    if (document.getElementById("walletScreen").classList.contains("active")) {
+                        updateWalletView()
+                    }
                 }
             }
             if (newTimestamp > 0){
@@ -3924,6 +3969,22 @@ console.log("processChats sender", sender)
                     // Insert at correct position to maintain order
                     myData.chats.splice(insertIndex, 0, chatUpdate);
                 }
+                
+                // Show toast notification for new messages if we're not already in chat with this person
+                if (!inActiveChatWithSender) {
+                    // Get name of sender
+                    const senderName = contact.name || contact.username || `${from.slice(0,8)}...`
+                    
+                    if (added > 0) {
+                        showToast(`New message from ${senderName}`, 3000, 'info')
+                    }
+                }
+            }
+            
+            // Show transfer notification even if no messages were added
+            if (hasNewTransfer && !inActiveChatWithSender) {
+                const senderName = contact.name || contact.username || `${from.slice(0,8)}...`
+                showToast(`New transfer received from ${senderName}`, 3000, 'success')
             }
         }
     }
@@ -4978,6 +5039,12 @@ async function handleConnectivityChange(event) {
 
 // Setup connectivity detection
 function setupConnectivityDetection() {
+    // Only setup offline detection if running as installed PWA
+    if (!checkIsInstalledPWA()) {
+        isOnline = true; // Always consider online in web mode
+        return;
+    }
+
     // Listen for browser online/offline events
     window.addEventListener('online', handleConnectivityChange);
     window.addEventListener('offline', handleConnectivityChange);
@@ -5533,4 +5600,288 @@ function handleGatewayForm(event) {
 
     // Close the form
     closeAddEditGatewayForm();
+}
+
+// WebSocket Manager Class
+class WSManager {
+  constructor() {
+    this.ws = null;
+    this.isSubscribed = false;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.reconnectDelay = 1000; // Start with 1s delay
+    this.maxReconnectDelay = 30000; // Maximum 30s delay
+    this.subscriptionTimeout = null;
+    this.connectionState = 'disconnected'; // disconnected, connecting, connected
+  }
+
+  connect() {
+    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+      console.log('WebSocket already connecting or connected');
+      return;
+    }
+
+    this.connectionState = 'connecting';
+    console.log('Connecting to WebSocket server:', network.websocket.url);
+    
+    try {
+      this.ws = new WebSocket(network.websocket.url);
+      this.setupEventHandlers();
+    } catch (error) {
+      console.error('WebSocket connection error:', error);
+      this.handleConnectionFailure();
+    }
+  }
+
+  setupEventHandlers() {
+    this.ws.onopen = () => {
+      console.log('WebSocket connection established');
+      this.connectionState = 'connected';
+      this.reconnectAttempts = 0;
+      this.reconnectDelay = 1000;
+      this.subscribe();
+    };
+
+    this.ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        // Handle subscription confirmation
+        if (data.result === true && data.account_id) {
+          console.log('Subscription confirmed for account:', data.account_id);
+          this.isSubscribed = true;
+          if (this.subscriptionTimeout) {
+            clearTimeout(this.subscriptionTimeout);
+            this.subscriptionTimeout = null;
+          }
+          return;
+        }
+        
+        // Handle chat event messages
+        if (data.account_id && data.timestamp) {
+          console.log('WebSocket notification received - New message available at timestamp:', data.timestamp);
+          this.handleChatEvent(data);
+        } else {
+          // Log other types of messages for debugging
+          console.log('WebSocket received non-chat event message:', data);
+        }
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error, event.data);
+      }
+    };
+
+    this.ws.onclose = (event) => {
+      console.log('WebSocket connection closed:', event.code, event.reason);
+      this.connectionState = 'disconnected';
+      this.isSubscribed = false;
+      
+      if (event.code !== 1000) { // Not a normal closure
+        this.handleConnectionFailure();
+      }
+    };
+
+    this.ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      this.connectionState = 'disconnected';
+    };
+  }
+
+  subscribe() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.log('Cannot subscribe: WebSocket not open');
+      return;
+    }
+
+    if (this.isSubscribed) {
+      console.log('Already subscribed');
+      return;
+    }
+
+    if (!myAccount || !myAccount.keys || !myAccount.keys.address) {
+      console.error('Cannot subscribe: No account address available');
+      return;
+    }
+
+    // Use the longAddress function to format the address correctly
+    const accountAddress = longAddress(myAccount.keys.address);
+
+    const subscribeMsg = {
+      method: network.websocket.subscribeMessage.method,
+      params: [
+        network.websocket.subscribeMessage.params[0],
+        accountAddress
+      ]
+    };
+
+    console.log('Subscribing to chat events');
+    this.ws.send(JSON.stringify(subscribeMsg));
+    
+    // Set timeout for subscription confirmation
+    this.subscriptionTimeout = setTimeout(() => {
+      console.error('Subscription confirmation timeout');
+      this.isSubscribed = false;
+      this.reconnect();
+    }, 5000);
+  }
+
+  unsubscribe() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.isSubscribed) {
+      return;
+    }
+
+    // Use the longAddress function to format the address correctly
+    const accountAddress = longAddress(myAccount.keys.address);
+
+    const unsubscribeMsg = {
+      method: "ChatEvent",
+      params: ["unsubscribe", accountAddress]
+    };
+
+    console.log('Unsubscribing from chat events');
+    this.ws.send(JSON.stringify(unsubscribeMsg));
+    this.isSubscribed = false;
+  }
+
+  disconnect() {
+    if (this.subscriptionTimeout) {
+      clearTimeout(this.subscriptionTimeout);
+      this.subscriptionTimeout = null;
+    }
+    
+    if (this.ws) {
+      this.ws.close(1000, "Normal closure");
+      this.ws = null;
+    }
+    
+    this.isSubscribed = false;
+    this.connectionState = 'disconnected';
+    console.log('WebSocket disconnected');
+  }
+
+  handleConnectionFailure() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.log('Maximum reconnection attempts reached');
+      return;
+    }
+
+    this.reconnectAttempts++;
+    const delay = Math.min(this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1), this.maxReconnectDelay);
+    
+    console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    setTimeout(() => this.connect(), delay);
+  }
+
+  reconnect() {
+    this.disconnect();
+    this.connect();
+  }
+
+  isConnected() {
+    return this.ws && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  handleChatEvent(data) {
+    // Skip if timestamp is older than or equal to what we already have
+    const storedTimestamp = myAccount.chatTimestamp || 0;
+    
+    if (data.timestamp <= storedTimestamp) {
+      console.log('Skipping WebSocket notification - Already processed timestamp:', data.timestamp, '<=', storedTimestamp);
+      return;
+    }
+
+    console.log('Processing WebSocket notification for new message at timestamp:', data.timestamp, '(stored timestamp:', storedTimestamp, ')');
+
+    // Process message immediately if we have an active connection
+    if (this.connectionState === 'connected' && this.isSubscribed) {
+      console.log('Connection active, processing notification and updating UI');
+      this.processNewMessage(data);
+    } else {
+      console.log('Connection not active, skipping message processing');
+    }
+  }
+
+  async processNewMessage(data) {
+    if (!myAccount || !myAccount.keys) {
+      console.error('Cannot process message: No account available');
+      return;
+    }
+
+    try {
+      // First, we need to get the actual chat information
+      // The WebSocket event only tells us there's a new message, but not the chat ID
+      
+      // Use the timestamp from the WebSocket notification
+      const wsTimestamp = data.timestamp;
+      // Get the stored timestamp for comparison
+      const storedTimestamp = myAccount.chatTimestamp || 0;
+      
+      console.log('Fetching chat information - WebSocket timestamp:', wsTimestamp, 'Stored timestamp:', storedTimestamp);
+      
+      // Add a small delay (500ms) to give the server time to process the message
+      // This helps ensure the message is available when we query for it
+      console.log('Adding short delay before fetching chat information...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Get the latest chat information using the stored timestamp
+      // This ensures we get all messages since our last update
+      const accountAddress = longAddress(myAccount.keys.address);
+      let senders = await queryNetwork(`/account/${accountAddress}/chats/${storedTimestamp}`);
+      
+      // Retry logic for empty responses
+      let retryCount = 0;
+      const maxRetries = 2;
+      
+      while (retryCount < maxRetries && 
+             (!senders || !senders.chats || Object.keys(senders.chats).length === 0)) {
+        retryCount++;
+        console.log(`No chats found, retrying (${retryCount}/${maxRetries})...`);
+        
+        // Exponential backoff
+        const delay = 500 * Math.pow(2, retryCount - 1);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
+        // Retry the query
+        senders = await queryNetwork(`/account/${accountAddress}/chats/${storedTimestamp}`);
+      }
+      
+      // Always update the timestamp to avoid processing the same notification multiple times
+      if (wsTimestamp > storedTimestamp) {
+        console.log('Updating chat timestamp from', storedTimestamp, 'to', wsTimestamp);
+        myAccount.chatTimestamp = wsTimestamp;
+      }
+      
+      let messagesProcessed = false;
+      
+      if (senders && senders.chats && Object.keys(senders.chats).length > 0) {
+        console.log('Processing chats from WebSocket notification:', senders.chats);
+        // Process the chats using the existing function
+        await processChats(senders.chats, myAccount.keys);
+        messagesProcessed = true;
+        
+        // Update UI if needed
+        if (appendChatModal.address) {
+          appendChatModal();
+        }
+      } else {
+        console.log('No new chats found after WebSocket notification and retries');
+      }
+      
+      // Update the chat list UI to show unread counts
+      // This is important to ensure the UI is updated with new messages
+      if (messagesProcessed) {
+        console.log('Updating chat list UI after WebSocket message processing');
+        if (document.getElementById("chatScreen").classList.contains("active")){
+          await updateChatList(true)
+        }
+        
+        // Also update wallet view if wallet screen is active
+        if (document.getElementById("walletScreen").classList.contains("active")) {
+          console.log('Wallet screen is active, updating wallet view after WebSocket notification');
+          await updateWalletView();
+        }
+      }
+    } catch (error) {
+      console.error('Error processing WebSocket message:', error);
+    }
+  }
 }

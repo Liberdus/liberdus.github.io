@@ -13,6 +13,13 @@ const network = {
   },
   "explorer": {
     "url": "https://test.liberdus.com/explorer"
+  },
+  websocket: {
+    url: "wss://dev.liberdus.com:3031",
+    subscribeMessage: {
+      method: "ChatEvent",
+      params: ["subscribe", "$ACCOUNT_ID"]
+    }
   }
 }
 

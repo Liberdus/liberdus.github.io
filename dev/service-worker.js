@@ -4,7 +4,7 @@ try {
   console.error('Failed to import log-utils.js:', e);
 }
 
-const SW_VERSION = '1.0.58';
+const SW_VERSION = '1.0.59';
 
 // Cache names with proper versioning
 const CACHE_VERSION = '1.0.0';
@@ -21,8 +21,8 @@ const PRECACHE_URLS = [
   './manifest.json',
   './offline.html',
   './log-utils.js',
-  './liberdus_logo_50.png',
-  './liberdus_logo_250.png'
+  './media/liberdus_logo_50.png',
+  './media/liberdus_logo_250.png'
 ];
 
 // Simplified state management
@@ -498,8 +498,8 @@ async function showNotification(chatCount) {
 
         await self.registration.showNotification('New Messages', {
             body: notificationText,
-            icon: './liberdus_logo_250.png',
-            badge: './liberdus_logo_250.png',
+            icon: './media/liberdus_logo_250.png',
+            badge: './media/liberdus_logo_250.png',
             tag: 'new-messages',
             renotify: true
         });
