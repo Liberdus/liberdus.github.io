@@ -4903,33 +4903,35 @@ function createDisplayInfo(contact) {
 
 // Add this function before the ContactInfoModalManager class
 function showToast(message, duration = 2000, type = "default") {
-    const toastContainer = document.getElementById('toastContainer');
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.textContent = message;
-    
-    // Generate a unique ID for this toast
-    const toastId = 'toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-    toast.id = toastId;
-    
-    toastContainer.appendChild(toast);
-    
-    // Force reflow to enable transition
-    toast.offsetHeight;
-    
-    // Show the toast
     requestAnimationFrame(() => {
-        toast.classList.add('show');
+        const toastContainer = document.getElementById('toastContainer');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        
+        // Generate a unique ID for this toast
+        const toastId = 'toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+        toast.id = toastId;
+        
+        toastContainer.appendChild(toast);
+        
+        // Force reflow to enable transition
+        toast.offsetHeight;
+        
+        // Show the toast
+        requestAnimationFrame(() => {
+            toast.classList.add('show');
+        });
+        
+        // If duration is provided, auto-hide the toast
+        if (duration > 0) {
+            setTimeout(() => {
+                hideToast(toastId);
+            }, duration);
+        }
+        
+        return toastId;
     });
-    
-    // If duration is provided, auto-hide the toast
-    if (duration > 0) {
-        setTimeout(() => {
-            hideToast(toastId);
-        }, duration);
-    }
-    
-    return toastId;
 }
 
 // Function to hide a specific toast by ID
@@ -5870,12 +5872,14 @@ class WSManager {
       // This is important to ensure the UI is updated with new messages
       if (messagesProcessed) {
         console.log('Updating chat list UI after WebSocket message processing');
-        if (document.getElementById("chatScreen").classList.contains("active")){
-          await updateChatList(true)
+        const chatScreen = document.getElementById("chatScreen");
+        if (chatScreen && chatScreen.classList && chatScreen.classList.contains("active")) {
+          await updateChatList(true);
         }
         
         // Also update wallet view if wallet screen is active
-        if (document.getElementById("walletScreen").classList.contains("active")) {
+        const walletScreen = document.getElementById("walletScreen");
+        if (walletScreen && walletScreen.classList && walletScreen.classList.contains("active")) {
           console.log('Wallet screen is active, updating wallet view after WebSocket notification');
           await updateWalletView();
         }
