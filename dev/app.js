@@ -811,10 +811,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('refreshChatButton').addEventListener('click', async () => {
         console.log('Manual chat refresh requested');
         if (appendChatModal.address) {
+            // Save the current length before refreshing
+            const currentLength = appendChatModal.len;
+            
+            // Update the chat list to get any new messages
             await updateChatList(true);
-            appendChatModal.len = 0; // Reset to force refresh
+            
+            // Only append new messages by keeping the current length
+            // rather than resetting to 0, which would cause all messages to be displayed again
             appendChatModal();
-            showToast('Chat refreshed', 1000);
+            
+            // Get the new message count after refresh
+            const messages = myData.contacts[appendChatModal.address].messages;
+            const newMessagesCount = Math.max(0, messages.length - currentLength);
+            
+            // Show appropriate toast based on whether new messages were found
+            if (newMessagesCount > 0) {
+                showToast(`Refreshed: ${newMessagesCount} new message${newMessagesCount > 1 ? 's' : ''}`, 1500, 'success');
+            } else {
+                showToast('No new messages', 1500, 'info');
+            }
+            
+            // Force iOS rendering update
             forceIOSUpdate();
         }
     });
@@ -3831,6 +3849,12 @@ getChats.lastCall = 0
 
 // Actually payments also appear in the chats, so we can add these to
 async function processChats(chats, keys) {
+    // Check if we're on iOS for special handling
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    
+    // Track all notifications to batch them on iOS
+    const pendingNotifications = [];
+    
     for (let sender in chats) {
         const timestamp = myAccount.chatTimestamp || 0
         const res = await queryNetwork(`/messages/${chats[sender]}/${timestamp}`)
@@ -4013,7 +4037,16 @@ async function processChats(chats, keys) {
                     const senderName = contact.name || contact.username || `${from.slice(0,8)}...`
                     
                     if (added > 0) {
-                        showToast(`New message from ${senderName}`, 3000, 'info')
+                        // On iOS, batch notifications for better rendering
+                        if (isIOS) {
+                            pendingNotifications.push({
+                                message: `New message from ${senderName}`,
+                                type: 'info',
+                                duration: 3000
+                            });
+                        } else {
+                            showToast(`New message from ${senderName}`, 3000, 'info');
+                        }
                     }
                 }
             }
@@ -4021,9 +4054,46 @@ async function processChats(chats, keys) {
             // Show transfer notification even if no messages were added
             if (hasNewTransfer && !inActiveChatWithSender) {
                 const senderName = contact.name || contact.username || `${from.slice(0,8)}...`
-                showToast(`New transfer received from ${senderName}`, 3000, 'success')
+                
+                // On iOS, batch notifications for better rendering
+                if (isIOS) {
+                    pendingNotifications.push({
+                        message: `New transfer received from ${senderName}`,
+                        type: 'success',
+                        duration: 3000
+                    });
+                } else {
+                    showToast(`New transfer received from ${senderName}`, 3000, 'success');
+                }
+            }
+            
+            if (newTimestamp > 0){
+                // Update the timestamp
+                myAccount.chatTimestamp = newTimestamp
             }
         }
+    }
+    
+    // On iOS, show notifications with a slight delay between each one
+    if (isIOS && pendingNotifications.length > 0) {
+        console.log(`Showing ${pendingNotifications.length} batched notifications on iOS`);
+        
+        // Force a view update first
+        forceIOSUpdate();
+        
+        // Show notifications with a delay between them
+        let delay = 300; // Start delay
+        pendingNotifications.forEach((notification, index) => {
+            setTimeout(() => {
+                showToast(notification.message, notification.duration, notification.type);
+                
+                // After the last notification, force one more update
+                if (index === pendingNotifications.length - 1) {
+                    setTimeout(forceIOSUpdate, 500);
+                }
+            }, delay);
+            delay += 800; // Increase delay for each subsequent notification
+        });
     }
 }
 
@@ -4940,7 +5010,16 @@ function createDisplayInfo(contact) {
 
 // Add this function before the ContactInfoModalManager class
 function showToast(message, duration = 2000, type = "default") {
+    // Pre-check iOS for special handling
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    
+    // Run in requestAnimationFrame to ensure we're in a rendering frame
     requestAnimationFrame(() => {
+        // Force a reflow even before creating the toast on iOS
+        if (isIOS) {
+            document.body.offsetHeight;
+        }
+        
         const toastContainer = document.getElementById('toastContainer');
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
@@ -4949,6 +5028,12 @@ function showToast(message, duration = 2000, type = "default") {
         // Generate a unique ID for this toast
         const toastId = 'toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
         toast.id = toastId;
+        
+        // On iOS, apply additional styles to force hardware acceleration
+        if (isIOS) {
+            toast.style.transform = 'translate3d(0,0,0)';
+            toast.style.backfaceVisibility = 'hidden';
+        }
         
         toastContainer.appendChild(toast);
         
@@ -4960,7 +5045,23 @@ function showToast(message, duration = 2000, type = "default") {
             toast.classList.add('show');
             
             // Force iOS reflow to ensure toast is displayed
-            forceIOSUpdate();
+            if (isIOS) {
+                // First force the reflow
+                forceIOSUpdate();
+                
+                // Then set a series of timeouts to force multiple reflows on iOS
+                // This helps overcome the notorious iOS rendering bugs
+                setTimeout(forceIOSUpdate, 50);
+                setTimeout(forceIOSUpdate, 100);
+                
+                // For particularly stubborn iOS issues, force the entire DOM to repaint
+                setTimeout(() => {
+                    document.body.style.opacity = "0.99";
+                    setTimeout(() => {
+                        document.body.style.opacity = "1";
+                    }, 20);
+                }, 30);
+            }
         });
         
         // If duration is provided, auto-hide the toast
@@ -5950,12 +6051,50 @@ function forceIOSUpdate() {
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   
   if (isIOS) {
-    // Force reflow/repaint
+    console.log('Forcing iOS UI update');
+    
+    // Force reflow/repaint with multiple approaches
+    
+    // 1. Standard reflow trigger
     document.body.offsetHeight;
     
-    // On iOS, sometimes multiple reflows are needed to ensure updates
+    // 2. Focus on important UI areas
+    const criticalElements = [
+      document.body,
+      document.getElementById('toastContainer'),
+      document.querySelector('.messages-container'),
+      document.querySelector('.toast-container')
+    ];
+    
+    // Force reflow on each critical element
+    criticalElements.forEach(el => {
+      if (el) {
+        // Force style recalculation
+        const currentZIndex = window.getComputedStyle(el).zIndex;
+        // Toggle a style property to force repaint
+        el.style.zIndex = (parseInt(currentZIndex || '0') + 1).toString();
+        el.offsetHeight; // Force reflow
+        el.style.zIndex = currentZIndex; // Restore
+      }
+    });
+    
+    // 3. Schedule additional reflows
     setTimeout(() => {
       document.body.offsetHeight;
+      
+      // Make sure toast container is properly updated
+      const toastContainer = document.getElementById('toastContainer');
+      if (toastContainer) {
+        // Force hardware acceleration
+        toastContainer.style.transform = 'translate3d(-50%, 0, 0)';
+        toastContainer.style.webkitTransform = 'translate3d(-50%, 0, 0)';
+        toastContainer.offsetHeight;
+      }
     }, 50);
+    
+    // 4. One last refresh after a longer delay
+    setTimeout(() => {
+      document.body.offsetHeight;
+    }, 150);
   }
 }

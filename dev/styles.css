@@ -2382,6 +2382,15 @@ mark {
   flex-direction: column;
   gap: 8px;
   pointer-events: none;
+  width: 85%;
+  max-width: 320px;
+  /* Add iOS specific improvements */
+  -webkit-transform: translate3d(-50%, 0, 0);
+  transform: translate3d(-50%, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  -webkit-perspective: 1000;
+  perspective: 1000;
 }
 
 .toast {
@@ -2399,6 +2408,15 @@ mark {
   max-width: 280px;
   margin: 0 auto;
   backdrop-filter: blur(4px);
+  /* Add iOS specific improvements */
+  -webkit-transform: translateY(-20px) translate3d(0, 0, 0);
+  transform: translateY(-20px) translate3d(0, 0, 0);
+  -webkit-transition: all 0.3s ease;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  -webkit-perspective: 1000;
+  perspective: 1000;
+  will-change: transform, opacity;
 }
 
 /* Toast type styles */
@@ -2431,8 +2449,8 @@ mark {
 .toast.loading::before {
   content: "";
   position: absolute;
-  left: 15px;
   top: 50%;
+  left: 15px;
   transform: translateY(-50%);
   width: 20px;
   height: 20px;
@@ -2454,13 +2472,12 @@ mark {
 .toast.show {
   opacity: 1;
   transform: translateY(0);
+  -webkit-transform: translateY(0) translate3d(0, 0, 0);
 }
 
 @media (min-width: 769px) {
   .toast-container {
-    position: absolute;
-    top: 25%; /* Maintain the same positioning in desktop view */
-    transform: translate(-50%, 0);
+    top: 10%;
   }
 }
 
