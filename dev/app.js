@@ -1009,11 +1009,11 @@ function handleVisibilityChange(e) {
                 // Force data refresh on iOS when app becomes visible
                 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
                 if (isIOS && myAccount) {
-                    console.log('iOS detected, forcing data refresh after visibility change');
+                    Logger.log('iOS detected, forcing data refresh after visibility change');
                     
                     // Trigger immediate iOS fallback check if enabled
                     if (wsManager && wsManager.isConnected()) {
-                        console.log('Triggering immediate iOS fallback check after visibility change');
+                        Logger.log('Triggering immediate iOS fallback check after visibility change');
                         wsManager.processIOSFallback();
                     }
                     
@@ -2026,9 +2026,11 @@ function appendChatModal(){
     // Ensure the modal is active before trying to add messages
     const isActive = modal.classList.contains('active');
     console.log('Chat modal active:', isActive, 'Current msgs:', appendChatModal.len, 'New msgs:', messages.length);
+    Logger.log('Chat modal active:', isActive, 'Current msgs:', appendChatModal.len, 'New msgs:', messages.length);
     
     if (!isActive) {
         console.log('Chat modal not active, not appending messages');
+        Logger.log('Chat modal not active, not appending messages');
         // Update the length counter to avoid showing "old" messages as new when the modal opens
         appendChatModal.len = messages.length;
         return;
@@ -2036,6 +2038,7 @@ function appendChatModal(){
 
     for (let i=appendChatModal.len; i<messages.length; i++) {
         console.log('Appending new message:', i);
+        Logger.log('Appending new message:', i);
         const m = messages[i]
         m.type = m.my ? 'sent' : 'received'
         // Add message to UI
@@ -5773,11 +5776,13 @@ class WSManager {
   connect() {
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
       console.log('WebSocket already connecting or connected');
+      Logger.log('WebSocket already connecting or connected');
       return;
     }
 
     this.connectionState = 'connecting';
     console.log('Connecting to WebSocket server:', network.websocket.url);
+    Logger.log('Connecting to WebSocket server:', network.websocket.url);
     
     try {
       this.ws = new WebSocket(network.websocket.url);
@@ -5785,17 +5790,18 @@ class WSManager {
       
       // Set up iOS-specific polling to ensure WebSocket events are processed
       if (this.isIOS) {
+        Logger.log('iOS detected, setting up iOS fallback polling');
         this.setupIOSFallback();
       }
     } catch (error) {
-      console.error('WebSocket connection error:', error);
+        Logger.error('WebSocket connection error:', error);
       this.handleConnectionFailure();
     }
   }
   
   // New method to set up iOS fallback polling
   setupIOSFallback() {
-    console.log('Setting up iOS fallback polling for WebSocket');
+    Logger.log('Setting up iOS fallback polling for WebSocket');
     
     // Clear any existing interval
     if (this.iosPollInterval) {
@@ -5815,7 +5821,7 @@ class WSManager {
     }
     
     try {
-      console.log('iOS fallback: checking for missed WebSocket messages');
+        Logger.log('iOS fallback: checking for missed WebSocket messages');
       
       // Get the current timestamp for comparison
       const storedTimestamp = myAccount.chatTimestamp || 0;
@@ -5823,6 +5829,7 @@ class WSManager {
       if (this.lastProcessedTimestamp === storedTimestamp) {
         // No new timestamp since last check
         console.log('iOS fallback: no new timestamp since last check');
+        Logger.log('iOS fallback: no new timestamp since last check');
         return;
       }
       
@@ -5835,7 +5842,7 @@ class WSManager {
       
       if (senders && senders.chats && Object.keys(senders.chats).length > 0) {
         console.log('iOS fallback: found missed messages, processing now');
-        
+        Logger.log('iOS fallback: found missed messages, processing now');
         // Process messages and update UI
         await processChats(senders.chats, myAccount.keys);
         await updateChatList(true);
@@ -5852,15 +5859,18 @@ class WSManager {
         forceIOSUpdate();
       } else {
         console.log('iOS fallback: no missed messages found');
+        Logger.log('iOS fallback: no missed messages found');
       }
     } catch (error) {
       console.error('Error in iOS WebSocket fallback:', error);
+      Logger.error('Error in iOS WebSocket fallback:', error);
     }
   }
 
   setupEventHandlers() {
     this.ws.onopen = () => {
       console.log('WebSocket connection established');
+      Logger.log('WebSocket connection established');
       this.connectionState = 'connected';
       this.reconnectAttempts = 0;
       this.reconnectDelay = 1000;
@@ -5874,6 +5884,7 @@ class WSManager {
         // Handle subscription confirmation
         if (data.result === true && data.account_id) {
           console.log('Subscription confirmed for account:', data.account_id);
+          Logger.log('Subscription confirmed for account:', data.account_id);
           this.isSubscribed = true;
           if (this.subscriptionTimeout) {
             clearTimeout(this.subscriptionTimeout);
@@ -5885,18 +5896,22 @@ class WSManager {
         // Handle chat event messages
         if (data.account_id && data.timestamp) {
           console.log('WebSocket notification received - New message available at timestamp:', data.timestamp);
+          Logger.log('WebSocket notification received - New message available at timestamp:', data.timestamp);
           this.handleChatEvent(data);
         } else {
           // Log other types of messages for debugging
           console.log('WebSocket received non-chat event message:', data);
+          Logger.log('WebSocket received non-chat event message:', data);
         }
       } catch (error) {
         console.error('Error parsing WebSocket message:', error, event.data);
+        Logger.error('Error parsing WebSocket message:', error, event.data);
       }
     };
 
     this.ws.onclose = (event) => {
       console.log('WebSocket connection closed:', event.code, event.reason);
+      Logger.log('WebSocket connection closed:', event.code, event.reason);
       this.connectionState = 'disconnected';
       this.isSubscribed = false;
       
@@ -5907,6 +5922,7 @@ class WSManager {
 
     this.ws.onerror = (error) => {
       console.error('WebSocket error:', error);
+      Logger.error('WebSocket error:', error);
       this.connectionState = 'disconnected';
     };
   }
@@ -5914,6 +5930,7 @@ class WSManager {
   subscribe() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.log('Cannot subscribe: WebSocket not open');
+      Logger.log('Cannot subscribe: WebSocket not open');
       return;
     }
 
@@ -5924,6 +5941,7 @@ class WSManager {
 
     if (!myAccount || !myAccount.keys || !myAccount.keys.address) {
       console.error('Cannot subscribe: No account address available');
+      Logger.error('Cannot subscribe: No account address available');
       return;
     }
 
@@ -5939,11 +5957,13 @@ class WSManager {
     };
 
     console.log('Subscribing to chat events');
+    Logger.log('Subscribing to chat events');
     this.ws.send(JSON.stringify(subscribeMsg));
     
     // Set timeout for subscription confirmation
     this.subscriptionTimeout = setTimeout(() => {
       console.error('Subscription confirmation timeout');
+      Logger.error('Subscription confirmation timeout');
       this.isSubscribed = false;
       this.reconnect();
     }, 5000);
@@ -5963,6 +5983,7 @@ class WSManager {
     };
 
     console.log('Unsubscribing from chat events');
+    Logger.log('Unsubscribing from chat events');
     this.ws.send(JSON.stringify(unsubscribeMsg));
     this.isSubscribed = false;
   }
@@ -5987,11 +6008,13 @@ class WSManager {
     this.isSubscribed = false;
     this.connectionState = 'disconnected';
     console.log('WebSocket disconnected');
+    Logger.log('WebSocket disconnected');
   }
 
   handleConnectionFailure() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.log('Maximum reconnection attempts reached');
+      Logger.log('Maximum reconnection attempts reached');
       return;
     }
 
@@ -5999,6 +6022,7 @@ class WSManager {
     const delay = Math.min(this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1), this.maxReconnectDelay);
     
     console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    Logger.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
     setTimeout(() => this.connect(), delay);
   }
 
@@ -6017,25 +6041,29 @@ class WSManager {
     
     if (data.timestamp <= storedTimestamp) {
       console.log('Skipping WebSocket notification - Already processed timestamp:', data.timestamp, '<=', storedTimestamp);
+      Logger.log('Skipping WebSocket notification - Already processed timestamp:', data.timestamp, '<=', storedTimestamp);
       return;
     }
 
     console.log('Processing WebSocket notification for new message at timestamp:', data.timestamp, '(stored timestamp:', storedTimestamp, ')');
-
+    Logger.log('Processing WebSocket notification for new message at timestamp:', data.timestamp, '(stored timestamp:', storedTimestamp, ')');
     // Process message immediately if we have an active connection
     if (this.connectionState === 'connected' && this.isSubscribed) {
       console.log('Connection active, processing notification and updating UI');
+      Logger.log('Connection active, processing notification and updating UI');
       // Update our lastProcessedTimestamp for iOS fallback
       this.lastProcessedTimestamp = data.timestamp;
       this.processNewMessage(data);
     } else {
       console.log('Connection not active, skipping message processing');
+      Logger.log('Connection not active, skipping message processing');
     }
   }
 
   async processNewMessage(data) {
     if (!myAccount || !myAccount.keys) {
       console.error('Cannot process message: No account available');
+      Logger.error('Cannot process message: No account available');
       return;
     }
 
@@ -6049,6 +6077,7 @@ class WSManager {
       const storedTimestamp = myAccount.chatTimestamp || 0;
       
       console.log('Fetching chat information - WebSocket timestamp:', wsTimestamp, 'Stored timestamp:', storedTimestamp);
+      Logger.log('Fetching chat information - WebSocket timestamp:', wsTimestamp, 'Stored timestamp:', storedTimestamp);
       
       // Get the latest chat information right away - no delay needed
       const accountAddress = longAddress(myAccount.keys.address);
@@ -6057,6 +6086,7 @@ class WSManager {
       // Retry logic for empty responses - just try once more for speed
       if (!senders || !senders.chats || Object.keys(senders.chats).length === 0) {
         console.log(`No chats found, retrying...`);
+        Logger.log(`No chats found, retrying...`);
         // Brief delay before retry
         await new Promise(resolve => setTimeout(resolve, 300));
         // Retry the query
@@ -6066,6 +6096,7 @@ class WSManager {
       // Always update the timestamp to avoid processing the same notification multiple times
       if (wsTimestamp > storedTimestamp) {
         console.log('Updating chat timestamp from', storedTimestamp, 'to', wsTimestamp);
+        Logger.log('Updating chat timestamp from', storedTimestamp, 'to', wsTimestamp);
         myAccount.chatTimestamp = wsTimestamp;
       }
       
@@ -6076,7 +6107,7 @@ class WSManager {
       // Process the new messages if we have chats
       if (senders && senders.chats && Object.keys(senders.chats).length > 0) {
         console.log('Processing chats from WebSocket notification:', senders.chats);
-        
+        Logger.log('Processing chats from WebSocket notification:', senders.chats);
         // Process the chats using the existing function
         await processChats(senders.chats, myAccount.keys);
         
@@ -6087,7 +6118,7 @@ class WSManager {
         // If the chat modal is open, always update it with new messages
         if (activeChatAddress) {
           console.log('Chat modal is open, updating with new messages for:', activeChatAddress);
-          
+          Logger.log('Chat modal is open, updating with new messages for:', activeChatAddress);
           // Make sure modal updates with new messages
           const chatModal = document.getElementById('chatModal');
           if (chatModal && chatModal.classList.contains('active')) {
@@ -6117,9 +6148,11 @@ class WSManager {
         }
       } else {
         console.log('No new chats found after WebSocket notification and retries');
+        Logger.log('No new chats found after WebSocket notification and retries');
       }
     } catch (error) {
       console.error('Error processing WebSocket message:', error);
+      Logger.error('Error processing WebSocket message:', error);
     }
   }
 }
@@ -6131,7 +6164,7 @@ function forceIOSUpdate() {
   
   if (isIOS) {
     console.log('Forcing iOS UI update');
-    
+    Logger.log('Forcing iOS UI update');
     // Force reflow/repaint with multiple approaches
     
     // 1. Standard reflow trigger
