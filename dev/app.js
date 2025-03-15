@@ -2005,7 +2005,7 @@ function openChatModal(address) {
 }
 
 function appendChatModal(){
-console.log('appendChatModal')
+    console.log('appendChatModal')
     if (! appendChatModal.address){ return }
 //console.log(2)
 //    if (document.getElementById('chatModal').classList.contains('active')) { return }
@@ -2016,8 +2016,19 @@ console.log('appendChatModal')
     const modal = document.getElementById('chatModal');
     const messagesList = modal.querySelector('.messages-list');
 
+    // Ensure the modal is active before trying to add messages
+    const isActive = modal.classList.contains('active');
+    console.log('Chat modal active:', isActive, 'Current msgs:', appendChatModal.len, 'New msgs:', messages.length);
+    
+    if (!isActive) {
+        console.log('Chat modal not active, not appending messages');
+        // Update the length counter to avoid showing "old" messages as new when the modal opens
+        appendChatModal.len = messages.length;
+        return;
+    }
+
     for (let i=appendChatModal.len; i<messages.length; i++) {
-console.log(5, i)
+        console.log('Appending new message:', i);
         const m = messages[i]
         m.type = m.my ? 'sent' : 'received'
         // Add message to UI
@@ -2033,7 +2044,10 @@ console.log(5, i)
     messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
     
     // Force reflow to ensure iOS renders the updates
-    forceIOSUpdate();
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isIOS) {
+        forceIOSUpdate();
+    }
 }
 appendChatModal.address = null
 appendChatModal.len = 0
@@ -3868,8 +3882,10 @@ async function processChats(chats, keys) {
             let newTimestamp = 0
             let hasNewTransfer = false;
             
-            // Don't show notifications if we're already in chat with this person
-            const inActiveChatWithSender = appendChatModal.address === from;
+            // This check determines if we're currently chatting with the sender
+            // We ONLY want to avoid notifications if we're actively viewing this exact chat
+            const inActiveChatWithSender = appendChatModal.address === from && 
+                document.getElementById('chatModal').classList.contains('active');
             
             for (let i in res.messages){
                 const tx = res.messages[i] // the messages are actually the whole tx
@@ -4031,7 +4047,8 @@ async function processChats(chats, keys) {
                     myData.chats.splice(insertIndex, 0, chatUpdate);
                 }
                 
-                // Show toast notification for new messages if we're not already in chat with this person
+                // Show toast notification for new messages
+                // Only suppress notification if we're ACTIVELY viewing this chat
                 if (!inActiveChatWithSender) {
                     // Get name of sender
                     const senderName = contact.name || contact.username || `${from.slice(0,8)}...`
@@ -5013,66 +5030,51 @@ function showToast(message, duration = 2000, type = "default") {
     // Pre-check iOS for special handling
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     
-    // Run in requestAnimationFrame to ensure we're in a rendering frame
-    requestAnimationFrame(() => {
-        // Force a reflow even before creating the toast on iOS
+    // Force a pre-update to ensure the DOM is ready
+    if (isIOS) {
+        document.body.offsetHeight;
+    }
+    
+    // Create the toast in a single operation for reliability
+    const toastContainer = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    
+    // Generate a unique ID for this toast
+    const toastId = 'toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+    toast.id = toastId;
+    
+    // On iOS, apply simpler hardware acceleration
+    if (isIOS) {
+        toast.style.transform = 'translate3d(0,0,0)';
+        toast.style.backfaceVisibility = 'hidden';
+    }
+    
+    // Add to DOM
+    toastContainer.appendChild(toast);
+    
+    // Force reflow before showing
+    toast.offsetHeight;
+    
+    // Show with a slight delay to ensure rendering
+    setTimeout(() => {
+        toast.classList.add('show');
+        
+        // Force iOS update if needed
         if (isIOS) {
-            document.body.offsetHeight;
+            forceIOSUpdate();
         }
         
-        const toastContainer = document.getElementById('toastContainer');
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-        toast.textContent = message;
-        
-        // Generate a unique ID for this toast
-        const toastId = 'toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-        toast.id = toastId;
-        
-        // On iOS, apply additional styles to force hardware acceleration
-        if (isIOS) {
-            toast.style.transform = 'translate3d(0,0,0)';
-            toast.style.backfaceVisibility = 'hidden';
-        }
-        
-        toastContainer.appendChild(toast);
-        
-        // Force reflow to enable transition
-        toast.offsetHeight;
-        
-        // Show the toast
-        requestAnimationFrame(() => {
-            toast.classList.add('show');
-            
-            // Force iOS reflow to ensure toast is displayed
-            if (isIOS) {
-                // First force the reflow
-                forceIOSUpdate();
-                
-                // Then set a series of timeouts to force multiple reflows on iOS
-                // This helps overcome the notorious iOS rendering bugs
-                setTimeout(forceIOSUpdate, 50);
-                setTimeout(forceIOSUpdate, 100);
-                
-                // For particularly stubborn iOS issues, force the entire DOM to repaint
-                setTimeout(() => {
-                    document.body.style.opacity = "0.99";
-                    setTimeout(() => {
-                        document.body.style.opacity = "1";
-                    }, 20);
-                }, 30);
-            }
-        });
-        
-        // If duration is provided, auto-hide the toast
+        // Set hide timeout
         if (duration > 0) {
             setTimeout(() => {
                 hideToast(toastId);
             }, duration);
         }
-        
-        return toastId;
-    });
+    }, 10);
+    
+    return toastId;
 }
 
 // Function to hide a specific toast by ID
@@ -5960,29 +5962,15 @@ class WSManager {
       
       console.log('Fetching chat information - WebSocket timestamp:', wsTimestamp, 'Stored timestamp:', storedTimestamp);
       
-      // Add a small delay (500ms) to give the server time to process the message
-      // This helps ensure the message is available when we query for it
-      console.log('Adding short delay before fetching chat information...');
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Get the latest chat information using the stored timestamp
-      // This ensures we get all messages since our last update
+      // Get the latest chat information right away - no delay needed
       const accountAddress = longAddress(myAccount.keys.address);
       let senders = await queryNetwork(`/account/${accountAddress}/chats/${storedTimestamp}`);
       
-      // Retry logic for empty responses
-      let retryCount = 0;
-      const maxRetries = 2;
-      
-      while (retryCount < maxRetries && 
-             (!senders || !senders.chats || Object.keys(senders.chats).length === 0)) {
-        retryCount++;
-        console.log(`No chats found, retrying (${retryCount}/${maxRetries})...`);
-        
-        // Exponential backoff
-        const delay = 500 * Math.pow(2, retryCount - 1);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        
+      // Retry logic for empty responses - just try once more for speed
+      if (!senders || !senders.chats || Object.keys(senders.chats).length === 0) {
+        console.log(`No chats found, retrying...`);
+        // Brief delay before retry
+        await new Promise(resolve => setTimeout(resolve, 300));
         // Retry the query
         senders = await queryNetwork(`/account/${accountAddress}/chats/${storedTimestamp}`);
       }
@@ -5993,51 +5981,54 @@ class WSManager {
         myAccount.chatTimestamp = wsTimestamp;
       }
       
-      let messagesProcessed = false;
+      // Remember the active chat address for notifications
+      const activeChatAddress = appendChatModal.address;
+      console.log('Current active chat address:', activeChatAddress);
       
+      // Process the new messages if we have chats
       if (senders && senders.chats && Object.keys(senders.chats).length > 0) {
         console.log('Processing chats from WebSocket notification:', senders.chats);
+        
         // Process the chats using the existing function
         await processChats(senders.chats, myAccount.keys);
-        messagesProcessed = true;
         
-        // Update UI if needed
-        if (appendChatModal.address) {
-          appendChatModal();
+        // Always update the chat list UI, regardless of which screen is active
+        // This ensures unread counts are updated everywhere
+        await updateChatList(true);
+        
+        // If the chat modal is open, always update it with new messages
+        if (activeChatAddress) {
+          console.log('Chat modal is open, updating with new messages for:', activeChatAddress);
+          
+          // Make sure modal updates with new messages
+          const chatModal = document.getElementById('chatModal');
+          if (chatModal && chatModal.classList.contains('active')) {
+            appendChatModal();
+            
+            // Scroll to the bottom of the messages
+            const messagesContainer = chatModal.querySelector('.messages-container');
+            if (messagesContainer) {
+              setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+              }, 100);
+            }
+          }
+        }
+        
+        // Force a wallet view update if needed - transfers affect the wallet
+        await updateWalletView();
+        
+        // Force DOM updates on all platforms (not just iOS)
+        // This helps ensure toast notifications and UI changes are visible
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        if (isIOS) {
+          forceIOSUpdate();
+        } else {
+          // Force reflow on non-iOS too, just not as aggressively
+          document.body.offsetHeight;
         }
       } else {
         console.log('No new chats found after WebSocket notification and retries');
-      }
-      console.log('messagesProcessed in processNewMessage', messagesProcessed);
-      // Update the chat list UI to show unread counts
-      // This is important to ensure the UI is updated with new messages
-      if (messagesProcessed) {
-        console.log('Updating chat list UI after WebSocket message processing');
-        
-        // Check if we're on iOS
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-        console.log('isIOS', isIOS);
-        
-        // Update chatScreen if it's active OR we're on iOS
-        const chatScreen = document.getElementById("chatScreen");
-        if (chatScreen && chatScreen.classList && chatScreen.classList.contains("active") || isIOS) {
-          await updateChatList(true);
-        }
-        
-        // Update wallet view if wallet screen is active OR we're on iOS
-        const walletScreen = document.getElementById("walletScreen");
-        if (walletScreen && walletScreen.classList && walletScreen.classList.contains("active") || isIOS) {
-          console.log('Wallet screen is active or iOS, updating wallet view');
-          await updateWalletView();
-        }
-        
-        // Always update chat modal on iOS if it has data
-        if (isIOS && appendChatModal.address) {
-          appendChatModal();
-        }
-        
-        // Force iOS reflow to ensure all UI updates are rendered
-        forceIOSUpdate();
       }
     } catch (error) {
       console.error('Error processing WebSocket message:', error);
