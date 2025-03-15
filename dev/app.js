@@ -1010,6 +1010,13 @@ function handleVisibilityChange(e) {
                 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
                 if (isIOS && myAccount) {
                     console.log('iOS detected, forcing data refresh after visibility change');
+                    
+                    // Trigger immediate iOS fallback check if enabled
+                    if (wsManager && wsManager.isConnected()) {
+                        console.log('Triggering immediate iOS fallback check after visibility change');
+                        wsManager.processIOSFallback();
+                    }
+                    
                     await updateChatList(true);
                     
                     // Refresh chat modal if open
@@ -5758,6 +5765,9 @@ class WSManager {
     this.maxReconnectDelay = 30000; // Maximum 30s delay
     this.subscriptionTimeout = null;
     this.connectionState = 'disconnected'; // disconnected, connecting, connected
+    this.lastProcessedTimestamp = 0;
+    this.iosPollInterval = null;
+    this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   }
 
   connect() {
@@ -5772,9 +5782,79 @@ class WSManager {
     try {
       this.ws = new WebSocket(network.websocket.url);
       this.setupEventHandlers();
+      
+      // Set up iOS-specific polling to ensure WebSocket events are processed
+      if (this.isIOS) {
+        this.setupIOSFallback();
+      }
     } catch (error) {
       console.error('WebSocket connection error:', error);
       this.handleConnectionFailure();
+    }
+  }
+  
+  // New method to set up iOS fallback polling
+  setupIOSFallback() {
+    console.log('Setting up iOS fallback polling for WebSocket');
+    
+    // Clear any existing interval
+    if (this.iosPollInterval) {
+      clearInterval(this.iosPollInterval);
+    }
+    
+    // Set up periodic check every 5 seconds
+    this.iosPollInterval = setInterval(() => {
+      this.processIOSFallback();
+    }, 5000);
+  }
+  
+  // New method to process iOS fallback
+  async processIOSFallback() {
+    if (!this.isIOS || !this.isConnected() || !this.isSubscribed || !myAccount || !myAccount.keys) {
+      return;
+    }
+    
+    try {
+      console.log('iOS fallback: checking for missed WebSocket messages');
+      
+      // Get the current timestamp for comparison
+      const storedTimestamp = myAccount.chatTimestamp || 0;
+      
+      if (this.lastProcessedTimestamp === storedTimestamp) {
+        // No new timestamp since last check
+        console.log('iOS fallback: no new timestamp since last check');
+        return;
+      }
+      
+      // Update for next check
+      this.lastProcessedTimestamp = storedTimestamp;
+      
+      // Force a check for any missed messages
+      const accountAddress = longAddress(myAccount.keys.address);
+      const senders = await queryNetwork(`/account/${accountAddress}/chats/${storedTimestamp}`);
+      
+      if (senders && senders.chats && Object.keys(senders.chats).length > 0) {
+        console.log('iOS fallback: found missed messages, processing now');
+        
+        // Process messages and update UI
+        await processChats(senders.chats, myAccount.keys);
+        await updateChatList(true);
+        
+        // Update open chat modal if needed
+        if (appendChatModal.address) {
+          appendChatModal();
+        }
+        
+        // Always update wallet view for iOS
+        await updateWalletView();
+        
+        // Force a UI update
+        forceIOSUpdate();
+      } else {
+        console.log('iOS fallback: no missed messages found');
+      }
+    } catch (error) {
+      console.error('Error in iOS WebSocket fallback:', error);
     }
   }
 
@@ -5888,6 +5968,12 @@ class WSManager {
   }
 
   disconnect() {
+    // Also clear the iOS polling interval
+    if (this.iosPollInterval) {
+      clearInterval(this.iosPollInterval);
+      this.iosPollInterval = null;
+    }
+    
     if (this.subscriptionTimeout) {
       clearTimeout(this.subscriptionTimeout);
       this.subscriptionTimeout = null;
@@ -5939,6 +6025,8 @@ class WSManager {
     // Process message immediately if we have an active connection
     if (this.connectionState === 'connected' && this.isSubscribed) {
       console.log('Connection active, processing notification and updating UI');
+      // Update our lastProcessedTimestamp for iOS fallback
+      this.lastProcessedTimestamp = data.timestamp;
       this.processNewMessage(data);
     } else {
       console.log('Connection not active, skipping message processing');
