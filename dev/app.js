@@ -807,6 +807,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('closeContactInfoModal').addEventListener('click', () => contactInfoModal.close());
     document.getElementById('handleSendMessage').addEventListener('click', handleSendMessage);
     
+    // Add refresh chat button handler
+    document.getElementById('refreshChatButton').addEventListener('click', async () => {
+        console.log('Manual chat refresh requested');
+        if (appendChatModal.address) {
+            await updateChatList(true);
+            appendChatModal.len = 0; // Reset to force refresh
+            appendChatModal();
+            showToast('Chat refreshed', 1000);
+            forceIOSUpdate();
+        }
+    });
+    
     // Add refresh balance button handler
     document.getElementById('refreshBalance').addEventListener('click', async () => {
 //        await updateWalletBalances();
@@ -973,6 +985,25 @@ function handleVisibilityChange(e) {
         // Reconnect WebSocket if needed
         if (wsManager && !wsManager.isConnected() && myAccount) {
             wsManager.connect();
+            
+            // Add slight delay to ensure connection is established
+            setTimeout(async () => {
+                // Force data refresh on iOS when app becomes visible
+                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+                if (isIOS && myAccount) {
+                    console.log('iOS detected, forcing data refresh after visibility change');
+                    await updateChatList(true);
+                    
+                    // Refresh chat modal if open
+                    if (appendChatModal.address) {
+                        appendChatModal.len = 0; // Reset to force refresh
+                        appendChatModal();
+                    }
+                }
+                
+                // Force reflow to ensure iOS repaints after visibility change
+                forceIOSUpdate();
+            }, 500);
         }
     }
 }
@@ -1357,6 +1388,9 @@ async function switchView(view) {
             button.classList.add('active');
         }
     });
+    
+    // Force reflow for iOS to ensure view transition is properly rendered
+    forceIOSUpdate();
 }
 
 // Update contacts list UI
@@ -1979,6 +2013,9 @@ console.log(5, i)
     appendChatModal.len = messages.length
     // Scroll to bottom
     messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
+    
+    // Force reflow to ensure iOS renders the updates
+    forceIOSUpdate();
 }
 appendChatModal.address = null
 appendChatModal.len = 0
@@ -4921,6 +4958,9 @@ function showToast(message, duration = 2000, type = "default") {
         // Show the toast
         requestAnimationFrame(() => {
             toast.classList.add('show');
+            
+            // Force iOS reflow to ensure toast is displayed
+            forceIOSUpdate();
         });
         
         // If duration is provided, auto-hide the toast
@@ -5894,9 +5934,28 @@ class WSManager {
         if (isIOS && appendChatModal.address) {
           appendChatModal();
         }
+        
+        // Force iOS reflow to ensure all UI updates are rendered
+        forceIOSUpdate();
       }
     } catch (error) {
       console.error('Error processing WebSocket message:', error);
     }
+  }
+}
+
+// Helper function to force UI updates on iOS
+function forceIOSUpdate() {
+  // Check if we're on iOS
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  
+  if (isIOS) {
+    // Force reflow/repaint
+    document.body.offsetHeight;
+    
+    // On iOS, sometimes multiple reflows are needed to ensure updates
+    setTimeout(() => {
+      document.body.offsetHeight;
+    }, 50);
   }
 }
