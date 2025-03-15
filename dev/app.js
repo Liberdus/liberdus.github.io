@@ -5867,21 +5867,32 @@ class WSManager {
       } else {
         console.log('No new chats found after WebSocket notification and retries');
       }
-      
+      console.log('messagesProcessed in processNewMessage', messagesProcessed);
       // Update the chat list UI to show unread counts
       // This is important to ensure the UI is updated with new messages
       if (messagesProcessed) {
         console.log('Updating chat list UI after WebSocket message processing');
+        
+        // Check if we're on iOS
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        console.log('isIOS', isIOS);
+        
+        // Update chatScreen if it's active OR we're on iOS
         const chatScreen = document.getElementById("chatScreen");
-        if (chatScreen && chatScreen.classList && chatScreen.classList.contains("active")) {
+        if (chatScreen && chatScreen.classList && chatScreen.classList.contains("active") || isIOS) {
           await updateChatList(true);
         }
         
-        // Also update wallet view if wallet screen is active
+        // Update wallet view if wallet screen is active OR we're on iOS
         const walletScreen = document.getElementById("walletScreen");
-        if (walletScreen && walletScreen.classList && walletScreen.classList.contains("active")) {
-          console.log('Wallet screen is active, updating wallet view after WebSocket notification');
+        if (walletScreen && walletScreen.classList && walletScreen.classList.contains("active") || isIOS) {
+          console.log('Wallet screen is active or iOS, updating wallet view');
           await updateWalletView();
+        }
+        
+        // Always update chat modal on iOS if it has data
+        if (isIOS && appendChatModal.address) {
+          appendChatModal();
         }
       }
     } catch (error) {
