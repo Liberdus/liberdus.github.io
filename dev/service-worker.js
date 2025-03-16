@@ -4,7 +4,7 @@ try {
   console.error('Failed to import log-utils.js:', e);
 }
 
-const SW_VERSION = '1.0.69';
+const SW_VERSION = '1.0.70';
 
 // Cache names with proper versioning
 const CACHE_VERSION = '1.0.0';
@@ -203,6 +203,14 @@ function getCacheStrategy(request) {
 
 // Fetch event - handle caching strategies
 self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+  
+  // Skip handling WebSocket connections
+  if (url.protocol === 'wss:' || url.protocol === 'ws:') {
+    console.log('[Service Worker] Bypassing WebSocket request:', url.href);
+    return; // Let the browser handle WebSocket connections directly
+  }
+  
   const strategy = getCacheStrategy(event.request);
   
   switch (strategy) {
@@ -314,6 +322,11 @@ async function networkOnly(request) {
 // Helper function to determine if a request should not be cached
 function shouldNotCache(request) {
   const url = new URL(request.url);
+  
+  // Don't cache WebSocket connections
+  if (url.protocol === 'wss:' || url.protocol === 'ws:') {
+    return true;
+  }
   
   // Don't cache API endpoints that are stored in IndexedDB
   // or contain sensitive/frequently changing data
