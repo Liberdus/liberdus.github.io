@@ -28,7 +28,7 @@ console.log(parseInt(myVersion.replace(/\D/g, '')), parseInt(newVersion.replace(
             alert('Updating to new version: ' + newVersion)
         }
         localStorage.setItem('version', newVersion); // Save new version
-        forceReload(['index.html','styles.css','app.js','lib.js', 'network.js'])
+        forceReload(['./', 'index.html','styles.css','app.js','lib.js', 'network.js', 'db.js', 'log-utils.js', 'service-worker.js', 'offline.html'])
         const newUrl = window.location.href
 //console.log('reloading', newUrl)
         window.location.replace(newUrl);
@@ -130,6 +130,8 @@ import { STORES, saveData, getData, addVersionToData, closeAllConnections } from
 const myHashKey = hex2bin('69fa4195670576c0160d660c3be36556ff8d504725be8a59b5a96509e0c994bc')
 const weiDigits = 18; 
 const wei = 10n**BigInt(weiDigits)
+const pollIntervalNormal = 30000 // in millisconds
+const pollIntervalChatting = 5000  // in millseconds
 //network.monitor.url = "http://test.liberdus.com:3000"    // URL of the monitor server
 //network.explorer.url = "http://test.liberdus.com:6001"   // URL of the chain explorer
 
@@ -516,11 +518,15 @@ async function handleCreateAccount(event) {
 
     requestNotificationPermission();
 
+    console.log('initializing WebSocket connection')
     // Initialize WebSocket connection
     if (!wsManager) {
+        console.log('new WSManager')
         wsManager = new WSManager();
     }
-    wsManager.connect();
+    if (!wsManager.isConnected){
+        wsManager.connect();
+    }
 
     // Close modal and proceed to app
     closeCreateAccountModal();
@@ -569,8 +575,10 @@ async function handleSignIn(event) {
 
     requestNotificationPermission();
 
+    console.log('initializing WebSocket connection')
     // Initialize WebSocket connection
     if (!wsManager) {
+        console.log('new WSManager')
         wsManager = new WSManager();
     }
     wsManager.connect();
@@ -696,6 +704,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const usernames = getAvailableUsernames()
     const hasAccounts = usernames.length > 0
 
+    if (!wsManager) {
+        console.log('new WSManager')
+        wsManager = new WSManager();
+    }
+/*     if (!wsManager.isConnected){
+        wsManager.connect();
+    } */
+
     const signInBtn = document.getElementById('signInButton');
     const createAccountBtn = document.getElementById('createAccountButton');
     const importAccountBtn = document.getElementById('importAccountButton');
@@ -806,36 +822,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('closeChatModal').addEventListener('click', closeChatModal);
     document.getElementById('closeContactInfoModal').addEventListener('click', () => contactInfoModal.close());
     document.getElementById('handleSendMessage').addEventListener('click', handleSendMessage);
-    
-    // Add refresh chat button handler
-    document.getElementById('refreshChatButton').addEventListener('click', async () => {
-        console.log('Manual chat refresh requested');
-        if (appendChatModal.address) {
-            // Save the current length before refreshing
-            const currentLength = appendChatModal.len;
-            
-            // Update the chat list to get any new messages
-            await updateChatList(true);
-            
-            // Only append new messages by keeping the current length
-            // rather than resetting to 0, which would cause all messages to be displayed again
-            appendChatModal();
-            
-            // Get the new message count after refresh
-            const messages = myData.contacts[appendChatModal.address].messages;
-            const newMessagesCount = Math.max(0, messages.length - currentLength);
-            
-            // Show appropriate toast based on whether new messages were found
-            if (newMessagesCount > 0) {
-                showToast(`Refreshed: ${newMessagesCount} new message${newMessagesCount > 1 ? 's' : ''}`, 1500, 'success');
-            } else {
-                showToast('No new messages', 1500, 'info');
-            }
-            
-            // Force iOS rendering update
-            forceIOSUpdate();
-        }
-    });
     
     // Add refresh balance button handler
     document.getElementById('refreshBalance').addEventListener('click', async () => {
@@ -1003,32 +989,6 @@ function handleVisibilityChange(e) {
         // Reconnect WebSocket if needed
         if (wsManager && !wsManager.isConnected() && myAccount) {
             wsManager.connect();
-            
-            // Add slight delay to ensure connection is established
-            setTimeout(async () => {
-                // Force data refresh on iOS when app becomes visible
-                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-                if (isIOS && myAccount) {
-                    Logger.log('iOS detected, forcing data refresh after visibility change');
-                    
-                    // Trigger immediate iOS fallback check if enabled
-                    if (wsManager && wsManager.isConnected()) {
-                        Logger.log('Triggering immediate iOS fallback check after visibility change');
-                        wsManager.processIOSFallback();
-                    }
-                    
-                    await updateChatList(true);
-                    
-                    // Refresh chat modal if open
-                    if (appendChatModal.address) {
-                        appendChatModal.len = 0; // Reset to force refresh
-                        appendChatModal();
-                    }
-                }
-                
-                // Force reflow to ensure iOS repaints after visibility change
-                forceIOSUpdate();
-            }, 500);
         }
     }
 }
@@ -1398,6 +1358,9 @@ async function switchView(view) {
     // Update lists when switching views
     if (view === 'chats') {
         await updateChatList('force');
+        if (isOnline) {
+            pollChatInterval(pollIntervalNormal)
+        }
     } else if (view === 'contacts') {
         await updateContactsList();
     } else if (view === 'wallet') {
@@ -1413,9 +1376,6 @@ async function switchView(view) {
             button.classList.add('active');
         }
     });
-    
-    // Force reflow for iOS to ensure view transition is properly rendered
-    forceIOSUpdate();
 }
 
 // Update contacts list UI
@@ -2009,6 +1969,9 @@ function openChatModal(address) {
     // Setup to update new messages
     appendChatModal.address = address
     appendChatModal.len = messages.length
+    if (isOnline) {
+        pollChatInterval(pollIntervalChatting) // poll for messages at a faster rate
+    }
 }
 
 function appendChatModal(){
@@ -2052,12 +2015,6 @@ function appendChatModal(){
     appendChatModal.len = messages.length
     // Scroll to bottom
     messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
-    
-    // Force reflow to ensure iOS renders the updates
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    if (isIOS) {
-        forceIOSUpdate();
-    }
 }
 appendChatModal.address = null
 appendChatModal.len = 0
@@ -2070,6 +2027,9 @@ function closeChatModal() {
     }
     appendChatModal.address = null
     appendChatModal.len = 0
+    if (isOnline) {
+        pollChatInterval(pollIntervalNormal) // back to polling at slower rate
+    }
 }
 
 function openReceiveModal() {
@@ -3839,6 +3799,31 @@ async function queryNetwork(url) {
         return null
     }
 }
+
+async function pollChatInterval(milliseconds) {
+    pollChats.nextPoll = milliseconds
+    pollChats()
+}
+
+async function pollChats(){
+    // only poll if IOS PWA is installed
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (!isIOS){ return }
+    if (pollChats.nextPoll < 100){ return } // can be used to stop polling; pollChatInterval(0)
+    const now = Date.now()
+    if (pollChats.lastPoll + pollChats.nextPoll <= now){
+        updateChatList()
+        if (document.getElementById('walletScreen').classList.contains('active')) { await updateWalletView() }
+        pollChats.lastPoll = now
+    }
+    if (pollChats.timer){ clearTimeout(pollChats.timer) }
+console.log('in pollChats setting timer', now, pollChats.nextPoll)
+    pollChats.timer = setTimeout(pollChats, pollChats.nextPoll)
+}
+pollChats.lastPoll = 0
+pollChats.nextPoll = 10000   // milliseconds between polls
+pollChats.timer = null
+
 async function getChats(keys) {  // needs to return the number of chats that need to be processed
 //console.log('keys', keys)
     if (! keys){ console.log('no keys in getChats'); return 0 }     // TODO don't require passing in keys
@@ -3873,12 +3858,6 @@ getChats.lastCall = 0
 
 // Actually payments also appear in the chats, so we can add these to
 async function processChats(chats, keys) {
-    // Check if we're on iOS for special handling
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    
-    // Track all notifications to batch them on iOS
-    const pendingNotifications = [];
-    
     for (let sender in chats) {
         const timestamp = myAccount.chatTimestamp || 0
         const res = await queryNetwork(`/messages/${chats[sender]}/${timestamp}`)
@@ -4064,34 +4043,15 @@ async function processChats(chats, keys) {
                     const senderName = contact.name || contact.username || `${from.slice(0,8)}...`
                     
                     if (added > 0) {
-                        // On iOS, batch notifications for better rendering
-                        if (isIOS) {
-                            pendingNotifications.push({
-                                message: `New message from ${senderName}`,
-                                type: 'info',
-                                duration: 3000
-                            });
-                        } else {
-                            showToast(`New message from ${senderName}`, 3000, 'info');
-                        }
+                        showToast(`New message from ${senderName}`, 3000, 'info');
                     }
                 }
             }
             
             // Show transfer notification even if no messages were added
             if (hasNewTransfer && !inActiveChatWithSender) {
-                const senderName = contact.name || contact.username || `${from.slice(0,8)}...`
-                
-                // On iOS, batch notifications for better rendering
-                if (isIOS) {
-                    pendingNotifications.push({
-                        message: `New transfer received from ${senderName}`,
-                        type: 'success',
-                        duration: 3000
-                    });
-                } else {
-                    showToast(`New transfer received from ${senderName}`, 3000, 'success');
-                }
+                const senderName = contact.name || contact.username || `${from.slice(0,8)}...`        
+                showToast(`New transfer received from ${senderName}`, 3000, 'success');
             }
             
             if (newTimestamp > 0){
@@ -4099,28 +4059,6 @@ async function processChats(chats, keys) {
                 myAccount.chatTimestamp = newTimestamp
             }
         }
-    }
-    
-    // On iOS, show notifications with a slight delay between each one
-    if (isIOS && pendingNotifications.length > 0) {
-        console.log(`Showing ${pendingNotifications.length} batched notifications on iOS`);
-        
-        // Force a view update first
-        forceIOSUpdate();
-        
-        // Show notifications with a delay between them
-        let delay = 300; // Start delay
-        pendingNotifications.forEach((notification, index) => {
-            setTimeout(() => {
-                showToast(notification.message, notification.duration, notification.type);
-                
-                // After the last notification, force one more update
-                if (index === pendingNotifications.length - 1) {
-                    setTimeout(forceIOSUpdate, 500);
-                }
-            }, delay);
-            delay += 800; // Increase delay for each subsequent notification
-        });
     }
 }
 
@@ -5037,14 +4975,6 @@ function createDisplayInfo(contact) {
 
 // Add this function before the ContactInfoModalManager class
 function showToast(message, duration = 2000, type = "default") {
-    // Pre-check iOS for special handling
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    
-    // Force a pre-update to ensure the DOM is ready
-    if (isIOS) {
-        document.body.offsetHeight;
-    }
-    
     // Create the toast in a single operation for reliability
     const toastContainer = document.getElementById('toastContainer');
     const toast = document.createElement('div');
@@ -5055,12 +4985,6 @@ function showToast(message, duration = 2000, type = "default") {
     const toastId = 'toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
     toast.id = toastId;
     
-    // On iOS, apply simpler hardware acceleration
-    if (isIOS) {
-        toast.style.transform = 'translate3d(0,0,0)';
-        toast.style.backfaceVisibility = 'hidden';
-    }
-    
     // Add to DOM
     toastContainer.appendChild(toast);
     
@@ -5070,12 +4994,6 @@ function showToast(message, duration = 2000, type = "default") {
     // Show with a slight delay to ensure rendering
     setTimeout(() => {
         toast.classList.add('show');
-        
-        // Force iOS update if needed
-        if (isIOS) {
-            forceIOSUpdate();
-        }
-        
         // Set hide timeout
         if (duration > 0) {
             setTimeout(() => {
@@ -5768,9 +5686,6 @@ class WSManager {
     this.maxReconnectDelay = 30000; // Maximum 30s delay
     this.subscriptionTimeout = null;
     this.connectionState = 'disconnected'; // disconnected, connecting, connected
-    this.lastProcessedTimestamp = 0;
-    this.iosPollInterval = null;
-    this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   }
 
   connect() {
@@ -5787,83 +5702,9 @@ class WSManager {
     try {
       this.ws = new WebSocket(network.websocket.url);
       this.setupEventHandlers();
-      
-      // Set up iOS-specific polling to ensure WebSocket events are processed
-      if (this.isIOS) {
-        Logger.log('iOS detected, setting up iOS fallback polling');
-        this.setupIOSFallback();
-      }
     } catch (error) {
         Logger.error('WebSocket connection error:', error);
       this.handleConnectionFailure();
-    }
-  }
-  
-  // New method to set up iOS fallback polling
-  setupIOSFallback() {
-    Logger.log('Setting up iOS fallback polling for WebSocket');
-    
-    // Clear any existing interval
-    if (this.iosPollInterval) {
-      clearInterval(this.iosPollInterval);
-    }
-    
-    // Set up periodic check every 5 seconds
-    this.iosPollInterval = setInterval(() => {
-      this.processIOSFallback();
-    }, 5000);
-  }
-  
-  // New method to process iOS fallback
-  async processIOSFallback() {
-    if (!this.isIOS || !this.isConnected() || !this.isSubscribed || !myAccount || !myAccount.keys) {
-      return;
-    }
-    
-    try {
-        Logger.log('iOS fallback: checking for missed WebSocket messages');
-      
-      // Get the current timestamp for comparison
-      const storedTimestamp = myAccount.chatTimestamp || 0;
-      
-      if (this.lastProcessedTimestamp === storedTimestamp) {
-        // No new timestamp since last check
-        console.log('iOS fallback: no new timestamp since last check');
-        Logger.log('iOS fallback: no new timestamp since last check');
-        return;
-      }
-      
-      // Update for next check
-      this.lastProcessedTimestamp = storedTimestamp;
-      
-      // Force a check for any missed messages
-      const accountAddress = longAddress(myAccount.keys.address);
-      const senders = await queryNetwork(`/account/${accountAddress}/chats/${storedTimestamp}`);
-      
-      if (senders && senders.chats && Object.keys(senders.chats).length > 0) {
-        console.log('iOS fallback: found missed messages, processing now');
-        Logger.log('iOS fallback: found missed messages, processing now');
-        // Process messages and update UI
-        await processChats(senders.chats, myAccount.keys);
-        await updateChatList(true);
-        
-        // Update open chat modal if needed
-        if (appendChatModal.address) {
-          appendChatModal();
-        }
-        
-        // Always update wallet view for iOS
-        await updateWalletView();
-        
-        // Force a UI update
-        forceIOSUpdate();
-      } else {
-        console.log('iOS fallback: no missed messages found');
-        Logger.log('iOS fallback: no missed messages found');
-      }
-    } catch (error) {
-      console.error('Error in iOS WebSocket fallback:', error);
-      Logger.error('Error in iOS WebSocket fallback:', error);
     }
   }
 
@@ -5989,12 +5830,6 @@ class WSManager {
   }
 
   disconnect() {
-    // Also clear the iOS polling interval
-    if (this.iosPollInterval) {
-      clearInterval(this.iosPollInterval);
-      this.iosPollInterval = null;
-    }
-    
     if (this.subscriptionTimeout) {
       clearTimeout(this.subscriptionTimeout);
       this.subscriptionTimeout = null;
@@ -6051,8 +5886,6 @@ class WSManager {
     if (this.connectionState === 'connected' && this.isSubscribed) {
       console.log('Connection active, processing notification and updating UI');
       Logger.log('Connection active, processing notification and updating UI');
-      // Update our lastProcessedTimestamp for iOS fallback
-      this.lastProcessedTimestamp = data.timestamp;
       this.processNewMessage(data);
     } else {
       console.log('Connection not active, skipping message processing');
@@ -6136,16 +5969,6 @@ class WSManager {
         
         // Force a wallet view update if needed - transfers affect the wallet
         await updateWalletView();
-        
-        // Force DOM updates on all platforms (not just iOS)
-        // This helps ensure toast notifications and UI changes are visible
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-        if (isIOS) {
-          forceIOSUpdate();
-        } else {
-          // Force reflow on non-iOS too, just not as aggressively
-          document.body.offsetHeight;
-        }
       } else {
         console.log('No new chats found after WebSocket notification and retries');
         Logger.log('No new chats found after WebSocket notification and retries');
@@ -6154,59 +5977,5 @@ class WSManager {
       console.error('Error processing WebSocket message:', error);
       Logger.error('Error processing WebSocket message:', error);
     }
-  }
-}
-
-// Helper function to force UI updates on iOS
-function forceIOSUpdate() {
-  // Check if we're on iOS
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-  
-  if (isIOS) {
-    console.log('Forcing iOS UI update');
-    Logger.log('Forcing iOS UI update');
-    // Force reflow/repaint with multiple approaches
-    
-    // 1. Standard reflow trigger
-    document.body.offsetHeight;
-    
-    // 2. Focus on important UI areas
-    const criticalElements = [
-      document.body,
-      document.getElementById('toastContainer'),
-      document.querySelector('.messages-container'),
-      document.querySelector('.toast-container')
-    ];
-    
-    // Force reflow on each critical element
-    criticalElements.forEach(el => {
-      if (el) {
-        // Force style recalculation
-        const currentZIndex = window.getComputedStyle(el).zIndex;
-        // Toggle a style property to force repaint
-        el.style.zIndex = (parseInt(currentZIndex || '0') + 1).toString();
-        el.offsetHeight; // Force reflow
-        el.style.zIndex = currentZIndex; // Restore
-      }
-    });
-    
-    // 3. Schedule additional reflows
-    setTimeout(() => {
-      document.body.offsetHeight;
-      
-      // Make sure toast container is properly updated
-      const toastContainer = document.getElementById('toastContainer');
-      if (toastContainer) {
-        // Force hardware acceleration
-        toastContainer.style.transform = 'translate3d(-50%, 0, 0)';
-        toastContainer.style.webkitTransform = 'translate3d(-50%, 0, 0)';
-        toastContainer.offsetHeight;
-      }
-    }, 50);
-    
-    // 4. One last refresh after a longer delay
-    setTimeout(() => {
-      document.body.offsetHeight;
-    }, 150);
   }
 }
