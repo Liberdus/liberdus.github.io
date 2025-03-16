@@ -5842,7 +5842,15 @@ function stopCamera() {
 }
 
 // WebSocket Manager Class
+/**
+ * WebSocket Manager Class
+ * Handles WebSocket connections, reconnection logic, and message processing for chat events.
+ * Maintains connection state and provides methods for subscribing to and processing chat notifications.
+ */
 class WSManager {
+  /**
+   * Initialize the WebSocket Manager with default configuration
+   */
   constructor() {
     this.ws = null;
     this.isSubscribed = false;
@@ -5854,9 +5862,11 @@ class WSManager {
     this.connectionState = 'disconnected'; // disconnected, connecting, connected
   }
 
+  /**
+   * Establish a WebSocket connection if one doesn't already exist
+   */
   connect() {
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
-      console.log('WebSocket already connecting or connected');
       return;
     }
 
@@ -5872,6 +5882,9 @@ class WSManager {
     }
   }
 
+  /**
+   * Set up event handlers for the WebSocket connection
+   */
   setupEventHandlers() {
     this.ws.onopen = () => {
       console.log('WebSocket connection established');
@@ -5898,11 +5911,7 @@ class WSManager {
         
         // Handle chat event messages
         if (data.account_id && data.timestamp) {
-          console.log('WebSocket notification received - New message available at timestamp:', data.timestamp);
           this.handleChatEvent(data);
-        } else {
-          // Log other types of messages for debugging
-          console.log('WebSocket received non-chat event message:', data);
         }
       } catch (error) {
         console.error('Error parsing WebSocket message:', error, event.data);
@@ -5925,14 +5934,15 @@ class WSManager {
     };
   }
 
+  /**
+   * Subscribe to chat events for the current account
+   */
   subscribe() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.log('Cannot subscribe: WebSocket not open');
       return;
     }
 
     if (this.isSubscribed) {
-      console.log('Already subscribed');
       return;
     }
 
@@ -5963,6 +5973,9 @@ class WSManager {
     }, 5000);
   }
 
+  /**
+   * Unsubscribe from chat events for the current account
+   */
   unsubscribe() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.isSubscribed) {
       return;
@@ -5981,6 +5994,9 @@ class WSManager {
     this.isSubscribed = false;
   }
 
+  /**
+   * Disconnect the WebSocket connection and clean up resources
+   */
   disconnect() {
     if (this.subscriptionTimeout) {
       clearTimeout(this.subscriptionTimeout);
@@ -5994,9 +6010,11 @@ class WSManager {
     
     this.isSubscribed = false;
     this.connectionState = 'disconnected';
-    console.log('WebSocket disconnected');
   }
 
+  /**
+   * Handle connection failures with exponential backoff retry logic
+   */
   handleConnectionFailure() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.log('Maximum reconnection attempts reached');
@@ -6010,34 +6028,45 @@ class WSManager {
     setTimeout(() => this.connect(), delay);
   }
 
+  /**
+   * Reconnect by disconnecting and then connecting again
+   */
   reconnect() {
     this.disconnect();
     this.connect();
   }
 
+  /**
+   * Check if the WebSocket connection is currently open
+   * @returns {boolean} True if connected, false otherwise
+   */
   isConnected() {
     return this.ws && this.ws.readyState === WebSocket.OPEN;
   }
 
+  /**
+   * Handle incoming chat event notifications
+   * @param {Object} data - The chat event data
+   */
   handleChatEvent(data) {
     // Skip if timestamp is older than or equal to what we already have
     const storedTimestamp = myAccount.chatTimestamp || 0;
     
     if (data.timestamp <= storedTimestamp) {
-      console.log('Skipping WebSocket notification - Already processed timestamp:', data.timestamp, '<=', storedTimestamp);
       return;
     }
 
-    console.log('Processing WebSocket notification for new message at timestamp:', data.timestamp, '(stored timestamp:', storedTimestamp, ')');
     // Process message immediately if we have an active connection
     if (this.connectionState === 'connected' && this.isSubscribed) {
-      console.log('Connection active, processing notification and updating UI');
       this.processNewMessage(data);
-    } else {
-      console.log('Connection not active, skipping message processing');
     }
   }
 
+  /**
+   * Process a new chat message notification
+   * Fetches the actual chat data and updates the UI accordingly
+   * @param {Object} data - The notification data containing timestamp
+   */
   async processNewMessage(data) {
     if (!myAccount || !myAccount.keys) {
       console.error('Cannot process message: No account available');
@@ -6052,8 +6081,6 @@ class WSManager {
       const wsTimestamp = data.timestamp;
       // Get the stored timestamp for comparison
       const storedTimestamp = myAccount.chatTimestamp || 0;
-      
-      console.log('Fetching chat information - WebSocket timestamp:', wsTimestamp, 'Stored timestamp:', storedTimestamp);
       
       // Get the latest chat information right away - no delay needed
       const accountAddress = longAddress(myAccount.keys.address);
@@ -6070,17 +6097,14 @@ class WSManager {
       
       // Always update the timestamp to avoid processing the same notification multiple times
       if (wsTimestamp > storedTimestamp) {
-        console.log('Updating chat timestamp from', storedTimestamp, 'to', wsTimestamp);
         myAccount.chatTimestamp = wsTimestamp;
       }
       
       // Remember the active chat address for notifications
       const activeChatAddress = appendChatModal.address;
-      console.log('Current active chat address:', activeChatAddress);
       
       // Process the new messages if we have chats
       if (senders && senders.chats && Object.keys(senders.chats).length > 0) {
-        console.log('Processing chats from WebSocket notification:', senders.chats);
         // Process the chats using the existing function
         await processChats(senders.chats, myAccount.keys);
         
@@ -6090,7 +6114,6 @@ class WSManager {
         
         // If the chat modal is open, always update it with new messages
         if (activeChatAddress) {
-          console.log('Chat modal is open, updating with new messages for:', activeChatAddress);
           // Make sure modal updates with new messages
           const chatModal = document.getElementById('chatModal');
           if (chatModal && chatModal.classList.contains('active')) {
@@ -6108,13 +6131,9 @@ class WSManager {
         
         // Force a wallet view update - transfers affect the wallet
         await updateWalletView();
-
-      } else {
-        console.log('No new chats found after WebSocket notification and retries');
       }
     } catch (error) {
       console.error('Error processing WebSocket message:', error);
     }
   }
 }
-
