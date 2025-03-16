@@ -575,12 +575,12 @@ async function handleSignIn(event) {
 
     requestNotificationPermission();
 
-    console.log('initializing WebSocket connection')
     // Initialize WebSocket connection
     if (!wsManager) {
         console.log('new WSManager')
         wsManager = new WSManager();
     }
+    console.log('connecting to WSManager')
     wsManager.connect();
 
     // Close modal and proceed to app
@@ -678,9 +678,10 @@ function checkIsInstalledPWA() {
 
 // Load saved account data and update chat list on page load
 document.addEventListener('DOMContentLoaded', async () => {
-    const isInstalledPWA = checkIsInstalledPWA();
+    await checkVersion()  // version needs to be checked before anything else happens
     
     // Initialize service worker only if running as installed PWA
+    const isInstalledPWA = checkIsInstalledPWA();
     if (isInstalledPWA && 'serviceWorker' in navigator) {
         await registerServiceWorker();
         setupServiceWorkerMessaging(); 
@@ -691,7 +692,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('Running in web-only mode, skipping service worker initialization');
     }
 
-    checkVersion()
     document.getElementById('versionDisplay').textContent = myVersion + ' '+version;
     document.getElementById('networkNameDisplay').textContent = network.name;
 
@@ -705,12 +705,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const hasAccounts = usernames.length > 0
 
     if (!wsManager) {
-        console.log('new WSManager')
         wsManager = new WSManager();
     }
-/*     if (!wsManager.isConnected){
-        wsManager.connect();
-    } */
 
     const signInBtn = document.getElementById('signInButton');
     const createAccountBtn = document.getElementById('createAccountButton');
@@ -931,6 +927,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             displayContactResults(results, searchText);
         }
     }, (searchText) => searchText.length === 1 ? 600 : 300)); // Dynamic wait time
+
+
+    // Omar added
+    document.getElementById('scanQRButton').addEventListener('click', openQRScanModal);
+    document.getElementById('closeQRScanModal').addEventListener('click', closeQRScanModal);    
 
     setupAddToHomeScreen()
 });
@@ -1986,22 +1987,8 @@ function appendChatModal(){
     const modal = document.getElementById('chatModal');
     const messagesList = modal.querySelector('.messages-list');
 
-    // Ensure the modal is active before trying to add messages
-    const isActive = modal.classList.contains('active');
-    console.log('Chat modal active:', isActive, 'Current msgs:', appendChatModal.len, 'New msgs:', messages.length);
-    Logger.log('Chat modal active:', isActive, 'Current msgs:', appendChatModal.len, 'New msgs:', messages.length);
-    
-    if (!isActive) {
-        console.log('Chat modal not active, not appending messages');
-        Logger.log('Chat modal not active, not appending messages');
-        // Update the length counter to avoid showing "old" messages as new when the modal opens
-        appendChatModal.len = messages.length;
-        return;
-    }
-
     for (let i=appendChatModal.len; i<messages.length; i++) {
-        console.log('Appending new message:', i);
-        Logger.log('Appending new message:', i);
+        console.log(5, i)
         const m = messages[i]
         m.type = m.my ? 'sent' : 'received'
         // Add message to UI
@@ -2374,7 +2361,9 @@ function openSendModal() {
     const submitButton = document.querySelector('#sendForm button[type="submit"]');
     usernameAvailable.style.display = 'none';
     submitButton.disabled = true;
+    openQRScanModal.fill = fillPaymentFromQR  // set function to handle filling the payment form from QR data
     
+/* This is now done in the DOMContentLoaded funtion
     // Add QR code scan button handler
     const scanButton = document.getElementById('scanQRButton');
     // Remove any existing event listeners first
@@ -2382,7 +2371,8 @@ function openSendModal() {
     scanButton.parentNode.replaceChild(newScanButton, scanButton);
     newScanButton.addEventListener('click', scanQRCode);
     console.log("Added click event listener to scan QR button");
-    
+ */
+
     // Check availability on input changes
     let checkTimeout;
     usernameInput.addEventListener('input', (e) => {
@@ -2437,8 +2427,40 @@ function openSendModal() {
     updateSendAddresses();
 }
 
+// Function to handle QR code scanning Omar
+function openQRScanModal() {
+    const modal = document.getElementById('qrScanModal');
+    modal.classList.add('active');
+    startCamera(openQRScanModal.fill)
+}
+openQRScanModal.fill = null
+
+function closeQRScanModal(){
+    document.getElementById('qrScanModal').classList.remove('active');
+    stopCamera()
+}
+
+function fillPaymentFromQR(data){
+    console.log('in fill', data)
+    data = data.replace('liberdus://', '')
+    const paymentData = JSON.parse(atob(data))
+    console.log("Read payment data:", JSON.stringify(paymentData, null, 2));
+    if (paymentData.username){
+        document.getElementById('sendToAddress').value = paymentData.username
+    }
+    if (paymentData.amount){
+        document.getElementById('sendAmount').value = paymentData.amount
+    }
+    if (paymentData.memo){
+        document.getElementById('sendMemo').value = paymentData.memo
+    }
+    // Trigger username validation
+    document.getElementById('sendToAddress').dispatchEvent(new Event('input'));
+}
+
+// this was the old scanQRCode function; not needed anymore
 // Function to handle QR code scanning
-async function scanQRCode() {
+async function scanQRCodeOld() {
     try {
         console.log("scanQRCode function called");
         
@@ -3809,6 +3831,7 @@ async function pollChats(){
     // only poll if IOS PWA is installed
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     if (!isIOS){ return }
+
     if (pollChats.nextPoll < 100){ return } // can be used to stop polling; pollChatInterval(0)
     const now = Date.now()
     if (pollChats.lastPoll + pollChats.nextPoll <= now){
@@ -4975,7 +4998,6 @@ function createDisplayInfo(contact) {
 
 // Add this function before the ContactInfoModalManager class
 function showToast(message, duration = 2000, type = "default") {
-    // Create the toast in a single operation for reliability
     const toastContainer = document.getElementById('toastContainer');
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
@@ -4985,10 +5007,9 @@ function showToast(message, duration = 2000, type = "default") {
     const toastId = 'toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
     toast.id = toastId;
     
-    // Add to DOM
     toastContainer.appendChild(toast);
     
-    // Force reflow before showing
+    // Force reflow to enable transition
     toast.offsetHeight;
     
     // Show with a slight delay to ensure rendering
@@ -5675,6 +5696,151 @@ function handleGatewayForm(event) {
     closeAddEditGatewayForm();
 }
 
+async function startCamera() {
+    const video = document.getElementById('video');
+    const canvasElement = document.getElementById('canvas');
+    const canvas = canvasElement.getContext('2d', { willReadFrequently: true }); // Optimized for frequent getImageData calls
+    const scanHighlight = document.getElementById('scan-highlight');
+    try {
+        // Stop any existing stream
+        if (startCamera.stream) {
+            stopCamera();
+        }
+        
+        // Hide previous results
+//        resultContainer.classList.add('hidden');
+        
+//        statusMessage.textContent = 'Accessing camera...';
+        
+        // Request camera access
+        startCamera.stream = await navigator.mediaDevices.getUserMedia({
+            video: { 
+                facingMode: 'environment', // Use back camera
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            },
+            audio: false
+        });
+        
+        // Connect the camera stream to the video element
+        video.srcObject = startCamera.stream;
+        video.setAttribute('playsinline', true); // required for iOS Safari
+        
+        // When video is ready to play
+        video.onloadedmetadata = function() {
+            video.play();
+            
+            // Enable scanning and update button
+            startCamera.scanning = true;
+//            toggleButton.textContent = 'Stop Camera';
+            
+            // Start scanning for QR codes
+            // Use interval instead of requestAnimationFrame for better control over scan frequency
+            startCamera.scanInterval = setInterval(readQRCode, 100); // scan every 100ms (10 times per second)
+            
+//            statusMessage.textContent = 'Camera active. Point at a QR code.';
+        };
+    } catch (error) {
+        console.error('Error accessing camera:', error);
+//        statusMessage.textContent = `Camera error: ${error.message}`;
+    }
+}
+startCamera.stream = null;
+startCamera.scanning = false;
+startCamera.scanInterval = null;
+        
+
+function readQRCode(){
+    if (!startCamera.scanning) return;
+
+    // Check if video is ready for capture
+    const video = document.getElementById('video');
+    const canvasElement = document.getElementById('canvas');
+    const canvas = canvasElement.getContext('2d', { willReadFrequently: true }); // Optimized for frequent getImageData calls
+
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        // Set canvas size to match video
+        canvasElement.height = video.videoHeight;
+        canvasElement.width = video.videoWidth;
+        
+        // Draw video frame to canvas
+        canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+        
+        // Get image data for QR processing
+        const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
+        
+        try {
+            // Process image with jsQR
+            const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: "dontInvert",
+            });
+            
+            // If QR code found
+            if (code) {
+                console.log("QR Code detected:", code.data);
+                handleSuccessfulScan(code.data);
+            }
+        } catch (error) {
+            console.error('QR scanning error:', error);
+        }
+    }
+}
+
+// Handle successful scan
+function handleSuccessfulScan(data) {
+    if (! data.match(/^liberdus:\/\//)){ return }  // should start with liberdus://
+    const scanHighlight = document.getElementById('scan-highlight');
+    // Stop scanning
+    if (startCamera.scanInterval) {
+        clearInterval(startCamera.scanInterval);
+        startCamera.scanInterval = null;
+    }
+    
+    startCamera.scanning = false;
+    
+    // Stop the camera
+    stopCamera();
+    
+/*
+    // Show highlight effect
+    scanHighlight.classList.add('active');
+    setTimeout(() => {
+        scanHighlight.classList.remove('active');
+    }, 500);
+*/
+
+    // Display the result
+//    qrResult.textContent = data;
+//    resultContainer.classList.remove('hidden');
+    console.log(data) 
+    if (openQRScanModal.fill){
+        openQRScanModal.fill(data)
+    }
+
+    closeQRScanModal()
+
+    // Update status
+//    statusMessage.textContent = 'QR code detected! Camera stopped.';
+}
+
+// Stop camera
+function stopCamera() {
+    const video = document.getElementById('video');
+    if (startCamera.scanInterval) {
+        clearInterval(startCamera.scanInterval);
+        startCamera.scanInterval = null;
+    }
+    
+    if (startCamera.stream) {
+        startCamera.stream.getTracks().forEach(track => track.stop());
+        startCamera.stream = null;
+        video.srcObject = null;
+        startCamera.scanning = false;
+//        toggleButton.textContent = 'Start Camera';
+//        statusMessage.textContent = 'Camera stopped.';
+    }
+}
+
 // WebSocket Manager Class
 class WSManager {
   constructor() {
@@ -5691,19 +5857,17 @@ class WSManager {
   connect() {
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
       console.log('WebSocket already connecting or connected');
-      Logger.log('WebSocket already connecting or connected');
       return;
     }
 
     this.connectionState = 'connecting';
     console.log('Connecting to WebSocket server:', network.websocket.url);
-    Logger.log('Connecting to WebSocket server:', network.websocket.url);
     
     try {
       this.ws = new WebSocket(network.websocket.url);
       this.setupEventHandlers();
     } catch (error) {
-        Logger.error('WebSocket connection error:', error);
+      console.error('WebSocket connection error:', error);
       this.handleConnectionFailure();
     }
   }
@@ -5711,7 +5875,6 @@ class WSManager {
   setupEventHandlers() {
     this.ws.onopen = () => {
       console.log('WebSocket connection established');
-      Logger.log('WebSocket connection established');
       this.connectionState = 'connected';
       this.reconnectAttempts = 0;
       this.reconnectDelay = 1000;
@@ -5725,7 +5888,6 @@ class WSManager {
         // Handle subscription confirmation
         if (data.result === true && data.account_id) {
           console.log('Subscription confirmed for account:', data.account_id);
-          Logger.log('Subscription confirmed for account:', data.account_id);
           this.isSubscribed = true;
           if (this.subscriptionTimeout) {
             clearTimeout(this.subscriptionTimeout);
@@ -5737,22 +5899,18 @@ class WSManager {
         // Handle chat event messages
         if (data.account_id && data.timestamp) {
           console.log('WebSocket notification received - New message available at timestamp:', data.timestamp);
-          Logger.log('WebSocket notification received - New message available at timestamp:', data.timestamp);
           this.handleChatEvent(data);
         } else {
           // Log other types of messages for debugging
           console.log('WebSocket received non-chat event message:', data);
-          Logger.log('WebSocket received non-chat event message:', data);
         }
       } catch (error) {
         console.error('Error parsing WebSocket message:', error, event.data);
-        Logger.error('Error parsing WebSocket message:', error, event.data);
       }
     };
 
     this.ws.onclose = (event) => {
       console.log('WebSocket connection closed:', event.code, event.reason);
-      Logger.log('WebSocket connection closed:', event.code, event.reason);
       this.connectionState = 'disconnected';
       this.isSubscribed = false;
       
@@ -5763,7 +5921,6 @@ class WSManager {
 
     this.ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      Logger.error('WebSocket error:', error);
       this.connectionState = 'disconnected';
     };
   }
@@ -5771,7 +5928,6 @@ class WSManager {
   subscribe() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.log('Cannot subscribe: WebSocket not open');
-      Logger.log('Cannot subscribe: WebSocket not open');
       return;
     }
 
@@ -5782,7 +5938,6 @@ class WSManager {
 
     if (!myAccount || !myAccount.keys || !myAccount.keys.address) {
       console.error('Cannot subscribe: No account address available');
-      Logger.error('Cannot subscribe: No account address available');
       return;
     }
 
@@ -5798,13 +5953,11 @@ class WSManager {
     };
 
     console.log('Subscribing to chat events');
-    Logger.log('Subscribing to chat events');
     this.ws.send(JSON.stringify(subscribeMsg));
     
     // Set timeout for subscription confirmation
     this.subscriptionTimeout = setTimeout(() => {
       console.error('Subscription confirmation timeout');
-      Logger.error('Subscription confirmation timeout');
       this.isSubscribed = false;
       this.reconnect();
     }, 5000);
@@ -5824,7 +5977,6 @@ class WSManager {
     };
 
     console.log('Unsubscribing from chat events');
-    Logger.log('Unsubscribing from chat events');
     this.ws.send(JSON.stringify(unsubscribeMsg));
     this.isSubscribed = false;
   }
@@ -5843,13 +5995,11 @@ class WSManager {
     this.isSubscribed = false;
     this.connectionState = 'disconnected';
     console.log('WebSocket disconnected');
-    Logger.log('WebSocket disconnected');
   }
 
   handleConnectionFailure() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.log('Maximum reconnection attempts reached');
-      Logger.log('Maximum reconnection attempts reached');
       return;
     }
 
@@ -5857,7 +6007,6 @@ class WSManager {
     const delay = Math.min(this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1), this.maxReconnectDelay);
     
     console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-    Logger.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
     setTimeout(() => this.connect(), delay);
   }
 
@@ -5876,27 +6025,22 @@ class WSManager {
     
     if (data.timestamp <= storedTimestamp) {
       console.log('Skipping WebSocket notification - Already processed timestamp:', data.timestamp, '<=', storedTimestamp);
-      Logger.log('Skipping WebSocket notification - Already processed timestamp:', data.timestamp, '<=', storedTimestamp);
       return;
     }
 
     console.log('Processing WebSocket notification for new message at timestamp:', data.timestamp, '(stored timestamp:', storedTimestamp, ')');
-    Logger.log('Processing WebSocket notification for new message at timestamp:', data.timestamp, '(stored timestamp:', storedTimestamp, ')');
     // Process message immediately if we have an active connection
     if (this.connectionState === 'connected' && this.isSubscribed) {
       console.log('Connection active, processing notification and updating UI');
-      Logger.log('Connection active, processing notification and updating UI');
       this.processNewMessage(data);
     } else {
       console.log('Connection not active, skipping message processing');
-      Logger.log('Connection not active, skipping message processing');
     }
   }
 
   async processNewMessage(data) {
     if (!myAccount || !myAccount.keys) {
       console.error('Cannot process message: No account available');
-      Logger.error('Cannot process message: No account available');
       return;
     }
 
@@ -5910,7 +6054,6 @@ class WSManager {
       const storedTimestamp = myAccount.chatTimestamp || 0;
       
       console.log('Fetching chat information - WebSocket timestamp:', wsTimestamp, 'Stored timestamp:', storedTimestamp);
-      Logger.log('Fetching chat information - WebSocket timestamp:', wsTimestamp, 'Stored timestamp:', storedTimestamp);
       
       // Get the latest chat information right away - no delay needed
       const accountAddress = longAddress(myAccount.keys.address);
@@ -5919,7 +6062,6 @@ class WSManager {
       // Retry logic for empty responses - just try once more for speed
       if (!senders || !senders.chats || Object.keys(senders.chats).length === 0) {
         console.log(`No chats found, retrying...`);
-        Logger.log(`No chats found, retrying...`);
         // Brief delay before retry
         await new Promise(resolve => setTimeout(resolve, 300));
         // Retry the query
@@ -5929,7 +6071,6 @@ class WSManager {
       // Always update the timestamp to avoid processing the same notification multiple times
       if (wsTimestamp > storedTimestamp) {
         console.log('Updating chat timestamp from', storedTimestamp, 'to', wsTimestamp);
-        Logger.log('Updating chat timestamp from', storedTimestamp, 'to', wsTimestamp);
         myAccount.chatTimestamp = wsTimestamp;
       }
       
@@ -5940,7 +6081,6 @@ class WSManager {
       // Process the new messages if we have chats
       if (senders && senders.chats && Object.keys(senders.chats).length > 0) {
         console.log('Processing chats from WebSocket notification:', senders.chats);
-        Logger.log('Processing chats from WebSocket notification:', senders.chats);
         // Process the chats using the existing function
         await processChats(senders.chats, myAccount.keys);
         
@@ -5951,7 +6091,6 @@ class WSManager {
         // If the chat modal is open, always update it with new messages
         if (activeChatAddress) {
           console.log('Chat modal is open, updating with new messages for:', activeChatAddress);
-          Logger.log('Chat modal is open, updating with new messages for:', activeChatAddress);
           // Make sure modal updates with new messages
           const chatModal = document.getElementById('chatModal');
           if (chatModal && chatModal.classList.contains('active')) {
@@ -5967,15 +6106,15 @@ class WSManager {
           }
         }
         
-        // Force a wallet view update if needed - transfers affect the wallet
+        // Force a wallet view update - transfers affect the wallet
         await updateWalletView();
+
       } else {
         console.log('No new chats found after WebSocket notification and retries');
-        Logger.log('No new chats found after WebSocket notification and retries');
       }
     } catch (error) {
       console.error('Error processing WebSocket message:', error);
-      Logger.error('Error processing WebSocket message:', error);
     }
   }
 }
+
