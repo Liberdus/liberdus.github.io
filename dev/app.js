@@ -3828,9 +3828,9 @@ async function pollChatInterval(milliseconds) {
 }
 
 async function pollChats(){
-    // only poll if IOS PWA is installed
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    if (!isIOS){ return }
+    // skip polling if IOS PWA is installed or if ws is connected
+    if (!isIOS || wsManager.isConnected()){ return }
 
     if (pollChats.nextPoll < 100){ return } // can be used to stop polling; pollChatInterval(0)
     const now = Date.now()
