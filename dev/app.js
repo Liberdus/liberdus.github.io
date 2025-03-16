@@ -518,8 +518,12 @@ async function handleCreateAccount(event) {
 
     // Initialize WebSocket connection
     if (!wsManager) {
+        console.log('initializing wsManager');
+        Logger.log('initializing wsManager');
         wsManager = new WSManager();
     }
+    console.log('connecting wsManager');
+    Logger.log('connecting wsManager');
     wsManager.connect();
 
     // Close modal and proceed to app
@@ -683,6 +687,30 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('Running in web-only mode, skipping service worker initialization');
     }
 
+    // Add focus event listener for iOS PWA WebSocket reconnection
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isIOS && isInstalledPWA) {
+        window.addEventListener('focus', () => {
+            console.log('Window focus event detected on iOS PWA');
+            Logger.log('Window focus event detected on iOS PWA');
+            
+            if (wsManager && myAccount) {
+                console.log('Focus event: forcing WebSocket reconnection');
+                Logger.log('Focus event: forcing WebSocket reconnection');
+                wsManager.disconnect();
+                setTimeout(() => wsManager.connect(), 500);
+                
+                // Force data refresh
+                setTimeout(async () => {
+                    await updateChatList(true);
+                    if (appendChatModal.address) {
+                        appendChatModal();
+                    }
+                }, 1500);
+            }
+        });
+    }
+
     checkVersion()
     document.getElementById('versionDisplay').textContent = myVersion + ' '+version;
     document.getElementById('networkNameDisplay').textContent = network.name;
@@ -831,9 +859,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else {
                 showToast('No new messages', 1500, 'info');
             }
-            
-            // Force iOS rendering update
-            forceIOSUpdate();
         }
     });
     
@@ -992,6 +1017,12 @@ console.log('stop back button')
 function handleVisibilityChange(e) {
     console.log('in handleVisibilityChange', document.visibilityState);
     Logger.log('in handleVisibilityChange', document.visibilityState);
+    
+    // Detect iOS and PWA status
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isPWA = window.matchMedia('(display-mode: standalone)').matches || 
+                 window.navigator.standalone;
+    
     if (document.visibilityState === 'hidden') {
         saveState();
         Logger.saveState();
@@ -1000,35 +1031,37 @@ function handleVisibilityChange(e) {
             return;
         }
     } else if (document.visibilityState === 'visible') {
-        // Reconnect WebSocket if needed
-        if (wsManager && !wsManager.isConnected() && myAccount) {
-            wsManager.connect();
+        // Special handling for iOS PWAs
+        if (isIOS && isPWA && myAccount) {
+            console.log('iOS PWA detected, forcing WebSocket reconnection');
+            Logger.log('iOS PWA detected, forcing WebSocket reconnection');
             
-            // Add slight delay to ensure connection is established
-            setTimeout(async () => {
-                // Force data refresh on iOS when app becomes visible
-                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-                if (isIOS && myAccount) {
-                    Logger.log('iOS detected, forcing data refresh after visibility change');
-                    
-                    // Trigger immediate iOS fallback check if enabled
-                    if (wsManager && wsManager.isConnected()) {
-                        Logger.log('Triggering immediate iOS fallback check after visibility change');
-                        wsManager.processIOSFallback();
-                    }
-                    
-                    await updateChatList(true);
-                    
-                    // Refresh chat modal if open
-                    if (appendChatModal.address) {
-                        appendChatModal.len = 0; // Reset to force refresh
-                        appendChatModal();
-                    }
-                }
+            if (wsManager) {
+                // Force disconnect first
+                wsManager.unsubscribe();
+                wsManager.disconnect();
                 
-                // Force reflow to ensure iOS repaints after visibility change
-                forceIOSUpdate();
-            }, 500);
+                // Reconnect with a slight delay
+                setTimeout(() => {
+                    wsManager.connect();
+                    
+                    // Force data refresh after reconnection
+                    setTimeout(async () => {
+                        console.log('iOS PWA: Forcing data refresh after visibility change');
+                        Logger.log('iOS PWA: Forcing data refresh after visibility change');
+                        await updateChatList(true);
+                        
+                        // Refresh chat modal if open
+                        if (appendChatModal.address) {
+                            appendChatModal.len = 0; // Reset to force refresh
+                            appendChatModal();
+                        }
+                    }, 1000);
+                }, 500);
+            }
+        } else if (wsManager && !wsManager.isConnected() && myAccount) {
+            // Normal reconnection for other platforms
+            wsManager.connect();
         }
     }
 }
@@ -1413,9 +1446,6 @@ async function switchView(view) {
             button.classList.add('active');
         }
     });
-    
-    // Force reflow for iOS to ensure view transition is properly rendered
-    forceIOSUpdate();
 }
 
 // Update contacts list UI
@@ -2023,19 +2053,6 @@ function appendChatModal(){
     const modal = document.getElementById('chatModal');
     const messagesList = modal.querySelector('.messages-list');
 
-    // Ensure the modal is active before trying to add messages
-    const isActive = modal.classList.contains('active');
-    console.log('Chat modal active:', isActive, 'Current msgs:', appendChatModal.len, 'New msgs:', messages.length);
-    Logger.log('Chat modal active:', isActive, 'Current msgs:', appendChatModal.len, 'New msgs:', messages.length);
-    
-    if (!isActive) {
-        console.log('Chat modal not active, not appending messages');
-        Logger.log('Chat modal not active, not appending messages');
-        // Update the length counter to avoid showing "old" messages as new when the modal opens
-        appendChatModal.len = messages.length;
-        return;
-    }
-
     for (let i=appendChatModal.len; i<messages.length; i++) {
         console.log('Appending new message:', i);
         Logger.log('Appending new message:', i);
@@ -2052,12 +2069,6 @@ function appendChatModal(){
     appendChatModal.len = messages.length
     // Scroll to bottom
     messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
-    
-    // Force reflow to ensure iOS renders the updates
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    if (isIOS) {
-        forceIOSUpdate();
-    }
 }
 appendChatModal.address = null
 appendChatModal.len = 0
@@ -3875,9 +3886,14 @@ getChats.lastCall = 0
 async function processChats(chats, keys) {
     // Check if we're on iOS for special handling
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isPWA = window.matchMedia('(display-mode: standalone)').matches || 
+                 window.navigator.standalone;
     
-    // Track all notifications to batch them on iOS
-    const pendingNotifications = [];
+    // Log device information for debugging
+    if (isIOS && isPWA) {
+        console.log('Processing chats on iOS PWA - WebSocket may be unreliable');
+        Logger.log('Processing chats on iOS PWA - WebSocket may be unreliable');
+    }
     
     for (let sender in chats) {
         const timestamp = myAccount.chatTimestamp || 0
@@ -3892,10 +3908,8 @@ async function processChats(chats, keys) {
             let newTimestamp = 0
             let hasNewTransfer = false;
             
-            // This check determines if we're currently chatting with the sender
-            // We ONLY want to avoid notifications if we're actively viewing this exact chat
-            const inActiveChatWithSender = appendChatModal.address === from && 
-                document.getElementById('chatModal').classList.contains('active');
+            // Don't show notifications if we're already in chat with this person
+            const inActiveChatWithSender = appendChatModal.address === from;
             
             for (let i in res.messages){
                 const tx = res.messages[i] // the messages are actually the whole tx
@@ -4057,23 +4071,12 @@ async function processChats(chats, keys) {
                     myData.chats.splice(insertIndex, 0, chatUpdate);
                 }
                 
-                // Show toast notification for new messages
-                // Only suppress notification if we're ACTIVELY viewing this chat
+                // Show toast notification for new messages if we're not already in chat with this person
                 if (!inActiveChatWithSender) {
                     // Get name of sender
                     const senderName = contact.name || contact.username || `${from.slice(0,8)}...`
-                    
                     if (added > 0) {
-                        // On iOS, batch notifications for better rendering
-                        if (isIOS) {
-                            pendingNotifications.push({
-                                message: `New message from ${senderName}`,
-                                type: 'info',
-                                duration: 3000
-                            });
-                        } else {
-                            showToast(`New message from ${senderName}`, 3000, 'info');
-                        }
+                        showToast(`New message from ${senderName}`, 3000, 'info');
                     }
                 }
             }
@@ -4081,47 +4084,14 @@ async function processChats(chats, keys) {
             // Show transfer notification even if no messages were added
             if (hasNewTransfer && !inActiveChatWithSender) {
                 const senderName = contact.name || contact.username || `${from.slice(0,8)}...`
-                
-                // On iOS, batch notifications for better rendering
-                if (isIOS) {
-                    pendingNotifications.push({
-                        message: `New transfer received from ${senderName}`,
-                        type: 'success',
-                        duration: 3000
-                    });
-                } else {
-                    showToast(`New transfer received from ${senderName}`, 3000, 'success');
+                showToast(`New transfer received from ${senderName}`, 3000, 'success');
                 }
             }
-            
             if (newTimestamp > 0){
                 // Update the timestamp
                 myAccount.chatTimestamp = newTimestamp
             }
         }
-    }
-    
-    // On iOS, show notifications with a slight delay between each one
-    if (isIOS && pendingNotifications.length > 0) {
-        console.log(`Showing ${pendingNotifications.length} batched notifications on iOS`);
-        
-        // Force a view update first
-        forceIOSUpdate();
-        
-        // Show notifications with a delay between them
-        let delay = 300; // Start delay
-        pendingNotifications.forEach((notification, index) => {
-            setTimeout(() => {
-                showToast(notification.message, notification.duration, notification.type);
-                
-                // After the last notification, force one more update
-                if (index === pendingNotifications.length - 1) {
-                    setTimeout(forceIOSUpdate, 500);
-                }
-            }, delay);
-            delay += 800; // Increase delay for each subsequent notification
-        });
-    }
 }
 
 // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
@@ -5040,51 +5010,37 @@ function showToast(message, duration = 2000, type = "default") {
     // Pre-check iOS for special handling
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     
-    // Force a pre-update to ensure the DOM is ready
-    if (isIOS) {
-        document.body.offsetHeight;
-    }
-    
-    // Create the toast in a single operation for reliability
-    const toastContainer = document.getElementById('toastContainer');
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.textContent = message;
-    
-    // Generate a unique ID for this toast
-    const toastId = 'toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-    toast.id = toastId;
-    
-    // On iOS, apply simpler hardware acceleration
-    if (isIOS) {
-        toast.style.transform = 'translate3d(0,0,0)';
-        toast.style.backfaceVisibility = 'hidden';
-    }
-    
-    // Add to DOM
-    toastContainer.appendChild(toast);
-    
-    // Force reflow before showing
-    toast.offsetHeight;
-    
-    // Show with a slight delay to ensure rendering
-    setTimeout(() => {
-        toast.classList.add('show');
+    // Run in requestAnimationFrame to ensure we're in a rendering frame
+    requestAnimationFrame(() => {
         
-        // Force iOS update if needed
-        if (isIOS) {
-            forceIOSUpdate();
-        }
+        const toastContainer = document.getElementById('toastContainer');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
         
-        // Set hide timeout
+        // Generate a unique ID for this toast
+        const toastId = 'toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+        toast.id = toastId;
+        
+        toastContainer.appendChild(toast);
+        
+        // Force reflow to enable transition
+        toast.offsetHeight;
+        
+        // Show the toast
+        requestAnimationFrame(() => {
+            toast.classList.add('show');
+        });
+        
+        // If duration is provided, auto-hide the toast
         if (duration > 0) {
             setTimeout(() => {
                 hideToast(toastId);
             }, duration);
         }
-    }, 10);
-    
-    return toastId;
+        
+        return toastId;
+    });
 }
 
 // Function to hide a specific toast by ID
@@ -5768,113 +5724,42 @@ class WSManager {
     this.maxReconnectDelay = 30000; // Maximum 30s delay
     this.subscriptionTimeout = null;
     this.connectionState = 'disconnected'; // disconnected, connecting, connected
-    this.lastProcessedTimestamp = 0;
-    this.iosPollInterval = null;
+    this.heartbeatInterval = null;
+    
+    // Detect iOS and PWA status
     this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    this.isPWA = window.matchMedia('(display-mode: standalone)').matches || 
+                window.navigator.standalone;
   }
 
   connect() {
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
       console.log('WebSocket already connecting or connected');
-      Logger.log('WebSocket already connecting or connected');
       return;
     }
 
     this.connectionState = 'connecting';
     console.log('Connecting to WebSocket server:', network.websocket.url);
-    Logger.log('Connecting to WebSocket server:', network.websocket.url);
     
     try {
       this.ws = new WebSocket(network.websocket.url);
       this.setupEventHandlers();
-      
-      // Set up iOS-specific polling to ensure WebSocket events are processed
-      if (this.isIOS) {
-        Logger.log('iOS detected, setting up iOS fallback polling');
-        this.setupIOSFallback();
-      }
     } catch (error) {
-        Logger.error('WebSocket connection error:', error);
+      console.error('WebSocket connection error:', error);
       this.handleConnectionFailure();
-    }
-  }
-  
-  // New method to set up iOS fallback polling
-  setupIOSFallback() {
-    Logger.log('Setting up iOS fallback polling for WebSocket');
-    
-    // Clear any existing interval
-    if (this.iosPollInterval) {
-      clearInterval(this.iosPollInterval);
-    }
-    
-    // Set up periodic check every 5 seconds
-    this.iosPollInterval = setInterval(() => {
-      this.processIOSFallback();
-    }, 5000);
-  }
-  
-  // New method to process iOS fallback
-  async processIOSFallback() {
-    if (!this.isIOS || !this.isConnected() || !this.isSubscribed || !myAccount || !myAccount.keys) {
-      return;
-    }
-    
-    try {
-        Logger.log('iOS fallback: checking for missed WebSocket messages');
-      
-      // Get the current timestamp for comparison
-      const storedTimestamp = myAccount.chatTimestamp || 0;
-      
-      if (this.lastProcessedTimestamp === storedTimestamp) {
-        // No new timestamp since last check
-        console.log('iOS fallback: no new timestamp since last check');
-        Logger.log('iOS fallback: no new timestamp since last check');
-        return;
-      }
-      
-      // Update for next check
-      this.lastProcessedTimestamp = storedTimestamp;
-      
-      // Force a check for any missed messages
-      const accountAddress = longAddress(myAccount.keys.address);
-      const senders = await queryNetwork(`/account/${accountAddress}/chats/${storedTimestamp}`);
-      
-      if (senders && senders.chats && Object.keys(senders.chats).length > 0) {
-        console.log('iOS fallback: found missed messages, processing now');
-        Logger.log('iOS fallback: found missed messages, processing now');
-        // Process messages and update UI
-        await processChats(senders.chats, myAccount.keys);
-        await updateChatList(true);
-        
-        // Update open chat modal if needed
-        if (appendChatModal.address) {
-          appendChatModal();
-        }
-        
-        // Always update wallet view for iOS
-        await updateWalletView();
-        
-        // Force a UI update
-        forceIOSUpdate();
-      } else {
-        console.log('iOS fallback: no missed messages found');
-        Logger.log('iOS fallback: no missed messages found');
-      }
-    } catch (error) {
-      console.error('Error in iOS WebSocket fallback:', error);
-      Logger.error('Error in iOS WebSocket fallback:', error);
     }
   }
 
   setupEventHandlers() {
     this.ws.onopen = () => {
       console.log('WebSocket connection established');
-      Logger.log('WebSocket connection established');
       this.connectionState = 'connected';
       this.reconnectAttempts = 0;
       this.reconnectDelay = 1000;
       this.subscribe();
+      
+      // Set up heartbeat after successful connection
+      this.setupHeartbeat();
     };
 
     this.ws.onmessage = (event) => {
@@ -5884,7 +5769,6 @@ class WSManager {
         // Handle subscription confirmation
         if (data.result === true && data.account_id) {
           console.log('Subscription confirmed for account:', data.account_id);
-          Logger.log('Subscription confirmed for account:', data.account_id);
           this.isSubscribed = true;
           if (this.subscriptionTimeout) {
             clearTimeout(this.subscriptionTimeout);
@@ -5896,22 +5780,18 @@ class WSManager {
         // Handle chat event messages
         if (data.account_id && data.timestamp) {
           console.log('WebSocket notification received - New message available at timestamp:', data.timestamp);
-          Logger.log('WebSocket notification received - New message available at timestamp:', data.timestamp);
           this.handleChatEvent(data);
         } else {
           // Log other types of messages for debugging
           console.log('WebSocket received non-chat event message:', data);
-          Logger.log('WebSocket received non-chat event message:', data);
         }
       } catch (error) {
         console.error('Error parsing WebSocket message:', error, event.data);
-        Logger.error('Error parsing WebSocket message:', error, event.data);
       }
     };
 
     this.ws.onclose = (event) => {
       console.log('WebSocket connection closed:', event.code, event.reason);
-      Logger.log('WebSocket connection closed:', event.code, event.reason);
       this.connectionState = 'disconnected';
       this.isSubscribed = false;
       
@@ -5922,15 +5802,68 @@ class WSManager {
 
     this.ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      Logger.error('WebSocket error:', error);
       this.connectionState = 'disconnected';
     };
+  }
+  
+  // Add heartbeat mechanism to keep connection alive
+  setupHeartbeat() {
+    // Clear any existing interval
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    
+    // Use more frequent heartbeats for iOS PWAs
+    const heartbeatFrequency = (this.isIOS && this.isPWA) ? 15000 : 30000; // 15s for iOS PWA, 30s for others
+    
+    console.log(`Setting up WebSocket heartbeat with ${heartbeatFrequency}ms interval`);
+    Logger.log(`Setting up WebSocket heartbeat with ${heartbeatFrequency}ms interval`);
+    
+    this.heartbeatInterval = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        // Send a ping message
+        try {
+          this.ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+          console.log('WebSocket heartbeat sent');
+        } catch (error) {
+          console.error('Failed to send heartbeat:', error);
+          this.handleConnectionFailure();
+        }
+      } else if (this.connectionState !== 'connecting') {
+        // Try to reconnect if not already connecting
+        console.log('Heartbeat detected closed connection, reconnecting...');
+        Logger.log('Heartbeat detected closed connection, reconnecting...');
+        this.reconnect();
+      }
+    }, heartbeatFrequency);
+  }
+
+  disconnect() {
+    // Clear heartbeat interval when disconnecting
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    
+    if (this.subscriptionTimeout) {
+      clearTimeout(this.subscriptionTimeout);
+      this.subscriptionTimeout = null;
+    }
+    
+    if (this.ws) {
+      this.ws.close(1000, "Normal closure");
+      this.ws = null;
+    }
+    
+    this.isSubscribed = false;
+    this.connectionState = 'disconnected';
+    console.log('WebSocket disconnected');
   }
 
   subscribe() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.log('Cannot subscribe: WebSocket not open');
-      Logger.log('Cannot subscribe: WebSocket not open');
       return;
     }
 
@@ -5941,7 +5874,6 @@ class WSManager {
 
     if (!myAccount || !myAccount.keys || !myAccount.keys.address) {
       console.error('Cannot subscribe: No account address available');
-      Logger.error('Cannot subscribe: No account address available');
       return;
     }
 
@@ -5957,13 +5889,11 @@ class WSManager {
     };
 
     console.log('Subscribing to chat events');
-    Logger.log('Subscribing to chat events');
     this.ws.send(JSON.stringify(subscribeMsg));
     
     // Set timeout for subscription confirmation
     this.subscriptionTimeout = setTimeout(() => {
       console.error('Subscription confirmation timeout');
-      Logger.error('Subscription confirmation timeout');
       this.isSubscribed = false;
       this.reconnect();
     }, 5000);
@@ -5983,38 +5913,13 @@ class WSManager {
     };
 
     console.log('Unsubscribing from chat events');
-    Logger.log('Unsubscribing from chat events');
     this.ws.send(JSON.stringify(unsubscribeMsg));
     this.isSubscribed = false;
-  }
-
-  disconnect() {
-    // Also clear the iOS polling interval
-    if (this.iosPollInterval) {
-      clearInterval(this.iosPollInterval);
-      this.iosPollInterval = null;
-    }
-    
-    if (this.subscriptionTimeout) {
-      clearTimeout(this.subscriptionTimeout);
-      this.subscriptionTimeout = null;
-    }
-    
-    if (this.ws) {
-      this.ws.close(1000, "Normal closure");
-      this.ws = null;
-    }
-    
-    this.isSubscribed = false;
-    this.connectionState = 'disconnected';
-    console.log('WebSocket disconnected');
-    Logger.log('WebSocket disconnected');
   }
 
   handleConnectionFailure() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.log('Maximum reconnection attempts reached');
-      Logger.log('Maximum reconnection attempts reached');
       return;
     }
 
@@ -6022,13 +5927,31 @@ class WSManager {
     const delay = Math.min(this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1), this.maxReconnectDelay);
     
     console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-    Logger.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
     setTimeout(() => this.connect(), delay);
   }
 
   reconnect() {
     this.disconnect();
-    this.connect();
+    
+    // More aggressive reconnection strategy for iOS PWAs
+    if (this.isIOS && this.isPWA) {
+      console.log('iOS PWA detected, using aggressive reconnection strategy');
+      Logger.log('iOS PWA detected, using aggressive reconnection strategy');
+      
+      // Try multiple reconnection attempts with increasing delays
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => {
+          if (this.connectionState !== 'connected' && this.connectionState !== 'connecting') {
+            console.log(`iOS reconnection attempt ${i+1}`);
+            Logger.log(`iOS reconnection attempt ${i+1}`);
+            this.connect();
+          }
+        }, i * 2000); // 0s, 2s, 4s
+      }
+    } else {
+      // Normal reconnection for other platforms
+      this.connect();
+    }
   }
 
   isConnected() {
@@ -6036,34 +5959,26 @@ class WSManager {
   }
 
   handleChatEvent(data) {
-    // Skip if timestamp is older than or equal to what we already have
-    const storedTimestamp = myAccount.chatTimestamp || 0;
     
     if (data.timestamp <= storedTimestamp) {
       console.log('Skipping WebSocket notification - Already processed timestamp:', data.timestamp, '<=', storedTimestamp);
-      Logger.log('Skipping WebSocket notification - Already processed timestamp:', data.timestamp, '<=', storedTimestamp);
       return;
     }
 
     console.log('Processing WebSocket notification for new message at timestamp:', data.timestamp, '(stored timestamp:', storedTimestamp, ')');
-    Logger.log('Processing WebSocket notification for new message at timestamp:', data.timestamp, '(stored timestamp:', storedTimestamp, ')');
+
     // Process message immediately if we have an active connection
     if (this.connectionState === 'connected' && this.isSubscribed) {
       console.log('Connection active, processing notification and updating UI');
-      Logger.log('Connection active, processing notification and updating UI');
-      // Update our lastProcessedTimestamp for iOS fallback
-      this.lastProcessedTimestamp = data.timestamp;
       this.processNewMessage(data);
     } else {
       console.log('Connection not active, skipping message processing');
-      Logger.log('Connection not active, skipping message processing');
     }
   }
 
   async processNewMessage(data) {
     if (!myAccount || !myAccount.keys) {
       console.error('Cannot process message: No account available');
-      Logger.error('Cannot process message: No account available');
       return;
     }
 
@@ -6077,18 +5992,30 @@ class WSManager {
       const storedTimestamp = myAccount.chatTimestamp || 0;
       
       console.log('Fetching chat information - WebSocket timestamp:', wsTimestamp, 'Stored timestamp:', storedTimestamp);
-      Logger.log('Fetching chat information - WebSocket timestamp:', wsTimestamp, 'Stored timestamp:', storedTimestamp);
       
-      // Get the latest chat information right away - no delay needed
+      // Add a small delay (500ms) to give the server time to process the message
+      // This helps ensure the message is available when we query for it
+      console.log('Adding short delay before fetching chat information...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Get the latest chat information using the stored timestamp
+      // This ensures we get all messages since our last update
       const accountAddress = longAddress(myAccount.keys.address);
       let senders = await queryNetwork(`/account/${accountAddress}/chats/${storedTimestamp}`);
       
-      // Retry logic for empty responses - just try once more for speed
-      if (!senders || !senders.chats || Object.keys(senders.chats).length === 0) {
-        console.log(`No chats found, retrying...`);
-        Logger.log(`No chats found, retrying...`);
-        // Brief delay before retry
-        await new Promise(resolve => setTimeout(resolve, 300));
+      // Retry logic for empty responses
+      let retryCount = 0;
+      const maxRetries = 2;
+      
+      while (retryCount < maxRetries && 
+             (!senders || !senders.chats || Object.keys(senders.chats).length === 0)) {
+        retryCount++;
+        console.log(`No chats found, retrying (${retryCount}/${maxRetries})...`);
+        
+        // Exponential backoff
+        const delay = 500 * Math.pow(2, retryCount - 1);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
         // Retry the query
         senders = await queryNetwork(`/account/${accountAddress}/chats/${storedTimestamp}`);
       }
@@ -6096,63 +6023,57 @@ class WSManager {
       // Always update the timestamp to avoid processing the same notification multiple times
       if (wsTimestamp > storedTimestamp) {
         console.log('Updating chat timestamp from', storedTimestamp, 'to', wsTimestamp);
-        Logger.log('Updating chat timestamp from', storedTimestamp, 'to', wsTimestamp);
         myAccount.chatTimestamp = wsTimestamp;
       }
       
-      // Remember the active chat address for notifications
-      const activeChatAddress = appendChatModal.address;
-      console.log('Current active chat address:', activeChatAddress);
+      let messagesProcessed = false;
       
-      // Process the new messages if we have chats
       if (senders && senders.chats && Object.keys(senders.chats).length > 0) {
         console.log('Processing chats from WebSocket notification:', senders.chats);
-        Logger.log('Processing chats from WebSocket notification:', senders.chats);
         // Process the chats using the existing function
         await processChats(senders.chats, myAccount.keys);
+        messagesProcessed = true;
         
-        // Always update the chat list UI, regardless of which screen is active
-        // This ensures unread counts are updated everywhere
-        await updateChatList(true);
-        
-        // If the chat modal is open, always update it with new messages
-        if (activeChatAddress) {
-          console.log('Chat modal is open, updating with new messages for:', activeChatAddress);
-          Logger.log('Chat modal is open, updating with new messages for:', activeChatAddress);
-          // Make sure modal updates with new messages
-          const chatModal = document.getElementById('chatModal');
-          if (chatModal && chatModal.classList.contains('active')) {
-            appendChatModal();
-            
-            // Scroll to the bottom of the messages
-            const messagesContainer = chatModal.querySelector('.messages-container');
-            if (messagesContainer) {
-              setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-              }, 100);
-            }
-          }
-        }
-        
-        // Force a wallet view update if needed - transfers affect the wallet
-        await updateWalletView();
-        
-        // Force DOM updates on all platforms (not just iOS)
-        // This helps ensure toast notifications and UI changes are visible
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-        if (isIOS) {
-          forceIOSUpdate();
-        } else {
-          // Force reflow on non-iOS too, just not as aggressively
-          document.body.offsetHeight;
+        // Update UI if needed
+        if (appendChatModal.address) {
+          appendChatModal();
         }
       } else {
         console.log('No new chats found after WebSocket notification and retries');
-        Logger.log('No new chats found after WebSocket notification and retries');
+      }
+      console.log('messagesProcessed in processNewMessage', messagesProcessed);
+      // Update the chat list UI to show unread counts
+      // This is important to ensure the UI is updated with new messages
+      if (messagesProcessed) {
+        console.log('Updating chat list UI after WebSocket message processing');
+        
+        // Check if we're on iOS
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        console.log('isIOS', isIOS);
+        
+        // Update chatScreen if it's active OR we're on iOS
+        const chatScreen = document.getElementById("chatScreen");
+        if (chatScreen && chatScreen.classList && chatScreen.classList.contains("active") || isIOS) {
+          await updateChatList(true);
+        }
+        
+        // Update wallet view if wallet screen is active OR we're on iOS
+        const walletScreen = document.getElementById("walletScreen");
+        if (walletScreen && walletScreen.classList && walletScreen.classList.contains("active") || isIOS) {
+          console.log('Wallet screen is active or iOS, updating wallet view');
+          await updateWalletView();
+        }
+        
+        // Always update chat modal on iOS if it has data
+        if (isIOS && appendChatModal.address) {
+          appendChatModal();
+        }
+        
+        // Force iOS reflow to ensure all UI updates are rendered
+        forceIOSUpdate();
       }
     } catch (error) {
       console.error('Error processing WebSocket message:', error);
-      Logger.error('Error processing WebSocket message:', error);
     }
   }
 }
@@ -6164,7 +6085,7 @@ function forceIOSUpdate() {
   
   if (isIOS) {
     console.log('Forcing iOS UI update');
-    Logger.log('Forcing iOS UI update');
+    
     // Force reflow/repaint with multiple approaches
     
     // 1. Standard reflow trigger
