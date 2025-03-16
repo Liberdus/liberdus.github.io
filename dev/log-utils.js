@@ -21,69 +21,174 @@ class Logger {
   static MAX_LOGS = 1000;
   static _db = null;
   static _lastTimestamp = 0;  // Track last used timestamp
+  static _dbInitPromise = null; // Track ongoing initialization
+  static _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  static _isPWA = window.matchMedia('(display-mode: standalone)').matches || 
+                 window.navigator.standalone || // iOS
+                 document.referrer.includes('android-app://');
 
   // In-memory queue configuration
   static _memoryQueue = [];
   static _flushInterval = null;
-  static FLUSH_INTERVAL = 5000;    // Flush every 5 seconds
-  static MAX_QUEUE_SIZE = 100;     // Or when queue reaches 100 items
-  static _isFlushingQueue = false; // Lock to prevent concurrent flushes
+  static FLUSH_INTERVAL = this._isIOS ? 2000 : 5000;    // More frequent flushes on iOS
+  static MAX_QUEUE_SIZE = this._isIOS ? 50 : 100;       // Smaller batches on iOS
+  static _isFlushingQueue = false;
 
-  static MAX_BATCH_SIZE = 50;      // Maximum logs to process in one batch
-  static RETRY_DELAY = 1000;       // Retry failed saves after 1 second
-  static MAX_RETRIES = 3;          // Maximum number of retry attempts
-  static _retryQueue = [];         // Queue for failed saves
+  static MAX_BATCH_SIZE = this._isIOS ? 25 : 50;        // Smaller batches on iOS
+  static RETRY_DELAY = this._isIOS ? 500 : 1000;        // Faster retries on iOS
+  static MAX_RETRIES = this._isIOS ? 5 : 3;            // More retries on iOS
+  static _retryQueue = [];
   static _processingRetries = false;
-
   static _counter = 0;
 
   static async initDB() {
-    const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.DB_NAME, 1);
-      
-      request.onerror = (event) => {
-        console.error('Database error:', event.target.error);
-        reject(event.target.error);
-      };
-
-      request.onupgradeneeded = (event) => {
-        const db = event.target.result;
-        if (!db.objectStoreNames.contains(this.STORE_NAME)) {
-          const store = db.createObjectStore(this.STORE_NAME, { 
-            keyPath: 'id'  // Change to use generated id instead of timestamp
-          });
-          store.createIndex('timestamp', 'timestamp', { unique: false });
-        }
-      };
-
-      request.onsuccess = (event) => {
-        this._db = event.target.result;
-        resolve(this._db);
-      };
-    });
-
-    // Start periodic flush interval
-    this._flushInterval = setInterval(() => {
-      this.flushQueue();
-    }, this.FLUSH_INTERVAL);
-
-    // Add visibility change handler
-    if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') {
-          this.flushQueue(true);
-        }
-      });
+    // If initialization is in progress, wait for it
+    if (this._dbInitPromise) {
+      return this._dbInitPromise;
     }
 
-    return db;
+    // Create new initialization promise
+    this._dbInitPromise = (async () => {
+      try {
+        // Special handling for iOS PWA
+        if (this._isIOS && this._isPWA) {
+          // Always try to delete existing database first on iOS PWA
+          // This prevents issues with corrupted/partially initialized databases
+          try {
+            await new Promise((resolve) => {
+              const deleteRequest = indexedDB.deleteDatabase(this.DB_NAME);
+              deleteRequest.onsuccess = () => {
+                console.log('[Logger] Successfully reset database on iOS PWA');
+                resolve();
+              };
+              deleteRequest.onerror = () => {
+                console.warn('[Logger] Failed to reset database on iOS PWA');
+                resolve(); // Continue anyway
+              };
+            });
+          } catch (error) {
+            console.warn('[Logger] Error during iOS PWA database reset:', error);
+          }
+        }
+
+        // Regular initialization
+        const db = await new Promise((resolve, reject) => {
+          console.log('[Logger] Opening database...');
+          const request = indexedDB.open(this.DB_NAME, 1);
+          
+          request.onerror = (event) => {
+            console.error('[Logger] Database error:', event.target.error);
+            reject(event.target.error);
+          };
+
+          request.onblocked = (event) => {
+            console.warn('[Logger] Database blocked, closing other connections');
+            if (this._db) {
+              this._db.close();
+              this._db = null;
+            }
+          };
+
+          request.onupgradeneeded = (event) => {
+            console.log('[Logger] Database upgrade needed');
+            const db = event.target.result;
+            
+            // Always recreate store on upgrade for consistency
+            if (db.objectStoreNames.contains(this.STORE_NAME)) {
+              db.deleteObjectStore(this.STORE_NAME);
+            }
+            
+            const store = db.createObjectStore(this.STORE_NAME, { 
+              keyPath: 'id'
+            });
+            store.createIndex('timestamp', 'timestamp', { unique: false });
+            console.log('[Logger] Store created successfully');
+          };
+
+          request.onsuccess = (event) => {
+            this._db = event.target.result;
+            
+            // iOS-specific error handling
+            this._db.onversionchange = () => {
+              this._db.close();
+              this._db = null;
+              this._dbInitPromise = null;
+              console.log('[Logger] Database version changed, closing connection');
+            };
+
+            // Verify store exists
+            if (!this._db.objectStoreNames.contains(this.STORE_NAME)) {
+              console.error('[Logger] Store creation verification failed');
+              this._db.close();
+              this._db = null;
+              reject(new Error('Store creation failed'));
+              return;
+            }
+            
+            console.log('[Logger] Database initialized successfully');
+            resolve(this._db);
+          };
+        });
+
+        // Set up periodic flush with iOS-specific handling
+        if (!this._flushInterval) {
+          this._flushInterval = setInterval(() => {
+            this.flushQueue().catch(error => {
+              if (this._isIOS && this._isPWA) {
+                // On iOS PWA, reset database on serious errors
+                if (error.name === 'InvalidStateError' || error.name === 'NotFoundError') {
+                  this._db = null;
+                  this._dbInitPromise = null;
+                }
+              }
+              console.error('[Logger] Periodic flush failed:', error);
+            });
+          }, this.FLUSH_INTERVAL);
+        }
+
+        // iOS PWA specific visibility change handling
+        if (this._isIOS && this._isPWA && typeof document !== 'undefined') {
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+              // Force immediate flush on iOS PWA when app goes to background
+              this.forceSave().catch(error => {
+                console.error('[Logger] iOS PWA background flush failed:', error);
+              });
+            } else if (document.visibilityState === 'visible') {
+              // Reinitialize database when app comes to foreground
+              this._db = null;
+              this._dbInitPromise = null;
+            }
+          });
+        }
+
+        return db;
+      } catch (error) {
+        console.error('[Logger] Database initialization failed:', error);
+        this._dbInitPromise = null; // Clear failed initialization
+        throw error;
+      }
+    })();
+
+    return this._dbInitPromise;
   }
 
   static async getDB() {
-    if (!this._db) {
-      await this.initDB();
+    try {
+      if (!this._db) {
+        await this.initDB();
+      }
+      // Double check store exists
+      if (!this._db.objectStoreNames.contains(this.STORE_NAME)) {
+        console.warn('[Logger] Store missing after init, reinitializing...');
+        this._db = null;
+        await this.initDB();
+      }
+      return this._db;
+    } catch (error) {
+      console.error('[Logger] getDB failed:', error);
+      throw error;
     }
-    return this._db;
   }
 
   static async flushQueue(force = false) {
@@ -92,51 +197,77 @@ class Logger {
     
     this._isFlushingQueue = true;
     let logsToSave;
+    let retryCount = 0;
+    const MAX_RETRIES = 3;
     
-    try {
-      const db = await this.getDB();
-      const tx = db.transaction(this.STORE_NAME, 'readwrite');
-      const store = tx.objectStore(this.STORE_NAME);
+    while (retryCount < MAX_RETRIES) {
+      try {
+        const db = await this.getDB();
+        
+        // Verify store exists before attempting transaction
+        if (!db.objectStoreNames.contains(this.STORE_NAME)) {
+          throw new Error('Logs store not found');
+        }
+        
+        const tx = db.transaction(this.STORE_NAME, 'readwrite');
+        const store = tx.objectStore(this.STORE_NAME);
 
-      // Process logs in smaller batches
-      while (this._memoryQueue.length > 0) {
-        // Take a batch of logs
-        logsToSave = this._memoryQueue.splice(0, this.MAX_BATCH_SIZE);
+        // Process logs in smaller batches
+        while (this._memoryQueue.length > 0) {
+          // Take a batch of logs
+          logsToSave = this._memoryQueue.splice(0, this.MAX_BATCH_SIZE);
 
-        // Save batch
-        const addPromises = logsToSave.map(log => 
-          new Promise((resolve, reject) => {
-            const request = store.add(log);
-            request.onsuccess = () => resolve();
-            request.onerror = () => reject(request.error);
-          })
-        );
+          // Save batch
+          const addPromises = logsToSave.map(log => 
+            new Promise((resolve, reject) => {
+              const request = store.add(log);
+              request.onsuccess = () => resolve();
+              request.onerror = () => reject(request.error);
+            })
+          );
 
-        try {
-          await Promise.all(addPromises);
-        } catch (error) {
-          // Add failed logs to retry queue
-          this._retryQueue.push(...logsToSave);
-          this.scheduleRetry();
-          throw error; // Re-throw to trigger outer catch
+          try {
+            await Promise.all(addPromises);
+          } catch (error) {
+            // Add failed logs to retry queue
+            this._retryQueue.push(...logsToSave);
+            this.scheduleRetry();
+            throw error;
+          }
+        }
+
+        // Wait for transaction to complete
+        await new Promise((resolve, reject) => {
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        
+        // Success - exit retry loop
+        break;
+
+      } catch (error) {
+        console.error(`[Logger] Failed to flush log queue (attempt ${retryCount + 1}):`, error);
+        retryCount++;
+        
+        if (error.message === 'Logs store not found') {
+          // Try reinitializing database
+          this._db = null;
+          await this.initDB();
+        }
+        
+        // Put logs back in queue if save failed and not force flushing
+        if (!force && logsToSave && retryCount === MAX_RETRIES) {
+          this._memoryQueue.unshift(...logsToSave);
+        }
+        
+        // Wait before retrying
+        if (retryCount < MAX_RETRIES) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
         }
       }
-
-      // Wait for transaction to complete
-      await new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-
-    } catch (error) {
-      console.error('Failed to flush log queue:', error);
-      // Put logs back in queue if save failed and not force flushing
-      if (!force && logsToSave) {
-        this._memoryQueue.unshift(...logsToSave);
-      }
-    } finally {
-      this._isFlushingQueue = false;
     }
+    
+    this._isFlushingQueue = false;
   }
 
   static async scheduleRetry() {
@@ -254,12 +385,36 @@ class Logger {
 
   // Update forceSave to handle retry queue
   static async forceSave() {
-    clearInterval(this._flushInterval);
-    await this.flushQueue(true);
-    
-    // Try to save any remaining retry queue items
-    if (this._retryQueue.length > 0) {
-      await this.scheduleRetry();
+    try {
+      // Clear any existing flush interval
+      if (this._flushInterval) {
+        clearInterval(this._flushInterval);
+        this._flushInterval = null;
+      }
+
+      // Special handling for iOS PWA
+      if (this._isIOS && this._isPWA) {
+        // Force immediate flush with no retries
+        await this.flushQueue(true);
+        
+        // Close and null the database connection
+        if (this._db) {
+          this._db.close();
+          this._db = null;
+        }
+        this._dbInitPromise = null;
+      } else {
+        // Normal forceSave behavior
+        await this.flushQueue(true);
+        
+        // Try to save any remaining retry queue items
+        if (this._retryQueue.length > 0) {
+          await this.scheduleRetry();
+        }
+      }
+    } catch (error) {
+      console.error('[Logger] Force save failed:', error);
+      // Don't rethrow - we want to continue cleanup
     }
   }
 

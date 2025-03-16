@@ -3841,20 +3841,16 @@ async function pollChatInterval(milliseconds) {
 }
 
 async function pollChats(){
-    try {
-        if(!wsManager) {
-            console.log('no wsManager, creating new one in pollChats')
-            wsManager = new WebSocketManager()
-            wsManager.connect()
-        }
-    } catch (error) {
-        console.error('error creating new wsManager in pollChats', error)
+    if(!wsManager) {
+        console.log('no wsManager, creating new one in pollChats')
+        wsManager = new WebSocketManager()
+        wsManager.connect()
     }
 
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    // skip polling if not an installed IOS PWA or skip if subscription is active
-    if (!isIOS || wsManager.isSubscribed) { 
-        console.log('skipping first if not an installed IOS PWA or subscription is active')
+    //const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    // skip polling if subscription is active
+    if (wsManager.isSubscribed) { 
+        console.log('skipping pollChats because subscription is active')
         return 
     }
 
