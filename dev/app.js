@@ -520,12 +520,16 @@ async function handleCreateAccount(event) {
 
     console.log('initializing WebSocket connection')
     // Initialize WebSocket connection
-    if (!wsManager) {
-        console.log('new WSManager')
-        wsManager = new WSManager();
-    }
-    if (!wsManager.isConnected){
+    try {
+        if (!wsManager) {
+            console.log('new WSManager')
+            wsManager = new WSManager();
+        }
+        console.log('connecting to WSManager')
         wsManager.connect();
+
+    } catch (error) {
+        console.error('error initializing WebSocket connection', error)
     }
 
     // Close modal and proceed to app
@@ -576,12 +580,16 @@ async function handleSignIn(event) {
     requestNotificationPermission();
 
     // Initialize WebSocket connection
-    if (!wsManager) {
-        console.log('new WSManager')
-        wsManager = new WSManager();
+    try {
+        if (!wsManager) {
+            console.log('new WSManager')
+            wsManager = new WSManager();
+        }
+        console.log('connecting to WSManager')
+        wsManager.connect();
+    } catch (error) {
+        console.error('error initializing WebSocket connection', error)
     }
-    console.log('connecting to WSManager')
-    wsManager.connect();
 
     // Close modal and proceed to app
     closeSignInModal();
@@ -704,8 +712,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const usernames = getAvailableUsernames()
     const hasAccounts = usernames.length > 0
 
-    if (!wsManager) {
-        wsManager = new WSManager();
+    try {
+        if (!wsManager) {
+            console.log('new WSManager')
+            wsManager = new WSManager();
+        }
+    } catch (error) {
+        console.error('error initializing WebSocket connection in DOMContentLoaded', error)
     }
 
     const signInBtn = document.getElementById('signInButton');
@@ -3828,16 +3841,20 @@ async function pollChatInterval(milliseconds) {
 }
 
 async function pollChats(){
-    if(!wsManager) {
-        console.log('no wsManager, creating new one in pollChats')
-        wsManager = new WebSocketManager()
-        wsManager.connect()
+    try {
+        if(!wsManager) {
+            console.log('no wsManager, creating new one in pollChats')
+            wsManager = new WebSocketManager()
+            wsManager.connect()
+        }
+    } catch (error) {
+        console.error('error creating new wsManager in pollChats', error)
     }
 
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     // skip polling if not an installed IOS PWA or skip if subscription is active
-    if (wsManager.isSubscribed) { 
-        console.log('skipping pollChats because subscription is active')
+    if (!isIOS || wsManager.isSubscribed) { 
+        console.log('skipping first if not an installed IOS PWA or subscription is active')
         return 
     }
 
