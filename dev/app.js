@@ -3829,8 +3829,11 @@ async function pollChatInterval(milliseconds) {
 
 async function pollChats(){
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    // skip polling if IOS PWA is installed or if ws is connected
-    if (!isIOS || wsManager.isConnected()){ return }
+    // skip polling if not an installed IOS PWA or skip if ws is connected
+    if (!isIOS || wsManager.isConnected()) { 
+        console.log('skipping pollChats because not an installed IOS PWA or ws is connected')
+        return 
+    }
 
     if (pollChats.nextPoll < 100){ return } // can be used to stop polling; pollChatInterval(0)
     const now = Date.now()
