@@ -864,7 +864,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     document.getElementById('clearLogs').addEventListener('click', async () => {
-        await Logger.clearLogs();
+        // await Logger.clearLogs();
         updateLogsView();
     });
 
@@ -961,7 +961,7 @@ function handleUnload(e){
         }
         
         saveState()
-        Logger.forceSave();
+        // Logger.forceSave();
         if (isInstalledPWA) {
             closeAllConnections();
         }
@@ -978,7 +978,7 @@ console.log('in handleBeforeUnload', e)
     }
     
     saveState()
-    Logger.saveState();
+    // Logger.saveState();
     if (handleSignOut.exit){ 
         window.removeEventListener('beforeunload', handleBeforeUnload)
         return 
@@ -991,10 +991,10 @@ console.log('stop back button')
 // This is for installed apps where we can't stop the back button; just save the state
 function handleVisibilityChange(e) {
     console.log('in handleVisibilityChange', document.visibilityState);
-    Logger.log('in handleVisibilityChange', document.visibilityState);
+    // Logger.log('in handleVisibilityChange', document.visibilityState);
     if (document.visibilityState === 'hidden') {
         saveState();
-        Logger.saveState();
+        // Logger.saveState();
         if (handleSignOut.exit) {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             return;
@@ -1009,9 +1009,9 @@ function handleVisibilityChange(e) {
 
 
 function saveState(){
-console.log('in saveState')
+    console.log('in saveState')
     if (myData && myAccount && myAccount.username && myAccount.netid) {
-console.log('saving state')
+        console.log('saving state')
         localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
     }
 }
@@ -4361,7 +4361,7 @@ function decryptChacha(key, encrypted) {
 async function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) {
         console.log('Service Worker not supported');
-        Logger.log('Service Worker not supported');
+        // Logger.log('Service Worker not supported');
         return;
     }
 
@@ -4372,7 +4372,7 @@ async function registerServiceWorker() {
         // If there's an existing service worker
         if (registration?.active) {
             console.log('Service Worker already registered and active');
-            Logger.log('Service Worker already registered and active');
+            // Logger.log('Service Worker already registered and active');
             
             // Set up message handling for the active worker
             setupServiceWorkerMessaging(registration.active);
@@ -4398,7 +4398,7 @@ async function registerServiceWorker() {
         });
 
         console.log('Service Worker registered successfully:', newRegistration.scope);
-        Logger.log('Service Worker registered successfully:', newRegistration.scope);
+        // Logger.log('Service Worker registered successfully:', newRegistration.scope);
 
         // Set up new service worker handling
         newRegistration.addEventListener('updatefound', () => {
@@ -4415,12 +4415,12 @@ async function registerServiceWorker() {
         // Wait for the service worker to be ready
         await navigator.serviceWorker.ready;
         console.log('Service Worker ready');
-        Logger.log('Service Worker ready');
+        // Logger.log('Service Worker ready');
 
         return newRegistration;
     } catch (error) {
         console.error('Service Worker registration failed:', error);
-        Logger.error('Service Worker registration failed:', error);
+        // Logger.error('Service Worker registration failed:', error);
         return null;
     }
 }
@@ -4438,7 +4438,7 @@ function setupServiceWorkerMessaging() {
                 break;
             case 'OFFLINE_MODE':
                 console.warn('Service worker detected offline mode:', data.url);
-                Logger.warn('Service worker detected offline mode:', data.url);
+                // Logger.warn('Service worker detected offline mode:', data.url);
                 isOnline = false;
                 updateUIForConnectivity();
                 markConnectivityDependentElements();
@@ -4478,7 +4478,7 @@ function setupAppStateManagement() {
         if (document.hidden) {
             // App is being hidden/closed
             console.log('📱 App hidden - starting service worker polling');
-            Logger.log('📱 App hidden - starting service worker polling');
+            // Logger.log('📱 App hidden - starting service worker polling');
             const timestamp = Date.now().toString();
             localStorage.setItem('appPaused', timestamp);
             
@@ -4502,7 +4502,7 @@ function setupAppStateManagement() {
         } else {
             // App is becoming visible/open
             console.log('📱 App visible - stopping service worker polling');
-            Logger.log('📱 App visible - stopping service worker polling');
+            // Logger.log('📱 App visible - stopping service worker polling');
             localStorage.setItem('appPaused', '0');
             
             // Stop polling in service worker
@@ -4536,7 +4536,7 @@ function requestNotificationPermission() {
         Notification.requestPermission()
             .then(permission => {
                 console.log('Notification permission result:', permission);
-                Logger.log('Notification permission result:', permission);
+                // Logger.log('Notification permission result:', permission);
                 // Optional: Hide a notification button if granted.
                 if (permission === 'granted') {
                     const notificationButton = document.getElementById('requestNotificationPermission');
@@ -4545,12 +4545,12 @@ function requestNotificationPermission() {
                     }
                 } else {
                     console.log('Notification permission denied');
-                    Logger.log('Notification permission denied');
+                    // Logger.log('Notification permission denied');
                 }
             })
             .catch(error => {
                 console.error('Error during notification permission request:', error);
-                Logger.error('Error during notification permission request:', error);
+                // Logger.error('Error during notification permission request:', error);
             });
     }
 }
@@ -4558,7 +4558,7 @@ function requestNotificationPermission() {
 
 async function updateLogsView() {
     const logsContainer = document.getElementById('logsContainer');
-    const logs = await Logger.getLogs();
+    const logs = []; // Empty array instead of Logger.getLogs()
     
     // Create document fragment for better performance
     const fragment = document.createDocumentFragment();
@@ -5907,6 +5907,14 @@ class WSManager {
    */
   connect() {
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+      console.log('WebSocket connection already established');
+      return;
+    }
+
+    // Check if WebSockets are supported before attempting to connect
+    if (!this.checkWebSocketSupport()) {
+      console.error('WebSockets not supported, falling back to polling');
+      this.connectionState = 'disconnected';
       return;
     }
 
@@ -5914,10 +5922,18 @@ class WSManager {
     console.log('Connecting to WebSocket server:', network.websocket.url);
     
     try {
+      console.log('Creating new WebSocket instance');
       this.ws = new WebSocket(network.websocket.url);
+      
+      // Add error event handler before setupEventHandlers
+      this.ws.onerror = (error) => {
+        console.error('WebSocket error occurred:', error);
+        this.handleConnectionFailure();
+      };
+      
       this.setupEventHandlers();
     } catch (error) {
-      console.error('WebSocket connection error:', error);
+      console.error('WebSocket connection creation error:', error);
       this.handleConnectionFailure();
     }
   }
@@ -5968,10 +5984,6 @@ class WSManager {
       }
     };
 
-    this.ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      this.connectionState = 'disconnected';
-    };
   }
 
   /**
@@ -6056,8 +6068,22 @@ class WSManager {
    * Handle connection failures with exponential backoff retry logic
    */
   handleConnectionFailure() {
+    console.error('WebSocket connection failed. Current state:', this.connectionState);
+    console.log('Browser information:', navigator.userAgent);
+    console.log('Protocol used:', window.location.protocol);
+    
+    // Check if Firefox might be blocking WebSockets
+    if (navigator.userAgent.includes('Firefox')) {
+      console.log('Firefox detected - checking for potential WebSocket issues');
+      // Additional Firefox-specific debugging information
+      console.log('Firefox may have different security policies for WebSockets');
+      console.log('Check if mixed content is blocked (HTTPS site with WS instead of WSS)');
+    }
+    
+    this.connectionState = 'disconnected';
+    
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('Maximum reconnection attempts reached');
+      console.log('Maximum reconnection attempts reached. Falling back to polling.');
       return;
     }
 
@@ -6175,5 +6201,27 @@ class WSManager {
     } catch (error) {
       console.error('Error processing WebSocket message:', error);
     }
+  }
+
+  /**
+   * Check if WebSockets are supported in the current browser
+   * @returns {boolean} True if WebSockets are supported, false otherwise
+   */
+  checkWebSocketSupport() {
+    if (typeof WebSocket === 'undefined') {
+      console.error('WebSockets are not supported in this browser');
+      return false;
+    }
+    
+    // Check for secure context if using wss://
+    if (network.websocket.url.startsWith('wss://') && 
+        window.location.protocol !== 'https:' && 
+        window.location.hostname !== 'localhost') {
+      console.error('Secure WebSockets (wss://) require a secure context (https)');
+      return false;
+    }
+    
+    console.log('WebSockets are supported in this browser');
+    return true;
   }
 }
