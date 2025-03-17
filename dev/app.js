@@ -6220,11 +6220,27 @@ class WSManager {
   handleChatEvent(data) {
     console.log('Handling chat event:', data);
     
-    if (data && data.result && data.result.includes('new_message')) {
-      // Extract message data and process it
-      const messageId = data.result[1];
-      console.log('New message received via WebSocket:', messageId);
-      this.processNewMessage(data.result[2]);
+    // Check if data and result exist
+    if (!data || !data.result) {
+      console.log('Invalid chat event data format');
+      return;
+    }
+
+    // Handle array format
+    if (Array.isArray(data.result)) {
+      if (data.result[0] === 'new_message') {
+        console.log('New message received via WebSocket:', JSON.stringify(data.result));
+        const messageId = data.result[1];
+        console.log('New message received via WebSocket:', messageId);
+        this.processNewMessage(data.result[2]);
+      }
+    } 
+    // Handle object format
+    else if (typeof data.result === 'object') {
+      if (data.result.type === 'new_message') {
+        console.log('New message received via WebSocket:', JSON.stringify(data.result));
+        this.processNewMessage(data.result.data);
+      }
     }
   }
 
