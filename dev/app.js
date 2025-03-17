@@ -523,7 +523,7 @@ async function handleCreateAccount(event) {
     // Initialize WebSocket connection
     try {
         if (!wsManager) {
-            console.log('Initializing WebSocket manager');
+            console.log('initializing WebSocket manager in handleCreateAccount')
             initializeWebSocketManager();
         } else {
             wsManager.connect();
@@ -582,7 +582,7 @@ async function handleSignIn(event) {
     // Initialize WebSocket connection
     try {
         if (!wsManager) {
-            console.log('Initializing WebSocket manager');
+            console.log('initializing WebSocket manager in handleSignIn')
             initializeWebSocketManager();
         } else {
             wsManager.connect();
@@ -714,7 +714,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     try {
         if (!wsManager) {
-            console.log('Initializing WebSocket manager');
+            console.log('initializing WebSocket manager in DOMContentLoaded')
             initializeWebSocketManager();
         } else {
             wsManager.connect();
@@ -868,7 +868,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     document.getElementById('clearLogs').addEventListener('click', async () => {
-        // await Logger.clearLogs();
+        // await Logger.clearLogs()
         //updateLogsView();
     });
 
@@ -6429,6 +6429,3 @@ function initializeWebSocketManager() {
     
     return wsManager;
 }
-
-console.log('Initializing WebSocket connectivity');
-initializeWebSocketManager();
