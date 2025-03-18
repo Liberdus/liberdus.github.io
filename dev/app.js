@@ -3860,93 +3860,89 @@ async function pollChats(){
     let wsStatus = "not initialized";
     if (wsManager) {
         wsStatus = wsManager.isConnected() ? "connected" : "disconnected";
-        console.log('WebSocket manager status:', wsStatus);
-        console.log('WebSocket connection state:', wsManager.connectionState);
-        console.log('WebSocket subscription status:', wsManager.subscribed ? "subscribed" : "not subscribed");
+        /* const wsInfo = {
+            status: wsStatus,
+            connectionState: wsManager.connectionState,
+            subscriptionStatus: wsManager.subscribed ? "subscribed" : "not subscribed"
+        };
+        console.log('WebSocket Status:', wsInfo); */
         
         // Check for any active error conditions
         if (wsStatus === "disconnected" && wsManager.connectionState === 'disconnected') {
-            console.log('Checking for WebSocket connection barriers:');
-            
-            // Check if the browser is in a state that might block WebSockets
-            const isPrivateMode = !window.localStorage;
-            console.log('- Browser private mode detection:', isPrivateMode ? 'Likely in private mode' : 'Not in private mode');
-            
-            // Check for browser extensions that might block WebSockets
-            console.log('- Network context:', window.location.protocol === 'https:' ? 'Secure (HTTPS)' : 'Insecure (HTTP)');
-            
-            // Network connectivity check
-            const isOnlineCheck = navigator.onLine;
-            console.log('- Network connectivity:', isOnlineCheck ? 'Online' : 'Offline');
-            
-            // WebSocket feature support check
-            console.log('- WebSocket API available:', typeof WebSocket !== 'undefined' ? 'Yes' : 'No');
-            
-            // Verify WebSocket URL
-            if (network && network.websocket && network.websocket.url) {
-                console.log('- WebSocket URL validation:', 
-                    (network.websocket.url.startsWith('ws://') || network.websocket.url.startsWith('wss://')) 
-                    ? 'Valid WebSocket URL' 
-                    : 'Invalid WebSocket URL');
-            } else {
-                console.error('- WebSocket URL not properly configured');
-            }
+            const diagnosticInfo = {
+                browserState: {
+                    isPrivateMode: !window.localStorage,
+                    networkProtocol: window.location.protocol === 'https:' ? 'Secure (HTTPS)' : 'Insecure (HTTP)',
+                    isOnline: navigator.onLine,
+                    webSocketSupport: typeof WebSocket !== 'undefined'
+                },
+                websocketConfig: {
+                    urlValid: network?.websocket?.url ? 
+                        (network.websocket.url.startsWith('ws://') || network.websocket.url.startsWith('wss://')) : 
+                        false,
+                    url: network?.websocket?.url || 'Not configured'
+                }
+            };
+            console.log('WebSocket Diagnostic Information:', diagnosticInfo);
         }
     }
   
     // Try to connect WebSocket if it's not already connected
     if (wsManager && !wsManager.isConnected() && myAccount) {
-        console.log('Attempting to connect WebSocket from pollChats');
+        console.log('Attempting WebSocket connection from pollChats');
         wsManager.connect();
         
-        // Add a short delay to check if connection was successful
         await new Promise(resolve => setTimeout(resolve, 500));
         
-        // Check connection status after attempt
-        if (wsManager.isConnected()) {
-            console.log('WebSocket connection successful from pollChats');
-        } else {
-            console.log('WebSocket connection still not established after attempt');
-        }
+        console.log('Connection attempt result:', {
+            success: wsManager.isConnected()
+        });
     }
 
     // Only poll if WebSocket is not connected/subscribed
     const isSubscribed = wsManager && wsManager.subscribed && wsManager.isConnected();
-    console.log('pollChats isSubscribed:', isSubscribed);
+    
+    const pollStatus = {
+        isSubscribed,
+        accountValid: Boolean(myAccount?.keys?.address),
+        polling: window.chatUpdateTimer ? true : false
+    };
+    //console.log('Poll Status:', pollStatus);
 
     if (!isSubscribed) {
-        if (!myAccount || !myAccount.keys?.address) {
-            console.log('Cannot poll chats: No valid account');
+        if (!pollStatus.accountValid) {
+            console.log('Poll skipped: No valid account');
             return;
         }
 
         try {
-            // Use updateChatList to match original implementation
-            console.log('Polling for chats via REST API');
+            console.log('Initiating REST API poll');
             await updateChatList();
             
-            // Also update wallet view if wallet screen is active (as in original)
             if (document.getElementById('walletScreen')?.classList.contains('active')) {
                 await updateWalletView();
             }
         } catch (error) {
-            console.error('Error polling chats:', error);
+            console.error('Chat polling error:', error);
         }
 
-        // Only set up next timer if we're not subscribed
         const now = Date.now();
         if (window.chatUpdateTimer) {
             clearTimeout(window.chatUpdateTimer);
         }
-        console.log('in pollChats setting timer for next poll (not subscribed)', now, 30000);
+        
+        console.log('Poll schedule:', {
+            timestamp: now,
+            nextPollIn: '30000ms',
+            reason: 'WebSocket not subscribed'
+        });
+        
         window.chatUpdateTimer = setTimeout(pollChats, 30000);
     } else {
-        console.log('subscribed: not setting timer')
-        // Clear any existing timer since we're subscribed
         if (window.chatUpdateTimer) {
             clearTimeout(window.chatUpdateTimer);
             window.chatUpdateTimer = null;
-            console.log('Cleared polling timer since WebSocket is subscribed');
+            console.log('Poll status: Stopped - WebSocket subscribed');
         }
     }
 }
@@ -5962,7 +5958,7 @@ class WSManager {
    * Initialize the WebSocket Manager with default configuration
    */
   constructor() {
-    console.log('WebSocket Manager constructor called');
+    //console.log('WebSocket Manager constructor called');
     this.ws = null;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
@@ -5974,6 +5970,7 @@ class WSManager {
    * Connect to WebSocket server
    */
   connect() {
+    // Check if ws is not null and readyState is either CONNECTING or OPEN
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
       console.log('WebSocket connection already established');
       return;
@@ -5987,9 +5984,11 @@ class WSManager {
     }
 
     this.connectionState = 'connecting';
-    console.log('Connecting to WebSocket server:', network.websocket.url);
-    console.log('Browser details:', navigator.userAgent);
-    console.log('Page protocol:', window.location.protocol);
+    console.log('WebSocket Connection:', {
+        url: network.websocket.url,
+        protocol: window.location.protocol,
+        userAgent: navigator.userAgent
+    });
     
     try {
       console.log('Creating new WebSocket instance');
@@ -6018,7 +6017,7 @@ class WSManager {
       return;
     }
 
-    console.log('Setting up WebSocket event handlers');
+    // console.log('Setting up WebSocket event handlers');
 
     this.ws.onopen = () => {
       console.log('WebSocket connection established');
@@ -6101,7 +6100,6 @@ class WSManager {
       console.log('Sending subscription message:', JSON.stringify(subscribeMessage));
       this.ws.send(JSON.stringify(subscribeMessage));
       this.subscribed = true;
-      console.log('Subscription sent successfully');
       return true;
     } catch (error) {
       console.error('Error subscribing to chat events:', error);
@@ -6175,24 +6173,34 @@ class WSManager {
    * Handle connection failures with exponential backoff retry logic
    */
   handleConnectionFailure() {
-    console.error('WebSocket connection failed. Current state:', this.connectionState);
-    console.log('Browser information:', navigator.userAgent);
-    console.log('Protocol used:', window.location.protocol);
+    const diagnosticInfo = {
+      connectionState: this.connectionState,
+      browser: {
+        userAgent: navigator.userAgent,
+        protocol: window.location.protocol
+      },
+      reconnection: {
+        attempts: this.reconnectAttempts,
+        maxAttempts: this.maxReconnectAttempts
+      }
+    };
     
-    // Check if Firefox might be blocking WebSockets
+    // Add Firefox-specific diagnostics
     if (navigator.userAgent.includes('Firefox')) {
-      console.log('Firefox detected - checking for potential WebSocket issues');
-      // Additional Firefox-specific debugging information
-      console.log('Firefox may have different security policies for WebSockets');
-      console.log('Check if mixed content is blocked (HTTPS site with WS instead of WSS)');
-      console.log('Firefox WebSocket URL:', network.websocket.url);
-      console.log('Firefox page protocol:', window.location.protocol);
+      diagnosticInfo.firefox = {
+        securityPolicy: 'Different security policies for WebSockets',
+        mixedContent: 'Check if HTTPS site with WS instead of WSS',
+        websocketUrl: network.websocket.url,
+        pageProtocol: window.location.protocol
+      };
     }
+    
+    console.error('WebSocket Connection Failure:', diagnosticInfo);
     
     this.connectionState = 'disconnected';
     
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('Maximum reconnection attempts reached. Falling back to polling.');
+      console.log('Reconnection Status: Maximum attempts reached, falling back to polling');
       return;
     }
 
@@ -6200,7 +6208,13 @@ class WSManager {
     
     // Exponential backoff
     const delay = Math.min(30000, Math.pow(2, this.reconnectAttempts) * 1000 + Math.random() * 1000);
-    console.log(`Attempting to reconnect in ${Math.round(delay / 1000)} seconds (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    
+    const reconnectInfo = {
+      attempt: this.reconnectAttempts,
+      maxAttempts: this.maxReconnectAttempts,
+      delaySeconds: Math.round(delay / 1000)
+    };
+    console.log('Reconnection Schedule:', reconnectInfo);
     
     setTimeout(() => this.reconnect(), delay);
   }
@@ -6209,7 +6223,7 @@ class WSManager {
    * Reconnect to the WebSocket server
    */
   reconnect() {
-    console.log('Attempting to reconnect to WebSocket server');
+    console.log('WebSocket Action: Attempting reconnection');
     this.connect();
   }
 
@@ -6217,46 +6231,60 @@ class WSManager {
    * Check if WebSocket is connected
    */
   isConnected() {
-    const result = !!(this.ws && this.ws.readyState === WebSocket.OPEN);
-    console.log('WebSocket connection status check:', result ? 'connected' : 'disconnected');
-    return result;
+    const status = {
+      connected: !!(this.ws && this.ws.readyState === WebSocket.OPEN),
+      //readyState: this.ws ? this.ws.readyState : 'no websocket',
+      //polling: window.chatUpdateTimer ? true : false,
+      //subscription: this.subscribed ? true : false
+    };
+    //console.log('WebSocket Status:', status);
+    return status.connected;
   }
 
   /**
    * Handle chat event messages
    */
   handleChatEvent(data) {
-    console.log('Handling chat event:', data);
+    const eventInfo = {
+      type: 'unknown',
+      data: data
+    };
     
-    // Handle subscription confirmation
+    // Determine event type and relevant data
     if (data.result === true) {
-      console.log('Server confirmed subscription successful');
-      return;
-    }
-    
-    // Handle timestamp update message
-    if (data.account_id && data.timestamp) {
-      console.log('Received timestamp update:', data.timestamp);
-      this.processNewMessage({
-        timestamp: data.timestamp
-      });
-      return;
-    }
-    
-    // Handle array format (legacy)
-    if (data.result && Array.isArray(data.result)) {
+      eventInfo.type = 'subscription_confirmation';
+    } else if (data.account_id && data.timestamp) {
+      eventInfo.type = 'timestamp_update';
+      eventInfo.timestamp = data.timestamp;
+    } else if (data.result && Array.isArray(data.result)) {
       if (data.result[0] === 'new_message') {
-        const messageId = data.result[1];
-        console.log('New message received via WebSocket:', messageId);
-        this.processNewMessage(data.result[2]);
+        eventInfo.type = 'new_message_legacy_array';
+        eventInfo.messageId = data.result[1];
+        eventInfo.messageData = data.result[2];
       }
-    } 
-    // Handle object format (legacy)
-    else if (data.result && typeof data.result === 'object') {
+    } else if (data.result && typeof data.result === 'object') {
       if (data.result.type === 'new_message') {
-        console.log('New message received via WebSocket:', data.result.id);
-        this.processNewMessage(data.result.data);
+        eventInfo.type = 'new_message_object';
+        eventInfo.messageId = data.result.id;
+        eventInfo.messageData = data.result.data;
       }
+    }
+    
+    console.log('WebSocket Event:', eventInfo);
+    
+    // Process the event based on type
+    switch (eventInfo.type) {
+      case 'subscription_confirmation':
+        return;
+      case 'timestamp_update':
+        this.processNewMessage({ timestamp: data.timestamp });
+        return;
+      case 'new_message_legacy_array':
+        this.processNewMessage(data.result[2]);
+        return;
+      case 'new_message_object':
+        this.processNewMessage(data.result.data);
+        return;
     }
   }
 
@@ -6265,167 +6293,196 @@ class WSManager {
    */
   async processNewMessage(data) {
     try {
-      console.log('Processing new WebSocket message data:', data);
+      const processInfo = {
+        messageData: data,
+        accountValid: !!(data && myAccount && myAccount.keys),
+        timestamps: {
+          ws: data?.timestamp || Date.now(),
+          stored: myAccount?.chatTimestamp || 0
+        }
+      };
+      console.log('Processing WebSocket Message:', processInfo);
       
-      if (!data || !myAccount || !myAccount.keys) {
-        console.error('Cannot process message: Missing data or account');
+      if (!processInfo.accountValid) {
+        console.error('Message Processing Error: Missing data or account');
         return;
       }
       
-      // Get timestamps for comparison
-      const wsTimestamp = data.timestamp || Date.now();
-      const storedTimestamp = myAccount.chatTimestamp || 0;
-      
       // Get latest chat data from the network
       const accountAddress = longAddress(myAccount.keys.address);
-      console.log(`Querying network for new messages since ${storedTimestamp}`);
-      let senders = await queryNetwork(`/account/${accountAddress}/chats/${storedTimestamp}`);
+      let senders = await queryNetwork(`/account/${accountAddress}/chats/${processInfo.timestamps.stored}`);
       
       // Retry logic for empty responses
       if (!senders || !senders.chats || Object.keys(senders.chats).length === 0) {
-        console.log('No chats found in first query, retrying...');
-        // Brief delay before retry
-        await new Promise(resolve => setTimeout(resolve, 300));
-        // Retry the query
-        senders = await queryNetwork(`/account/${accountAddress}/chats/${storedTimestamp}`);
+        const retryInfo = { attempt: 1, delay: 300 };
+        console.log('Chat Query Retry:', retryInfo);
+        
+        await new Promise(resolve => setTimeout(resolve, retryInfo.delay));
+        senders = await queryNetwork(`/account/${accountAddress}/chats/${processInfo.timestamps.stored}`);
       }
       
-      // Update timestamp to avoid processing the same notification multiple times
-      if (wsTimestamp > storedTimestamp) {
-        console.log(`Updating chat timestamp from ${storedTimestamp} to ${wsTimestamp}`);
-        myAccount.chatTimestamp = wsTimestamp;
+      // Update timestamp if newer
+      if (processInfo.timestamps.ws > processInfo.timestamps.stored) {
+        const timestampUpdate = {
+          old: processInfo.timestamps.stored,
+          new: processInfo.timestamps.ws
+        };
+        console.log('Chat Timestamp Update:', timestampUpdate);
+        myAccount.chatTimestamp = processInfo.timestamps.ws;
       }
       
-      // Remember the active chat address for notifications and updates
-      const activeChatAddress = appendChatModal?.address;
-      console.log('Active chat address:', activeChatAddress || 'none');
+      // Track active chat for notifications
+      const chatState = {
+        activeChatAddress: appendChatModal?.address,
+        hasNewChats: !!(senders?.chats && Object.keys(senders.chats).length > 0),
+        chatCount: senders?.chats ? Object.keys(senders.chats).length : 0
+      };
+      console.log('Chat Processing State:', chatState);
       
-      // Process the new messages if we have chats
-      if (senders && senders.chats && Object.keys(senders.chats).length > 0) {
-        // Process the chats using the existing function
-        console.log('Processing new chats:', Object.keys(senders.chats).length);
+      if (chatState.hasNewChats) {
         await processChats(senders.chats, myAccount.keys);
         
-        // Always update the chat list UI
-        console.log('Updating chat list UI');
+        // Update UI elements
+        const uiUpdates = {
+          chatListUpdated: true,
+          modalUpdated: false,
+          walletUpdated: false
+        };
+        
         await updateChatList(true);
         
-        // If the chat modal is open, update it with new messages
-        if (activeChatAddress) {
+        // Update chat modal if open
+        if (chatState.activeChatAddress) {
           const chatModal = document.getElementById('chatModal');
-          if (chatModal && chatModal.classList.contains('active')) {
-            console.log('Updating open chat modal with new messages');
+          if (chatModal?.classList.contains('active')) {
             appendChatModal();
             
-            // Scroll to the bottom of the messages
             const messagesContainer = chatModal.querySelector('.messages-container');
             if (messagesContainer) {
               setTimeout(() => {
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
               }, 100);
             }
+            uiUpdates.modalUpdated = true;
           }
         }
         
-        // Force a wallet view update - transfers affect the wallet
-        console.log('Updating wallet view for potential transfers');
+        // Update wallet view
         await updateWalletView();
+        uiUpdates.walletUpdated = true;
         
-        // Show notification if app is hidden
+        console.log('UI Update Status:', uiUpdates);
+        
+        // Handle notifications
         if (document.visibilityState === 'hidden') {
-          if ('Notification' in window && Notification.permission === 'granted') {
+          const notificationState = {
+            supported: 'Notification' in window,
+            permission: Notification.permission,
+            sent: false
+          };
+          
+          if (notificationState.supported && notificationState.permission === 'granted') {
             new Notification('New Message', {
               body: 'You have a new message',
               icon: './media/liberdus_logo_250.png'
             });
+            notificationState.sent = true;
           }
+          
+          console.log('Notification Status:', notificationState);
         }
-      } else {
-        console.log('No new chats to process after WebSocket notification');
       }
       
-      // Clear the polling timer since we just checked
+      // Update polling timer
       if (window.chatUpdateTimer) {
+        const timerUpdate = {
+          action: 'reset',
+          newInterval: 30000
+        };
+        console.log('Poll Timer Update:', timerUpdate);
+        
         clearTimeout(window.chatUpdateTimer);
-        window.chatUpdateTimer = setTimeout(pollChats, 30000);
+        window.chatUpdateTimer = setTimeout(pollChats, timerUpdate.newInterval);
       }
       
-      console.log('WebSocket message processed successfully');
     } catch (error) {
-      console.error('Error processing WebSocket message:', error);
+      console.error('WebSocket Message Processing Error:', {
+        error: error.message,
+        stack: error.stack
+      });
     }
   }
 
   /**
    * Check if WebSockets are supported in the current browser
-   * @returns {boolean} True if WebSockets are supported, false otherwise
    */
   checkWebSocketSupport() {
-    if (typeof WebSocket === 'undefined') {
-      console.error('WebSockets are not supported in this browser');
-      return false;
-    }
-    
-    // Log detailed browser information for troubleshooting
-    console.log('Navigator:', {
-      userAgent: navigator.userAgent,
-      vendor: navigator.vendor,
-      platform: navigator.platform,
-      language: navigator.language
-    });
-    
-    // iOS standalone mode detection
+    const supportInfo = {
+      webSocketAvailable: typeof WebSocket !== 'undefined',
+      browser: {
+        userAgent: navigator.userAgent,
+        vendor: navigator.vendor,
+        platform: navigator.platform,
+        language: navigator.language
+      },
+      environment: {
+        protocol: window.location.protocol,
+        hostname: window.location.hostname,
+        isLocalhost: window.location.hostname === 'localhost'
+      }
+    };
+
+    // Add iOS standalone info
     const isIOSStandalone = ['iPhone', 'iPad', 'iPod'].includes(navigator.platform) && 
                             window.navigator.standalone === true;
     if (isIOSStandalone) {
-      console.log('Running as iOS standalone (installed PWA)');
-      // iOS PWAs have additional restrictions on WebSockets
-      if (network.websocket.url.startsWith('wss://') && 
-          network.websocket.url.includes('dev.liberdus.com')) {
-        console.log('Note: iOS PWAs may have stricter requirements for external WebSocket connections');
-      }
+      supportInfo.ios = {
+        mode: 'standalone_pwa',
+        restrictions: network.websocket.url.startsWith('wss://') && 
+                     network.websocket.url.includes('dev.liberdus.com')
+      };
     }
-    
-    // Firefox specific checks
+
+    // Add Firefox-specific info
     if (navigator.userAgent.includes('Firefox')) {
-      console.log('Firefox detected - checking advanced WebSocket compatibility');
-      
-      // Network protocol compatibility
-      if (window.location.protocol === 'https:' && network.websocket.url.startsWith('ws://')) {
-        console.error('Mixed content: HTTPS site cannot use insecure WebSocket (ws://) in Firefox');
-        return false;
-      }
-      
-      // Check for potential certificate issues
-      if (network.websocket.url.startsWith('wss://')) {
-        console.log('Using secure WebSockets - ensure server certificate is valid for Firefox');
-      }
-      
-      // Check for port blocking
-      console.log('Using port:', network.websocket.url.split(':')[2]?.split('/')[0] || 'default');
-      console.log('Some organizations/networks block non-standard WebSocket ports');
+      supportInfo.firefox = {
+        mixedContentBlocked: window.location.protocol === 'https:' && 
+                            network.websocket.url.startsWith('ws://'),
+        usingSecureWebSocket: network.websocket.url.startsWith('wss://'),
+        port: network.websocket.url.split(':')[2]?.split('/')[0] || 'default'
+      };
     }
-    
-    // Check for secure context if using wss://
-    if (network.websocket.url.startsWith('wss://') && 
-        window.location.protocol !== 'https:' && 
-        window.location.hostname !== 'localhost') {
-      console.error('Secure WebSockets (wss://) require a secure context (https)');
-      console.log('Current protocol:', window.location.protocol);
-      console.log('Current hostname:', window.location.hostname);
-      return false;
-    }
-    
-    // Comprehensive WebSocket URL information
+
+    // Add WebSocket URL details
     const wsUrl = new URL(network.websocket.url);
-    console.log('WebSocket details:', {
+    supportInfo.websocket = {
       protocol: wsUrl.protocol,
       hostname: wsUrl.hostname,
       port: wsUrl.port || (wsUrl.protocol === 'wss:' ? '443' : '80'),
-      pathname: wsUrl.pathname
-    });
-    
-    console.log('WebSockets are supported in this browser');
+      pathname: wsUrl.pathname,
+      requiresSecureContext: wsUrl.protocol === 'wss:' && 
+                           !supportInfo.environment.isLocalhost
+    };
+
+    console.log('WebSocket Support Analysis:', supportInfo);
+
+    // Return false for known unsupported conditions
+    if (!supportInfo.webSocketAvailable) {
+      console.error('WebSocket Support: Not available in browser');
+      return false;
+    }
+
+    if (supportInfo.firefox?.mixedContentBlocked) {
+      console.error('WebSocket Support: Mixed content blocked in Firefox');
+      return false;
+    }
+
+    if (supportInfo.websocket.requiresSecureContext && 
+        supportInfo.environment.protocol !== 'https:') {
+      console.error('WebSocket Support: Secure context required for WSS');
+      return false;
+    }
+
     return true;
   }
 }
@@ -6434,29 +6491,38 @@ class WSManager {
 function initializeWebSocketManager() {
     if (!wsManager) {
         try {
-            console.log('Initializing new WebSocket manager');
+            const initInfo = {
+                status: 'starting',
+                config: {
+                    url: network.websocket.url,
+                    subscribeMessage: network.websocket.subscribeMessage
+                },
+                account: {
+                    available: !!(myAccount?.keys?.address)
+                }
+            };
+            
+            console.log('WebSocket Manager Initialization:', initInfo);
+            
             wsManager = new WSManager();
-            console.log('WebSocket manager created successfully');
+            initInfo.status = 'created';
             
-            // Log network configuration
-            console.log('WebSocket configuration:', {
-                url: network.websocket.url,
-                subscribeMessage: network.websocket.subscribeMessage
-            });
-            
-            // Check if we should connect immediately
-            if (myAccount && myAccount.keys && myAccount.keys.address) {
-                console.log('Account available, connecting WebSocket manager');
+            if (initInfo.account.available) {
                 wsManager.connect();
-            } else {
-                console.log('No account available, WebSocket connection deferred');
+                initInfo.status = 'connecting';
             }
+            
+            console.log('WebSocket Manager Status:', initInfo);
+            
         } catch (error) {
-            console.error('Failed to initialize WebSocket manager:', error);
+            console.error('WebSocket Manager Initialization Error:', {
+                error: error.message,
+                stack: error.stack
+            });
             wsManager = null;
         }
     } else {
-        console.log('WebSocket manager already initialized');
+        console.log('WebSocket Manager: Already initialized');
     }
     
     return wsManager;
