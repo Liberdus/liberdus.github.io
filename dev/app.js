@@ -3932,15 +3932,23 @@ async function pollChats(){
         } catch (error) {
             console.error('Error polling chats:', error);
         }
-    }
 
-    // Set timer for next poll with fixed 30 second interval
-    const now = Date.now();
-    if (window.chatUpdateTimer) {
-        clearTimeout(window.chatUpdateTimer);
+        // Only set up next timer if we're not subscribed
+        const now = Date.now();
+        if (window.chatUpdateTimer) {
+            clearTimeout(window.chatUpdateTimer);
+        }
+        console.log('in pollChats setting timer for next poll (not subscribed)', now, 30000);
+        window.chatUpdateTimer = setTimeout(pollChats, 30000);
+    } else {
+        console.log('subscribed: not setting timer')
+        // Clear any existing timer since we're subscribed
+        if (window.chatUpdateTimer) {
+            clearTimeout(window.chatUpdateTimer);
+            window.chatUpdateTimer = null;
+            console.log('Cleared polling timer since WebSocket is subscribed');
+        }
     }
-    console.log('in pollChats setting timer', now, 30000);
-    window.chatUpdateTimer = setTimeout(pollChats, 30000);
 }
 
 async function getChats(keys) {  // needs to return the number of chats that need to be processed
