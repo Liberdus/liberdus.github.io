@@ -5727,6 +5727,11 @@ async function startCamera() {
     const canvas = canvasElement.getContext('2d', { willReadFrequently: true }); // Optimized for frequent getImageData calls
     const scanHighlight = document.getElementById('scan-highlight');
     try {
+        // First check if camera API is supported
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error('Camera API is not supported in this browser');
+        }
+
         // Stop any existing stream
         if (startCamera.stream) {
             stopCamera();
@@ -5736,16 +5741,33 @@ async function startCamera() {
 //        resultContainer.classList.add('hidden');
         
 //        statusMessage.textContent = 'Accessing camera...';
-        
-        // Request camera access
-        startCamera.stream = await navigator.mediaDevices.getUserMedia({
-            video: { 
-                facingMode: 'environment', // Use back camera
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
-            },
-            audio: false
-        });
+        // Request camera access with specific error handling
+        try {
+            startCamera.stream = await navigator.mediaDevices.getUserMedia({
+                video: { 
+                    facingMode: 'environment', // Use back camera
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                },
+                audio: false
+            });
+        } catch (mediaError) {
+            // Handle specific getUserMedia errors
+            switch (mediaError.name) {
+                case 'NotAllowedError':
+                    throw new Error('Camera access was denied. Please check your browser settings and grant permission to use the camera.');
+                case 'NotFoundError':
+                    throw new Error('No camera device was found on your system.');
+                case 'NotReadableError':
+                    throw new Error('Camera is already in use by another application or encountered a hardware error.');
+                case 'SecurityError':
+                    throw new Error('Camera access was blocked by your browser\'s security policy.');
+                case 'AbortError':
+                    throw new Error('Camera access was cancelled.');
+                default:
+                    throw new Error(`Camera error: ${mediaError.message}`);
+            }
+        }
         
         // Connect the camera stream to the video element
         video.srcObject = startCamera.stream;
@@ -5765,15 +5787,28 @@ async function startCamera() {
             
 //            statusMessage.textContent = 'Camera active. Point at a QR code.';
         };
+
+        // Add error handler for video element
+        video.onerror = function(error) {
+            console.error('Video element error:', error);
+            stopCamera();
+            throw new Error('Failed to start video stream');
+        };
+
     } catch (error) {
         console.error('Error accessing camera:', error);
-//        statusMessage.textContent = `Camera error: ${error.message}`;
+        stopCamera(); // Ensure we clean up any partial setup
+        
+        // Show user-friendly error message
+        showToast(error.message || 'Failed to access camera. Please check your permissions and try again.', 5000, 'error');
+        
+        // Optionally trigger fallback method (if you have one)
+        // fallbackToFileInput();
+        
+        // Re-throw the error if you need to handle it further up
+        throw error;
     }
 }
-startCamera.stream = null;
-startCamera.scanning = false;
-startCamera.scanInterval = null;
-        
 
 function readQRCode(){
     if (!startCamera.scanning) return;
