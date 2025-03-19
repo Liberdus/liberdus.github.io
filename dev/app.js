@@ -519,18 +519,8 @@ async function handleCreateAccount(event) {
 
     requestNotificationPermission();
 
-    console.log('initializing WebSocket connection')
-    // Initialize WebSocket connection
-    try {
-        if (!wsManager) {
-            console.log('initializing WebSocket manager in handleCreateAccount')
-            initializeWebSocketManager();
-        } else {
-            wsManager.connect();
-        }
-    } catch (error) {
-        console.error('error initializing WebSocket connection', error)
-    }
+    console.log('initializing WebSocket connection in handleCreateAccount');
+    initializeWebSocketManager();
 
     // Close modal and proceed to app
     closeCreateAccountModal();
@@ -580,16 +570,8 @@ async function handleSignIn(event) {
     requestNotificationPermission();
 
     // Initialize WebSocket connection
-    try {
-        if (!wsManager) {
-            console.log('initializing WebSocket manager in handleSignIn')
-            initializeWebSocketManager();
-        } else {
-            wsManager.connect();
-        }
-    } catch (error) {
-        console.error('error initializing WebSocket connection', error)
-    }
+    console.log('initializing WebSocket connection in handleSignIn');
+    initializeWebSocketManager();
 
     // Close modal and proceed to app
     closeSignInModal();
@@ -712,16 +694,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const usernames = getAvailableUsernames()
     const hasAccounts = usernames.length > 0
 
-    try {
-        if (!wsManager) {
-            console.log('initializing WebSocket manager in DOMContentLoaded')
-            initializeWebSocketManager();
-        } else {
-            wsManager.connect();
-        }
-    } catch (error) {
-        console.error('error initializing WebSocket connection in DOMContentLoaded', error)
-    }
+    console.log('initializing WebSocket connection in DOMContentLoaded');
+    initializeWebSocketManager();
 
     const signInBtn = document.getElementById('signInButton');
     const createAccountBtn = document.getElementById('createAccountButton');
@@ -1216,38 +1190,16 @@ async function updateChatList(force) {
                     }
                 }
                 
-                if ((gotChats > 0 || force) && isInstalledPWA) {
-                    // Cache the updated chat data if installed as PWA
-                    try {
-                        const chatData = addVersionToData({
-                            chatId: myAccount.keys.address,
-                            chats: myData.chats,
-                            contacts: myData.contacts
-                        });
-                        await saveData(STORES.CHATS, chatData);
-                    } catch (error) {
-                        console.error('Failed to cache chat data:', error);
-                    }
+                // Cache only if we got new chats or force is true
+                if (gotChats > 0 || force) {
+                    await handleChatDataCaching(true); // true = save mode
                 }
             } catch (error) {
                 console.error('Error updating chat list:', error);
             }
         } else {
-            // Offline: Get from cache
-            if (isInstalledPWA) {
-                try {
-                    const cachedData = await getData(STORES.CHATS, myAccount.keys.address);
-                    if (cachedData) {
-                        myData.chats = cachedData.chats;
-                        myData.contacts = cachedData.contacts;
-                        console.log('Using cached chat data from:', new Date(cachedData.lastUpdated));
-                    }
-                } catch (error) {
-                    console.error('Failed to read cached chat data:', error);
-                }
-            } else {
-                console.log('Not installed PWA. No cached chat data to use for offline mode.');
-            }
+            // Offline: Load from cache
+            await handleChatDataCaching(false); // false = load mode
         }
     }
     console.log('force gotChats', force === undefined ? 'undefined' : JSON.stringify(force), 
@@ -1306,6 +1258,9 @@ async function updateChatList(force) {
 async function updateWalletBalances() {
     if (!myAccount || !myData || !myData.wallet || !myData.wallet.assets) {
         console.error('No wallet data available');
+        return;
+    } else if (!isOnline) {
+        console.error('Not online. Not updating wallet balances');
         return;
     }
     await updateAssetPricesIfNeeded()
@@ -1404,38 +1359,12 @@ async function switchView(view) {
 async function updateContactsList() {
 
     // cache system
-    if (isOnline) {
-        // Online: Get from network and cache
-        if (isInstalledPWA) {
-            try {
-                const contactsData = addVersionToData({
-                    address: myAccount.keys.address,
-                    contacts: myData.contacts
-                });
-                await saveData(STORES.CONTACTS, contactsData);
-                console.log('Successfully cached contacts data:', contactsData);
-            } catch (error) {
-                console.error('Failed to cache contacts data:', error);
-            }
-        } else {
-            console.log('Not installed PWA. Not caching contacts data.');
-        }
-    } else {
-        // Offline: Get from cache
-        if (isInstalledPWA) {
-            try {
-                const cachedData = await getData(STORES.CONTACTS, myAccount.keys.address);
-                if (cachedData) {
-                    myData.contacts = cachedData.contacts;
-                    console.log('Using cached contacts data from:', new Date(cachedData.lastUpdated));
-                }
-            } catch (error) {
-                console.error('Failed to read cached contacts data:', error);
-            }
-        } else {
-            console.log('Not installed PWA. No cached contacts data.');
-        }
-    }
+    await handleDataCaching({
+        store: STORES.CONTACTS,
+        dataKey: myAccount.keys.address,
+        currentData: myData.contacts,
+        dataType: 'contacts'
+    });
 
     const contactsList = document.getElementById('contactsList');
 //            const chatsData = myData
@@ -3617,40 +3546,17 @@ async function updateWalletView() {
     const walletData = myData.wallet
     
 
-    if(isOnline){
-        await updateWalletBalances()
-    }
+
+    await updateWalletBalances()
 
     // cache system
-    if (isInstalledPWA) {
-        if (isOnline) {
-            // Cache the current wallet data
-            try {
-                const walletCacheData = addVersionToData({
-                    assetId: myAccount.keys.address,
-                    wallet: walletData
-                });
-                await saveData(STORES.WALLET, walletCacheData);
-                console.log('Successfully cached wallet data:', walletCacheData);
-            } catch (error) {
-                console.error('Failed to cache wallet data:', error);
-            }
-        } else {
-            // Offline: Get from cache
-            try {
-                const cachedData = await getData(STORES.WALLET, myAccount.keys.address);
-                if (cachedData) {
-                    myData.wallet = cachedData.wallet;
-                    console.log('Using cached wallet data from:', new Date(cachedData.lastUpdated));
-                }
-            } catch (error) {
-                console.error('Failed to read cached wallet data:', error);
-            }
-        }
-    } else {
-        console.log('Not installed PWA. No caching available.');
-    }
-
+    await handleDataCaching({
+        store: STORES.WALLET,
+        dataKey: myAccount.keys.address,
+        currentData: walletData,
+        dataType: 'wallet',
+        idField: 'assetId'
+    });
     // Update total networth
     document.getElementById('walletTotalBalance').textContent = (walletData.networth || 0).toFixed(2);
     
@@ -3855,57 +3761,26 @@ async function pollChatInterval(milliseconds) {
     pollChats()
 }
 
-async function pollChats(){
-    // Check if WebSocket is connected first
-    let wsStatus = "not initialized";
-    if (wsManager) {
-        wsStatus = wsManager.isConnected() ? "connected" : "disconnected";
-        
-        // Check for any active error conditions
-        if (wsStatus === "disconnected" && wsManager.connectionState === 'disconnected') {
-            const diagnosticInfo = {
-                browserState: {
-                    isPrivateMode: !window.localStorage,
-                    networkProtocol: window.location.protocol === 'https:' ? 'Secure (HTTPS)' : 'Insecure (HTTP)',
-                    isOnline: navigator.onLine,
-                    webSocketSupport: typeof WebSocket !== 'undefined'
-                },
-                websocketConfig: {
-                    urlValid: network?.websocket?.url ? 
-                        (network.websocket.url.startsWith('ws://') || network.websocket.url.startsWith('wss://')) : 
-                        false,
-                    url: network?.websocket?.url || 'Not configured'
-                }
-            };
-            console.log('WebSocket Diagnostic Information:', diagnosticInfo);
-        }
-    }
-  
-    // Try to connect WebSocket if it's not already connected
-    if (wsManager && !wsManager.isConnected() && myAccount) {
-        console.log('Attempting WebSocket connection from pollChats');
-        wsManager.connect();
-        
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        console.log('Connection attempt result:', {
-            success: wsManager.isConnected()
-        });
-    }
-
-    // Only poll if WebSocket is not connected/subscribed
+// Called every 30 seconds if we are online and not subscribed to WebSocket
+async function pollChats() {
+    // Step 1: Attempt WebSocket connection if needed
+    console.log('Attempting WebSocket connection in pollChats');
+    await attemptWebSocketConnection();
+    
+    // Step 2: Check if we need to poll
     const isSubscribed = wsManager && wsManager.subscribed && wsManager.isConnected();
-
+    
+    // Step 3: Poll if we are not subscribed to WebSocket
     if (!isSubscribed) {
-        if (!pollStatus.accountValid) {
+        // Skip if no valid account
+        if (!myAccount?.keys?.address) {
             console.log('Poll skipped: No valid account');
             return;
         }
 
         try {
-            console.log('Initiating REST API poll');
             await updateChatList();
-            
+
             if (document.getElementById('walletScreen')?.classList.contains('active')) {
                 await updateWalletView();
             }
@@ -3913,26 +3788,16 @@ async function pollChats(){
             console.error('Chat polling error:', error);
         }
 
-        const now = Date.now();
-        if (window.chatUpdateTimer) {
-            clearTimeout(window.chatUpdateTimer);
-        }
-        
-        console.log('Poll schedule:', JSON.stringify({
-            timestamp: now,
-            nextPollIn: '30000ms',
-            reason: 'WebSocket not subscribed'
-        }, null, 2));
-        
-        window.chatUpdateTimer = setTimeout(pollChats, 30000);
-    } else {
-        if (window.chatUpdateTimer) {
-            clearTimeout(window.chatUpdateTimer);
-            window.chatUpdateTimer = null;
-            console.log('Poll status: Stopped - WebSocket subscribed');
-        }
+        scheduleNextPoll();
+    } else if (window.chatUpdateTimer) {
+        // Clear polling if WebSocket is subscribed
+        clearTimeout(window.chatUpdateTimer);
+        window.chatUpdateTimer = null;
+        console.log('Poll status: Stopped - WebSocket subscribed');
     }
-
+    
+    const wsStatus = await checkWebSocketStatus();
+    // Step 4: Log final status
     const pollStatus = {
         wsStatus,
         accountValid: Boolean(myAccount?.keys?.address),
@@ -3940,6 +3805,65 @@ async function pollChats(){
         pollingStatus: window.chatUpdateTimer ? 'polling' : 'not polling'
     };
     console.log('Poll Status:', JSON.stringify(pollStatus, null, 2));
+}
+
+// Helper function to check WebSocket status and log diagnostics if needed
+async function checkWebSocketStatus() {
+    if (!wsManager) return "not initialized";
+    
+    const status = wsManager.isConnected() ? "connected" : "disconnected";
+    
+    // Log diagnostic info if disconnected
+    if (status === "disconnected" && wsManager.connectionState === 'disconnected') {
+        const diagnosticInfo = {
+            browserState: {
+                isPrivateMode: !window.localStorage,
+                networkProtocol: window.location.protocol === 'https:' ? 'Secure (HTTPS)' : 'Insecure (HTTP)',
+                isOnline: navigator.onLine,
+                webSocketSupport: typeof WebSocket !== 'undefined'
+            },
+            websocketConfig: {
+                urlValid: network?.websocket?.url ? 
+                    (network.websocket.url.startsWith('ws://') || network.websocket.url.startsWith('wss://')) : 
+                    false,
+                url: network?.websocket?.url || 'Not configured'
+            }
+        };
+        console.log('WebSocket Diagnostic Information:', diagnosticInfo);
+    }
+    
+    return status;
+}
+
+// Helper function to attempt WebSocket connection
+async function attemptWebSocketConnection() {
+    if (!wsManager || !myAccount || wsManager.isConnected()) return;
+    
+    console.log('Attempting WebSocket connection from pollChats');
+    wsManager.connect();
+    
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    console.log('Connection attempt result:', {
+        success: wsManager.isConnected()
+    });
+}
+
+// Helper function to schedule next poll
+function scheduleNextPoll() {
+    if (window.chatUpdateTimer) {
+        clearTimeout(window.chatUpdateTimer);
+    }
+    
+    const interval = pollChats.nextPoll || pollIntervalNormal;
+    const now = Date.now();
+    console.log('Poll schedule:', JSON.stringify({
+        timestamp: now,
+        nextPollIn: `${interval}ms`,
+        reason: 'WebSocket not subscribed'
+    }, null, 2));
+    
+    window.chatUpdateTimer = setTimeout(pollChats, interval);
 }
 
 async function getChats(keys) {  // needs to return the number of chats that need to be processed
@@ -6386,19 +6310,6 @@ class WSManager {
           console.log('Notification Status:', JSON.stringify(notificationState, null, 2));
         }
       }
-      
-      // Update polling timer
-      if (window.chatUpdateTimer) {
-        const timerUpdate = {
-          action: 'reset',
-          newInterval: 30000
-        };
-        console.log('Poll Timer Update:', JSON.stringify(timerUpdate, null, 2));
-        
-        clearTimeout(window.chatUpdateTimer);
-        window.chatUpdateTimer = setTimeout(pollChats, timerUpdate.newInterval);
-      }
-      
     } catch (error) {
       console.error('WebSocket Message Processing Error:', JSON.stringify({
         error: error.message,
@@ -6520,4 +6431,76 @@ function initializeWebSocketManager() {
     }
     
     return wsManager;
+}
+
+async function handleDataCaching(options) {
+    const {
+        store,          // STORES.WALLET or STORES.CONTACTS
+        dataKey,        // myAccount.keys.address
+        currentData,    // data to be cached
+        dataType,       // 'wallet' or 'contacts' - for logging and data structure
+        idField = 'address'  // 'assetId' for wallet, 'address' for contacts
+    } = options;
+
+    if (!isInstalledPWA) {
+        console.log(`Not installed PWA. No ${dataType} caching available.`);
+        return;
+    }
+
+    if (isOnline) {
+        try {
+            const cacheData = addVersionToData({
+                [idField]: dataKey,
+                [dataType]: currentData
+            });
+            await saveData(store, cacheData);
+            console.log(`Successfully cached ${dataType} data:`, cacheData);
+        } catch (error) {
+            console.error(`Failed to cache ${dataType} data:`, error);
+        }
+    } else {
+        try {
+            const cachedData = await getData(store, dataKey);
+            if (cachedData) {
+                myData[dataType] = cachedData[dataType];
+                console.log(`Using cached ${dataType} data from:`, new Date(cachedData.lastUpdated));
+            }
+        } catch (error) {
+            console.error(`Failed to read cached ${dataType} data:`, error);
+        }
+    }
+}
+
+async function handleChatDataCaching(isSaveMode) {
+    if (!isInstalledPWA) {
+        console.log('Not installed PWA. No chat data caching available.');
+        return;
+    }
+    
+    if (isSaveMode) {
+        // Save mode - cache the current chat data
+        try {
+            const cacheData = addVersionToData({
+                chatId: myAccount.keys.address,
+                chats: myData.chats,
+                contacts: myData.contacts
+            });
+            await saveData(STORES.CHATS, cacheData);
+            console.log('Successfully cached chat data');
+        } catch (error) {
+            console.error('Failed to cache chat data:', error);
+        }
+    } else {
+        // Load mode - retrieve cached chat data
+        try {
+            const cachedData = await getData(STORES.CHATS, myAccount.keys.address);
+            if (cachedData) {
+                myData.chats = cachedData.chats;
+                myData.contacts = cachedData.contacts;
+                console.log('Using cached chat data from:', new Date(cachedData.lastUpdated));
+            }
+        } catch (error) {
+            console.error('Failed to read cached chat data:', error);
+        }
+    }
 }
