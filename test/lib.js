@@ -85,7 +85,12 @@ export function formatTime(timestamp) {
     } else if (days > 0) {
         return days === 1 ? 'Yesterday' : `${days} days ago`;
     } else {
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        // Use hour12: true to get 12-hour format and remove leading zeros
+        return date.toLocaleTimeString([], { 
+            hour: 'numeric', 
+            minute: '2-digit',
+            hour12: true 
+        });
     }
 }
 
