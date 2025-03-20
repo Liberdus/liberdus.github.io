@@ -934,8 +934,8 @@ function handleUnload(e){
     else{
         // Clean up WebSocket connection
         if (wsManager) {
-            wsManager.unsubscribe();
             wsManager.disconnect();
+            wsManager = null;
         }
         
         saveState()
@@ -951,8 +951,8 @@ function handleBeforeUnload(e){
 console.log('in handleBeforeUnload', e)
     // Clean up WebSocket connection
     if (wsManager) {
-        wsManager.unsubscribe();
         wsManager.disconnect();
+        wsManager = null;
     }
     
     saveState()
@@ -1336,7 +1336,9 @@ async function switchView(view) {
     if (view === 'chats') {
         await updateChatList('force');
         if (isOnline) {
-            pollChatInterval(pollIntervalNormal)
+            if (wsManager && !wsManager.isSubscribed()) {
+                pollChatInterval(pollIntervalNormal)
+            }
         }
     } else if (view === 'contacts') {
         await updateContactsList();
@@ -1931,7 +1933,9 @@ function openChatModal(address) {
     appendChatModal.address = address
     appendChatModal.len = messages.length
     if (isOnline) {
-        pollChatInterval(pollIntervalChatting) // poll for messages at a faster rate
+        if (wsManager && !wsManager.isSubscribed()) {
+            pollChatInterval(pollIntervalChatting) // poll for messages at a faster rate
+        }
     }
 }
 
@@ -1975,7 +1979,9 @@ function closeChatModal() {
     appendChatModal.address = null
     appendChatModal.len = 0
     if (isOnline) {
-        pollChatInterval(pollIntervalNormal) // back to polling at slower rate
+        if (wsManager && !wsManager.isSubscribed()) {
+            pollChatInterval(pollIntervalNormal) // back to polling at slower rate
+        }
     }
 }
 
@@ -3351,7 +3357,6 @@ function handleSignOut() {
 
     // Clean up WebSocket connection
     if (wsManager) {
-        wsManager.unsubscribe();
         wsManager.disconnect();
         wsManager = null;
     }
@@ -3767,8 +3772,8 @@ async function pollChats() {
     console.log('Attempting WebSocket connection in pollChats');
     await attemptWebSocketConnection();
     
-    // Step 2: Check if we need to poll
-    const isSubscribed = wsManager && wsManager.subscribed && wsManager.isConnected();
+    // Step 2: variable to check if we are subscribed to WebSocket
+    const isSubscribed = wsManager && wsManager.subscribed && wsManager.isSubscribed();
     
     // Step 3: Poll if we are not subscribed to WebSocket
     if (!isSubscribed) {
@@ -3837,7 +3842,7 @@ async function checkWebSocketStatus() {
 
 // Helper function to attempt WebSocket connection
 async function attemptWebSocketConnection() {
-    if (!wsManager || !myAccount || wsManager.isConnected()) return;
+    if (!wsManager || !myAccount || wsManager.isSubscribed()) return;
     
     console.log('Attempting WebSocket connection from pollChats');
     wsManager.connect();
@@ -6005,15 +6010,20 @@ class WSManager {
         
         // Check if this is a subscription response
         if (data.result !== undefined) {
-          if (data.result === true) {
-            console.log('Server confirmed subscription successful');
-          } else if (data.error) {
-            console.error('Server rejected subscription:', data.error);
-            this.subscribed = false;
+            if (data.result === true) {
+              console.log('Server confirmed subscription successful');
+              this.subscribed = true;
+            } else if (data.error) {
+              console.error('Server rejected subscription:', data.error);
+              this.subscribed = false;
+            }
+          } else if (data.account_id && data.timestamp) {
+            console.log('Received new chat notification in ws');
+            updateChatList(true);
+          } else {
+            // Handle any other unexpected message formats
+            console.warn('Received unrecognized websocket message format:', data);
           }
-        }
-        
-        this.handleChatEvent(data);
       } catch (error) {
         console.error('Error processing WebSocket message:', error);
       }
@@ -6038,22 +6048,15 @@ class WSManager {
     try {
       console.log('Subscribing to chat events for address:', myAccount.keys.address);
       
-      // Create subscription message
+      // Create subscription message directly with the required format
       const subscribeMessage = {
-        ...network.websocket.subscribeMessage
+        method: "ChatEvent",
+        params: ["subscribe", longAddress(myAccount.keys.address)]
       };
-      
-      // Replace placeholder with actual account ID if needed
-      if (subscribeMessage.params && 
-          subscribeMessage.params.includes('$ACCOUNT_ID')) {
-        const addressIndex = subscribeMessage.params.indexOf('$ACCOUNT_ID');
-        subscribeMessage.params[addressIndex] = longAddress(myAccount.keys.address);
-      }
       
       console.log('Sending subscription message:', JSON.stringify(subscribeMessage));
       this.ws.send(JSON.stringify(subscribeMessage));
-      this.subscribed = true;
-      //console.log('Subscription sent successfully');
+      console.log('Subscription message sent');
       return true;
     } catch (error) {
       console.error('Error subscribing to chat events:', error);
@@ -6078,23 +6081,15 @@ class WSManager {
     
     try {
       console.log('Unsubscribing from chat events');
-      const unsubscribeMessage = { ...network.websocket.subscribeMessage };
       
-      // Change subscribe to unsubscribe in parameters
-      if (unsubscribeMessage.params && unsubscribeMessage.params[0] === 'subscribe') {
-        unsubscribeMessage.params[0] = 'unsubscribe';
-      }
-      
-      // Replace placeholder with actual account ID if needed
-      if (unsubscribeMessage.params && 
-          unsubscribeMessage.params.includes('$ACCOUNT_ID')) {
-        const addressIndex = unsubscribeMessage.params.indexOf('$ACCOUNT_ID');
-        unsubscribeMessage.params[addressIndex] = longAddress(myAccount.keys.address);
-      }
+      const unsubscribeMessage = {
+        method: "ChatEvent",
+        params: ["unsubscribe", longAddress(myAccount.keys.address)]
+      };
       
       this.ws.send(JSON.stringify(unsubscribeMessage));
       this.subscribed = false;
-      console.log('Unsubscribed successfully');
+      console.log('Attempted to unsubscribe');
     } catch (error) {
       console.error('Error unsubscribing from chat events:', error);
     }
@@ -6170,187 +6165,24 @@ class WSManager {
     };
     console.log('Reconnection Schedule:', JSON.stringify(reconnectInfo, null, 2));
     
-    setTimeout(() => this.reconnect(), delay);
-  }
-
-  /**
-   * Reconnect to the WebSocket server
-   */
-  reconnect() {
-    console.log('WebSocket Action: Attempting reconnection');
-    this.connect();
+    setTimeout(() => {
+      console.log('Reconnecting to WebSocket');
+      this.connect();
+    }, delay);
   }
 
   /**
    * Check if WebSocket is connected
    */
   isConnected() {
-    const status = {
-      connected: !!(this.ws && this.ws.readyState === WebSocket.OPEN),
-      readyState: this.ws ? this.ws.readyState : 'no websocket',
-      polling: window.chatUpdateTimer ? true : false,
-      subscription: this.subscribed ? true : false
-    };
-    return status.connected;
+    return !!(this.ws && this.ws.readyState === WebSocket.OPEN);
   }
 
   /**
-   * Handle chat event messages
+   * Check if WebSocket is subscribed
    */
-  handleChatEvent(data) {
-    const eventInfo = {
-      type: 'unknown',
-      data: data
-    };
-    
-    // Determine event type and relevant data
-    if (data.result === true) {
-      eventInfo.type = 'subscription_confirmation';
-    } else if (data.account_id && data.timestamp) {
-      eventInfo.type = 'timestamp_update';
-      eventInfo.timestamp = data.timestamp;
-    } else if (data.result && Array.isArray(data.result)) {
-      if (data.result[0] === 'new_message') {
-        eventInfo.type = 'new_message_legacy_array';
-        eventInfo.messageId = data.result[1];
-        eventInfo.messageData = data.result[2];
-      }
-    } else if (data.result && typeof data.result === 'object') {
-      if (data.result.type === 'new_message') {
-        eventInfo.type = 'new_message_object';
-        eventInfo.messageId = data.result.id;
-        eventInfo.messageData = data.result.data;
-      }
-    }
-    
-    console.log('WebSocket Event:', eventInfo);
-    
-    // Process the event based on type
-    switch (eventInfo.type) {
-      case 'subscription_confirmation':
-        return;
-      case 'timestamp_update':
-        this.processNewMessage({ timestamp: data.timestamp });
-        return;
-      case 'new_message_legacy_array':
-        this.processNewMessage(data.result[2]);
-        return;
-      case 'new_message_object':
-        this.processNewMessage(data.result.data);
-        return;
-    }
-  }
-
-  /**
-   * Process new message data from WebSocket
-   */
-  async processNewMessage(data) {
-    try {
-      const processInfo = {
-        messageData: data,
-        accountValid: !!(data && myAccount && myAccount.keys),
-        timestamps: {
-          ws: data?.timestamp || Date.now(),
-          stored: myAccount?.chatTimestamp || 0
-        }
-      };
-      console.log('Processing WebSocket Message:', JSON.stringify(processInfo, null, 2));
-      
-      if (!processInfo.accountValid) {
-        console.error('Message Processing Error: Missing data or account');
-        return;
-      }
-      
-      // Get latest chat data from the network
-      const accountAddress = longAddress(myAccount.keys.address);
-      let senders = await queryNetwork(`/account/${accountAddress}/chats/${processInfo.timestamps.stored}`);
-      
-      // Retry logic for empty responses
-      if (!senders || !senders.chats || Object.keys(senders.chats).length === 0) {
-        const retryInfo = { attempt: 1, delay: 300 };
-        console.log('Chat Query Retry:', retryInfo);
-        
-        await new Promise(resolve => setTimeout(resolve, retryInfo.delay));
-        senders = await queryNetwork(`/account/${accountAddress}/chats/${processInfo.timestamps.stored}`);
-      }
-      
-      // Update timestamp if newer
-      if (processInfo.timestamps.ws > processInfo.timestamps.stored) {
-        const timestampUpdate = {
-          old: processInfo.timestamps.stored,
-          new: processInfo.timestamps.ws
-        };
-        console.log('Chat Timestamp Update:', JSON.stringify(timestampUpdate, null, 2));
-        myAccount.chatTimestamp = processInfo.timestamps.ws;
-      }
-      
-      // Track active chat for notifications
-      const chatState = {
-        activeChatAddress: appendChatModal?.address,
-        hasNewChats: !!(senders?.chats && Object.keys(senders.chats).length > 0),
-        chatCount: senders?.chats ? Object.keys(senders.chats).length : 0
-      };
-      console.log('Chat Processing State:', JSON.stringify(chatState, null, 2));
-      
-      if (chatState.hasNewChats) {
-        await processChats(senders.chats, myAccount.keys);
-        
-        // Update UI elements
-        const uiUpdates = {
-          chatListUpdated: true,
-          modalUpdated: false,
-          walletUpdated: false
-        };
-        
-        await updateChatList(true);
-        
-        // Update chat modal if open
-        if (chatState.activeChatAddress) {
-          const chatModal = document.getElementById('chatModal');
-          if (chatModal?.classList.contains('active')) {
-            appendChatModal();
-            
-            const messagesContainer = chatModal.querySelector('.messages-container');
-            if (messagesContainer) {
-              setTimeout(() => {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-              }, 100);
-            }
-            uiUpdates.modalUpdated = true;
-          }
-        }
-        
-        // Update wallet view
-        await updateWalletView();
-        uiUpdates.walletUpdated = true;
-        
-        console.log('UI Update Status:', JSON.stringify(uiUpdates, null, 2));
-        
-        // Handle notifications
-        if (document.visibilityState === 'hidden') {
-          const notificationState = {
-            supported: 'Notification' in window,
-            permission: Notification.permission,
-            sent: false
-          };
-          
-          if (notificationState.supported && notificationState.permission === 'granted') {
-            new Notification('New Message', {
-              body: 'You have a new message',
-              icon: './media/liberdus_logo_250.png'
-            });
-            notificationState.sent = true;
-          }
-          
-          console.log('Notification Status:', JSON.stringify(notificationState, null, 2));
-        }
-      }
-    } catch (error) {
-      console.error('WebSocket Message Processing Error:', JSON.stringify({
-        error: error.message,
-        stack: error.stack
-      }, null, 2));
-    }
+  isSubscribed() {
+    return this.subscribed;
   }
 
   /**
@@ -6376,8 +6208,7 @@ class WSManager {
     if (isIOSStandalone) {
       supportInfo.ios = {
         mode: 'standalone_pwa',
-        restrictions: network.websocket.url.startsWith('wss://') && 
-                      network.websocket.url.includes('dev.liberdus.com')
+        restrictions: network.websocket.url.startsWith('wss://')
       };
     }
 
@@ -6435,7 +6266,6 @@ function initializeWebSocketManager() {
                 status: 'starting',
                 config: {
                     url: network.websocket.url,
-                    subscribeMessage: network.websocket.subscribeMessage
                 },
                 account: {
                     available: !!(myAccount?.keys?.address)
