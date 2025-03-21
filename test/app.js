@@ -1334,6 +1334,7 @@ async function switchView(view) {
 
     // Update lists when switching views
     if (view === 'chats') {
+        document.getElementById('switchToChats').classList.remove('has-notification');
         await updateChatList('force');
         if (isOnline) {
             if (wsManager && !wsManager.isSubscribed()) {
@@ -1345,6 +1346,7 @@ async function switchView(view) {
     } else if (view === 'wallet') {
 //        await updateAssetPricesIfNeeded(); // New function to update asset prices
 //        await updateWalletBalances();
+        document.getElementById('switchToWallet').classList.remove('has-notification');
         await updateWalletView();
     }
     
@@ -4090,15 +4092,22 @@ async function processChats(chats, keys) {
                     const senderName = contact.name || contact.username || `${from.slice(0,8)}...`
                     
                     if (added > 0) {
-                        showToast(`New message from ${senderName}`, 3000, 'info');
+                        // Add notification indicator to Chats tab if we're not on it
+                        const chatsButton = document.getElementById('switchToChats');
+                        if (!document.getElementById('chatsScreen').classList.contains('active')) {
+                            chatsButton.classList.add('has-notification');
+                        }
                     }
                 }
             }
             
             // Show transfer notification even if no messages were added
             if (hasNewTransfer && !inActiveChatWithSender) {
-                const senderName = contact.name || contact.username || `${from.slice(0,8)}...`        
-                showToast(`New transfer received from ${senderName}`, 3000, 'success');
+                // Add notification indicator to Wallet tab if we're not on it
+                const walletButton = document.getElementById('switchToWallet');
+                if (!document.getElementById('walletScreen').classList.contains('active')) {
+                    walletButton.classList.add('has-notification');
+                }
             }
             
             if (newTimestamp > 0){
