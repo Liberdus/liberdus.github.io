@@ -392,9 +392,7 @@ body {
 }
 
 #chatsScreen {
-  padding-bottom: calc(
-    80px + env(safe-area-inset-bottom, 0px)
-  ); /* Match the existing chatsScreen padding */
+  padding-bottom: 80px;
 }
 
 .chat-avatar {
@@ -669,20 +667,6 @@ button:disabled {
   left: 0;
   height: 72px;
   margin-bottom: env(safe-area-inset-bottom, 0);
-  padding-bottom: env(safe-area-inset-bottom, 0);
-  margin-bottom: 0; /* Remove the margin-bottom if it exists */
-}
-
-/* Add this new style for the background extension */
-.footer::after {
-  content: "";
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: env(safe-area-inset-bottom, 0);
-  background-color: var(--background-color);
-  z-index: 999; /* Make sure it's above other content but below the footer */
 }
 
 .footer.active {
@@ -734,6 +718,7 @@ button:disabled {
 .nav-button.has-notification::after {
   opacity: 1;
 }
+
 
 .nav-button::before {
   content: "";
