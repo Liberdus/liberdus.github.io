@@ -4,7 +4,7 @@ try {
   console.error('Failed to import log-utils.js:', e);
 }
 
-const SW_VERSION = '1.0.90';
+const SW_VERSION = '2025.03.21.13.23';
 
 // Cache names with proper versioning
 const CACHE_VERSION = '1.0.0';
