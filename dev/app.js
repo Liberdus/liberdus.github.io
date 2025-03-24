@@ -1219,7 +1219,7 @@ async function updateChatList(force) {
         chatList.innerHTML = `
             <div class="empty-state">
                 <div style="font-size: 2rem; margin-bottom: 1rem"></div>
-                <div style="font-weight: bold; margin-bottom: 0.5rem">No Chats Yet</div>
+                <div style="font-weight: bold; margin-bottom: 0.5rem">Click the + button to start a chat</div>
                 <div>Your conversations will appear here</div>
             </div>`;
         return;
@@ -3538,7 +3538,8 @@ async function handleSendMessage() {
 
         // Clear input and reset height
         messageInput.value = '';
-        messageInput.style.height = '45px';
+        messageInput.style.height = '44px'; // original height
+        messageInput.focus(); // Add focus back to keep keyboard open
 
         appendChatModal()
 
@@ -3556,7 +3557,6 @@ async function handleClickToCopy(e) {
     if (!messageEl) return;
     
     try {
-        // Get text directly from the message-content div instead of data attribute
         const messageText = messageEl.querySelector('.message-content').textContent;
         await navigator.clipboard.writeText(messageText);
         showToast('Message copied to clipboard', 2000, 'success');
