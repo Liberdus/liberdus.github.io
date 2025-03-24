@@ -3412,8 +3412,10 @@ handleSignOut.exit = false
 // The user has a chat modal open to a recipient and has typed a message anc clicked the Send button
 // The recipient account already exists in myData.contacts; it was created when the user submitted the New Chat form
 async function handleSendMessage() {
-    await updateChatList()  // before sending the message check and show received messages
     const messageInput = document.querySelector('.message-input');
+    messageInput.focus(); // Add focus back to keep keyboard open
+    await updateChatList()  // before sending the message check and show received messages
+    
     const message = messageInput.value.trim();
     if (!message) return;
 
@@ -3539,7 +3541,6 @@ async function handleSendMessage() {
         // Clear input and reset height
         messageInput.value = '';
         messageInput.style.height = '44px'; // original height
-        messageInput.focus(); // Add focus back to keep keyboard open
 
         appendChatModal()
 

@@ -3329,3 +3329,13 @@ input[type="number"] {
   display: none;
 }
 /* end of additions by Omar */
+
+small {
+  font-size: 0.8rem;
+  color: #6c757d;
+  text-align: left;
+  display: block;
+  padding: 8px;
+  border-radius: 4px;
+  margin-top: 8px;
+}
