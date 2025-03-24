@@ -1127,6 +1127,12 @@ input[type="file"].form-control::file-selector-button {
   border-radius: 1rem;
   position: relative;
   text-align: left;
+  cursor: pointer;
+  transition: filter 0.2s ease;
+}
+
+.message:hover {
+  filter: brightness(95%);
 }
 
 .message.received {
