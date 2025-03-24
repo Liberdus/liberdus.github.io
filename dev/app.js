@@ -1889,7 +1889,7 @@ function openChatModal(address) {
 
     // Display messages and click-to-copy feature
     messagesList.innerHTML = messages.map(msg => `
-        <div class="message ${msg.my ? 'sent' : 'received'}" data-message="${msg.message.replace(/"/g, '&quot;')}">
+        <div class="message ${msg.my ? 'sent' : 'received'}">
             <div class="message-content">${msg.message}</div>
             <div class="message-time">${formatTime(msg.timestamp)}</div>
         </div>
@@ -3556,7 +3556,8 @@ async function handleClickToCopy(e) {
     if (!messageEl) return;
     
     try {
-        const messageText = messageEl.dataset.message;
+        // Get text directly from the message-content div instead of data attribute
+        const messageText = messageEl.querySelector('.message-content').textContent;
         await navigator.clipboard.writeText(messageText);
         showToast('Message copied to clipboard', 2000, 'success');
     } catch (err) {
