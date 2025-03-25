@@ -719,7 +719,6 @@ button:disabled {
   opacity: 1;
 }
 
-
 .nav-button::before {
   content: "";
   width: 24px;
@@ -1148,11 +1147,25 @@ input[type="file"].form-control::file-selector-button {
   border-bottom-right-radius: 0.25rem;
 }
 
+.message.sent .message-time {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  margin-top: 0.25rem;
+  text-align: right;
+}
+
 .message-time {
   font-size: 0.75rem;
   opacity: 0.7;
   margin-top: 0.25rem;
   text-align: left;
+}
+
+.message-content {
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+  hyphens: auto;
 }
 
 .chat-user-info {
@@ -1781,6 +1794,11 @@ input[type="file"].form-control {
   font-family: var(--font-primary);
   font-size: var(--font-size-sm);
   color: var(--secondary-text-color);
+  word-break: break-all;
+  word-wrap: break-word;
+  max-width: 100%;
+  text-align: center;
+  padding: 0 8px;
 }
 
 .contact-info-item {
