@@ -780,7 +780,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // TODO add comment about which send form this is for chat or assets
     document.getElementById('openSendModal').addEventListener('click', openSendModal);
     document.getElementById('closeSendModal').addEventListener('click', closeSendModal);
-    document.getElementById('sendForm').addEventListener('submit', handleSendAsset);
+    document.getElementById('sendForm').addEventListener('submit', handleSendFormSubmit);
+
+    // Add event listeners for send confirmation modal
+    document.getElementById('closeSendConfirmationModal').addEventListener('click', closeSendConfirmationModal);
+    document.getElementById('confirmSendButton').addEventListener('click', handleSendAsset);
+    document.getElementById('cancelSendButton').addEventListener('click', closeSendConfirmationModal);
 
     document.getElementById('sendAsset').addEventListener('change', () => {
 //        updateSendAddresses();
@@ -2845,7 +2850,10 @@ function fillAmount() {
 // The recipient account may not exist in myData.contacts and might have to be created
 async function handleSendAsset(event) {
     event.preventDefault();
-    
+    if (Date.now() - handleSendAsset.timestamp < 2000) {
+        return;
+    }
+    handleSendAsset.timestamp = Date.now()
     const wallet = myData.wallet;
     const assetIndex = document.getElementById('sendAsset').value;  // TODO include the asset id and symbol in the tx
     const fromAddress = myAccount.keys.address;
@@ -2986,10 +2994,13 @@ console.log('payload is', payload)
         updateWalletView();
 */
         closeSendModal();
+        closeSendConfirmationModal();
         document.getElementById('sendToAddress').value = '';
         document.getElementById('sendAmount').value = '';
         document.getElementById('sendMemo').value = '';
         document.getElementById('sendToAddressError').style.display = 'none'
+        // Show history modal after successful transaction
+        openHistoryModal();
 /*
         const sendToAddressError = document.getElementById('sendToAddressError');
         if (sendToAddressError) {
@@ -3001,6 +3012,7 @@ console.log('payload is', payload)
         alert('Transaction failed. Please try again.');
     }
 }
+handleSendAsset.timestamp = Date.now()
 
 // Contact Info Modal Management
 class ContactInfoModalManager {
@@ -6395,4 +6407,39 @@ async function handleChatDataCaching(isSaveMode) {
             console.error('Failed to read cached chat data:', error);
         }
     }
+}
+
+// New functions for send confirmation flow
+function handleSendFormSubmit(event) {
+    event.preventDefault();
+    
+    // Get form values
+    const assetSelect = document.getElementById('sendAsset');
+    const assetSymbol = assetSelect.options[assetSelect.selectedIndex].text;
+    const recipient = document.getElementById('sendToAddress').value;
+    const amount = document.getElementById('sendAmount').value;
+    const memo = document.getElementById('sendMemo').value;
+
+    // Update confirmation modal with values
+    document.getElementById('confirmRecipient').textContent = recipient;
+    document.getElementById('confirmAmount').textContent = `${amount}`;
+    document.getElementById('confirmAsset').textContent = assetSymbol;
+    
+    // Show/hide memo if present
+    const memoGroup = document.getElementById('confirmMemoGroup');
+    if (memo) {
+        document.getElementById('confirmMemo').textContent = memo;
+        memoGroup.style.display = 'block';
+    } else {
+        memoGroup.style.display = 'none';
+    }
+
+    // Hide send modal and show confirmation modal
+    document.getElementById('sendModal').classList.remove('active');
+    document.getElementById('sendConfirmationModal').classList.add('active');
+}
+
+function closeSendConfirmationModal() {
+    document.getElementById('sendConfirmationModal').classList.remove('active');
+    document.getElementById('sendModal').classList.add('active');
 }

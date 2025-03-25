@@ -693,6 +693,38 @@
         </div>
       </div>
 
+      <!-- Send Confirmation Modal -->
+      <div class="modal fixed-header" id="sendConfirmationModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeSendConfirmationModal"></button>
+          <div class="modal-title">Confirm Transaction</div>
+        </div>
+        <div class="form-container">
+          <div class="confirmation-details">
+            <div class="form-group">
+              <label>Recipient</label>
+              <div id="confirmRecipient" class="confirm-value"></div>
+            </div>
+            <div class="form-group">
+              <label>Amount</label>
+              <div id="confirmAmount" class="confirm-value"></div>
+            </div>
+            <div class="form-group">
+              <label>Asset</label>
+              <div id="confirmAsset" class="confirm-value"></div>
+            </div>
+            <div class="form-group" id="confirmMemoGroup" style="display: none">
+              <label>Memo</label>
+              <div id="confirmMemo" class="confirm-value"></div>
+            </div>
+          </div>
+          <button id="confirmSendButton" class="update-button">
+            Confirm Send
+          </button>
+          <button id="cancelSendButton" class="secondary-button">Cancel</button>
+        </div>
+      </div>
+
       <!-- QR Scan Modal -->
       <div class="modal fixed-header" id="qrScanModal">
         <div class="modal-header">
