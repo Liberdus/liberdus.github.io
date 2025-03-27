@@ -378,11 +378,11 @@ body {
   padding: 0;
   overflow-y: auto;
   position: relative;
-  /* Update padding bottom to account for footer height + safe area */
-  padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
-  /* Add these properties to create a new stacking context */
-  transform: translateZ(0);
+  height: calc(100vh - 72px - env(safe-area-inset-bottom, 0px));
+  /* Remove the padding-bottom since we're using height calc */
+  /* padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); */
   -webkit-overflow-scrolling: touch;
+  padding-bottom: 0;
 }
 
 .app-screen.active {
@@ -390,7 +390,7 @@ body {
 }
 
 #chatsScreen {
-  padding-bottom: 80px;
+  /* padding-bottom: 80px; */
 }
 
 .chat-avatar {
@@ -409,10 +409,9 @@ body {
   padding: 0;
   margin: 0;
   overflow-y: auto;
-  /* Add padding to bottom to ensure last item is fully visible */
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  /* Ensure smooth scrolling on iOS */
   -webkit-overflow-scrolling: touch;
+  /* Add padding to account for last item visibility */
+  padding-bottom: 16px;
 }
 
 /* Main chat list items */
