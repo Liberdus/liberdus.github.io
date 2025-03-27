@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'z'   // Also increment this when you increment version.html
+const version = 'a'   // Also increment this when you increment version.html
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -682,6 +682,36 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('Running in web-only mode, skipping service worker initialization');
     }
 
+    // Add clear cache button handler
+    const clearCacheButton = document.getElementById('clearCacheButton');
+    if (clearCacheButton) {
+        clearCacheButton.addEventListener('click', async () => {
+            try {
+                if ('serviceWorker' in navigator) {
+                    // Unregister all service workers
+                    const registrations = await navigator.serviceWorker.getRegistrations();
+                    for(let registration of registrations) {
+                        await registration.unregister();
+                    }
+                    // Clear all caches
+                    const keys = await caches.keys();
+                    await Promise.all(keys.map(key => caches.delete(key)));
+                    
+                    // Show success message
+                    showToast('Cache cleared successfully. Please refresh the page.');
+                    
+                    // Optional: Reload the page after a short delay
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
+                }
+            } catch (error) {
+                console.error('Failed to clear cache:', error);
+                showToast('Failed to clear cache. Please try again.');
+            }
+        });
+    }
+
     document.getElementById('versionDisplay').textContent = myVersion + ' '+version;
     document.getElementById('networkNameDisplay').textContent = network.name;
 
@@ -710,12 +740,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         welcomeButtons.appendChild(importAccountBtn);
         signInBtn.classList.add('primary-button');
         signInBtn.classList.remove('secondary-button');
+        // append clear cache button to the welcomeButtons
+        welcomeButtons.appendChild(clearCacheButton);
     } else {
         welcomeButtons.innerHTML = ''; // Clear existing order
         welcomeButtons.appendChild(createAccountBtn);
         welcomeButtons.appendChild(importAccountBtn);
         createAccountBtn.classList.add('primary-button');
         createAccountBtn.classList.remove('secondary-button');
+        // append clear cache button to the welcomeButtons
+        welcomeButtons.appendChild(clearCacheButton);
     }
 
     // Add event listeners
@@ -934,6 +968,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     nameInput.addEventListener('keydown', handleEditNameKeydown);
     nameActionButton.addEventListener('click', handleEditNameButton);
     
+    // Add send money button handler
+    document.getElementById('contactInfoSendButton').addEventListener('click', () => {
+    const contactUsername = document.getElementById('contactInfoUsername');
+    if (contactUsername) {
+        openSendModal.username = contactUsername.textContent;
+    }
+    
+        openSendModal();
+    });
+
+    document.getElementById('chatSendMoneyButton').addEventListener('click', (event) => {
+        const button = event.currentTarget;
+        openSendModal.username = button.dataset.username;
+        openSendModal();
+    });
 
     setupAddToHomeScreen()
 });
@@ -1895,6 +1944,11 @@ function openChatModal(address) {
     const contact = myData.contacts[address]
     // Set user info
     modalTitle.textContent = contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`;
+    
+    // Add data attributes to store the username and address
+    const sendMoneyButton = document.getElementById('chatSendMoneyButton');
+    sendMoneyButton.dataset.username = contact.username || address;
+
     generateIdenticon(contact.address, 40).then(identicon => {
         modalAvatar.innerHTML = identicon;
     });
@@ -2338,7 +2392,6 @@ async function copyAddress() {
 function openSendModal() {
     const modal = document.getElementById('sendModal');
     modal.classList.add('active');
-    
     const usernameInput = document.getElementById('sendToAddress');
     const usernameAvailable = document.getElementById('sendToAddressError');
     const submitButton = document.querySelector('#sendForm button[type="submit"]');
@@ -2356,6 +2409,15 @@ function openSendModal() {
     console.log("Added click event listener to scan QR button");
  */
 
+    if (openSendModal.username) {
+        const usernameInput = document.getElementById('sendToAddress');
+        usernameInput.value = openSendModal.username;
+        setTimeout(() => {
+            usernameInput.dispatchEvent(new Event('input'));
+        }, 500);
+        openSendModal.username = null
+    }
+    
     // Check availability on input changes
     let checkTimeout;
     usernameInput.addEventListener('input', (e) => {
@@ -2409,6 +2471,8 @@ function openSendModal() {
     // Update addresses for first asset
     updateSendAddresses();
 }
+
+openSendModal.username = null
 
 // Function to handle QR code scanning Omar
 function openQRScanModal() {
@@ -2810,6 +2874,7 @@ async function closeSendModal() {
     await updateChatList()
     document.getElementById('sendModal').classList.remove('active');
     document.getElementById('sendForm').reset();
+    opensendModal.username = null
 }
 
 function updateSendAddresses() {

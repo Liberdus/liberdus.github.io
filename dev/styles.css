@@ -209,6 +209,7 @@ body {
   position: relative;
   overflow: hidden;
   padding: 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   /* for firefox */
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.3) rgba(0, 0, 0, 0.05);
@@ -231,6 +232,7 @@ body {
   .container {
     width: 400px;
     height: 800px;
+    padding-bottom: 0;
   }
 }
 
@@ -291,7 +293,7 @@ body {
   color: var(--text-color);
   position: sticky;
   top: env(safe-area-inset-top, 0);
-  z-index: 1000;
+  /* z-index: 1000; */
   margin-top: env(safe-area-inset-top, 0);
 }
 
@@ -378,7 +380,10 @@ body {
   padding: 0;
   overflow-y: auto;
   position: relative;
+  /* Update padding to account for footer height plus safe area inset */
   padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  /* Add height constraint to prevent overflow */
+  height: calc(100% - 72px - env(safe-area-inset-bottom, 0px));
 }
 
 .app-screen.active {
@@ -660,7 +665,7 @@ button:disabled {
   bottom: 0;
   left: 0;
   height: 72px;
-  margin-bottom: env(safe-area-inset-bottom, 0);
+  background-color: white;
 }
 
 .footer.active {
@@ -673,6 +678,8 @@ button:disabled {
   max-width: 390px;
   margin: 0 auto;
   width: 100%;
+  height: 100%;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .nav-button {
@@ -779,11 +786,15 @@ button:disabled {
 @media (min-width: 769px) {
   .footer {
     position: absolute;
-    margin-bottom: 0;
   }
 
-  .header {
-    margin-top: 0;
+  .nav-buttons {
+    padding-bottom: 0;
+  }
+
+  .app-screen {
+    height: calc(100% - 72px);
+    padding-bottom: 72px;
   }
 }
 
@@ -798,7 +809,7 @@ button:disabled {
   transition: transform 0.3s ease-in-out;
   display: flex;
   flex-direction: column;
-  z-index: 1001;
+  /* z-index: 1001; */
   overflow-y: auto;
 }
 
@@ -811,14 +822,14 @@ button:disabled {
   align-items: center;
   padding: 16px;
   background-color: var(--background-color);
-  z-index: 1002;
+  /* z-index: 1002; */
   position: relative;
 }
 
 .back-button {
   position: absolute;
   left: 16px;
-  z-index: 1;
+  /* z-index: 1; */
   background: none;
   border: none;
   cursor: pointer;
@@ -1016,7 +1027,7 @@ input[type="file"].form-control::file-selector-button {
   align-items: center;
   justify-content: center;
   transition: transform 0.2s, background-color 0.2s;
-  z-index: 1000;
+  /* z-index: 1000; */
   opacity: 0.68;
 }
 
@@ -1690,7 +1701,7 @@ input[type="file"].form-control {
   transition: transform 0.3s ease-in-out;
   display: flex;
   flex-direction: column;
-  z-index: 1001;
+  /* z-index: 1001; */
   overflow-y: auto;
 }
 
@@ -1706,7 +1717,7 @@ input[type="file"].form-control {
   position: sticky;
   top: 0;
   background-color: white;
-  z-index: 1002;
+  /* z-index: 1002; */
 }
 
 #aboutModal .back-button {
@@ -2126,7 +2137,7 @@ mark {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   display: none;
   width: 160px; /* Set a fixed width that's about half of previous */
-  z-index: 1000;
+  /* z-index: 1000; */
 }
 
 .dropdown-menu.active {
@@ -2211,7 +2222,7 @@ mark {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 3px;
   position: absolute;
   right: 16px;
   top: 50%;
@@ -2384,7 +2395,6 @@ mark {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23dc3545' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'%3E%3C/circle%3E%3Cline x1='15' y1='9' x2='9' y2='15'%3E%3C/line%3E%3Cline x1='9' y1='9' x2='15' y2='15'%3E%3C/line%3E%3C/svg%3E");
 }
 
-
 /* Hover state for both buttons */
 @media (hover: hover) {
   .icon-button.cancel-button:hover::before {
@@ -2402,7 +2412,7 @@ mark {
   top: 25%;
   left: 50%;
   transform: translate(-50%, 0);
-  z-index: 2000;
+  /* z-index: 2000; */
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2598,7 +2608,7 @@ mark {
   border-radius: 28px;
   font-size: 12px;
   white-space: nowrap;
-  z-index: 1000;
+  /* z-index: 1000; */
   pointer-events: none;
 }
 
@@ -2613,7 +2623,7 @@ mark {
   padding: 12px 24px;
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 1000;
+  /* z-index: 1000; */
   display: flex;
   align-items: center;
   gap: 12px;
@@ -2823,7 +2833,7 @@ mark {
   padding: 0.2rem 0.5rem;
   border-radius: 3px;
   font-weight: bold;
-  z-index: 1;
+  /* z-index: 1; */
 }
 
 /* Modal specific adjustments */
@@ -3157,7 +3167,7 @@ mark {
   width: 100%;
   height: 100%;
   background: #000;
-  z-index: 1000;
+  /* z-index: 1000; */
   display: flex;
   flex-direction: column;
 }
@@ -3317,7 +3327,7 @@ input[type="number"] {
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: 10;
+  /* z-index: 10; */
   border: 2px solid #3498db;
   border-radius: 8px;
   opacity: 0;
@@ -3482,5 +3492,30 @@ small {
 }
 
 .contact-info-value-container .icon-button:hover {
+  opacity: 1;
+}
+
+/* Send money icon button */
+.icon-button.send-money-icon {
+  width: 30px;
+  height: 40px;
+  padding: 8px;
+  border-radius: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--primary-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 20px;
+  opacity: 0.7;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='12' y1='1' x2='12' y2='23'%3E%3C/line%3E%3Cpath d='M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'%3E%3C/path%3E%3C/svg%3E");
+}
+
+.icon-button.send-money-icon:hover {
+  background-color: var(--hover-background);
   opacity: 1;
 }
