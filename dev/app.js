@@ -1247,7 +1247,7 @@ async function updateChatList(force) {
                 <div class="chat-avatar">${identicon}</div>
                 <div class="chat-content">
                     <div class="chat-header">
-                        <div class="chat-name">${contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
+                        <div class="chat-name">${contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
                         <div class="chat-time">${formatTime(message.timestamp)}  <span class="chat-time-chevron"></span></div>
                     </div>
                     <div class="chat-message">
@@ -1433,7 +1433,7 @@ async function updateContactsList() {
                     <div class="chat-avatar">${identicon}</div>
                     <div class="chat-content">
                         <div class="chat-header">
-                            <div class="chat-name">${contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
+                            <div class="chat-name">${contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
                         </div>
                         <div class="chat-message">
                             ${contact.email || contact.x || contact.phone || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}
@@ -1455,7 +1455,7 @@ async function updateContactsList() {
                     <div class="chat-avatar">${identicon}</div>
                     <div class="chat-content">
                         <div class="chat-header">
-                            <div class="chat-name">${contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
+                            <div class="chat-name">${contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
                         </div>
                         <div class="chat-message">
                             ${contact.email || contact.x || contact.phone || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}
@@ -1894,7 +1894,7 @@ function openChatModal(address) {
     document.getElementById('newChatButton').classList.remove('visible');
     const contact = myData.contacts[address]
     // Set user info
-    modalTitle.textContent = contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`;
+    modalTitle.textContent = contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`;
     generateIdenticon(contact.address, 40).then(identicon => {
         modalAvatar.innerHTML = identicon;
     });
