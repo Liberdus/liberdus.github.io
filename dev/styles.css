@@ -664,7 +664,7 @@ button:disabled {
   position: fixed;
   bottom: 0;
   left: 0;
-  height: calc(72px + env(safe-area-inset-bottom, 0px));
+  height: calc(env(safe-area-inset-bottom, 0px));
   background-color: white;
   /* Add flex display to control nav-buttons positioning */
   display: flex;
