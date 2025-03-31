@@ -209,7 +209,6 @@ body {
   position: relative;
   overflow: hidden;
   padding: 0;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
   /* for firefox */
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.3) rgba(0, 0, 0, 0.05);
@@ -232,7 +231,6 @@ body {
   .container {
     width: 400px;
     height: 800px;
-    padding-bottom: 0;
   }
 }
 
@@ -380,16 +378,15 @@ body {
   padding: 0;
   overflow-y: auto;
   position: relative;
-  /* Update padding to account for footer height plus safe area inset */
-  padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
-  /* Add height constraint to prevent overflow */
-  height: calc(100% - 72px - env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  margin-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .app-screen.active {
   display: block;
 }
 
+#contactsScreen,
 #chatsScreen {
   padding-bottom: 80px;
 }
@@ -410,6 +407,7 @@ body {
   padding: 0;
   margin: 0;
   overflow-y: auto; /* Ensure scrolling is enabled */
+  margin-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
 }
 
 /* Main chat list items */
@@ -664,15 +662,12 @@ button:disabled {
   position: fixed;
   bottom: 0;
   left: 0;
-  height: calc(72px + env(safe-area-inset-bottom, 0px));
-  background-color: white;
-  /* Add flex display to control nav-buttons positioning */
-  display: flex;
-  flex-direction: column;
+  height: 72px;
+  margin-bottom: env(safe-area-inset-bottom, 0);
 }
 
 .footer.active {
-  display: flex;
+  display: block;
 }
 
 .nav-buttons {
@@ -681,9 +676,6 @@ button:disabled {
   max-width: 390px;
   margin: 0 auto;
   width: 100%;
-  /* Remove height: 100% and padding-bottom that were pushing buttons down */
-  /* Add padding to position buttons correctly */
-  padding: 4px 0;
 }
 
 .nav-button {
@@ -790,16 +782,11 @@ button:disabled {
 @media (min-width: 769px) {
   .footer {
     position: absolute;
-    height: 72px;
+    margin-bottom: 0;
   }
 
-  .nav-buttons {
-    height: 100%; /* On desktop we can use full height */
-  }
-
-  .app-screen {
-    height: calc(100% - 72px);
-    padding-bottom: 72px;
+  .header {
+    margin-top: 0;
   }
 }
 
