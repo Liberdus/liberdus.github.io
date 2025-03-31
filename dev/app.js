@@ -5921,8 +5921,6 @@ function handleGatewayForm(event) {
 async function startCamera() {
     const video = document.getElementById('video');
     const canvasElement = document.getElementById('canvas');
-    const canvas = canvasElement.getContext('2d', { willReadFrequently: true }); // Optimized for frequent getImageData calls
-    const scanHighlight = document.getElementById('scan-highlight');
     try {
         // First check if camera API is supported
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
