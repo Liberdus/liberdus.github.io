@@ -91,10 +91,13 @@
             Create Account
           </button>
           <button id="importAccountButton" class="secondary-button">
-            Import Account
+            Restore Account
           </button>
           <button id="addToHomeScreenButton" class="secondary-button">
             Install
+          </button>
+          <button id="clearCacheButton" class="secondary-button">
+            Clear Cache
           </button>
         </div>
         <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
@@ -121,7 +124,6 @@
           <!-- Chat items will be inserted here -->
         </ul>
       </div>
-      <button class="floating-button" id="newChatButton">+</button>
 
       <!-- New Chat Modal -->
       <div class="modal" id="newChatModal">
@@ -170,6 +172,7 @@
           <!-- Contact items will be inserted here -->
         </ul>
       </div>
+      <button class="floating-button" id="newChatButton">+</button>
 
       <div class="app-screen" id="walletScreen">
         <div class="wallet-balance">
@@ -215,7 +218,7 @@
         </div>
         <ul class="menu-list">
           <li class="menu-item" id="openAccountForm">Account</li>
-          <li class="menu-item" id="openExportForm">Export</li>
+          <li class="menu-item" id="openExportForm">Backup</li>
           <li class="menu-item" id="openNetwork">Gateway</li>
           <!--                <li class="menu-item" id="openSettings">Settings</li> -->
           <li class="menu-item" id="openExplorer">Explorer</li>
@@ -364,7 +367,7 @@
             </div>
             <div class="form-group">
               <label for="newPrivateKey"
-                >Private Key (hex, optional)
+                >Private Key
                 <span
                   id="newPrivateKeyError"
                   style="color: #dc3545; display: none"
@@ -374,8 +377,11 @@
                 type="text"
                 id="newPrivateKey"
                 class="form-control"
-                placeholder="Enter private key in hex format"
+                placeholder="Optional private key in hex format"
               />
+              <small>
+                If you want to use an existing private key enter it here. Otherwise you can leave this empty to have a private key automatically generated.
+              </small>
             </div>
             <button type="submit" class="update-button" disabled>
               Create Account
@@ -424,7 +430,7 @@
       <div class="modal" id="importModal">
         <div class="modal-header">
           <button class="back-button" id="closeImportForm"></button>
-          <div class="modal-title">Import Account</div>
+          <div class="modal-title">Restore Account</div>
         </div>
         <div class="form-container">
           <form id="importForm">
@@ -463,13 +469,18 @@
             <div class="modal-avatar"></div>
             <div class="modal-title"></div>
           </div>
-          <!-- Add header actions container for the add friend button -->
+          <!-- Add header actions container for the edit button and send money button -->
+
           <div class="header-actions">
             <button
-              class="icon-button add-friend-icon"
-              id="chatAddFriendButton"
-              aria-label="Add friend"
-              style="display: none"
+              class="icon-button send-money-icon"
+              id="chatSendMoneyButton"
+              aria-label="Send money"
+            ></button>
+            <button
+              class="icon-button edit-icon"
+              id="chatEditButton"
+              aria-label="Edit contact"
             ></button>
           </div>
         </div>
@@ -486,6 +497,80 @@
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
             </svg>
           </button>
+        </div>
+      </div>
+
+      <!-- Contact Info Modal -->
+      <div class="modal fixed-header" id="contactInfoModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeContactInfoModal"></button>
+          <div class="modal-title">Contact Info</div>
+          <!-- Add header actions container -->
+          <div class="header-actions">
+            <button
+              class="icon-button chat-icon"
+              id="contactInfoChatButton"
+              aria-label="Open chat"
+            ></button>
+            <button
+              class="icon-button send-money-icon"
+              id="contactInfoSendButton"
+              aria-label="Send money"
+            ></button>
+            <button
+              class="icon-button add-friend-icon"
+              id="addFriendButton"
+              aria-label="Add friend"
+            ></button>
+          </div>
+        </div>
+        <div class="form-container">
+          <div class="contact-info-list">
+            <div class="contact-avatar-section">
+              <div class="avatar" id="contactInfoAvatar"></div>
+              <div class="name"></div>
+              <div class="subtitle"></div>
+            </div>
+            <!-- Template for contact info items -->
+            <template id="contactInfoItemTemplate">
+              <div class="contact-info-item">
+                <div class="contact-info-label"></div>
+                <div class="contact-info-value"></div>
+              </div>
+            </template>
+            <!-- Contact info fields -->
+            <div class="contact-info-item">
+              <div class="contact-info-label">Username</div>
+              <div class="contact-info-value" id="contactInfoUsername"></div>
+            </div>
+            <div class="contact-info-item">
+              <div class="contact-info-label">Name</div>
+              <div class="contact-info-value-container">
+                <div class="contact-info-value" id="contactInfoName"></div>
+                <button
+                  class="icon-button edit-icon"
+                  id="nameEditButton"
+                  aria-label="Edit name"
+                ></button>
+              </div>
+            </div>
+            <div class="contact-info-item">
+              <div class="contact-info-label">Email</div>
+              <div class="contact-info-value" id="contactInfoEmail"></div>
+            </div>
+            <div class="contact-info-item">
+              <div class="contact-info-label">Phone</div>
+              <div class="contact-info-value" id="contactInfoPhone"></div>
+            </div>
+            <div class="contact-info-item">
+              <div class="contact-info-label">LinkedIn</div>
+              <div class="contact-info-value" id="contactInfoLinkedin"></div>
+            </div>
+            <div class="contact-info-item">
+              <div class="contact-info-label">X</div>
+              <div class="contact-info-value" id="contactInfoX"></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -690,6 +775,38 @@
         </div>
       </div>
 
+      <!-- Send Confirmation Modal -->
+      <div class="modal fixed-header" id="sendConfirmationModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeSendConfirmationModal"></button>
+          <div class="modal-title">Confirm Transaction</div>
+        </div>
+        <div class="form-container">
+          <div class="confirmation-details">
+            <div class="form-group">
+              <label>Recipient</label>
+              <div id="confirmRecipient" class="confirm-value"></div>
+            </div>
+            <div class="form-group">
+              <label>Amount</label>
+              <div id="confirmAmount" class="confirm-value"></div>
+            </div>
+            <div class="form-group">
+              <label>Asset</label>
+              <div id="confirmAsset" class="confirm-value"></div>
+            </div>
+            <div class="form-group" id="confirmMemoGroup" style="display: none">
+              <label>Memo</label>
+              <div id="confirmMemo" class="confirm-value"></div>
+            </div>
+          </div>
+          <button id="confirmSendButton" class="update-button">
+            Confirm Send
+          </button>
+          <button id="cancelSendButton" class="secondary-button">Cancel</button>
+        </div>
+      </div>
+
       <!-- QR Scan Modal -->
       <div class="modal fixed-header" id="qrScanModal">
         <div class="modal-header">
@@ -704,7 +821,7 @@
           <canvas id="canvas"></canvas>
         </div>
       </div>
-      
+
       <!-- History Modal -->
       <div class="modal fixed-header" id="historyModal">
         <div class="modal-header">
@@ -726,7 +843,7 @@
       <div class="modal" id="exportModal">
         <div class="modal-header">
           <button class="back-button" id="closeExportForm"></button>
-          <div class="modal-title">Export Data</div>
+          <div class="modal-title">Backup Data</div>
         </div>
         <div class="form-container">
           <form id="exportForm">
@@ -741,75 +858,6 @@
             </div>
             <button type="submit" class="update-button">Download Data</button>
           </form>
-        </div>
-      </div>
-
-      <!-- Contact Info Modal -->
-      <div class="modal fixed-header" id="contactInfoModal">
-        <div class="modal-header">
-          <button class="back-button" id="closeContactInfoModal"></button>
-          <div class="modal-title">Contact Info</div>
-          <!-- Add header actions container -->
-          <div class="header-actions">
-            <button
-              class="icon-button chat-icon"
-              id="contactInfoChatButton"
-              aria-label="Open chat"
-            ></button>
-            <div class="dropdown">
-              <button
-                class="dropdown-menu-button"
-                id="contactInfoMenuButton"
-                aria-label="More options"
-              ></button>
-              <div class="dropdown-menu" id="contactInfoMenuDropdown">
-                <button class="dropdown-item" id="editContactButton">
-                  <span class="dropdown-icon edit-icon"></span>
-                  <span class="dropdown-text">Edit</span>
-                </button>
-                <button class="dropdown-item add-friend" id="addFriendButton">
-                  <span class="dropdown-icon add-friend-icon"></span>
-                  <span class="dropdown-text">Add Friend</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="form-container">
-          <div class="contact-info-list">
-            <!-- Template for contact info items -->
-            <template id="contactInfoItemTemplate">
-              <div class="contact-info-item">
-                <div class="contact-info-label"></div>
-                <div class="contact-info-value"></div>
-              </div>
-            </template>
-            <!-- Contact info fields -->
-            <div class="contact-info-item">
-              <div class="contact-info-label">Username</div>
-              <div class="contact-info-value" id="contactInfoUsername"></div>
-            </div>
-            <div class="contact-info-item">
-              <div class="contact-info-label">Name</div>
-              <div class="contact-info-value" id="contactInfoName"></div>
-            </div>
-            <div class="contact-info-item">
-              <div class="contact-info-label">Email</div>
-              <div class="contact-info-value" id="contactInfoEmail"></div>
-            </div>
-            <div class="contact-info-item">
-              <div class="contact-info-label">Phone</div>
-              <div class="contact-info-value" id="contactInfoPhone"></div>
-            </div>
-            <div class="contact-info-item">
-              <div class="contact-info-label">LinkedIn</div>
-              <div class="contact-info-value" id="contactInfoLinkedin"></div>
-            </div>
-            <div class="contact-info-item">
-              <div class="contact-info-label">X</div>
-              <div class="contact-info-value" id="contactInfoX"></div>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -962,6 +1010,60 @@
           </div>
           <div id="contactSearchResults" class="chat-list">
             <!-- Contact search results will be populated here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Edit Contact Modal -->
+      <div class="modal fixed-header" id="editContactModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeEditContactModal"></button>
+          <div class="modal-title">Edit Contact</div>
+        </div>
+        <div class="form-container">
+          <div class="contact-info-list">
+            <div class="contact-avatar-section">
+              <div class="avatar"></div>
+              <div class="name"></div>
+              <div class="subtitle"></div>
+            </div>
+            <div class="contact-info-item">
+              <div class="contact-info-label">Username</div>
+              <div class="contact-info-value" id="editContactUsername"></div>
+            </div>
+            <div class="contact-info-item">
+              <div class="contact-info-label">Name</div>
+              <div class="contact-info-value-container">
+                <div class="contact-info-value editing">
+                  <input
+                    type="text"
+                    class="edit-field-input"
+                    id="editContactNameInput"
+                    placeholder="Enter contact name"
+                  />
+                  <button
+                    class="field-action-button clear"
+                    aria-label="Add"
+                  ></button>
+                </div>
+              </div>
+            </div>
+            <div class="contact-info-item">
+              <div class="contact-info-label">Email</div>
+              <div class="contact-info-value" id="editContactEmail"></div>
+            </div>
+            <div class="contact-info-item">
+              <div class="contact-info-label">Phone</div>
+              <div class="contact-info-value" id="editContactPhone"></div>
+            </div>
+            <div class="contact-info-item">
+              <div class="contact-info-label">LinkedIn</div>
+              <div class="contact-info-value" id="editContactLinkedin"></div>
+            </div>
+            <div class="contact-info-item">
+              <div class="contact-info-label">X</div>
+              <div class="contact-info-value" id="editContactX"></div>
+            </div>
           </div>
         </div>
       </div>

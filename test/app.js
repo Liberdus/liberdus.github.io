@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'   // Also increment this when you increment version.html
+const version = 'k'   // Also increment this when you increment version.html
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -682,6 +682,36 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('Running in web-only mode, skipping service worker initialization');
     }
 
+    // Add clear cache button handler
+    const clearCacheButton = document.getElementById('clearCacheButton');
+    if (clearCacheButton) {
+        clearCacheButton.addEventListener('click', async () => {
+            try {
+                if ('serviceWorker' in navigator) {
+                    // Unregister all service workers
+                    const registrations = await navigator.serviceWorker.getRegistrations();
+                    for(let registration of registrations) {
+                        await registration.unregister();
+                    }
+                    // Clear all caches
+                    const keys = await caches.keys();
+                    await Promise.all(keys.map(key => caches.delete(key)));
+                    
+                    // Show success message
+                    showToast('Cache cleared successfully. Please refresh the page.');
+                    
+                    // Optional: Reload the page after a short delay
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
+                }
+            } catch (error) {
+                console.error('Failed to clear cache:', error);
+                showToast('Failed to clear cache. Please try again.');
+            }
+        });
+    }
+
     document.getElementById('versionDisplay').textContent = myVersion + ' '+version;
     document.getElementById('networkNameDisplay').textContent = network.name;
 
@@ -706,17 +736,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (hasAccounts) {
         welcomeButtons.innerHTML = ''; // Clear existing order
         welcomeButtons.appendChild(signInBtn);
-                welcomeButtons.appendChild(createAccountBtn);
-                welcomeButtons.appendChild(importAccountBtn);
+        welcomeButtons.appendChild(createAccountBtn);
+        welcomeButtons.appendChild(importAccountBtn);
         signInBtn.classList.add('primary-button');
         signInBtn.classList.remove('secondary-button');
+        // append clear cache button to the welcomeButtons
+        welcomeButtons.appendChild(clearCacheButton);
     } else {
         welcomeButtons.innerHTML = ''; // Clear existing order
         welcomeButtons.appendChild(createAccountBtn);
-                welcomeButtons.appendChild(signInBtn);
         welcomeButtons.appendChild(importAccountBtn);
         createAccountBtn.classList.add('primary-button');
         createAccountBtn.classList.remove('secondary-button');
+        // append clear cache button to the welcomeButtons
+        welcomeButtons.appendChild(clearCacheButton);
     }
 
     // Add event listeners
@@ -780,7 +813,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // TODO add comment about which send form this is for chat or assets
     document.getElementById('openSendModal').addEventListener('click', openSendModal);
     document.getElementById('closeSendModal').addEventListener('click', closeSendModal);
-    document.getElementById('sendForm').addEventListener('submit', handleSendAsset);
+    document.getElementById('sendForm').addEventListener('submit', handleSendFormSubmit);
+
+    // Add event listeners for send confirmation modal
+    document.getElementById('closeSendConfirmationModal').addEventListener('click', closeSendConfirmationModal);
+    document.getElementById('confirmSendButton').addEventListener('click', handleSendAsset);
+    document.getElementById('cancelSendButton').addEventListener('click', closeSendConfirmationModal);
 
     document.getElementById('sendAsset').addEventListener('change', () => {
 //        updateSendAddresses();
@@ -808,6 +846,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('closeContactInfoModal').addEventListener('click', () => contactInfoModal.close());
     document.getElementById('handleSendMessage').addEventListener('click', handleSendMessage);
     
+    // Add message click-to-copy handler
+    document.querySelector('.messages-list')?.addEventListener('click', handleClickToCopy);
+    
     // Add refresh balance button handler
     document.getElementById('refreshBalance').addEventListener('click', async () => {
 //        await updateWalletBalances();
@@ -826,8 +867,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     document.getElementById('openLogs').addEventListener('click', () => {
-        // Close the menu modal first
-        document.getElementById('menuModal').classList.remove('active');
         // Then open the logs modal and update view
         document.getElementById('logsModal').classList.add('active');
         //updateLogsView();
@@ -920,7 +959,30 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Omar added
     document.getElementById('scanQRButton').addEventListener('click', openQRScanModal);
-    document.getElementById('closeQRScanModal').addEventListener('click', closeQRScanModal);    
+    document.getElementById('closeQRScanModal').addEventListener('click', closeQRScanModal);
+    
+    const nameInput = document.getElementById('editContactNameInput');
+    const nameActionButton = nameInput.parentElement.querySelector('.field-action-button');
+
+    nameInput.addEventListener('input', handleEditNameInput);
+    nameInput.addEventListener('keydown', handleEditNameKeydown);
+    nameActionButton.addEventListener('click', handleEditNameButton);
+    
+    // Add send money button handler
+    document.getElementById('contactInfoSendButton').addEventListener('click', () => {
+    const contactUsername = document.getElementById('contactInfoUsername');
+    if (contactUsername) {
+        openSendModal.username = contactUsername.textContent;
+    }
+    
+        openSendModal();
+    });
+
+    document.getElementById('chatSendMoneyButton').addEventListener('click', (event) => {
+        const button = event.currentTarget;
+        openSendModal.username = button.dataset.username;
+        openSendModal();
+    });
 
     setupAddToHomeScreen()
 });
@@ -1216,7 +1278,7 @@ async function updateChatList(force) {
         chatList.innerHTML = `
             <div class="empty-state">
                 <div style="font-size: 2rem; margin-bottom: 1rem"></div>
-                <div style="font-weight: bold; margin-bottom: 0.5rem">No Chats Yet</div>
+                <div style="font-weight: bold; margin-bottom: 0.5rem">Click the + button to start a chat</div>
                 <div>Your conversations will appear here</div>
             </div>`;
         return;
@@ -1234,7 +1296,7 @@ async function updateChatList(force) {
                 <div class="chat-avatar">${identicon}</div>
                 <div class="chat-content">
                     <div class="chat-header">
-                        <div class="chat-name">${contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
+                        <div class="chat-name">${contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
                         <div class="chat-time">${formatTime(message.timestamp)}  <span class="chat-time-chevron"></span></div>
                     </div>
                     <div class="chat-message">
@@ -1328,6 +1390,8 @@ async function switchView(view) {
     const newChatButton = document.getElementById('newChatButton');
     if (view === 'chats') {
         newChatButton.classList.add('visible');
+    } else if (view === 'contacts') {
+        newChatButton.classList.add('visible');
     } else {
         newChatButton.classList.remove('visible');
     }
@@ -1418,10 +1482,10 @@ async function updateContactsList() {
                     <div class="chat-avatar">${identicon}</div>
                     <div class="chat-content">
                         <div class="chat-header">
-                            <div class="chat-name">${contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
+                            <div class="chat-name">${contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
                         </div>
                         <div class="chat-message">
-                            ${contact.email || contact.x || contact.phone || contact.address}
+                            ${contact.email || contact.x || contact.phone || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}
                         </div>
                     </div>
                 </li>
@@ -1440,10 +1504,10 @@ async function updateContactsList() {
                     <div class="chat-avatar">${identicon}</div>
                     <div class="chat-content">
                         <div class="chat-header">
-                            <div class="chat-name">${contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
+                            <div class="chat-name">${contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
                         </div>
                         <div class="chat-message">
-                            ${contact.email || contact.x || contact.phone || contact.address}
+                            ${contact.email || contact.x || contact.phone || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}
                         </div>
                     </div>
                 </li>
@@ -1730,6 +1794,9 @@ function closeNewChatModal() {
     document.getElementById('newChatForm').reset();
     if (document.getElementById('chatsScreen').classList.contains('active')) {
         document.getElementById('newChatButton').classList.add('visible');
+    } 
+    if (document.getElementById('contactsScreen').classList.contains('active')) {
+        document.getElementById('newChatButton').classList.add('visible');
     }
 }
 
@@ -1872,11 +1939,16 @@ function openChatModal(address) {
     const modalAvatar = modal.querySelector('.modal-avatar');
     const modalTitle = modal.querySelector('.modal-title');
     const messagesList = modal.querySelector('.messages-list');
-    const addFriendButton = document.getElementById('chatAddFriendButton');
+    const editButton = document.getElementById('chatEditButton');
     document.getElementById('newChatButton').classList.remove('visible');
     const contact = myData.contacts[address]
     // Set user info
-    modalTitle.textContent = contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`;
+    modalTitle.textContent = contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`;
+    
+    // Add data attributes to store the username and address
+    const sendMoneyButton = document.getElementById('chatSendMoneyButton');
+    sendMoneyButton.dataset.username = contact.username || address;
+
     generateIdenticon(contact.address, 40).then(identicon => {
         modalAvatar.innerHTML = identicon;
     });
@@ -1884,7 +1956,7 @@ function openChatModal(address) {
     // Get messages from contacts data
     const messages = contact?.messages || [];
 
-    // Display messages
+    // Display messages and click-to-copy feature
     messagesList.innerHTML = messages.map(msg => `
         <div class="message ${msg.my ? 'sent' : 'received'}">
             <div class="message-content">${msg.message}</div>
@@ -1906,20 +1978,13 @@ function openChatModal(address) {
         }
     };
 
-    // Show or hide add friend button based on friend status
-    const isFriend = contact.friend || false;
-    if (isFriend) {
-        addFriendButton.style.display = 'none';
-    } else {
-        addFriendButton.style.display = 'flex';
-        // Add click handler for add friend button
-        addFriendButton.onclick = () => {
-            contact.friend = true;
-            showToast('Added to friends');
-            addFriendButton.style.display = 'none';
-            saveState();
-        };
-    }
+    // Add click handler for edit button
+    editButton.onclick = () => {
+        const contact = myData.contacts[address];
+        if (contact) {
+            contactInfoModal.open(createDisplayInfo(contact));
+        }
+    };
 
     // Show modal
     modal.classList.add('active');
@@ -1976,6 +2041,10 @@ function closeChatModal() {
     document.getElementById('chatModal').classList.remove('active');
     if (document.getElementById('chatsScreen').classList.contains('active')) {
         updateChatList('force')
+        document.getElementById('newChatButton').classList.add('visible');
+    }
+    if (document.getElementById('contactsScreen').classList.contains('active')) {
+        updateContactsList()
         document.getElementById('newChatButton').classList.add('visible');
     }
     appendChatModal.address = null
@@ -2323,7 +2392,6 @@ async function copyAddress() {
 function openSendModal() {
     const modal = document.getElementById('sendModal');
     modal.classList.add('active');
-    
     const usernameInput = document.getElementById('sendToAddress');
     const usernameAvailable = document.getElementById('sendToAddressError');
     const submitButton = document.querySelector('#sendForm button[type="submit"]');
@@ -2341,6 +2409,15 @@ function openSendModal() {
     console.log("Added click event listener to scan QR button");
  */
 
+    if (openSendModal.username) {
+        const usernameInput = document.getElementById('sendToAddress');
+        usernameInput.value = openSendModal.username;
+        setTimeout(() => {
+            usernameInput.dispatchEvent(new Event('input'));
+        }, 500);
+        openSendModal.username = null
+    }
+    
     // Check availability on input changes
     let checkTimeout;
     usernameInput.addEventListener('input', (e) => {
@@ -2394,6 +2471,8 @@ function openSendModal() {
     // Update addresses for first asset
     updateSendAddresses();
 }
+
+openSendModal.username = null
 
 // Function to handle QR code scanning Omar
 function openQRScanModal() {
@@ -2795,6 +2874,7 @@ async function closeSendModal() {
     await updateChatList()
     document.getElementById('sendModal').classList.remove('active');
     document.getElementById('sendForm').reset();
+    opensendModal.username = null
 }
 
 function updateSendAddresses() {
@@ -2842,7 +2922,10 @@ function fillAmount() {
 // The recipient account may not exist in myData.contacts and might have to be created
 async function handleSendAsset(event) {
     event.preventDefault();
-    
+    if (Date.now() - handleSendAsset.timestamp < 2000) {
+        return;
+    }
+    handleSendAsset.timestamp = Date.now()
     const wallet = myData.wallet;
     const assetIndex = document.getElementById('sendAsset').value;  // TODO include the asset id and symbol in the tx
     const fromAddress = myAccount.keys.address;
@@ -2983,10 +3066,13 @@ console.log('payload is', payload)
         updateWalletView();
 */
         closeSendModal();
+        closeSendConfirmationModal();
         document.getElementById('sendToAddress').value = '';
         document.getElementById('sendAmount').value = '';
         document.getElementById('sendMemo').value = '';
         document.getElementById('sendToAddressError').style.display = 'none'
+        // Show history modal after successful transaction
+        openHistoryModal();
 /*
         const sendToAddressError = document.getElementById('sendToAddressError');
         if (sendToAddressError) {
@@ -2998,6 +3084,7 @@ console.log('payload is', payload)
         alert('Transaction failed. Please try again.');
     }
 }
+handleSendAsset.timestamp = Date.now()
 
 // Contact Info Modal Management
 class ContactInfoModalManager {
@@ -3022,24 +3109,6 @@ class ContactInfoModalManager {
             }
         });
 
-        // Menu toggle
-        const menuButton = document.getElementById('contactInfoMenuButton');
-        menuButton.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.menuDropdown.classList.toggle('active');
-        });
-
-        // Close dropdown when clicking outside
-        document.addEventListener('click', () => {
-            this.menuDropdown.classList.remove('active');
-        });
-
-        // Edit button
-        document.getElementById('editContactButton').addEventListener('click', () => {
-            this.enterEditMode();
-            this.menuDropdown.classList.remove('active');
-        });
-
         // Add friend button
         document.getElementById('addFriendButton').addEventListener('click', () => {
             if (!this.currentContactAddress) return;
@@ -3053,11 +3122,8 @@ class ContactInfoModalManager {
             // Show appropriate toast message
             showToast(contact.friend ? 'Added to friends' : 'Removed from friends');
 
-            // Update button text
+            // Update button appearance
             this.updateFriendButton(contact.friend);
-
-            // Close the dropdown
-            this.menuDropdown.classList.remove('active');
 
             // Mark that we need to update the contact list
             this.needsContactListUpdate = true;
@@ -3071,6 +3137,14 @@ class ContactInfoModalManager {
             if (e.key === 'Escape' && this.isEditing) {
                 this.exitEditMode(false);
             }
+        });
+
+
+        document.getElementById('nameEditButton').addEventListener('click', openEditContactModal);
+
+        // Add close button handler for edit contact modal
+        document.getElementById('closeEditContactModal').addEventListener('click', () => {
+            document.getElementById('editContactModal').classList.remove('active');
         });
     }
 
@@ -3181,10 +3255,6 @@ class ContactInfoModalManager {
                 <div class="dropdown">
                     <button class="dropdown-menu-button" id="contactInfoMenuButton"></button>
                     <div class="dropdown-menu" id="contactInfoMenuDropdown">
-                        <button class="dropdown-item" id="editContactButton">
-                            <span class="dropdown-icon edit-icon"></span>
-                            <span class="dropdown-text">Edit</span>
-                        </button>
                         <button class="dropdown-item add-friend" id="addFriendButton">
                             <span class="dropdown-icon add-friend-icon"></span>
                             <span class="dropdown-text">Add Friend</span>
@@ -3197,19 +3267,12 @@ class ContactInfoModalManager {
         // Reattach all necessary event listeners
         const menuButton = document.getElementById('contactInfoMenuButton');
         const menuDropdown = document.getElementById('contactInfoMenuDropdown');
-        const editButton = document.getElementById('editContactButton');
         const addFriendButton = document.getElementById('addFriendButton');
 
         // Menu button click handler
         menuButton.addEventListener('click', (e) => {
             e.stopPropagation();
             menuDropdown.classList.toggle('active');
-        });
-
-        // Edit button click handler
-        editButton.addEventListener('click', () => {
-            this.enterEditMode();
-            menuDropdown.classList.remove('active');
         });
 
         // Add friend button click handler
@@ -3249,44 +3312,28 @@ class ContactInfoModalManager {
     // Update friend button text based on current status
     updateFriendButton(isFriend) {
         const button = document.getElementById('addFriendButton');
-        const textSpan = button.querySelector('.dropdown-text');
-        const iconSpan = button.querySelector('.dropdown-icon');
-        textSpan.textContent = isFriend ? 'Remove Friend' : 'Add Friend';
-        
-        // Toggle the removing class based on friend status
         if (isFriend) {
             button.classList.add('removing');
-            iconSpan.classList.add('removing');
         } else {
             button.classList.remove('removing');
-            iconSpan.classList.remove('removing');
         }
     }
 
     // Update contact info values
     async updateContactInfo(displayInfo) {
-        // Add avatar section at the top
-        const contactInfoList = this.modal.querySelector('.contact-info-list');
-        const avatarSection = document.createElement('div');
-        avatarSection.className = 'contact-avatar-section';
+        // Update avatar section
+        const avatarSection = this.modal.querySelector('.contact-avatar-section');
+        const avatarDiv = avatarSection.querySelector('.avatar');
+        const nameDiv = avatarSection.querySelector('.name');
+        const subtitleDiv = avatarSection.querySelector('.subtitle');
         
         // Generate identicon for the contact
         const identicon = await generateIdenticon(displayInfo.address, 96);
         
-        avatarSection.innerHTML = `
-            <div class="avatar">${identicon}</div>
-            <div class="name">${displayInfo.name !== 'Not provided' ? displayInfo.name : displayInfo.username}</div>
-            <div class="subtitle">${displayInfo.address}</div>
-        `;
-
-        // Remove existing avatar section if it exists
-        const existingAvatarSection = contactInfoList.querySelector('.contact-avatar-section');
-        if (existingAvatarSection) {
-            existingAvatarSection.remove();
-        }
-
-        // Add new avatar section at the top
-        contactInfoList.insertBefore(avatarSection, contactInfoList.firstChild);
+        // Update the avatar section
+        avatarDiv.innerHTML = identicon;
+        nameDiv.textContent = displayInfo.name !== 'Not provided' ? displayInfo.name : displayInfo.username;
+        subtitleDiv.textContent = displayInfo.address;
 
         const fields = {
             'Username': 'contactInfoUsername',
@@ -3339,7 +3386,6 @@ class ContactInfoModalManager {
     close() {
         this.currentContactAddress = null;
         this.modal.classList.remove('active');
-        this.menuDropdown.classList.remove('active');
 
         // If we made changes that affect the contact list, update it
         if (this.needsContactListUpdate) {
@@ -3349,9 +3395,128 @@ class ContactInfoModalManager {
     }
 }
 
+async function openEditContactModal() {
+    // Get the avatar section elements
+    const avatarSection = document.querySelector('#editContactModal .contact-avatar-section');
+    const avatarDiv = avatarSection.querySelector('.avatar');
+    const nameDiv = avatarSection.querySelector('.name');
+    const subtitleDiv = avatarSection.querySelector('.subtitle');
+    const identicon = document.getElementById('contactInfoAvatar').innerHTML;
+    
+    // Update the avatar section
+    avatarDiv.innerHTML = identicon;
+    nameDiv.textContent = document.getElementById('contactInfoName').textContent;
+    subtitleDiv.textContent = document.getElementById('contactInfoUsername').textContent;
+
+    // Get the original name from the contact info display
+    const contactNameDisplay = document.getElementById('contactInfoName');
+    let originalName = contactNameDisplay.textContent;
+    if (originalName === 'Not provided') {
+        originalName = '';
+    }
+
+    // Store the original name
+    openEditContactModal.originalName = originalName;
+
+    // Set up the input field with the original name
+    const nameInput = document.getElementById('editContactNameInput');
+    nameInput.value = originalName;
+
+    // field-action-button should be clear
+    nameInput.parentElement.querySelector('.field-action-button').className = 'field-action-button clear';
+
+    // Show the edit contact modal
+    document.getElementById('editContactModal').classList.add('active');
+    
+    // Get the current contact info from the contact info modal
+    const currentContactAddress = contactInfoModal.currentContactAddress;
+    if (!currentContactAddress || !myData.contacts[currentContactAddress]) {
+        console.error('No current contact found');
+        return;
+    }
+
+    // Create display info object using the same format as contactInfoModal
+    const displayInfo = createDisplayInfo(myData.contacts[currentContactAddress]);
+
+    setTimeout(() => {
+        nameInput.focus();
+    }, 1000);
+}
+
+openEditContactModal.originalName = ''
+
+// Creates a handler for input changes
+function handleEditNameInput() {
+    const nameInput = document.getElementById('editContactNameInput');
+    const nameActionButton = nameInput.parentElement.querySelector('.field-action-button');
+    const originalNameValue = openEditContactModal.originalName;
+
+    const currentValue = nameInput.value.trim();
+    const valueChanged = currentValue !== originalNameValue;
+    
+    if (valueChanged) {
+        nameActionButton.className = 'field-action-button add';
+        nameActionButton.setAttribute('aria-label', 'Save');
+    } else {
+        nameActionButton.className = 'field-action-button clear';
+        nameActionButton.setAttribute('aria-label', 'Clear');
+    }
+}
+
+// Creates a handler for action button clicks
+function handleEditNameButton() {
+    const nameInput = document.getElementById('editContactNameInput');
+    const nameActionButton = nameInput.parentElement.querySelector('.field-action-button');
+    
+    if (nameActionButton.classList.contains('clear')) {
+        nameInput.value = '';
+        // Always show save button after clearing
+        nameActionButton.className = 'field-action-button add';
+        nameActionButton.setAttribute('aria-label', 'Save');
+        nameInput.focus();
+    } else {
+        handleSaveEditContact();
+    }
+}
+
+// Creates a handler for keydown events
+function handleEditNameKeydown(e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        handleSaveEditContact();
+    }
+}
+
+// Handles saving contact changes
+function handleSaveEditContact() {
+    const nameInput = document.getElementById('editContactNameInput');
+    const currentContactAddress = contactInfoModal.currentContactAddress;
+    
+    // Save changes - if input is empty/spaces, it will become undefined
+    const newName = nameInput.value.trim() || null;
+    const contact = myData.contacts[currentContactAddress];
+    if (contact) {
+        contact.name = newName;
+        contactInfoModal.needsContactListUpdate = true;
+    }
+    
+    // Safely close the edit modal
+    const editModal = document.getElementById('editContactModal');
+    if (editModal) {
+        editModal.classList.remove('active');
+    }
+    
+    // Safely update the contact info modal if it exists and is open
+    if (contactInfoModal.currentContactAddress) {
+        const contactInfoModalElement = document.getElementById('contactInfoModal');
+        if (contactInfoModalElement && contactInfoModalElement.classList.contains('active')) {
+            contactInfoModal.updateContactInfo(createDisplayInfo(myData.contacts[currentContactAddress]));
+        }
+    }
+}
+
 // Create a singleton instance
 const contactInfoModal = new ContactInfoModalManager();
-
 
 function handleSignOut() {
 //    const shouldLeave = confirm('Do you want to leave this page?');
@@ -3409,8 +3574,10 @@ handleSignOut.exit = false
 // The user has a chat modal open to a recipient and has typed a message anc clicked the Send button
 // The recipient account already exists in myData.contacts; it was created when the user submitted the New Chat form
 async function handleSendMessage() {
-    await updateChatList()  // before sending the message check and show received messages
     const messageInput = document.querySelector('.message-input');
+    messageInput.focus(); // Add focus back to keep keyboard open
+    await updateChatList()  // before sending the message check and show received messages
+    
     const message = messageInput.value.trim();
     if (!message) return;
 
@@ -3535,7 +3702,7 @@ async function handleSendMessage() {
 
         // Clear input and reset height
         messageInput.value = '';
-        messageInput.style.height = '45px';
+        messageInput.style.height = '44px'; // original height
 
         appendChatModal()
 
@@ -3545,6 +3712,19 @@ async function handleSendMessage() {
     } catch (error) {
         console.error('Message error:', error);
         alert('Failed to send message. Please try again.');
+    }
+}
+
+async function handleClickToCopy(e) {
+    const messageEl = e.target.closest('.message');
+    if (!messageEl) return;
+    
+    try {
+        const messageText = messageEl.querySelector('.message-content').textContent;
+        await navigator.clipboard.writeText(messageText);
+        showToast('Message copied to clipboard', 2000, 'success');
+    } catch (err) {
+        showToast('Failed to copy message', 2000, 'error');
     }
 }
 
@@ -5408,9 +5588,6 @@ function initializeGatewayConfig() {
 
 // Function to open the gateway form
 function openGatewayForm() {
-    // Close menu modal
-    document.getElementById('menuModal').classList.remove('active');
-
     // Initialize gateway configuration if needed
     initializeGatewayConfig();
 
@@ -6377,4 +6554,39 @@ async function handleChatDataCaching(isSaveMode) {
             console.error('Failed to read cached chat data:', error);
         }
     }
+}
+
+// New functions for send confirmation flow
+function handleSendFormSubmit(event) {
+    event.preventDefault();
+    
+    // Get form values
+    const assetSelect = document.getElementById('sendAsset');
+    const assetSymbol = assetSelect.options[assetSelect.selectedIndex].text;
+    const recipient = document.getElementById('sendToAddress').value;
+    const amount = document.getElementById('sendAmount').value;
+    const memo = document.getElementById('sendMemo').value;
+
+    // Update confirmation modal with values
+    document.getElementById('confirmRecipient').textContent = recipient;
+    document.getElementById('confirmAmount').textContent = `${amount}`;
+    document.getElementById('confirmAsset').textContent = assetSymbol;
+    
+    // Show/hide memo if present
+    const memoGroup = document.getElementById('confirmMemoGroup');
+    if (memo) {
+        document.getElementById('confirmMemo').textContent = memo;
+        memoGroup.style.display = 'block';
+    } else {
+        memoGroup.style.display = 'none';
+    }
+
+    // Hide send modal and show confirmation modal
+    document.getElementById('sendModal').classList.remove('active');
+    document.getElementById('sendConfirmationModal').classList.add('active');
+}
+
+function closeSendConfirmationModal() {
+    document.getElementById('sendConfirmationModal').classList.remove('active');
+    document.getElementById('sendModal').classList.add('active');
 }
