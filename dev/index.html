@@ -380,7 +380,9 @@
                 placeholder="Optional private key in hex format"
               />
               <small>
-                If you want to use an existing private key enter it here. Otherwise you can leave this empty to have a private key automatically generated.
+                If you want to use an existing private key enter it here.
+                Otherwise you can leave this empty to have a private key
+                automatically generated.
               </small>
             </div>
             <button type="submit" class="update-button" disabled>
@@ -697,6 +699,24 @@
                 />
                 <button
                   type="button"
+                  id="uploadQRButton"
+                  class="icon-button"
+                  title="Upload QR Code"
+                  style="flex-shrink: 0;"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="24"
+                    height="24"
+                    style="fill: #007bff"
+                  >
+                    <path
+                      d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"
+                    />
+                  </svg>
+                </button>
+                <button
+                  type="button"
                   id="scanQRButton"
                   class="icon-button"
                   title="Scan QR Code"
@@ -706,7 +726,7 @@
                     viewBox="0 0 24 24"
                     width="24"
                     height="24"
-                    style="fill: currentColor"
+                    style="fill: #007bff"
                   >
                     <path
                       d="M3,3 L10,3 L10,10 L3,10 Z M5,5 L5,8 L8,8 L8,5 Z M14,3 L21,3 L21,10 L14,10 Z M16,5 L16,8 L19,8 L19,5 Z M3,14 L10,14 L10,21 L3,21 Z M5,16 L5,19 L8,19 L8,16 Z M14,14 L21,14 L21,21 L14,21 Z M16,16 L16,19 L19,19 L19,16 Z M11,3 L13,3 L13,10 L11,10 Z M11,14 L13,14 L13,21 L11,21 Z M3,11 L10,11 L10,13 L3,13 Z M14,11 L21,11 L21,13 L14,13 Z"
