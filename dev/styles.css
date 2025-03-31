@@ -407,7 +407,6 @@ body {
   padding: 0;
   margin: 0;
   overflow-y: auto; /* Ensure scrolling is enabled */
-  margin-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
 }
 
 /* Main chat list items */
@@ -2039,14 +2038,6 @@ mark {
 /* Search bar spacing */
 .form-container .search-bar {
   margin-bottom: 16px;
-}
-
-/* Chat list and search results styling */
-.chat-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  overflow-y: auto; /* Ensure scrolling is enabled */
 }
 
 /* Individual chat/search items */
