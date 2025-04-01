@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'o'   // Also increment this when you increment version.html
+const version = 'p'   // Also increment this when you increment version.html
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6137,11 +6137,14 @@ async function handleQRFileSelect(event) {
         if (code) {
             handleSuccessfulScan(code.data);
         } else {
+            console.error('No QR code found in image');
             showToast('No QR code found in image', 3000, 'error');
+            event.target.value = ''; // Reset the file input value
         }
     } catch (error) {
         console.error('Error processing QR code image:', error);
         showToast('Error processing image', 3000, 'error');
+        event.target.value = '';
     }
 }
 
