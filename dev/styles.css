@@ -1062,10 +1062,9 @@ input[type="file"].form-control::file-selector-button {
 }
 
 .messages-container {
-  flex: 1;
+  height: calc(100% - 153px); /* 100% - (header + input heights) */
   overflow-y: auto;
   padding: 1rem;
-  /* padding-bottom: calc(1rem + 80px); */
   -webkit-overflow-scrolling: touch;
 }
 
