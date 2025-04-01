@@ -241,6 +241,7 @@ body {
   justify-content: flex-start;
   align-items: center;
   padding: 2rem;
+  padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px) + 100px);
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
