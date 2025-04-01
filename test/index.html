@@ -146,34 +146,6 @@
       </div>
       <button class="floating-button" id="newChatButton">+</button>
       
-      <!-- New Chat Modal -->
-      <div class="modal" id="newChatModal">
-        <div class="modal-header">
-          <button class="back-button" id="closeNewChatModal"></button>
-          <div class="modal-title">New Chat</div>
-        </div>
-        <div class="form-container">
-          <form id="newChatForm">
-            <div class="form-group">
-              <label for="recipient"
-                >Recipient
-                <span
-                  id="chatRecipientError"
-                  style="color: #dc3545; display: none"
-                ></span
-              ></label>
-              <input
-                type="text"
-                id="chatRecipient"
-                class="form-control"
-                required
-              />
-            </div>
-            <button type="submit" class="update-button">Continue</button>
-          </form>
-        </div>
-      </div>
-      
       <div class="app-screen" id="walletScreen">
         <div class="wallet-balance">
           <div class="balance-label">Total Balance</div>
@@ -209,6 +181,34 @@
           <button class="nav-button" id="switchToWallet">Wallet</button>
         </div>
       </footer>
+
+      <!-- New Chat Modal -->
+      <div class="modal" id="newChatModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeNewChatModal"></button>
+          <div class="modal-title">New Chat</div>
+        </div>
+        <div class="form-container">
+          <form id="newChatForm">
+            <div class="form-group">
+              <label for="recipient"
+                >Recipient
+                <span
+                  id="chatRecipientError"
+                  style="color: #dc3545; display: none"
+                ></span
+              ></label>
+              <input
+                type="text"
+                id="chatRecipient"
+                class="form-control"
+                required
+              />
+            </div>
+            <button type="submit" class="update-button">Continue</button>
+          </form>
+        </div>
+      </div>
 
       <!-- Menu Modal -->
       <div class="modal" id="menuModal">
