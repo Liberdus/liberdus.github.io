@@ -125,6 +125,27 @@
         </ul>
       </div>
 
+      <div class="app-screen" id="contactsScreen">
+        <!-- Add search bar for contacts -->
+        <div class="search-bar-container" id="contactSearchBarContainer">
+          <div class="search-bar">
+            <span class="search-icon"></span>
+            <input
+              type="text"
+              id="contactSearchInput"
+              class="search-input"
+              placeholder="Search contacts..."
+              autocomplete="off"
+              readonly
+            />
+          </div>
+        </div>
+        <ul class="chat-list" id="contactsList">
+          <!-- Contact items will be inserted here -->
+        </ul>
+      </div>
+      <button class="floating-button" id="newChatButton">+</button>
+      
       <!-- New Chat Modal -->
       <div class="modal" id="newChatModal">
         <div class="modal-header">
@@ -152,28 +173,7 @@
           </form>
         </div>
       </div>
-
-      <div class="app-screen" id="contactsScreen">
-        <!-- Add search bar for contacts -->
-        <div class="search-bar-container" id="contactSearchBarContainer">
-          <div class="search-bar">
-            <span class="search-icon"></span>
-            <input
-              type="text"
-              id="contactSearchInput"
-              class="search-input"
-              placeholder="Search contacts..."
-              autocomplete="off"
-              readonly
-            />
-          </div>
-        </div>
-        <ul class="chat-list" id="contactsList">
-          <!-- Contact items will be inserted here -->
-        </ul>
-      </div>
-      <button class="floating-button" id="newChatButton">+</button>
-
+      
       <div class="app-screen" id="walletScreen">
         <div class="wallet-balance">
           <div class="balance-label">Total Balance</div>
