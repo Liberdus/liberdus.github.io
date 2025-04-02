@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2016,7 +2016,7 @@ async function openChatModal(address) {
         }
     };
 
-    // Show modal
+    // Show modal *before* trying to find elements within it for listeners
     modal.classList.add('active');
 
     // Clear unread count
@@ -2063,14 +2063,16 @@ async function openChatModal(address) {
     messagesList.innerHTML = ''; 
 
     // --- Add Listener Attachment ---
-    if (chatInputElement) {
-        // Define listeners
+    const localChatInput = modal.querySelector('.message-input'); // Query LOCALLY after modal is active
+    
+    if (localChatInput) {
+        // Define listeners using localChatInput
         currentChatInputFocusListener = () => {
-            console.log('DEBUG: Focus event fired'); // Keep one debug log for now
+            console.log('DEBUG: Focus event fired on:', localChatInput); 
             setTimeout(() => { 
                 try {
                     console.log('DEBUG: Attempting scrollIntoView and scroll reset');
-                    chatInputElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                    localChatInput.scrollIntoView({ behavior: 'smooth', block: 'end' });
                     
                     document.documentElement.scrollTop = 0;
                     document.body.scrollTop = 0; 
@@ -2082,14 +2084,13 @@ async function openChatModal(address) {
             }, 150); 
         };
 
-        // Use restoreChatLayout directly for blur for simplicity now
-        currentChatInputBlurListener = restoreChatLayout; 
+        currentChatInputBlurListener = restoreChatLayout; // Use restoreChatLayout directly
 
-        chatInputElement.addEventListener('focus', currentChatInputFocusListener);
-        chatInputElement.addEventListener('blur', currentChatInputBlurListener);
-        console.log('DEBUG: Focus/blur listeners added in openChatModal');
+        localChatInput.addEventListener('focus', currentChatInputFocusListener);
+        localChatInput.addEventListener('blur', currentChatInputBlurListener);
+        console.log('DEBUG: Focus/blur listeners added in openChatModal to:', localChatInput);
     } else {
-        console.error('CRITICAL: Could not find .message-input in openChatModal to attach listeners.');
+        console.error('CRITICAL: Could not find .message-input in openChatModal AFTER modal activated.');
     }
     // --- End Listener Attachment ---
 }
@@ -2127,28 +2128,29 @@ appendChatModal.len = 0
 
 function closeChatModal() {
     const chatModal = document.getElementById('chatModal');
-    const messageInput = chatModal.querySelector('.message-input'); // Get input element again
-    const messagesContainer = chatModal.querySelector('.messages-container');
+    const localChatInput = chatModal.querySelector('.message-input'); // Query LOCALLY
+    // const messagesContainer = chatModal.querySelector('.messages-container'); // Already have global reference?
 
-    // --- Add Listener Removal ---
-    if (messageInput && currentChatInputFocusListener) {
-        messageInput.removeEventListener('focus', currentChatInputFocusListener);
-        console.log('DEBUG: Removed focus listener');
+    // --- Listener Removal ---
+    if (localChatInput && currentChatInputFocusListener) {
+        localChatInput.removeEventListener('focus', currentChatInputFocusListener);
+        console.log('DEBUG: Removed focus listener from:', localChatInput);
     }
-    if (messageInput && currentChatInputBlurListener) {
-        messageInput.removeEventListener('blur', currentChatInputBlurListener);
-        console.log('DEBUG: Removed blur listener');
+    if (localChatInput && currentChatInputBlurListener) {
+        localChatInput.removeEventListener('blur', currentChatInputBlurListener);
+        console.log('DEBUG: Removed blur listener from:', localChatInput);
     }
-    currentChatInputFocusListener = null; // Clear references
+    currentChatInputFocusListener = null; 
     currentChatInputBlurListener = null;
     // --- End Listener Removal ---
 
     chatModal.classList.remove('active');
-    messageInput.value = '';
-    messageInput.style.height = '44px'; // Reset height
+    if(localChatInput) { // Check if element exists before modifying
+      localChatInput.value = '';
+      localChatInput.style.height = '44px'; // Reset height
+    }
 
-    // Restore default layout when modal closes
-    restoreChatLayout();
+    restoreChatLayout(); // Call restore layout
     
     // Reset current chat state
     appendChatModal.address = null
