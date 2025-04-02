@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2041,6 +2041,23 @@ async function openChatModal(address) {
     setTimeout(() => {
         messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
     }, 100);
+
+    // *** Add this check ***
+    if (!messagesList) {
+        console.error('CRITICAL: Could not find .messages-list element within #chatModal. Aborting openChatModal.');
+        // Consider closing the modal or showing a user-facing error here
+        closeChatModal(); // Close the broken modal
+        return; 
+    }
+    // *** End check ***
+
+    // Check if this modal is already open for the same address
+    if (modal.classList.contains('active') && appendChatModal.address === address) {
+        return; // Don't reopen if already open for the same user
+    }
+
+    // Clear previous messages (This should now be safe)
+    messagesList.innerHTML = ''; 
 }
 
 function appendChatModal(){

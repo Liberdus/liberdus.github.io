@@ -1058,7 +1058,7 @@ input[type="file"].form-control::file-selector-button {
 }
 
 #chatModal .modal-header {
-  position: sticky;
+  /* position: sticky; */ /* Temporarily comment out for testing */
   top: 0;
   background: white;
   flex-shrink: 0; /* Ensure header doesn't shrink */
