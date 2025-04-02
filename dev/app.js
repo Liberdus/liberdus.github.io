@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'
+const version = 'u'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -140,6 +140,12 @@ let myData = null
 let myAccount = null        // this is set to myData.account for convience
 let wsManager = null        // this is set to new WSManager() for convience
 let isInstalledPWA = false
+
+let chatModalElement = null;
+let chatHeaderElement = null;
+let chatMessagesContainerElement = null;
+let chatInputContainerElement = null;
+let chatInputElement = null;
 
 // TODO - get the parameters from the network
 // mock network parameters
@@ -993,12 +999,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupAddToHomeScreen()
     
     // --- Visual Viewport Layout Adjustment --- 
-    const chatModalElement = document.getElementById('chatModal');
-    const chatHeaderElement = chatModalElement?.querySelector('.modal-header');
-    const chatMessagesContainerElement = chatModalElement?.querySelector('.messages-container');
-    const chatInputContainerElement = chatModalElement?.querySelector('.message-input-container');
-    const chatInputElement = chatModalElement?.querySelector('.message-input');
-    // --- End Visual Viewport --- 
+    // Assign elements to the global variables
+    chatModalElement = document.getElementById('chatModal');
+    chatHeaderElement = chatModalElement?.querySelector('.modal-header');
+    chatMessagesContainerElement = chatModalElement?.querySelector('.messages-container');
+    chatInputContainerElement = chatModalElement?.querySelector('.message-input-container');
+    chatInputElement = chatModalElement?.querySelector('.message-input');
+
+    // Add listener for visual viewport resize
+    // ... listener attachment code remains here ...
+    
+    // Add listeners for input focus/blur
+    // ... listener attachment code remains here ...
+    // --- End VisualViewport --- 
     
 });
 
@@ -2069,7 +2082,7 @@ function closeChatModal() {
     chatModal.classList.remove('active');
     messageInput.value = '';
     messageInput.style.height = '44px'; // Reset height
-    messagesContainer.innerHTML = ''; // Clear messages
+    // messagesContainer.innerHTML = ''; // Clear messages <-- REMOVE THIS LINE
 
     // Restore default layout when modal closes
     restoreChatLayout();
@@ -6669,7 +6682,7 @@ function closeSendConfirmationModal() {
     document.getElementById('sendModal').classList.add('active');
 }
 
-    const chatInputElement = chatModalElement?.querySelector('.message-input');
+    chatInputElement = chatModalElement?.querySelector('.message-input');
 
     function adjustChatLayout() {
         if (!chatModalElement?.classList.contains('active')) return; // Only run if modal is active
