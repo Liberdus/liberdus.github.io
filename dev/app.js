@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6725,6 +6725,13 @@ function closeSendConfirmationModal() {
                 // Log both the style height we set and the resulting offsetHeight
                 console.log(`ChatModal Style Height: ${chatModalElement.style.height}, ChatModal OffsetHeight: ${chatModalElement.offsetHeight}`); 
             }
+
+            // Scroll messages container to bottom IMMEDIATELY after setting height
+            if (chatMessagesContainerElement) {
+                chatMessagesContainerElement.scrollTop = chatMessagesContainerElement.scrollHeight;
+                // console.log('Scrolled messages container to bottom.'); // Keep logging minimal for now
+            }
+
         } catch (error) {
             console.error('Error adjusting chat layout:', error);
         }
@@ -6733,9 +6740,10 @@ function closeSendConfirmationModal() {
     function restoreChatLayout() {
         if (!chatMessagesContainerElement || !chatModalElement) return; 
         
-        // Remove inline styles from both elements to revert to CSS
         chatMessagesContainerElement.style.removeProperty('height');
         chatModalElement.style.removeProperty('height');
+        // Ensure overflow is reset to its default (likely 'auto' from CSS)
+        chatMessagesContainerElement.style.removeProperty('overflow-y'); 
         console.log('VisualViewport layout restored to CSS defaults.');
     }
 
