@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6732,6 +6732,14 @@ function closeSendConfirmationModal() {
                 // console.log('Scrolled messages container to bottom.'); // Keep logging minimal for now
             }
 
+            // *** Force parent scroll positions to top ***
+            if (chatModalElement) {
+                chatModalElement.scrollTop = 0;
+            }
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0; // For older browsers / quirks mode
+            // *** End force scroll ***
+
         } catch (error) {
             console.error('Error adjusting chat layout:', error);
         }
@@ -6740,11 +6748,21 @@ function closeSendConfirmationModal() {
     function restoreChatLayout() {
         if (!chatMessagesContainerElement || !chatModalElement) return; 
         
+        // Store heights *before* removing styles
+        const messagesHeightBefore = chatMessagesContainerElement.offsetHeight;
+        const modalHeightBefore = chatModalElement.offsetHeight;
+
         chatMessagesContainerElement.style.removeProperty('height');
         chatModalElement.style.removeProperty('height');
-        // Ensure overflow is reset to its default (likely 'auto' from CSS)
         chatMessagesContainerElement.style.removeProperty('overflow-y'); 
-        console.log('VisualViewport layout restored to CSS defaults.');
+
+        // Log heights *after* removing styles
+        // Use setTimeout to give browser a tick to potentially recalculate layout
+        setTimeout(() => {
+            const messagesHeightAfter = chatMessagesContainerElement?.offsetHeight ?? 'N/A';
+            const modalHeightAfter = chatModalElement?.offsetHeight ?? 'N/A';
+            console.log(`VisualViewport layout restored: Before (MsgH=${messagesHeightBefore}, ModalH=${modalHeightBefore}), After (MsgH=${messagesHeightAfter}, ModalH=${modalHeightAfter})`);
+        }, 0); 
     }
 
     // Add listener for visual viewport resize
