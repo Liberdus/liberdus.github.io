@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'w'
+const version = 'x'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6702,24 +6702,28 @@ function closeSendConfirmationModal() {
     chatInputElement = chatModalElement?.querySelector('.message-input');
 
     function adjustChatLayout() {
-        if (!chatModalElement?.classList.contains('active')) return; // Only run if modal is active
-        if (!window.visualViewport || !chatHeaderElement || !chatInputContainerElement || !chatMessagesContainerElement) return; // Safety check
+        if (!chatModalElement?.classList.contains('active')) return; 
+        if (!window.visualViewport || !chatHeaderElement || !chatInputContainerElement || !chatMessagesContainerElement) return; 
 
         try {
             const vvHeight = window.visualViewport.height;
             const headerHeight = chatHeaderElement.offsetHeight;
             const inputHeight = chatInputContainerElement.offsetHeight;
 
-            // Calculate available height for messages, ensuring it's not negative
+            // Force the modal itself to resize with the visual viewport
+            chatModalElement.style.height = `${vvHeight}px`;
+
+            // Calculate available height for messages within the now-resized modal
             let availableHeight = vvHeight - headerHeight - inputHeight;
             availableHeight = Math.max(0, availableHeight); 
 
-            // Apply the calculated height as an inline style
+            // Apply the calculated height as an inline style to messages container
             chatMessagesContainerElement.style.height = `${availableHeight}px`;
+            
             console.log(`VisualViewport adjusted: vvH=${vvHeight}, headerH=${headerHeight}, inputH=${inputHeight}, messagesH=${availableHeight}`);
-            // Log the parent modal height too
             if (chatModalElement) {
-                console.log(`ChatModal OffsetHeight: ${chatModalElement.offsetHeight}`);
+                // Log both the style height we set and the resulting offsetHeight
+                console.log(`ChatModal Style Height: ${chatModalElement.style.height}, ChatModal OffsetHeight: ${chatModalElement.offsetHeight}`); 
             }
         } catch (error) {
             console.error('Error adjusting chat layout:', error);
@@ -6727,11 +6731,12 @@ function closeSendConfirmationModal() {
     }
 
     function restoreChatLayout() {
-        if (!chatMessagesContainerElement) return; // Safety check
+        if (!chatMessagesContainerElement || !chatModalElement) return; 
         
-        // Remove the inline style to revert to CSS flex behavior
+        // Remove inline styles from both elements to revert to CSS
         chatMessagesContainerElement.style.removeProperty('height');
-        console.log('VisualViewport layout restored to CSS flex.');
+        chatModalElement.style.removeProperty('height');
+        console.log('VisualViewport layout restored to CSS defaults.');
     }
 
     // Add listener for visual viewport resize
