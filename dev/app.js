@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'   // Also increment this when you increment version.html
+const version = 'n'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -991,6 +991,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     setupAddToHomeScreen()
+    
+    // Add keyboard event handlers for mobile
+    const messageInput = document.querySelector('.message-input');
+    const messageInputContainer = document.querySelector('.message-input-container');
+    const messagesContainer = document.querySelector('.messages-container');
+    
+    if (messageInput && messageInputContainer && messagesContainer) {
+        messageInput.addEventListener('focus', () => {
+            // Add class for iOS keyboard visible state
+            messageInputContainer.classList.add('keyboard-visible');
+            
+            // Scroll the messages container to bottom after a short delay
+            // This ensures the keyboard is fully shown
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 100);
+        });
+
+        messageInput.addEventListener('blur', () => {
+            // Remove the keyboard visible class
+            messageInputContainer.classList.remove('keyboard-visible');
+        });
+        
+        // Ensure input stays focused after sending message
+        document.querySelector('.send-button')?.addEventListener('click', () => {
+            messageInput.focus();
+        });
+    }
 });
 
 
@@ -3581,12 +3609,12 @@ handleSignOut.exit = false
 // The recipient account already exists in myData.contacts; it was created when the user submitted the New Chat form
 async function handleSendMessage() {
     const messageInput = document.querySelector('.message-input');
-    messageInput.focus(); // Add focus back to keep keyboard open
-    await updateChatList()  // before sending the message check and show received messages
-    
     const message = messageInput.value.trim();
-    if (!message) return;
-
+    if (!message) {
+        messageInput.focus(); // Keep focus even if message is empty
+        return;
+    }
+    
     const modal = document.getElementById('chatModal');
     const modalTitle = modal.querySelector('.modal-title');
     const messagesList = modal.querySelector('.messages-list');
@@ -3719,6 +3747,11 @@ async function handleSendMessage() {
         console.error('Message error:', error);
         alert('Failed to send message. Please try again.');
     }
+    
+    // After sending, clear input and maintain focus
+    messageInput.value = '';
+    messageInput.style.height = '44px';
+    messageInput.focus();
 }
 
 async function handleClickToCopy(e) {

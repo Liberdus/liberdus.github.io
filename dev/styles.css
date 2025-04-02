@@ -412,7 +412,7 @@ body {
   list-style: none;
   padding: 0;
   margin: 0;
-  overflow-y: auto; /* Ensure scrolling is enabled */
+  overflow-y: auto;
   min-height: 0;
   flex: 1;
 }
@@ -823,7 +823,6 @@ button:disabled {
   background-color: var(--background-color);
   flex-shrink: 0;
   background: white;
-  border-bottom: 1px solid #e9ecef;
 }
 
 .back-button {
@@ -1066,12 +1065,12 @@ input[type="file"].form-control::file-selector-button {
 
 .messages-container {
   position: relative;
-  height: calc(
-    100dvh - 153px
-  ); /* dynamic viewport height minus header and input */
+  height: calc(100dvh - 153px);
   overflow-y: auto;
   padding: 1rem;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  will-change: transform;
 }
 
 .messages-list {
@@ -1104,13 +1103,35 @@ input[type="file"].form-control::file-selector-button {
   height: 48px;
   min-height: unset;
   line-height: 24px;
-  overflow-y: hidden;
+  overflow-y: auto;
+  /* have the scrollbar not visible */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
+.message-input::-webkit-scrollbar {
+  display: none;
+}
+
+/* Add styles for focused state */
 .message-input:focus {
   outline: none;
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px rgba(61, 61, 206, 0.1);
+}
+
+@supports (-webkit-touch-callout: none) {
+  .messages-container {
+    /* Specific fix for iOS to handle keyboard appearance */
+    height: calc(100vh - 153px - env(safe-area-inset-bottom));
+  }
+
+  .message-input-container.keyboard-visible {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
 }
 
 .send-button {
