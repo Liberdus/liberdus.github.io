@@ -1117,21 +1117,7 @@ input[type="file"].form-control::file-selector-button {
 .message-input:focus {
   outline: none;
   border-color: var(--primary-color);
-}
-
-@supports (-webkit-touch-callout: none) {
-  .messages-container {
-    /* Specific fix for iOS to handle keyboard appearance */
-    height: calc(100vh - 153px - env(safe-area-inset-bottom));
-  }
-
-  .message-input-container.keyboard-visible {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding-bottom: calc(16px + env(safe-area-inset-bottom));
-  }
+  box-shadow: 0 0 0 2px rgba(61, 61, 206, 0.1);
 }
 
 .send-button {
