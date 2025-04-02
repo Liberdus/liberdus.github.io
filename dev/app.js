@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'd'
+const version = 'e'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6711,27 +6711,23 @@ function closeSendConfirmationModal() {
             const inputHeight = chatInputContainerElement.offsetHeight;
             const availableHeight = Math.max(0, vvHeight - headerHeight - inputHeight);
 
-            // Batch our writes
+            // Batch our writes using requestAnimationFrame
             requestAnimationFrame(() => {
-                // Set modal height first
+                // Set modal height to match the visual viewport
                 chatModalElement.style.height = `${vvHeight}px`;
-                chatModalElement.style.position = 'fixed'; // Ensure modal stays fixed
-                chatModalElement.style.top = `${window.visualViewport.offsetTop}px`; // Adjust for viewport offset
+                // --- REMOVED fixed positioning and top adjustment ---
 
-                // Then set messages container height
+                // Set messages container height
                 chatMessagesContainerElement.style.height = `${availableHeight}px`;
                 
-                // Force container to stay in view on Android
-                chatInputContainerElement.style.position = 'sticky';
-                chatInputContainerElement.style.bottom = '0';
-                chatInputContainerElement.style.backgroundColor = '#fff'; // Ensure it's visible
+                // --- REMOVED sticky positioning for input container ---
 
-                // Scroll messages to bottom in next frame
+                // Scroll messages to bottom in the *next* frame to ensure layout is calculated
                 requestAnimationFrame(() => {
                     chatMessagesContainerElement.scrollTop = chatMessagesContainerElement.scrollHeight;
                     
-                    // Reset scroll positions of parent elements
-                    if (chatModalElement) chatModalElement.scrollTop = 0;
+                    // Reset scroll positions of parent elements (still useful to prevent body scroll)
+                    if (chatModalElement) chatModalElement.scrollTop = 0; // Keep modal scroll top at 0
                     document.documentElement.scrollTop = 0;
                     document.body.scrollTop = 0;
                 });
