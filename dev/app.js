@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'i'
+const version = 'j'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6771,7 +6771,7 @@ function closeSendConfirmationModal() {
 
     // Add listeners for input focus/blur
     if (chatInputElement) {
-        console.log('DEBUG: Adding focus/blur listeners to:', chatInputElement); // Log 1: Confirm element exists
+/*         console.log('DEBUG: Adding focus/blur listeners to:', chatInputElement); // Log 1: Confirm element exists
         // Optional: Adjust on focus if resize is too slow? Maybe not needed initially.
         // chatInputElement.addEventListener('focus', () => {
         //     // Add a slight delay in case resize event is coming
@@ -6806,7 +6806,25 @@ function closeSendConfirmationModal() {
             // Optional: Trigger layout adjustment shortly after focus too, 
             // in case resize event is delayed or unreliable on some devices.
             // setTimeout(adjustLayout, 150); // Renamed adjustChatLayout earlier
+        }); */
+
+        console.log('DEBUG: Found chatInputElement. Adding listeners:', chatInputElement); // Log 1 (modified)
+
+        // Restore layout when input loses focus (keyboard likely dismissing)
+        chatInputElement.addEventListener('blur', () => {
+            console.log('DEBUG: Blur event fired'); // New Log Blur
+            restoreChatLayout();
         });
+
+        // --- TEMPORARY FOCUS LISTENER FOR DEBUGGING ---
+        chatInputElement.addEventListener('focus', () => {
+            console.log('DEBUG: Focus event fired'); // Log 2: Does this appear?
+            // We are temporarily removing the setTimeout and scroll logic
+            // just to see if the focus event itself logs reliably.
+        });
+        // --- END TEMPORARY FOCUS LISTENER ---
+
+        console.log('DEBUG: Listeners added.'); // New Log Added
     } else {
         console.warn('Chat input element not found for focus/blur listeners.');
     }
