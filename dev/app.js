@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'j'
+const version = 'k'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1961,6 +1961,8 @@ function createNewContact(addr, username){
     c.unread = 0
 }
 
+let currentChatInputFocusListener = null;
+let currentChatInputBlurListener = null;
 
 async function openChatModal(address) {
     const modal = document.getElementById('chatModal');
@@ -2059,6 +2061,37 @@ async function openChatModal(address) {
 
     // Clear previous messages (This should now be safe)
     messagesList.innerHTML = ''; 
+
+    // --- Add Listener Attachment ---
+    if (chatInputElement) {
+        // Define listeners
+        currentChatInputFocusListener = () => {
+            console.log('DEBUG: Focus event fired'); // Keep one debug log for now
+            setTimeout(() => { 
+                try {
+                    console.log('DEBUG: Attempting scrollIntoView and scroll reset');
+                    chatInputElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                    
+                    document.documentElement.scrollTop = 0;
+                    document.body.scrollTop = 0; 
+                    console.log("Attempted extra scroll reset post-focus"); 
+
+                } catch (error) {
+                     console.error("Error in focus setTimeout:", error); 
+                }
+            }, 150); 
+        };
+
+        // Use restoreChatLayout directly for blur for simplicity now
+        currentChatInputBlurListener = restoreChatLayout; 
+
+        chatInputElement.addEventListener('focus', currentChatInputFocusListener);
+        chatInputElement.addEventListener('blur', currentChatInputBlurListener);
+        console.log('DEBUG: Focus/blur listeners added in openChatModal');
+    } else {
+        console.error('CRITICAL: Could not find .message-input in openChatModal to attach listeners.');
+    }
+    // --- End Listener Attachment ---
 }
 
 function appendChatModal(){
@@ -2094,8 +2127,21 @@ appendChatModal.len = 0
 
 function closeChatModal() {
     const chatModal = document.getElementById('chatModal');
-    const messageInput = chatModal.querySelector('.message-input');
+    const messageInput = chatModal.querySelector('.message-input'); // Get input element again
     const messagesContainer = chatModal.querySelector('.messages-container');
+
+    // --- Add Listener Removal ---
+    if (messageInput && currentChatInputFocusListener) {
+        messageInput.removeEventListener('focus', currentChatInputFocusListener);
+        console.log('DEBUG: Removed focus listener');
+    }
+    if (messageInput && currentChatInputBlurListener) {
+        messageInput.removeEventListener('blur', currentChatInputBlurListener);
+        console.log('DEBUG: Removed blur listener');
+    }
+    currentChatInputFocusListener = null; // Clear references
+    currentChatInputBlurListener = null;
+    // --- End Listener Removal ---
 
     chatModal.classList.remove('active');
     messageInput.value = '';
@@ -6771,7 +6817,7 @@ function closeSendConfirmationModal() {
 
     // Add listeners for input focus/blur
     if (chatInputElement) {
-/*         console.log('DEBUG: Adding focus/blur listeners to:', chatInputElement); // Log 1: Confirm element exists
+        console.log('DEBUG: Adding focus/blur listeners to:', chatInputElement); // Log 1: Confirm element exists
         // Optional: Adjust on focus if resize is too slow? Maybe not needed initially.
         // chatInputElement.addEventListener('focus', () => {
         //     // Add a slight delay in case resize event is coming
@@ -6806,9 +6852,9 @@ function closeSendConfirmationModal() {
             // Optional: Trigger layout adjustment shortly after focus too, 
             // in case resize event is delayed or unreliable on some devices.
             // setTimeout(adjustLayout, 150); // Renamed adjustChatLayout earlier
-        }); */
+        });
 
-        console.log('DEBUG: Found chatInputElement. Adding listeners:', chatInputElement); // Log 1 (modified)
+/*         console.log('DEBUG: Found chatInputElement. Adding listeners:', chatInputElement); // Log 1 (modified)
 
         // Restore layout when input loses focus (keyboard likely dismissing)
         chatInputElement.addEventListener('blur', () => {
@@ -6824,7 +6870,7 @@ function closeSendConfirmationModal() {
         });
         // --- END TEMPORARY FOCUS LISTENER ---
 
-        console.log('DEBUG: Listeners added.'); // New Log Added
+        console.log('DEBUG: Listeners added.'); // New Log Added */
     } else {
         console.warn('Chat input element not found for focus/blur listeners.');
     }
