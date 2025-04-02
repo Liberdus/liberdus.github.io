@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'f'
+const version = 'g'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6784,7 +6784,17 @@ function closeSendConfirmationModal() {
             setTimeout(() => { // Add slight delay to allow keyboard to start animating
                 // Try aligning to the bottom edge instead of 'nearest'
                 chatInputElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
-            }, 100); 
+
+                // Extra safeguard: Reset document scroll AFTER scrollIntoView on Android
+                // This might counteract excessive upward panning by the browser itself.
+                // Check for Android user agent (simple check, adjust if needed)
+                if (/android/i.test(navigator.userAgent)) { 
+                    document.documentElement.scrollTop = 0;
+                    document.body.scrollTop = 0; // For older browsers / quirks mode
+                    console.log("Attempted extra scroll reset for Android");
+                }
+
+            }, 150); // Slightly increase delay to allow scrollIntoView to potentially finish
             // Optional: Trigger layout adjustment shortly after focus too, 
             // in case resize event is delayed or unreliable on some devices.
             // setTimeout(adjustChatLayout, 150); 
