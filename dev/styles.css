@@ -394,6 +394,7 @@ body {
 #contactsScreen,
 #chatsScreen {
   padding-bottom: 80px;
+  overflow-y: hidden;
 }
 
 .chat-avatar {
@@ -1057,7 +1058,7 @@ input[type="file"].form-control::file-selector-button {
 }
 
 #chatModal .modal-header {
-  /* position: sticky; */ /* Temporarily comment out for testing */
+  position: sticky; /* Re-enable sticky positioning */
   top: 0;
   background: white;
   flex-shrink: 0; /* Ensure header doesn't shrink */
@@ -1069,9 +1070,10 @@ input[type="file"].form-control::file-selector-button {
   min-height: 0;
   overflow-y: auto;
   padding: 1rem;
-  -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch; /* For smoother scrolling on iOS */
+  touch-action: pan-y; /* Allow vertical panning */
   /* will-change: transform; */ /* Temporarily remove for testing */
+  overscroll-behavior-y: contain; /* Prevent scroll chaining to parent/body */
 }
 
 .messages-list {
