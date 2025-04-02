@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'v'
+const version = 'w'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6717,6 +6717,10 @@ function closeSendConfirmationModal() {
             // Apply the calculated height as an inline style
             chatMessagesContainerElement.style.height = `${availableHeight}px`;
             console.log(`VisualViewport adjusted: vvH=${vvHeight}, headerH=${headerHeight}, inputH=${inputHeight}, messagesH=${availableHeight}`);
+            // Log the parent modal height too
+            if (chatModalElement) {
+                console.log(`ChatModal OffsetHeight: ${chatModalElement.offsetHeight}`);
+            }
         } catch (error) {
             console.error('Error adjusting chat layout:', error);
         }
