@@ -57,6 +57,8 @@ body {
   margin: 0;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.3) rgba(0, 0, 0, 0.05);
+  overflow: hidden; /* Ensure no scrolling on root elements */
+  overscroll-behavior-y: none; /* Prevent bounce/pull-to-refresh on root */
 }
 
 /* Refined Scrollbar Styling */
