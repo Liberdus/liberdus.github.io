@@ -210,7 +210,6 @@ body {
   overflow: hidden;
   padding: 0;
   height: 100dvh; /* dynamic viewport height */
-  overscroll-behavior-y: none; /* Prevent pull-to-refresh/scroll-chaining on the main container */
   /* for firefox */
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.3) rgba(0, 0, 0, 0.05);
