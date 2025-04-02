@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'c'
+const version = 'd'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6705,39 +6705,37 @@ function closeSendConfirmationModal() {
         if (!window.visualViewport || !chatHeaderElement || !chatInputContainerElement || !chatMessagesContainerElement) return; 
 
         try {
+            // Batch our reads
             const vvHeight = window.visualViewport.height;
             const headerHeight = chatHeaderElement.offsetHeight;
             const inputHeight = chatInputContainerElement.offsetHeight;
+            const availableHeight = Math.max(0, vvHeight - headerHeight - inputHeight);
 
-            // Force the modal itself to resize with the visual viewport
-            chatModalElement.style.height = `${vvHeight}px`;
+            // Batch our writes
+            requestAnimationFrame(() => {
+                // Set modal height first
+                chatModalElement.style.height = `${vvHeight}px`;
+                chatModalElement.style.position = 'fixed'; // Ensure modal stays fixed
+                chatModalElement.style.top = `${window.visualViewport.offsetTop}px`; // Adjust for viewport offset
 
-            // Calculate available height for messages within the now-resized modal
-            let availableHeight = vvHeight - headerHeight - inputHeight;
-            availableHeight = Math.max(0, availableHeight); 
+                // Then set messages container height
+                chatMessagesContainerElement.style.height = `${availableHeight}px`;
+                
+                // Force container to stay in view on Android
+                chatInputContainerElement.style.position = 'sticky';
+                chatInputContainerElement.style.bottom = '0';
+                chatInputContainerElement.style.backgroundColor = '#fff'; // Ensure it's visible
 
-            // Apply the calculated height as an inline style to messages container
-            chatMessagesContainerElement.style.height = `${availableHeight}px`;
-            
-            console.log(`VisualViewport adjusted: vvH=${vvHeight}, headerH=${headerHeight}, inputH=${inputHeight}, messagesH=${availableHeight}`);
-            if (chatModalElement) {
-                // Log both the style height we set and the resulting offsetHeight
-                console.log(`ChatModal Style Height: ${chatModalElement.style.height}, ChatModal OffsetHeight: ${chatModalElement.offsetHeight}`); 
-            }
-
-            // Scroll messages container to bottom IMMEDIATELY after setting height
-            if (chatMessagesContainerElement) {
-                chatMessagesContainerElement.scrollTop = chatMessagesContainerElement.scrollHeight;
-                // console.log('Scrolled messages container to bottom.'); // Keep logging minimal for now
-            }
-
-            // *** Force parent scroll positions to top ***
-            if (chatModalElement) {
-                chatModalElement.scrollTop = 0;
-            }
-            document.documentElement.scrollTop = 0;
-            document.body.scrollTop = 0; // For older browsers / quirks mode
-            // *** End force scroll ***
+                // Scroll messages to bottom in next frame
+                requestAnimationFrame(() => {
+                    chatMessagesContainerElement.scrollTop = chatMessagesContainerElement.scrollHeight;
+                    
+                    // Reset scroll positions of parent elements
+                    if (chatModalElement) chatModalElement.scrollTop = 0;
+                    document.documentElement.scrollTop = 0;
+                    document.body.scrollTop = 0;
+                });
+            });
 
         } catch (error) {
             console.error('Error adjusting chat layout:', error);
