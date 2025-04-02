@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'
+const version = 't'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -991,6 +991,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     setupAddToHomeScreen()
+    
+    // --- Visual Viewport Layout Adjustment --- 
+    const chatModalElement = document.getElementById('chatModal');
+    const chatHeaderElement = chatModalElement?.querySelector('.modal-header');
+    const chatMessagesContainerElement = chatModalElement?.querySelector('.messages-container');
+    const chatInputContainerElement = chatModalElement?.querySelector('.message-input-container');
+    const chatInputElement = chatModalElement?.querySelector('.message-input');
+    // --- End Visual Viewport --- 
+    
 });
 
 
@@ -1940,7 +1949,7 @@ function createNewContact(addr, username){
 }
 
 
-function openChatModal(address) {
+async function openChatModal(address) {
     const modal = document.getElementById('chatModal');
     const modalAvatar = modal.querySelector('.modal-avatar');
     const modalTitle = modal.querySelector('.modal-title');
@@ -2010,6 +2019,15 @@ function openChatModal(address) {
             pollChatInterval(pollIntervalChatting) // poll for messages at a faster rate
         }
     }
+
+    // Restore default layout initially, then adjust after a short delay
+    restoreChatLayout(); // Ensure no stale inline height
+    setTimeout(adjustChatLayout, 150); // Adjust after modal transition/render (adjust delay if needed)
+
+    // Scroll to bottom after a short delay
+    setTimeout(() => {
+        messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
+    }, 100);
 }
 
 function appendChatModal(){
@@ -2044,16 +2062,19 @@ appendChatModal.address = null
 appendChatModal.len = 0
 
 function closeChatModal() {
-    document.getElementById('chatModal').classList.remove('active');
-    document.querySelector('.message-input').value = '';
-    if (document.getElementById('chatsScreen').classList.contains('active')) {
-        updateChatList('force')
-        document.getElementById('newChatButton').classList.add('visible');
-    }
-    if (document.getElementById('contactsScreen').classList.contains('active')) {
-        updateContactsList()
-        document.getElementById('newChatButton').classList.add('visible');
-    }
+    const chatModal = document.getElementById('chatModal');
+    const messageInput = chatModal.querySelector('.message-input');
+    const messagesContainer = chatModal.querySelector('.messages-container');
+
+    chatModal.classList.remove('active');
+    messageInput.value = '';
+    messageInput.style.height = '44px'; // Reset height
+    messagesContainer.innerHTML = ''; // Clear messages
+
+    // Restore default layout when modal closes
+    restoreChatLayout();
+    
+    // Reset current chat state
     appendChatModal.address = null
     appendChatModal.len = 0
     if (isOnline) {
@@ -6647,3 +6668,60 @@ function closeSendConfirmationModal() {
     document.getElementById('sendConfirmationModal').classList.remove('active');
     document.getElementById('sendModal').classList.add('active');
 }
+
+    const chatInputElement = chatModalElement?.querySelector('.message-input');
+
+    function adjustChatLayout() {
+        if (!chatModalElement?.classList.contains('active')) return; // Only run if modal is active
+        if (!window.visualViewport || !chatHeaderElement || !chatInputContainerElement || !chatMessagesContainerElement) return; // Safety check
+
+        try {
+            const vvHeight = window.visualViewport.height;
+            const headerHeight = chatHeaderElement.offsetHeight;
+            const inputHeight = chatInputContainerElement.offsetHeight;
+
+            // Calculate available height for messages, ensuring it's not negative
+            let availableHeight = vvHeight - headerHeight - inputHeight;
+            availableHeight = Math.max(0, availableHeight); 
+
+            // Apply the calculated height as an inline style
+            chatMessagesContainerElement.style.height = `${availableHeight}px`;
+            console.log(`VisualViewport adjusted: vvH=${vvHeight}, headerH=${headerHeight}, inputH=${inputHeight}, messagesH=${availableHeight}`);
+        } catch (error) {
+            console.error('Error adjusting chat layout:', error);
+        }
+    }
+
+    function restoreChatLayout() {
+        if (!chatMessagesContainerElement) return; // Safety check
+        
+        // Remove the inline style to revert to CSS flex behavior
+        chatMessagesContainerElement.style.removeProperty('height');
+        console.log('VisualViewport layout restored to CSS flex.');
+    }
+
+    // Add listener for visual viewport resize
+    if (window.visualViewport) {
+        const debouncedAdjustLayout = debounce(adjustChatLayout, 50); // Debounce by 50ms
+        window.visualViewport.addEventListener('resize', debouncedAdjustLayout);
+    } else {
+        console.warn('VisualViewport API not supported. Layout adjustments may not work correctly with keyboard.');
+    }
+    
+    // --- End VisualViewport --- 
+
+    // Add listeners for input focus/blur
+    if (chatInputElement) {
+        // Optional: Adjust on focus if resize is too slow? Maybe not needed initially.
+        // chatInputElement.addEventListener('focus', () => {
+        //     // Add a slight delay in case resize event is coming
+        //     setTimeout(adjustChatLayout, 100); 
+        // });
+
+        // Restore layout when input loses focus (keyboard likely dismissing)
+        chatInputElement.addEventListener('blur', restoreChatLayout);
+    } else {
+        console.warn('Chat input element not found for focus/blur listeners.');
+    }
+    
+    // --- End VisualViewport --- 
