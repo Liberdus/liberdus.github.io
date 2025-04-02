@@ -61,7 +61,6 @@ body {
 
 /* Refined Scrollbar Styling */
 /* For Webkit browsers (Chrome, Safari, newer versions of Opera) */
-.app-screen::-webkit-scrollbar,
 .messages-container::-webkit-scrollbar,
 .modal::-webkit-scrollbar,
 .logs-container::-webkit-scrollbar,
@@ -129,7 +128,6 @@ body::-webkit-scrollbar-thumb:hover {
 }
 
 /* For Firefox */
-.app-screen,
 .messages-container,
 .modal,
 .logs-container,
@@ -382,7 +380,7 @@ body {
   flex: 1;
   display: none;
   padding: 0;
-  overflow-y: auto;
+  overflow-y: hidden; /* Prevent scrolling on the main screen container */
   position: relative;
   padding-bottom: env(safe-area-inset-bottom, 0px);
   margin-bottom: env(safe-area-inset-bottom, 0px);
@@ -390,6 +388,7 @@ body {
 
 .app-screen.active {
   display: block;
+  overflow-y: hidden;
 }
 
 #contactsScreen,
