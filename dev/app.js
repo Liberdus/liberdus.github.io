@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'e'
+const version = 'f'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6782,7 +6782,8 @@ function closeSendConfirmationModal() {
         chatInputElement.addEventListener('focus', () => {
             // Attempt to scroll the input into view, might help Android panning
             setTimeout(() => { // Add slight delay to allow keyboard to start animating
-                chatInputElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                // Try aligning to the bottom edge instead of 'nearest'
+                chatInputElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
             }, 100); 
             // Optional: Trigger layout adjustment shortly after focus too, 
             // in case resize event is delayed or unreliable on some devices.
