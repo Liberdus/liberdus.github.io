@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2033,6 +2033,7 @@ async function openChatModal(address) {
         }
     }
 
+    console.log('openChatModal invoking restoreChatLayout')
     // Restore default layout initially, then adjust after a short delay
     restoreChatLayout(); // Ensure no stale inline height
     setTimeout(adjustChatLayout, 150); // Adjust after modal transition/render (adjust delay if needed)
@@ -6770,6 +6771,7 @@ function closeSendConfirmationModal() {
 
     // Add listeners for input focus/blur
     if (chatInputElement) {
+        console.log('DEBUG: Adding focus/blur listeners to:', chatInputElement); // Log 1: Confirm element exists
         // Optional: Adjust on focus if resize is too slow? Maybe not needed initially.
         // chatInputElement.addEventListener('focus', () => {
         //     // Add a slight delay in case resize event is coming
@@ -6780,18 +6782,25 @@ function closeSendConfirmationModal() {
         chatInputElement.addEventListener('blur', restoreChatLayout);
 
         chatInputElement.addEventListener('focus', () => {
+            console.log('DEBUG: Input element focused'); // Log 2: Confirm focus event
             // Attempt to scroll the input into view, might help Android panning
             setTimeout(() => { // Add slight delay to allow keyboard to start animating
-                // Try aligning to the bottom edge instead of 'nearest'
-                chatInputElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
-
-                // Extra safeguard: Reset document scroll AFTER scrollIntoView.
-                // This counteracts excessive upward panning by the browser itself,
-                // particularly observed on some Android environments.
-                // Apply unconditionally as it's unlikely to harm iOS.
-                document.documentElement.scrollTop = 0;
-                document.body.scrollTop = 0; // For older browsers / quirks mode
-                console.log("Attempted extra scroll reset post-focus"); // Generic log message
+                console.log('DEBUG: Attempting to scroll input into view'); // Log 3: Confirm scroll attempt
+                try {
+                    // Try aligning to the bottom edge instead of 'nearest'
+                    chatInputElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                    console.log('DEBUG: ScrollIntoView completed'); // Log 4: Confirm scroll completion
+                
+                    // Extra safeguard: Reset document scroll AFTER scrollIntoView.
+                    // This counteracts excessive upward panning by the browser itself,
+                    // particularly observed on some Android environments.
+                    // Apply unconditionally as it's unlikely to harm iOS.
+                    document.documentElement.scrollTop = 0;
+                    document.body.scrollTop = 0; // For older browsers / quirks mode
+                    console.log("Attempted extra scroll reset post-focus"); // Log 5: Confirm scroll reset
+                } catch (error) {
+                    console.error('Error during scrollIntoView:', error); // Log 6: Error handling
+                }
 
             }, 150); // Slightly increase delay to allow scrollIntoView to potentially finish
             // Optional: Trigger layout adjustment shortly after focus too, 
