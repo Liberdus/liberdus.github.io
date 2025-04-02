@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6721,15 +6721,23 @@ function closeSendConfirmationModal() {
             
             console.log(`VisualViewport adjusted: vvH=${vvHeight}, headerH=${headerHeight}, inputH=${inputHeight}, messagesH=${availableHeight}`);
             if (chatModalElement) {
+                // Log both the style height we set and the resulting offsetHeight
                 console.log(`ChatModal Style Height: ${chatModalElement.style.height}, ChatModal OffsetHeight: ${chatModalElement.offsetHeight}`); 
             }
 
             // Scroll messages container to bottom IMMEDIATELY after setting height
             if (chatMessagesContainerElement) {
                 chatMessagesContainerElement.scrollTop = chatMessagesContainerElement.scrollHeight;
+                // console.log('Scrolled messages container to bottom.'); // Keep logging minimal for now
             }
 
-            // Removed redundant scroll resets since we have overflow: hidden on container and body
+            // *** Force parent scroll positions to top ***
+            if (chatModalElement) {
+                chatModalElement.scrollTop = 0;
+            }
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0; // For older browsers / quirks mode
+            // *** End force scroll ***
 
         } catch (error) {
             console.error('Error adjusting chat layout:', error);
@@ -6768,18 +6776,24 @@ function closeSendConfirmationModal() {
 
     // Add listeners for input focus/blur
     if (chatInputElement) {
-        chatInputElement.addEventListener('focus', () => {
-            // Let the visualViewport resize event handle the layout adjustment
-            // Only scroll into view if really needed (e.g. on Android)
-            if (/Android/.test(navigator.userAgent)) {
-                setTimeout(() => {
-                    chatInputElement.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-                }, 100);
-            }
-        });
+        // Optional: Adjust on focus if resize is too slow? Maybe not needed initially.
+        // chatInputElement.addEventListener('focus', () => {
+        //     // Add a slight delay in case resize event is coming
+        //     setTimeout(adjustChatLayout, 100); 
+        // });
 
         // Restore layout when input loses focus (keyboard likely dismissing)
         chatInputElement.addEventListener('blur', restoreChatLayout);
+
+        chatInputElement.addEventListener('focus', () => {
+            // Attempt to scroll the input into view, might help Android panning
+            setTimeout(() => { // Add slight delay to allow keyboard to start animating
+                chatInputElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 100); 
+            // Optional: Trigger layout adjustment shortly after focus too, 
+            // in case resize event is delayed or unreliable on some devices.
+            // setTimeout(adjustChatLayout, 150); 
+        });
     } else {
         console.warn('Chat input element not found for focus/blur listeners.');
     }
