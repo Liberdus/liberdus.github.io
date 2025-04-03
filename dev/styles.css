@@ -1077,7 +1077,7 @@ input[type="file"].form-control::file-selector-button {
   touch-action: pan-y; /* Allow vertical panning */
   overscroll-behavior-y: contain; /* Prevent scroll chaining to parent/body */
   /* Add transition for height changes */
-  transition: height 0.3s ease-in-out;
+  transition: height 0.1s ease-in-out;
 }
 
 .messages-list {
@@ -3555,5 +3555,5 @@ small {
   transform: none;
 
   /* Add transition for height changes */
-  transition: height 0.3s ease-in-out;
+  transition: height 0.1s ease-in-out;
 }

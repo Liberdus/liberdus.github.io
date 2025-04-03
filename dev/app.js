@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'f'
+const version = 'g'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1028,8 +1028,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         chatInputElement.addEventListener('focus', () => {
             console.log('DEBUG: Input element focused'); // Log 2: Confirm focus event
-            // --- REMOVE THE SCROLLING LOGIC ---
-            /*
+            // --- Restore scrollIntoView within setTimeout --- 
+            // /*
             setTimeout(() => { // Add slight delay to allow keyboard to start animating
                 console.log('DEBUG: Attempting to scroll input into view'); // Log 3: Confirm scroll attempt
                 try {
@@ -1037,17 +1037,19 @@ document.addEventListener('DOMContentLoaded', async () => {
                     chatInputElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
                     console.log('DEBUG: ScrollIntoView completed'); // Log 4: Confirm scroll completion
                 
-                    // Extra safeguard: Reset document scroll AFTER scrollIntoView.
+                    // --- Keep document scroll resets commented out --- 
+                    /*
                     document.documentElement.scrollTop = 0;
                     document.body.scrollTop = 0; // For older browsers / quirks mode
                     console.log("Attempted extra scroll reset post-focus"); // Log 5: Confirm scroll reset
+                    */
                 } catch (error) {
                     console.error('Error during scrollIntoView:', error); // Log 6: Error handling
                 }
 
             }, 150); // Slightly increase delay to allow scrollIntoView to potentially finish
-            */
-            // --- END REMOVED BLOCK ---
+            // */
+            // --- END BLOCK ---
         });
     } else {
         console.warn('Chat input element *still* not found for focus/blur listeners within DOMContentLoaded.'); // Changed warning message
@@ -6813,13 +6815,13 @@ function adjustChatLayout() {
                 if (chatMessagesContainerElement) {
                     chatMessagesContainerElement.scrollTop = chatMessagesContainerElement.scrollHeight;
                 }
-                // --- Restore document scroll resets ONLY for iPhone --- 
-                // /* 
+                // --- REMOVE iPhone-specific document scroll resets --- 
+                /*
                 if (navigator.userAgent.includes('iPhone')) {
                     document.documentElement.scrollTop = 0;
                     document.body.scrollTop = 0;
                 }
-                // */
+                */
             });
         });
 
