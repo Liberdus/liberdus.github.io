@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'
+const version = 'r'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -4992,6 +4992,10 @@ function handleSearchResultClick(result) {
         // Switch to chats view if not already there
         switchView('chats');
         
+        // clear search input and clear results
+        document.getElementById('messageSearch').value = '';
+        document.getElementById('searchResults').innerHTML = '';
+
         // Open the chat with this contact
         openChatModal(result.contactAddress);
         
