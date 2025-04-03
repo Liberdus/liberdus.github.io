@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'l'
+const version = 'm'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2062,37 +2062,39 @@ async function openChatModal(address) {
     // Clear previous messages (This should now be safe)
     messagesList.innerHTML = ''; 
 
-    // --- Add Listener Attachment ---
-    const localChatInput = modal.querySelector('.message-input'); // Query LOCALLY after modal is active
-    
-    if (localChatInput) {
-        // Define listeners using localChatInput
-        currentChatInputFocusListener = () => {
-            console.log('DEBUG: Focus event fired on:', localChatInput); 
-            setTimeout(() => { 
-                try {
-                    console.log('DEBUG: Attempting scrollIntoView and scroll reset');
-                    localChatInput.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                    
-                    document.documentElement.scrollTop = 0;
-                    document.body.scrollTop = 0; 
-                    console.log("Attempted extra scroll reset post-focus"); 
+    // --- Defer Listener Attachment ---
+    setTimeout(() => {
+        const localChatInput = modal.querySelector('.message-input'); // Query LOCALLY after modal is active and timeout
+        
+        if (localChatInput) {
+            // Define listeners using localChatInput
+            currentChatInputFocusListener = () => {
+                console.log('DEBUG: Focus event fired on:', localChatInput); 
+                setTimeout(() => { 
+                    try {
+                        console.log('DEBUG: Attempting scrollIntoView and scroll reset');
+                        localChatInput.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                        
+                        document.documentElement.scrollTop = 0;
+                        document.body.scrollTop = 0; 
+                        console.log("Attempted extra scroll reset post-focus"); 
 
-                } catch (error) {
-                     console.error("Error in focus setTimeout:", error); 
-                }
-            }, 150); 
-        };
+                    } catch (error) {
+                         console.error("Error in focus setTimeout:", error); 
+                    }
+                }, 150); 
+            };
 
-        currentChatInputBlurListener = restoreChatLayout; // Use restoreChatLayout directly
+            currentChatInputBlurListener = restoreChatLayout; // Use restoreChatLayout directly
 
-        localChatInput.addEventListener('focus', currentChatInputFocusListener);
-        localChatInput.addEventListener('blur', currentChatInputBlurListener);
-        console.log('DEBUG: Focus/blur listeners added in openChatModal to:', localChatInput);
-    } else {
-        console.error('CRITICAL: Could not find .message-input in openChatModal AFTER modal activated.');
-    }
-    // --- End Listener Attachment ---
+            localChatInput.addEventListener('focus', currentChatInputFocusListener);
+            localChatInput.addEventListener('blur', currentChatInputBlurListener);
+            console.log('DEBUG: Focus/blur listeners added in openChatModal to:', localChatInput);
+        } else {
+            console.error('CRITICAL: Could not find .message-input in openChatModal AFTER modal activated and timeout.');
+        }
+    }, 0); // Use setTimeout 0 to defer execution
+    // --- End Defer Listener Attachment ---
 }
 
 function appendChatModal(){
