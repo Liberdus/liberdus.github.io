@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2028,8 +2028,8 @@ function openChatModal(address) {
     const messages = contact?.messages || [];
 
     // Display messages and click-to-copy feature
-    messagesList.innerHTML = messages.map((msg, index) => `
-        <div class="message ${msg.my ? 'sent' : 'received'}" data-message-id="${index}">
+    messagesList.innerHTML = messages.map(msg => `
+        <div class="message ${msg.my ? 'sent' : 'received'}">
             <div class="message-content">${msg.message}</div>
             <div class="message-time">${formatTime(msg.timestamp)}</div>
         </div>
@@ -3645,93 +3645,96 @@ handleSignOut.exit = false
 // The user has a chat modal open to a recipient and has typed a message anc clicked the Send button
 // The recipient account already exists in myData.contacts; it was created when the user submitted the New Chat form
 async function handleSendMessage() {
-    const messageInput = document.querySelector('.message-input');
-    messageInput.focus(); // Add focus back to keep keyboard open
-    await updateChatList()  // before sending the message check and show received messages
-    
-    const message = messageInput.value.trim();
-    if (!message) return;
-
-    const modal = document.getElementById('chatModal');
-    const modalTitle = modal.querySelector('.modal-title');
-    const messagesList = modal.querySelector('.messages-list');
-
-    // Get current chat data
-    const chatsData = myData
-/*
-    const currentAddress = Object.values(chatsData.contacts).find(contact =>
-        modalTitle.textContent === (contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`)
-    )?.address;
-*/
-    const currentAddress = appendChatModal.address
-    if (!currentAddress) return;
-
-    // Get sender's keys from wallet
-    const keys = myAccount.keys;
-    if (!keys) {
-        alert('Keys not found for sender address');
-        return;
-    }
-
-///yyy
-    // Get recipient's public key from contacts
-    let recipientPubKey = myData.contacts[currentAddress]?.public;
-    let pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
-    if (!recipientPubKey || !pqRecPubKey) {
-        const recipientInfo = await queryNetwork(`/account/${longAddress(currentAddress)}`)
-        if (!recipientInfo?.account?.publicKey){
-            console.log(`no public key found for recipient ${currentAddress}`)
-            return
-        }
-        recipientPubKey = recipientInfo.account.publicKey
-        myData.contacts[currentAddress].public = recipientPubKey
-        pqRecPubKey = recipientInfo.account.pqPublicKey
-        myData.contacts[currentAddress].pqPublic = pqRecPubKey
-    }
-
-    // Generate shared secret using ECDH and take first 32 bytes
-    let dhkey = ecSharedKey(keys.secret, recipientPubKey)
-    const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey)
-    const combined = new Uint8Array(dhkey.length + sharedSecret.length)
-    combined.set(dhkey)
-    combined.set(sharedSecret, dhkey.length)
-    dhkey = blake.blake2b(combined, myHashKey, 32)
-
-    // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
-    // Encrypt message using shared secret
-    const encMessage = encryptChacha(dhkey, message)
-
-    // Create message payload
-    const payload = {
-        message: encMessage,
-        encrypted: true,
-        encryptionMethod: 'xchacha20poly1305',
-        pqEncSharedKey: bin2base64(cipherText),
-        sent_timestamp: Date.now()
-    };
-
-    // Always include username, but only include other info if recipient is a friend
-    const contact = myData.contacts[currentAddress];
-    // Create basic sender info with just username
-    const senderInfo = {
-        username: myAccount.username
-    };
-    
-    // Add additional info only if recipient is a friend
-    if (contact && contact.friend) {
-        // Add more personal details for friends
-        senderInfo.name = myData.account.name;
-        senderInfo.email = myData.account.email;
-        senderInfo.phone = myData.account.phone;
-        senderInfo.linkedin = myData.account.linkedin;
-        senderInfo.x = myData.account.x;
-    }
-    
-    // Always encrypt and send senderInfo (which will contain at least the username)
-    payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
+    const sendButton = document.getElementById('handleSendMessage');
+    sendButton.disabled = true; // Disable the button
 
     try {
-//console.log('payload is', payload)
+        const messageInput = document.querySelector('.message-input');
+        messageInput.focus(); // Add focus back to keep keyboard open
+        await updateChatList()  // before sending the message check and show received messages
+        
+        const message = messageInput.value.trim();
+        if (!message) return;
+
+        const modal = document.getElementById('chatModal');
+        //const modalTitle = modal.querySelector('.modal-title');
+        const messagesList = modal.querySelector('.messages-list');
+
+        // Get current chat data
+        const chatsData = myData
+        /*
+        const currentAddress = Object.values(chatsData.contacts).find(contact =>
+            modalTitle.textContent === (contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`)
+        )?.address;
+        */
+        const currentAddress = appendChatModal.address
+        if (!currentAddress) return;
+
+        // Get sender's keys from wallet
+        const keys = myAccount.keys;
+        if (!keys) {
+            alert('Keys not found for sender address');
+            return;
+        }
+
+        ///yyy
+        // Get recipient's public key from contacts
+        let recipientPubKey = myData.contacts[currentAddress]?.public;
+        let pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
+        if (!recipientPubKey || !pqRecPubKey) {
+            const recipientInfo = await queryNetwork(`/account/${longAddress(currentAddress)}`)
+            if (!recipientInfo?.account?.publicKey){
+                console.log(`no public key found for recipient ${currentAddress}`)
+                return
+            }
+            recipientPubKey = recipientInfo.account.publicKey
+            myData.contacts[currentAddress].public = recipientPubKey
+            pqRecPubKey = recipientInfo.account.pqPublicKey
+            myData.contacts[currentAddress].pqPublic = pqRecPubKey
+        }
+
+        // Generate shared secret using ECDH and take first 32 bytes
+        let dhkey = ecSharedKey(keys.secret, recipientPubKey)
+        const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey)
+        const combined = new Uint8Array(dhkey.length + sharedSecret.length)
+        combined.set(dhkey)
+        combined.set(sharedSecret, dhkey.length)
+        dhkey = blake.blake2b(combined, myHashKey, 32)
+
+        // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
+        // Encrypt message using shared secret
+        const encMessage = encryptChacha(dhkey, message)
+
+        // Create message payload
+        const payload = {
+            message: encMessage,
+            encrypted: true,
+            encryptionMethod: 'xchacha20poly1305',
+            pqEncSharedKey: bin2base64(cipherText),
+            sent_timestamp: Date.now()
+        };
+
+        // Always include username, but only include other info if recipient is a friend
+        const contact = myData.contacts[currentAddress];
+        // Create basic sender info with just username
+        const senderInfo = {
+            username: myAccount.username
+        };
+        
+        // Add additional info only if recipient is a friend
+        if (contact && contact.friend) {
+            // Add more personal details for friends
+            senderInfo.name = myData.account.name;
+            senderInfo.email = myData.account.email;
+            senderInfo.phone = myData.account.phone;
+            senderInfo.linkedin = myData.account.linkedin;
+            senderInfo.x = myData.account.x;
+        }
+        
+        // Always encrypt and send senderInfo (which will contain at least the username)
+        payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
+
+        //console.log('payload is', payload)
         // Send the message transaction using postChatMessage with default toll of 1
         const response = await postChatMessage(currentAddress, payload, 1, keys);
         
@@ -3741,12 +3744,12 @@ async function handleSendMessage() {
         }
 
         // Not needed since it is created when the New Chat form was submitted
-/*
-        // Create contact if needed
-        if (!chatsData.contacts[currentAddress].messages) {   // TODO check if this is really needed; should be created already
-            createNewContact(currentAddress)
-        }
-*/
+        /*
+                // Create contact if needed
+                if (!chatsData.contacts[currentAddress].messages) {   // TODO check if this is really needed; should be created already
+                    createNewContact(currentAddress)
+                }
+        */
 
         // Create new message
         const newMessage = {
@@ -3783,6 +3786,8 @@ async function handleSendMessage() {
     } catch (error) {
         console.error('Message error:', error);
         alert('Failed to send message. Please try again.');
+    } finally {
+        sendButton.disabled = false; // Re-enable the button
     }
 }
 
@@ -4962,11 +4967,7 @@ function displaySearchResults(results) {
             </div>
         `;
 
-        resultElement.addEventListener('click', (event) => { 
-            event.stopImmediatePropagation(); // Stop all other listeners and bubbling immediately
-            // clear search input and clear results
-            document.getElementById('messageSearch').value = '';
-            document.getElementById('searchResults').innerHTML = '';
+        resultElement.addEventListener('click', () => {
             handleSearchResultClick(result);
         });
 
@@ -4996,18 +4997,17 @@ function handleSearchResultClick(result) {
         switchView('chats');
         
         // Open the chat with this contact
-        openChatModal(result.contactAddress);
+        handleResultClick(result.contactAddress);
         
         // Scroll to and highlight the message
         setTimeout(() => {
-            const messageSelector = `[data-message-id="${result.messageId}"]`;
-            const messageElement = document.querySelector(messageSelector);
+            const messageElement = document.querySelector(`[data-message-id="${result.messageId}"]`);
             if (messageElement) {
                 messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 messageElement.classList.add('highlighted');
                 setTimeout(() => messageElement.classList.remove('highlighted'), 2000);
             } else {
-                console.error('Message element not found for selector:', messageSelector);
+                console.error('Message not found');
                 // Could add a toast notification here
             }
         }, 300);
@@ -5061,6 +5061,110 @@ function displayLoadingState() {
             Searching messages
         </div>
     `;
+}
+
+async function handleResultClick(contactAddress) {
+    // Get the contact info
+    const contact = myData.contacts[contactAddress];
+    if (!contact) return;
+
+    // Open chat modal
+    const chatModal = document.getElementById('chatModal');
+    chatModal.classList.add('active');
+
+    // Generate the identicon first
+    const identicon = await generateIdenticon(contactAddress);
+
+    // Update chat header with contact info and avatar - match exact structure from chat view
+    const modalHeader = chatModal.querySelector('.modal-header');
+    modalHeader.innerHTML = `
+        <button class="back-button" id="closeChatModal"></button>
+        <div class="chat-user-info">
+            <div class="modal-avatar">${identicon}</div>
+            <div class="modal-title">${contact.username || contactAddress}</div>
+        </div>
+        <div class="header-actions">
+            <button
+              class="icon-button add-friend-icon"
+              id="chatAddFriendButton"
+              aria-label="Add friend"
+              style="display: ${contact.friend ? 'none' : 'flex'}"
+            ></button>
+        </div>
+    `;
+
+    // Re-attach close button event listener
+    document.getElementById('closeChatModal').addEventListener('click', () => {
+        chatModal.classList.remove('active');
+    });
+
+    // Add click handler for username to show contact info
+    const userInfo = chatModal.querySelector('.chat-user-info');
+    userInfo.onclick = () => {
+        if (contact) {
+            contactInfoModal.open(createDisplayInfo(contact));
+        }
+    };
+
+    // Add click handler for add friend button if visible
+    const addFriendButton = document.getElementById('chatAddFriendButton');
+    if (addFriendButton && !contact.friend) {
+        addFriendButton.onclick = () => {
+            contact.friend = true;
+            showToast('Added to friends');
+            addFriendButton.style.display = 'none';
+            saveState();
+        };
+    }
+
+    // Ensure messages container structure matches
+    const messagesContainer = chatModal.querySelector('.messages-container');
+    if (!messagesContainer) {
+        const container = document.createElement('div');
+        container.className = 'messages-container';
+        container.innerHTML = '<div class="messages-list"></div>';
+        chatModal.appendChild(container);
+    }
+
+    // Load messages
+    const messagesList = chatModal.querySelector('.messages-list');
+    messagesList.innerHTML = ''; // Clear existing messages
+
+    // Add messages if they exist
+    if (contact.messages && contact.messages.length > 0) {
+        contact.messages.forEach((msg, index) => {
+            const messageElement = document.createElement('div');
+            messageElement.className = `message ${msg.my ? 'sent' : 'received'}`;
+            messageElement.setAttribute('data-message-id', index);
+            messageElement.innerHTML = `
+                <div class="message-content">${msg.message}</div>
+                <div class="message-time">${formatTime(msg.timestamp)}</div>
+            `;
+            messagesList.appendChild(messageElement);
+        });
+        
+        // Scroll to bottom of messages
+        messagesList.scrollTop = messagesList.scrollHeight;
+    }
+
+    // Ensure input container exists
+    const inputContainer = chatModal.querySelector('.message-input-container');
+    if (!inputContainer) {
+        const container = document.createElement('div');
+        container.className = 'message-input-container';
+        container.innerHTML = `
+            <textarea class="message-input" placeholder="Type a message..."></textarea>
+            <button class="send-button" id="handleSendMessage">
+                <svg viewBox="0 0 24 24">
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+                </svg>
+            </button>
+        `;
+        chatModal.appendChild(container);
+    }
+
+    // Store current contact for message sending
+    handleResultClick.currentContact = contactAddress;
 }
 
 // Contact search functions
@@ -5158,9 +5262,6 @@ function displayContactResults(results, searchText) {
 
         // Add click handler to show contact info
         contactElement.addEventListener("click", () => {
-            // clear search results and input contactSearchResults
-            document.getElementById("contactSearchResults").innerHTML = "";
-            document.getElementById("contactSearch").value = "";
             // Create display info and open contact info modal
             contactInfoModal.open(createDisplayInfo(contact));
             // Close the search modal
