@@ -57,12 +57,11 @@ body {
   margin: 0;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.3) rgba(0, 0, 0, 0.05);
-  overflow: hidden; /* Ensure no scrolling on root elements */
-  overscroll-behavior-y: none; /* Prevent bounce/pull-to-refresh on root */
 }
 
 /* Refined Scrollbar Styling */
 /* For Webkit browsers (Chrome, Safari, newer versions of Opera) */
+.app-screen::-webkit-scrollbar,
 .messages-container::-webkit-scrollbar,
 .modal::-webkit-scrollbar,
 .logs-container::-webkit-scrollbar,
@@ -130,6 +129,7 @@ body::-webkit-scrollbar-thumb:hover {
 }
 
 /* For Firefox */
+.app-screen,
 .messages-container,
 .modal,
 .logs-container,
@@ -210,7 +210,6 @@ body {
   overflow: hidden;
   padding: 0;
   height: 100dvh; /* dynamic viewport height */
-  overscroll-behavior-y: none; /* Prevent pull-to-refresh/scroll-chaining on the main container */
   /* for firefox */
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.3) rgba(0, 0, 0, 0.05);
@@ -383,7 +382,7 @@ body {
   flex: 1;
   display: none;
   padding: 0;
-  overflow-y: hidden; /* Prevent scrolling on the main screen container */
+  overflow-y: auto;
   position: relative;
   padding-bottom: env(safe-area-inset-bottom, 0px);
   margin-bottom: env(safe-area-inset-bottom, 0px);
@@ -391,13 +390,11 @@ body {
 
 .app-screen.active {
   display: block;
-  overflow-y: hidden;
 }
 
 #contactsScreen,
 #chatsScreen {
   padding-bottom: 80px;
-  overflow-y: hidden;
 }
 
 .chat-avatar {
@@ -1061,23 +1058,21 @@ input[type="file"].form-control::file-selector-button {
 }
 
 #chatModal .modal-header {
-  position: sticky; /* Re-enable sticky positioning */
+  position: sticky;
   top: 0;
   background: white;
   flex-shrink: 0; /* Ensure header doesn't shrink */
 }
 
-#chatModal .messages-container {
+.messages-container {
   position: relative;
-  flex: 1;
-  min-height: 0;
+  flex: 1; /* Let flexbox handle height */
+  min-height: 0; /* Prevent flex item overflow */
   overflow-y: auto;
   padding: 1rem;
-  -webkit-overflow-scrolling: touch; /* For smoother scrolling on iOS */
-  touch-action: pan-y; /* Allow vertical panning */
-  overscroll-behavior-y: contain; /* Prevent scroll chaining to parent/body */
-  /* Add transition for height changes */
-  transition: height 0.1s ease-in-out;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  will-change: transform;
 }
 
 .messages-list {
@@ -3536,24 +3531,4 @@ small {
 .icon-button.send-money-icon:hover {
   background-color: var(--hover-background);
   opacity: 1;
-}
-
-#chatModal.active {
-  display: flex; /* Changed from block to flex */
-  /* --- Add Fixed Positioning --- */
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  /* Ensure it's on top */
-  z-index: 1050; /* Adjust if needed, should be higher than other elements */
-  /* --- End Fixed Positioning --- */
-
-  /* height is set dynamically by JS */
-  /* Remove potentially conflicting properties if they exist elsewhere for #chatModal */
-  top: auto;
-  transform: none;
-
-  /* Add transition for height changes */
-  transition: height 0.1s ease-in-out;
 }
