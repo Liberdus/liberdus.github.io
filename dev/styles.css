@@ -1067,7 +1067,7 @@ input[type="file"].form-control::file-selector-button {
   flex-shrink: 0; /* Ensure header doesn't shrink */
 }
 
-.messages-container {
+#chatModal .messages-container {
   position: relative;
   flex: 1;
   min-height: 0;
@@ -1075,8 +1075,9 @@ input[type="file"].form-control::file-selector-button {
   padding: 1rem;
   -webkit-overflow-scrolling: touch; /* For smoother scrolling on iOS */
   touch-action: pan-y; /* Allow vertical panning */
-  /* will-change: transform; */ /* Temporarily remove for testing */
   overscroll-behavior-y: contain; /* Prevent scroll chaining to parent/body */
+  /* Add transition for height changes */
+  transition: height 0.3s ease-in-out;
 }
 
 .messages-list {
@@ -3545,11 +3546,14 @@ small {
   left: 0;
   width: 100%;
   /* Ensure it's on top */
-  /* z-index: 1050;  *//* Adjust if needed, should be higher than other elements */
+  z-index: 1050; /* Adjust if needed, should be higher than other elements */
   /* --- End Fixed Positioning --- */
 
   /* height is set dynamically by JS */
   /* Remove potentially conflicting properties if they exist elsewhere for #chatModal */
   top: auto;
   transform: none;
+
+  /* Add transition for height changes */
+  transition: height 0.3s ease-in-out;
 }
