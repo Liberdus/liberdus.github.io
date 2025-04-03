@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'p'
+const version = 'q'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2028,8 +2028,8 @@ function openChatModal(address) {
     const messages = contact?.messages || [];
 
     // Display messages and click-to-copy feature
-    messagesList.innerHTML = messages.map(msg => `
-        <div class="message ${msg.my ? 'sent' : 'received'}">
+    messagesList.innerHTML = messages.map((msg, index) => `
+        <div class="message ${msg.my ? 'sent' : 'received'}" data-message-id="${index}">
             <div class="message-content">${msg.message}</div>
             <div class="message-time">${formatTime(msg.timestamp)}</div>
         </div>
@@ -2110,7 +2110,6 @@ appendChatModal.len = 0
 
 function closeChatModal() {
     document.getElementById('chatModal').classList.remove('active');
-    document.querySelector('.message-input').value = '';
     if (document.getElementById('chatsScreen').classList.contains('active')) {
         updateChatList('force')
         document.getElementById('newChatButton').classList.add('visible');
@@ -4963,7 +4962,8 @@ function displaySearchResults(results) {
             </div>
         `;
 
-        resultElement.addEventListener('click', () => {
+        resultElement.addEventListener('click', (event) => { 
+            event.stopImmediatePropagation(); // Stop all other listeners and bubbling immediately
             handleSearchResultClick(result);
         });
 
@@ -4993,17 +4993,18 @@ function handleSearchResultClick(result) {
         switchView('chats');
         
         // Open the chat with this contact
-        handleResultClick(result.contactAddress);
+        openChatModal(result.contactAddress);
         
         // Scroll to and highlight the message
         setTimeout(() => {
-            const messageElement = document.querySelector(`[data-message-id="${result.messageId}"]`);
+            const messageSelector = `[data-message-id="${result.messageId}"]`;
+            const messageElement = document.querySelector(messageSelector);
             if (messageElement) {
                 messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 messageElement.classList.add('highlighted');
                 setTimeout(() => messageElement.classList.remove('highlighted'), 2000);
             } else {
-                console.error('Message not found');
+                console.error('Message element not found for selector:', messageSelector);
                 // Could add a toast notification here
             }
         }, 300);
@@ -5057,110 +5058,6 @@ function displayLoadingState() {
             Searching messages
         </div>
     `;
-}
-
-async function handleResultClick(contactAddress) {
-    // Get the contact info
-    const contact = myData.contacts[contactAddress];
-    if (!contact) return;
-
-    // Open chat modal
-    const chatModal = document.getElementById('chatModal');
-    chatModal.classList.add('active');
-
-    // Generate the identicon first
-    const identicon = await generateIdenticon(contactAddress);
-
-    // Update chat header with contact info and avatar - match exact structure from chat view
-    const modalHeader = chatModal.querySelector('.modal-header');
-    modalHeader.innerHTML = `
-        <button class="back-button" id="closeChatModal"></button>
-        <div class="chat-user-info">
-            <div class="modal-avatar">${identicon}</div>
-            <div class="modal-title">${contact.username || contactAddress}</div>
-        </div>
-        <div class="header-actions">
-            <button
-              class="icon-button add-friend-icon"
-              id="chatAddFriendButton"
-              aria-label="Add friend"
-              style="display: ${contact.friend ? 'none' : 'flex'}"
-            ></button>
-        </div>
-    `;
-
-    // Re-attach close button event listener
-    document.getElementById('closeChatModal').addEventListener('click', () => {
-        chatModal.classList.remove('active');
-    });
-
-    // Add click handler for username to show contact info
-    const userInfo = chatModal.querySelector('.chat-user-info');
-    userInfo.onclick = () => {
-        if (contact) {
-            contactInfoModal.open(createDisplayInfo(contact));
-        }
-    };
-
-    // Add click handler for add friend button if visible
-    const addFriendButton = document.getElementById('chatAddFriendButton');
-    if (addFriendButton && !contact.friend) {
-        addFriendButton.onclick = () => {
-            contact.friend = true;
-            showToast('Added to friends');
-            addFriendButton.style.display = 'none';
-            saveState();
-        };
-    }
-
-    // Ensure messages container structure matches
-    const messagesContainer = chatModal.querySelector('.messages-container');
-    if (!messagesContainer) {
-        const container = document.createElement('div');
-        container.className = 'messages-container';
-        container.innerHTML = '<div class="messages-list"></div>';
-        chatModal.appendChild(container);
-    }
-
-    // Load messages
-    const messagesList = chatModal.querySelector('.messages-list');
-    messagesList.innerHTML = ''; // Clear existing messages
-
-    // Add messages if they exist
-    if (contact.messages && contact.messages.length > 0) {
-        contact.messages.forEach((msg, index) => {
-            const messageElement = document.createElement('div');
-            messageElement.className = `message ${msg.my ? 'sent' : 'received'}`;
-            messageElement.setAttribute('data-message-id', index);
-            messageElement.innerHTML = `
-                <div class="message-content">${msg.message}</div>
-                <div class="message-time">${formatTime(msg.timestamp)}</div>
-            `;
-            messagesList.appendChild(messageElement);
-        });
-        
-        // Scroll to bottom of messages
-        messagesList.scrollTop = messagesList.scrollHeight;
-    }
-
-    // Ensure input container exists
-    const inputContainer = chatModal.querySelector('.message-input-container');
-    if (!inputContainer) {
-        const container = document.createElement('div');
-        container.className = 'message-input-container';
-        container.innerHTML = `
-            <textarea class="message-input" placeholder="Type a message..."></textarea>
-            <button class="send-button" id="handleSendMessage">
-                <svg viewBox="0 0 24 24">
-                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
-                </svg>
-            </button>
-        `;
-        chatModal.appendChild(container);
-    }
-
-    // Store current contact for message sending
-    handleResultClick.currentContact = contactAddress;
 }
 
 // Contact search functions
