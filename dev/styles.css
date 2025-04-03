@@ -45,16 +45,20 @@
   box-sizing: border-box;
 }
 
+html {
+  height: 100%; /* Ensure html takes full height */
+}
+
 body {
-  min-height: 100dvh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
   font-family: var(--font-primary);
-  background-color: #f0f0f0;
-  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
-    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  color: var(--text-color);
+  background-color: var(--background-color);
   margin: 0;
+  position: relative; /* Establish positioning context */
+  overflow: hidden;
+  padding: 0;
+  height: 100dvh; /* dynamic viewport height */
+  /* for firefox */
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.3) rgba(0, 0, 0, 0.05);
 }
@@ -1089,6 +1093,9 @@ input[type="file"].form-control::file-selector-button {
   border-top: 1px solid #dee2e6;
   min-height: 80px;
   padding: 16px;
+  padding-bottom: calc(
+    16px + env(safe-area-inset-bottom)
+  ); /* Add padding for safe area */
   display: flex;
   gap: 12px;
   align-items: flex-end;
