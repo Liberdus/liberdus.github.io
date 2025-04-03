@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'm'
+const version = 'n'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1007,10 +1007,51 @@ document.addEventListener('DOMContentLoaded', async () => {
     chatInputElement = chatModalElement?.querySelector('.message-input');
 
     // Add listener for visual viewport resize
-    // ... listener attachment code remains here ...
+    if (window.visualViewport) {
+        const debouncedAdjustLayout = debounce(adjustChatLayout, 50); // Debounce by 50ms
+        window.visualViewport.addEventListener('resize', debouncedAdjustLayout);
+    } else {
+        console.warn('VisualViewport API not supported. Layout adjustments may not work correctly with keyboard.');
+    }
     
     // Add listeners for input focus/blur
-    // ... listener attachment code remains here ...
+    if (chatInputElement) {
+        console.log('DEBUG: Adding focus/blur listeners to:', chatInputElement); // Log 1: Confirm element exists
+        // Optional: Adjust on focus if resize is too slow? Maybe not needed initially.
+        // chatInputElement.addEventListener('focus', () => {
+        //     // Add a slight delay in case resize event is coming
+        //     setTimeout(adjustLayout, 100); // Renamed adjustChatLayout earlier
+        // });
+
+        // Restore layout when input loses focus (keyboard likely dismissing)
+        chatInputElement.addEventListener('blur', restoreChatLayout);
+
+        chatInputElement.addEventListener('focus', () => {
+            console.log('DEBUG: Input element focused'); // Log 2: Confirm focus event
+            // Attempt to scroll the input into view, might help Android panning
+            setTimeout(() => { // Add slight delay to allow keyboard to start animating
+                console.log('DEBUG: Attempting to scroll input into view'); // Log 3: Confirm scroll attempt
+                try {
+                    // Try aligning to the bottom edge instead of 'nearest'
+                    chatInputElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                    console.log('DEBUG: ScrollIntoView completed'); // Log 4: Confirm scroll completion
+                
+                    // Extra safeguard: Reset document scroll AFTER scrollIntoView.
+                    // This counteracts excessive upward panning by the browser itself,
+                    // particularly observed on some Android environments.
+                    // Apply unconditionally as it's unlikely to harm iOS.
+                    document.documentElement.scrollTop = 0;
+                    document.body.scrollTop = 0; // For older browsers / quirks mode
+                    console.log("Attempted extra scroll reset post-focus"); // Log 5: Confirm scroll reset
+                } catch (error) {
+                    console.error('Error during scrollIntoView:', error); // Log 6: Error handling
+                }
+
+            }, 150); // Slightly increase delay to allow scrollIntoView to potentially finish
+        });
+    } else {
+        console.warn('Chat input element *still* not found for focus/blur listeners within DOMContentLoaded.'); // Changed warning message
+    }
     // --- End VisualViewport --- 
     
 });
@@ -6749,134 +6790,63 @@ function closeSendConfirmationModal() {
     document.getElementById('sendModal').classList.add('active');
 }
 
-    chatInputElement = chatModalElement?.querySelector('.message-input');
+function adjustChatLayout() {
+    if (!chatModalElement?.classList.contains('active')) return; 
+    if (!window.visualViewport || !chatHeaderElement || !chatInputContainerElement || !chatMessagesContainerElement) return; 
 
-    function adjustChatLayout() {
-        if (!chatModalElement?.classList.contains('active')) return; 
-        if (!window.visualViewport || !chatHeaderElement || !chatInputContainerElement || !chatMessagesContainerElement) return; 
+    try {
+        // Batch our reads
+        const vvHeight = window.visualViewport.height;
+        const headerHeight = chatHeaderElement.offsetHeight;
+        const inputHeight = chatInputContainerElement.offsetHeight;
+        const availableHeight = Math.max(0, vvHeight - headerHeight - inputHeight);
 
-        try {
-            // Batch our reads
-            const vvHeight = window.visualViewport.height;
-            const headerHeight = chatHeaderElement.offsetHeight;
-            const inputHeight = chatInputContainerElement.offsetHeight;
-            const availableHeight = Math.max(0, vvHeight - headerHeight - inputHeight);
+        // Batch our writes using requestAnimationFrame
+        requestAnimationFrame(() => {
+            // Set modal height to match the visual viewport
+            chatModalElement.style.height = `${vvHeight}px`;
+            // --- REMOVED fixed positioning and top adjustment ---
 
-            // Batch our writes using requestAnimationFrame
+            // Set messages container height
+            chatMessagesContainerElement.style.height = `${availableHeight}px`;
+            
+            // --- REMOVED sticky positioning for input container ---
+
+            // Scroll messages to bottom in the *next* frame to ensure layout is calculated
             requestAnimationFrame(() => {
-                // Set modal height to match the visual viewport
-                chatModalElement.style.height = `${vvHeight}px`;
-                // --- REMOVED fixed positioning and top adjustment ---
-
-                // Set messages container height
-                chatMessagesContainerElement.style.height = `${availableHeight}px`;
-                
-                // --- REMOVED sticky positioning for input container ---
-
-                // Scroll messages to bottom in the *next* frame to ensure layout is calculated
-                requestAnimationFrame(() => {
+                if (chatMessagesContainerElement) { // Add null check
                     chatMessagesContainerElement.scrollTop = chatMessagesContainerElement.scrollHeight;
-                    
-                    // Reset scroll positions of parent elements (still useful to prevent body scroll)
-                    if (chatModalElement) chatModalElement.scrollTop = 0; // Keep modal scroll top at 0
-                    document.documentElement.scrollTop = 0;
-                    document.body.scrollTop = 0;
-                });
-            });
-
-        } catch (error) {
-            console.error('Error adjusting chat layout:', error);
-        }
-    }
-
-    function restoreChatLayout() {
-        if (!chatMessagesContainerElement || !chatModalElement) return; 
-        
-        // Store heights *before* removing styles
-        const messagesHeightBefore = chatMessagesContainerElement.offsetHeight;
-        const modalHeightBefore = chatModalElement.offsetHeight;
-
-        chatMessagesContainerElement.style.removeProperty('height');
-        chatModalElement.style.removeProperty('height');
-        chatMessagesContainerElement.style.removeProperty('overflow-y'); 
-
-        // Log heights *after* removing styles
-        // Use setTimeout to give browser a tick to potentially recalculate layout
-        setTimeout(() => {
-            const messagesHeightAfter = chatMessagesContainerElement?.offsetHeight ?? 'N/A';
-            const modalHeightAfter = chatModalElement?.offsetHeight ?? 'N/A';
-            console.log(`VisualViewport layout restored: Before (MsgH=${messagesHeightBefore}, ModalH=${modalHeightBefore}), After (MsgH=${messagesHeightAfter}, ModalH=${modalHeightAfter})`);
-        }, 0); 
-    }
-
-    // Add listener for visual viewport resize
-    if (window.visualViewport) {
-        const debouncedAdjustLayout = debounce(adjustChatLayout, 50); // Debounce by 50ms
-        window.visualViewport.addEventListener('resize', debouncedAdjustLayout);
-    } else {
-        console.warn('VisualViewport API not supported. Layout adjustments may not work correctly with keyboard.');
-    }
-    
-    // --- End VisualViewport --- 
-
-    // Add listeners for input focus/blur
-    if (chatInputElement) {
-        console.log('DEBUG: Adding focus/blur listeners to:', chatInputElement); // Log 1: Confirm element exists
-        // Optional: Adjust on focus if resize is too slow? Maybe not needed initially.
-        // chatInputElement.addEventListener('focus', () => {
-        //     // Add a slight delay in case resize event is coming
-        //     setTimeout(adjustChatLayout, 100); 
-        // });
-
-        // Restore layout when input loses focus (keyboard likely dismissing)
-        chatInputElement.addEventListener('blur', restoreChatLayout);
-
-        chatInputElement.addEventListener('focus', () => {
-            console.log('DEBUG: Input element focused'); // Log 2: Confirm focus event
-            // Attempt to scroll the input into view, might help Android panning
-            setTimeout(() => { // Add slight delay to allow keyboard to start animating
-                console.log('DEBUG: Attempting to scroll input into view'); // Log 3: Confirm scroll attempt
-                try {
-                    // Try aligning to the bottom edge instead of 'nearest'
-                    chatInputElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                    console.log('DEBUG: ScrollIntoView completed'); // Log 4: Confirm scroll completion
-                
-                    // Extra safeguard: Reset document scroll AFTER scrollIntoView.
-                    // This counteracts excessive upward panning by the browser itself,
-                    // particularly observed on some Android environments.
-                    // Apply unconditionally as it's unlikely to harm iOS.
-                    document.documentElement.scrollTop = 0;
-                    document.body.scrollTop = 0; // For older browsers / quirks mode
-                    console.log("Attempted extra scroll reset post-focus"); // Log 5: Confirm scroll reset
-                } catch (error) {
-                    console.error('Error during scrollIntoView:', error); // Log 6: Error handling
                 }
-
-            }, 150); // Slightly increase delay to allow scrollIntoView to potentially finish
-            // Optional: Trigger layout adjustment shortly after focus too, 
-            // in case resize event is delayed or unreliable on some devices.
-            // setTimeout(adjustLayout, 150); // Renamed adjustChatLayout earlier
+                
+                // Reset scroll positions of parent elements (still useful to prevent body scroll)
+                if (chatModalElement) chatModalElement.scrollTop = 0; // Keep modal scroll top at 0
+                document.documentElement.scrollTop = 0;
+                document.body.scrollTop = 0;
+            });
         });
 
-/*         console.log('DEBUG: Found chatInputElement. Adding listeners:', chatInputElement); // Log 1 (modified)
-
-        // Restore layout when input loses focus (keyboard likely dismissing)
-        chatInputElement.addEventListener('blur', () => {
-            console.log('DEBUG: Blur event fired'); // New Log Blur
-            restoreChatLayout();
-        });
-
-        // --- TEMPORARY FOCUS LISTENER FOR DEBUGGING ---
-        chatInputElement.addEventListener('focus', () => {
-            console.log('DEBUG: Focus event fired'); // Log 2: Does this appear?
-            // We are temporarily removing the setTimeout and scroll logic
-            // just to see if the focus event itself logs reliably.
-        });
-        // --- END TEMPORARY FOCUS LISTENER ---
-
-        console.log('DEBUG: Listeners added.'); // New Log Added */
-    } else {
-        console.warn('Chat input element not found for focus/blur listeners.');
+    } catch (error) {
+        console.error('Error adjusting chat layout:', error);
     }
+}
+
+function restoreChatLayout() {
+    if (!chatMessagesContainerElement || !chatModalElement) return; 
     
-    // --- End VisualViewport --- 
+    // Store heights *before* removing styles
+    const messagesHeightBefore = chatMessagesContainerElement.offsetHeight;
+    const modalHeightBefore = chatModalElement.offsetHeight;
+
+    chatMessagesContainerElement.style.removeProperty('height');
+    chatModalElement.style.removeProperty('height');
+    chatMessagesContainerElement.style.removeProperty('overflow-y'); 
+
+    // Log heights *after* removing styles
+    // Use setTimeout to give browser a tick to potentially recalculate layout
+    setTimeout(() => {
+        const messagesHeightAfter = chatMessagesContainerElement?.offsetHeight ?? 'N/A';
+        const modalHeightAfter = chatModalElement?.offsetHeight ?? 'N/A';
+        console.log(`VisualViewport layout restored: Before (MsgH=${messagesHeightBefore}, ModalH=${modalHeightBefore}), After (MsgH=${messagesHeightAfter}, ModalH=${modalHeightAfter})`);
+    }, 0); 
+}
+
