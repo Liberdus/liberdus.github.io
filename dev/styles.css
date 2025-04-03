@@ -3530,3 +3530,7 @@ small {
   background-color: var(--hover-background);
   opacity: 1;
 }
+
+.hidden {
+  display: none;
+}

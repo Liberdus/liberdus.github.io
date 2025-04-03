@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'l'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -735,20 +735,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Reorder buttons based on accounts existence
     if (hasAccounts) {
         welcomeButtons.innerHTML = ''; // Clear existing order
+        signInBtn.classList.remove('hidden');
+        createAccountBtn.classList.remove('hidden');
+        importAccountBtn.classList.remove('hidden');
+        clearCacheButton.classList.remove('hidden');
         welcomeButtons.appendChild(signInBtn);
         welcomeButtons.appendChild(createAccountBtn);
         welcomeButtons.appendChild(importAccountBtn);
         signInBtn.classList.add('primary-button');
         signInBtn.classList.remove('secondary-button');
-        // append clear cache button to the welcomeButtons
         welcomeButtons.appendChild(clearCacheButton);
     } else {
         welcomeButtons.innerHTML = ''; // Clear existing order
+        createAccountBtn.classList.remove('hidden');
+        importAccountBtn.classList.remove('hidden');
+        clearCacheButton.classList.remove('hidden');
         welcomeButtons.appendChild(createAccountBtn);
         welcomeButtons.appendChild(importAccountBtn);
         createAccountBtn.classList.add('primary-button');
         createAccountBtn.classList.remove('secondary-button');
-        // append clear cache button to the welcomeButtons
         welcomeButtons.appendChild(clearCacheButton);
     }
 
@@ -6172,7 +6177,12 @@ async function handleQRFileSelect(event) {
         console.error('Error processing QR code image:', error);
         showToast('Error processing image', 3000, 'error');
         event.target.value = '';
+        // Remove focus from the upload button
+        document.getElementById('uploadQRButton').blur();
     }
+
+    // Remove focus from the upload button
+    document.getElementById('uploadQRButton').blur();
 }
 
 // WebSocket Manager Class
