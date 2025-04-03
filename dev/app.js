@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'l'
+const version = 'a'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6172,6 +6172,8 @@ async function handleQRFileSelect(event) {
             console.error('No QR code found in image');
             showToast('No QR code found in image', 3000, 'error');
             event.target.value = ''; // Reset the file input value
+            // Remove focus from the upload button
+            document.getElementById('uploadQRButton').blur();
         }
     } catch (error) {
         console.error('Error processing QR code image:', error);
@@ -6181,8 +6183,10 @@ async function handleQRFileSelect(event) {
         document.getElementById('uploadQRButton').blur();
     }
 
-    // Remove focus from the upload button
-    document.getElementById('uploadQRButton').blur();
+    // Remove focus from the upload button with a slight delay
+    setTimeout(() => {
+        document.getElementById('uploadQRButton').blur();
+    }, 0); // 0ms delay often works, pushes to end of event loop
 }
 
 // WebSocket Manager Class
