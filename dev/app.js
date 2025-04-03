@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'p'
+const version = 'e'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6805,23 +6805,21 @@ function adjustChatLayout() {
         requestAnimationFrame(() => {
             // Set modal height to match the visual viewport
             chatModalElement.style.height = `${vvHeight}px`;
-            // --- REMOVED fixed positioning and top adjustment ---
-
             // Set messages container height
             chatMessagesContainerElement.style.height = `${availableHeight}px`;
-            
-            // --- REMOVED sticky positioning for input container ---
 
             // Scroll messages to bottom in the *next* frame to ensure layout is calculated
             requestAnimationFrame(() => {
-                if (chatMessagesContainerElement) { // Add null check
+                if (chatMessagesContainerElement) {
                     chatMessagesContainerElement.scrollTop = chatMessagesContainerElement.scrollHeight;
                 }
-                
-                // Reset scroll positions of parent elements
-                // if (chatModalElement) chatModalElement.scrollTop = 0; // Keep modal scroll top at 0 (Already commented out)
-                // document.documentElement.scrollTop = 0; // Commenting this out
-                // document.body.scrollTop = 0; // Commenting this out
+                // --- REMOVE document scroll resets --- 
+                /* 
+                if (navigator.userAgent.includes('iPhone')) {
+                    document.documentElement.scrollTop = 0;
+                    document.body.scrollTop = 0;
+                }
+                */
             });
         });
 

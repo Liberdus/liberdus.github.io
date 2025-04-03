@@ -3536,3 +3536,20 @@ small {
   background-color: var(--hover-background);
   opacity: 1;
 }
+
+#chatModal.active {
+  display: flex; /* Changed from block to flex */
+  /* --- Add Fixed Positioning --- */
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  /* Ensure it's on top */
+  /* z-index: 1050;  *//* Adjust if needed, should be higher than other elements */
+  /* --- End Fixed Positioning --- */
+
+  /* height is set dynamically by JS */
+  /* Remove potentially conflicting properties if they exist elsewhere for #chatModal */
+  top: auto;
+  transform: none;
+}
