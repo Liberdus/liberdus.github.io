@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'v'
+const version = 'x'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -825,6 +825,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         updateAvailableBalance();
     });
     document.getElementById('availableBalance').addEventListener('click', fillAmount);
+    // amount input listener for real-time balance validation
+    document.getElementById('sendAmount').addEventListener('input', updateAvailableBalance);
     
     // Add blur event listener for recipient validation
 //    document.getElementById('sendToAddress').addEventListener('blur', handleSendToAddressValidation);
@@ -2028,8 +2030,8 @@ function openChatModal(address) {
     const messages = contact?.messages || [];
 
     // Display messages and click-to-copy feature
-    messagesList.innerHTML = messages.map(msg => `
-        <div class="message ${msg.my ? 'sent' : 'received'}">
+    messagesList.innerHTML = messages.map((msg, index) => `
+        <div class="message ${msg.my ? 'sent' : 'received'}" data-message-id="${index}">
             <div class="message-content">${msg.message}</div>
             <div class="message-time">${formatTime(msg.timestamp)}</div>
         </div>
@@ -2965,28 +2967,70 @@ function updateSendAddresses() {
 }
 
 function updateAvailableBalance() {
-    const walletData = myData.wallet
+    const walletData = myData.wallet;
     const assetIndex = document.getElementById('sendAsset').value;
-
-    const balanceAmount = document.getElementById('balanceAmount');
-    const balanceSymbol = document.getElementById('balanceSymbol');
-
+    const balanceWarning = document.getElementById('balanceWarning');
+    
     // Check if we have any assets
     if (!walletData.assets || walletData.assets.length === 0) {
-        balanceAmount.textContent = '0.00';
-        balanceSymbol.textContent = '';
+        updateBalanceDisplay(null);
+        return;
+    }
+    
+    updateBalanceDisplay(walletData.assets[assetIndex]);
+    
+    // Validate balance and disable submit button if needed
+    document.querySelector('#sendForm button[type="submit"]').disabled = 
+        validateBalance(document.getElementById('sendAmount').value, assetIndex, balanceWarning);
+}
+
+function updateBalanceDisplay(asset) {
+    if (!asset) {
+        document.getElementById('balanceAmount').textContent = '0.0000';
+        document.getElementById('balanceSymbol').textContent = '';
+        document.getElementById('transactionFee').textContent = '0.00';
         return;
     }
 
-    const asset = walletData.assets[assetIndex];
+    const txFeeInLIB = BigInt(parameters.current.transactionFee || 1) * wei;
     
-    balanceAmount.textContent = big2str(asset.balance, weiDigits);
-    balanceSymbol.textContent = asset.symbol;
+    document.getElementById('balanceAmount').textContent = big2str(BigInt(asset.balance), 18).slice(0, -12);
+    document.getElementById('balanceSymbol').textContent = asset.symbol;
+    document.getElementById('transactionFee').textContent = big2str(txFeeInLIB, 18).slice(0, -16);
 }
 
+
+function validateBalance(amount, assetIndex, balanceWarning = null) {
+    if (!amount) {
+        if (balanceWarning) balanceWarning.style.display = 'none';
+        return false;
+    }
+
+    const asset = myData.wallet.assets[assetIndex];
+    const feeInWei = BigInt(parameters.current.transactionFee || 1) * wei;
+    const totalRequired = bigxnum2big(wei, amount.toString()) + feeInWei;
+    const hasInsufficientBalance = BigInt(asset.balance) < totalRequired;
+
+    if (balanceWarning) {
+        if (hasInsufficientBalance) {
+            balanceWarning.textContent = `Insufficient balance (including ${big2str(feeInWei, 18).slice(0, -16)} LIB fee)`;
+            balanceWarning.style.display = 'block';
+        } else {
+            balanceWarning.style.display = 'none';
+        }
+    }
+
+    return hasInsufficientBalance;
+}
+
+
 function fillAmount() {
-    const amount = document.getElementById('balanceAmount').textContent;
-    document.getElementById('sendAmount').value = amount;
+    const asset = myData.wallet.assets[document.getElementById('sendAsset').value];
+    const feeInWei = BigInt(parameters.current.transactionFee || 1) * wei;
+    const maxAmount = BigInt(asset.balance) - feeInWei;
+    
+    document.getElementById('sendAmount').value = big2str(maxAmount > 0n ? maxAmount : 0n, 18).slice(0, -16);
+    document.getElementById('sendAmount').dispatchEvent(new Event('input'));
 }
 
 // The user has filled out the form to send assets to a recipient and clicked the Send button
@@ -3007,9 +3051,17 @@ async function handleSendAsset(event) {
     const keys = myAccount.keys;
     let toAddress;
 
-    // Validate amount
-    if (amount > fromAddress.balance) {  // TODO - include tx fee
-        alert('Insufficient balance');
+    // Validate amount including transaction fee
+    if (!validateBalance(amount, assetIndex)) {
+        const txFeeInLIB = BigInt(parameters.current.transactionFee || 1) * wei;
+        const amountInWei = bigxnum2big(wei, amount.toString());
+        const balance = BigInt(wallet.assets[assetIndex].balance);
+        
+        const amountStr = big2str(amountInWei, 18).slice(0, -16);
+        const feeStr = big2str(txFeeInLIB, 18).slice(0, -16);
+        const balanceStr = big2str(balance, 18).slice(0, -16);
+        
+        alert(`Insufficient balance: ${amountStr} + ${feeStr} (fee) > ${balanceStr} LIB`);
         return;
     }
 
@@ -4967,7 +5019,11 @@ function displaySearchResults(results) {
             </div>
         `;
 
-        resultElement.addEventListener('click', () => {
+        resultElement.addEventListener('click', (event) => { 
+            event.stopImmediatePropagation(); // Stop all other listeners and bubbling immediately
+            // clear search input and clear results
+            document.getElementById('messageSearch').value = '';
+            document.getElementById('searchResults').innerHTML = '';
             handleSearchResultClick(result);
         });
 
@@ -4997,17 +5053,18 @@ function handleSearchResultClick(result) {
         switchView('chats');
         
         // Open the chat with this contact
-        handleResultClick(result.contactAddress);
+        openChatModal(result.contactAddress);
         
         // Scroll to and highlight the message
         setTimeout(() => {
-            const messageElement = document.querySelector(`[data-message-id="${result.messageId}"]`);
+            const messageSelector = `[data-message-id="${result.messageId}"]`;
+            const messageElement = document.querySelector(messageSelector);
             if (messageElement) {
                 messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 messageElement.classList.add('highlighted');
                 setTimeout(() => messageElement.classList.remove('highlighted'), 2000);
             } else {
-                console.error('Message not found');
+                console.error('Message element not found for selector:', messageSelector);
                 // Could add a toast notification here
             }
         }, 300);
@@ -5061,110 +5118,6 @@ function displayLoadingState() {
             Searching messages
         </div>
     `;
-}
-
-async function handleResultClick(contactAddress) {
-    // Get the contact info
-    const contact = myData.contacts[contactAddress];
-    if (!contact) return;
-
-    // Open chat modal
-    const chatModal = document.getElementById('chatModal');
-    chatModal.classList.add('active');
-
-    // Generate the identicon first
-    const identicon = await generateIdenticon(contactAddress);
-
-    // Update chat header with contact info and avatar - match exact structure from chat view
-    const modalHeader = chatModal.querySelector('.modal-header');
-    modalHeader.innerHTML = `
-        <button class="back-button" id="closeChatModal"></button>
-        <div class="chat-user-info">
-            <div class="modal-avatar">${identicon}</div>
-            <div class="modal-title">${contact.username || contactAddress}</div>
-        </div>
-        <div class="header-actions">
-            <button
-              class="icon-button add-friend-icon"
-              id="chatAddFriendButton"
-              aria-label="Add friend"
-              style="display: ${contact.friend ? 'none' : 'flex'}"
-            ></button>
-        </div>
-    `;
-
-    // Re-attach close button event listener
-    document.getElementById('closeChatModal').addEventListener('click', () => {
-        chatModal.classList.remove('active');
-    });
-
-    // Add click handler for username to show contact info
-    const userInfo = chatModal.querySelector('.chat-user-info');
-    userInfo.onclick = () => {
-        if (contact) {
-            contactInfoModal.open(createDisplayInfo(contact));
-        }
-    };
-
-    // Add click handler for add friend button if visible
-    const addFriendButton = document.getElementById('chatAddFriendButton');
-    if (addFriendButton && !contact.friend) {
-        addFriendButton.onclick = () => {
-            contact.friend = true;
-            showToast('Added to friends');
-            addFriendButton.style.display = 'none';
-            saveState();
-        };
-    }
-
-    // Ensure messages container structure matches
-    const messagesContainer = chatModal.querySelector('.messages-container');
-    if (!messagesContainer) {
-        const container = document.createElement('div');
-        container.className = 'messages-container';
-        container.innerHTML = '<div class="messages-list"></div>';
-        chatModal.appendChild(container);
-    }
-
-    // Load messages
-    const messagesList = chatModal.querySelector('.messages-list');
-    messagesList.innerHTML = ''; // Clear existing messages
-
-    // Add messages if they exist
-    if (contact.messages && contact.messages.length > 0) {
-        contact.messages.forEach((msg, index) => {
-            const messageElement = document.createElement('div');
-            messageElement.className = `message ${msg.my ? 'sent' : 'received'}`;
-            messageElement.setAttribute('data-message-id', index);
-            messageElement.innerHTML = `
-                <div class="message-content">${msg.message}</div>
-                <div class="message-time">${formatTime(msg.timestamp)}</div>
-            `;
-            messagesList.appendChild(messageElement);
-        });
-        
-        // Scroll to bottom of messages
-        messagesList.scrollTop = messagesList.scrollHeight;
-    }
-
-    // Ensure input container exists
-    const inputContainer = chatModal.querySelector('.message-input-container');
-    if (!inputContainer) {
-        const container = document.createElement('div');
-        container.className = 'message-input-container';
-        container.innerHTML = `
-            <textarea class="message-input" placeholder="Type a message..."></textarea>
-            <button class="send-button" id="handleSendMessage">
-                <svg viewBox="0 0 24 24">
-                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
-                </svg>
-            </button>
-        `;
-        chatModal.appendChild(container);
-    }
-
-    // Store current contact for message sending
-    handleResultClick.currentContact = contactAddress;
 }
 
 // Contact search functions
@@ -5262,6 +5215,9 @@ function displayContactResults(results, searchText) {
 
         // Add click handler to show contact info
         contactElement.addEventListener("click", () => {
+            // clear search results and input contactSearchResults
+            document.getElementById("contactSearchResults").innerHTML = "";
+            document.getElementById("contactSearch").value = "";
             // Create display info and open contact info modal
             contactInfoModal.open(createDisplayInfo(contact));
             // Close the search modal
