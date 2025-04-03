@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'm'
+const version = 'o'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1028,7 +1028,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         chatInputElement.addEventListener('focus', () => {
             console.log('DEBUG: Input element focused'); // Log 2: Confirm focus event
-            // Attempt to scroll the input into view, might help Android panning
+            // --- REMOVE THE SCROLLING LOGIC ---
+            /*
             setTimeout(() => { // Add slight delay to allow keyboard to start animating
                 console.log('DEBUG: Attempting to scroll input into view'); // Log 3: Confirm scroll attempt
                 try {
@@ -1037,9 +1038,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                     console.log('DEBUG: ScrollIntoView completed'); // Log 4: Confirm scroll completion
                 
                     // Extra safeguard: Reset document scroll AFTER scrollIntoView.
-                    // This counteracts excessive upward panning by the browser itself,
-                    // particularly observed on some Android environments.
-                    // Apply unconditionally as it's unlikely to harm iOS.
                     document.documentElement.scrollTop = 0;
                     document.body.scrollTop = 0; // For older browsers / quirks mode
                     console.log("Attempted extra scroll reset post-focus"); // Log 5: Confirm scroll reset
@@ -1048,6 +1046,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
 
             }, 150); // Slightly increase delay to allow scrollIntoView to potentially finish
+            */
+            // --- END REMOVED BLOCK ---
         });
     } else {
         console.warn('Chat input element *still* not found for focus/blur listeners within DOMContentLoaded.'); // Changed warning message
