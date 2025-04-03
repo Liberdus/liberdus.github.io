@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'n'
+const version = 'm'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6819,7 +6819,7 @@ function adjustChatLayout() {
                 }
                 
                 // Reset scroll positions of parent elements (still useful to prevent body scroll)
-                if (chatModalElement) chatModalElement.scrollTop = 0; // Keep modal scroll top at 0
+                // if (chatModalElement) chatModalElement.scrollTop = 0; // <-- REMOVED THIS LINE
                 document.documentElement.scrollTop = 0;
                 document.body.scrollTop = 0;
             });
