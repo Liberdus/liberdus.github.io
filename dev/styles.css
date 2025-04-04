@@ -3564,13 +3564,13 @@ small {
 /* Override focus and active states to prevent visual highlight */
 #uploadQRButton:focus,
 #uploadQRButton:active {
-  background-color: transparent; /* Match default state */
-  outline: none; /* Remove browser default focus ring */
-  box-shadow: none; /* Remove any potential focus box-shadow */
+  background-color: transparent !important; /* Match default state and override hover */
+  outline: none !important; /* Remove browser default focus ring */
+  box-shadow: none !important; /* Remove any potential focus box-shadow */
 }
 
 /* Ensure SVG color doesn't change on focus/active */
 #uploadQRButton:focus svg,
 #uploadQRButton:active svg {
-  fill: #007bff; /* Match default state */
+  fill: #007bff !important; /* Match default state */
 }
