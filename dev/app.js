@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'j'
+const version = 'k'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -497,19 +497,21 @@ async function handleCreateAccount(event) {
             if (accountInfo && accountInfo.account) { 
                 console.log('Account already exists for this private key:', accountInfo);
                 privateKeyError.textContent = 'An account already exists for this private key.';
-                privateKeyError.classList.add('visible');
+                privateKeyError.style.color = '#dc3545';
+                privateKeyError.style.display = 'inline';
                 return; // Stop the account creation process
             } else {
                  console.log('No existing account found for this private key.');
                  // Ensure error is hidden if the check passes
-                 privateKeyError.classList.remove('visible');
+                 privateKeyError.style.display = 'none';
             }
         } catch (error) {
             console.error('Error checking for existing account:', error);
             // Decide how to handle network errors during this check.
             // Maybe inform the user? For now, let's display a generic error.
             privateKeyError.textContent = 'Network error checking key. Please try again.';
-
+            privateKeyError.style.color = '#dc3545';
+            privateKeyError.style.display = 'inline';
             return; // Stop process on error
         }
     }
