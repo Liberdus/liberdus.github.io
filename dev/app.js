@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -437,6 +437,7 @@ async function handleCreateAccount(event) {
     } else {
         privateKey = secp.utils.randomPrivateKey();
         privateKeyHex = bin2hex(privateKey);
+        privateKeyError.style.display = 'none'; // Ensure hidden if generated
     }
 
     function validatePrivateKey(key) {
@@ -483,6 +484,39 @@ async function handleCreateAccount(event) {
     const address = keccak256(publicKey.slice(1)).slice(-20);
     const addressHex = bin2hex(address);
 
+    // If a private key was provided, check if the derived address already exists on the network
+    if (providedPrivateKey) {
+        try {
+            const accountCheckAddress = longAddress(addressHex);
+            console.log(`Checking network for existing account at address: ${accountCheckAddress}`);
+            const accountInfo = await queryNetwork(`/account/${accountCheckAddress}`);
+            
+            // Check if the query returned data indicating an account exists.
+            // Adjust the condition `accountInfo && accountInfo.account` based on the actual
+            // structure of the response from your `/account/{address}` endpoint.
+            // This assumes a non-null `accountInfo` with an `account` property means it exists.
+            if (accountInfo && accountInfo.account) { 
+                console.log('Account already exists for this private key:', accountInfo);
+                privateKeyError.textContent = 'An account already exists for this private key.';
+                privateKeyError.style.color = '#dc3545'; 
+                privateKeyError.style.display = 'inline';
+                return; // Stop the account creation process
+            } else {
+                 console.log('No existing account found for this private key.');
+                 // Ensure error is hidden if the check passes
+                 privateKeyError.style.display = 'none';
+            }
+        } catch (error) {
+            console.error('Error checking for existing account:', error);
+            // Decide how to handle network errors during this check.
+            // Maybe inform the user? For now, let's display a generic error.
+            privateKeyError.textContent = 'Network error checking key. Please try again.';
+            privateKeyError.style.color = '#dc3545'; 
+            privateKeyError.style.display = 'inline';
+            return; // Stop process on error
+        }
+    }
+    
     // Create new account entry
     myAccount = {
         netid,
