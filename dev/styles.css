@@ -3534,3 +3534,43 @@ small {
 .hidden {
   display: none;
 }
+
+/* Add styles for uploadQRButton (same as scanQRButton for now) */
+#uploadQRButton {
+  background-color: transparent;
+  border: none;
+  color: #007bff; /* Or match the icon fill color */
+  cursor: pointer;
+  padding: 8px; /* Match scanQRButton */
+  border-radius: 4px; /* Match scanQRButton */
+  transition: background-color 0.2s;
+  display: inline-flex; /* Helps with alignment if using SVG */
+  align-items: center;
+  justify-content: center;
+}
+
+/* Style the SVG inside uploadQRButton */
+#uploadQRButton svg {
+  display: block; /* Ensures SVG behaves correctly */
+  width: 24px; /* Match scanQRButton */
+  height: 24px; /* Match scanQRButton */
+  fill: #007bff; /* Match scanQRButton */
+}
+
+#uploadQRButton:hover {
+  background-color: rgba(0, 123, 255, 0.1); /* Match scanQRButton */
+}
+
+/* Override focus and active states to prevent visual highlight */
+#uploadQRButton:focus,
+#uploadQRButton:active {
+  background-color: transparent; /* Match default state */
+  outline: none; /* Remove browser default focus ring */
+  box-shadow: none; /* Remove any potential focus box-shadow */
+}
+
+/* Ensure SVG color doesn't change on focus/active */
+#uploadQRButton:focus svg,
+#uploadQRButton:active svg {
+  fill: #007bff; /* Match default state */
+}
