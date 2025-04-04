@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'i'
+const version = 'j'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -490,29 +490,26 @@ async function handleCreateAccount(event) {
             const accountCheckAddress = longAddress(addressHex);
             console.log(`Checking network for existing account at address: ${accountCheckAddress}`);
             const accountInfo = await queryNetwork(`/account/${accountCheckAddress}`);
+            console.log('DEBUG accountInfo', JSON.stringify(accountInfo, null, 2));
             
             // Check if the query returned data indicating an account exists.
-            // Adjust the condition `accountInfo && accountInfo.account` based on the actual
-            // structure of the response from your `/account/{address}` endpoint.
             // This assumes a non-null `accountInfo` with an `account` property means it exists.
             if (accountInfo && accountInfo.account) { 
                 console.log('Account already exists for this private key:', accountInfo);
                 privateKeyError.textContent = 'An account already exists for this private key.';
-                privateKeyError.style.color = '#dc3545'; 
-                privateKeyError.style.display = 'inline';
+                privateKeyError.classList.add('visible');
                 return; // Stop the account creation process
             } else {
                  console.log('No existing account found for this private key.');
                  // Ensure error is hidden if the check passes
-                 privateKeyError.style.display = 'none';
+                 privateKeyError.classList.remove('visible');
             }
         } catch (error) {
             console.error('Error checking for existing account:', error);
             // Decide how to handle network errors during this check.
             // Maybe inform the user? For now, let's display a generic error.
             privateKeyError.textContent = 'Network error checking key. Please try again.';
-            privateKeyError.style.color = '#dc3545'; 
-            privateKeyError.style.display = 'inline';
+
             return; // Stop process on error
         }
     }
