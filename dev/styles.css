@@ -3547,6 +3547,7 @@ small {
   display: inline-flex; /* Helps with alignment if using SVG */
   align-items: center;
   justify-content: center;
+  -webkit-tap-highlight-color: transparent; /* Remove iOS tap highlight */
 }
 
 /* Style the SVG inside uploadQRButton */
