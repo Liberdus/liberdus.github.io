@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -490,7 +490,6 @@ async function handleCreateAccount(event) {
             const accountCheckAddress = longAddress(addressHex);
             console.log(`Checking network for existing account at address: ${accountCheckAddress}`);
             const accountInfo = await queryNetwork(`/account/${accountCheckAddress}`);
-            console.log('DEBUG accountInfo', JSON.stringify(accountInfo, null, 2));
             
             // Check if the query returned data indicating an account exists.
             // This assumes a non-null `accountInfo` with an `account` property means it exists.
@@ -502,13 +501,10 @@ async function handleCreateAccount(event) {
                 return; // Stop the account creation process
             } else {
                  console.log('No existing account found for this private key.');
-                 // Ensure error is hidden if the check passes
                  privateKeyError.style.display = 'none';
             }
         } catch (error) {
             console.error('Error checking for existing account:', error);
-            // Decide how to handle network errors during this check.
-            // Maybe inform the user? For now, let's display a generic error.
             privateKeyError.textContent = 'Network error checking key. Please try again.';
             privateKeyError.style.color = '#dc3545';
             privateKeyError.style.display = 'inline';
@@ -731,11 +727,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     await Promise.all(keys.map(key => caches.delete(key)));
                     
                     // Show success message
-                    showToast('Cache cleared successfully. Please refresh the page.');
+                    showToast('Cache cleared successfully. Page will refresh...');
                     
-                    // Optional: Reload the page after a short delay
+                    // Perform a hard refresh after a short delay
                     setTimeout(() => {
-                        window.location.reload();
+                        // Clear browser cache and force reload from server
+                        window.location.href = window.location.href + '?clearCache=' + new Date().getTime();
                     }, 2000);
                 }
             } catch (error) {
@@ -2317,8 +2314,8 @@ function previewQRData(paymentData) {
     
     // Create human-readable preview
     let preview = `<strong>QR Code Data:</strong><br>`;
-    preview += `<span class="preview-label">Username:</span> ${paymentData.username}<br>`;
-    preview += `<span class="preview-label">Asset:</span> ${paymentData.symbol}<br>`;
+    preview += `<span class="preview-label">Username:</span> ${paymentData.u}<br>`;
+    preview += `<span class="preview-label">Asset:</span> ${paymentData.s}<br>`;
     
     if (paymentData.amount) {
         preview += `<span class="preview-label">Amount:</span> ${paymentData.amount} ${paymentData.symbol}<br>`;
@@ -2329,13 +2326,14 @@ function previewQRData(paymentData) {
     }
     
     // Add timestamp in readable format
-    const date = new Date(paymentData.timestamp);
+    // Use the short key 't' for the timestamp
+    const date = new Date(paymentData.t); 
     preview += `<span class="preview-label">Generated:</span> ${date.toLocaleString()}`;
     
     // Create minimized version (single line)
-    let minimizedPreview = `${paymentData.username} • ${paymentData.symbol}`;
-    if (paymentData.amount) {
-        minimizedPreview += ` • ${paymentData.amount} ${paymentData.symbol}`;
+    let minimizedPreview = `${paymentData.u} • ${paymentData.s}`;
+    if (paymentData.a) {
+        minimizedPreview += ` • ${paymentData.a} ${paymentData.s}`;
     }
     if (paymentData.memo) {
         const shortMemo = paymentData.memo.length > 20 ? 
@@ -2414,24 +2412,41 @@ function createQRPaymentData() {
         console.error("Error accessing asset data:", error);
     }
     
-    // Build payment data object
+    // Build payment data object with short keys
     const paymentData = {
-        username: myAccount.username,
-        timestamp: Date.now(),
-        version: "1.0",
-        assetId: assetId,
-        symbol: symbol
+        u: myAccount.username, // username
+        t: Date.now(), // timestamp
+        v: "1.0", // version
+        i: assetId, // assetId
+        s: symbol // symbol
     };
     
     // Add optional fields if they have values
     const amount = document.getElementById('receiveAmount').value.trim();
     if (amount) {
-        paymentData.amount = amount;
+        paymentData.a = amount; // amount
     }
     
-    const memo = document.getElementById('receiveMemo').value.trim();
+    const memoInput = document.getElementById('receiveMemo'); // Get the input element itself
+    let memo = memoInput.value.trim();
+    
+    // Calculate approximate base data length (JSON + base64 overhead estimated)
+    const baseData = { ...paymentData }; // Copy base data
+    const baseJson = JSON.stringify(baseData);
+    const base64 = btoa(baseJson);
+    const baseUriLength = `liberdus://${base64}`.length;
+    
+    const MAX_QR_LENGTH = 1000; 
+    // Adjust buffer slightly for shorter key "m": vs "memo": 
+    const availableMemoLength = MAX_QR_LENGTH - baseUriLength - 6; 
+    
+    if (memo.length > availableMemoLength) {
+        memo = memo.substring(0, availableMemoLength > 0 ? availableMemoLength : 0);
+        console.warn(`Memo truncated to ${memo.length} characters to fit QR code.`);
+    }
+    
     if (memo) {
-        paymentData.memo = memo;
+        paymentData.m = memo;
     }
     
     return paymentData;
@@ -2470,19 +2485,45 @@ function updateQRCode() {
     } catch (error) {
         console.error("Error in updateQRCode:", error);
         
-        // Fallback to basic address QR code
-        const address = myAccount.keys.address;
-        new QRCode(qrcodeContainer, {
-            text: '0x' + address,
-            width: 200,
-            height: 200
-        });
-        
-        // Show error in preview
-        const previewElement = document.getElementById('qrDataPreview');
-        previewElement.innerHTML = `Error generating QR code: ${error.message}<br>Showing address QR code instead.`;
-        
-        return '0x' + address;
+        qrcodeContainer.innerHTML = ''; // Clear the container before adding fallback QR
+
+        // Fallback to basic username QR code in liberdus:// format
+        try {
+            // Use short key 'u' for username
+            const fallbackData = { u: myAccount.username }; 
+            const fallbackJsonData = JSON.stringify(fallbackData);
+            const fallbackBase64Data = btoa(fallbackJsonData);
+            const fallbackQrText = `liberdus://${fallbackBase64Data}`;
+            
+            new QRCode(qrcodeContainer, {
+                text: fallbackQrText,
+                width: 200,
+                height: 200
+            });
+            console.log("Fallback QR code generated with username URI");
+            console.error("Error generating full QR", error);
+
+            // Show error in preview (pointing to the inner content div)
+            const previewElement = document.getElementById('qrDataPreview');
+            const previewContent = previewElement.querySelector('.preview-content'); 
+            if (previewContent) {
+                previewContent.innerHTML = `<span style="color: red;">Error generating full QR</span><br> Generating QR with only username. <br> Username: ${myAccount.username}`;
+                
+            } else {
+                previewElement.innerHTML = `Error generating full QR. Username: ${myAccount.username}`;
+            }
+            
+            return fallbackQrText; // Return the generated fallback URI
+        } catch (fallbackError) {
+            // If even the fallback fails (e.g., username missing), show a simple error
+            console.error("Error generating fallback QR code:", fallbackError);
+            qrcodeContainer.innerHTML = '<p style="color: red; text-align: center;">Failed to generate QR code.</p>';
+            const previewElement = document.getElementById('qrDataPreview');
+            if (previewElement) {
+                previewElement.innerHTML = '<p style="color: red;">Error generating QR code.</p>';
+            }
+            return null; // Indicate complete failure
+        }
     }
 }
 
@@ -2941,34 +2982,34 @@ function processQRData(qrText) {
             return;
         }
         
-        // Validate required fields
-        if (!qrData.username) {
+        // Validate required fields (using short key)
+        if (!qrData.u) { // Check for 'u' instead of 'username'
             showToast('QR code missing required username', 3000, 'error');
             return;
         }
         
-        // Fill the form fields
-        document.getElementById('sendToAddress').value = qrData.username;
+        // Fill the form fields (using short keys)
+        document.getElementById('sendToAddress').value = qrData.u; // Use qrData.u
         
-        if (qrData.amount) {
-            document.getElementById('sendAmount').value = qrData.amount;
+        if (qrData.a) { // Check for 'a' instead of 'amount'
+            document.getElementById('sendAmount').value = qrData.a; // Use qrData.a
         }
         
-        if (qrData.memo) {
-            document.getElementById('sendMemo').value = qrData.memo;
+        if (qrData.m) { // Check for 'm' instead of 'memo'
+            document.getElementById('sendMemo').value = qrData.m; // Use qrData.m
         }
         
-        // If asset info provided, select matching asset
-        if (qrData.assetId && qrData.symbol) {
+        // If asset info provided, select matching asset (using short keys)
+        if (qrData.i && qrData.s) { // Check for 'i' and 's'
             const assetSelect = document.getElementById('sendAsset');
             const assetOption = Array.from(assetSelect.options).find((opt) =>
-                opt.text.includes(qrData.symbol)
+                opt.text.includes(qrData.s) // Find based on symbol 's'
             );
             if (assetOption) {
                 assetSelect.value = assetOption.value;
                 console.log(`Selected asset: ${assetOption.text} (value: ${assetOption.value})`);
             } else {
-                console.log(`Asset with symbol ${qrData.symbol} not found in dropdown`);
+                console.log(`Asset with symbol ${qrData.s} not found in dropdown`);
             }
         }
         
