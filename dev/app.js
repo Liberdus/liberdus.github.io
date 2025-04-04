@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'm'
+const version = 'n'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2644,14 +2644,14 @@ function fillPaymentFromQR(data){
     data = data.replace('liberdus://', '')
     const paymentData = JSON.parse(atob(data))
     console.log("Read payment data:", JSON.stringify(paymentData, null, 2));
-    if (paymentData.username){
-        document.getElementById('sendToAddress').value = paymentData.username
+    if (paymentData.u){
+        document.getElementById('sendToAddress').value = paymentData.u
     }
-    if (paymentData.amount){
-        document.getElementById('sendAmount').value = paymentData.amount
+    if (paymentData.a){
+        document.getElementById('sendAmount').value = paymentData.a
     }
-    if (paymentData.memo){
-        document.getElementById('sendMemo').value = paymentData.memo
+    if (paymentData.m){
+        document.getElementById('sendMemo').value = paymentData.m
     }
     // Trigger username validation and amount validation
     document.getElementById('sendToAddress').dispatchEvent(new Event('input'));
