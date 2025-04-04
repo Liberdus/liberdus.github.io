@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'a'
+const version = 'b'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -971,7 +971,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // File upload handlers
     document.getElementById('uploadQRButton').addEventListener('click', () => {
         document.getElementById('qrFileInput').click();
-        document.getElementById('uploadQRButton').blur();
+        // document.getElementById('uploadQRButton').blur(); // REMOVED - Using focus shift at end of handleQRFileSelect
     });
 
     document.getElementById('qrFileInput').addEventListener('change', handleQRFileSelect);
@@ -6172,21 +6172,19 @@ async function handleQRFileSelect(event) {
             console.error('No QR code found in image');
             showToast('No QR code found in image', 3000, 'error');
             event.target.value = ''; // Reset the file input value
-            // Remove focus from the upload button
-            document.getElementById('uploadQRButton').blur();
+            // document.getElementById('uploadQRButton').blur(); // REMOVED
         }
     } catch (error) {
         console.error('Error processing QR code image:', error);
         showToast('Error processing image', 3000, 'error');
         event.target.value = '';
-        // Remove focus from the upload button
-        document.getElementById('uploadQRButton').blur();
+        // document.getElementById('uploadQRButton').blur(); // REMOVED
     }
 
-    // Remove focus from the upload button with a slight delay
+    // Move focus to the body with a slight delay to prevent button highlight persistence
     setTimeout(() => {
-        document.getElementById('uploadQRButton').blur();
-    }, 0); // 0ms delay often works, pushes to end of event loop
+        document.body.focus();
+    }, 0);
 }
 
 // WebSocket Manager Class
