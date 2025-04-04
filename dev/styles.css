@@ -3531,29 +3531,6 @@ small {
   display: none;
 }
 
-/* Add styles for uploadQRButton (same as scanQRButton for now) */
-#uploadQRButton {
-  background-color: transparent;
-  border: none;
-  color: #007bff; /* Or match the icon fill color */
-  cursor: pointer;
-  padding: 8px; /* Match scanQRButton */
-  border-radius: 4px; /* Match scanQRButton */
-  transition: background-color 0.2s;
-  display: inline-flex; /* Helps with alignment if using SVG */
-  align-items: center;
-  justify-content: center;
-  -webkit-tap-highlight-color: transparent; /* Add this back! Crucial for iOS */
-}
-
-/* Style the SVG inside uploadQRButton */
-#uploadQRButton svg {
-  display: block; /* Ensures SVG behaves correctly */
-  width: 24px; /* Match scanQRButton */
-  height: 24px; /* Match scanQRButton */
-  fill: #007bff; /* Match scanQRButton */
-}
-
 /* Explicitly prevent background change on :active for iOS quirks */
 #uploadQRButton:hover,
 #scanQRButton:hover {

@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'g'
+const version = 'h'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2579,8 +2579,9 @@ function fillPaymentFromQR(data){
     if (paymentData.memo){
         document.getElementById('sendMemo').value = paymentData.memo
     }
-    // Trigger username validation
+    // Trigger username validation and amount validation
     document.getElementById('sendToAddress').dispatchEvent(new Event('input'));
+    document.getElementById('sendAmount').dispatchEvent(new Event('input'));
 }
 
 // this was the old scanQRCode function; not needed anymore
@@ -6167,22 +6168,23 @@ async function handleQRFileSelect(event) {
         // Handle QR code result
         if (code) {
             handleSuccessfulScan(code.data);
+            event.target.value = '';
         } else {
             console.error('No QR code found in image');
             showToast('No QR code found in image', 3000, 'error');
             event.target.value = ''; // Reset the file input value
+            document.getElementById('sendForm').reset();
+            document.getElementById('sendToAddressError').textContent = '';
+            document.getElementById('balanceWarning').textContent = '';
         }
     } catch (error) {
         console.error('Error processing QR code image:', error);
         showToast('Error processing image', 3000, 'error');
         event.target.value = '';
+        document.getElementById('sendForm').reset();
+        document.getElementById('sendToAddressError').textContent = '';
+        document.getElementById('balanceWarning').textContent = '';
     }
-
-    // Move focus to the body with a slight delay to prevent button highlight persistence
-/*     setTimeout(() => {
-        console.log('Moving focus to body');
-        document.body.focus();
-    }, 0); */
 }
 
 // WebSocket Manager Class
