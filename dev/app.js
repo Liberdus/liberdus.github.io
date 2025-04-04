@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'l'
+const version = 'm'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2321,8 +2321,8 @@ function previewQRData(paymentData) {
         preview += `<span class="preview-label">Amount:</span> ${paymentData.amount} ${paymentData.symbol}<br>`;
     }
     
-    if (paymentData.memo) {
-        preview += `<span class="preview-label">Memo:</span> ${paymentData.memo}<br>`;
+    if (paymentData.m) {
+        preview += `<span class="preview-label">Memo:</span> ${paymentData.m}<br>`;
     }
     
     // Add timestamp in readable format
@@ -2335,10 +2335,10 @@ function previewQRData(paymentData) {
     if (paymentData.a) {
         minimizedPreview += ` • ${paymentData.a} ${paymentData.s}`;
     }
-    if (paymentData.memo) {
-        const shortMemo = paymentData.memo.length > 20 ? 
-            paymentData.memo.substring(0, 20) + '...' : 
-            paymentData.memo;
+    if (paymentData.m) {
+        const shortMemo = paymentData.m.length > 20 ? 
+            paymentData.m.substring(0, 20) + '...' : 
+            paymentData.m;
         minimizedPreview += ` • Memo: ${shortMemo}`;
     }
     
