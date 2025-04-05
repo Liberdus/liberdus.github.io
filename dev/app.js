@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'n'
+const version = 'o'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2326,7 +2326,6 @@ function previewQRData(paymentData) {
     }
     
     // Add timestamp in readable format
-    // Use the short key 't' for the timestamp
     const date = new Date(paymentData.t); 
     preview += `<span class="preview-label">Generated:</span> ${date.toLocaleString()}`;
     
@@ -2412,7 +2411,7 @@ function createQRPaymentData() {
         console.error("Error accessing asset data:", error);
     }
     
-    // Build payment data object with short keys
+    // Build payment data object
     const paymentData = {
         u: myAccount.username, // username
         t: Date.now(), // timestamp
@@ -2424,27 +2423,10 @@ function createQRPaymentData() {
     // Add optional fields if they have values
     const amount = document.getElementById('receiveAmount').value.trim();
     if (amount) {
-        paymentData.a = amount; // amount
+        paymentData.a = amount;
     }
     
-    const memoInput = document.getElementById('receiveMemo'); // Get the input element itself
-    let memo = memoInput.value.trim();
-    
-    // Calculate approximate base data length (JSON + base64 overhead estimated)
-    const baseData = { ...paymentData }; // Copy base data
-    const baseJson = JSON.stringify(baseData);
-    const base64 = btoa(baseJson);
-    const baseUriLength = `liberdus://${base64}`.length;
-    
-    const MAX_QR_LENGTH = 1000; 
-    // Adjust buffer slightly for shorter key "m": vs "memo": 
-    const availableMemoLength = MAX_QR_LENGTH - baseUriLength - 6; 
-    
-    if (memo.length > availableMemoLength) {
-        memo = memo.substring(0, availableMemoLength > 0 ? availableMemoLength : 0);
-        console.warn(`Memo truncated to ${memo.length} characters to fit QR code.`);
-    }
-    
+    const memo = document.getElementById('receiveMemo').value.trim(); 
     if (memo) {
         paymentData.m = memo;
     }
@@ -2989,14 +2971,14 @@ function processQRData(qrText) {
         }
         
         // Fill the form fields (using short keys)
-        document.getElementById('sendToAddress').value = qrData.u; // Use qrData.u
+        document.getElementById('sendToAddress').value = qrData.u;
         
-        if (qrData.a) { // Check for 'a' instead of 'amount'
-            document.getElementById('sendAmount').value = qrData.a; // Use qrData.a
+        if (qrData.a) {
+            document.getElementById('sendAmount').value = qrData.a;
         }
         
-        if (qrData.m) { // Check for 'm' instead of 'memo'
-            document.getElementById('sendMemo').value = qrData.m; // Use qrData.m
+        if (qrData.m) {
+            document.getElementById('sendMemo').value = qrData.m;
         }
         
         // If asset info provided, select matching asset (using short keys)
