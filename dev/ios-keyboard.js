@@ -1,3 +1,5 @@
+console.log("iOS Keyboard Script Loaded"); // Top-level log
+
 // iOS Keyboard Adjustment Script
 // This script handles the viewport adjustments needed for iOS devices
 // to maintain the "sandwich" layout when the on-screen keyboard appears
@@ -21,6 +23,7 @@ function isIOS() {
 
 // Adjust layout for iOS devices when the keyboard appears/disappears
 function adjustLayoutForIOS() {
+  console.log("iOS Adjust: adjustLayoutForIOS() called"); // Log entry
   const chatModal = document.getElementById("chatModal");
   if (!chatModal || !chatModal.classList.contains("active")) {
     // console.log("iOS Adjust: Chat modal not active");
@@ -38,9 +41,7 @@ function adjustLayoutForIOS() {
 
   if (window.visualViewport) {
     const viewport = window.visualViewport;
-    // Calculate keyboard height based on visual viewport
     const keyboardHeight = Math.max(0, window.innerHeight - viewport.height);
-
     console.log(`iOS Adjust: keyboardHeight = ${keyboardHeight}`);
 
     if (keyboardHeight > 0) {
@@ -50,16 +51,15 @@ function adjustLayoutForIOS() {
       console.log(`iOS Adjust: Applying paddingBottom ${keyboardHeight}px`);
       content.style.paddingBottom = `${keyboardHeight}px`;
 
-      // Scroll the focused element into view if needed
-      if (document.activeElement === messageInput) {
-        console.log("iOS Adjust: Scrolling input into view");
-        // Use a small timeout to ensure layout has updated before scrolling
-        setTimeout(() => {
-          messageInput.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        }, 50);
-      }
+      // --- DISABLED Scroll the focused element into view --- 
+      // if (document.activeElement === messageInput) {
+      //   console.log("iOS Adjust: Scrolling input into view (DISABLED)");
+      //   // setTimeout(() => {
+      //   //   messageInput.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      //   // }, 50);
+      // }
     } else {
-      // Keyboard is hidden or not overlapping significantly
+      // Keyboard is hidden
       console.log("iOS Adjust: Resetting styles");
       footer.style.transform = "";
       content.style.paddingBottom = "";
@@ -71,8 +71,14 @@ function adjustLayoutForIOS() {
 
 // Initialize the iOS keyboard adjustment
 function initIOSKeyboardAdjustment() {
-  if (isIOS() && window.visualViewport) {
-    console.log("iOS device detected, initializing keyboard adjustments.");
+  console.log("iOS Adjust: initIOSKeyboardAdjustment() called"); // Log entry
+  const isDeviceIOS = isIOS();
+  const viewportAvailable = !!window.visualViewport;
+  console.log(`iOS Adjust: isIOS = ${isDeviceIOS}`);
+  console.log(`iOS Adjust: visualViewport available = ${viewportAvailable}`);
+
+  if (isDeviceIOS && viewportAvailable) {
+    console.log("iOS Adjust: Initializing listeners.");
 
     // Listen for viewport changes (keyboard appearance/disappearance)
     window.visualViewport.addEventListener("resize", adjustLayoutForIOS);
@@ -144,11 +150,8 @@ function initIOSKeyboardAdjustment() {
          console.error("iOS Adjust: Could not find chatModal element to observe.");
      }
 
-
   } else {
-    console.log(
-      "Non-iOS device detected or visualViewport not supported, skipping keyboard adjustments."
-    );
+    console.log("iOS Adjust: Skipping initialization (Not iOS or no visualViewport).");
   }
 }
 
