@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2108,7 +2108,7 @@ function openChatModal(address) {
                 console.log('iOS Adjust: Programmatically focusing input after delay.');
                 messageInput.focus();
             }
-        }, 150); // Delay in ms (adjust if needed)
+        }, 300); // Delay in ms (adjust if needed)
     }
 
     // Clear unread count
