@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'e'
+const version = 'f'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -28,7 +28,7 @@ console.log(parseInt(myVersion.replace(/\D/g, '')), parseInt(newVersion.replace(
             alert('Updating to new version: ' + newVersion)
         }
         localStorage.setItem('version', newVersion); // Save new version
-        forceReload(['./', 'index.html','styles.css','app.js','lib.js', 'network.js', 'db.js', 'log-utils.js', 'service-worker.js', 'offline.html'])
+        forceReload(['./', 'index.html','styles.css','app.js','lib.js', 'network.js', 'db.js', 'log-utils.js', 'service-worker.js', 'offline.html', 'ios-keyboard.js'])
         const newUrl = window.location.href
 //console.log('reloading', newUrl)
         window.location.replace(newUrl);
@@ -904,24 +904,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelector('.message-input')?.addEventListener('input', function() {
         this.style.height = '44px';
         this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-    });
-
-    // input focus
-    document.querySelector('.message-input')?.addEventListener('focus', () => {
-        console.log('message-input focused: ', Date.now());
-    });
-
-    document.querySelector('.message-input')?.addEventListener('blur', () => {
-        console.log('message-input blurred: ', Date.now());
-    });
-
-    // chat modal focus
-    document.getElementById('chatModal').addEventListener('focus', () => {
-        console.log('chatModal focused: ', Date.now());
-    });
-
-    document.getElementById('chatModal').addEventListener('blur', () => {
-        console.log('chatModal blurred: ', Date.now());
     });
 
     document.getElementById('openLogs').addEventListener('click', () => {
