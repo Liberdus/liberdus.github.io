@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'a'
+const version = 'b'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -88,6 +88,9 @@ async function forceReload(urls) {
         throw error;
     }
 }
+
+// https://github.com/paulmillr/qr
+//import { encodeQR } from './external/qr.js';
 
 // https://github.com/paulmillr/noble-post-quantum
 // https://github.com/paulmillr/noble-post-quantum/releases
@@ -2097,6 +2100,17 @@ function openChatModal(address) {
     // Show modal
     modal.classList.add('active');
 
+    // Add a short delay before focusing the input on iOS
+    if (isIOS()) { // Assuming you have an isIOS() helper function
+        setTimeout(() => {
+            const messageInput = modal.querySelector('.message-input'); // Ensure this selector is correct
+            if (messageInput) {
+                console.log('iOS Adjust: Programmatically focusing input after delay.');
+                messageInput.focus();
+            }
+        }, 150); // Delay in ms (adjust if needed)
+    }
+
     // Clear unread count
     if (contact.unread > 0) {
         myData.state.unread = Math.max(0, (myData.state.unread || 0) - contact.unread);
@@ -2414,6 +2428,7 @@ function createQRPaymentData() {
     // Build payment data object
     const paymentData = {
         u: myAccount.username, // username
+        // TODO: remove timestamp and version to save space
         t: Date.now(), // timestamp
         v: "1.0", // version
         i: assetId, // assetId
@@ -2452,14 +2467,20 @@ function updateQRCode() {
         const qrText = `liberdus://${base64Data}`;
         console.log("QR code text length:", qrText.length);
         console.log("QR code text (first 100 chars):", qrText.substring(0, 100) + (qrText.length > 100 ? "..." : ""));
-        
-        // Generate QR code
-        new QRCode(qrcodeContainer, {
-            text: qrText,
-            width: 200,
-            height: 200
-        });
-        
+
+
+        const gifBytes = qr.encodeQR(qrText, 'gif', { scale: 4 });
+        // Convert the raw bytes to a base64 data URL
+        const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
+        const dataUrl = 'data:image/gif;base64,' + base64;
+        // Create an image element and set its source to the data URL
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        img.width = 200;
+        img.height = 200;
+        // Add the image to the container
+        qrcodeContainer.appendChild(img);
+
         // Update preview
         previewQRData(paymentData);
         
@@ -2476,12 +2497,20 @@ function updateQRCode() {
             const fallbackJsonData = JSON.stringify(fallbackData);
             const fallbackBase64Data = btoa(fallbackJsonData);
             const fallbackQrText = `liberdus://${fallbackBase64Data}`;
-            
-            new QRCode(qrcodeContainer, {
-                text: fallbackQrText,
-                width: 200,
-                height: 200
-            });
+
+            const gifBytes = qr.encodeQR(fallbackQrText, 'gif', { scale: 4 });
+            // Convert the raw bytes to a base64 data URL
+            const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
+            const dataUrl = 'data:image/gif;base64,' + base64;
+            // Create an image element and set its source to the data URL
+            const img = document.createElement('img');
+            img.src = dataUrl;
+            img.width = 200;
+            img.height = 200;
+            // Add the image to the container
+            qrcodeContainer.appendChild(img);
+
+
             console.log("Fallback QR code generated with username URI");
             console.error("Error generating full QR", error);
 
@@ -6093,41 +6122,44 @@ async function startCamera() {
     }
 }
 
+// changed to use qr.js library instead of jsQR.js 
 function readQRCode(){
-    if (!startCamera.scanning) return;
-
-    // Check if video is ready for capture
     const video = document.getElementById('video');
     const canvasElement = document.getElementById('canvas');
-    const canvas = canvasElement.getContext('2d', { willReadFrequently: true }); // Optimized for frequent getImageData calls
+    const canvas = canvasElement.getContext('2d');
 
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        // Set canvas size to match video
+    if (startCamera.scanning && video.readyState === video.HAVE_ENOUGH_DATA) {
+        // Set canvas size to match video dimensions
         canvasElement.height = video.videoHeight;
         canvasElement.width = video.videoWidth;
-        
-        // Draw video frame to canvas
+
+        // Draw video frame onto canvas
         canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
-        
+
         // Get image data for QR processing
         const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
-        
+
         try {
-            // Process image with jsQR
-            const code = jsQR(imageData.data, imageData.width, imageData.height, {
-                inversionAttempts: "dontInvert",
+            // Process image with qr.js library
+            // qr.decodeQR expects an object { data, height, width }
+            const decodedText = qr.decodeQR({
+                data: imageData.data,
+                width: imageData.width,
+                height: imageData.height
             });
-            
-            // If QR code found
-            if (code) {
-                console.log("QR Code detected:", code.data);
-                handleSuccessfulScan(code.data);
+
+            // If QR code found and decoded
+            if (decodedText) {
+                console.log("QR Code detected:", decodedText);
+                handleSuccessfulScan(decodedText);
             }
         } catch (error) {
-            console.error('QR scanning error:', error);
+            // qr.decodeQR throws error if not found or on error
+            console.log('QR scanning error or not found:', error); // Optional: Log if needed
         }
     }
 }
+
 
 // Handle successful scan
 function handleSuccessfulScan(data) {
@@ -6184,64 +6216,84 @@ function stopCamera() {
     }
 }
 
+// Changed to use qr.js library instead of jsQR.js 
 async function handleQRFileSelect(event) {
     const file = event.target.files[0];
-    if (!file) return;
+    if (!file) {
+        return; // No file selected
+    }
 
-    try {
-        // Create an image object
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
         const img = new Image();
-        img.src = URL.createObjectURL(file);
+        img.onload = async function() {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            if (!context) {
+                console.error('Could not get 2d context from canvas');
+                showToast('Error processing image', 3000, 'error');
+                event.target.value = ''; // Reset file input
+                return;
+            }
+            canvas.width = img.width;
+            canvas.height = img.height;
+            context.drawImage(img, 0, 0, img.width, img.height);
+            const imageData = context.getImageData(0, 0, img.width, img.height);
 
-        // Wait for image to load
-        await new Promise((resolve, reject) => {
-            img.onload = resolve;
-            img.onerror = reject;
-        });
+            try {
+                // Use qr.js library for decoding
+                const decodedData = qr.decodeQR({
+                    data: imageData.data,
+                    width: imageData.width,
+                    height: imageData.height,
+                });
 
-        // Create canvas and get context
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-
-        // Set canvas size to match image
-        canvas.width = img.width;
-        canvas.height = img.height;
-
-        // Draw image to canvas
-        context.drawImage(img, 0, 0);
-
-        // Get image data for QR processing
-        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-
-        // Process image with jsQR
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: "dontInvert",
-        });
-
-        // Clean up
-        URL.revokeObjectURL(img.src);
-
-        // Handle QR code result
-        if (code) {
-            handleSuccessfulScan(code.data);
-            event.target.value = '';
-        } else {
-            console.error('No QR code found in image');
-            showToast('No QR code found in image', 3000, 'error');
-            event.target.value = ''; // Reset the file input value
-            document.getElementById('sendForm').reset();
+                if (decodedData) {
+                    handleSuccessfulScan(decodedData);
+                } else {
+                    // qr.decodeQR might throw an error instead of returning null/undefined
+                    // This else block might not be reached if errors are always thrown
+                    console.error('No QR code found in image (qr.js)');
+                    showToast('No QR code found in image', 3000, 'error');
+                    // Clear the form fields in case of failure to find QR code
+                    document.getElementById('sendForm')?.reset();
+                    document.getElementById('sendToAddressError').textContent = '';
+                    document.getElementById('balanceWarning').textContent = '';
+                }
+            } catch (error) {
+                console.error('Error processing QR code image with qr.js:', error);
+                // Assume error means no QR code found or decoding failed
+                showToast('Could not read QR code from image', 3000, 'error');
+                // Clear the form fields in case of error
+                 document.getElementById('sendForm')?.reset();
+                 document.getElementById('sendToAddressError').textContent = '';
+                 document.getElementById('balanceWarning').textContent = '';
+            } finally {
+                 event.target.value = ''; // Reset the file input value regardless of outcome
+            }
+        };
+        img.onerror = function() {
+            console.error('Error loading image');
+            showToast('Error loading image file', 3000, 'error');
+             event.target.value = ''; // Reset the file input value
+            // Clear the form fields in case of image loading error
+            document.getElementById('sendForm')?.reset();
             document.getElementById('sendToAddressError').textContent = '';
             document.getElementById('balanceWarning').textContent = '';
-        }
-    } catch (error) {
-        console.error('Error processing QR code image:', error);
-        showToast('Error processing image', 3000, 'error');
-        event.target.value = '';
-        document.getElementById('sendForm').reset();
-        document.getElementById('sendToAddressError').textContent = '';
-        document.getElementById('balanceWarning').textContent = '';
-    }
+        };
+        img.src = e.target.result;
+    };
+
+    reader.onerror = function() {
+        console.error('Error reading file');
+        showToast('Error reading file', 3000, 'error');
+        event.target.value = ''; // Reset the file input value
+    };
+
+    reader.readAsDataURL(file);
 }
+
 
 // WebSocket Manager Class
 /**

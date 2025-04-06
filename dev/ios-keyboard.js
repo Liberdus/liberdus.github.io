@@ -83,9 +83,8 @@ function handleViewportResize() {
   // console.log("iOS Adjust Debounce: Timer finished, scheduling RAF.");
   
   // Directly schedule the adjustment using RAF without debounce
-  console.log("iOS Adjust: Scheduling adjustment directly on resize.");
-  // requestAnimationFrame(applyIOSLayoutAdjustments);
-  setTimeout(applyIOSLayoutAdjustments, 0); // Try setTimeout
+  console.log("iOS Adjust: Scheduling RAF directly on resize.");
+  requestAnimationFrame(applyIOSLayoutAdjustments);
 
   // }, 300); // Debounce timeout in milliseconds (adjust as needed)
 }
@@ -101,8 +100,7 @@ function initIOSKeyboardAdjustmentSimplified() {
 
     // Initial check only if modal is currently active
     if (chatModal && chatModal.classList.contains("active")) {
-       // requestAnimationFrame(applyIOSLayoutAdjustments);
-       setTimeout(applyIOSLayoutAdjustments, 0); // Try setTimeout
+       requestAnimationFrame(applyIOSLayoutAdjustments);
     }
 
     // Observe the chat modal for attribute changes (like class)
@@ -111,8 +109,7 @@ function initIOSKeyboardAdjustmentSimplified() {
       // listen for the chat modal to be opened
       chatModal.addEventListener("open", () => {
         console.log("iOS Adjust: Chat modal opened, applying adjustments.");
-        // requestAnimationFrame(applyIOSLayoutAdjustments);
-        setTimeout(applyIOSLayoutAdjustments, 0); // Try setTimeout
+        requestAnimationFrame(applyIOSLayoutAdjustments);
       });
 
       // listen for the chat modal to be closed
@@ -128,8 +125,7 @@ function initIOSKeyboardAdjustmentSimplified() {
         if (event.target === messageInput) {
             console.log("iOS Adjust: Message input focused, scheduling adjustment.");
             // Run adjustment immediately on focus
-            // requestAnimationFrame(applyIOSLayoutAdjustments);
-            setTimeout(applyIOSLayoutAdjustments, 0); // Try setTimeout
+            requestAnimationFrame(applyIOSLayoutAdjustments);
         }
       });
 
@@ -167,8 +163,7 @@ function initIOSKeyboardAdjustmentSimplified() {
         const chatModal = document.getElementById("chatModal");
         if (chatModal && chatModal.classList.contains("active")) {
           console.log("iOS Adjust: Modal active on visibilitychange, applying adjustments.");
-          // requestAnimationFrame(applyIOSLayoutAdjustments);
-          setTimeout(applyIOSLayoutAdjustments, 0); // Try setTimeout
+          requestAnimationFrame(applyIOSLayoutAdjustments);
         }
       }
     });
