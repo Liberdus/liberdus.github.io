@@ -75,14 +75,18 @@ function resetIOSLayoutAdjustments() {
 // Resize event handler - schedules the adjustment using RAF with debouncing
 function handleViewportResize() {
   // Clear any previously scheduled timeout
-  clearTimeout(resizeDebounceTimer);
+  // clearTimeout(resizeDebounceTimer); // Removing debounce timer
 
   // Set a new timeout to schedule the adjustment after a short delay
-  resizeDebounceTimer = setTimeout(() => {
-    // Only schedule RAF if the timeout actually runs (wasn't cleared)
-    console.log("iOS Adjust Debounce: Timer finished, scheduling RAF.");
-    requestAnimationFrame(applyIOSLayoutAdjustments);
-  }, 300); // Debounce timeout in milliseconds (adjust as needed)
+  // resizeDebounceTimer = setTimeout(() => {
+  // Only schedule RAF if the timeout actually runs (wasn't cleared)
+  // console.log("iOS Adjust Debounce: Timer finished, scheduling RAF.");
+  
+  // Directly schedule the adjustment using RAF without debounce
+  console.log("iOS Adjust: Scheduling RAF directly on resize.");
+  requestAnimationFrame(applyIOSLayoutAdjustments);
+
+  // }, 300); // Debounce timeout in milliseconds (adjust as needed)
 }
 
 // Initialize the iOS keyboard adjustment
