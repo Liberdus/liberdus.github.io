@@ -14,8 +14,6 @@ function isIOS() {
   );
 }
 
-// We no longer need isRAFScheduled with the debounce approach
-// let isRAFScheduled = false; 
 let resizeDebounceTimer = null; // Timer for debouncing resize events
 
 // Function to apply layout adjustments
@@ -59,6 +57,21 @@ function applyIOSLayoutAdjustments() {
   }
 }
 
+// Function to explicitly reset layout adjustments
+function resetIOSLayoutAdjustments() {
+  const chatModal = document.getElementById("chatModal");
+  if (!chatModal) return; // Exit if modal not found
+
+  const footer = chatModal.querySelector(".message-input-container");
+  const content = chatModal.querySelector(".messages-container");
+
+  if (footer && content) {
+    footer.style.transform = "";
+    content.style.paddingBottom = "";
+    console.log("iOS Adjust Reset: Styles reset explicitly.");
+  }
+}
+
 // Resize event handler - schedules the adjustment using RAF with debouncing
 function handleViewportResize() {
   // Clear any previously scheduled timeout
@@ -69,18 +82,51 @@ function handleViewportResize() {
     // Only schedule RAF if the timeout actually runs (wasn't cleared)
     console.log("iOS Adjust Debounce: Timer finished, scheduling RAF.");
     requestAnimationFrame(applyIOSLayoutAdjustments);
-  }, 150); // Debounce timeout in milliseconds (adjust as needed)
+  }, 300); // Debounce timeout in milliseconds (adjust as needed)
 }
 
 // Initialize the iOS keyboard adjustment
 function initIOSKeyboardAdjustmentSimplified() {
   console.log("iOS Adjust RAF: init called");
+  const chatModal = document.getElementById("chatModal"); // Find the modal
+
   if (isIOS() && window.visualViewport) {
     console.log("iOS Adjust RAF: Initializing resize listener.");
     window.visualViewport.addEventListener("resize", handleViewportResize);
 
-    // Initial check in case loaded with keyboard already open
-    requestAnimationFrame(applyIOSLayoutAdjustments);
+    // Initial check only if modal is currently active
+    if (chatModal && chatModal.classList.contains("active")) {
+       requestAnimationFrame(applyIOSLayoutAdjustments);
+    }
+
+    // Observe the chat modal for attribute changes (like class)
+    if (chatModal) {
+      const observer = new MutationObserver((mutationsList) => {
+        for (const mutation of mutationsList) {
+          if (
+            mutation.type === "attributes" &&
+            mutation.attributeName === "class"
+          ) {
+            // Check if the 'active' class was removed
+            const isActive = chatModal.classList.contains("active");
+            if (!isActive) {
+              console.log("iOS Adjust Observer: Modal no longer active, resetting styles.");
+              resetIOSLayoutAdjustments();
+            } else {
+               // Optional: Re-apply adjustments if modal becomes active again and keyboard might still be up
+               // requestAnimationFrame(applyIOSLayoutAdjustments);
+               console.log("iOS Adjust Observer: Modal became active.");
+            }
+          }
+        }
+      });
+
+      observer.observe(chatModal, { attributes: true });
+      console.log("iOS Adjust Observer: Started observing chatModal.");
+      // Note: Consider disconnecting the observer if the modal/component is destroyed.
+    } else {
+       console.warn("iOS Adjust: Could not find chatModal to observe.");
+    }
 
   } else {
     console.log(
