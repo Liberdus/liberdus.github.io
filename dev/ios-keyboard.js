@@ -14,11 +14,13 @@ function isIOS() {
   );
 }
 
-let isRAFScheduled = false;
+// We no longer need isRAFScheduled with the debounce approach
+// let isRAFScheduled = false; 
+let resizeDebounceTimer = null; // Timer for debouncing resize events
 
 // Function to apply layout adjustments
 function applyIOSLayoutAdjustments() {
-  isRAFScheduled = false; // Reset flag
+  // Reset flag
 
   const chatModal = document.getElementById("chatModal");
   // Only run if chat modal is active
@@ -57,13 +59,17 @@ function applyIOSLayoutAdjustments() {
   }
 }
 
-// Resize event handler - schedules the adjustment using RAF
+// Resize event handler - schedules the adjustment using RAF with debouncing
 function handleViewportResize() {
-  // Prevent scheduling multiple RAFs if resize events fire rapidly
-  if (!isRAFScheduled) {
-    isRAFScheduled = true;
+  // Clear any previously scheduled timeout
+  clearTimeout(resizeDebounceTimer);
+
+  // Set a new timeout to schedule the adjustment after a short delay
+  resizeDebounceTimer = setTimeout(() => {
+    // Only schedule RAF if the timeout actually runs (wasn't cleared)
+    console.log("iOS Adjust Debounce: Timer finished, scheduling RAF.");
     requestAnimationFrame(applyIOSLayoutAdjustments);
-  }
+  }, 150); // Debounce timeout in milliseconds (adjust as needed)
 }
 
 // Initialize the iOS keyboard adjustment

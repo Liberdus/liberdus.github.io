@@ -1049,14 +1049,16 @@ input[type="file"].form-control::file-selector-button {
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
 }
 
 .messages-container {
-  overflow-y: auto;
+  overflow-y: scroll;
   padding: 1rem;
   display: flex;
   flex-direction: column;
   flex: 1;
+  -webkit-overflow-scrolling: touch;
 }
 
 .message-input-container {
