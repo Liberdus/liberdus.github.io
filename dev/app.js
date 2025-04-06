@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'g'
+const version = 'h'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2117,14 +2117,15 @@ function openChatModal(address) {
     }
 
     // Add a short delay before focusing the input on iOS
-    if (isIOS()) { // Assuming you have an isIOS() helper function
+/*     if (isIOS()) { // Assuming you have an isIOS() helper function
         console.log('isIOS and focus the message input')
         // focus the message input
         const messageInput = modal.querySelector('.message-input');
         if (messageInput) {
+
             messageInput.focus();
         }
-    }
+    } */
 }
 
 function appendChatModal(){
