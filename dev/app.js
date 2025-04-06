@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'd'
+const version = 'e'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -28,7 +28,7 @@ console.log(parseInt(myVersion.replace(/\D/g, '')), parseInt(newVersion.replace(
             alert('Updating to new version: ' + newVersion)
         }
         localStorage.setItem('version', newVersion); // Save new version
-        forceReload(['./', 'index.html','styles.css','app.js','lib.js', 'network.js', 'db.js', 'log-utils.js', 'service-worker.js', 'offline.html', 'ios-keyboard.js'])
+        forceReload(['./', 'index.html','styles.css','app.js','lib.js', 'network.js', 'db.js', 'log-utils.js', 'service-worker.js', 'offline.html'])
         const newUrl = window.location.href
 //console.log('reloading', newUrl)
         window.location.replace(newUrl);
@@ -904,6 +904,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelector('.message-input')?.addEventListener('input', function() {
         this.style.height = '44px';
         this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+    });
+
+    // input focus
+    document.querySelector('.message-input')?.addEventListener('focus', () => {
+        console.log('message-input focused: ', Date.now());
+    });
+
+    document.querySelector('.message-input')?.addEventListener('blur', () => {
+        console.log('message-input blurred: ', Date.now());
+    });
+
+    // chat modal focus
+    document.getElementById('chatModal').addEventListener('focus', () => {
+        console.log('chatModal focused: ', Date.now());
+    });
+
+    document.getElementById('chatModal').addEventListener('blur', () => {
+        console.log('chatModal blurred: ', Date.now());
     });
 
     document.getElementById('openLogs').addEventListener('click', () => {
@@ -2046,6 +2064,7 @@ function createNewContact(addr, username){
 
 
 function openChatModal(address) {
+    console.log(`APP [${Date.now()}]: openChatModal CALLED for address: ${address}`);
     const modal = document.getElementById('chatModal');
     const modalAvatar = modal.querySelector('.modal-avatar');
     const modalTitle = modal.querySelector('.modal-title');
@@ -2076,7 +2095,9 @@ function openChatModal(address) {
     `).join('');
 
     // Scroll to bottom
+    console.log(`APP [${Date.now()}]: Scheduling scroll to bottom in 100ms.`);
     setTimeout(() => {
+        console.log(`APP [${Date.now()}]: Running scroll to bottom timeout callback.`);
         messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
     }, 100);
 
@@ -2098,18 +2119,9 @@ function openChatModal(address) {
     };
 
     // Show modal
+    console.log(`APP [${Date.now()}]: Adding 'active' class to chatModal.`);
     modal.classList.add('active');
-
-    // Add a short delay before focusing the input on iOS
-    if (isIOS()) { // Assuming you have an isIOS() helper function
-        setTimeout(() => {
-            const messageInput = modal.querySelector('.message-input'); // Ensure this selector is correct
-            if (messageInput) {
-                console.log('iOS Adjust: Programmatically focusing input after delay.');
-                messageInput.focus();
-            }
-        }, 300); // Delay in ms (adjust if needed)
-    }
+    console.log(`APP [${Date.now()}]: 'active' class added.`);
 
     // Clear unread count
     if (contact.unread > 0) {
@@ -2126,21 +2138,44 @@ function openChatModal(address) {
             pollChatInterval(pollIntervalChatting) // poll for messages at a faster rate
         }
     }
+
+    // Add a short delay before focusing the input on iOS
+    if (isIOS()) { // Assuming you have an isIOS() helper function
+        console.log(`APP [${Date.now()}]: isIOS() is true. Attempting to focus input.`);
+        // focus the message input
+        const messageInput = modal.querySelector('.message-input');
+        if (messageInput) {
+            console.log(`APP [${Date.now()}]: Found message input, calling focus().`);
+            messageInput.focus();
+            console.log(`APP [${Date.now()}]: focus() called on message input.`);
+        } else {
+            console.log(`APP [${Date.now()}]: Message input not found for focusing.`);
+        }
+    }
+    console.log(`APP [${Date.now()}]: openChatModal FINISHED.`);
 }
 
 function appendChatModal(){
-    console.log('appendChatModal')
-    if (! appendChatModal.address){ return }
+    console.log(`APP [${Date.now()}]: appendChatModal CALLED`);
+    if (! appendChatModal.address){ 
+        console.log(`APP [${Date.now()}]: appendChatModal exiting - no address set.`);
+        return;
+    }
 //console.log(2)
 //    if (document.getElementById('chatModal').classList.contains('active')) { return }
 //console.log(3)
     const messages = myData.contacts[appendChatModal.address].messages
-    if (appendChatModal.len >= messages.length){ return }
+    const initialLen = appendChatModal.len;
+    if (initialLen >= messages.length){ 
+        console.log(`APP [${Date.now()}]: appendChatModal exiting - no new messages (current: ${initialLen}, total: ${messages.length}).`);
+        return;
+    }
+    console.log(`APP [${Date.now()}]: Appending messages from index ${initialLen} to ${messages.length - 1}.`);
 //console.log(4)
     const modal = document.getElementById('chatModal');
     const messagesList = modal.querySelector('.messages-list');
 
-    for (let i=appendChatModal.len; i<messages.length; i++) {
+    for (let i=initialLen; i<messages.length; i++) {
         console.log(5, i)
         const m = messages[i]
         m.type = m.my ? 'sent' : 'received'
@@ -2154,7 +2189,9 @@ function appendChatModal(){
     }
     appendChatModal.len = messages.length
     // Scroll to bottom
+    console.log(`APP [${Date.now()}]: Setting scroll position after appending messages.`);
     messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
+    console.log(`APP [${Date.now()}]: Scroll position set.`);
 }
 appendChatModal.address = null
 appendChatModal.len = 0
