@@ -118,6 +118,17 @@ function initIOSKeyboardAdjustmentSimplified() {
         resetIOSLayoutAdjustments();
       });
 
+      // Add listener for focus events within the modal
+      chatModal.addEventListener('focusin', (event) => {
+        // Check if the focused element is the message input
+        const messageInput = chatModal.querySelector('.message-input'); // Adjust selector if needed
+        if (event.target === messageInput) {
+            console.log("iOS Adjust: Message input focused, scheduling adjustment.");
+            // Run adjustment immediately on focus
+            requestAnimationFrame(applyIOSLayoutAdjustments);
+        }
+      });
+
       const observer = new MutationObserver((mutationsList) => {
         for (const mutation of mutationsList) {
           if (
