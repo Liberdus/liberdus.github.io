@@ -105,6 +105,19 @@ function initIOSKeyboardAdjustmentSimplified() {
 
     // Observe the chat modal for attribute changes (like class)
     if (chatModal) {
+
+      // listen for the chat modal to be opened
+      chatModal.addEventListener("open", () => {
+        console.log("iOS Adjust: Chat modal opened, applying adjustments.");
+        requestAnimationFrame(applyIOSLayoutAdjustments);
+      });
+
+      // listen for the chat modal to be closed
+      chatModal.addEventListener("close", () => {
+        console.log("iOS Adjust: Chat modal closed, resetting styles.");
+        resetIOSLayoutAdjustments();
+      });
+
       const observer = new MutationObserver((mutationsList) => {
         for (const mutation of mutationsList) {
           if (
@@ -131,6 +144,18 @@ function initIOSKeyboardAdjustmentSimplified() {
     } else {
        console.warn("iOS Adjust: Could not find chatModal to observe.");
     }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        console.log("iOS Adjust: Page became visible.");
+        // Re-apply adjustments if the modal is active when page becomes visible
+        const chatModal = document.getElementById("chatModal");
+        if (chatModal && chatModal.classList.contains("active")) {
+          console.log("iOS Adjust: Modal active on visibilitychange, applying adjustments.");
+          requestAnimationFrame(applyIOSLayoutAdjustments);
+        }
+      }
+    });
 
   } else {
     console.log(
