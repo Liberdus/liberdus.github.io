@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -955,7 +955,26 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('closeChatModal')?.addEventListener('click', () => {
         document.getElementById('chatModal').classList.remove('active');
+        // clear the message input
+        const messageInput = document.querySelector('.message-input');
+        if (messageInput) {
+            messageInput.value = '';
+        }
+        // unfocus the message input
+        messageInput.blur();
     });
+
+    // click listener for message input
+    document.querySelector('.message-input')?.addEventListener('click', () => {
+        console.log('message input clicked and focusing and scrolling to bottom')
+        // focus the message input
+        messageInput.focus();
+        // scroll to bottom
+        messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
+    });
+
+
+    
     initializeSearch();
 
     
@@ -2115,17 +2134,6 @@ function openChatModal(address) {
             pollChatInterval(pollIntervalChatting) // poll for messages at a faster rate
         }
     }
-
-    // Add a short delay before focusing the input on iOS
-/*     if (isIOS()) { // Assuming you have an isIOS() helper function
-        console.log('isIOS and focus the message input')
-        // focus the message input
-        const messageInput = modal.querySelector('.message-input');
-        if (messageInput) {
-
-            messageInput.focus();
-        }
-    } */
 }
 
 function appendChatModal(){
