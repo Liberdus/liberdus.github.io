@@ -17,15 +17,25 @@ function isIOS() {
 let resizeDebounceTimer = null; // Timer for debouncing resize events
 const DEBOUNCE_DELAY = 250; // Delay in milliseconds - Increased for more stability on iOS
 
+// Add a global flag to track adjustment state and a threshold
+let isKeyboardAdjusted = false;
+const KEYBOARD_THRESHOLD = 50; // Minimum height in pixels to consider keyboard 'up'
+
 // Function to apply layout adjustments
 function applyIOSLayoutAdjustments() {
   console.log(Date.now(), "iOS Adjust RAF: applyIOSLayoutAdjustments START");
-  // Reset flag
 
   const chatModal = document.getElementById("chatModal");
-  // Only run if chat modal is active
   if (!chatModal || !chatModal.classList.contains("active")) {
     console.log(Date.now(), "iOS Adjust RAF: Chat modal not active, exiting applyIOSLayoutAdjustments.");
+    // Ensure flag is reset if modal becomes inactive unexpectedly
+    if (isKeyboardAdjusted) {
+      console.log(Date.now(), "iOS Adjust RAF: Modal inactive, resetting flag.")
+      isKeyboardAdjusted = false;
+      // Optionally reset body/html overflow here too if needed
+      // document.documentElement.style.overflow = '';
+      // document.body.style.overflowY = '';
+    }
     return;
   }
 
@@ -43,31 +53,48 @@ function applyIOSLayoutAdjustments() {
     const currentViewportHeight = viewport.height;
     const keyboardHeight = Math.max(0, currentInnerHeight - currentViewportHeight);
 
-    console.log(Date.now(), `iOS Adjust RAF: innerH=${currentInnerHeight}, visualH=${currentViewportHeight}, calculated keyboardHeight=${keyboardHeight}`);
+    console.log(Date.now(), `iOS Adjust RAF: innerH=${currentInnerHeight}, visualH=${currentViewportHeight}, calculated keyboardHeight=${keyboardHeight}, currently adjusted=${isKeyboardAdjusted}`);
 
-    if (keyboardHeight > 0) {
-      // Apply styles for visible keyboard
-      footer.style.transform = `translateY(-${keyboardHeight}px)`;
-      content.style.paddingBottom = `${keyboardHeight}px`;
-      // Prevent body and html scroll when keyboard is up
-      document.documentElement.style.overflow = 'hidden';
-      document.body.style.overflowY = 'hidden';
-      console.log(Date.now(), `iOS Adjust RAF: Applied transform/padding. Set html/body overflow = hidden.`);
-    } else {
-      // Reset styles for hidden keyboard
+    if (keyboardHeight > KEYBOARD_THRESHOLD) {
+      // Keyboard is definitively up
+      if (!isKeyboardAdjusted) {
+        // Apply styles only if not already adjusted
+        console.log(Date.now(), `iOS Adjust RAF: Applying styles (keyboardHeight=${keyboardHeight} > ${KEYBOARD_THRESHOLD}). Setting adjusted=true`);
+        footer.style.transform = `translateY(-${keyboardHeight}px)`;
+        content.style.paddingBottom = `${keyboardHeight}px`;
+        document.documentElement.style.overflow = 'hidden';
+        document.body.style.overflowY = 'hidden';
+        isKeyboardAdjusted = true;
+      } else {
+         // Already adjusted, keyboard still up. Optional: Update values if height changed slightly
+         console.log(Date.now(), `iOS Adjust RAF: Keyboard up, already adjusted. (keyboardHeight=${keyboardHeight})`);
+         // If you notice the height changing slightly while keyboard is up, uncomment these lines:
+         // footer.style.transform = `translateY(-${keyboardHeight}px)`;
+         // content.style.paddingBottom = `${keyboardHeight}px`;
+      }
+    } else if (keyboardHeight <= KEYBOARD_THRESHOLD && isKeyboardAdjusted) {
+      // Keyboard is definitively down/gone, and we were previously adjusted
+      console.log(Date.now(), `iOS Adjust RAF: Resetting styles (keyboardHeight=${keyboardHeight} <= ${KEYBOARD_THRESHOLD} and was adjusted). Setting adjusted=false`);
       footer.style.transform = "";
       content.style.paddingBottom = "";
-      // Restore body and html scroll when keyboard is hidden
       document.documentElement.style.overflow = '';
       document.body.style.overflowY = '';
-      console.log(Date.now(), "iOS Adjust RAF: Reset transform/padding. Reset html/body overflow.");
+      isKeyboardAdjusted = false;
+    } else {
+      // Keyboard is down/gone, and we weren't adjusted (or already reset). Do nothing.
+      console.log(Date.now(), `iOS Adjust RAF: Keyboard down or threshold not met (keyboardHeight=${keyboardHeight}), and not previously adjusted or already reset. Doing nothing.`);
     }
 
+    // Scrolling might still be useful on every check
     if (content) {
-      // Use scrollTop and scrollHeight to scroll to the very bottom
       const scrollTarget = content.scrollHeight;
-      content.scrollTop = scrollTarget;
-      console.log(Date.now(), `iOS Adjust RAF: Scrolled messages container to bottom (scrollTop = ${scrollTarget}).`);
+      // Only scroll if the keyboard is considered up, to prevent jumps when resetting
+      if (isKeyboardAdjusted) {
+          content.scrollTop = scrollTarget;
+          console.log(Date.now(), `iOS Adjust RAF: Scrolled messages container to bottom (scrollTop = ${scrollTarget}) while adjusted.`);
+      } else {
+          console.log(Date.now(), `iOS Adjust RAF: Skipping scroll as not adjusted.`);
+      }
     }
   } else {
     console.warn(Date.now(), "iOS Adjust RAF: window.visualViewport not available.");
@@ -91,7 +118,8 @@ function resetIOSLayoutAdjustments() {
   const chatModal = document.getElementById("chatModal");
   if (!chatModal) {
     console.log(Date.now(), "iOS Adjust Reset: chatModal not found, exiting.");
-    return; // Exit if modal not found
+    isKeyboardAdjusted = false; // Reset flag even if modal not found
+    return;
   }
 
   const footer = chatModal.querySelector(".message-input-container");
@@ -100,13 +128,15 @@ function resetIOSLayoutAdjustments() {
   if (footer && content) {
     footer.style.transform = "";
     content.style.paddingBottom = "";
-     // Ensure html and body scroll is restored on explicit reset
     document.documentElement.style.overflow = '';
     document.body.style.overflowY = '';
     console.log(Date.now(), "iOS Adjust Reset: Transform/padding styles reset. Reset html/body overflow.");
   } else {
      console.warn(Date.now(), "iOS Adjust Reset: Could not find footer or content to reset.");
   }
+  // ALWAYS reset the flag on explicit reset
+  isKeyboardAdjusted = false;
+  console.log(Date.now(), `iOS Adjust Reset: Flag set to ${isKeyboardAdjusted}`);
 }
 
 // Debounced Resize event handler
