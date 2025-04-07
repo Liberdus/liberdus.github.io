@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -972,14 +972,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // click listener for message input
     document.querySelector('.message-input')?.addEventListener('click', () => {
         const messageInput = document.querySelector('.message-input');
-        const messagesList = document.getElementById('chatModal')?.querySelector('.messages-list');
+        // const messagesList = document.getElementById('chatModal')?.querySelector('.messages-list'); // No longer needed here
         console.log(Date.now(), 'AppJS: Message input clicked.');
         // focus the message input
         if(messageInput) {
             console.log(Date.now(), 'AppJS: Focusing message input.');
             messageInput.focus();
         }
-        // wait and scroll to bottom
+        // REMOVED: wait and scroll to bottom - This is now handled by ios-keyboard.js
+        /*
         if(messagesList && messagesList.parentElement) {
             console.log(Date.now(), 'AppJS: Scheduling scroll to bottom (350ms delay).');
             setTimeout(() => {
@@ -990,6 +991,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else {
             console.warn(Date.now(), "AppJS: Could not find messagesList parent to scroll.");
         }
+        */
     });
 
 

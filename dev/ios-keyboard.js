@@ -15,6 +15,7 @@ function isIOS() {
 }
 
 let resizeDebounceTimer = null; // Timer for debouncing resize events
+const DEBOUNCE_DELAY = 150; // Delay in milliseconds
 
 // Function to apply layout adjustments
 function applyIOSLayoutAdjustments() {
@@ -89,22 +90,17 @@ function resetIOSLayoutAdjustments() {
   }
 }
 
-// Resize event handler - schedules the adjustment using RAF with debouncing
+// Debounced Resize event handler
 function handleViewportResize(event) {
   console.log(Date.now(), "iOS Adjust: handleViewportResize called. Event:", event);
   // Clear any previously scheduled timeout
-  // clearTimeout(resizeDebounceTimer); // Removing debounce timer
+  clearTimeout(resizeDebounceTimer);
 
   // Set a new timeout to schedule the adjustment after a short delay
-  // resizeDebounceTimer = setTimeout(() => {
-  // Only schedule RAF if the timeout actually runs (wasn't cleared)
-  // console.log("iOS Adjust Debounce: Timer finished, scheduling RAF.");
-
-  // Directly schedule the adjustment using RAF without debounce
-  console.log(Date.now(), "iOS Adjust: Scheduling RAF from handleViewportResize.");
-  requestAnimationFrame(applyIOSLayoutAdjustments);
-
-  // }, 300); // Debounce timeout in milliseconds (adjust as needed)
+  resizeDebounceTimer = setTimeout(() => {
+    console.log(Date.now(), `iOS Adjust Debounce: Timer finished (${DEBOUNCE_DELAY}ms), scheduling RAF.`);
+    requestAnimationFrame(applyIOSLayoutAdjustments);
+  }, DEBOUNCE_DELAY);
 }
 
 // Initialize the iOS keyboard adjustment
@@ -139,20 +135,6 @@ function initIOSKeyboardAdjustmentSimplified() {
       chatModal.addEventListener("close", () => {
         console.log(Date.now(), "iOS Adjust: 'close' event triggered on chatModal, resetting styles.");
         resetIOSLayoutAdjustments();
-      });
-
-      // Add listener for focus events within the modal
-      chatModal.addEventListener('focusin', (event) => {
-        console.log(Date.now(), "iOS Adjust: focusin event triggered inside chatModal. Target:", event.target);
-        // Check if the focused element is the message input
-        const messageInput = chatModal.querySelector('.message-input'); // Adjust selector if needed
-        if (event.target === messageInput) {
-            console.log(Date.now(), "iOS Adjust: Message input focused, scheduling adjustment via RAF.");
-            // Run adjustment immediately on focus
-            requestAnimationFrame(applyIOSLayoutAdjustments);
-        } else {
-            console.log(Date.now(), "iOS Adjust: Focusin event target was not message input.");
-        }
       });
 
       const observer = new MutationObserver((mutationsList) => {
