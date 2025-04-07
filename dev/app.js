@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'p'
+const version = 'q'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -971,8 +971,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // click listener for message input
     document.querySelector('.message-input')?.addEventListener('click', () => {
-        const messageInput = document.querySelector('.message-input');
-        // const messagesList = document.getElementById('chatModal')?.querySelector('.messages-list'); // No longer needed here
+        //const messageInput = document.querySelector('.message-input');
+        const messagesList = document.getElementById('chatModal')?.querySelector('.messages-list');
         console.log(Date.now(), 'AppJS: Message input clicked.');
         // focus the message input
 /*         if(messageInput) {
