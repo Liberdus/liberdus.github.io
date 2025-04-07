@@ -1124,6 +1124,7 @@ input[type="file"].form-control::file-selector-button {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  padding-bottom: 1rem; /* Add some padding at the bottom of the list itself */
 }
 
 .message {

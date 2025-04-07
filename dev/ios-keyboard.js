@@ -15,7 +15,7 @@ function isIOS() {
 }
 
 let resizeDebounceTimer = null; // Timer for debouncing resize events
-const DEBOUNCE_DELAY = 150; // Delay in milliseconds
+const DEBOUNCE_DELAY = 250; // Delay in milliseconds - Increased for more stability on iOS
 
 // Function to apply layout adjustments
 function applyIOSLayoutAdjustments() {
@@ -49,12 +49,16 @@ function applyIOSLayoutAdjustments() {
       // Apply styles for visible keyboard
       footer.style.transform = `translateY(-${keyboardHeight}px)`;
       content.style.paddingBottom = `${keyboardHeight}px`;
-      console.log(Date.now(), `iOS Adjust RAF: Applied transform translateY(-${keyboardHeight}px) and paddingBottom ${keyboardHeight}px.`);
+      // Prevent body scroll when keyboard is up
+      document.body.style.overflowY = 'hidden';
+      console.log(Date.now(), `iOS Adjust RAF: Applied transform/padding. Set body overflowY = hidden.`);
     } else {
       // Reset styles for hidden keyboard
       footer.style.transform = "";
       content.style.paddingBottom = "";
-      console.log(Date.now(), "iOS Adjust RAF: Reset transform and paddingBottom styles.");
+      // Restore body scroll when keyboard is hidden
+      document.body.style.overflowY = '';
+      console.log(Date.now(), "iOS Adjust RAF: Reset transform/padding. Reset body overflowY.");
     }
 
     if (content) {
@@ -84,7 +88,9 @@ function resetIOSLayoutAdjustments() {
   if (footer && content) {
     footer.style.transform = "";
     content.style.paddingBottom = "";
-    console.log(Date.now(), "iOS Adjust Reset: Transform and paddingBottom styles reset explicitly.");
+     // Ensure body scroll is restored on explicit reset
+    document.body.style.overflowY = '';
+    console.log(Date.now(), "iOS Adjust Reset: Transform/padding styles reset. Reset body overflowY.");
   } else {
      console.warn(Date.now(), "iOS Adjust Reset: Could not find footer or content to reset.");
   }
