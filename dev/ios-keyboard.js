@@ -49,16 +49,18 @@ function applyIOSLayoutAdjustments() {
       // Apply styles for visible keyboard
       footer.style.transform = `translateY(-${keyboardHeight}px)`;
       content.style.paddingBottom = `${keyboardHeight}px`;
-      // Prevent body scroll when keyboard is up
+      // Prevent body and html scroll when keyboard is up
+      document.documentElement.style.overflow = 'hidden';
       document.body.style.overflowY = 'hidden';
-      console.log(Date.now(), `iOS Adjust RAF: Applied transform/padding. Set body overflowY = hidden.`);
+      console.log(Date.now(), `iOS Adjust RAF: Applied transform/padding. Set html/body overflow = hidden.`);
     } else {
       // Reset styles for hidden keyboard
       footer.style.transform = "";
       content.style.paddingBottom = "";
-      // Restore body scroll when keyboard is hidden
+      // Restore body and html scroll when keyboard is hidden
+      document.documentElement.style.overflow = '';
       document.body.style.overflowY = '';
-      console.log(Date.now(), "iOS Adjust RAF: Reset transform/padding. Reset body overflowY.");
+      console.log(Date.now(), "iOS Adjust RAF: Reset transform/padding. Reset html/body overflow.");
     }
 
     if (content) {
@@ -88,9 +90,10 @@ function resetIOSLayoutAdjustments() {
   if (footer && content) {
     footer.style.transform = "";
     content.style.paddingBottom = "";
-     // Ensure body scroll is restored on explicit reset
+     // Ensure html and body scroll is restored on explicit reset
+    document.documentElement.style.overflow = '';
     document.body.style.overflowY = '';
-    console.log(Date.now(), "iOS Adjust Reset: Transform/padding styles reset. Reset body overflowY.");
+    console.log(Date.now(), "iOS Adjust Reset: Transform/padding styles reset. Reset html/body overflow.");
   } else {
      console.warn(Date.now(), "iOS Adjust Reset: Could not find footer or content to reset.");
   }
@@ -131,16 +134,32 @@ function initIOSKeyboardAdjustmentSimplified() {
     if (chatModal) {
       console.log(Date.now(), "iOS Adjust: Found chatModal, setting up listeners and observer.");
 
-      // listen for the chat modal to be opened
+      // Listen for the chat modal to be opened (Custom Event - Check if dispatched from app.js)
       chatModal.addEventListener("open", () => {
         console.log(Date.now(), "iOS Adjust: 'open' event triggered on chatModal, scheduling adjustment.");
         requestAnimationFrame(applyIOSLayoutAdjustments);
       });
 
-      // listen for the chat modal to be closed
+      // Listen for the chat modal to be closed (Custom Event - Check if dispatched from app.js)
       chatModal.addEventListener("close", () => {
         console.log(Date.now(), "iOS Adjust: 'close' event triggered on chatModal, resetting styles.");
         resetIOSLayoutAdjustments();
+      });
+
+      // Add listener for focus events within the modal - RE-ADDED WITH DELAY
+      chatModal.addEventListener('focusin', (event) => {
+        console.log(Date.now(), "iOS Adjust: focusin event triggered inside chatModal. Target:", event.target);
+        const messageInput = chatModal.querySelector('.message-input');
+        if (event.target === messageInput) {
+            console.log(Date.now(), "iOS Adjust: Message input focused. Scheduling adjustment via setTimeout (300ms) then RAF.");
+            // Use setTimeout before RAF to give iOS time to settle after focus
+            setTimeout(() => {
+                 console.log(Date.now(), "iOS Adjust: Focus setTimeout finished, scheduling RAF.");
+                 requestAnimationFrame(applyIOSLayoutAdjustments);
+            }, 300); // Delay in ms
+        } else {
+            console.log(Date.now(), "iOS Adjust: Focusin event target was not message input.");
+        }
       });
 
       const observer = new MutationObserver((mutationsList) => {
