@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'i'
+const version = 'k'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -954,23 +954,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     }, 300));
 
     document.getElementById('closeChatModal')?.addEventListener('click', () => {
+        console.log(Date.now(), "AppJS: Close chat modal button clicked.");
         document.getElementById('chatModal').classList.remove('active');
         // clear the message input
         const messageInput = document.querySelector('.message-input');
         if (messageInput) {
+            console.log(Date.now(), "AppJS: Clearing message input value.");
             messageInput.value = '';
         }
         // unfocus the message input
+        console.log(Date.now(), "AppJS: Blurring message input.");
         messageInput.blur();
+        // Manually trigger reset for iOS layout if needed (optional, based on observer behavior)
+        // if (typeof resetIOSLayoutAdjustments === 'function') { resetIOSLayoutAdjustments(); }
     });
 
     // click listener for message input
     document.querySelector('.message-input')?.addEventListener('click', () => {
-        console.log('message input clicked and focusing and scrolling to bottom')
+        const messageInput = document.querySelector('.message-input');
+        const messagesList = document.getElementById('chatModal')?.querySelector('.messages-list');
+        console.log(Date.now(), 'AppJS: Message input clicked.');
         // focus the message input
-        messageInput.focus();
-        // scroll to bottom
-        messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
+        if(messageInput) {
+            console.log(Date.now(), 'AppJS: Focusing message input.');
+            messageInput.focus();
+        }
+        // wait and scroll to bottom
+        if(messagesList && messagesList.parentElement) {
+            console.log(Date.now(), 'AppJS: Scheduling scroll to bottom (350ms delay).');
+            setTimeout(() => {
+                const targetScroll = messagesList.parentElement.scrollHeight;
+                messagesList.parentElement.scrollTop = targetScroll;
+                console.log(Date.now(), `AppJS: Scrolled messages container to bottom (scrollTop = ${targetScroll}) after delay.`);
+            }, 350);
+        } else {
+            console.warn(Date.now(), "AppJS: Could not find messagesList parent to scroll.");
+        }
     });
 
 
@@ -2065,6 +2084,7 @@ function createNewContact(addr, username){
 
 
 function openChatModal(address) {
+    console.log(Date.now(), `AppJS: openChatModal called for address: ${address}`);
     const modal = document.getElementById('chatModal');
     const modalAvatar = modal.querySelector('.modal-avatar');
     const modalTitle = modal.querySelector('.modal-title');
@@ -2085,6 +2105,7 @@ function openChatModal(address) {
 
     // Get messages from contacts data
     const messages = contact?.messages || [];
+    console.log(Date.now(), `AppJS: Found ${messages.length} messages for chat modal.`);
 
     // Display messages and click-to-copy feature
     messagesList.innerHTML = messages.map((msg, index) => `
@@ -2093,10 +2114,18 @@ function openChatModal(address) {
             <div class="message-time">${formatTime(msg.timestamp)}</div>
         </div>
     `).join('');
+    console.log(Date.now(), `AppJS: Rendered messages in messagesList.`);
 
     // Scroll to bottom
+    console.log(Date.now(), "AppJS: Scheduling scroll to bottom (100ms delay) after opening modal.");
     setTimeout(() => {
-        messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
+        if (messagesList && messagesList.parentElement) {
+            const targetScroll = messagesList.parentElement.scrollHeight;
+            messagesList.parentElement.scrollTop = targetScroll;
+            console.log(Date.now(), `AppJS: Scrolled messages container to bottom (scrollTop = ${targetScroll}) after initial delay.`);
+        } else {
+            console.warn(Date.now(), "AppJS: Could not find messagesList parent to scroll after initial delay.");
+        }
     }, 100);
 
     // Add click handler for username to show contact info
@@ -2117,7 +2146,10 @@ function openChatModal(address) {
     };
 
     // Show modal
+    console.log(Date.now(), "AppJS: Adding 'active' class to chatModal.");
     modal.classList.add('active');
+    // Dispatch a custom 'open' event (optional, if ios-keyboard needs it)
+    // modal.dispatchEvent(new CustomEvent('open'));
 
     // Clear unread count
     if (contact.unread > 0) {
@@ -2137,19 +2169,36 @@ function openChatModal(address) {
 }
 
 function appendChatModal(){
-    console.log('appendChatModal')
+    console.log(Date.now(), 'AppJS: appendChatModal called. Current address:', appendChatModal.address, 'Current length:', appendChatModal.len);
     if (! appendChatModal.address){ return }
 //console.log(2)
 //    if (document.getElementById('chatModal').classList.contains('active')) { return }
 //console.log(3)
-    const messages = myData.contacts[appendChatModal.address].messages
+    const contactData = myData.contacts[appendChatModal.address];
+    if (!contactData || !contactData.messages) {
+        console.warn(Date.now(), 'AppJS: appendChatModal - No contact data or messages found for address:', appendChatModal.address);
+        return;
+    }
+    const messages = contactData.messages;
+    console.log(Date.now(), `AppJS: appendChatModal - Checking messages. Current UI length: ${appendChatModal.len}, Actual message length: ${messages.length}`);
     if (appendChatModal.len >= messages.length){ return }
 //console.log(4)
     const modal = document.getElementById('chatModal');
+    if (!modal || !modal.classList.contains('active')) {
+        console.log(Date.now(), 'AppJS: appendChatModal - Modal not found or not active, skipping append.');
+        // Update length anyway so we don't try to re-append same messages later if modal re-opens
+        appendChatModal.len = messages.length;
+        return;
+    }
     const messagesList = modal.querySelector('.messages-list');
+    if (!messagesList) {
+        console.error(Date.now(), 'AppJS: appendChatModal - Could not find messagesList element.');
+        return;
+    }
 
+    console.log(Date.now(), `AppJS: appendChatModal - Appending messages from index ${appendChatModal.len} to ${messages.length - 1}`);
     for (let i=appendChatModal.len; i<messages.length; i++) {
-        console.log(5, i)
+        console.log(Date.now(), `AppJS: appendChatModal - Appending message index ${i}`);
         const m = messages[i]
         m.type = m.my ? 'sent' : 'received'
         // Add message to UI
@@ -2162,7 +2211,13 @@ function appendChatModal(){
     }
     appendChatModal.len = messages.length
     // Scroll to bottom
-    messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
+    if (messagesList.parentElement) {
+        const targetScroll = messagesList.parentElement.scrollHeight;
+        messagesList.parentElement.scrollTop = targetScroll;
+        console.log(Date.now(), `AppJS: appendChatModal - Scrolled messages container to bottom (scrollTop = ${targetScroll}).`);
+    } else {
+        console.warn(Date.now(), "AppJS: appendChatModal - Could not find messagesList parent to scroll.");
+    }
 }
 appendChatModal.address = null
 appendChatModal.len = 0
