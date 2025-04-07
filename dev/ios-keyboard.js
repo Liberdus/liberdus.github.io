@@ -75,6 +75,16 @@ function applyIOSLayoutAdjustments() {
   console.log(Date.now(), "iOS Adjust RAF: applyIOSLayoutAdjustments END");
 }
 
+// Helper function to schedule adjustment using nested RAF for more stability
+function scheduleAdjustmentRAF() {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      console.log(Date.now(), "iOS Adjust: Nested RAF triggered, calling applyIOSLayoutAdjustments.");
+      applyIOSLayoutAdjustments();
+    });
+  });
+}
+
 // Function to explicitly reset layout adjustments
 function resetIOSLayoutAdjustments() {
   console.log(Date.now(), "iOS Adjust Reset: resetIOSLayoutAdjustments called.");
@@ -107,8 +117,8 @@ function handleViewportResize(event) {
 
   // Set a new timeout to schedule the adjustment after a short delay
   resizeDebounceTimer = setTimeout(() => {
-    console.log(Date.now(), `iOS Adjust Debounce: Timer finished (${DEBOUNCE_DELAY}ms), scheduling RAF.`);
-    requestAnimationFrame(applyIOSLayoutAdjustments);
+    console.log(Date.now(), `iOS Adjust Debounce: Timer finished (${DEBOUNCE_DELAY}ms), scheduling nested RAF.`);
+    scheduleAdjustmentRAF(); // Use nested RAF scheduler
   }, DEBOUNCE_DELAY);
 }
 
@@ -151,11 +161,11 @@ function initIOSKeyboardAdjustmentSimplified() {
         console.log(Date.now(), "iOS Adjust: focusin event triggered inside chatModal. Target:", event.target);
         const messageInput = chatModal.querySelector('.message-input');
         if (event.target === messageInput) {
-            console.log(Date.now(), "iOS Adjust: Message input focused. Scheduling adjustment via setTimeout (300ms) then RAF.");
+            console.log(Date.now(), "iOS Adjust: Message input focused. Scheduling adjustment via setTimeout (300ms) then nested RAF.");
             // Use setTimeout before RAF to give iOS time to settle after focus
             setTimeout(() => {
-                 console.log(Date.now(), "iOS Adjust: Focus setTimeout finished, scheduling RAF.");
-                 requestAnimationFrame(applyIOSLayoutAdjustments);
+                 console.log(Date.now(), "iOS Adjust: Focus setTimeout finished, scheduling nested RAF.");
+                 scheduleAdjustmentRAF(); // Use nested RAF scheduler
             }, 300); // Delay in ms
         } else {
             console.log(Date.now(), "iOS Adjust: Focusin event target was not message input.");
