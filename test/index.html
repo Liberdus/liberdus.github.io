@@ -9,7 +9,7 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content"
     />
     <meta name="theme-color" content="#ffffff" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -54,8 +54,7 @@
       https://github.com/davidshimjs/qrcodejs/blob/master/qrcode.js
     -->
     <script src="./log-utils.js"></script>
-    <script src="./external/qrcode.js"></script>
-    <script src="./external/jsQR.js"></script>
+    <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
     <link rel="stylesheet" href="./styles.css" />
     <link rel="manifest" href="./manifest.json" />
@@ -86,18 +85,20 @@
           ></div>
         </h1>
         <div class="welcome-buttons">
-          <button id="signInButton" class="secondary-button">Sign In</button>
-          <button id="createAccountButton" class="secondary-button">
+          <button id="signInButton" class="secondary-button hidden">
+            Sign In
+          </button>
+          <button id="createAccountButton" class="secondary-button hidden">
             Create Account
           </button>
-          <button id="importAccountButton" class="secondary-button">
+          <button id="importAccountButton" class="secondary-button hidden">
             Restore Account
           </button>
-          <button id="addToHomeScreenButton" class="secondary-button">
+          <button id="addToHomeScreenButton" class="secondary-button hidden">
             Install
           </button>
-          <button id="clearCacheButton" class="secondary-button">
-            Clear Cache
+          <button id="clearCacheButton" class="secondary-button hidden">
+            Check Update
           </button>
         </div>
         <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
@@ -145,7 +146,7 @@
         </ul>
       </div>
       <button class="floating-button" id="newChatButton">+</button>
-      
+
       <div class="app-screen" id="walletScreen">
         <div class="wallet-balance">
           <div class="balance-label">Total Balance</div>
@@ -373,14 +374,24 @@
                   style="color: #dc3545; display: none"
                 ></span
               ></label>
-              <input
-                type="text"
-                id="newPrivateKey"
-                class="form-control"
-                placeholder="Optional private key in hex format"
-              />
+              <div style="position: relative">
+                <input
+                  type="password"
+                  id="newPrivateKey"
+                  class="form-control"
+                  placeholder="Optional private key in hex format"
+                />
+                <button
+                  type="button"
+                  id="togglePrivateKeyVisibility"
+                  class="password-toggle-btn"
+                >
+                </button>
+              </div>
               <small>
-                If you want to use an existing private key enter it here. Otherwise you can leave this empty to have a private key automatically generated.
+                If you want to use an existing private key enter it here.
+                Otherwise you can leave this empty to have a private key
+                automatically generated.
               </small>
             </div>
             <button type="submit" class="update-button" disabled>
@@ -491,6 +502,7 @@
           <textarea
             class="message-input"
             placeholder="Type a message..."
+            maxlength="2000"
           ></textarea>
           <button class="send-button" id="handleSendMessage">
             <svg viewBox="0 0 24 24">
@@ -609,59 +621,41 @@
             ></div>
 
             <!-- QR Code Preview (Moved here) -->
-            <div id="qrDataPreview" class="form-control qr-data-preview">
-              <div class="preview-content">
-                <!-- Will show what data will be encoded in QR -->
-              </div>
-              <button
-                type="button"
-                id="qrDataToggle"
-                class="qr-data-toggle"
-                aria-label="Toggle QR data view"
-              ></button>
-            </div>
-          </div>
-
-          <!-- Toggle for Payment Request Options -->
-          <div class="form-group">
-            <button
-              id="toggleQROptions"
-              class="secondary-button"
-              style="width: 100%"
+            <div
+              id="qrDataPreview"
+              class="form-control qr-data-preview"
+              style="display: none"
             >
-              <span id="toggleQROptionsText">Show Payment Request Options</span>
-              <span id="toggleQROptionsIcon" style="margin-left: 5px">▼</span>
-            </button>
+              <!-- Error messages will be placed here directly by JS -->
+            </div>
           </div>
 
           <!-- Payment Request Options (New) -->
-          <div id="qrOptionsContainer" class="form-group" style="display: none">
-            <div class="form-group">
-              <label for="receiveAsset">Asset</label>
-              <select id="receiveAsset" class="form-control">
-                <!-- Will be populated with assets in JavaScript -->
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="receiveAmount">Amount (Optional)</label>
-              <input
-                type="number"
-                id="receiveAmount"
-                class="form-control"
-                placeholder="Enter amount"
-                step="any"
-                min="0"
-              />
-            </div>
-            <div class="form-group">
-              <label for="receiveMemo">Memo (Optional)</label>
-              <textarea
-                id="receiveMemo"
-                class="form-control"
-                placeholder="Add a note for the payment"
-                maxlength="140"
-              ></textarea>
-            </div>
+          <div class="form-group">
+            <label for="receiveAsset">Asset</label>
+            <select id="receiveAsset" class="form-control">
+              <!-- Will be populated with assets in JavaScript -->
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="receiveAmount">Amount (Optional)</label>
+            <input
+              type="number"
+              id="receiveAmount"
+              class="form-control"
+              placeholder="Enter amount"
+              step="any"
+              min="0"
+            />
+          </div>
+          <div class="form-group">
+            <label for="receiveMemo">Memo (Optional)</label>
+            <textarea
+              id="receiveMemo"
+              class="form-control"
+              placeholder="Add a note for the payment"
+              maxlength="300"
+            ></textarea>
           </div>
         </div>
       </div>
@@ -697,6 +691,24 @@
                 />
                 <button
                   type="button"
+                  id="uploadQRButton"
+                  class="icon-button"
+                  title="Upload QR Code"
+                  style="flex-shrink: 0"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="24"
+                    height="24"
+                    style="fill: #007bff"
+                  >
+                    <path
+                      d="M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z"
+                    />
+                  </svg>
+                </button>
+                <button
+                  type="button"
                   id="scanQRButton"
                   class="icon-button"
                   title="Scan QR Code"
@@ -706,19 +718,18 @@
                     viewBox="0 0 24 24"
                     width="24"
                     height="24"
-                    style="fill: currentColor"
+                    style="fill: #007bff"
                   >
                     <path
                       d="M3,3 L10,3 L10,10 L3,10 Z M5,5 L5,8 L8,8 L8,5 Z M14,3 L21,3 L21,10 L14,10 Z M16,5 L16,8 L19,8 L19,5 Z M3,14 L10,14 L10,21 L3,21 Z M5,16 L5,19 L8,19 L8,16 Z M14,14 L21,14 L21,21 L14,21 Z M16,16 L16,19 L19,19 L19,16 Z M11,3 L13,3 L13,10 L11,10 Z M11,14 L13,14 L13,21 L11,21 Z M3,11 L10,11 L10,13 L3,13 Z M14,11 L21,11 L21,13 L14,13 Z"
                     />
                   </svg>
                 </button>
-                <!-- Permanent file input for iOS PWA compatibility -->
+                <!-- File input for QR code upload -->
                 <input
                   type="file"
                   id="qrFileInput"
                   accept="image/*"
-                  capture="environment"
                   style="
                     display: none;
                     position: absolute;
@@ -732,12 +743,17 @@
             </div>
             <div class="form-group">
               <label for="sendAmount">Amount</label>
-              <div
-                id="availableBalance"
-                style="margin-bottom: 0.5rem; color: #6c757d; cursor: pointer"
-              >
-                Available: <span id="balanceAmount">0.00</span>
-                <span id="balanceSymbol"></span>
+              <div id="availableBalance" class="available-balance">
+                <div class="balance-info">
+                  <span
+                    >Available: <span id="balanceAmount">0.00</span>
+                    <span id="balanceSymbol"></span
+                  ></span>
+                  <span class="fee-info"
+                    >Fee: <span id="transactionFee">0.00</span> LIB</span
+                  >
+                </div>
+                <div id="balanceWarning" class="balance-warning"></div>
               </div>
               <input
                 type="number"
@@ -750,7 +766,11 @@
             </div>
             <div class="form-group">
               <label for="sendMemo">Memo (Optional)</label>
-              <textarea id="sendMemo" class="form-control"></textarea>
+              <textarea
+                id="sendMemo"
+                class="form-control"
+                maxlength="2000"
+              ></textarea>
             </div>
             <button type="submit" class="update-button">Send</button>
           </form>

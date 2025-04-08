@@ -94,6 +94,36 @@ export function formatTime(timestamp) {
     }
 }
 
+// Function to detect URLs, convert them to clickable links, prevent XSS, prevent html tags from being displayed
+export function linkifyUrls(text) {
+    if (!text) return '';
+
+    // escape html characters in the text
+    text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    // Updated Regex: Only match explicit http:// or https://
+    const urlRegex = /(\b(https?):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/gi;
+
+    // Allowed protocols check (still good practice, though the regex is stricter)
+    const allowedProtocols = /^https?:\/\//i; 
+
+    return text.replace(urlRegex, function(url) {
+        // No need to prepend protocol anymore, as the regex ensures it's present.
+        const properUrl = url; 
+
+        const escapedUrl = url;
+
+        // **Safety Check:** Validate the protocol
+        // Should always pass now due to the strict regex, but kept for safety.
+        if (!allowedProtocols.test(properUrl)) {
+             return escapedUrl; 
+        }
+
+        // Create the link
+        return `<a href="${properUrl}" target="_blank" rel="noopener noreferrer">${escapedUrl}</a>`;
+    });
+}
+
 export function ab2base64(buffer) {
     let binary = '';
     const bytes = new Uint8Array(buffer);

@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'o'   // Also increment this when you increment version.html
+const version = 'r'   // Also increment this when you increment version.html
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -89,6 +89,9 @@ async function forceReload(urls) {
     }
 }
 
+// https://github.com/paulmillr/qr
+//import { encodeQR } from './external/qr.js';
+
 // https://github.com/paulmillr/noble-post-quantum
 // https://github.com/paulmillr/noble-post-quantum/releases
 import { ml_kem1024, randomBytes } from './external/noble-post-quantum.js';
@@ -121,7 +124,7 @@ import { cbc, xchacha20poly1305 } from './external/noble-ciphers.js';
 import { normalizeUsername, generateIdenticon, formatTime, 
     isValidEthereumAddress, 
     normalizeAddress, longAddress, utf82bin, bin2utf8, hex2big, bigxnum2big,
-    big2str, base642bin, bin2base64, hex2bin, bin2hex,
+    big2str, base642bin, bin2base64, hex2bin, bin2hex, linkifyUrls
 } from './lib.js';
 
 // Import database functions
@@ -242,104 +245,119 @@ function openSignInModal() {
         return;
     }
 
-    // Multiple accounts exist, show modal with select dropdown
     const usernameSelect = document.getElementById('username');
-    const submitButton = document.querySelector('#signInForm button[type="submit"]');
-    
-    // Populate select with usernames
-    usernameSelect.innerHTML = `
-        <option value="">Select an account</option>
-        ${usernames.map(username => `<option value="${username}">${username}</option>`).join('')}
-    `;
-    
-    
-    // Enable submit button when an account is selected
-    usernameSelect.addEventListener('change', async () => {
-        const username = usernameSelect.value;
-        const notFoundMessage = document.getElementById('usernameNotFound');
-        const options = usernameSelect.options;
-        if (!username) {
-            submitButton.disabled = true;
-            notFoundMessage.style.display = 'none';
-            return;
-        }
-//        const address = netidAccounts.usernames[username].keys.address;
-        const address = netidAccounts.usernames[username].address;
-        const availability = await checkUsernameAvailability(username, address);
-//console.log('usernames.length', usernames.length);
-//console.log('availability', availability);
-        const removeButton = document.getElementById('removeAccountButton');
-        if (usernames.length === 1 && availability === 'mine') {
-//            myAccount = netidAccounts.usernames[username];
-            myData = parse(localStorage.getItem(`${username}_${netid}`));
-            if (!myData) { console.log('Account data not found'); return }
-            myAccount = myData.account
-            closeSignInModal();
-            document.getElementById('welcomeScreen').style.display = 'none';
-            switchView('chats');
-            return;
-        } else if (availability === 'mine') {
-            submitButton.disabled = false;
-            submitButton.textContent = 'Sign In';
-            submitButton.style.display = 'inline';
-            removeButton.style.display = 'none';
-            notFoundMessage.style.display = 'none';
-        } else if (availability === 'taken') {
-            submitButton.style.display = 'none';
-            removeButton.style.display = 'inline';
-            notFoundMessage.textContent = 'taken';
-            notFoundMessage.style.display = 'inline';
-        } else if (availability === 'available') {
-            submitButton.disabled = false;
-            submitButton.textContent = 'Recreate';
-            submitButton.style.display = 'inline';
-            removeButton.style.display = 'inline';
-            notFoundMessage.textContent = 'not found';
-            notFoundMessage.style.display = 'inline';
-        } else {
-            submitButton.disabled = true;
-            submitButton.textContent = 'Sign In';
-            submitButton.style.display = 'none';
-            removeButton.style.display = 'none';
-            notFoundMessage.textContent = 'network error';
-            notFoundMessage.style.display = 'inline';
-        }
-    });
-    // TODO move the removeButton stuff to its own handleRemoveButton function; it does not belong here
-    // Add event listener for remove account button
-    const removeButton = document.getElementById('removeAccountButton');
-    removeButton.addEventListener('click', async () => {
-        const username = usernameSelect.value;
-        if (!username) return;
-        const confirmed = confirm(`Are you sure you want to remove account "${username}"?`);
-        if (!confirmed) return;
 
-        // Get network ID from network.js
-        const { netid } = network;
-
-        // Get existing accounts
-        const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-
-        // Remove the account from the accounts object
-        if (existingAccounts.netids[netid] && existingAccounts.netids[netid].usernames) {
-            delete existingAccounts.netids[netid].usernames[username];
-            localStorage.setItem('accounts', stringify(existingAccounts));
-        }
-
-        // Remove the account data from localStorage
-        localStorage.removeItem(`${username}_${netid}`);
-
-        // Reload the page to redirect to welcome screen
-        window.location.reload();
-    });
-    // Initially disable submit button
-    submitButton.disabled = true;
-    // If only one account exists, select it and trigger change event
+        // If only one account exists, select it and trigger change event
     if (usernames.length === 1) {
         usernameSelect.value = usernames[0];
         usernameSelect.dispatchEvent(new Event('change'));
         return;
     }   
+
+
+    // Multiple accounts exist, show modal with select dropdown
+    const submitButton = document.querySelector('#signInForm button[type="submit"]');
+    const removeButton = document.getElementById('removeAccountButton');
+    const notFoundMessage = document.getElementById('usernameNotFound');
+    // Populate select with usernames
+    usernameSelect.innerHTML = `
+        <option value="">Select an account</option>
+        ${usernames.map(username => `<option value="${username}">${username}</option>`).join('')}
+    `;
+
+    submitButton.disabled = false;
+    submitButton.textContent = 'Sign In';
+    submitButton.style.display = 'inline';
+    removeButton.style.display = 'none';
+    notFoundMessage.style.display = 'none';
+
+}
+
+async function handleRemoveAccountButton() {
+    const usernameSelect = document.getElementById('username');
+    const username = usernameSelect.value;
+    if (!username) return;
+    const confirmed = confirm(`Are you sure you want to remove account "${username}"?`);
+    if (!confirmed) return;
+
+    // Get network ID from network.js
+    const { netid } = network;
+
+    // Get existing accounts
+    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+
+    // Remove the account from the accounts object
+    if (existingAccounts.netids[netid] && existingAccounts.netids[netid].usernames) {
+        delete existingAccounts.netids[netid].usernames[username];
+        localStorage.setItem('accounts', stringify(existingAccounts));
+    }
+
+    // Remove the account data from localStorage
+    localStorage.removeItem(`${username}_${netid}`);
+
+    // Reload the page to redirect to welcome screen
+    window.location.reload();
+}
+
+async function handleUsernameOnSignInModal() {
+    console.log('in handleUsernameOnSignInModal')
+    // Get existing accounts
+    const { netid } = network;
+    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    const netidAccounts = existingAccounts.netids[netid];
+    const usernames = netidAccounts?.usernames ? Object.keys(netidAccounts.usernames) : [];
+    const usernameSelect = document.getElementById('username');
+    const submitButton = document.querySelector('#signInForm button[type="submit"]');
+    // Enable submit button when an account is selected
+    const username = usernameSelect.value;
+    const notFoundMessage = document.getElementById('usernameNotFound');
+    const options = usernameSelect.options;
+    if (!username) {
+        submitButton.disabled = true;
+        notFoundMessage.style.display = 'none';
+        return;
+    }
+//        const address = netidAccounts.usernames[username].keys.address;
+    const address = netidAccounts.usernames[username].address;
+    const availability = await checkUsernameAvailability(username, address);
+//console.log('usernames.length', usernames.length);
+//console.log('availability', availability);
+    const removeButton = document.getElementById('removeAccountButton');
+    if (usernames.length === 1 && availability === 'mine') {
+//            myAccount = netidAccounts.usernames[username];
+        myData = parse(localStorage.getItem(`${username}_${netid}`));
+        if (!myData) { console.log('Account data not found'); return }
+        myAccount = myData.account
+        closeSignInModal();
+        document.getElementById('welcomeScreen').style.display = 'none';
+        switchView('chats');
+        return;
+    } else if (availability === 'mine') {
+        submitButton.disabled = false;
+        submitButton.textContent = 'Sign In';
+        submitButton.style.display = 'inline';
+        removeButton.style.display = 'none';
+        notFoundMessage.style.display = 'none';
+    } else if (availability === 'taken') {
+        submitButton.style.display = 'none';
+        removeButton.style.display = 'inline';
+        notFoundMessage.textContent = 'taken';
+        notFoundMessage.style.display = 'inline';
+    } else if (availability === 'available') {
+        submitButton.disabled = false;
+        submitButton.textContent = 'Recreate';
+        submitButton.style.display = 'inline';
+        removeButton.style.display = 'inline';
+        notFoundMessage.textContent = 'not found';
+        notFoundMessage.style.display = 'inline';
+    } else {
+        submitButton.disabled = true;
+        submitButton.textContent = 'Sign In';
+        submitButton.style.display = 'none';
+        removeButton.style.display = 'none';
+        notFoundMessage.textContent = 'network error';
+        notFoundMessage.style.display = 'inline';
+    }
 }
 
 function closeSignInModal() {
@@ -402,6 +420,12 @@ function closeCreateAccountModal() {
 }
 
 async function handleCreateAccount(event) {
+    showToast('Creating account...', 3000);
+
+    // disable submit button
+    const submitButton = document.querySelector('#createAccountForm button[type="submit"]');
+    submitButton.disabled = true;
+
     event.preventDefault();
     const username = normalizeUsername(document.getElementById('newUsername').value)
     
@@ -437,6 +461,7 @@ async function handleCreateAccount(event) {
     } else {
         privateKey = secp.utils.randomPrivateKey();
         privateKeyHex = bin2hex(privateKey);
+        privateKeyError.style.display = 'none'; // Ensure hidden if generated
     }
 
     function validatePrivateKey(key) {
@@ -483,6 +508,39 @@ async function handleCreateAccount(event) {
     const address = keccak256(publicKey.slice(1)).slice(-20);
     const addressHex = bin2hex(address);
 
+    // If a private key was provided, check if the derived address already exists on the network
+    if (providedPrivateKey) {
+        try {
+            const accountCheckAddress = longAddress(addressHex);
+            console.log(`Checking network for existing account at address: ${accountCheckAddress}`);
+            const accountInfo = await queryNetwork(`/account/${accountCheckAddress}`);
+            
+            // Check if the query returned data indicating an account exists.
+            // This assumes a non-null `accountInfo` with an `account` property means it exists.
+            if (accountInfo && accountInfo.account) { 
+                console.log('Account already exists for this private key:', accountInfo);
+                privateKeyError.textContent = 'An account already exists for this private key.';
+                privateKeyError.style.color = '#dc3545';
+                privateKeyError.style.display = 'inline';
+                return; // Stop the account creation process
+            } else {
+                 console.log('No existing account found for this private key.');
+                 privateKeyError.style.display = 'none';
+            }
+        } catch (error) {
+            console.error('Error checking for existing account:', error);
+            privateKeyError.textContent = 'Network error checking key. Please try again.';
+            privateKeyError.style.color = '#dc3545';
+            privateKeyError.style.display = 'inline';
+            return; // Stop process on error
+        }
+    }
+    
+
+    // TODO: check if account has been created successfully
+    // sleep/timeout for 3 seconds
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
     // Create new account entry
     myAccount = {
         netid,
@@ -521,6 +579,9 @@ async function handleCreateAccount(event) {
 
     console.log('initializing WebSocket connection in handleCreateAccount');
     initializeWebSocketManager();
+
+    // enable submit button
+    submitButton.disabled = false;
 
     // Close modal and proceed to app
     closeCreateAccountModal();
@@ -698,11 +759,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     await Promise.all(keys.map(key => caches.delete(key)));
                     
                     // Show success message
-                    showToast('Cache cleared successfully. Please refresh the page.');
+                    showToast('Cache cleared successfully. Page will refresh...');
                     
-                    // Optional: Reload the page after a short delay
+                    // Perform a hard refresh after a short delay
                     setTimeout(() => {
-                        window.location.reload();
+                        // Clear browser cache and force reload from server
+                        window.location.href = window.location.href + '?clearCache=' + new Date().getTime();
                     }, 2000);
                 }
             } catch (error) {
@@ -735,20 +797,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Reorder buttons based on accounts existence
     if (hasAccounts) {
         welcomeButtons.innerHTML = ''; // Clear existing order
+        signInBtn.classList.remove('hidden');
+        createAccountBtn.classList.remove('hidden');
+        importAccountBtn.classList.remove('hidden');
+        clearCacheButton.classList.remove('hidden');
         welcomeButtons.appendChild(signInBtn);
         welcomeButtons.appendChild(createAccountBtn);
         welcomeButtons.appendChild(importAccountBtn);
         signInBtn.classList.add('primary-button');
         signInBtn.classList.remove('secondary-button');
-        // append clear cache button to the welcomeButtons
         welcomeButtons.appendChild(clearCacheButton);
     } else {
         welcomeButtons.innerHTML = ''; // Clear existing order
+        createAccountBtn.classList.remove('hidden');
+        importAccountBtn.classList.remove('hidden');
+        clearCacheButton.classList.remove('hidden');
         welcomeButtons.appendChild(createAccountBtn);
         welcomeButtons.appendChild(importAccountBtn);
         createAccountBtn.classList.add('primary-button');
         createAccountBtn.classList.remove('secondary-button');
-        // append clear cache button to the welcomeButtons
         welcomeButtons.appendChild(clearCacheButton);
     }
 
@@ -825,6 +892,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         updateAvailableBalance();
     });
     document.getElementById('availableBalance').addEventListener('click', fillAmount);
+    // amount input listener for real-time balance validation
+    document.getElementById('sendAmount').addEventListener('input', updateAvailableBalance);
     
     // Add blur event listener for recipient validation
 //    document.getElementById('sendToAddress').addEventListener('blur', handleSendToAddressValidation);
@@ -961,6 +1030,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('scanQRButton').addEventListener('click', openQRScanModal);
     document.getElementById('closeQRScanModal').addEventListener('click', closeQRScanModal);
     
+    // File upload handlers
+    document.getElementById('uploadQRButton').addEventListener('click', () => {
+        document.getElementById('qrFileInput').click();
+    });
+
+    document.getElementById('qrFileInput').addEventListener('change', handleQRFileSelect);
+
     const nameInput = document.getElementById('editContactNameInput');
     const nameActionButton = nameInput.parentElement.querySelector('.field-action-button');
 
@@ -970,11 +1046,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Add send money button handler
     document.getElementById('contactInfoSendButton').addEventListener('click', () => {
-    const contactUsername = document.getElementById('contactInfoUsername');
-    if (contactUsername) {
-        openSendModal.username = contactUsername.textContent;
-    }
-    
+        const contactUsername = document.getElementById('contactInfoUsername');
+        if (contactUsername) {
+            openSendModal.username = contactUsername.textContent;
+        }
         openSendModal();
     });
 
@@ -983,6 +1058,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         openSendModal.username = button.dataset.username;
         openSendModal();
     });
+
+    // Add listener for the password visibility toggle
+    const togglePasswordButton = document.getElementById('togglePrivateKeyVisibility');
+    const passwordInput = document.getElementById('newPrivateKey');
+    
+    togglePasswordButton.addEventListener('click', function () {
+        // Toggle the type attribute
+        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+        passwordInput.setAttribute('type', type);
+
+        // Toggle the visual state class on the button
+        this.classList.toggle('toggled-visible');
+    });
+
+    // add listner for username input, debounce
+    document.getElementById('chatRecipient').addEventListener('input', debounce(handleUsernameInput, 300));
+    
+    // add listener for username select change on sign in modal
+    document.getElementById('username').addEventListener('change', handleUsernameOnSignInModal);
+
+    // Add event listener for remove account button
+    document.getElementById('removeAccountButton').addEventListener('click', handleRemoveAccountButton);
 
     setupAddToHomeScreen()
 });
@@ -1300,7 +1397,7 @@ async function updateChatList(force) {
                         <div class="chat-time">${formatTime(message.timestamp)}  <span class="chat-time-chevron"></span></div>
                     </div>
                     <div class="chat-message">
-                        ${message.message}
+                        ${linkifyUrls(message.message)}
                         ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : ''}
                     </div>
                 </div>
@@ -1366,61 +1463,126 @@ async function updateWalletBalances() {
 }
 
 async function switchView(view) {
-    // Hide all screens
-    document.querySelectorAll('.app-screen').forEach(screen => {
-        screen.classList.remove('active');
-    });
+    // Store the current view for potential rollback
+    const previousView = document.querySelector('.app-screen.active')?.id?.replace('Screen', '') || 'chats';
+    const previousButton = document.querySelector('.nav-button.active');
     
-    // Show selected screen
-    document.getElementById(`${view}Screen`).classList.add('active');
+    try {
+        // Direct references to view elements
+        const chatScreen = document.getElementById('chatsScreen');
+        const contactsScreen = document.getElementById('contactsScreen');
+        const walletScreen = document.getElementById('walletScreen');
+        
+        // Direct references to button elements
+        const chatButton = document.getElementById('switchToChats');
+        const contactsButton = document.getElementById('switchToContacts');
+        const walletButton = document.getElementById('switchToWallet');
+        
+        // Hide all screens
+        chatScreen.classList.remove('active');
+        contactsScreen.classList.remove('active');
+        walletScreen.classList.remove('active');
+        
+        // Show selected screen
+        document.getElementById(`${view}Screen`).classList.add('active');
 
-    // Show header and footer
-    document.getElementById('header').classList.add('active');
-    document.getElementById('footer').classList.add('active');
-    
-    // Update header with username if signed in
-    const appName = document.querySelector('.app-name');
-    if (myAccount && myAccount.username) {
-        appName.textContent = `${myAccount.username}`;
-    } else {
-        appName.textContent = '';
-    }   
+        // Update nav buttons - remove active class from all
+        chatButton.classList.remove('active');
+        contactsButton.classList.remove('active');
+        walletButton.classList.remove('active');
+        
+        // Add active class to selected button
+        if (view === 'chats') {
+            chatButton.classList.add('active');
+        } else if (view === 'contacts') {
+            contactsButton.classList.add('active');
+        } else if (view === 'wallet') {
+            walletButton.classList.add('active');
+        }
 
-    // Show/hide new chat button
-    const newChatButton = document.getElementById('newChatButton');
-    if (view === 'chats') {
-        newChatButton.classList.add('visible');
-    } else if (view === 'contacts') {
-        newChatButton.classList.add('visible');
-    } else {
-        newChatButton.classList.remove('visible');
-    }
+        // Show header and footer
+        document.getElementById('header').classList.add('active');
+        document.getElementById('footer').classList.add('active');
+        
+        // Update header with username if signed in
+        const appName = document.querySelector('.app-name');
+        if (myAccount && myAccount.username) {
+            appName.textContent = `${myAccount.username}`;
+        } else {
+            appName.textContent = '';
+        }   
 
-    // Update lists when switching views
-    if (view === 'chats') {
-        document.getElementById('switchToChats').classList.remove('has-notification');
-        await updateChatList('force');
-        if (isOnline) {
-            if (wsManager && !wsManager.isSubscribed()) {
-                pollChatInterval(pollIntervalNormal)
+        // Show/hide new chat button
+        const newChatButton = document.getElementById('newChatButton');
+        if (view === 'chats' || view === 'contacts') {
+            newChatButton.classList.add('visible');
+        } else {
+            newChatButton.classList.remove('visible');
+        }
+
+        // Update lists when switching views
+        if (view === 'chats') {
+            chatButton.classList.remove('has-notification');
+            await updateChatList('force');
+            if (isOnline) {
+                if (wsManager && !wsManager.isSubscribed()) {
+                    pollChatInterval(pollIntervalNormal);
+                }
             }
+        } else if (view === 'contacts') {
+            await updateContactsList();
+        } else if (view === 'wallet') {
+            walletButton.classList.remove('has-notification');
+            await updateWalletView();
         }
-    } else if (view === 'contacts') {
-        await updateContactsList();
-    } else if (view === 'wallet') {
-//        await updateAssetPricesIfNeeded(); // New function to update asset prices
-//        await updateWalletBalances();
-        document.getElementById('switchToWallet').classList.remove('has-notification');
-        await updateWalletView();
+    } catch (error) {
+        console.error(`Error switching to ${view} view:`, error);
+        
+        // Restore previous view if there was an error
+        if (previousView && previousButton) {
+            console.log(`Restoring previous view: ${previousView}`);
+            
+            // Get references to screens and buttons
+            const chatScreen = document.getElementById('chatsScreen');
+            const contactsScreen = document.getElementById('contactsScreen');
+            const walletScreen = document.getElementById('walletScreen');
+            
+            const chatButton = document.getElementById('switchToChats');
+            const contactsButton = document.getElementById('switchToContacts');
+            const walletButton = document.getElementById('switchToWallet');
+            
+            // Hide all screens with direct references
+            chatScreen.classList.remove('active');
+            contactsScreen.classList.remove('active');
+            walletScreen.classList.remove('active');
+            
+            // Show previous screen
+            const previousScreenElement = document.getElementById(`${previousView}Screen`);
+            if (previousScreenElement) {
+                previousScreenElement.classList.add('active');
+            }
+            
+            // Remove active class from all buttons with direct references
+            chatButton.classList.remove('active');
+            contactsButton.classList.remove('active');
+            walletButton.classList.remove('active');
+            
+            // Add active to the correct button based on previousView
+            if (previousView === 'chats') {
+                chatButton.classList.add('active');
+            } else if (previousView === 'contacts') {
+                contactsButton.classList.add('active');
+            } else if (previousView === 'wallet') {
+                walletButton.classList.add('active');
+            } else {
+                // Fallback if previousButton is available
+                previousButton.classList.add('active');
+            }
+            
+            // Display error toast to user
+            showToast(`Failed to switch to ${view} view`, 3000, "error");
+        }
     }
-    
-    // Update nav button states
-    document.querySelectorAll('.nav-button').forEach(button => {
-        button.classList.remove('active');
-        if (button.textContent.toLowerCase() === view) {
-            button.classList.add('active');
-        }
-    });
 }
 
 // Update contacts list UI
@@ -1747,46 +1909,54 @@ function openNewChatModal() {
     const usernameAvailable = document.getElementById('chatRecipientError');
     const submitButton = document.querySelector('#newChatForm button[type="submit"]');
     usernameAvailable.style.display = 'none';
+    submitButton.disabled = true;  
+}
+
+// handler that invokes listener for username input
+function handleUsernameInput(e) {
+    
+    const usernameAvailable = document.getElementById('chatRecipientError');
+    const submitButton = document.querySelector('#newChatForm button[type="submit"]');
+    usernameAvailable.style.display = 'none';
     submitButton.disabled = true;
-// Check availability on input changes
+    // Check availability on input changes
     let checkTimeout;
-    usernameInput.addEventListener('input', (e) => {
-        const username = normalizeUsername(e.target.value);
-        
-        // Clear previous timeout
-        if (checkTimeout) {
-            clearTimeout(checkTimeout);
-        }
-                
-        // Check if username is too short
-        if (username.length < 3) {
-            usernameAvailable.textContent = 'too short';
+
+    const username = normalizeUsername(e.target.value);
+    
+    // Clear previous timeout
+    if (checkTimeout) {
+        clearTimeout(checkTimeout);
+    }
+            
+    // Check if username is too short
+    if (username.length < 3) {
+        usernameAvailable.textContent = 'too short';
+        usernameAvailable.style.color = '#dc3545';
+        usernameAvailable.style.display = 'inline';
+        return;
+    }
+    
+    // Check username availability
+    checkTimeout = setTimeout(async () => {
+        const taken = await checkUsernameAvailability(username, myAccount.keys.address);
+        if (taken == 'taken') {
+            usernameAvailable.textContent = 'found';
+            usernameAvailable.style.color = '#28a745';
+            usernameAvailable.style.display = 'inline';
+            submitButton.disabled = false;
+        } else if ((taken == 'available') || (taken == 'mine')) {
+            usernameAvailable.textContent = 'not found';
             usernameAvailable.style.color = '#dc3545';
             usernameAvailable.style.display = 'inline';
-            return;
+            submitButton.disabled = true;
+        } else {
+            usernameAvailable.textContent = 'network error';
+            usernameAvailable.style.color = '#dc3545';
+            usernameAvailable.style.display = 'inline';
+            submitButton.disabled = true;
         }
-        
-        // Check network availability
-        checkTimeout = setTimeout(async () => {
-            const taken = await checkUsernameAvailability(username, myAccount.keys.address);
-            if (taken == 'taken') {
-                usernameAvailable.textContent = 'found';
-                usernameAvailable.style.color = '#28a745';
-                usernameAvailable.style.display = 'inline';
-                submitButton.disabled = false;
-            } else if ((taken == 'available') || (taken == 'mine')) {
-                usernameAvailable.textContent = 'not found';
-                usernameAvailable.style.color = '#dc3545';
-                usernameAvailable.style.display = 'inline';
-                submitButton.disabled = true;
-            } else {
-                usernameAvailable.textContent = 'network error';
-                usernameAvailable.style.color = '#dc3545';
-                usernameAvailable.style.display = 'inline';
-                submitButton.disabled = true;
-            }
-        }, 1000);
-    });    
+    }, 1000);  
 }
 
 function closeNewChatModal() {
@@ -1906,16 +2076,6 @@ async function handleNewChat(event) {
     if (!chatsData.contacts[recipientAddress]) { createNewContact(recipientAddress) }
     chatsData.contacts[recipientAddress].username = username
 
-// TODO - maybe we don't need this; this is just adding a blank entry into the chats table
-    // Add to chats if not already present
-    const existingChat = chatsData.chats.find(chat => chat.address === recipientAddress);
-    if (!existingChat) {
-        chatsData.chats.unshift({
-            address: recipientAddress,
-            timestamp: Date.now(),
-        });
-    }
-
     // Close new chat modal and open chat modal
     closeNewChatModal();
     openChatModal(recipientAddress);
@@ -1957,9 +2117,9 @@ function openChatModal(address) {
     const messages = contact?.messages || [];
 
     // Display messages and click-to-copy feature
-    messagesList.innerHTML = messages.map(msg => `
-        <div class="message ${msg.my ? 'sent' : 'received'}">
-            <div class="message-content">${msg.message}</div>
+    messagesList.innerHTML = messages.map((msg, index) => `
+        <div class="message ${msg.my ? 'sent' : 'received'}" data-message-id="${index}">
+            <div class="message-content">${linkifyUrls(msg.message)}</div>
             <div class="message-time">${formatTime(msg.timestamp)}</div>
         </div>
     `).join('');
@@ -2025,7 +2185,7 @@ function appendChatModal(){
         // Add message to UI
         messagesList.insertAdjacentHTML('beforeend', `
             <div class="message ${m.type}">
-                <div class="message-content" style="white-space: pre-wrap">${m.message}</div>
+                <div class="message-content" style="white-space: pre-wrap">${linkifyUrls(m.message)}</div>
                 <div class="message-time">${formatTime(m.timestamp)}</div>
             </div>
         `);
@@ -2068,11 +2228,6 @@ function openReceiveModal() {
     const amountInput = document.getElementById('receiveAmount');
     const memoInput = document.getElementById('receiveMemo');
     const qrDataPreview = document.getElementById('qrDataPreview');
-    const qrDataToggle = document.getElementById('qrDataToggle');
-    const toggleButton = document.getElementById('toggleQROptions');
-    const optionsContainer = document.getElementById('qrOptionsContainer');
-    const toggleText = document.getElementById('toggleQROptionsText');
-    const toggleIcon = document.getElementById('toggleQROptionsIcon');
     
     // Store these references on the modal element for later cleanup
     modal.receiveElements = {
@@ -2080,11 +2235,6 @@ function openReceiveModal() {
         amountInput,
         memoInput,
         qrDataPreview,
-        qrDataToggle,
-        toggleButton,
-        optionsContainer,
-        toggleText,
-        toggleIcon
     };
     
     // Define event handlers and store references to them
@@ -2092,37 +2242,11 @@ function openReceiveModal() {
     const handleAmountInput = () => updateQRCode();
     const handleMemoInput = () => updateQRCode();
     
-    const handleQRDataToggle = () => {
-        qrDataPreview.classList.toggle('minimized');
-        
-        // Adjust height based on state
-        if (qrDataPreview.classList.contains('minimized')) {
-            qrDataPreview.style.height = '40px';
-        } else {
-            // Set height to auto to fit content
-            qrDataPreview.style.height = 'auto';
-        }
-    };
-    
-    const handleOptionsToggle = () => {
-        if (optionsContainer.style.display === 'none') {
-            optionsContainer.style.display = 'block';
-            toggleButton.classList.add('active');
-            toggleText.textContent = 'Hide Payment Request Options';
-        } else {
-            optionsContainer.style.display = 'none';
-            toggleButton.classList.remove('active');
-            toggleText.textContent = 'Show Payment Request Options';
-        }
-    };
-    
     // Store event handlers on the modal for later removal
     modal.receiveHandlers = {
         handleAssetChange,
         handleAmountInput,
         handleMemoInput,
-        handleQRDataToggle,
-        handleOptionsToggle
     };
     
     // Populate assets dropdown
@@ -2156,20 +2280,6 @@ function openReceiveModal() {
     assetSelect.addEventListener('change', handleAssetChange);
     amountInput.addEventListener('input', handleAmountInput);
     memoInput.addEventListener('input', handleMemoInput);
-    
-    // Reset QR data preview state
-    qrDataPreview.classList.remove('minimized');
-    
-    // Add toggle event listener
-    qrDataToggle.addEventListener('click', handleQRDataToggle);
-    
-    // Reset toggle state
-    toggleButton.classList.remove('active');
-    optionsContainer.style.display = 'none';
-    toggleText.textContent = 'Show Payment Request Options';
-    
-    // Add toggle event listener
-    toggleButton.addEventListener('click', handleOptionsToggle);
 
     // Update addresses for first asset
     updateReceiveAddresses();
@@ -2180,15 +2290,13 @@ function closeReceiveModal() {
     
     // Remove event listeners if they were added
     if (modal.receiveElements && modal.receiveHandlers) {
-        const { assetSelect, amountInput, memoInput, qrDataToggle, toggleButton } = modal.receiveElements;
-        const { handleAssetChange, handleAmountInput, handleMemoInput, handleQRDataToggle, handleOptionsToggle } = modal.receiveHandlers;
+        const { assetSelect, amountInput, memoInput } = modal.receiveElements;
+        const { handleAssetChange, handleAmountInput, handleMemoInput } = modal.receiveHandlers;
         
         // Remove event listeners
         if (assetSelect) assetSelect.removeEventListener('change', handleAssetChange);
         if (amountInput) amountInput.removeEventListener('input', handleAmountInput);
         if (memoInput) memoInput.removeEventListener('input', handleMemoInput);
-        if (qrDataToggle) qrDataToggle.removeEventListener('click', handleQRDataToggle);
-        if (toggleButton) toggleButton.removeEventListener('click', handleOptionsToggle);
         
         // Clean up references
         delete modal.receiveElements;
@@ -2204,43 +2312,24 @@ function previewQRData(paymentData) {
     const previewElement = document.getElementById('qrDataPreview');
     const previewContent = previewElement.querySelector('.preview-content');
     
-    // Create human-readable preview
-    let preview = `<strong>QR Code Data:</strong><br>`;
-    preview += `<span class="preview-label">Username:</span> ${paymentData.username}<br>`;
-    preview += `<span class="preview-label">Asset:</span> ${paymentData.symbol}<br>`;
-    
-    if (paymentData.amount) {
-        preview += `<span class="preview-label">Amount:</span> ${paymentData.amount} ${paymentData.symbol}<br>`;
-    }
-    
-    if (paymentData.memo) {
-        preview += `<span class="preview-label">Memo:</span> ${paymentData.memo}<br>`;
-    }
-    
-    // Add timestamp in readable format
-    const date = new Date(paymentData.timestamp);
-    preview += `<span class="preview-label">Generated:</span> ${date.toLocaleString()}`;
-    
     // Create minimized version (single line)
-    let minimizedPreview = `${paymentData.username} • ${paymentData.symbol}`;
-    if (paymentData.amount) {
-        minimizedPreview += ` • ${paymentData.amount} ${paymentData.symbol}`;
+    let minimizedPreview = `${paymentData.u} • ${paymentData.s}`;
+    if (paymentData.a) {
+        minimizedPreview += ` • ${paymentData.a} ${paymentData.s}`;
     }
-    if (paymentData.memo) {
-        const shortMemo = paymentData.memo.length > 20 ? 
-            paymentData.memo.substring(0, 20) + '...' : 
-            paymentData.memo;
+    if (paymentData.m) {
+        const shortMemo = paymentData.m.length > 20 ? 
+            paymentData.m.substring(0, 20) + '...' : 
+            paymentData.m;
         minimizedPreview += ` • Memo: ${shortMemo}`;
     }
     
-    // Set preview text
-    previewContent.innerHTML = preview;
-    previewContent.setAttribute('data-minimized', minimizedPreview);
+    // SET minimizedPreview directly as innerHTML
+    previewContent.innerHTML = minimizedPreview;
     
-    // Ensure the container fits the content when maximized
-    if (!previewElement.classList.contains('minimized')) {
-        previewElement.style.height = 'auto';
-    }
+    // Ensure consistent height and style for the single line preview
+    previewElement.style.height = 'auto'; // Let content determine height initially
+    previewElement.classList.remove('minimized'); // Ensure minimized class is not present
 }
 
 function updateReceiveAddresses() {
@@ -2305,22 +2394,20 @@ function createQRPaymentData() {
     
     // Build payment data object
     const paymentData = {
-        username: myAccount.username,
-        timestamp: Date.now(),
-        version: "1.0",
-        assetId: assetId,
-        symbol: symbol
+        u: myAccount.username, // username
+        i: assetId, // assetId
+        s: symbol // symbol
     };
     
     // Add optional fields if they have values
     const amount = document.getElementById('receiveAmount').value.trim();
     if (amount) {
-        paymentData.amount = amount;
+        paymentData.a = amount;
     }
     
-    const memo = document.getElementById('receiveMemo').value.trim();
+    const memo = document.getElementById('receiveMemo').value.trim(); 
     if (memo) {
-        paymentData.memo = memo;
+        paymentData.m = memo;
     }
     
     return paymentData;
@@ -2329,7 +2416,10 @@ function createQRPaymentData() {
 // Update QR code with current payment data
 function updateQRCode() {
     const qrcodeContainer = document.getElementById('qrcode');
+    const previewElement = document.getElementById('qrDataPreview'); // Get preview element
     qrcodeContainer.innerHTML = '';
+    previewElement.style.display = 'none'; // Hide preview/error area initially
+    previewElement.innerHTML = ''; // Clear any previous error message
     
     try {
         // Get payment data
@@ -2344,34 +2434,68 @@ function updateQRCode() {
         const qrText = `liberdus://${base64Data}`;
         console.log("QR code text length:", qrText.length);
         console.log("QR code text (first 100 chars):", qrText.substring(0, 100) + (qrText.length > 100 ? "..." : ""));
-        
-        // Generate QR code
-        new QRCode(qrcodeContainer, {
-            text: qrText,
-            width: 200,
-            height: 200
-        });
-        
-        // Update preview
-        previewQRData(paymentData);
+
+
+        const gifBytes = qr.encodeQR(qrText, 'gif', { scale: 4 });
+        // Convert the raw bytes to a base64 data URL
+        const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
+        const dataUrl = 'data:image/gif;base64,' + base64;
+        // Create an image element and set its source to the data URL
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        img.width = 200;
+        img.height = 200;
+        // Add the image to the container
+        qrcodeContainer.appendChild(img);
+
         
         return qrText;
     } catch (error) {
         console.error("Error in updateQRCode:", error);
         
-        // Fallback to basic address QR code
-        const address = myAccount.keys.address;
-        new QRCode(qrcodeContainer, {
-            text: '0x' + address,
-            width: 200,
-            height: 200
-        });
-        
-        // Show error in preview
-        const previewElement = document.getElementById('qrDataPreview');
-        previewElement.innerHTML = `Error generating QR code: ${error.message}<br>Showing address QR code instead.`;
-        
-        return '0x' + address;
+        qrcodeContainer.innerHTML = ''; // Clear the container before adding fallback QR
+
+        // Fallback to basic username QR code in liberdus:// format
+        try {
+            // Use short key 'u' for username
+            const fallbackData = { u: myAccount.username }; 
+            const fallbackJsonData = JSON.stringify(fallbackData);
+            const fallbackBase64Data = btoa(fallbackJsonData);
+            const fallbackQrText = `liberdus://${fallbackBase64Data}`;
+
+            const gifBytes = qr.encodeQR(fallbackQrText, 'gif', { scale: 4 });
+            // Convert the raw bytes to a base64 data URL
+            const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
+            const dataUrl = 'data:image/gif;base64,' + base64;
+            // Create an image element and set its source to the data URL
+            const img = document.createElement('img');
+            img.src = dataUrl;
+            img.width = 200;
+            img.height = 200;
+            // Add the image to the container
+            qrcodeContainer.appendChild(img);
+
+
+            console.log("Fallback QR code generated with username URI");
+            console.error("Error generating full QR", error);
+
+            // Show error directly in the preview element
+            if (previewElement) {
+                previewElement.innerHTML = `<span style="color: red;">Error generating full QR</span><br> Generating QR with only username. <br> Username: ${myAccount.username}`;
+                previewElement.style.display = 'block'; // Make the error visible
+            }
+            
+            return fallbackQrText; // Return the generated fallback URI
+        } catch (fallbackError) {
+            // If even the fallback fails (e.g., username missing), show a simple error
+            console.error("Error generating fallback QR code:", fallbackError);
+            qrcodeContainer.innerHTML = '<p style="color: red; text-align: center;">Failed to generate QR code.</p>';
+            if (previewElement) {
+                previewElement.innerHTML = '<p style="color: red;">Error generating QR code.</p>';
+                previewElement.style.display = 'block'; // Make the error visible
+            }
+            return null; // Indicate complete failure
+        }
     }
 }
 
@@ -2389,9 +2513,15 @@ async function copyAddress() {
     }
 }
 
-function openSendModal() {
+async function openSendModal() {
     const modal = document.getElementById('sendModal');
     modal.classList.add('active');
+
+    // Clear fields when opening the modal
+    document.getElementById('sendToAddress').value = '';
+    document.getElementById('sendAmount').value = '';
+    document.getElementById('sendMemo').value = '';
+
     const usernameInput = document.getElementById('sendToAddress');
     const usernameAvailable = document.getElementById('sendToAddressError');
     const submitButton = document.querySelector('#sendForm button[type="submit"]');
@@ -2458,7 +2588,7 @@ function openSendModal() {
         }, 1000);
     });
 
-
+    await updateWalletBalances(); // Refresh wallet balances first
     // Get wallet data
     const wallet = myData.wallet
     // Populate assets dropdown
@@ -2489,20 +2619,27 @@ function closeQRScanModal(){
 
 function fillPaymentFromQR(data){
     console.log('in fill', data)
+
+    // Clear existing fields first
+    document.getElementById('sendToAddress').value = '';
+    document.getElementById('sendAmount').value = '';
+    document.getElementById('sendMemo').value = '';
+
     data = data.replace('liberdus://', '')
     const paymentData = JSON.parse(atob(data))
     console.log("Read payment data:", JSON.stringify(paymentData, null, 2));
-    if (paymentData.username){
-        document.getElementById('sendToAddress').value = paymentData.username
+    if (paymentData.u){
+        document.getElementById('sendToAddress').value = paymentData.u
     }
-    if (paymentData.amount){
-        document.getElementById('sendAmount').value = paymentData.amount
+    if (paymentData.a){
+        document.getElementById('sendAmount').value = paymentData.a
     }
-    if (paymentData.memo){
-        document.getElementById('sendMemo').value = paymentData.memo
+    if (paymentData.m){
+        document.getElementById('sendMemo').value = paymentData.m
     }
-    // Trigger username validation
+    // Trigger username validation and amount validation
     document.getElementById('sendToAddress').dispatchEvent(new Event('input'));
+    document.getElementById('sendAmount').dispatchEvent(new Event('input'));
 }
 
 // this was the old scanQRCode function; not needed anymore
@@ -2829,34 +2966,34 @@ function processQRData(qrText) {
             return;
         }
         
-        // Validate required fields
-        if (!qrData.username) {
+        // Validate required fields (using short key)
+        if (!qrData.u) { // Check for 'u' instead of 'username'
             showToast('QR code missing required username', 3000, 'error');
             return;
         }
         
-        // Fill the form fields
-        document.getElementById('sendToAddress').value = qrData.username;
+        // Fill the form fields (using short keys)
+        document.getElementById('sendToAddress').value = qrData.u;
         
-        if (qrData.amount) {
-            document.getElementById('sendAmount').value = qrData.amount;
+        if (qrData.a) {
+            document.getElementById('sendAmount').value = qrData.a;
         }
         
-        if (qrData.memo) {
-            document.getElementById('sendMemo').value = qrData.memo;
+        if (qrData.m) {
+            document.getElementById('sendMemo').value = qrData.m;
         }
         
-        // If asset info provided, select matching asset
-        if (qrData.assetId && qrData.symbol) {
+        // If asset info provided, select matching asset (using short keys)
+        if (qrData.i && qrData.s) { // Check for 'i' and 's'
             const assetSelect = document.getElementById('sendAsset');
             const assetOption = Array.from(assetSelect.options).find((opt) =>
-                opt.text.includes(qrData.symbol)
+                opt.text.includes(qrData.s) // Find based on symbol 's'
             );
             if (assetOption) {
                 assetSelect.value = assetOption.value;
                 console.log(`Selected asset: ${assetOption.text} (value: ${assetOption.value})`);
             } else {
-                console.log(`Asset with symbol ${qrData.symbol} not found in dropdown`);
+                console.log(`Asset with symbol ${qrData.s} not found in dropdown`);
             }
         }
         
@@ -2874,7 +3011,7 @@ async function closeSendModal() {
     await updateChatList()
     document.getElementById('sendModal').classList.remove('active');
     document.getElementById('sendForm').reset();
-    opensendModal.username = null
+    openSendModal.username = null
 }
 
 function updateSendAddresses() {
@@ -2894,28 +3031,70 @@ function updateSendAddresses() {
 }
 
 function updateAvailableBalance() {
-    const walletData = myData.wallet
+    const walletData = myData.wallet;
     const assetIndex = document.getElementById('sendAsset').value;
-
-    const balanceAmount = document.getElementById('balanceAmount');
-    const balanceSymbol = document.getElementById('balanceSymbol');
-
+    const balanceWarning = document.getElementById('balanceWarning');
+    
     // Check if we have any assets
     if (!walletData.assets || walletData.assets.length === 0) {
-        balanceAmount.textContent = '0.00';
-        balanceSymbol.textContent = '';
+        updateBalanceDisplay(null);
+        return;
+    }
+    
+    updateBalanceDisplay(walletData.assets[assetIndex]);
+    
+    // Validate balance and disable submit button if needed
+    document.querySelector('#sendForm button[type="submit"]').disabled = 
+        validateBalance(document.getElementById('sendAmount').value, assetIndex, balanceWarning);
+}
+
+function updateBalanceDisplay(asset) {
+    if (!asset) {
+        document.getElementById('balanceAmount').textContent = '0.0000';
+        document.getElementById('balanceSymbol').textContent = '';
+        document.getElementById('transactionFee').textContent = '0.00';
         return;
     }
 
-    const asset = walletData.assets[assetIndex];
+    const txFeeInLIB = BigInt(parameters.current.transactionFee || 1) * wei;
     
-    balanceAmount.textContent = big2str(asset.balance, weiDigits);
-    balanceSymbol.textContent = asset.symbol;
+    document.getElementById('balanceAmount').textContent = big2str(BigInt(asset.balance), 18).slice(0, -12);
+    document.getElementById('balanceSymbol').textContent = asset.symbol;
+    document.getElementById('transactionFee').textContent = big2str(txFeeInLIB, 18).slice(0, -16);
 }
 
+
+function validateBalance(amount, assetIndex, balanceWarning = null) {
+    if (!amount) {
+        if (balanceWarning) balanceWarning.style.display = 'none';
+        return false;
+    }
+
+    const asset = myData.wallet.assets[assetIndex];
+    const feeInWei = BigInt(parameters.current.transactionFee || 1) * wei;
+    const totalRequired = bigxnum2big(wei, amount.toString()) + feeInWei;
+    const hasInsufficientBalance = BigInt(asset.balance) < totalRequired;
+
+    if (balanceWarning) {
+        if (hasInsufficientBalance) {
+            balanceWarning.textContent = `Insufficient balance (including ${big2str(feeInWei, 18).slice(0, -16)} LIB fee)`;
+            balanceWarning.style.display = 'block';
+        } else {
+            balanceWarning.style.display = 'none';
+        }
+    }
+
+    return hasInsufficientBalance;
+}
+
+
 function fillAmount() {
-    const amount = document.getElementById('balanceAmount').textContent;
-    document.getElementById('sendAmount').value = amount;
+    const asset = myData.wallet.assets[document.getElementById('sendAsset').value];
+    const feeInWei = BigInt(parameters.current.transactionFee || 1) * wei;
+    const maxAmount = BigInt(asset.balance) - feeInWei;
+    
+    document.getElementById('sendAmount').value = big2str(maxAmount > 0n ? maxAmount : 0n, 18).slice(0, -16);
+    document.getElementById('sendAmount').dispatchEvent(new Event('input'));
 }
 
 // The user has filled out the form to send assets to a recipient and clicked the Send button
@@ -2936,9 +3115,17 @@ async function handleSendAsset(event) {
     const keys = myAccount.keys;
     let toAddress;
 
-    // Validate amount
-    if (amount > fromAddress.balance) {  // TODO - include tx fee
-        alert('Insufficient balance');
+    // Validate amount including transaction fee
+    if (!validateBalance(amount, assetIndex)) {
+        const txFeeInLIB = BigInt(parameters.current.transactionFee || 1) * wei;
+        const amountInWei = bigxnum2big(wei, amount.toString());
+        const balance = BigInt(wallet.assets[assetIndex].balance);
+        
+        const amountStr = big2str(amountInWei, 18).slice(0, -16);
+        const feeStr = big2str(txFeeInLIB, 18).slice(0, -16);
+        const balanceStr = big2str(balance, 18).slice(0, -16);
+        
+        alert(`Insufficient balance: ${amountStr} + ${feeStr} (fee) > ${balanceStr} LIB`);
         return;
     }
 
@@ -3574,93 +3761,96 @@ handleSignOut.exit = false
 // The user has a chat modal open to a recipient and has typed a message anc clicked the Send button
 // The recipient account already exists in myData.contacts; it was created when the user submitted the New Chat form
 async function handleSendMessage() {
-    const messageInput = document.querySelector('.message-input');
-    messageInput.focus(); // Add focus back to keep keyboard open
-    await updateChatList()  // before sending the message check and show received messages
-    
-    const message = messageInput.value.trim();
-    if (!message) return;
-
-    const modal = document.getElementById('chatModal');
-    const modalTitle = modal.querySelector('.modal-title');
-    const messagesList = modal.querySelector('.messages-list');
-
-    // Get current chat data
-    const chatsData = myData
-/*
-    const currentAddress = Object.values(chatsData.contacts).find(contact =>
-        modalTitle.textContent === (contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`)
-    )?.address;
-*/
-    const currentAddress = appendChatModal.address
-    if (!currentAddress) return;
-
-    // Get sender's keys from wallet
-    const keys = myAccount.keys;
-    if (!keys) {
-        alert('Keys not found for sender address');
-        return;
-    }
-
-///yyy
-    // Get recipient's public key from contacts
-    let recipientPubKey = myData.contacts[currentAddress]?.public;
-    let pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
-    if (!recipientPubKey || !pqRecPubKey) {
-        const recipientInfo = await queryNetwork(`/account/${longAddress(currentAddress)}`)
-        if (!recipientInfo?.account?.publicKey){
-            console.log(`no public key found for recipient ${currentAddress}`)
-            return
-        }
-        recipientPubKey = recipientInfo.account.publicKey
-        myData.contacts[currentAddress].public = recipientPubKey
-        pqRecPubKey = recipientInfo.account.pqPublicKey
-        myData.contacts[currentAddress].pqPublic = pqRecPubKey
-    }
-
-    // Generate shared secret using ECDH and take first 32 bytes
-    let dhkey = ecSharedKey(keys.secret, recipientPubKey)
-    const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey)
-    const combined = new Uint8Array(dhkey.length + sharedSecret.length)
-    combined.set(dhkey)
-    combined.set(sharedSecret, dhkey.length)
-    dhkey = blake.blake2b(combined, myHashKey, 32)
-
-    // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
-    // Encrypt message using shared secret
-    const encMessage = encryptChacha(dhkey, message)
-
-    // Create message payload
-    const payload = {
-        message: encMessage,
-        encrypted: true,
-        encryptionMethod: 'xchacha20poly1305',
-        pqEncSharedKey: bin2base64(cipherText),
-        sent_timestamp: Date.now()
-    };
-
-    // Always include username, but only include other info if recipient is a friend
-    const contact = myData.contacts[currentAddress];
-    // Create basic sender info with just username
-    const senderInfo = {
-        username: myAccount.username
-    };
-    
-    // Add additional info only if recipient is a friend
-    if (contact && contact.friend) {
-        // Add more personal details for friends
-        senderInfo.name = myData.account.name;
-        senderInfo.email = myData.account.email;
-        senderInfo.phone = myData.account.phone;
-        senderInfo.linkedin = myData.account.linkedin;
-        senderInfo.x = myData.account.x;
-    }
-    
-    // Always encrypt and send senderInfo (which will contain at least the username)
-    payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
+    const sendButton = document.getElementById('handleSendMessage');
+    sendButton.disabled = true; // Disable the button
 
     try {
-//console.log('payload is', payload)
+        const messageInput = document.querySelector('.message-input');
+        messageInput.focus(); // Add focus back to keep keyboard open
+        await updateChatList()  // before sending the message check and show received messages
+        
+        const message = messageInput.value.trim();
+        if (!message) return;
+
+        const modal = document.getElementById('chatModal');
+        //const modalTitle = modal.querySelector('.modal-title');
+        const messagesList = modal.querySelector('.messages-list');
+
+        // Get current chat data
+        const chatsData = myData
+        /*
+        const currentAddress = Object.values(chatsData.contacts).find(contact =>
+            modalTitle.textContent === (contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`)
+        )?.address;
+        */
+        const currentAddress = appendChatModal.address
+        if (!currentAddress) return;
+
+        // Get sender's keys from wallet
+        const keys = myAccount.keys;
+        if (!keys) {
+            alert('Keys not found for sender address');
+            return;
+        }
+
+        ///yyy
+        // Get recipient's public key from contacts
+        let recipientPubKey = myData.contacts[currentAddress]?.public;
+        let pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
+        if (!recipientPubKey || !pqRecPubKey) {
+            const recipientInfo = await queryNetwork(`/account/${longAddress(currentAddress)}`)
+            if (!recipientInfo?.account?.publicKey){
+                console.log(`no public key found for recipient ${currentAddress}`)
+                return
+            }
+            recipientPubKey = recipientInfo.account.publicKey
+            myData.contacts[currentAddress].public = recipientPubKey
+            pqRecPubKey = recipientInfo.account.pqPublicKey
+            myData.contacts[currentAddress].pqPublic = pqRecPubKey
+        }
+
+        // Generate shared secret using ECDH and take first 32 bytes
+        let dhkey = ecSharedKey(keys.secret, recipientPubKey)
+        const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey)
+        const combined = new Uint8Array(dhkey.length + sharedSecret.length)
+        combined.set(dhkey)
+        combined.set(sharedSecret, dhkey.length)
+        dhkey = blake.blake2b(combined, myHashKey, 32)
+
+        // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
+        // Encrypt message using shared secret
+        const encMessage = encryptChacha(dhkey, message)
+
+        // Create message payload
+        const payload = {
+            message: encMessage,
+            encrypted: true,
+            encryptionMethod: 'xchacha20poly1305',
+            pqEncSharedKey: bin2base64(cipherText),
+            sent_timestamp: Date.now()
+        };
+
+        // Always include username, but only include other info if recipient is a friend
+        const contact = myData.contacts[currentAddress];
+        // Create basic sender info with just username
+        const senderInfo = {
+            username: myAccount.username
+        };
+        
+        // Add additional info only if recipient is a friend
+        if (contact && contact.friend) {
+            // Add more personal details for friends
+            senderInfo.name = myData.account.name;
+            senderInfo.email = myData.account.email;
+            senderInfo.phone = myData.account.phone;
+            senderInfo.linkedin = myData.account.linkedin;
+            senderInfo.x = myData.account.x;
+        }
+        
+        // Always encrypt and send senderInfo (which will contain at least the username)
+        payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
+
+        //console.log('payload is', payload)
         // Send the message transaction using postChatMessage with default toll of 1
         const response = await postChatMessage(currentAddress, payload, 1, keys);
         
@@ -3670,12 +3860,12 @@ async function handleSendMessage() {
         }
 
         // Not needed since it is created when the New Chat form was submitted
-/*
-        // Create contact if needed
-        if (!chatsData.contacts[currentAddress].messages) {   // TODO check if this is really needed; should be created already
-            createNewContact(currentAddress)
-        }
-*/
+        /*
+                // Create contact if needed
+                if (!chatsData.contacts[currentAddress].messages) {   // TODO check if this is really needed; should be created already
+                    createNewContact(currentAddress)
+                }
+        */
 
         // Create new message
         const newMessage = {
@@ -3712,6 +3902,8 @@ async function handleSendMessage() {
     } catch (error) {
         console.error('Message error:', error);
         alert('Failed to send message. Please try again.');
+    } finally {
+        sendButton.disabled = false; // Re-enable the button
     }
 }
 
@@ -3883,7 +4075,7 @@ async function updateTransactionHistory() {
                 </div>
                 <div class="transaction-time">${formatTime(tx.timestamp)}</div>
             </div>
-            ${tx.memo ? `<div class="transaction-memo">${tx.memo}</div>` : ''}
+            ${tx.memo ? `<div class="transaction-memo">${linkifyUrls(tx.memo)}</div>` : ''}
         </div>
     `).join('');
 }
@@ -4874,6 +5066,7 @@ function displaySearchResults(results) {
         const identicon = await generateIdenticon(result.contactAddress);
         
         // Format message preview with "You:" prefix if it's a sent message
+        // make this textContent?
         const messagePreview = result.my ? `You: ${result.preview}` : result.preview;
         
         resultElement.innerHTML = `
@@ -4886,12 +5079,16 @@ function displaySearchResults(results) {
                     <div class="chat-time">${formatTime(result.timestamp)}</div>
                 </div>
                 <div class="chat-message">
-                    ${messagePreview}
+                    ${linkifyUrls(messagePreview)}
                 </div>
             </div>
         `;
 
-        resultElement.addEventListener('click', () => {
+        resultElement.addEventListener('click', (event) => { 
+            event.stopImmediatePropagation(); // Stop all other listeners and bubbling immediately
+            // clear search input and clear results
+            document.getElementById('messageSearch').value = '';
+            document.getElementById('searchResults').innerHTML = '';
             handleSearchResultClick(result);
         });
 
@@ -4921,17 +5118,18 @@ function handleSearchResultClick(result) {
         switchView('chats');
         
         // Open the chat with this contact
-        handleResultClick(result.contactAddress);
+        openChatModal(result.contactAddress);
         
         // Scroll to and highlight the message
         setTimeout(() => {
-            const messageElement = document.querySelector(`[data-message-id="${result.messageId}"]`);
+            const messageSelector = `[data-message-id="${result.messageId}"]`;
+            const messageElement = document.querySelector(messageSelector);
             if (messageElement) {
                 messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 messageElement.classList.add('highlighted');
                 setTimeout(() => messageElement.classList.remove('highlighted'), 2000);
             } else {
-                console.error('Message not found');
+                console.error('Message element not found for selector:', messageSelector);
                 // Could add a toast notification here
             }
         }, 300);
@@ -4985,110 +5183,6 @@ function displayLoadingState() {
             Searching messages
         </div>
     `;
-}
-
-async function handleResultClick(contactAddress) {
-    // Get the contact info
-    const contact = myData.contacts[contactAddress];
-    if (!contact) return;
-
-    // Open chat modal
-    const chatModal = document.getElementById('chatModal');
-    chatModal.classList.add('active');
-
-    // Generate the identicon first
-    const identicon = await generateIdenticon(contactAddress);
-
-    // Update chat header with contact info and avatar - match exact structure from chat view
-    const modalHeader = chatModal.querySelector('.modal-header');
-    modalHeader.innerHTML = `
-        <button class="back-button" id="closeChatModal"></button>
-        <div class="chat-user-info">
-            <div class="modal-avatar">${identicon}</div>
-            <div class="modal-title">${contact.username || contactAddress}</div>
-        </div>
-        <div class="header-actions">
-            <button
-              class="icon-button add-friend-icon"
-              id="chatAddFriendButton"
-              aria-label="Add friend"
-              style="display: ${contact.friend ? 'none' : 'flex'}"
-            ></button>
-        </div>
-    `;
-
-    // Re-attach close button event listener
-    document.getElementById('closeChatModal').addEventListener('click', () => {
-        chatModal.classList.remove('active');
-    });
-
-    // Add click handler for username to show contact info
-    const userInfo = chatModal.querySelector('.chat-user-info');
-    userInfo.onclick = () => {
-        if (contact) {
-            contactInfoModal.open(createDisplayInfo(contact));
-        }
-    };
-
-    // Add click handler for add friend button if visible
-    const addFriendButton = document.getElementById('chatAddFriendButton');
-    if (addFriendButton && !contact.friend) {
-        addFriendButton.onclick = () => {
-            contact.friend = true;
-            showToast('Added to friends');
-            addFriendButton.style.display = 'none';
-            saveState();
-        };
-    }
-
-    // Ensure messages container structure matches
-    const messagesContainer = chatModal.querySelector('.messages-container');
-    if (!messagesContainer) {
-        const container = document.createElement('div');
-        container.className = 'messages-container';
-        container.innerHTML = '<div class="messages-list"></div>';
-        chatModal.appendChild(container);
-    }
-
-    // Load messages
-    const messagesList = chatModal.querySelector('.messages-list');
-    messagesList.innerHTML = ''; // Clear existing messages
-
-    // Add messages if they exist
-    if (contact.messages && contact.messages.length > 0) {
-        contact.messages.forEach((msg, index) => {
-            const messageElement = document.createElement('div');
-            messageElement.className = `message ${msg.my ? 'sent' : 'received'}`;
-            messageElement.setAttribute('data-message-id', index);
-            messageElement.innerHTML = `
-                <div class="message-content">${msg.message}</div>
-                <div class="message-time">${formatTime(msg.timestamp)}</div>
-            `;
-            messagesList.appendChild(messageElement);
-        });
-        
-        // Scroll to bottom of messages
-        messagesList.scrollTop = messagesList.scrollHeight;
-    }
-
-    // Ensure input container exists
-    const inputContainer = chatModal.querySelector('.message-input-container');
-    if (!inputContainer) {
-        const container = document.createElement('div');
-        container.className = 'message-input-container';
-        container.innerHTML = `
-            <textarea class="message-input" placeholder="Type a message..."></textarea>
-            <button class="send-button" id="handleSendMessage">
-                <svg viewBox="0 0 24 24">
-                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
-                </svg>
-            </button>
-        `;
-        chatModal.appendChild(container);
-    }
-
-    // Store current contact for message sending
-    handleResultClick.currentContact = contactAddress;
 }
 
 // Contact search functions
@@ -5186,6 +5280,9 @@ function displayContactResults(results, searchText) {
 
         // Add click handler to show contact info
         contactElement.addEventListener("click", () => {
+            // clear search results and input contactSearchResults
+            document.getElementById("contactSearchResults").innerHTML = "";
+            document.getElementById("contactSearch").value = "";
             // Create display info and open contact info modal
             contactInfoModal.open(createDisplayInfo(contact));
             // Close the search modal
@@ -5915,8 +6012,6 @@ function handleGatewayForm(event) {
 async function startCamera() {
     const video = document.getElementById('video');
     const canvasElement = document.getElementById('canvas');
-    const canvas = canvasElement.getContext('2d', { willReadFrequently: true }); // Optimized for frequent getImageData calls
-    const scanHighlight = document.getElementById('scan-highlight');
     try {
         // First check if camera API is supported
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -6001,41 +6096,44 @@ async function startCamera() {
     }
 }
 
+// changed to use qr.js library instead of jsQR.js 
 function readQRCode(){
-    if (!startCamera.scanning) return;
-
-    // Check if video is ready for capture
     const video = document.getElementById('video');
     const canvasElement = document.getElementById('canvas');
-    const canvas = canvasElement.getContext('2d', { willReadFrequently: true }); // Optimized for frequent getImageData calls
+    const canvas = canvasElement.getContext('2d');
 
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        // Set canvas size to match video
+    if (startCamera.scanning && video.readyState === video.HAVE_ENOUGH_DATA) {
+        // Set canvas size to match video dimensions
         canvasElement.height = video.videoHeight;
         canvasElement.width = video.videoWidth;
-        
-        // Draw video frame to canvas
+
+        // Draw video frame onto canvas
         canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
-        
+
         // Get image data for QR processing
         const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
-        
+
         try {
-            // Process image with jsQR
-            const code = jsQR(imageData.data, imageData.width, imageData.height, {
-                inversionAttempts: "dontInvert",
+            // Process image with qr.js library
+            // qr.decodeQR expects an object { data, height, width }
+            const decodedText = qr.decodeQR({
+                data: imageData.data,
+                width: imageData.width,
+                height: imageData.height
             });
-            
-            // If QR code found
-            if (code) {
-                console.log("QR Code detected:", code.data);
-                handleSuccessfulScan(code.data);
+
+            // If QR code found and decoded
+            if (decodedText) {
+                console.log("QR Code detected:", decodedText);
+                handleSuccessfulScan(decodedText);
             }
         } catch (error) {
-            console.error('QR scanning error:', error);
+            // qr.decodeQR throws error if not found or on error
+            console.log('QR scanning error or not found:', error); // Optional: Log if needed
         }
     }
 }
+
 
 // Handle successful scan
 function handleSuccessfulScan(data) {
@@ -6091,6 +6189,85 @@ function stopCamera() {
 //        statusMessage.textContent = 'Camera stopped.';
     }
 }
+
+// Changed to use qr.js library instead of jsQR.js 
+async function handleQRFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) {
+        return; // No file selected
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+        const img = new Image();
+        img.onload = async function() {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            if (!context) {
+                console.error('Could not get 2d context from canvas');
+                showToast('Error processing image', 3000, 'error');
+                event.target.value = ''; // Reset file input
+                return;
+            }
+            canvas.width = img.width;
+            canvas.height = img.height;
+            context.drawImage(img, 0, 0, img.width, img.height);
+            const imageData = context.getImageData(0, 0, img.width, img.height);
+
+            try {
+                // Use qr.js library for decoding
+                const decodedData = qr.decodeQR({
+                    data: imageData.data,
+                    width: imageData.width,
+                    height: imageData.height,
+                });
+
+                if (decodedData) {
+                    handleSuccessfulScan(decodedData);
+                } else {
+                    // qr.decodeQR might throw an error instead of returning null/undefined
+                    // This else block might not be reached if errors are always thrown
+                    console.error('No QR code found in image (qr.js)');
+                    showToast('No QR code found in image', 3000, 'error');
+                    // Clear the form fields in case of failure to find QR code
+                    document.getElementById('sendForm')?.reset();
+                    document.getElementById('sendToAddressError').textContent = '';
+                    document.getElementById('balanceWarning').textContent = '';
+                }
+            } catch (error) {
+                console.error('Error processing QR code image with qr.js:', error);
+                // Assume error means no QR code found or decoding failed
+                showToast('Could not read QR code from image', 3000, 'error');
+                // Clear the form fields in case of error
+                 document.getElementById('sendForm')?.reset();
+                 document.getElementById('sendToAddressError').textContent = '';
+                 document.getElementById('balanceWarning').textContent = '';
+            } finally {
+                 event.target.value = ''; // Reset the file input value regardless of outcome
+            }
+        };
+        img.onerror = function() {
+            console.error('Error loading image');
+            showToast('Error loading image file', 3000, 'error');
+             event.target.value = ''; // Reset the file input value
+            // Clear the form fields in case of image loading error
+            document.getElementById('sendForm')?.reset();
+            document.getElementById('sendToAddressError').textContent = '';
+            document.getElementById('balanceWarning').textContent = '';
+        };
+        img.src = e.target.result;
+    };
+
+    reader.onerror = function() {
+        console.error('Error reading file');
+        showToast('Error reading file', 3000, 'error');
+        event.target.value = ''; // Reset the file input value
+    };
+
+    reader.readAsDataURL(file);
+}
+
 
 // WebSocket Manager Class
 /**
