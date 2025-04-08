@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'r'
+const version = 's'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2481,6 +2481,12 @@ async function copyAddress() {
 function openSendModal() {
     const modal = document.getElementById('sendModal');
     modal.classList.add('active');
+
+    // Clear fields when opening the modal
+    document.getElementById('sendToAddress').value = '';
+    document.getElementById('sendAmount').value = '';
+    document.getElementById('sendMemo').value = '';
+
     const usernameInput = document.getElementById('sendToAddress');
     const usernameAvailable = document.getElementById('sendToAddressError');
     const submitButton = document.querySelector('#sendForm button[type="submit"]');
@@ -2578,6 +2584,12 @@ function closeQRScanModal(){
 
 function fillPaymentFromQR(data){
     console.log('in fill', data)
+
+    // Clear existing fields first
+    document.getElementById('sendToAddress').value = '';
+    document.getElementById('sendAmount').value = '';
+    document.getElementById('sendMemo').value = '';
+
     data = data.replace('liberdus://', '')
     const paymentData = JSON.parse(atob(data))
     console.log("Read payment data:", JSON.stringify(paymentData, null, 2));
