@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'
+const version = 'r'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -28,7 +28,7 @@ console.log(parseInt(myVersion.replace(/\D/g, '')), parseInt(newVersion.replace(
             alert('Updating to new version: ' + newVersion)
         }
         localStorage.setItem('version', newVersion); // Save new version
-        forceReload(['./', 'index.html','styles.css','app.js','lib.js', 'network.js', 'db.js', 'log-utils.js', 'service-worker.js', 'offline.html', 'ios-keyboard.js'])
+        forceReload(['./', 'index.html','styles.css','app.js','lib.js', 'network.js', 'db.js', 'log-utils.js', 'service-worker.js', 'offline.html'])
         const newUrl = window.location.href
 //console.log('reloading', newUrl)
         window.location.replace(newUrl);
@@ -124,7 +124,7 @@ import { cbc, xchacha20poly1305 } from './external/noble-ciphers.js';
 import { normalizeUsername, generateIdenticon, formatTime, 
     isValidEthereumAddress, 
     normalizeAddress, longAddress, utf82bin, bin2utf8, hex2big, bigxnum2big,
-    big2str, base642bin, bin2base64, hex2bin, bin2hex,
+    big2str, base642bin, bin2base64, hex2bin, bin2hex, linkifyUrls
 } from './lib.js';
 
 // Import database functions
@@ -954,47 +954,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }, 300));
 
     document.getElementById('closeChatModal')?.addEventListener('click', () => {
-        console.log(Date.now(), "AppJS: Close chat modal button clicked.");
         document.getElementById('chatModal').classList.remove('active');
-        // clear the message input
-        const messageInput = document.querySelector('.message-input');
-        if (messageInput) {
-            console.log(Date.now(), "AppJS: Clearing message input value.");
-            messageInput.value = '';
-        }
-        // unfocus the message input
-        console.log(Date.now(), "AppJS: Blurring message input.");
-        messageInput.blur();
-        // Manually trigger reset for iOS layout if needed (optional, based on observer behavior)
-        // if (typeof resetIOSLayoutAdjustments === 'function') { resetIOSLayoutAdjustments(); }
     });
-
-    // click listener for message input
-    document.querySelector('.message-input')?.addEventListener('click', () => {
-        //const messageInput = document.querySelector('.message-input');
-        const messagesList = document.getElementById('chatModal')?.querySelector('.messages-list');
-        console.log(Date.now(), 'AppJS: Message input clicked.');
-        // focus the message input
-/*         if(messageInput) {
-            console.log(Date.now(), 'AppJS: Focusing message input.');
-            messageInput.focus();
-        } */
-        // REMOVED: wait and scroll to bottom - This is now handled by ios-keyboard.js
-        // if android, wait and scroll to bottom
-        if(messagesList && messagesList.parentElement && !isIOS()) {
-            console.log(Date.now(), 'AppJS: Scheduling scroll to bottom (350ms delay).');
-            setTimeout(() => {
-                const targetScroll = messagesList.parentElement.scrollHeight;
-                messagesList.parentElement.scrollTop = targetScroll;
-                console.log(Date.now(), `AppJS: Scrolled messages container to bottom (scrollTop = ${targetScroll}) after delay.`);
-            }, 350);
-        } else {
-            console.warn(Date.now(), "AppJS: Could not find messagesList parent to scroll.");
-        }
-    });
-
-
-    
     initializeSearch();
 
     
@@ -1068,6 +1029,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         openSendModal.username = button.dataset.username;
         openSendModal();
     });
+
+    // Add listener for the password visibility toggle
+    const togglePasswordButton = document.getElementById('togglePrivateKeyVisibility');
+    const passwordInput = document.getElementById('newPrivateKey');
+    
+    togglePasswordButton.addEventListener('click', function () {
+        // Toggle the type attribute
+        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+        passwordInput.setAttribute('type', type);
+
+        // Toggle the visual state class on the button
+        this.classList.toggle('toggled-visible');
+    });
+    
 
     setupAddToHomeScreen()
 });
@@ -2085,7 +2060,6 @@ function createNewContact(addr, username){
 
 
 function openChatModal(address) {
-    console.log(Date.now(), `AppJS: openChatModal called for address: ${address}`);
     const modal = document.getElementById('chatModal');
     const modalAvatar = modal.querySelector('.modal-avatar');
     const modalTitle = modal.querySelector('.modal-title');
@@ -2106,27 +2080,18 @@ function openChatModal(address) {
 
     // Get messages from contacts data
     const messages = contact?.messages || [];
-    console.log(Date.now(), `AppJS: Found ${messages.length} messages for chat modal.`);
 
     // Display messages and click-to-copy feature
     messagesList.innerHTML = messages.map((msg, index) => `
         <div class="message ${msg.my ? 'sent' : 'received'}" data-message-id="${index}">
-            <div class="message-content">${msg.message}</div>
+            <div class="message-content">${linkifyUrls(msg.message)}</div>
             <div class="message-time">${formatTime(msg.timestamp)}</div>
         </div>
     `).join('');
-    console.log(Date.now(), `AppJS: Rendered messages in messagesList.`);
 
     // Scroll to bottom
-    console.log(Date.now(), "AppJS: Scheduling scroll to bottom (100ms delay) after opening modal.");
     setTimeout(() => {
-        if (messagesList && messagesList.parentElement) {
-            const targetScroll = messagesList.parentElement.scrollHeight;
-            messagesList.parentElement.scrollTop = targetScroll;
-            console.log(Date.now(), `AppJS: Scrolled messages container to bottom (scrollTop = ${targetScroll}) after initial delay.`);
-        } else {
-            console.warn(Date.now(), "AppJS: Could not find messagesList parent to scroll after initial delay.");
-        }
+        messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
     }, 100);
 
     // Add click handler for username to show contact info
@@ -2147,10 +2112,7 @@ function openChatModal(address) {
     };
 
     // Show modal
-    console.log(Date.now(), "AppJS: Adding 'active' class to chatModal.");
     modal.classList.add('active');
-    // Dispatch a custom 'open' event (optional, if ios-keyboard needs it)
-    // modal.dispatchEvent(new CustomEvent('open'));
 
     // Clear unread count
     if (contact.unread > 0) {
@@ -2170,55 +2132,32 @@ function openChatModal(address) {
 }
 
 function appendChatModal(){
-    console.log(Date.now(), 'AppJS: appendChatModal called. Current address:', appendChatModal.address, 'Current length:', appendChatModal.len);
+    console.log('appendChatModal')
     if (! appendChatModal.address){ return }
 //console.log(2)
 //    if (document.getElementById('chatModal').classList.contains('active')) { return }
 //console.log(3)
-    const contactData = myData.contacts[appendChatModal.address];
-    if (!contactData || !contactData.messages) {
-        console.warn(Date.now(), 'AppJS: appendChatModal - No contact data or messages found for address:', appendChatModal.address);
-        return;
-    }
-    const messages = contactData.messages;
-    console.log(Date.now(), `AppJS: appendChatModal - Checking messages. Current UI length: ${appendChatModal.len}, Actual message length: ${messages.length}`);
+    const messages = myData.contacts[appendChatModal.address].messages
     if (appendChatModal.len >= messages.length){ return }
 //console.log(4)
     const modal = document.getElementById('chatModal');
-    if (!modal || !modal.classList.contains('active')) {
-        console.log(Date.now(), 'AppJS: appendChatModal - Modal not found or not active, skipping append.');
-        // Update length anyway so we don't try to re-append same messages later if modal re-opens
-        appendChatModal.len = messages.length;
-        return;
-    }
     const messagesList = modal.querySelector('.messages-list');
-    if (!messagesList) {
-        console.error(Date.now(), 'AppJS: appendChatModal - Could not find messagesList element.');
-        return;
-    }
 
-    console.log(Date.now(), `AppJS: appendChatModal - Appending messages from index ${appendChatModal.len} to ${messages.length - 1}`);
     for (let i=appendChatModal.len; i<messages.length; i++) {
-        console.log(Date.now(), `AppJS: appendChatModal - Appending message index ${i}`);
+        console.log(5, i)
         const m = messages[i]
         m.type = m.my ? 'sent' : 'received'
         // Add message to UI
         messagesList.insertAdjacentHTML('beforeend', `
             <div class="message ${m.type}">
-                <div class="message-content" style="white-space: pre-wrap">${m.message}</div>
+                <div class="message-content" style="white-space: pre-wrap">${linkifyUrls(m.message)}</div>
                 <div class="message-time">${formatTime(m.timestamp)}</div>
             </div>
         `);
     }
     appendChatModal.len = messages.length
     // Scroll to bottom
-    if (messagesList.parentElement) {
-        const targetScroll = messagesList.parentElement.scrollHeight;
-        messagesList.parentElement.scrollTop = targetScroll;
-        console.log(Date.now(), `AppJS: appendChatModal - Scrolled messages container to bottom (scrollTop = ${targetScroll}).`);
-    } else {
-        console.warn(Date.now(), "AppJS: appendChatModal - Could not find messagesList parent to scroll.");
-    }
+    messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
 }
 appendChatModal.address = null
 appendChatModal.len = 0
@@ -2254,11 +2193,6 @@ function openReceiveModal() {
     const amountInput = document.getElementById('receiveAmount');
     const memoInput = document.getElementById('receiveMemo');
     const qrDataPreview = document.getElementById('qrDataPreview');
-    const qrDataToggle = document.getElementById('qrDataToggle');
-    const toggleButton = document.getElementById('toggleQROptions');
-    const optionsContainer = document.getElementById('qrOptionsContainer');
-    const toggleText = document.getElementById('toggleQROptionsText');
-    const toggleIcon = document.getElementById('toggleQROptionsIcon');
     
     // Store these references on the modal element for later cleanup
     modal.receiveElements = {
@@ -2266,11 +2200,6 @@ function openReceiveModal() {
         amountInput,
         memoInput,
         qrDataPreview,
-        qrDataToggle,
-        toggleButton,
-        optionsContainer,
-        toggleText,
-        toggleIcon
     };
     
     // Define event handlers and store references to them
@@ -2278,37 +2207,11 @@ function openReceiveModal() {
     const handleAmountInput = () => updateQRCode();
     const handleMemoInput = () => updateQRCode();
     
-    const handleQRDataToggle = () => {
-        qrDataPreview.classList.toggle('minimized');
-        
-        // Adjust height based on state
-        if (qrDataPreview.classList.contains('minimized')) {
-            qrDataPreview.style.height = '40px';
-        } else {
-            // Set height to auto to fit content
-            qrDataPreview.style.height = 'auto';
-        }
-    };
-    
-    const handleOptionsToggle = () => {
-        if (optionsContainer.style.display === 'none') {
-            optionsContainer.style.display = 'block';
-            toggleButton.classList.add('active');
-            toggleText.textContent = 'Hide Payment Request Options';
-        } else {
-            optionsContainer.style.display = 'none';
-            toggleButton.classList.remove('active');
-            toggleText.textContent = 'Show Payment Request Options';
-        }
-    };
-    
     // Store event handlers on the modal for later removal
     modal.receiveHandlers = {
         handleAssetChange,
         handleAmountInput,
         handleMemoInput,
-        handleQRDataToggle,
-        handleOptionsToggle
     };
     
     // Populate assets dropdown
@@ -2342,20 +2245,6 @@ function openReceiveModal() {
     assetSelect.addEventListener('change', handleAssetChange);
     amountInput.addEventListener('input', handleAmountInput);
     memoInput.addEventListener('input', handleMemoInput);
-    
-    // Reset QR data preview state
-    qrDataPreview.classList.remove('minimized');
-    
-    // Add toggle event listener
-    qrDataToggle.addEventListener('click', handleQRDataToggle);
-    
-    // Reset toggle state
-    toggleButton.classList.remove('active');
-    optionsContainer.style.display = 'none';
-    toggleText.textContent = 'Show Payment Request Options';
-    
-    // Add toggle event listener
-    toggleButton.addEventListener('click', handleOptionsToggle);
 
     // Update addresses for first asset
     updateReceiveAddresses();
@@ -2366,15 +2255,13 @@ function closeReceiveModal() {
     
     // Remove event listeners if they were added
     if (modal.receiveElements && modal.receiveHandlers) {
-        const { assetSelect, amountInput, memoInput, qrDataToggle, toggleButton } = modal.receiveElements;
-        const { handleAssetChange, handleAmountInput, handleMemoInput, handleQRDataToggle, handleOptionsToggle } = modal.receiveHandlers;
+        const { assetSelect, amountInput, memoInput } = modal.receiveElements;
+        const { handleAssetChange, handleAmountInput, handleMemoInput } = modal.receiveHandlers;
         
         // Remove event listeners
         if (assetSelect) assetSelect.removeEventListener('change', handleAssetChange);
         if (amountInput) amountInput.removeEventListener('input', handleAmountInput);
         if (memoInput) memoInput.removeEventListener('input', handleMemoInput);
-        if (qrDataToggle) qrDataToggle.removeEventListener('click', handleQRDataToggle);
-        if (toggleButton) toggleButton.removeEventListener('click', handleOptionsToggle);
         
         // Clean up references
         delete modal.receiveElements;
@@ -2390,23 +2277,6 @@ function previewQRData(paymentData) {
     const previewElement = document.getElementById('qrDataPreview');
     const previewContent = previewElement.querySelector('.preview-content');
     
-    // Create human-readable preview
-    let preview = `<strong>QR Code Data:</strong><br>`;
-    preview += `<span class="preview-label">Username:</span> ${paymentData.u}<br>`;
-    preview += `<span class="preview-label">Asset:</span> ${paymentData.s}<br>`;
-    
-    if (paymentData.amount) {
-        preview += `<span class="preview-label">Amount:</span> ${paymentData.amount} ${paymentData.symbol}<br>`;
-    }
-    
-    if (paymentData.m) {
-        preview += `<span class="preview-label">Memo:</span> ${paymentData.m}<br>`;
-    }
-    
-    // Add timestamp in readable format
-    const date = new Date(paymentData.t); 
-    preview += `<span class="preview-label">Generated:</span> ${date.toLocaleString()}`;
-    
     // Create minimized version (single line)
     let minimizedPreview = `${paymentData.u} • ${paymentData.s}`;
     if (paymentData.a) {
@@ -2419,14 +2289,12 @@ function previewQRData(paymentData) {
         minimizedPreview += ` • Memo: ${shortMemo}`;
     }
     
-    // Set preview text
-    previewContent.innerHTML = preview;
-    previewContent.setAttribute('data-minimized', minimizedPreview);
+    // SET minimizedPreview directly as innerHTML
+    previewContent.innerHTML = minimizedPreview;
     
-    // Ensure the container fits the content when maximized
-    if (!previewElement.classList.contains('minimized')) {
-        previewElement.style.height = 'auto';
-    }
+    // Ensure consistent height and style for the single line preview
+    previewElement.style.height = 'auto'; // Let content determine height initially
+    previewElement.classList.remove('minimized'); // Ensure minimized class is not present
 }
 
 function updateReceiveAddresses() {
@@ -2492,9 +2360,6 @@ function createQRPaymentData() {
     // Build payment data object
     const paymentData = {
         u: myAccount.username, // username
-        // TODO: remove timestamp and version to save space
-        t: Date.now(), // timestamp
-        v: "1.0", // version
         i: assetId, // assetId
         s: symbol // symbol
     };
@@ -2516,7 +2381,10 @@ function createQRPaymentData() {
 // Update QR code with current payment data
 function updateQRCode() {
     const qrcodeContainer = document.getElementById('qrcode');
+    const previewElement = document.getElementById('qrDataPreview'); // Get preview element
     qrcodeContainer.innerHTML = '';
+    previewElement.style.display = 'none'; // Hide preview/error area initially
+    previewElement.innerHTML = ''; // Clear any previous error message
     
     try {
         // Get payment data
@@ -2545,8 +2413,6 @@ function updateQRCode() {
         // Add the image to the container
         qrcodeContainer.appendChild(img);
 
-        // Update preview
-        previewQRData(paymentData);
         
         return qrText;
     } catch (error) {
@@ -2578,14 +2444,10 @@ function updateQRCode() {
             console.log("Fallback QR code generated with username URI");
             console.error("Error generating full QR", error);
 
-            // Show error in preview (pointing to the inner content div)
-            const previewElement = document.getElementById('qrDataPreview');
-            const previewContent = previewElement.querySelector('.preview-content'); 
-            if (previewContent) {
-                previewContent.innerHTML = `<span style="color: red;">Error generating full QR</span><br> Generating QR with only username. <br> Username: ${myAccount.username}`;
-                
-            } else {
-                previewElement.innerHTML = `Error generating full QR. Username: ${myAccount.username}`;
+            // Show error directly in the preview element
+            if (previewElement) {
+                previewElement.innerHTML = `<span style="color: red;">Error generating full QR</span><br> Generating QR with only username. <br> Username: ${myAccount.username}`;
+                previewElement.style.display = 'block'; // Make the error visible
             }
             
             return fallbackQrText; // Return the generated fallback URI
@@ -2593,9 +2455,9 @@ function updateQRCode() {
             // If even the fallback fails (e.g., username missing), show a simple error
             console.error("Error generating fallback QR code:", fallbackError);
             qrcodeContainer.innerHTML = '<p style="color: red; text-align: center;">Failed to generate QR code.</p>';
-            const previewElement = document.getElementById('qrDataPreview');
             if (previewElement) {
                 previewElement.innerHTML = '<p style="color: red;">Error generating QR code.</p>';
+                previewElement.style.display = 'block'; // Make the error visible
             }
             return null; // Indicate complete failure
         }

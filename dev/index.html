@@ -9,7 +9,7 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no"
     />
     <meta name="theme-color" content="#ffffff" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -56,7 +56,6 @@
     <script src="./log-utils.js"></script>
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <script src="./ios-keyboard.js"></script>
     <link rel="stylesheet" href="./styles.css" />
     <link rel="manifest" href="./manifest.json" />
   </head>
@@ -375,12 +374,20 @@
                   style="color: #dc3545; display: none"
                 ></span
               ></label>
-              <input
-                type="text"
-                id="newPrivateKey"
-                class="form-control"
-                placeholder="Optional private key in hex format"
-              />
+              <div style="position: relative">
+                <input
+                  type="password"
+                  id="newPrivateKey"
+                  class="form-control"
+                  placeholder="Optional private key in hex format"
+                />
+                <button
+                  type="button"
+                  id="togglePrivateKeyVisibility"
+                  class="password-toggle-btn"
+                >
+                </button>
+              </div>
               <small>
                 If you want to use an existing private key enter it here.
                 Otherwise you can leave this empty to have a private key
@@ -613,59 +620,41 @@
             ></div>
 
             <!-- QR Code Preview (Moved here) -->
-            <div id="qrDataPreview" class="form-control qr-data-preview">
-              <div class="preview-content">
-                <!-- Will show what data will be encoded in QR -->
-              </div>
-              <button
-                type="button"
-                id="qrDataToggle"
-                class="qr-data-toggle"
-                aria-label="Toggle QR data view"
-              ></button>
-            </div>
-          </div>
-
-          <!-- Toggle for Payment Request Options -->
-          <div class="form-group">
-            <button
-              id="toggleQROptions"
-              class="secondary-button"
-              style="width: 100%"
+            <div
+              id="qrDataPreview"
+              class="form-control qr-data-preview"
+              style="display: none"
             >
-              <span id="toggleQROptionsText">Show Payment Request Options</span>
-              <span id="toggleQROptionsIcon" style="margin-left: 5px">▼</span>
-            </button>
+              <!-- Error messages will be placed here directly by JS -->
+            </div>
           </div>
 
           <!-- Payment Request Options (New) -->
-          <div id="qrOptionsContainer" class="form-group" style="display: none">
-            <div class="form-group">
-              <label for="receiveAsset">Asset</label>
-              <select id="receiveAsset" class="form-control">
-                <!-- Will be populated with assets in JavaScript -->
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="receiveAmount">Amount (Optional)</label>
-              <input
-                type="number"
-                id="receiveAmount"
-                class="form-control"
-                placeholder="Enter amount"
-                step="any"
-                min="0"
-              />
-            </div>
-            <div class="form-group">
-              <label for="receiveMemo">Memo (Optional)</label>
-              <textarea
-                id="receiveMemo"
-                class="form-control"
-                placeholder="Add a note for the payment"
-                maxlength="140"
-              ></textarea>
-            </div>
+          <div class="form-group">
+            <label for="receiveAsset">Asset</label>
+            <select id="receiveAsset" class="form-control">
+              <!-- Will be populated with assets in JavaScript -->
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="receiveAmount">Amount (Optional)</label>
+            <input
+              type="number"
+              id="receiveAmount"
+              class="form-control"
+              placeholder="Enter amount"
+              step="any"
+              min="0"
+            />
+          </div>
+          <div class="form-group">
+            <label for="receiveMemo">Memo (Optional)</label>
+            <textarea
+              id="receiveMemo"
+              class="form-control"
+              placeholder="Add a note for the payment"
+              maxlength="300"
+            ></textarea>
           </div>
         </div>
       </div>
