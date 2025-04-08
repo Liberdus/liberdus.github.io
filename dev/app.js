@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 's'
+const version = 't'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -405,6 +405,12 @@ function closeCreateAccountModal() {
 }
 
 async function handleCreateAccount(event) {
+    showToast('Creating account...', 3000);
+
+    // disable submit button
+    const submitButton = document.querySelector('#createAccountForm button[type="submit"]');
+    submitButton.disabled = true;
+
     event.preventDefault();
     const username = normalizeUsername(document.getElementById('newUsername').value)
     
@@ -515,6 +521,11 @@ async function handleCreateAccount(event) {
         }
     }
     
+
+    // TODO: check if account has been created successfully
+    // sleep/timeout for 3 seconds
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
     // Create new account entry
     myAccount = {
         netid,
@@ -553,6 +564,9 @@ async function handleCreateAccount(event) {
 
     console.log('initializing WebSocket connection in handleCreateAccount');
     initializeWebSocketManager();
+
+    // enable submit button
+    submitButton.disabled = false;
 
     // Close modal and proceed to app
     closeCreateAccountModal();
@@ -2478,7 +2492,7 @@ async function copyAddress() {
     }
 }
 
-function openSendModal() {
+async function openSendModal() {
     const modal = document.getElementById('sendModal');
     modal.classList.add('active');
 
@@ -2553,7 +2567,7 @@ function openSendModal() {
         }, 1000);
     });
 
-
+    await updateWalletBalances(); // Refresh wallet balances first
     // Get wallet data
     const wallet = myData.wallet
     // Populate assets dropdown
