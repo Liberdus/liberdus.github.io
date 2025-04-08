@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -245,52 +245,58 @@ function openSignInModal() {
         return;
     }
 
-    // Multiple accounts exist, show modal with select dropdown
     const usernameSelect = document.getElementById('username');
-    const submitButton = document.querySelector('#signInForm button[type="submit"]');
-    
-    // Populate select with usernames
-    usernameSelect.innerHTML = `
-        <option value="">Select an account</option>
-        ${usernames.map(username => `<option value="${username}">${username}</option>`).join('')}
-    `;
-    
-    
-    // TODO move the removeButton stuff to its own handleRemoveButton function; it does not belong here
-    // Add event listener for remove account button
-    const removeButton = document.getElementById('removeAccountButton');
-    removeButton.addEventListener('click', async () => {
-        const username = usernameSelect.value;
-        if (!username) return;
-        const confirmed = confirm(`Are you sure you want to remove account "${username}"?`);
-        if (!confirmed) return;
 
-        // Get network ID from network.js
-        const { netid } = network;
-
-        // Get existing accounts
-        const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-
-        // Remove the account from the accounts object
-        if (existingAccounts.netids[netid] && existingAccounts.netids[netid].usernames) {
-            delete existingAccounts.netids[netid].usernames[username];
-            localStorage.setItem('accounts', stringify(existingAccounts));
-        }
-
-        // Remove the account data from localStorage
-        localStorage.removeItem(`${username}_${netid}`);
-
-        // Reload the page to redirect to welcome screen
-        window.location.reload();
-    });
-    // Initially disable submit button
-    submitButton.disabled = true;
-    // If only one account exists, select it and trigger change event
+        // If only one account exists, select it and trigger change event
     if (usernames.length === 1) {
         usernameSelect.value = usernames[0];
         usernameSelect.dispatchEvent(new Event('change'));
         return;
     }   
+
+
+    // Multiple accounts exist, show modal with select dropdown
+    const submitButton = document.querySelector('#signInForm button[type="submit"]');
+    const removeButton = document.getElementById('removeAccountButton');
+    const notFoundMessage = document.getElementById('usernameNotFound');
+    // Populate select with usernames
+    usernameSelect.innerHTML = `
+        <option value="">Select an account</option>
+        ${usernames.map(username => `<option value="${username}">${username}</option>`).join('')}
+    `;
+
+    submitButton.disabled = false;
+    submitButton.textContent = 'Sign In';
+    submitButton.style.display = 'inline';
+    removeButton.style.display = 'none';
+    notFoundMessage.style.display = 'none';
+
+}
+
+async function handleRemoveAccountButton() {
+    const usernameSelect = document.getElementById('username');
+    const username = usernameSelect.value;
+    if (!username) return;
+    const confirmed = confirm(`Are you sure you want to remove account "${username}"?`);
+    if (!confirmed) return;
+
+    // Get network ID from network.js
+    const { netid } = network;
+
+    // Get existing accounts
+    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+
+    // Remove the account from the accounts object
+    if (existingAccounts.netids[netid] && existingAccounts.netids[netid].usernames) {
+        delete existingAccounts.netids[netid].usernames[username];
+        localStorage.setItem('accounts', stringify(existingAccounts));
+    }
+
+    // Remove the account data from localStorage
+    localStorage.removeItem(`${username}_${netid}`);
+
+    // Reload the page to redirect to welcome screen
+    window.location.reload();
 }
 
 async function handleUsernameOnSignInModal() {
@@ -1071,6 +1077,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // add listener for username select change on sign in modal
     document.getElementById('username').addEventListener('change', handleUsernameOnSignInModal);
+
+    // Add event listener for remove account button
+    document.getElementById('removeAccountButton').addEventListener('click', handleRemoveAccountButton);
 
     setupAddToHomeScreen()
 });
