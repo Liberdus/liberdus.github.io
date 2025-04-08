@@ -18,4 +18,3 @@ const network = {
     url: "wss://dev.liberdus.com:3031",
   }
 }
-

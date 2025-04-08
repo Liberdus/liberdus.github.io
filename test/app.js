@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'v'   // Also increment this when you increment version.html
+const version = 'x'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -246,6 +246,11 @@ function openSignInModal() {
     }
 
     const usernameSelect = document.getElementById('username');
+    // Populate select with usernames
+    usernameSelect.innerHTML = `
+        <option value="">Select an account</option>
+        ${usernames.map(username => `<option value="${username}">${username}</option>`).join('')}
+    `;
 
         // If only one account exists, select it and trigger change event
     if (usernames.length === 1) {
@@ -259,11 +264,6 @@ function openSignInModal() {
     const submitButton = document.querySelector('#signInForm button[type="submit"]');
     const removeButton = document.getElementById('removeAccountButton');
     const notFoundMessage = document.getElementById('usernameNotFound');
-    // Populate select with usernames
-    usernameSelect.innerHTML = `
-        <option value="">Select an account</option>
-        ${usernames.map(username => `<option value="${username}">${username}</option>`).join('')}
-    `;
 
     submitButton.disabled = false;
     submitButton.textContent = 'Sign In';
