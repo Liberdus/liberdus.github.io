@@ -94,9 +94,12 @@ export function formatTime(timestamp) {
     }
 }
 
-// Function to detect URLs and convert them to clickable links
+// Function to detect URLs, convert them to clickable links, prevent XSS, prevent html tags from being displayed
 export function linkifyUrls(text) {
     if (!text) return '';
+
+    // escape html characters in the text
+    text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
     // Updated Regex: Only match explicit http:// or https://
     const urlRegex = /(\b(https?):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/gi;
@@ -108,8 +111,7 @@ export function linkifyUrls(text) {
         // No need to prepend protocol anymore, as the regex ensures it's present.
         const properUrl = url; 
 
-        // Escape HTML characters in the display text to prevent XSS
-        const escapedUrl = url.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const escapedUrl = url;
 
         // **Safety Check:** Validate the protocol
         // Should always pass now due to the strict regex, but kept for safety.
