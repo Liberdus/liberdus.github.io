@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -904,7 +904,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('openHistoryModal').addEventListener('click', openHistoryModal);
     document.getElementById('closeHistoryModal').addEventListener('click', closeHistoryModal);
     document.getElementById('historyAsset').addEventListener('change', updateHistoryAddresses);
-
+    
     // Receive Modal input listeners
     document.getElementById('receiveAsset').addEventListener('change', updateQRCode);
     document.getElementById('receiveAmount').addEventListener('input', debounce(updateQRCode, 300));
@@ -1085,13 +1085,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Add event listener for remove account button
     document.getElementById('removeAccountButton').addEventListener('click', handleRemoveAccountButton);
 
+    // create account button listener to clear message input on create account
+    document.getElementById('newUsername').addEventListener('input', handleCreateAccountInput);
+
     // handle openSendModal sendToAddress username input change
     document.getElementById('sendToAddress').addEventListener('input', (e) => {
         handleOpenSendModalInput(e);
     });
-
-    // create account button listener to clear message input on create account
-    document.getElementById('newUsername').addEventListener('input', handleCreateAccountInput);
 
     setupAddToHomeScreen()
 });
@@ -2885,11 +2885,8 @@ handleSendAsset.timestamp = Date.now()
 class ContactInfoModalManager {
     constructor() {
         this.modal = document.getElementById('contactInfoModal');
-        this.menuDropdown = document.getElementById('contactInfoMenuDropdown');
         this.currentContactAddress = null;
         this.needsContactListUpdate = false;  // track if we need to update the contact list
-        this.isEditing = false;
-        this.originalName = null;
         this.setupEventListeners();
     }
 
@@ -2897,11 +2894,7 @@ class ContactInfoModalManager {
     setupEventListeners() {
         // Back button
         this.modal.querySelector('.back-button').addEventListener('click', () => {
-            if (this.isEditing) {
-                this.exitEditMode(false);
-            } else {
-                this.close();
-            }
+            this.close();
         });
 
         // Add friend button
@@ -2927,181 +2920,21 @@ class ContactInfoModalManager {
             saveState();
         });
 
-        // Add keyboard event listener for Escape key
-        this.modal.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && this.isEditing) {
-                this.exitEditMode(false);
-            }
-        });
-
-
         document.getElementById('nameEditButton').addEventListener('click', openEditContactModal);
 
         // Add close button handler for edit contact modal
         document.getElementById('closeEditContactModal').addEventListener('click', () => {
             document.getElementById('editContactModal').classList.remove('active');
         });
-    }
 
-    enterEditMode() {
-        this.isEditing = true;
-        const contact = myData.contacts[this.currentContactAddress];
-        this.originalName = contact?.name || '';
-        
-        // Update header
-        const header = this.modal.querySelector('.modal-header');
-        header.innerHTML = `
-            <button class="icon-button cancel-button" id="cancelEdit" aria-label="Cancel"></button>
-            <div class="modal-title">Edit Contact</div>
-            <button class="icon-button save-button" id="saveEdit" aria-label="Save"></button>
-        `;
-
-        // Setup header button listeners
-        header.querySelector('#cancelEdit').addEventListener('click', () => this.exitEditMode(false));
-        header.querySelector('#saveEdit').addEventListener('click', () => this.exitEditMode(true));
-
-        // Transform name field to edit mode
-        this.updateNameFieldToEditMode();
-    }
-
-    updateNameFieldToEditMode() {
-        const nameField = document.getElementById('contactInfoName');
-        const contact = myData.contacts[this.currentContactAddress];
-        const currentValue = contact?.name || '';
-        
-        nameField.innerHTML = `
-            <div class="contact-info-value editing">
-                <input 
-                    type="text" 
-                    class="edit-field-input"
-                    value="${currentValue}"
-                    placeholder="Enter contact name"
-                >
-                <button class="field-action-button ${currentValue ? 'clear' : 'add'}" aria-label="${currentValue ? 'Clear' : 'Add'}"></button>
-            </div>
-        `;
-
-        // Add event listeners
-        const input = nameField.querySelector('input');
-        const actionButton = nameField.querySelector('.field-action-button');
-
-        // Handle input changes
-        input.addEventListener('input', () => {
-            const hasValue = input.value.trim().length > 0;
-            actionButton.className = `field-action-button ${hasValue ? 'clear' : 'add'}`;
-            actionButton.setAttribute('aria-label', hasValue ? 'Clear' : 'Add');
-        });
-
-        // Handle action button clicks
-        actionButton.addEventListener('click', () => {
-            if (input.value.trim()) {
-                input.value = '';
-                actionButton.className = 'field-action-button add';
-                actionButton.setAttribute('aria-label', 'Add');
-            }
-            input.focus();
-        });
-
-        // Handle enter key
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                this.exitEditMode(true);
-            }
-        });
-    }
-
-    exitEditMode(save = false) {
-        if (save) {
-            // Save changes
-            const input = document.querySelector('.edit-field-input');
-            const newName = input.value.trim();
-            const contact = myData.contacts[this.currentContactAddress];
-            if (contact) {
-                contact.name = newName || null;
-                saveState();
-                this.needsContactListUpdate = true;
-            }
-        } else {
-            // Restore original name
-            const contact = myData.contacts[this.currentContactAddress];
-            if (contact) {
-                contact.name = this.originalName;
-            }
-        }
-
-        // Reset edit state
-        this.isEditing = false;
-        
-        // Restore original header
-        this.restoreHeader();
-        
-        // Update display
-        this.updateContactInfo(createDisplayInfo(myData.contacts[this.currentContactAddress]));
-    }
-
-    restoreHeader() {
-        const header = this.modal.querySelector('.modal-header');
-        header.innerHTML = `
-            <button class="back-button" id="closeContactInfoModal"></button>
-            <div class="modal-title">Contact Info</div>
-            <div class="header-actions">
-                <button class="icon-button chat-icon" id="contactInfoChatButton"></button>
-                <div class="dropdown">
-                    <button class="dropdown-menu-button" id="contactInfoMenuButton"></button>
-                    <div class="dropdown-menu" id="contactInfoMenuDropdown">
-                        <button class="dropdown-item add-friend" id="addFriendButton">
-                            <span class="dropdown-icon add-friend-icon"></span>
-                            <span class="dropdown-text">Add Friend</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        // Reattach all necessary event listeners
-        const menuButton = document.getElementById('contactInfoMenuButton');
-        const menuDropdown = document.getElementById('contactInfoMenuDropdown');
-        const addFriendButton = document.getElementById('addFriendButton');
-
-        // Menu button click handler
-        menuButton.addEventListener('click', (e) => {
-            e.stopPropagation();
-            menuDropdown.classList.toggle('active');
-        });
-
-        // Add friend button click handler
-        addFriendButton.addEventListener('click', () => {
-            if (!this.currentContactAddress) return;
-            const contact = myData.contacts[this.currentContactAddress];
-            if (!contact) return;
-            contact.friend = !contact.friend;
-            this.updateFriendButton(contact.friend);
-            menuDropdown.classList.remove('active');
-            this.needsContactListUpdate = true;
-            saveState();
-        });
-
-        // Back button click handler
-        this.modal.querySelector('.back-button').addEventListener('click', () => {
-            if (this.isEditing) {
-                this.exitEditMode(false);
-            } else {
+        // Add chat button handler for contact info modal
+        document.getElementById('contactInfoChatButton').addEventListener('click', () => {
+            const addressToOpen = this.currentContactAddress;
+            if (addressToOpen) { // Ensure we have an address before proceeding
                 this.close();
+                openChatModal(addressToOpen);
             }
         });
-
-        // Document click handler to close dropdown
-        document.addEventListener('click', () => {
-            menuDropdown.classList.remove('active');
-        });
-
-        // Restore chat button functionality and friend status
-        const contact = myData.contacts[this.currentContactAddress];
-        if (contact) {
-            this.setupChatButton({ address: this.currentContactAddress });
-            this.updateFriendButton(contact.friend || false);
-        }
     }
 
     // Update friend button text based on current status
@@ -3152,10 +2985,6 @@ class ContactInfoModalManager {
     setupChatButton(displayInfo) {
         const chatButton = document.getElementById('contactInfoChatButton');
         if (displayInfo.address) {
-            chatButton.addEventListener('click', () => {
-                this.close();
-                openChatModal(displayInfo.address);
-            });
             chatButton.style.display = 'block';
         } else {
             chatButton.style.display = 'none';
