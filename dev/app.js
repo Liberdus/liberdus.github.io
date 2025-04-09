@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -366,53 +366,52 @@ function closeSignInModal() {
 
 function openCreateAccountModal() {
     document.getElementById('createAccountModal').classList.add('active');
-    const usernameInput = document.getElementById('newUsername');
+}
+
+// Check availability on input changes
+let createAccountCheckTimeout;
+function handleCreateAccountInput(e) {
+    const username = e.target.value;
+    const usernameAvailable = document.getElementById('newUsernameAvailable');
+    const submitButton = document.querySelector('#createAccountForm button[type="submit"]');
     
-    // Check availability on input changes
-    let checkTimeout;
-    usernameInput.addEventListener('input', (e) => {
-        const username = e.target.value;
-        const usernameAvailable = document.getElementById('newUsernameAvailable');
-        const submitButton = document.querySelector('#createAccountForm button[type="submit"]');
-        
-        // Clear previous timeout
-        if (checkTimeout) {
-            clearTimeout(checkTimeout);
-        }
-        
-        // Reset display
-        usernameAvailable.style.display = 'none';
-        submitButton.disabled = true;
-        
-        // Check if username is too short
-        if (username.length < 3) {
-            usernameAvailable.textContent = 'too short';
+    // Clear previous timeout
+    if (createAccountCheckTimeout) {
+        clearTimeout(createAccountCheckTimeout);
+    }
+    
+    // Reset display
+    usernameAvailable.style.display = 'none';
+    submitButton.disabled = true;
+    
+    // Check if username is too short
+    if (username.length < 3) {
+        usernameAvailable.textContent = 'too short';
+        usernameAvailable.style.color = '#dc3545';
+        usernameAvailable.style.display = 'inline';
+        return;
+    }
+    
+    // Check network availability
+    createAccountCheckTimeout = setTimeout(async () => {
+        const taken = await checkUsernameAvailability(username);
+        if (taken == 'taken') {
+            usernameAvailable.textContent = 'taken';
             usernameAvailable.style.color = '#dc3545';
             usernameAvailable.style.display = 'inline';
-            return;
+            submitButton.disabled = true;
+        } else if (taken == 'available') {
+            usernameAvailable.textContent = 'available';
+            usernameAvailable.style.color = '#28a745';
+            usernameAvailable.style.display = 'inline';
+            submitButton.disabled = false;
+        } else {
+            usernameAvailable.textContent = 'network error';
+            usernameAvailable.style.color = '#dc3545';
+            usernameAvailable.style.display = 'inline';
+            submitButton.disabled = true;
         }
-        
-        // Check network availability
-        checkTimeout = setTimeout(async () => {
-            const taken = await checkUsernameAvailability(username);
-            if (taken == 'taken') {
-                usernameAvailable.textContent = 'taken';
-                usernameAvailable.style.color = '#dc3545';
-                usernameAvailable.style.display = 'inline';
-                submitButton.disabled = true;
-            } else if (taken == 'available') {
-                usernameAvailable.textContent = 'available';
-                usernameAvailable.style.color = '#28a745';
-                usernameAvailable.style.display = 'inline';
-                submitButton.disabled = false;
-            } else {
-                usernameAvailable.textContent = 'network error';
-                usernameAvailable.style.color = '#dc3545';
-                usernameAvailable.style.display = 'inline';
-                submitButton.disabled = true;
-            }
-        }, 1000);
-    });
+    }, 1000);
 }
 
 function closeCreateAccountModal() {
@@ -905,7 +904,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('openHistoryModal').addEventListener('click', openHistoryModal);
     document.getElementById('closeHistoryModal').addEventListener('click', closeHistoryModal);
     document.getElementById('historyAsset').addEventListener('change', updateHistoryAddresses);
-    
+
+    // Receive Modal input listeners
+    document.getElementById('receiveAsset').addEventListener('change', updateQRCode);
+    document.getElementById('receiveAmount').addEventListener('input', debounce(updateQRCode, 300));
+    document.getElementById('receiveMemo').addEventListener('input', debounce(updateQRCode, 300));
+
     document.getElementById('switchToChats').addEventListener('click', () => switchView('chats'));
     document.getElementById('switchToContacts').addEventListener('click', () => switchView('contacts'));
     document.getElementById('switchToWallet').addEventListener('click', () => switchView('wallet'));
@@ -1080,6 +1084,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Add event listener for remove account button
     document.getElementById('removeAccountButton').addEventListener('click', handleRemoveAccountButton);
+
+    // handle openSendModal sendToAddress username input change
+    document.getElementById('sendToAddress').addEventListener('input', (e) => {
+        handleOpenSendModalInput(e);
+    });
+
+    // create account button listener to clear message input on create account
+    document.getElementById('newUsername').addEventListener('input', handleCreateAccountInput);
 
     setupAddToHomeScreen()
 });
@@ -2223,31 +2235,10 @@ function openReceiveModal() {
     // Get wallet data
     const walletData = myData.wallet;
 
-    // Store references to elements that will have event listeners
+    // Get references to elements
     const assetSelect = document.getElementById('receiveAsset');
     const amountInput = document.getElementById('receiveAmount');
     const memoInput = document.getElementById('receiveMemo');
-    const qrDataPreview = document.getElementById('qrDataPreview');
-    
-    // Store these references on the modal element for later cleanup
-    modal.receiveElements = {
-        assetSelect,
-        amountInput,
-        memoInput,
-        qrDataPreview,
-    };
-    
-    // Define event handlers and store references to them
-    const handleAssetChange = () => updateQRCode();
-    const handleAmountInput = () => updateQRCode();
-    const handleMemoInput = () => updateQRCode();
-    
-    // Store event handlers on the modal for later removal
-    modal.receiveHandlers = {
-        handleAssetChange,
-        handleAmountInput,
-        handleMemoInput,
-    };
     
     // Populate assets dropdown
     // Clear existing options
@@ -2276,33 +2267,12 @@ function openReceiveModal() {
     amountInput.value = '';
     memoInput.value = '';
 
-    // Add event listeners for form fields
-    assetSelect.addEventListener('change', handleAssetChange);
-    amountInput.addEventListener('input', handleAmountInput);
-    memoInput.addEventListener('input', handleMemoInput);
-
-    // Update addresses for first asset
+    // Initial update for addresses based on the first asset
     updateReceiveAddresses();
 }
 
 function closeReceiveModal() {
     const modal = document.getElementById('receiveModal');
-    
-    // Remove event listeners if they were added
-    if (modal.receiveElements && modal.receiveHandlers) {
-        const { assetSelect, amountInput, memoInput } = modal.receiveElements;
-        const { handleAssetChange, handleAmountInput, handleMemoInput } = modal.receiveHandlers;
-        
-        // Remove event listeners
-        if (assetSelect) assetSelect.removeEventListener('change', handleAssetChange);
-        if (amountInput) amountInput.removeEventListener('input', handleAmountInput);
-        if (memoInput) memoInput.removeEventListener('input', handleMemoInput);
-        
-        // Clean up references
-        delete modal.receiveElements;
-        delete modal.receiveHandlers;
-    }
-    
     // Hide the modal
     modal.classList.remove('active');
 }
@@ -2522,22 +2492,21 @@ async function openSendModal() {
     document.getElementById('sendAmount').value = '';
     document.getElementById('sendMemo').value = '';
 
-    const usernameInput = document.getElementById('sendToAddress');
     const usernameAvailable = document.getElementById('sendToAddressError');
     const submitButton = document.querySelector('#sendForm button[type="submit"]');
     usernameAvailable.style.display = 'none';
     submitButton.disabled = true;
     openQRScanModal.fill = fillPaymentFromQR  // set function to handle filling the payment form from QR data
     
-/* This is now done in the DOMContentLoaded funtion
-    // Add QR code scan button handler
-    const scanButton = document.getElementById('scanQRButton');
-    // Remove any existing event listeners first
-    const newScanButton = scanButton.cloneNode(true);
-    scanButton.parentNode.replaceChild(newScanButton, scanButton);
-    newScanButton.addEventListener('click', scanQRCode);
-    console.log("Added click event listener to scan QR button");
- */
+    /* This is now done in the DOMContentLoaded funtion
+        // Add QR code scan button handler
+        const scanButton = document.getElementById('scanQRButton');
+        // Remove any existing event listeners first
+        const newScanButton = scanButton.cloneNode(true);
+        scanButton.parentNode.replaceChild(newScanButton, scanButton);
+        newScanButton.addEventListener('click', scanQRCode);
+        console.log("Added click event listener to scan QR button");
+    */
 
     if (openSendModal.username) {
         const usernameInput = document.getElementById('sendToAddress');
@@ -2548,45 +2517,6 @@ async function openSendModal() {
         openSendModal.username = null
     }
     
-    // Check availability on input changes
-    let checkTimeout;
-    usernameInput.addEventListener('input', (e) => {
-        const username = normalizeUsername(e.target.value);
-        
-        // Clear previous timeout
-        if (checkTimeout) {
-            clearTimeout(checkTimeout);
-        }
-                
-        // Check if username is too short
-        if (username.length < 3) {
-            usernameAvailable.textContent = 'too short';
-            usernameAvailable.style.color = '#dc3545';
-            usernameAvailable.style.display = 'inline';
-            return;
-        }
-        
-        // Check network availability
-        checkTimeout = setTimeout(async () => {
-            const taken = await checkUsernameAvailability(username, myAccount.keys.address);
-            if (taken == 'taken') {
-                usernameAvailable.textContent = 'found';
-                usernameAvailable.style.color = '#28a745';
-                usernameAvailable.style.display = 'inline';
-                submitButton.disabled = false;
-            } else if ((taken == 'available') || (taken == 'mine')) {
-                usernameAvailable.textContent = 'not found';
-                usernameAvailable.style.color = '#dc3545';
-                usernameAvailable.style.display = 'inline';
-                submitButton.disabled = true;
-            } else {
-                usernameAvailable.textContent = 'network error';
-                usernameAvailable.style.color = '#dc3545';
-                usernameAvailable.style.display = 'inline';
-                submitButton.disabled = true;
-            }
-        }, 1000);
-    });
 
     await updateWalletBalances(); // Refresh wallet balances first
     // Get wallet data
@@ -2603,6 +2533,49 @@ async function openSendModal() {
 }
 
 openSendModal.username = null
+
+let sendModalCheckTimeout;
+function handleOpenSendModalInput(e){
+    // Check availability on input changes
+    const username = normalizeUsername(e.target.value);
+    const usernameAvailable = document.getElementById('sendToAddressError');
+    const submitButton = document.querySelector('#sendForm button[type="submit"]');
+    
+    
+    // Clear previous timeout
+    if (sendModalCheckTimeout) {
+        clearTimeout(sendModalCheckTimeout);
+    }
+            
+    // Check if username is too short
+    if (username.length < 3) {
+        usernameAvailable.textContent = 'too short';
+        usernameAvailable.style.color = '#dc3545';
+        usernameAvailable.style.display = 'inline';
+        return;
+    }
+    
+    // Check network availability
+    sendModalCheckTimeout = setTimeout(async () => {
+        const taken = await checkUsernameAvailability(username, myAccount.keys.address);
+        if (taken == 'taken') {
+            usernameAvailable.textContent = 'found';
+            usernameAvailable.style.color = '#28a745';
+            usernameAvailable.style.display = 'inline';
+            submitButton.disabled = false;
+        } else if ((taken == 'available') || (taken == 'mine')) {
+            usernameAvailable.textContent = 'not found';
+            usernameAvailable.style.color = '#dc3545';
+            usernameAvailable.style.display = 'inline';
+            submitButton.disabled = true;
+        } else {
+            usernameAvailable.textContent = 'network error';
+            usernameAvailable.style.color = '#dc3545';
+            usernameAvailable.style.display = 'inline';
+            submitButton.disabled = true;
+        }
+    }, 1000);
+}
 
 // Function to handle QR code scanning Omar
 function openQRScanModal() {
@@ -2640,371 +2613,6 @@ function fillPaymentFromQR(data){
     // Trigger username validation and amount validation
     document.getElementById('sendToAddress').dispatchEvent(new Event('input'));
     document.getElementById('sendAmount').dispatchEvent(new Event('input'));
-}
-
-// this was the old scanQRCode function; not needed anymore
-// Function to handle QR code scanning
-async function scanQRCodeOld() {
-    try {
-        console.log("scanQRCode function called");
-        
-        // Get device capabilities
-        const capabilities = getDeviceCapabilities();
-        console.log("Device capabilities:", capabilities);
-        
-        // Check if BarcodeDetector API is supported
-        if (!capabilities.hasBarcodeDetector) {
-            console.log("BarcodeDetector API not supported, falling back to file input");
-            showToast("Your device doesn't support in-app QR scanning. Using file picker instead.", 3000, "info");
-            fallbackToFileInput();
-            return;
-        }
-        
-        // Show the scanner container
-        const scannerContainer = document.getElementById('qrScannerContainer');
-        scannerContainer.style.display = 'block';
-        
-        // Get video element
-        const video = document.getElementById('qrVideo');
-        
-        // Set up event listeners for scanner controls
-        const closeButton = document.getElementById('closeScanner');
-        const switchButton = document.getElementById('switchCamera');
-        
-        // Store current facing mode
-        let currentFacingMode = 'environment';
-        let scanningAnimationFrame;
-        
-        // Function to stop scanning
-        function stopScanning() {
-            console.log("Stopping QR scanner");
-            
-            // Stop all tracks in the stream
-            if (video.srcObject) {
-                const tracks = video.srcObject.getTracks();
-                tracks.forEach(track => track.stop());
-                video.srcObject = null;
-            }
-            
-            // Hide the scanner container
-            scannerContainer.style.display = 'none';
-            
-            // Remove event listeners
-            closeButton.removeEventListener('click', stopScanning);
-            switchButton.removeEventListener('click', switchCamera);
-            
-            // Stop the scanning loop
-            if (scanningAnimationFrame) {
-                window.cancelAnimationFrame(scanningAnimationFrame);
-            }
-        }
-        
-        // Function to switch camera
-        async function switchCamera() {
-            console.log("Switching camera");
-            
-            // Stop current stream
-            if (video.srcObject) {
-                const tracks = video.srcObject.getTracks();
-                tracks.forEach(track => track.stop());
-            }
-            
-            // Toggle facing mode
-            currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
-            console.log("New facing mode:", currentFacingMode);
-            
-            try {
-                // Start new stream with toggled facing mode
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: currentFacingMode }
-                });
-                
-                // Set new stream as video source
-                video.srcObject = stream;
-            } catch (error) {
-                console.error("Error switching camera:", error);
-                showToast("Failed to switch camera", 3000, "error");
-            }
-        }
-        
-        // Add event listeners
-        closeButton.addEventListener('click', stopScanning);
-        switchButton.addEventListener('click', switchCamera);
-        
-        // Check if camera access is available
-        if (!capabilities.hasCamera) {
-            console.log("Camera access not available, falling back to file input");
-            stopScanning();
-            fallbackToFileInput();
-            return;
-        }
-        
-        // Try to access the camera
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment' }
-            });
-            
-            // Set the video source to the camera stream
-            video.srcObject = stream;
-            
-            // Wait for video to be ready
-            await new Promise((resolve) => {
-                video.onloadedmetadata = () => {
-                    resolve();
-                };
-            });
-            
-            // Start playing the video
-            await video.play();
-            
-            console.log("Camera stream started");
-            
-            // Create a BarcodeDetector with QR code format
-            const barcodeDetector = new BarcodeDetector({ 
-                formats: ['qr_code'] 
-            });
-            
-            // Set up scanning loop
-            const scanFrame = async () => {
-                try {
-                    // Check if video is ready
-                    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                        // Detect barcodes in the current video frame
-                        const barcodes = await barcodeDetector.detect(video);
-                        
-                        // If a QR code is found
-                        if (barcodes.length > 0) {
-                            console.log("QR code detected:", barcodes[0].rawValue);
-                            
-                            // Process the QR code data
-                            processQRData(barcodes[0].rawValue);
-                            
-                            // Stop scanning
-                            stopScanning();
-                            
-                            // Show success message
-                            showToast('QR code scanned successfully', 2000, 'success');
-                            
-                            // Exit the scanning loop
-                            return;
-                        }
-                    }
-                    
-                    // Continue scanning
-                    scanningAnimationFrame = requestAnimationFrame(scanFrame);
-                } catch (error) {
-                    console.error("Error in scan frame:", error);
-                    scanningAnimationFrame = requestAnimationFrame(scanFrame);
-                }
-            };
-            
-            // Start the scanning loop
-            scanFrame();
-            
-        } catch (error) {
-            console.error("Error accessing camera:", error);
-            showToast('Failed to access camera. Please check permissions.', 3000, 'error');
-            
-            // Stop scanning
-            stopScanning();
-            
-            // Fall back to file input method
-            fallbackToFileInput();
-        }
-    } catch (error) {
-        console.error('Error in scanQRCode:', error);
-        showToast('Failed to scan QR code. Please try again.', 3000, 'error');
-    }
-}
-
-// Detect device capabilities
-function getDeviceCapabilities() {
-    return {
-        hasCamera: 'mediaDevices' in navigator && 'getUserMedia' in navigator.mediaDevices,
-        hasBarcodeDetector: 'BarcodeDetector' in window,
-        isIOS: /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream,
-        isPWA: window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches
-    };
-}
-
-// Fallback to file input method if camera access fails or BarcodeDetector is not supported
-function fallbackToFileInput() {
-    console.log("Falling back to file input method");
-    
-    const fileInput = document.getElementById('qrFileInput');
-    
-    // Clone and replace to remove any existing listeners
-    const newFileInput = fileInput.cloneNode(true);
-    fileInput.parentNode.replaceChild(newFileInput, fileInput);
-    
-    // Add change event listener
-    newFileInput.addEventListener('change', async (event) => {
-        if (event.target.files && event.target.files[0]) {
-            const file = event.target.files[0];
-            await processQRCodeImage(file);
-        }
-    });
-    
-    // Trigger file input
-    newFileInput.click();
-}
-
-// Process QR code image and extract data
-async function processQRCodeImage(file) {
-    try {
-        // Show processing message
-        showToast("Processing QR code...", 2000);
-        
-        // Process with Barcode Detection API
-        await processWithBarcodeAPI(file);
-    } catch (error) {
-        console.error('Error processing QR code image:', error);
-        showToast('Failed to read QR code. Please try again.', 3000, 'error');
-    }
-}
-
-// Process QR code using the Barcode Detection API
-async function processWithBarcodeAPI(file) {
-    try {
-        console.log("Using Barcode Detection API to scan QR code");
-        
-        // Create a BarcodeDetector with QR code format
-        const barcodeDetector = new BarcodeDetector({ 
-            formats: ['qr_code'] 
-        });
-        
-        // Create a blob URL for the file
-        const imageUrl = URL.createObjectURL(file);
-        console.log("Created blob URL for image");
-        
-        // Load the image
-        const img = new Image();
-        
-        // Create a promise to wait for the image to load
-        const imageLoaded = new Promise((resolve, reject) => {
-            img.onload = () => {
-                console.log(`Image loaded: ${img.width}x${img.height} pixels`);
-                resolve();
-            };
-            img.onerror = (e) => {
-                console.error("Error loading image:", e);
-                reject(new Error('Failed to load image'));
-            };
-        });
-        
-        // Set the image source
-        img.src = imageUrl;
-        
-        // Wait for the image to load
-        await imageLoaded;
-        
-        // Detect barcodes in the image
-        console.log("Detecting barcodes in image...");
-        const barcodes = await barcodeDetector.detect(img);
-        console.log(`Detected ${barcodes.length} barcodes`);
-        
-        // Release the blob URL
-        URL.revokeObjectURL(imageUrl);
-        
-        // Check if any barcodes were detected
-        if (barcodes.length === 0) {
-            console.log("No QR codes found in the image");
-            showToast("No QR code found in the image. Please try again.", 3000, "warning");
-            return;
-        }
-        
-        // Process the first detected barcode
-        const qrData = barcodes[0].rawValue;
-        console.log("QR code detected with Barcode API:", qrData);
-        
-        // Process the QR code data
-        processQRData(qrData);
-    } catch (error) {
-        console.error('Error with Barcode API:', error);
-        showToast('Error processing QR code. Please try again.', 3000, 'error');
-    }
-}
-
-// Process QR data and fill the send form
-function processQRData(qrText) {
-    try {
-        // Check if the QR code has the correct format
-        if (!qrText.startsWith('liberdus://')) {
-            // Try to handle it as a plain address or username
-            if (qrText.startsWith('0x') || /^[a-zA-Z0-9_-]+$/.test(qrText)) {
-                document.getElementById('sendToAddress').value = qrText;
-                document.getElementById('sendToAddress').dispatchEvent(new Event('input'));
-                showToast('QR code processed as address/username', 2000, 'success');
-                return;
-            }
-            
-            showToast('Invalid QR code format', 3000, 'error');
-            return;
-        }
-        
-        // Extract the base64 data
-        const base64Data = qrText.substring('liberdus://'.length);
-        
-        // Decode the base64 data to JSON
-        let jsonData;
-        try {
-            jsonData = atob(base64Data);
-        } catch (e) {
-            console.error('Failed to decode base64 data:', e);
-            showToast('Invalid QR code data format', 3000, 'error');
-            return;
-        }
-        
-        // Parse the JSON data
-        let qrData;
-        try {
-            qrData = JSON.parse(jsonData);
-        } catch (e) {
-            console.error('Failed to parse JSON data:', e);
-            showToast('Invalid QR code data structure', 3000, 'error');
-            return;
-        }
-        
-        // Validate required fields (using short key)
-        if (!qrData.u) { // Check for 'u' instead of 'username'
-            showToast('QR code missing required username', 3000, 'error');
-            return;
-        }
-        
-        // Fill the form fields (using short keys)
-        document.getElementById('sendToAddress').value = qrData.u;
-        
-        if (qrData.a) {
-            document.getElementById('sendAmount').value = qrData.a;
-        }
-        
-        if (qrData.m) {
-            document.getElementById('sendMemo').value = qrData.m;
-        }
-        
-        // If asset info provided, select matching asset (using short keys)
-        if (qrData.i && qrData.s) { // Check for 'i' and 's'
-            const assetSelect = document.getElementById('sendAsset');
-            const assetOption = Array.from(assetSelect.options).find((opt) =>
-                opt.text.includes(qrData.s) // Find based on symbol 's'
-            );
-            if (assetOption) {
-                assetSelect.value = assetOption.value;
-                console.log(`Selected asset: ${assetOption.text} (value: ${assetOption.value})`);
-            } else {
-                console.log(`Asset with symbol ${qrData.s} not found in dropdown`);
-            }
-        }
-        
-        // Trigger username validation
-        document.getElementById('sendToAddress').dispatchEvent(new Event('input'));
-        
-        showToast('QR code scanned successfully', 2000, 'success');
-    } catch (error) {
-        console.error('Error processing QR data:', error);
-        showToast('Failed to process QR code data', 3000, 'error');
-    }
 }
 
 async function closeSendModal() {
@@ -5033,7 +4641,7 @@ function searchMessages(searchText) {
                 const messageText = message.message;
                 const highlightedText = messageText.replace(
                     new RegExp(searchText, 'gi'),
-                    match => `<mark>${match}</mark>`
+                    match => `${match}`
                 );
                 
                 results.push({
@@ -5067,7 +4675,7 @@ function displaySearchResults(results) {
         
         // Format message preview with "You:" prefix if it's a sent message
         // make this textContent?
-        const messagePreview = result.my ? `You: ${result.preview}` : result.preview;
+        const messagePreview = result.my ? `You: <mark>${escapeHtml(result.preview)}</mark>` : `<mark>${escapeHtml(result.preview)}</mark>`;
         
         resultElement.innerHTML = `
             <div class="chat-avatar">
@@ -5079,7 +4687,7 @@ function displaySearchResults(results) {
                     <div class="chat-time">${formatTime(result.timestamp)}</div>
                 </div>
                 <div class="chat-message">
-                    ${linkifyUrls(messagePreview)}
+                    ${messagePreview}
                 </div>
             </div>
         `;
@@ -6087,9 +5695,6 @@ async function startCamera() {
         
         // Show user-friendly error message
         showToast(error.message || 'Failed to access camera. Please check your permissions and try again.', 5000, 'error');
-        
-        // Optionally trigger fallback method (if you have one)
-        // fallbackToFileInput();
         
         // Re-throw the error if you need to handle it further up
         throw error;
