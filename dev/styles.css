@@ -481,10 +481,11 @@ body {
   font-family: var(--font-primary);
   font-size: var(--font-size-sm);
   color: var(--secondary-text-color);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal; /* Allow wrapping */
+  overflow: visible; /* Show overflow (or remove line) */
+  word-break: break-all; /* Allow breaking long words/URLs */
   text-align: left;
+  /* text-overflow: ellipsis; Removed */
 }
 
 .chat-unread {

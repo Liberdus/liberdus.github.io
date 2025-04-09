@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'z'
+const version = 'a'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -989,9 +989,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('closeChatModal')?.addEventListener('click', () => {
         document.getElementById('chatModal').classList.remove('active');
     });
-    initializeSearch();
-
     
+    // Handle message search input
+    document.getElementById('messageSearch').addEventListener('input', (e) => {
+        handleMessageSearchInput(e);
+    });
+    
+    // Handle search input click
+    document.getElementById('searchInput').addEventListener('click', (e) => {
+        handleSearchInputClick(e);
+    });
 
     // Add contact search functionality
     const contactSearchInput = document.getElementById("contactSearchInput");
@@ -1409,7 +1416,7 @@ async function updateChatList(force) {
                         <div class="chat-time">${formatTime(message.timestamp)}  <span class="chat-time-chevron"></span></div>
                     </div>
                     <div class="chat-message">
-                        ${linkifyUrls(message.message)}
+                        ${escapeHtml(message.message)}
                         ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : ''}
                     </div>
                 </div>
@@ -4447,11 +4454,57 @@ function debounce(func, waitFn) {
     };
 }
 
-function truncateMessage(message, maxLength = 50) {
-    return message.length > maxLength
-        ? message.substring(0, maxLength) + '...'
-        : message;
+function truncateMessage(message, maxLength = 100) {
+    // If the message fits or is shorter, return it as is.
+    if (message.length <= maxLength) {
+        return message;
+    }
+
+    const firstMarkStart = message.indexOf('<mark>');
+
+    // Case 1: No highlight found
+    if (firstMarkStart === -1) {
+        // Default behavior: truncate from the beginning
+        return message.substring(0, maxLength) + '...';
+    }
+
+    // Case 2: Highlight found
+    // Aim to show some context before the highlight. Adjust ratio as needed.
+    const charsToShowBefore = Math.floor(maxLength * 0.3); // e.g., 30 chars for maxLength 100
+
+    // Calculate the ideal starting point
+    let startIndex = Math.max(0, firstMarkStart - charsToShowBefore);
+
+    // Calculate the ending point based on start + maxLength
+    let endIndex = Math.min(message.length, startIndex + maxLength);
+
+    // --- Adjustment for hitting the end ---
+    // If the calculated window ends exactly at the message end,
+    // it might be shorter than maxLength if the highlight was very close to the end.
+    // In this case, pull the startIndex back to ensure we show the full maxLength window
+    // ending at the message end.
+    if (endIndex === message.length) {
+         startIndex = Math.max(0, message.length - maxLength);
+    }
+    // --- End Adjustment ---
+
+
+    // Extract the substring
+    let preview = message.substring(startIndex, endIndex);
+
+    // Add ellipsis prefix if we didn't start at the beginning
+    if (startIndex > 0) {
+        preview = '...' + preview;
+    }
+
+    // Add ellipsis suffix if we didn't end at the very end
+    if (endIndex < message.length) {
+        preview = preview + '...';
+    }
+
+    return preview;
 }
+
 
 // Add these search-related functions
 function searchMessages(searchText) {
@@ -4467,12 +4520,11 @@ function searchMessages(searchText) {
         contact.messages.forEach((message, index) => {
             if (message.message.toLowerCase().includes(searchLower)) {
                 // Highlight matching text
-                const messageText = message.message;
+                const messageText = escapeHtml(message.message);
                 const highlightedText = messageText.replace(
                     new RegExp(searchText, 'gi'),
-                    match => `${match}`
+                    match => `<mark>${match}</mark>`
                 );
-                
                 results.push({
                     contactAddress: address,
                     username: contact.username || address,
@@ -4504,7 +4556,7 @@ function displaySearchResults(results) {
         
         // Format message preview with "You:" prefix if it's a sent message
         // make this textContent?
-        const messagePreview = result.my ? `You: <mark>${escapeHtml(result.preview)}</mark>` : `<mark>${escapeHtml(result.preview)}</mark>`;
+        const messagePreview = result.my ? `You: ${result.preview}` : `${result.preview}`;
         
         resultElement.innerHTML = `
             <div class="chat-avatar">
@@ -4576,14 +4628,18 @@ function handleSearchResultClick(result) {
     }
 }
 
-// Add the search input handler
-function initializeSearch() {
-    const searchInput = document.getElementById('searchInput');
+function handleSearchInputClick(e) {
     const messageSearch = document.getElementById('messageSearch');
-    const searchResults = document.getElementById('searchResults');
     const searchModal = document.getElementById('searchModal');
     
-    // Debounced search function
+    searchModal.classList.add('active');
+    messageSearch.focus();
+}
+
+function handleMessageSearchInput(e) {
+    const searchResults = document.getElementById('searchResults');
+
+    // debounced search
     const debouncedSearch = debounce((searchText) => {
         const trimmedText = searchText.trim();
         
@@ -4598,28 +4654,11 @@ function initializeSearch() {
         } else {
             displaySearchResults(results);
         }
-    }, (searchText) => searchText.length === 1 ? 600 : 300); // Dynamic wait time
-    
-    // Connect search input to modal input
-    searchInput.addEventListener('click', () => {
-        searchModal.classList.add('active');
-        messageSearch.focus();
-    });
-    
-    // Handle search input
-    messageSearch.addEventListener('input', (e) => {
-        debouncedSearch(e.target.value);
-    });
-}
+    }, (searchText) => searchText.length === 1 ? 600 : 300);
 
-// Add loading state display function
-function displayLoadingState() {
-    const searchResults = document.getElementById('searchResults');
-    searchResults.innerHTML = `
-        <div class="search-loading">
-            Searching messages
-        </div>
-    `;
+    
+        debouncedSearch(e.target.value);
+    
 }
 
 // Contact search functions
