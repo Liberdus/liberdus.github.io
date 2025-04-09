@@ -477,7 +477,7 @@ body {
   white-space: nowrap;
 }
 
-.chat-message {
+#searchResults .chat-message {
   font-family: var(--font-primary);
   font-size: var(--font-size-sm);
   color: var(--secondary-text-color);
@@ -486,6 +486,16 @@ body {
   word-break: break-all; /* Allow breaking long words/URLs */
   text-align: left;
   /* text-overflow: ellipsis; Removed */
+}
+
+.chat-message {
+  font-family: var(--font-primary);
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
 }
 
 .chat-unread {
