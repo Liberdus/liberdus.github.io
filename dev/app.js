@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'e'
+const version = 'f'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -141,7 +141,7 @@ const pollIntervalChatting = 5000  // in millseconds
 
 let myData = null
 let myAccount = null        // this is set to myData.account for convience
-let wsManager = new WSManager()        // this is set to new WSManager() for convience
+
 let isInstalledPWA = false
 
 // TODO - get the parameters from the network
@@ -6129,6 +6129,8 @@ class WSManager {
         }
     }
 }
+
+let wsManager = new WSManager()        // this is set to new WSManager() for convience
 
 async function handleDataCaching(options) {
     const {
