@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'c'
+const version = 'd'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -782,6 +782,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Check for existing accounts and arrange welcome buttons
     const usernames = getAvailableUsernames()
     const hasAccounts = usernames.length > 0
+
+    console.log('initializing WebSocket connection in DOMContentLoaded');
+    initializeWebSocketManager();
 
     const signInBtn = document.getElementById('signInButton');
     const createAccountBtn = document.getElementById('createAccountButton');
