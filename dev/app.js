@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'g'
+const version = 'h'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -141,7 +141,6 @@ const pollIntervalChatting = 5000  // in millseconds
 
 let myData = null
 let myAccount = null        // this is set to myData.account for convience
-
 let isInstalledPWA = false
 
 // TODO - get the parameters from the network
@@ -324,16 +323,7 @@ async function handleUsernameOnSignInModal() {
 //console.log('availability', availability);
     const removeButton = document.getElementById('removeAccountButton');
     if (usernames.length === 1 && availability === 'mine') {
-        // myAccount = netidAccounts.usernames[username];
-        // myData = parse(localStorage.getItem(`${username}_${netid}`));
-        // if (!myData) { console.log('Account data not found'); return }
-        // myAccount = myData.account
-        // TODO: add handleSignIn() here
-        
         handleSignIn();
-        // closeSignInModal();
-        // document.getElementById('welcomeScreen').style.display = 'none';
-        // switchView('chats');
         return;
     } else if (availability === 'mine') {
         submitButton.disabled = false;
@@ -3582,9 +3572,6 @@ async function pollChatInterval(milliseconds) {
 
 // Called every 30 seconds if we are online and not subscribed to WebSocket
 async function pollChats() {
-    // Step 1: Attempt WebSocket connection if needed
-    //console.log('Attempting WebSocket connection in pollChats');
-    //await attemptWebSocketConnection();
     
     // Step 2: variable to check if we are subscribed to WebSocket
     const isSubscribed = wsManager && wsManager.subscribed && wsManager.isSubscribed();
@@ -3652,21 +3639,6 @@ async function checkWebSocketStatus() {
     }
     
     return status;
-}
-
-// Helper function to attempt WebSocket connection
-async function attemptWebSocketConnection() {
-    // if no wsManager or no myAccount or already subscribed, return
-    if (wsManager?.isSubscribed()) return;
-    
-    console.log('Attempting WebSocket connection from pollChats');
-    wsManager.connect();
-    
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    console.log('Connection attempt result:', {
-        success: wsManager.isConnected()
-    });
 }
 
 // Helper function to schedule next poll
@@ -5785,7 +5757,6 @@ class WSManager {
         this.handleConnectionFailure();
       };
       
-      
     } catch (error) {
       console.error('WebSocket connection creation error:', error);
       this.handleConnectionFailure();
@@ -6116,7 +6087,7 @@ class WSManager {
                 wsManager.connect();
                 initInfo.status = 'connecting';
             }
-            
+
             this.setupEventHandlers();
             console.log('WebSocket Manager Status:', JSON.stringify(initInfo, null, 2));
             
