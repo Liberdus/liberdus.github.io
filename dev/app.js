@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'd'
+const version = 'e'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -141,7 +141,7 @@ const pollIntervalChatting = 5000  // in millseconds
 
 let myData = null
 let myAccount = null        // this is set to myData.account for convience
-let wsManager = null        // this is set to new WSManager() for convience
+let wsManager = new WSManager()        // this is set to new WSManager() for convience
 let isInstalledPWA = false
 
 // TODO - get the parameters from the network
@@ -324,13 +324,16 @@ async function handleUsernameOnSignInModal() {
 //console.log('availability', availability);
     const removeButton = document.getElementById('removeAccountButton');
     if (usernames.length === 1 && availability === 'mine') {
-//            myAccount = netidAccounts.usernames[username];
-        myData = parse(localStorage.getItem(`${username}_${netid}`));
-        if (!myData) { console.log('Account data not found'); return }
-        myAccount = myData.account
-        closeSignInModal();
-        document.getElementById('welcomeScreen').style.display = 'none';
-        switchView('chats');
+        // myAccount = netidAccounts.usernames[username];
+        // myData = parse(localStorage.getItem(`${username}_${netid}`));
+        // if (!myData) { console.log('Account data not found'); return }
+        // myAccount = myData.account
+        // TODO: add handleSignIn() here
+        
+        handleSignIn();
+        // closeSignInModal();
+        // document.getElementById('welcomeScreen').style.display = 'none';
+        // switchView('chats');
         return;
     } else if (availability === 'mine') {
         submitButton.disabled = false;
@@ -575,9 +578,6 @@ async function handleCreateAccount(event) {
 
     requestNotificationPermission();
 
-    console.log('initializing WebSocket connection in handleCreateAccount');
-    initializeWebSocketManager();
-
     // enable submit button
     submitButton.disabled = false;
 
@@ -590,7 +590,9 @@ async function handleCreateAccount(event) {
 
 // This is for the sign in button after selecting an account
 async function handleSignIn(event) {
-    event.preventDefault();
+    if(event) {
+        event.preventDefault();
+    }
     const username = document.getElementById('username').value;
     const submitButton = document.querySelector('#signInForm button[type="submit"]');
 
@@ -626,10 +628,6 @@ async function handleSignIn(event) {
     myAccount = myData.account;
 
     requestNotificationPermission();
-
-    // Initialize WebSocket connection
-    console.log('initializing WebSocket connection in handleSignIn');
-    initializeWebSocketManager();
 
     // Close modal and proceed to app
     closeSignInModal();
@@ -782,9 +780,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Check for existing accounts and arrange welcome buttons
     const usernames = getAvailableUsernames()
     const hasAccounts = usernames.length > 0
-
-    console.log('initializing WebSocket connection in DOMContentLoaded');
-    initializeWebSocketManager();
 
     const signInBtn = document.getElementById('signInButton');
     const createAccountBtn = document.getElementById('createAccountButton');
@@ -1483,6 +1478,9 @@ async function switchView(view) {
     // Store the current view for potential rollback
     const previousView = document.querySelector('.app-screen.active')?.id?.replace('Screen', '') || 'chats';
     const previousButton = document.querySelector('.nav-button.active');
+    
+    // Initialize WebSocket connection regardless of view
+    wsManager.initializeWebSocketManager();
     
     try {
         // Direct references to view elements
@@ -3585,8 +3583,8 @@ async function pollChatInterval(milliseconds) {
 // Called every 30 seconds if we are online and not subscribed to WebSocket
 async function pollChats() {
     // Step 1: Attempt WebSocket connection if needed
-    console.log('Attempting WebSocket connection in pollChats');
-    await attemptWebSocketConnection();
+    //console.log('Attempting WebSocket connection in pollChats');
+    //await attemptWebSocketConnection();
     
     // Step 2: variable to check if we are subscribed to WebSocket
     const isSubscribed = wsManager && wsManager.subscribed && wsManager.isSubscribed();
@@ -3658,7 +3656,8 @@ async function checkWebSocketStatus() {
 
 // Helper function to attempt WebSocket connection
 async function attemptWebSocketConnection() {
-    if (!wsManager || !myAccount || wsManager.isSubscribed()) return;
+    // if no wsManager or no myAccount or already subscribed, return
+    if (wsManager?.isSubscribed()) return;
     
     console.log('Attempting WebSocket connection from pollChats');
     wsManager.connect();
@@ -5786,7 +5785,7 @@ class WSManager {
         this.handleConnectionFailure();
       };
       
-      this.setupEventHandlers();
+      
     } catch (error) {
       console.error('WebSocket connection creation error:', error);
       this.handleConnectionFailure();
@@ -6083,11 +6082,22 @@ class WSManager {
 
     return true;
   }
-}
 
-// Initialize WebSocket manager if not already created
-function initializeWebSocketManager() {
-    if (!wsManager) {
+
+    // Initialize WebSocket manager if not already created
+    initializeWebSocketManager() {
+
+        if (wsManager.isConnected()) {
+            if(!wsManager.isSubscribed()) {
+                console.log('WebSocket is already connected but not subscribed, subscribing');
+                wsManager.subscribe();
+                return;
+            }
+            console.log('WebSocket is already connected and subscribed');
+            return;
+        } 
+
+        this.setupEventHandlers();
         try {
             const initInfo = {
                 status: 'starting',
@@ -6101,7 +6111,6 @@ function initializeWebSocketManager() {
             
             console.log('WebSocket Manager Initialization:', JSON.stringify(initInfo, null, 2));
             
-            wsManager = new WSManager();
             initInfo.status = 'created';
             
             if (initInfo.account.available) {
@@ -6118,11 +6127,7 @@ function initializeWebSocketManager() {
             }, null, 2));
             wsManager = null;
         }
-    } else {
-        console.log('WebSocket Manager: Already initialized');
     }
-    
-    return wsManager;
 }
 
 async function handleDataCaching(options) {
