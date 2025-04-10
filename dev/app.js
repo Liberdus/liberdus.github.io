@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -535,11 +535,6 @@ async function handleCreateAccount(event) {
         }
     }
     
-
-    // TODO: check if account has been created successfully
-    // sleep/timeout for 3 seconds
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
     // Create new account entry
     myAccount = {
         netid,
@@ -559,12 +554,16 @@ async function handleCreateAccount(event) {
     const res = await postRegisterAlias(username, myAccount.keys);
 
     if (res && (res.error || !res.result.success)) {
-//console.log('no res', res)
+        //console.log('no res', res)
         if (res?.result?.reason){
             alert(res.result.reason)
         }
         return;
     }
+
+    // TODO: check if account has been created successfully
+    // sleep/timeout for 3 seconds
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
     // Store updated accounts back in localStorage
 //    existingAccounts.netids[netid].usernames[username] = myAccount;
@@ -609,17 +608,16 @@ async function handleSignIn(event) {
 
     // Check if the button text is 'Recreate'
     if (submitButton.textContent === 'Recreate') {
-        const privateKey = existingAccounts.netids[netid].usernames[username].keys.secret;
+        const myData = parse(localStorage.getItem(`${username}_${netid}`));
+        const privateKey = myData.account.keys.secret;
         const newUsernameInput = document.getElementById('newUsername');
         newUsernameInput.value = username;
-        closeSignInModal();
-        openCreateAccountModal();
-        // Dispatch a change event to trigger the availability check
-        newUsernameInput.dispatchEvent(new Event('input'));
 
         document.getElementById('newPrivateKey').value = privateKey;
         closeSignInModal();
         openCreateAccountModal();
+        // Dispatch a change event to trigger the availability check
+        newUsernameInput.dispatchEvent(new Event('input'));
         return;
     }
 
@@ -784,9 +782,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Check for existing accounts and arrange welcome buttons
     const usernames = getAvailableUsernames()
     const hasAccounts = usernames.length > 0
-
-    console.log('initializing WebSocket connection in DOMContentLoaded');
-    initializeWebSocketManager();
 
     const signInBtn = document.getElementById('signInButton');
     const createAccountBtn = document.getElementById('createAccountButton');
@@ -4351,21 +4346,14 @@ function requestNotificationPermission() {
         Notification.requestPermission()
             .then(permission => {
                 console.log('Notification permission result:', permission);
-                // Logger.log('Notification permission result:', permission);
-                // Optional: Hide a notification button if granted.
                 if (permission === 'granted') {
-                    const notificationButton = document.getElementById('requestNotificationPermission');
-                    if (notificationButton) {
-                        notificationButton.style.display = 'none';
-                    }
+                    console.log('Notification permission granted');
                 } else {
                     console.log('Notification permission denied');
-                    // Logger.log('Notification permission denied');
                 }
             })
             .catch(error => {
                 console.error('Error during notification permission request:', error);
-                // Logger.error('Error during notification permission request:', error);
             });
     }
 }
