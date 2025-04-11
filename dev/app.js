@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -682,14 +682,6 @@ function newDataRecord(myAccount){
     }
     
     return myData
-}
-
-// Generate deterministic color from hash
-function getColorFromHash(hash, index) {
-    const hue = parseInt(hash.slice(index * 2, (index * 2) + 2), 16) % 360;
-    const saturation = 60 + (parseInt(hash.slice((index * 2) + 2, (index * 2) + 4), 16) % 20);
-    const lightness = 45 + (parseInt(hash.slice((index * 2) + 4, (index * 2) + 6), 16) % 10);
-    return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
 
 // Function to open the About modal
@@ -1766,7 +1758,6 @@ async function handleImportFile(event) {
             fileContent = await decryptData(fileContent, passwordInput.value.trim());
             if (fileContent == null){ throw "" }
         }
-        const jsonData = parse(fileContent);
 
         // We first parse to jsonData so that if the parse does not work we don't destroy myData
         myData = parse(fileContent)
@@ -1832,9 +1823,6 @@ async function handleImportFile(event) {
 // Encrypt data using ChaCha20-Poly1305
 async function encryptData(data, password) {
     if (!password) return data;
-
-    // Generate salt
-    const salt = window.crypto.getRandomValues(new Uint8Array(16));
 
     // Derive key using 100,000 iterations of blake2b
     let key = utf82bin(password);
@@ -1910,13 +1898,13 @@ function openNewChatModal() {
     document.getElementById('newChatModal').classList.add('active');
     document.getElementById('newChatButton').classList.remove('visible');
 
-    const usernameInput = document.getElementById('chatRecipient');
     const usernameAvailable = document.getElementById('chatRecipientError');
     const submitButton = document.querySelector('#newChatForm button[type="submit"]');
     usernameAvailable.style.display = 'none';
     submitButton.disabled = true;  
 }
 
+let usernameInputCheckTimeout;
 // handler that invokes listener for username input
 function handleUsernameInput(e) {
     
@@ -1924,14 +1912,12 @@ function handleUsernameInput(e) {
     const submitButton = document.querySelector('#newChatForm button[type="submit"]');
     usernameAvailable.style.display = 'none';
     submitButton.disabled = true;
-    // Check availability on input changes
-    let checkTimeout;
 
     const username = normalizeUsername(e.target.value);
     
     // Clear previous timeout
-    if (checkTimeout) {
-        clearTimeout(checkTimeout);
+    if (usernameInputCheckTimeout) {
+        clearTimeout(usernameInputCheckTimeout);
     }
             
     // Check if username is too short
@@ -1943,7 +1929,7 @@ function handleUsernameInput(e) {
     }
     
     // Check username availability
-    checkTimeout = setTimeout(async () => {
+    usernameInputCheckTimeout = setTimeout(async () => {
         const taken = await checkUsernameAvailability(username, myAccount.keys.address);
         if (taken == 'taken') {
             usernameAvailable.textContent = 'found';
@@ -3876,13 +3862,12 @@ async function processChats(chats, keys) {
                     // Get name of sender
                     const senderName = contact.name || contact.username || `${from.slice(0,8)}...`
                     
-                    if (added > 0) {
-                        // Add notification indicator to Chats tab if we're not on it
-                        const chatsButton = document.getElementById('switchToChats');
-                        if (!document.getElementById('chatsScreen').classList.contains('active')) {
-                            chatsButton.classList.add('has-notification');
-                        }
+                    // Add notification indicator to Chats tab if we're not on it
+                    const chatsButton = document.getElementById('switchToChats');
+                    if (!document.getElementById('chatsScreen').classList.contains('active')) {
+                        chatsButton.classList.add('has-notification');
                     }
+                    
                 }
             }
             
@@ -3893,11 +3878,6 @@ async function processChats(chats, keys) {
                 if (!document.getElementById('walletScreen').classList.contains('active')) {
                     walletButton.classList.add('has-notification');
                 }
-            }
-            
-            if (newTimestamp > 0){
-                // Update the timestamp
-                myAccount.chatTimestamp = newTimestamp
             }
         }
     }
