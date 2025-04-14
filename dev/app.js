@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2182,15 +2182,9 @@ function appendChatModal() {
             </div>
         `);
     }
-
-    // 4. Scroll to bottom
-    // (Consider adding a slight delay if rendering is complex,
-    // although clearing first might make it synchronous enough)
-    // setTimeout(() => {
         messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
-        console.log('Scrolled chat modal to bottom after full re-render.');
-    // }, 0);
 }
+appendChatModal.address = null
 
 function closeChatModal() {
     document.getElementById('chatModal').classList.remove('active');
@@ -2203,7 +2197,6 @@ function closeChatModal() {
         document.getElementById('newChatButton').classList.add('visible');
     }
     appendChatModal.address = null
-    appendChatModal.len = 0
     if (isOnline) {
         if (wsManager && !wsManager.isSubscribed()) {
             pollChatInterval(pollIntervalNormal) // back to polling at slower rate
@@ -3307,17 +3300,8 @@ async function handleSendMessage() {
         if (existingChatIndex !== -1) {
             chatsData.chats.splice(existingChatIndex, 1);
         }
-
-        // Find insertion point to maintain timestamp order (newest first)
-        const insertIndex = chatsData.chats.findIndex(chat => chat.timestamp < chatUpdate.timestamp);
-
-        if (insertIndex === -1) {
-            // If no earlier timestamp found, append to end (should be newest)
-            chatsData.chats.push(chatUpdate);
-        } else {
-            // Insert at correct position to maintain order
-            chatsData.chats.splice(insertIndex, 0, chatUpdate);
-        }
+        
+        insertSorted(chatsData.chats, chatUpdate, 'timestamp');
 
         // Clear input and reset height
         messageInput.value = '';
@@ -3823,26 +3807,22 @@ async function processChats(chats, keys) {
                         memo: payload.message
                     };
                     insertSorted(history, newPayment, 'timestamp');
-                    // TODO: redundant but keep for
+                    // TODO: redundant but keep for now
                     //  sort history array based on timestamp field in descending order
-                    history.sort((a, b) => b.timestamp - a.timestamp);
+                    //history.sort((a, b) => b.timestamp - a.timestamp);
                     
                     // Mark that we have a new transfer for toast notification
                     hasNewTransfer = true
 
-                    // Add logging to check the state right before the conditional
-                    const historyModalElement = document.getElementById("historyModal");
-                    const isHistoryModalActive = historyModalElement?.classList.contains("active");
                     const walletScreenActive = document.getElementById("walletScreen")?.classList.contains("active");
-
+                    const historyModalActive = document.getElementById("historyModal")?.classList.contains("active");
                     // Update wallet view if it's active
                     if (walletScreenActive) {
                         updateWalletView();
                     } 
                     // update history modal if it's active
-                    if (isHistoryModalActive) { // Use the variable here
+                    if (historyModalActive) {
                         updateTransactionHistory();
-                        showToast(`Transfer received: ${contact.username}`, 5000, 'success');
                     }
                 }
             }
