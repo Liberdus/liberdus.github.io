@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'i'
+const version = 'j'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1380,7 +1380,8 @@ async function updateChatList(force) {
     const chatItems = await Promise.all(chats.map(async chat => {
         const identicon = await generateIdenticon(chat.address);
         const contact = contacts[chat.address]
-        const message = contact.messages.at(-1)
+        // first message is now the latest message
+        const message = contact.messages[0];
         if (!message){ return '' }
         return `
             <li class="chat-item">
@@ -2104,18 +2105,10 @@ function openChatModal(address) {
         modalAvatar.innerHTML = identicon;
     });
 
-    // Get messages from contacts data
-    const messages = contact?.messages || [];
+    // Clear previous messages from the UI
+    messagesList.innerHTML = '';
 
-    // Display messages and click-to-copy feature
-    messagesList.innerHTML = messages.map((msg, index) => `
-        <div class="message ${msg.my ? 'sent' : 'received'}" data-message-id="${index}">
-            <div class="message-content">${linkifyUrls(msg.message)}</div>
-            <div class="message-time">${formatTime(msg.timestamp)}</div>
-        </div>
-    `).join('');
-
-    // Scroll to bottom
+    // Scroll to bottom (initial scroll for empty list, appendChatModal will scroll later)
     setTimeout(() => {
         messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
     }, 100);
@@ -2147,9 +2140,10 @@ function openChatModal(address) {
         updateChatList();
     } 
 
-    // Setup to update new messages
+    // Setup state for appendChatModal and perform initial render
     appendChatModal.address = address
-    appendChatModal.len = messages.length
+    appendChatModal(); // Call appendChatModal to render messages
+
     if (isOnline) {
         if (wsManager && !wsManager.isSubscribed()) {
             pollChatInterval(pollIntervalChatting) // poll for messages at a faster rate
@@ -2157,23 +2151,30 @@ function openChatModal(address) {
     }
 }
 
-function appendChatModal(){
-    console.log('appendChatModal')
-    if (! appendChatModal.address){ return }
-//console.log(2)
-//    if (document.getElementById('chatModal').classList.contains('active')) { return }
-//console.log(3)
-    const messages = myData.contacts[appendChatModal.address].messages
-    if (appendChatModal.len >= messages.length){ return }
-//console.log(4)
-    const modal = document.getElementById('chatModal');
-    const messagesList = modal.querySelector('.messages-list');
+function appendChatModal() {
+    console.log('appendChatModal running for address:', appendChatModal.address);
+    if (!appendChatModal.address) { return; }
 
-    for (let i=appendChatModal.len; i<messages.length; i++) {
-        console.log(5, i)
-        const m = messages[i]
-        m.type = m.my ? 'sent' : 'received'
-        // Add message to UI
+    const contact = myData.contacts[appendChatModal.address];
+    if (!contact || !contact.messages) {
+            console.log('No contact or messages found for address:', appendChatModal.address);
+            return;
+    }
+    const messages = contact.messages; // Already sorted descending
+
+    const modal = document.getElementById('chatModal');
+    if (!modal) return;
+    const messagesList = modal.querySelector('.messages-list');
+    if (!messagesList) return;
+
+    // 1. Clear the entire list
+    messagesList.innerHTML = '';
+
+    // 2. Iterate backwards through data (oldest to newest data index)
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        m.type = m.my ? 'sent' : 'received';
+        // 3. Append each message (results in oldest at top visually)
         messagesList.insertAdjacentHTML('beforeend', `
             <div class="message ${m.type}">
                 <div class="message-content" style="white-space: pre-wrap">${linkifyUrls(m.message)}</div>
@@ -2181,12 +2182,20 @@ function appendChatModal(){
             </div>
         `);
     }
-    appendChatModal.len = messages.length
-    // Scroll to bottom
-    messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
+
+    // 4. Scroll to bottom
+    // (Consider adding a slight delay if rendering is complex,
+    // although clearing first might make it synchronous enough)
+    // setTimeout(() => {
+        messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
+        console.log('Scrolled chat modal to bottom after full re-render.');
+    // }, 0);
+
+    // toast if chatModal is active
+    if (document.getElementById('chatModal').classList.contains('active')) {
+        showToast(`Message received: ${contact.username}`, 5000, 'success');
+    }
 }
-appendChatModal.address = null
-appendChatModal.len = 0
 
 function closeChatModal() {
     document.getElementById('chatModal').classList.remove('active');
@@ -2827,7 +2836,7 @@ console.log('payload is', payload)
             address: toAddress,
             memo: memo
         };
-        wallet.history.unshift(newPayment);
+        insertSorted(wallet.history, newPayment, 'timestamp');
 
 // Don't try to update the balance here; the tx might not have gone through; let user refresh the balance from the wallet page
 // Maybe we can set a timer to check on the status of the tx using txid and update the balance if the txid was processed
@@ -3290,21 +3299,30 @@ async function handleSendMessage() {
             sent_timestamp: Date.now(),
             my: true
         };
-        chatsData.contacts[currentAddress].messages.push(newMessage);
+        insertSorted(chatsData.contacts[currentAddress].messages, newMessage, 'timestamp');
 
-        // Update or add to chats list
-        const existingChatIndex = chatsData.chats.findIndex(chat => chat.address === currentAddress);
+        // Update or add to chats list, maintaining chronological order
         const chatUpdate = {
             address: currentAddress,
-            timestamp: newMessage.timestamp,
+            timestamp: newMessage.sent_timestamp,
         };
 
-        // Remove existing chat if present
+        // Remove existing chat for this contact if it exists
+        const existingChatIndex = chatsData.chats.findIndex(chat => chat.address === currentAddress);
         if (existingChatIndex !== -1) {
             chatsData.chats.splice(existingChatIndex, 1);
         }
-        // Add updated chat to the beginning of the array
-        chatsData.chats.unshift(chatUpdate);
+
+        // Find insertion point to maintain timestamp order (newest first)
+        const insertIndex = chatsData.chats.findIndex(chat => chat.timestamp < chatUpdate.timestamp);
+
+        if (insertIndex === -1) {
+            // If no earlier timestamp found, append to end (should be newest)
+            chatsData.chats.push(chatUpdate);
+        } else {
+            // Insert at correct position to maintain order
+            chatsData.chats.splice(insertIndex, 0, chatUpdate);
+        }
 
         // Clear input and reset height
         messageInput.value = '';
@@ -3747,8 +3765,8 @@ async function processChats(chats, keys) {
 
 //console.log('contact.message', contact.messages)
                     payload.my = false
-                    payload.timestamp = Date.now()
-                    contact.messages.push(payload)
+                    payload.timestamp = payload.sent_timestamp
+                    insertSorted(contact.messages, payload, 'timestamp')
                     added += 1
                 } else if (tx.type == 'transfer'){
 //console.log('transfer tx is')
@@ -3809,16 +3827,27 @@ async function processChats(chats, keys) {
                         address: from,
                         memo: payload.message
                     };
-                    history.unshift(newPayment);
+                    insertSorted(history, newPayment, 'timestamp');
+                    // TODO: redundant but keep for
                     //  sort history array based on timestamp field in descending order
                     history.sort((a, b) => b.timestamp - a.timestamp);
                     
                     // Mark that we have a new transfer for toast notification
                     hasNewTransfer = true
-                    
+
+                    // Add logging to check the state right before the conditional
+                    const historyModalElement = document.getElementById("historyModal");
+                    const isHistoryModalActive = historyModalElement?.classList.contains("active");
+                    const walletScreenActive = document.getElementById("walletScreen")?.classList.contains("active");
+
                     // Update wallet view if it's active
-                    if (document.getElementById("walletScreen").classList.contains("active")) {
-                        updateWalletView()
+                    if (walletScreenActive) {
+                        updateWalletView();
+                    } 
+                    // update history modal if it's active
+                    if (isHistoryModalActive) { // Use the variable here
+                        updateTransactionHistory();
+                        showToast(`Transfer received: ${contact.username}`, 5000, 'success');
                     }
                 }
             }
@@ -3828,8 +3857,8 @@ async function processChats(chats, keys) {
             }
             // If messages were added to contact.messages, update myData.chats
             if (added > 0) {
-                // Get the most recent message
-                const latestMessage = contact.messages[contact.messages.length - 1];
+                // Get the most recent message (index 0 because it's sorted descending)
+                const latestMessage = contact.messages[0];
                 
                 // Create chat object with only guaranteed fields
                 const chatUpdate = {
@@ -6189,3 +6218,29 @@ function closeSendConfirmationModal() {
     document.getElementById('sendConfirmationModal').classList.remove('active');
     document.getElementById('sendModal').classList.add('active');
 }
+
+/**
+ * Inserts an item into an array while maintaining descending order based on a timestamp field.
+ * Assumes the array is already sorted in descending order.
+ *
+ * @param {Array<Object>} array - The array to insert into (e.g., myData.chats, contact.messages, myData.wallet.history).
+ * @param {Object} item - The item to insert (e.g., chatUpdate, newMessage, newPayment).
+ * @param {string} [timestampField='timestamp'] - The name of the field containing the timestamp to sort by.
+ */
+function insertSorted(array, item, timestampField = 'timestamp') {
+    // Find the index where the new item should be inserted.
+    // We are looking for the first element with a timestamp LESS THAN the new item's timestamp.
+    // This is because the array is sorted descending (newest first).
+    const index = array.findIndex(
+      (existingItem) => existingItem[timestampField] < item[timestampField]
+    );
+  
+    if (index === -1) {
+      // If no such element is found, the new item is the oldest (or the array is empty),
+      // so add it to the end.
+      array.push(item);
+    } else {
+      // Otherwise, insert the new item at the found index.
+      array.splice(index, 0, item);
+    }
+  }
