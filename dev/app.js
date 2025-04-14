@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'j'
+const version = 'k'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2190,11 +2190,6 @@ function appendChatModal() {
         messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
         console.log('Scrolled chat modal to bottom after full re-render.');
     // }, 0);
-
-    // toast if chatModal is active
-    if (document.getElementById('chatModal').classList.contains('active')) {
-        showToast(`Message received: ${contact.username}`, 5000, 'success');
-    }
 }
 
 function closeChatModal() {
