@@ -124,6 +124,78 @@ export function linkifyUrls(text) {
     });
 }
 
+export function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+export function debounce(func, waitFn) {
+    let timeout;
+    return function executedFunction(...args) {
+        const wait = typeof waitFn === 'function' ? waitFn(args[0]) : waitFn;
+        
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+export function truncateMessage(message, maxLength = 100) {
+    // If the message fits or is shorter, return it as is.
+    if (message.length <= maxLength) {
+        return message;
+    }
+
+    const firstMarkStart = message.indexOf('<mark>');
+
+    // Case 1: No highlight found
+    if (firstMarkStart === -1) {
+        // Default behavior: truncate from the beginning
+        return message.substring(0, maxLength) + '...';
+    }
+
+    // Case 2: Highlight found
+    // Aim to show some context before the highlight. Adjust ratio as needed.
+    const charsToShowBefore = Math.floor(maxLength * 0.3); // e.g., 30 chars for maxLength 100
+
+    // Calculate the ideal starting point
+    let startIndex = Math.max(0, firstMarkStart - charsToShowBefore);
+
+    // Calculate the ending point based on start + maxLength
+    let endIndex = Math.min(message.length, startIndex + maxLength);
+
+    // --- Adjustment for hitting the end ---
+    // If the calculated window ends exactly at the message end,
+    // it might be shorter than maxLength if the highlight was very close to the end.
+    // In this case, pull the startIndex back to ensure we show the full maxLength window
+    // ending at the message end.
+    if (endIndex === message.length) {
+         startIndex = Math.max(0, message.length - maxLength);
+    }
+    // --- End Adjustment ---
+
+
+    // Extract the substring
+    let preview = message.substring(startIndex, endIndex);
+
+    // Add ellipsis prefix if we didn't start at the beginning
+    if (startIndex > 0) {
+        preview = '...' + preview;
+    }
+
+    // Add ellipsis suffix if we didn't end at the very end
+    if (endIndex < message.length) {
+        preview = preview + '...';
+    }
+
+    return preview;
+}
+
+
 export function ab2base64(buffer) {
     let binary = '';
     const bytes = new Uint8Array(buffer);

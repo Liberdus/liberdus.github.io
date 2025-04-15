@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'n'
+const version = 'o'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -124,7 +124,8 @@ import { cbc, xchacha20poly1305 } from './external/noble-ciphers.js';
 import { normalizeUsername, generateIdenticon, formatTime, 
     isValidEthereumAddress, 
     normalizeAddress, longAddress, utf82bin, bin2utf8, hex2big, bigxnum2big,
-    big2str, base642bin, bin2base64, hex2bin, bin2hex, linkifyUrls
+    big2str, base642bin, bin2base64, hex2bin, bin2hex, linkifyUrls, escapeHtml, 
+    debounce, truncateMessage
 } from './lib.js';
 
 // Import database functions
@@ -3419,6 +3420,11 @@ console.log(JSON.stringify(data,null,4))
 }
 
 function openHistoryModal() {
+    // remove notification from wallet-action-button if it is active
+    if (document.getElementById('openHistoryModal').classList.contains('has-notification')) {
+        document.getElementById('openHistoryModal').classList.remove('has-notification');
+    }
+
     const modal = document.getElementById('historyModal');
     modal.classList.add('active');
     
@@ -3878,6 +3884,9 @@ async function processChats(chats, keys) {
                 if (!document.getElementById('walletScreen').classList.contains('active')) {
                     walletButton.classList.add('has-notification');
                 }
+                // Add notification to openHistoryModal wallet-action-button
+                const historyButton = document.getElementById('openHistoryModal');
+                historyButton.classList.add('has-notification');
             }
         }
     }
@@ -4353,6 +4362,7 @@ async function updateLogsView() {
     logsContainer.scrollTop = logsContainer.scrollHeight;  // This scrolls to bottom
 }
 
+
 // Helper functions moved outside for reuse
 function formatMessage(message) {
     // If message is an array (from new format)
@@ -4381,78 +4391,6 @@ function formatMessage(message) {
         return message;
     }
 }
-
-function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-}
-
-function debounce(func, waitFn) {
-    let timeout;
-    return function executedFunction(...args) {
-        const wait = typeof waitFn === 'function' ? waitFn(args[0]) : waitFn;
-        
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-    };
-}
-
-function truncateMessage(message, maxLength = 100) {
-    // If the message fits or is shorter, return it as is.
-    if (message.length <= maxLength) {
-        return message;
-    }
-
-    const firstMarkStart = message.indexOf('<mark>');
-
-    // Case 1: No highlight found
-    if (firstMarkStart === -1) {
-        // Default behavior: truncate from the beginning
-        return message.substring(0, maxLength) + '...';
-    }
-
-    // Case 2: Highlight found
-    // Aim to show some context before the highlight. Adjust ratio as needed.
-    const charsToShowBefore = Math.floor(maxLength * 0.3); // e.g., 30 chars for maxLength 100
-
-    // Calculate the ideal starting point
-    let startIndex = Math.max(0, firstMarkStart - charsToShowBefore);
-
-    // Calculate the ending point based on start + maxLength
-    let endIndex = Math.min(message.length, startIndex + maxLength);
-
-    // --- Adjustment for hitting the end ---
-    // If the calculated window ends exactly at the message end,
-    // it might be shorter than maxLength if the highlight was very close to the end.
-    // In this case, pull the startIndex back to ensure we show the full maxLength window
-    // ending at the message end.
-    if (endIndex === message.length) {
-         startIndex = Math.max(0, message.length - maxLength);
-    }
-    // --- End Adjustment ---
-
-
-    // Extract the substring
-    let preview = message.substring(startIndex, endIndex);
-
-    // Add ellipsis prefix if we didn't start at the beginning
-    if (startIndex > 0) {
-        preview = '...' + preview;
-    }
-
-    // Add ellipsis suffix if we didn't end at the very end
-    if (endIndex < message.length) {
-        preview = preview + '...';
-    }
-
-    return preview;
-}
-
 
 // Add these search-related functions
 function searchMessages(searchText) {

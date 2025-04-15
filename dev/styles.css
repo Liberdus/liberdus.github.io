@@ -1293,6 +1293,27 @@ input[type="file"].form-control::file-selector-button {
   cursor: pointer;
   border-radius: 8px;
   transition: all 0.2s ease;
+  position: relative; /* Added for notification dot */
+}
+
+/* Notification indicator for wallet action buttons */
+.wallet-action-button::after {
+  content: "";
+  position: absolute;
+  top: 4px; /* Adjust vertical position if needed */
+  right: 10px; /* Adjust horizontal position if needed */
+  width: 8px;
+  height: 8px;
+  background-color: #3d3dce; /* Same blue color as nav buttons */
+  border-radius: 50%;
+  opacity: 0; /* Hidden by default */
+  transition: opacity 0.2s ease;
+  pointer-events: none; /* Prevent the dot interfering with clicks */
+}
+
+/* Show notification for wallet action button */
+.wallet-action-button.has-notification::after {
+  opacity: 1;
 }
 
 .wallet-action-button:hover {
