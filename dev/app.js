@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'p'
+const version = 'q'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1321,7 +1321,7 @@ function setupAddToHomeScreen(){
 }
 
 // Update chat list UI
-async function updateChatList(force) {
+async function updateChatList(force, triggeredByWebSocket = false) {
     let gotChats = 0
     if (myAccount && myAccount.keys) {
         if (isOnline) {
@@ -1364,7 +1364,9 @@ async function updateChatList(force) {
     const contacts = myData.contacts
     const chats = myData.chats
     
-    if (document.getElementById('chatModal').classList.contains('active')) { appendChatModal() }
+    if (document.getElementById('chatModal').classList.contains('active')) { 
+        appendChatModal(triggeredByWebSocket);
+    };
 
     if (chats.length === 0) {
         chatList.innerHTML = `
@@ -2152,7 +2154,7 @@ function openChatModal(address) {
     }
 }
 
-function appendChatModal() {
+function appendChatModal(triggeredByWebSocket = false) {
     console.log('appendChatModal running for address:', appendChatModal.address);
     if (!appendChatModal.address) { return; }
 
@@ -2167,6 +2169,9 @@ function appendChatModal() {
     if (!modal) return;
     const messagesList = modal.querySelector('.messages-list');
     if (!messagesList) return;
+    
+    // --- Tracking Variable ---
+    let lastReceivedElement = null; 
 
     // 1. Clear the entire list
     messagesList.innerHTML = '';
@@ -2175,15 +2180,47 @@ function appendChatModal() {
     for (let i = messages.length - 1; i >= 0; i--) {
         const m = messages[i];
         m.type = m.my ? 'sent' : 'received';
-        // 3. Append each message (results in oldest at top visually)
+
+        // 3. Append each message
         messagesList.insertAdjacentHTML('beforeend', `
-            <div class="message ${m.type}">
+            <div class="message ${m.type}" data-message-timestamp="${m.timestamp}">  
                 <div class="message-content" style="white-space: pre-wrap">${linkifyUrls(m.message)}</div>
                 <div class="message-time">${formatTime(m.timestamp)}</div>
             </div>
         `);
+
+        // 4. If this message is received, update our tracker to the latest one
+        if (m.type === 'received') {
+            lastReceivedElement = messagesList.lastElementChild; // Get the actual DOM element just added
+        }
     }
-        messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
+    
+    // 5. Delayed Scrolling & Highlighting Logic (after loop)
+    setTimeout(() => {
+        const messageContainer = messagesList.parentElement; 
+        if (lastReceivedElement && triggeredByWebSocket) {
+            // Found a received message, scroll to and highlight it
+            lastReceivedElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+            // Apply highlight immediately 
+            lastReceivedElement.classList.add('highlighted');
+            
+            // Set timeout to remove the highlight after a duration
+            setTimeout(() => {
+                 // Check if element still exists before removing class
+                 if (lastReceivedElement && lastReceivedElement.parentNode) {
+                    lastReceivedElement.classList.remove('highlighted'); 
+                 }
+            }, 2000); 
+
+        } else {
+            // No received messages found, just scroll to the bottom
+            // Ensure container exists before scrolling
+            if (messageContainer) {
+                messageContainer.scrollTop = messageContainer.scrollHeight;
+            }
+        }
+    }, 300); // <<< Delay of 500 milliseconds
 }
 appendChatModal.address = null
 
@@ -5740,7 +5777,7 @@ class WSManager {
             }
           } else if (data.account_id && data.timestamp) {
             console.log('Received new chat notification in ws');
-            updateChatList(true);
+            updateChatList(true, true);
           } else {
             // Handle any other unexpected message formats
             console.warn('Received unrecognized websocket message format:', data);

@@ -99,7 +99,7 @@ export function linkifyUrls(text) {
     if (!text) return '';
 
     // escape html characters in the text
-    text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    text = escapeHtml(text);
 
     // Updated Regex: Only match explicit http:// or https://
     const urlRegex = /(\b(https?):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/gi;
