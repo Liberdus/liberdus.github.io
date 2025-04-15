@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'
+const version = 'r'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -86,6 +86,20 @@ async function forceReload(urls) {
     } catch (error) {
         console.error('Force reload failed:', error);
         throw error;
+    }
+}
+
+// Function to attempt locking orientation to portrait
+async function lockToPortrait() {
+    try {
+        // Attempt to lock the orientation to any portrait mode.
+        // This will throw an error if screen.orientation or screen.orientation.lock is undefined,
+        // or if the lock operation itself fails.
+        await screen.orientation.lock("portrait");
+        console.log("Screen orientation locked to portrait.");
+    } catch (error) {
+        // Log any error encountered during the attempt
+        console.warn("Could not lock screen orientation:", error);
     }
 }
 
@@ -708,7 +722,7 @@ function checkIsInstalledPWA() {
 // Load saved account data and update chat list on page load
 document.addEventListener('DOMContentLoaded', async () => {
     await checkVersion()  // version needs to be checked before anything else happens
-    
+    await lockToPortrait()
     // Initialize service worker only if running as installed PWA
     isInstalledPWA = checkIsInstalledPWA(); // Set the global variable
     if (isInstalledPWA && 'serviceWorker' in navigator) {
