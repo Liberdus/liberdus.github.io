@@ -60,7 +60,7 @@
     <link rel="manifest" href="./manifest.json" />
   </head>
   <body>
-    <script src="./app.js?v=13" type="module"></script>
+    <script src="./app.js?v=14" type="module"></script>
     <div class="container">
       <header class="header" id="header">
         <div id="logo"><img src="./media/liberdus_logo_50.png" /></div>
@@ -385,8 +385,7 @@
                   type="button"
                   id="togglePrivateKeyVisibility"
                   class="password-toggle-btn"
-                >
-                </button>
+                ></button>
               </div>
               <small>
                 If you want to use an existing private key enter it here.
@@ -1088,6 +1087,17 @@
         </div>
       </div>
     </div>
+    <!-- Audio element for notification sounds -->
+    <audio
+      id="notificationSound"
+      src="sounds/notification.wav"
+      preload="auto"
+    ></audio>
+    <audio
+      id="transferSound"
+      src="sounds/transfer-noti.wav"
+      preload="auto"
+    ></audio>
     <!-- Toast container -->
     <div class="toast-container" id="toastContainer"></div>
   </body>
