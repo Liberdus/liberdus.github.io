@@ -3660,3 +3660,14 @@ small {
   margin-top: 0.25rem;
   display: none;
 }
+
+.contact-list-info {
+  font-family: var(--font-monospace);
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  letter-spacing: 0.5px;
+}

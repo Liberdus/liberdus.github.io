@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 's'
+const version = 't'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1659,8 +1659,8 @@ async function updateContactsList() {
                         <div class="chat-header">
                             <div class="chat-name">${contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
                         </div>
-                        <div class="chat-message">
-                            ${contact.email || contact.x || contact.phone || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}
+                        <div class="contact-list-info">
+                            ${contact.email || contact.x || contact.phone || `${contact.address.slice(0,8)}…${contact.address.slice(-6)}`}
                         </div>
                     </div>
                 </li>
@@ -1681,8 +1681,8 @@ async function updateContactsList() {
                         <div class="chat-header">
                             <div class="chat-name">${contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
                         </div>
-                        <div class="chat-message">
-                            ${contact.email || contact.x || contact.phone || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}
+                        <div class="contact-list-info">
+                            ${contact.email || contact.x || contact.phone || `${contact.address.slice(0,8)}…${contact.address.slice(-6)}`}
                         </div>
                     </div>
                 </li>
@@ -3557,6 +3557,11 @@ function handleHistoryItemClick(event) {
         // Get the address from the data-address attribute
         const address = item.dataset.address;
         if (address) {
+            // close contactInfoModal if it is open
+            if (document.getElementById('contactInfoModal').classList.contains('active')) {
+                document.getElementById('contactInfoModal').classList.remove('active');
+            }
+
             // Close the history modal
             closeHistoryModal();
             // Open the chat modal for the corresponding address
