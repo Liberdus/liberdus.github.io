@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -4105,6 +4105,8 @@ async function processChats(chats, keys) {
                     // Insert the transfer message into the contact's message list, maintaining sort order
                     insertSorted(contact.messages, transferMessage, 'timestamp');
                     // --------------------------------------------------------------
+
+                    added += 1;
 
                     const walletScreenActive = document.getElementById("walletScreen")?.classList.contains("active");
                     const historyModalActive = document.getElementById("historyModal")?.classList.contains("active");
