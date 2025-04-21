@@ -1,5 +1,5 @@
 const network = {
-  "netid": "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b",
+  "netid": "269d6797cf15e2b322e67bf1a005aeb8b9f04409efc7b61f387ab9a19d9b93a7",
   "name": "Testnet",
   "gateways": [
     {
