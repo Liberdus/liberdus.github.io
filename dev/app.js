@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -3692,7 +3692,7 @@ function scheduleNextPoll() {
     window.chatUpdateTimer = setTimeout(pollChats, interval);
 }
 
-async function getChats(keys) {  // needs to return the number of chats that need to be processed
+async function getChats(keys, retry = 0) {  // needs to return the number of chats that need to be processed
 //console.log('keys', keys)
     if (! keys){ console.log('no keys in getChats'); return 0 }     // TODO don't require passing in keys
     const now = Date.now()
@@ -3707,7 +3707,9 @@ async function getChats(keys) {  // needs to return the number of chats that nee
     const timestamp = myAccount.chatTimestamp || 0
 //    const timestamp = myData.contacts[keys.address]?.messages?.at(-1).timestamp || 0
 
+    
     const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/${timestamp}`) // TODO get this working
+
 //    const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/0`) // TODO stop using this
     const chatCount = senders?.chats ? Object.keys(senders.chats).length : 0; // Handle null/undefined senders.chats
     console.log('getChats senders', 
@@ -3716,6 +3718,12 @@ async function getChats(keys) {  // needs to return the number of chats that nee
         senders === undefined ? 'undefined' : JSON.stringify(senders))
     if (senders && senders.chats && chatCount){     // TODO check if above is working
         await processChats(senders.chats, keys)
+    } else {
+        if (retry < 3) {
+            setTimeout(() => getChats(keys, retry + 1), 1000);
+        } else {
+            console.error('Failed to get chats after 3 retries');
+        }
     }
     if (appendChatModal.address){   // clear the unread count of address for open chat modal
         myData.contacts[appendChatModal.address].unread = 0 
@@ -3751,13 +3759,14 @@ function playTransferSound(shouldPlay) {
 async function processChats(chats, keys) {
     let newTimestamp = 0
     const timestamp = myAccount.chatTimestamp || 0
-    // Use timestamp - 1 for the messages query to potentially include messages arriving *at* the last timestamp. Added this to since it fixed situation where a receiver sent a message right after the sender sent 3 sequential messages.
-    const messageQueryTimestamp = Math.max(0, timestamp);
+    // Use timestamp - 1 for the messages query to potentially include messages arriving *at* the last timestamp. Adjusted the logic below.
+//    const messageQueryTimestamp = Math.max(0, timestamp - 1); // Fetch messages >= (timestamp - 1)
+    const messageQueryTimestamp = Math.max(0, timestamp); // Reverted: Fetch messages >= timestamp
 
     for (let sender in chats) {
         // Fetch messages using the adjusted timestamp
         const res = await queryNetwork(`/messages/${chats[sender]}/${messageQueryTimestamp}`)
-        console.log("processChats sender", sender, "fetching since", messageQueryTimestamp)
+        console.log("processChats sender", sender, "fetching since", messageQueryTimestamp, "(using timestamp:", timestamp,")") // Added original timestamp for context
         if (res && res.messages){  
             const from = normalizeAddress(sender)
             if (!myData.contacts[from]){ createNewContact(from) }
@@ -3817,7 +3826,7 @@ async function processChats(chats, keys) {
                         }
                     }
                     if (alreadyExists) {
-                        //console.log(`Skipping already existing message: ${payload.sent_timestamp}`);
+                        console.log(`Skipping already existing message: tx.ts=${tx.timestamp}, payload.sent_ts=${payload.sent_timestamp}, content=${payload.message}`); // Added logging
                         continue; // Skip to the next message
                     }
 
@@ -3878,7 +3887,7 @@ async function processChats(chats, keys) {
                         }
                     }
                     if (alreadyInHistory) {
-                        //console.log(`Skipping already existing transfer: ${txidHex}`);
+                        console.log(`Skipping already existing transfer: txid=${txidHex}, tx.ts=${tx.timestamp}`); // Added logging
                         continue; // Skip to the next message
                     }
                     // add the transfer tx to the wallet history
