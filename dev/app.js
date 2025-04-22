@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'c'
+const version = 'd'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1301,7 +1301,7 @@ function setupAddToHomeScreen(){
 }
 
 // Update chat list UI
-async function updateChatList(force) {
+async function updateChatList(force, retry = 0) {
     let gotChats = 0
     if (myAccount && myAccount.keys) {
         if (isOnline) {
@@ -1312,7 +1312,7 @@ async function updateChatList(force) {
                 
                 while (retryCount <= maxRetries) {
                     try {
-                        gotChats = await getChats(myAccount.keys);
+                        gotChats = await getChats(myAccount.keys, retry);
                         break; // Success, exit the retry loop
                     } catch (networkError) {
                         retryCount++;
@@ -3719,10 +3719,12 @@ async function getChats(keys, retry = 0) {  // needs to return the number of cha
     if (senders && senders.chats && chatCount){     // TODO check if above is working
         await processChats(senders.chats, keys)
     } else {
-        if (retry < 3) {
-            setTimeout(() => getChats(keys, retry + 1), 1000);
-        } else {
-            console.error('Failed to get chats after 3 retries');
+        if(retry > 0){
+            if (retry < 3) {
+                setTimeout(() => getChats(keys, retry + 1), 1000);
+            } else {
+                console.error('Failed to get chats after 3 retries');
+            }
         }
     }
     if (appendChatModal.address){   // clear the unread count of address for open chat modal
@@ -5837,7 +5839,7 @@ class WSManager {
             }
           } else if (data.account_id && data.timestamp) {
             console.log('Received new chat notification in ws');
-            updateChatList(true, true);
+            updateChatList(true, 1);
           } else {
             // Handle any other unexpected message formats
             console.warn('Received unrecognized websocket message format:', data);
