@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'e'
+const version = 'f'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1363,38 +1363,32 @@ async function updateChatList(force, retry = 0) {
         if (!contact) return ''; // Safety check
 
         // Find the latest message/activity for this contact (which is the first in the messages array)
-        const latestActivity = contact.messages?.[0]; // Assumes messages array includes transfers and is sorted descending
+        const latestActivity = contact.messages[0]; // Assumes messages array includes transfers and is sorted descending
+        if (!latestActivity){ return '' }
 
-        let latestItemTimestamp = 0;
-        let previewHTML = '<span class="empty-preview">No recent activity</span>'; // Default
+        let previewHTML = ''; // Default
 
-        if (latestActivity) {
-            latestItemTimestamp = latestActivity.timestamp;
+        
+        const latestItemTimestamp = latestActivity.timestamp;
 
-            // Check if the latest activity is a payment/transfer message
-            if (typeof latestActivity.amount === 'bigint') {
-                // Latest item is a payment/transfer
-                const amountStr = big2str(latestActivity.amount, 18);
-                const amountDisplay = `${amountStr.slice(0, 6)} ${latestActivity.symbol || 'LIB'}`;
-                const directionText = latestActivity.my ? '-' : '+';
-                // Create payment preview text
-                previewHTML = `<span class="payment-preview">${directionText} ${amountDisplay}</span>`;
-                 // Optionally add memo preview
-                 if (latestActivity.message) { // Memo is stored in the 'message' field for transfers
-                     previewHTML += ` <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 25)}</span>`;
-                 }
-            } else {
-                // Latest item is a regular message
-                const messageText = escapeHtml(latestActivity.message);
-                // Add "You:" prefix for sent messages
-                const prefix = latestActivity.my ? 'You: ' : '';
-                previewHTML = `${prefix}${truncateMessage(messageText, 50)}`; // Truncate for preview
-            }
-        }
-
-        // If no messages or payments found, timestamp will be 0. Use current time as a fallback.
-        if (latestItemTimestamp === 0) {
-           latestItemTimestamp = Date.now();
+        // Check if the latest activity is a payment/transfer message
+        if (typeof latestActivity.amount === 'bigint') {
+            // Latest item is a payment/transfer
+            const amountStr = big2str(latestActivity.amount, 18);
+            const amountDisplay = `${amountStr.slice(0, 6)} ${latestActivity.symbol || 'LIB'}`;
+            const directionText = latestActivity.my ? '-' : '+';
+            // Create payment preview text
+            previewHTML = `<span class="payment-preview">${directionText} ${amountDisplay}</span>`;
+                // Optionally add memo preview
+                if (latestActivity.message) { // Memo is stored in the 'message' field for transfers
+                    previewHTML += ` <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 25)}</span>`;
+                }
+        } else {
+            // Latest item is a regular message
+            const messageText = escapeHtml(latestActivity.message);
+            // Add "You:" prefix for sent messages
+            const prefix = latestActivity.my ? 'You: ' : '';
+            previewHTML = `${prefix}${truncateMessage(messageText, 50)}`; // Truncate for preview
         }
 
         // Use the determined latest timestamp for display
@@ -2175,8 +2169,11 @@ function appendChatModal(highlightNewMessage = false) {
     if (!currentAddress) { return; }
 
     const contact = myData.contacts[currentAddress];
-    // Ensure messages array exists and is sorted descending (newest first)
-    const messages = contact?.messages || [];
+    if (!contact || !contact.messages) {
+            console.log('No contact or messages found for address:', appendChatModal.address);
+            return;
+    }
+    const messages = contact.messages; // Already sorted descending
 
     const modal = document.getElementById('chatModal');
     if (!modal) return;
@@ -2212,33 +2209,20 @@ function appendChatModal(highlightNewMessage = false) {
             const amountDisplay = `${amountStr.slice(0, 6)} ${item.symbol || 'LIB'}`; // Use item.symbol or fallback
 
             // Check item.my for sent/received
-            if (item.my) { // item is sent
-                // --- Render SENT Payment Transaction (like a sent message) ---
-                const directionText = '-';
-                messageHTML = `
-                    <div class="message sent payment-info" ${timestampAttribute}> 
-                        <div class="payment-header">
-                            <span class="payment-direction">${directionText}</span>
-                            <span class="payment-amount">${amountDisplay}</span>
-                        </div>
-                        ${itemMemo ? `<div class="payment-memo">${linkifyUrls(itemMemo)}</div>` : ''}
-                        <div class="message-time">${timeString}</div>
+
+            // --- Render Payment Transaction ---
+            const directionText = item.my ? '-' : '+';
+            const messageClass = item.my ? 'sent' : 'received';
+            messageHTML = `
+                <div class="message ${messageClass} payment-info" ${timestampAttribute}> 
+                    <div class="payment-header">
+                        <span class="payment-direction">${directionText}</span>
+                        <span class="payment-amount">${amountDisplay}</span>
                     </div>
-                `;
-            } else { // item.my is false (received)
-                // --- Render RECEIVED Payment Transaction (like a received message) ---
-                const directionText = '+';
-                messageHTML = `
-                    <div class="message received payment-info" ${timestampAttribute}>
-                        <div class="payment-header">
-                            <span class="payment-direction">${directionText}</span>
-                            <span class="payment-amount">${amountDisplay}</span>
-                        </div>
-                        ${itemMemo ? `<div class="payment-memo">${linkifyUrls(itemMemo)}</div>` : ''}
-                        <div class="message-time">${timeString}</div>
-                    </div>
-                `;
-            }
+                    ${itemMemo ? `<div class="payment-memo">${linkifyUrls(itemMemo)}</div>` : ''}
+                    <div class="message-time">${timeString}</div>
+                </div>
+            `;
         } else {
             // --- Render Chat Message ---
             const messageClass = item.my ? 'sent' : 'received'; // Use item.my directly
