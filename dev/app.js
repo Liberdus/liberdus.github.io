@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'd'
+const version = 'e'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -262,7 +262,7 @@ function openSignInModal() {
     const usernameSelect = document.getElementById('username');
     // Populate select with usernames
     usernameSelect.innerHTML = `
-        <option value="">Select an account</option>
+        <option value="" disabled selected hidden>Select an account</option>
         ${usernames.map(username => `<option value="${username}">${username}</option>`).join('')}
     `;
 
@@ -279,7 +279,7 @@ function openSignInModal() {
     const removeButton = document.getElementById('removeAccountButton');
     const notFoundMessage = document.getElementById('usernameNotFound');
 
-    submitButton.disabled = false;
+    submitButton.disabled = true;  // Keep button disabled until an account is selected
     submitButton.textContent = 'Sign In';
     submitButton.style.display = 'inline';
     removeButton.style.display = 'none';
@@ -1359,20 +1359,58 @@ async function updateChatList(force, retry = 0) {
     
     const chatItems = await Promise.all(chats.map(async chat => {
         const identicon = await generateIdenticon(chat.address);
-        const contact = contacts[chat.address]
-        // first message is now the latest message
-        const message = contact.messages[0];
-        if (!message){ return '' }
+        const contact = contacts[chat.address];
+        if (!contact) return ''; // Safety check
+
+        // Find the latest message/activity for this contact (which is the first in the messages array)
+        const latestActivity = contact.messages?.[0]; // Assumes messages array includes transfers and is sorted descending
+
+        let latestItemTimestamp = 0;
+        let previewHTML = '<span class="empty-preview">No recent activity</span>'; // Default
+
+        if (latestActivity) {
+            latestItemTimestamp = latestActivity.timestamp;
+
+            // Check if the latest activity is a payment/transfer message
+            if (typeof latestActivity.amount === 'bigint') {
+                // Latest item is a payment/transfer
+                const amountStr = big2str(latestActivity.amount, 18);
+                const amountDisplay = `${amountStr.slice(0, 6)} ${latestActivity.symbol || 'LIB'}`;
+                const directionText = latestActivity.my ? '-' : '+';
+                // Create payment preview text
+                previewHTML = `<span class="payment-preview">${directionText} ${amountDisplay}</span>`;
+                 // Optionally add memo preview
+                 if (latestActivity.message) { // Memo is stored in the 'message' field for transfers
+                     previewHTML += ` <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 25)}</span>`;
+                 }
+            } else {
+                // Latest item is a regular message
+                const messageText = escapeHtml(latestActivity.message);
+                // Add "You:" prefix for sent messages
+                const prefix = latestActivity.my ? 'You: ' : '';
+                previewHTML = `${prefix}${truncateMessage(messageText, 50)}`; // Truncate for preview
+            }
+        }
+
+        // If no messages or payments found, timestamp will be 0. Use current time as a fallback.
+        if (latestItemTimestamp === 0) {
+           latestItemTimestamp = Date.now();
+        }
+
+        // Use the determined latest timestamp for display
+        const timeDisplay = formatTime(latestItemTimestamp);
+        const contactName = contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`;
+
         return `
             <li class="chat-item">
                 <div class="chat-avatar">${identicon}</div>
                 <div class="chat-content">
                     <div class="chat-header">
-                        <div class="chat-name">${contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`}</div>
-                        <div class="chat-time">${formatTime(message.timestamp)}  <span class="chat-time-chevron"></span></div>
+                        <div class="chat-name">${contactName}</div>
+                        <div class="chat-time">${timeDisplay} <span class="chat-time-chevron"></span></div>
                     </div>
                     <div class="chat-message">
-                        ${escapeHtml(message.message)}
+                        ${previewHTML}
                         ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : ''}
                     </div>
                 </div>
@@ -2132,72 +2170,134 @@ function openChatModal(address) {
 }
 
 function appendChatModal(highlightNewMessage = false) {
-    console.log('appendChatModal running for address:', appendChatModal.address, 'Highlight:', highlightNewMessage);
-    if (!appendChatModal.address) { return; }
+    const currentAddress = appendChatModal.address; // Use a local constant
+    console.log('appendChatModal running for address:', currentAddress, 'Highlight:', highlightNewMessage);
+    if (!currentAddress) { return; }
 
-    const contact = myData.contacts[appendChatModal.address];
-    if (!contact || !contact.messages) {
-            console.log('No contact or messages found for address:', appendChatModal.address);
-            return;
-    }
-    const messages = contact.messages; // Already sorted descending
+    const contact = myData.contacts[currentAddress];
+    // Ensure messages array exists and is sorted descending (newest first)
+    const messages = contact?.messages || [];
 
     const modal = document.getElementById('chatModal');
     if (!modal) return;
     const messagesList = modal.querySelector('.messages-list');
     if (!messagesList) return;
-    
-    // --- Tracking Variable ---
-    let lastReceivedElement = null; 
 
-    // 1. Clear the entire list
+    // --- 1. Identify the actual newest received message data item ---
+    // Since messages are sorted descending (newest first), the first item with my: false is the newest received.
+    const newestReceivedItem = messages.find(item => !item.my);
+    console.log('appendChatModal: Identified newestReceivedItem data:', newestReceivedItem);
+
+    // 2. Clear the entire list
     messagesList.innerHTML = '';
 
-    // 2. Iterate backwards through data (oldest to newest data index)
+    // 3. Iterate backwards through messages (oldest to newest for rendering order)
+    // messages are already sorted descending (newest first) in myData
     for (let i = messages.length - 1; i >= 0; i--) {
-        const m = messages[i];
-        m.type = m.my ? 'sent' : 'received';
+        const item = messages[i];
+        let messageHTML = '';
+        const timeString = formatTime(item.timestamp);
+        // Use a consistent timestamp attribute for potential future use (e.g., message jumping)
+        const timestampAttribute = `data-message-timestamp="${item.timestamp}"`;
 
-        // 3. Append each message
-        messagesList.insertAdjacentHTML('beforeend', `
-            <div class="message ${m.type}" data-message-timestamp="${m.timestamp}">  
-                <div class="message-content" style="white-space: pre-wrap">${linkifyUrls(m.message)}</div>
-                <div class="message-time">${formatTime(m.timestamp)}</div>
-            </div>
-        `);
+        // Check if it's a payment based on the presence of the amount property (BigInt)
+        if (typeof item.amount === 'bigint') {
+            // Define common payment variables
+            const itemAmount = item.amount;
+            const itemMemo = item.message; // Memo is stored in the 'message' field for transfers
 
-        // 4. If this message is received, update our tracker to the latest one
-        if (m.type === 'received') {
-            lastReceivedElement = messagesList.lastElementChild; // Get the actual DOM element just added
+            // Assuming LIB (18 decimals) for now. TODO: Handle different asset decimals if needed.
+            // Format amount correctly using big2str
+            const amountStr = big2str(itemAmount, 18);
+            const amountDisplay = `${amountStr.slice(0, 6)} ${item.symbol || 'LIB'}`; // Use item.symbol or fallback
+
+            // Check item.my for sent/received
+            if (item.my) { // item is sent
+                // --- Render SENT Payment Transaction (like a sent message) ---
+                const directionText = '-';
+                messageHTML = `
+                    <div class="message sent payment-info" ${timestampAttribute}> 
+                        <div class="payment-header">
+                            <span class="payment-direction">${directionText}</span>
+                            <span class="payment-amount">${amountDisplay}</span>
+                        </div>
+                        ${itemMemo ? `<div class="payment-memo">${linkifyUrls(itemMemo)}</div>` : ''}
+                        <div class="message-time">${timeString}</div>
+                    </div>
+                `;
+            } else { // item.my is false (received)
+                // --- Render RECEIVED Payment Transaction (like a received message) ---
+                const directionText = '+';
+                messageHTML = `
+                    <div class="message received payment-info" ${timestampAttribute}>
+                        <div class="payment-header">
+                            <span class="payment-direction">${directionText}</span>
+                            <span class="payment-amount">${amountDisplay}</span>
+                        </div>
+                        ${itemMemo ? `<div class="payment-memo">${linkifyUrls(itemMemo)}</div>` : ''}
+                        <div class="message-time">${timeString}</div>
+                    </div>
+                `;
+            }
+        } else {
+            // --- Render Chat Message ---
+            const messageClass = item.my ? 'sent' : 'received'; // Use item.my directly
+            messageHTML = `
+                <div class="message ${messageClass}" ${timestampAttribute}>
+                    <div class="message-content" style="white-space: pre-wrap">${linkifyUrls(item.message)}</div>
+                    <div class="message-time">${timeString}</div>
+                </div>
+            `;
         }
+
+        // 4. Append the constructed HTML
+        // Insert at the end of the list to maintain correct chronological order
+        messagesList.insertAdjacentHTML('beforeend', messageHTML);
+        // The newest received element will be found after the loop completes
     }
-    
-    // 5. Delayed Scrolling & Highlighting Logic (after loop)
+
+    // --- 5. Find the corresponding DOM element after rendering ---
+    // This happens inside the setTimeout to ensure elements are in the DOM
+
+    // 6. Delayed Scrolling & Highlighting Logic (after loop)
     setTimeout(() => {
         const messageContainer = messagesList.parentElement; 
-        if (lastReceivedElement && highlightNewMessage) {
-            // Found a received message, scroll to and highlight it
-            lastReceivedElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-            // Apply highlight immediately 
-            lastReceivedElement.classList.add('highlighted');
-            
-            // Set timeout to remove the highlight after a duration
-            setTimeout(() => {
-                 // Check if element still exists before removing class
-                 if (lastReceivedElement && lastReceivedElement.parentNode) {
-                    lastReceivedElement.classList.remove('highlighted'); 
+        // Find the DOM element for the actual newest received item using its timestamp
+        // Only proceed if newestReceivedItem was found and highlightNewMessage is true
+        if (newestReceivedItem && highlightNewMessage) {
+            const newestReceivedElementDOM = messagesList.querySelector(`[data-message-timestamp="${newestReceivedItem.timestamp}"]`);
+
+            if (newestReceivedElementDOM) {
+                // Found the element, scroll to and highlight it
+                newestReceivedElementDOM.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+                // Apply highlight immediately 
+                newestReceivedElementDOM.classList.add('highlighted');
+                
+                // Set timeout to remove the highlight after a duration
+                setTimeout(() => {
+                     // Check if element still exists before removing class
+                     if (newestReceivedElementDOM && newestReceivedElementDOM.parentNode) {
+                        newestReceivedElementDOM.classList.remove('highlighted'); 
+                     }
+                }, 3000); 
+            } else {
+                 console.warn('appendChatModal: Could not find DOM element for newestReceivedItem with timestamp:', newestReceivedItem.timestamp);
+                 // If element not found, just scroll to bottom
+                 if (messageContainer) {
+                    messageContainer.scrollTop = messageContainer.scrollHeight;
                  }
-            }, 2000); 
+            }
 
         } else {
-            // No received messages found, just scroll to the bottom
-            // Ensure container exists before scrolling
+            // No received messages found, not highlighting, or highlightNewMessage is false,
+            // just scroll to the bottom if the container exists.
             if (messageContainer) {
                 messageContainer.scrollTop = messageContainer.scrollHeight;
             }
         }
-    }, 300); // <<< Delay of 500 milliseconds
+    }, 300); // <<< Delay of 300 milliseconds for rendering
 }
 appendChatModal.address = null
 
@@ -2831,11 +2931,13 @@ console.log('payload is', payload)
         }
 
         // Add transaction to history
+        const currentTime = Date.now();
+
         const newPayment = {
             txid: response.txid,
             amount: amount,
             sign: -1,
-            timestamp: Date.now(),
+            timestamp: currentTime,
             address: toAddress,
             memo: memo
         };
@@ -2851,6 +2953,29 @@ console.log('payload is', payload)
         // Update wallet view and close modal
         updateWalletView();
 */
+
+        // --- Create and Insert Sent Transfer Message into contact.messages ---
+        const transferMessage = {
+            timestamp: currentTime,
+            sent_timestamp: currentTime,
+            my: true, // Sent transfer
+            message: memo, // Use the memo as the message content
+            amount: amount, // Use the BigInt amount
+            symbol: 'LIB', // TODO: Use the asset symbol
+        };
+        // Insert the transfer message into the contact's message list, maintaining sort order
+        insertSorted(myData.contacts[toAddress].messages, transferMessage, 'timestamp');
+        // --------------------------------------------------------------
+
+        // Update the chat modal to show the newly sent transfer message
+        // Check if the chat modal for this recipient is currently active
+        const chatModalActive = document.getElementById('chatModal')?.classList.contains('active');
+        const inActiveChatWithRecipient = appendChatModal.address === toAddress && chatModalActive;
+
+        if (inActiveChatWithRecipient) {
+            appendChatModal(true); // Re-render the chat modal and highlight the new item
+        }
+
         closeSendModal();
         closeSendConfirmationModal();
         document.getElementById('sendToAddress').value = '';
@@ -3338,14 +3463,49 @@ async function handleSendMessage() {
 async function handleClickToCopy(e) {
     const messageEl = e.target.closest('.message');
     if (!messageEl) return;
-    
-    try {
-        const messageText = messageEl.querySelector('.message-content').textContent;
-        await navigator.clipboard.writeText(messageText);
-        showToast('Message copied to clipboard', 2000, 'success');
-    } catch (err) {
-        showToast('Failed to copy message', 2000, 'error');
+
+    let textToCopy = null;
+    let contentType = 'Text'; // Default content type for toast
+
+    // Check if it's a payment message
+    if (messageEl.classList.contains('payment-info')) {
+        const paymentMemoEl = messageEl.querySelector('.payment-memo');
+        if (paymentMemoEl) {
+            textToCopy = paymentMemoEl.textContent;
+            contentType = 'Memo'; // Update type for toast
+        } else {
+             // No memo element found in this payment block
+             showToast('No memo to copy', 2000, 'info');
+             return;
+        }
+    } else {
+        // It's a regular chat message
+        const messageContentEl = messageEl.querySelector('.message-content');
+        if (messageContentEl) {
+            textToCopy = messageContentEl.textContent;
+            contentType = 'Message'; // Update type for toast
+        }
+         else {
+             // Should not happen for regular messages, but handle gracefully
+             showToast('No content to copy', 2000, 'info');
+             return;
+         }
     }
+
+    // Proceed with copying if text was found
+    if (textToCopy && textToCopy.trim()) {
+        try {
+            await navigator.clipboard.writeText(textToCopy.trim());
+            showToast(`${contentType} copied to clipboard`, 2000, 'success');
+        } catch (err) {
+            console.error('Failed to copy:', err);
+            showToast(`Failed to copy ${contentType.toLowerCase()}`, 2000, 'error');
+        }
+    } else if (contentType === 'Memo'){
+        // Explicitly handle the case where memo exists but is empty/whitespace
+        showToast('Memo is empty', 2000, 'info');
+    }
+     // No need for an else here, cases with no element are handled above
 }
 
 // Update wallet view; refresh wallet
@@ -3707,9 +3867,7 @@ async function getChats(keys, retry = 0) {  // needs to return the number of cha
     const timestamp = myAccount.chatTimestamp || 0
 //    const timestamp = myData.contacts[keys.address]?.messages?.at(-1).timestamp || 0
 
-    
     const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/${timestamp}`) // TODO get this working
-
 //    const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/0`) // TODO stop using this
     const chatCount = senders?.chats ? Object.keys(senders.chats).length : 0; // Handle null/undefined senders.chats
     console.log('getChats senders', 
@@ -3720,6 +3878,7 @@ async function getChats(keys, retry = 0) {  // needs to return the number of cha
         await processChats(senders.chats, keys)
     } else {
         if(retry > 0){
+            console.log('getChats retry', retry)
             if (retry < 3) {
                 setTimeout(() => getChats(keys, retry + 1), 1000);
             } else {
@@ -3761,14 +3920,12 @@ function playTransferSound(shouldPlay) {
 async function processChats(chats, keys) {
     let newTimestamp = 0
     const timestamp = myAccount.chatTimestamp || 0
-    // Use timestamp - 1 for the messages query to potentially include messages arriving *at* the last timestamp. Adjusted the logic below.
-//    const messageQueryTimestamp = Math.max(0, timestamp - 1); // Fetch messages >= (timestamp - 1)
-    const messageQueryTimestamp = Math.max(0, timestamp); // Reverted: Fetch messages >= timestamp
+    const messageQueryTimestamp = Math.max(0, timestamp);
 
     for (let sender in chats) {
         // Fetch messages using the adjusted timestamp
         const res = await queryNetwork(`/messages/${chats[sender]}/${messageQueryTimestamp}`)
-        console.log("processChats sender", sender, "fetching since", messageQueryTimestamp, "(using timestamp:", timestamp,")") // Added original timestamp for context
+        console.log("processChats sender", sender, "fetching since", messageQueryTimestamp)
         if (res && res.messages){  
             const from = normalizeAddress(sender)
             if (!myData.contacts[from]){ createNewContact(from) }
@@ -3828,7 +3985,7 @@ async function processChats(chats, keys) {
                         }
                     }
                     if (alreadyExists) {
-                        console.log(`Skipping already existing message: tx.ts=${tx.timestamp}, payload.sent_ts=${payload.sent_timestamp}, content=${payload.message}`); // Added logging
+                        //console.log(`Skipping already existing message: ${payload.sent_timestamp}`);
                         continue; // Skip to the next message
                     }
 
@@ -3889,7 +4046,7 @@ async function processChats(chats, keys) {
                         }
                     }
                     if (alreadyInHistory) {
-                        console.log(`Skipping already existing transfer: txid=${txidHex}, tx.ts=${tx.timestamp}`); // Added logging
+                        //console.log(`Skipping already existing transfer: ${txidHex}`);
                         continue; // Skip to the next message
                     }
                     // add the transfer tx to the wallet history
@@ -3909,6 +4066,19 @@ async function processChats(chats, keys) {
                     // Mark that we have a new transfer for toast notification
                     hasNewTransfer = true
 
+                    // --- Create and Insert Transfer Message into contact.messages ---
+                    const transferMessage = {
+                        timestamp: payload.sent_timestamp,
+                        sent_timestamp: payload.sent_timestamp,
+                        my: false, // Received transfer
+                        message: payload.message, // Use the memo as the message content
+                        amount: parse(stringify(tx.amount)), // Ensure amount is stored as BigInt
+                        symbol: 'LIB', // TODO: get the symbol from the asset
+                    };
+                    // Insert the transfer message into the contact's message list, maintaining sort order
+                    insertSorted(contact.messages, transferMessage, 'timestamp');
+                    // --------------------------------------------------------------
+
                     const walletScreenActive = document.getElementById("walletScreen")?.classList.contains("active");
                     const historyModalActive = document.getElementById("historyModal")?.classList.contains("active");
                     // Update wallet view if it's active
@@ -3921,6 +4091,11 @@ async function processChats(chats, keys) {
                     }
                     // Always play transfer sound for new transfers
                     playTransferSound(true);
+                    // is chatModal of sender address is active
+                    if (inActiveChatWithSender){
+                        // add the transfer tx to the chatModal
+                        appendChatModal(true);
+                    }
                 }
             }
             // If messages were added to contact.messages, update myData.chats
@@ -3976,7 +4151,7 @@ async function processChats(chats, keys) {
             }
             
             // Show transfer notification even if no messages were added
-            if (hasNewTransfer && !inActiveChatWithSender) {
+            if (hasNewTransfer) {
                 // Add notification indicator to Wallet tab if we're not on it
                 const walletButton = document.getElementById('switchToWallet');
                 if (!document.getElementById('walletScreen').classList.contains('active')) {
