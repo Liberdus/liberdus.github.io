@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'a'
+const version = 'b'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -3752,7 +3752,7 @@ async function processChats(chats, keys) {
     let newTimestamp = 0
     const timestamp = myAccount.chatTimestamp || 0
     // Use timestamp - 1 for the messages query to potentially include messages arriving *at* the last timestamp. Added this to since it fixed situation where a receiver sent a message right after the sender sent 3 sequential messages.
-    const messageQueryTimestamp = Math.max(0, timestamp - 1);
+    const messageQueryTimestamp = Math.max(0, timestamp);
 
     for (let sender in chats) {
         // Fetch messages using the adjusted timestamp
