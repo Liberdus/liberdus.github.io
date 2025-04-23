@@ -53,24 +53,41 @@
       https://github.com/davidshimjs/qrcodejs
       https://github.com/davidshimjs/qrcodejs/blob/master/qrcode.js
     -->
+    <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v-38" />
+    <link rel="stylesheet" href="./styles.css?v-39" />
     <link rel="manifest" href="./manifest.json" />
   </head>
   <body>
-    <script src="./app.js?v-38" type="module"></script>
+    <script src="./app.js?v-39" type="module"></script>
     <div class="container">
       <header class="header" id="header">
-        <div id="logo"><a href="https://liberdus.com" target="_blank" title="Visit Liberdus website" class="logo-link"><img src="./media/liberdus_logo_50.png" /></a></div>
+        <div id="logo">
+          <a
+            href="https://liberdus.com"
+            target="_blank"
+            title="Visit Liberdus website"
+            class="logo-link"
+            ><img src="./media/liberdus_logo_50.png"
+          /></a>
+        </div>
         <div class="app-name">Liberdus</div>
         <div class="header-icons">
           <div class="offline-indicator" id="offlineIndicator">Offline</div>
+          <div id="wsStatusIndicator" class="ws-status-indicator">
+            WebSocket
+          </div>
           <button class="icon-button" id="toggleMenu"></button>
         </div>
       </header>
 
       <div class="welcome-screen" id="welcomeScreen">
-        <a href="https://liberdus.com" target="_blank" title="Visit Liberdus website" class="logo-link">
+        <a
+          href="https://liberdus.com"
+          target="_blank"
+          title="Visit Liberdus website"
+          class="logo-link"
+        >
           <img
             src="./media/liberdus_logo_250.png"
             alt="Liberdus Logo"
