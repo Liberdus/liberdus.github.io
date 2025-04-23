@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'l'
+const version = 'm'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -724,8 +724,7 @@ function checkIsInstalledPWA() {
 document.addEventListener('DOMContentLoaded', async () => {
     await checkVersion()  // version needs to be checked before anything else happens
     await lockToPortrait()
-    await timeDifference() // Calculate and log time difference early
-
+    await timeDifference(); // Calculate and log time difference early
     // Initialize service worker only if running as installed PWA
     isInstalledPWA = checkIsInstalledPWA(); // Set the global variable
     if (isInstalledPWA && 'serviceWorker' in navigator) {
@@ -6500,7 +6499,8 @@ async function timeDifference(retryCount = 0) {
     try {
         // Add 'cache: "no-store"' to potentially help with hard-refresh issues,
         // ensuring we always go to the network.
-        const response = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC', { cache: 'no-store' });
+        // Try a different API: worldclockapi.com
+        const response = await fetch('https://worldclockapi.com/api/json/utc/now', { cache: 'no-store' });
 
         if (!response.ok) {
             // Throw an error for bad HTTP status codes (e.g., 4xx, 5xx)
@@ -6509,7 +6509,8 @@ async function timeDifference(retryCount = 0) {
 
         const data = await response.json();
         const clientTimeMs = Date.now(); // Get client time as close as possible to response processing
-        const serverTimeString = data.utc_datetime;
+        // Adjust for worldclockapi.com response format
+        const serverTimeString = data.currentDateTime;
 
         const serverTimeMs = new Date(serverTimeString).getTime();
         if (isNaN(serverTimeMs)) {
