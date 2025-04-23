@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'm'
+const version = 'n'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6499,8 +6499,8 @@ async function timeDifference(retryCount = 0) {
     try {
         // Add 'cache: "no-store"' to potentially help with hard-refresh issues,
         // ensuring we always go to the network.
-        // Try a different API: worldclockapi.com
-        const response = await fetch('https://worldclockapi.com/api/json/utc/now', { cache: 'no-store' });
+        // Try a different API: TimeAPI.io
+        const response = await fetch('https://timeapi.io/api/time/current/zone?timeZone=UTC', { cache: 'no-store' });
 
         if (!response.ok) {
             // Throw an error for bad HTTP status codes (e.g., 4xx, 5xx)
@@ -6509,8 +6509,8 @@ async function timeDifference(retryCount = 0) {
 
         const data = await response.json();
         const clientTimeMs = Date.now(); // Get client time as close as possible to response processing
-        // Adjust for worldclockapi.com response format
-        const serverTimeString = data.currentDateTime;
+        // Adjust for TimeAPI.io response format
+        const serverTimeString = data.dateTime.endsWith("Z") ? data.dateTime : data.dateTime + "Z";
 
         const serverTimeMs = new Date(serverTimeString).getTime();
         if (isNaN(serverTimeMs)) {
@@ -6523,6 +6523,7 @@ async function timeDifference(retryCount = 0) {
         timeSkew = difference; // Store the calculated skew
 
         // Optional: Keep logging for verification
+        // update since we are using TimeAPI.io
         console.log(`Server time (UTC): ${serverTimeString}`);
         console.log(`Client time (local): ${new Date(clientTimeMs).toISOString()}`);
         console.log(`Time difference (Server - Client): ${difference} ms`);
