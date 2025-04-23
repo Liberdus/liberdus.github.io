@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'j'
+const version = 'k'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -724,7 +724,10 @@ function checkIsInstalledPWA() {
 document.addEventListener('DOMContentLoaded', async () => {
     await checkVersion()  // version needs to be checked before anything else happens
     await lockToPortrait()
-    await timeDifference(); // Calculate and log time difference early
+    // set timer for 2 seconds before invoking timeDifference
+    setTimeout(async () => {
+        await timeDifference(); // Calculate and log time difference early
+    }, 2000);
     // Initialize service worker only if running as installed PWA
     isInstalledPWA = checkIsInstalledPWA(); // Set the global variable
     if (isInstalledPWA && 'serviceWorker' in navigator) {
