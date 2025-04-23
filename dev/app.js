@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2784,9 +2784,16 @@ function fillAmount() {
 // The recipient account may not exist in myData.contacts and might have to be created
 async function handleSendAsset(event) {
     event.preventDefault();
-    if (Date.now() - handleSendAsset.timestamp < 2000) {
+    const confirmButton = document.getElementById('confirmSendButton');
+    const cancelButton = document.getElementById('cancelSendButton');
+
+    if (Date.now() - handleSendAsset.timestamp < 2000 || confirmButton.disabled) {
         return;
     }
+
+    confirmButton.disabled = true;
+    cancelButton.disabled = true;
+
     handleSendAsset.timestamp = Date.now()
     const wallet = myData.wallet;
     const assetIndex = document.getElementById('sendAsset').value;  // TODO include the asset id and symbol in the tx
@@ -2950,6 +2957,25 @@ console.log('payload is', payload)
         // Insert the transfer message into the contact's message list, maintaining sort order
         insertSorted(myData.contacts[toAddress].messages, transferMessage, 'timestamp');
         // --------------------------------------------------------------
+
+        // --- Update myData.chats to reflect the new message ---
+        const existingChatIndex = myData.chats.findIndex(chat => chat.address === toAddress);
+        if (existingChatIndex !== -1) {
+            myData.chats.splice(existingChatIndex, 1); // Remove existing entry
+        }
+        // Create the new chat entry
+        const chatUpdate = {
+            address: toAddress,
+            timestamp: currentTime,
+        };
+        // Find insertion point to maintain timestamp order (newest first)
+        const insertIndex = myData.chats.findIndex(chat => chat.timestamp < chatUpdate.timestamp);
+        if (insertIndex === -1) {
+            myData.chats.push(chatUpdate); // Append if newest or list is empty
+        } else {
+            myData.chats.splice(insertIndex, 0, chatUpdate); // Insert at correct position
+        }
+        // --- End Update myData.chats ---
 
         // Update the chat modal to show the newly sent transfer message
         // Check if the chat modal for this recipient is currently active
@@ -3298,14 +3324,12 @@ handleSignOut.exit = false
 // The user has a chat modal open to a recipient and has typed a message anc clicked the Send button
 // The recipient account already exists in myData.contacts; it was created when the user submitted the New Chat form
 async function handleSendMessage() {
-    console.log('entering handleSendMessage')
     const sendButton = document.getElementById('handleSendMessage');
     sendButton.disabled = true; // Disable the button
 
     try {
         const messageInput = document.querySelector('.message-input');
         messageInput.focus(); // Add focus back to keep keyboard open
-        //await updateChatList()  // before sending the message check and show received messages
         
         const message = messageInput.value.trim();
         if (!message) return;
@@ -3357,9 +3381,8 @@ async function handleSendMessage() {
 
         // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
         // Encrypt message using shared secret
-        console.log('dhkey is', dhkey)
         const encMessage = encryptChacha(dhkey, message)
-        console.log('encMessage is', encMessage)
+
         // Create message payload
         const payload = {
             message: encMessage,
@@ -3391,22 +3414,13 @@ async function handleSendMessage() {
 
         // --- Optimistic UI Update ---
         // Create new message object for local display immediately
-
-        // Not needed since it is created when the New Chat form was submitted
-        /*
-                // Create contact if needed
-                if (!chatsData.contacts[currentAddress].messages) {   // TODO check if this is really needed; should be created already
-                    createNewContact(currentAddress)
-                }
-        */
         const newMessage = {
             message,
-            timestamp: Date.now(), // Use current time for local display
-            sent_timestamp: payload.sent_timestamp, // Keep the timestamp that will be sent
+            timestamp: payload.sent_timestamp,
+            sent_timestamp: payload.sent_timestamp,
             my: true,
             //status: 'sending' // Add a temporary status
         };
-        console.log('about to insert newMessage into chatsData.contacts[currentAddress].messages')
         insertSorted(chatsData.contacts[currentAddress].messages, newMessage, 'timestamp');
 
         // Update or add to chats list, maintaining chronological order
@@ -3427,15 +3441,12 @@ async function handleSendMessage() {
         messageInput.value = '';
         messageInput.style.height = '44px'; // original height
 
-        console.log('newMessage is', newMessage)
         // Update the chat modal UI immediately
         appendChatModal() // This should now display the 'sending' message
-        console.log('chatsData.contacts[currentAddress].messages is', chatsData.contacts[currentAddress].messages)
 
         // Scroll to bottom of chat modal
         messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
         // --- End Optimistic UI Update ---
-
 
         //console.log('payload is', payload)
         // Send the message transaction using postChatMessage with default toll of 1
@@ -3446,6 +3457,7 @@ async function handleSendMessage() {
             msg => msg.sent_timestamp === newMessage.sent_timestamp && msg.my === true && msg.status === 'sending'
         ); */
         
+        //TODO: UI update to show sent message was sent or failed
         // will have to delete message from the places we added it to
         if (!response || !response.result || !response.result.success) {
             console.log('message failed to send', response)
@@ -4095,6 +4107,8 @@ async function processChats(chats, keys) {
                     insertSorted(contact.messages, transferMessage, 'timestamp');
                     // --------------------------------------------------------------
 
+                    added += 1
+
                     const walletScreenActive = document.getElementById("walletScreen")?.classList.contains("active");
                     const historyModalActive = document.getElementById("historyModal")?.classList.contains("active");
                     // Update wallet view if it's active
@@ -4152,8 +4166,8 @@ async function processChats(chats, keys) {
                 }
                 
                 // Show toast notification for new messages
-                // Only suppress notification if we're ACTIVELY viewing this chat
-                if (!inActiveChatWithSender) {
+                // Only suppress notification if we're ACTIVELY viewing this chat and if not a transfer
+                if (!inActiveChatWithSender && !hasNewTransfer) {
                     // Get name of sender
                     const senderName = contact.name || contact.username || `${from.slice(0,8)}...`
                     
@@ -6400,6 +6414,9 @@ function handleSendFormSubmit(event) {
     const amount = document.getElementById('sendAmount').value;
     const memo = document.getElementById('sendMemo').value;
 
+    const confirmButton = document.getElementById('confirmSendButton');
+    const cancelButton = document.getElementById('cancelSendButton');
+
     // Update confirmation modal with values
     document.getElementById('confirmRecipient').textContent = recipient;
     document.getElementById('confirmAmount').textContent = `${amount}`;
@@ -6416,6 +6433,9 @@ function handleSendFormSubmit(event) {
 
     // Hide send modal and show confirmation modal
     document.getElementById('sendModal').classList.remove('active');
+
+    confirmButton.disabled = false;
+    cancelButton.disabled = false;
     document.getElementById('sendConfirmationModal').classList.add('active');
 }
 
