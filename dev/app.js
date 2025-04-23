@@ -1,12 +1,12 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'i'
+const version = 'j'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
     let newVersion;
     try {
-        const response = await fetch(`version.html?${Date.now()}`);
+        const response = await fetch(`version.html?${getCorrectedTimestamp()}`);
         if (!response.ok) throw new Error('Version check failed');
         newVersion = await response.text();
     } catch (error) {
@@ -157,6 +157,7 @@ const pollIntervalChatting = 5000  // in millseconds
 let myData = null
 let myAccount = null        // this is set to myData.account for convience
 let isInstalledPWA = false
+let timeSkew = 0
 
 // TODO - get the parameters from the network
 // mock network parameters
@@ -589,7 +590,7 @@ async function handleCreateAccount(event) {
     // Close modal and proceed to app
     closeCreateAccountModal();
     document.getElementById('welcomeScreen').style.display = 'none';
-    getChats.lastCall = Date.now() // since we just created the account don't check for chat messages
+    getChats.lastCall = getCorrectedTimestamp() // since we just created the account don't check for chat messages
     switchView('chats'); // Default view
 }
 
@@ -654,7 +655,7 @@ function newDataRecord(myAccount){
         : [];
 
     const myData = {
-        timestamp: Date.now(),
+        timestamp: getCorrectedTimestamp(),
         account: myAccount,
         network: {
             gateways: networkGateways,
@@ -723,6 +724,7 @@ function checkIsInstalledPWA() {
 document.addEventListener('DOMContentLoaded', async () => {
     await checkVersion()  // version needs to be checked before anything else happens
     await lockToPortrait()
+    await timeDifference(); // Calculate and log time difference early
     // Initialize service worker only if running as installed PWA
     isInstalledPWA = checkIsInstalledPWA(); // Set the global variable
     if (isInstalledPWA && 'serviceWorker' in navigator) {
@@ -1430,7 +1432,7 @@ async function updateWalletBalances() {
         return;
     }
     await updateAssetPricesIfNeeded()
-    const now = Date.now()
+    const now = getCorrectedTimestamp()
     if (!myData.wallet.timestamp){myData.wallet.timestamp = 0}
     if (now - myData.wallet.timestamp < 5000){return}
 
@@ -1908,13 +1910,24 @@ async function handleRemoveAccount() {
 }
 
 function openNewChatModal() {
-    document.getElementById('newChatModal').classList.add('active');
+    const newChatModal = document.getElementById('newChatModal');
+    newChatModal.classList.add('active');
     document.getElementById('newChatButton').classList.remove('visible');
 
     const usernameAvailable = document.getElementById('chatRecipientError');
+    const recipientInput = document.getElementById('chatRecipient');
     const submitButton = document.querySelector('#newChatForm button[type="submit"]');
     usernameAvailable.style.display = 'none';
     submitButton.disabled = true;  
+
+    // Create the handler function
+    const focusHandler = () => {
+        recipientInput.focus();
+        newChatModal.removeEventListener('transitionend', focusHandler);
+    };
+
+    // Add the event listener
+    newChatModal.addEventListener('transitionend', focusHandler);
 }
 
 let usernameInputCheckTimeout;
@@ -2093,7 +2106,7 @@ function createNewContact(addr, username){
     c.address = address
     if (username){ c.username = normalizeUsername(username) }
     c.messages = []
-    c.timestamp = Date.now()
+    c.timestamp = getCorrectedTimestamp()
     c.unread = 0
 }
 
@@ -2787,14 +2800,14 @@ async function handleSendAsset(event) {
     const confirmButton = document.getElementById('confirmSendButton');
     const cancelButton = document.getElementById('cancelSendButton');
 
-    if (Date.now() - handleSendAsset.timestamp < 2000 || confirmButton.disabled) {
+    if ((getCorrectedTimestamp() - handleSendAsset.timestamp) < 2000 || confirmButton.disabled) {
         return;
     }
 
     confirmButton.disabled = true;
     cancelButton.disabled = true;
 
-    handleSendAsset.timestamp = Date.now()
+    handleSendAsset.timestamp = getCorrectedTimestamp()
     const wallet = myData.wallet;
     const assetIndex = document.getElementById('sendAsset').value;  // TODO include the asset id and symbol in the tx
     const fromAddress = myAccount.keys.address;
@@ -2901,7 +2914,7 @@ async function handleSendAsset(event) {
         encrypted: true,
         encryptionMethod: 'xchacha20poly1305',
         pqEncSharedKey: bin2base64(cipherText),
-        sent_timestamp: Date.now()
+        sent_timestamp: getCorrectedTimestamp()
     };
 
     try {
@@ -2922,7 +2935,7 @@ console.log('payload is', payload)
         }
 
         // Add transaction to history
-        const currentTime = Date.now();
+        const currentTime = getCorrectedTimestamp();
 
         const newPayment = {
             txid: response.txid,
@@ -2969,12 +2982,7 @@ console.log('payload is', payload)
             timestamp: currentTime,
         };
         // Find insertion point to maintain timestamp order (newest first)
-        const insertIndex = myData.chats.findIndex(chat => chat.timestamp < chatUpdate.timestamp);
-        if (insertIndex === -1) {
-            myData.chats.push(chatUpdate); // Append if newest or list is empty
-        } else {
-            myData.chats.splice(insertIndex, 0, chatUpdate); // Insert at correct position
-        }
+        insertSorted(myData.chats, chatUpdate, 'timestamp');
         // --- End Update myData.chats ---
 
         // Update the chat modal to show the newly sent transfer message
@@ -3005,7 +3013,7 @@ console.log('payload is', payload)
         alert('Transaction failed. Please try again.');
     }
 }
-handleSendAsset.timestamp = Date.now()
+handleSendAsset.timestamp = getCorrectedTimestamp()
 
 // Contact Info Modal Management
 class ContactInfoModalManager {
@@ -3146,6 +3154,8 @@ class ContactInfoModalManager {
 }
 
 async function openEditContactModal() {
+    const editContactModal = document.getElementById('editContactModal');
+    
     // Get the avatar section elements
     const avatarSection = document.querySelector('#editContactModal .contact-avatar-section');
     const avatarDiv = avatarSection.querySelector('.avatar');
@@ -3176,7 +3186,7 @@ async function openEditContactModal() {
     nameInput.parentElement.querySelector('.field-action-button').className = 'field-action-button clear';
 
     // Show the edit contact modal
-    document.getElementById('editContactModal').classList.add('active');
+    editContactModal.classList.add('active');
     
     // Get the current contact info from the contact info modal
     const currentContactAddress = contactInfoModal.currentContactAddress;
@@ -3188,9 +3198,14 @@ async function openEditContactModal() {
     // Create display info object using the same format as contactInfoModal
     const displayInfo = createDisplayInfo(myData.contacts[currentContactAddress]);
 
-    setTimeout(() => {
+    // Create a handler function to focus the input after the modal transition
+    const editContactFocusHandler = () => {
         nameInput.focus();
-    }, 1000);
+        editContactModal.removeEventListener('transitionend', editContactFocusHandler);
+    };
+
+    // Add the event listener
+    editContactModal.addEventListener('transitionend', editContactFocusHandler);
 }
 
 openEditContactModal.originalName = ''
@@ -3389,7 +3404,7 @@ async function handleSendMessage() {
             encrypted: true,
             encryptionMethod: 'xchacha20poly1305',
             pqEncSharedKey: bin2base64(cipherText),
-            sent_timestamp: Date.now()
+            sent_timestamp: getCorrectedTimestamp()
         };
 
         // Always include username, but only include other info if recipient is a friend
@@ -3589,7 +3604,7 @@ async function updateAssetPricesIfNeeded() {
         return;
     }
 
-    const now = Date.now();
+    const now = getCorrectedTimestamp();
     const priceUpdateInterval = 10 * 60 * 1000; // 10 minutes in milliseconds
 
     if (now - myData.wallet.priceTimestamp < priceUpdateInterval){ return }
@@ -3870,7 +3885,7 @@ function scheduleNextPoll() {
     }
     
     const interval = pollChats.nextPoll || pollIntervalNormal;
-    const now = Date.now();
+    const now = getCorrectedTimestamp();
     console.log('Poll schedule:', JSON.stringify({
         timestamp: now,
         nextPollIn: `${interval}ms`,
@@ -3883,7 +3898,7 @@ function scheduleNextPoll() {
 async function getChats(keys, retry = 0) {  // needs to return the number of chats that need to be processed
 //console.log('keys', keys)
     if (! keys){ console.log('no keys in getChats'); return 0 }     // TODO don't require passing in keys
-    const now = Date.now()
+    const now = getCorrectedTimestamp()
     if (now - getChats.lastCall < 1000){ return 0 }
     getChats.lastCall = now
 //console.log('address', keys)
@@ -4294,7 +4309,7 @@ async function postChatMessage(to, payload, toll, keys) {
         chatId: blake.blake2bHex([fromAddr, toAddr].sort().join``, myHashKey, 32),
         message: 'x',
         xmessage: payload,
-        timestamp: Date.now(),
+        timestamp: getCorrectedTimestamp(),
         network: '0000000000000000000000000000000000000000000000000000000000000000',
         fee: BigInt(parameters.current.transactionFee || 1)           // This is not used by the backend
     }
@@ -4314,7 +4329,7 @@ async function postAssetTransfer(to, amount, memo, keys) {
 // TODO backend is not allowing memo > 140 characters; by pass using xmemo; we might have to check the total tx size instead
 //        memo: stringify(memo),
         xmemo: memo,
-        timestamp: Date.now(),
+        timestamp: getCorrectedTimestamp(),
         network: '0000000000000000000000000000000000000000000000000000000000000000',
         fee: BigInt(parameters.current.transactionFee || 1)           // This is not used by the backend
     }
@@ -4335,7 +4350,7 @@ async function postRegisterAlias(alias, keys){
         alias: alias,
         publicKey: keys.public,
         pqPublicKey: pqPublicKey,
-        timestamp: Date.now()
+        timestamp: getCorrectedTimestamp()
     }
     const res = await injectTx(tx, keys)
     return res
@@ -4562,7 +4577,7 @@ function setupAppStateManagement() {
             // App is being hidden/closed
             console.log('📱 App hidden - starting service worker polling');
             // Logger.log('📱 App hidden - starting service worker polling');
-            const timestamp = Date.now().toString();
+            const timestamp = getCorrectedTimestamp().toString();
             localStorage.setItem('appPaused', timestamp);
             
             // Prepare account data for service worker
@@ -4980,7 +4995,7 @@ function showToast(message, duration = 2000, type = "default") {
     toast.textContent = message;
     
     // Generate a unique ID for this toast
-    const toastId = 'toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+    const toastId = 'toast-' + getCorrectedTimestamp() + '-' + Math.floor(Math.random() * 1000);
     toast.id = toastId;
     
     toastContainer.appendChild(toast);
@@ -6469,3 +6484,61 @@ function insertSorted(array, item, timestampField = 'timestamp') {
       array.splice(index, 0, item);
     }
   }
+
+/**
+ * Calculates the time difference between the client's local time and the server's time.
+ * This function fetches the current UTC time from a remote API and compares it to the client's local time.
+ * The difference is stored in the global variable `timeSkew`.
+ * 
+ * @returns {number} The time difference in milliseconds.
+ */
+async function timeDifference() {
+    try {
+        const response = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC');
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        const clientTimeMs = Date.now();
+        const serverTimeString = data.utc_datetime;
+
+        // Attempt to parse the server time string
+        const serverTimeMs = new Date(serverTimeString).getTime();
+        if (isNaN(serverTimeMs)) {
+            console.error('Error parsing server time:', serverTimeString);
+            return; // Exit if parsing failed
+        }
+
+        
+        const difference = serverTimeMs - clientTimeMs;
+
+        console.log(`Server time (UTC): ${serverTimeString}`);
+        console.log(`Client time (approx): ${new Date(clientTimeMs).toISOString()}`);
+        console.log(`Time difference (Server - Client): ${difference} ms`);
+        //log difference in minutes/seconds/milliseconds
+        const minutes = Math.floor(difference / 60000);
+        const seconds = Math.floor((difference % 60000) / 1000);
+        const milliseconds = difference % 1000;
+        console.log(`Time difference: ${minutes}m ${seconds}s ${milliseconds}ms`);
+        timeSkew = difference // in milliseconds
+    } catch (error) {
+        console.error('Failed to fetch or process time from API:', error);
+    }
+}
+
+/**
+ * Returns the current timestamp adjusted by the calculated time skew.
+ * This provides a timestamp closer to the server's time.
+ * @returns {number} The corrected timestamp in milliseconds since the Unix Epoch.
+ */
+function getCorrectedTimestamp() {
+    // Get the current client time
+    const clientNow = Date.now();
+    
+    // Add the stored skew (difference between server and client time)
+    // If server was ahead, timeSkew is positive, making the corrected time larger.
+    // If server was behind, timeSkew is negative, making the corrected time smaller.
+    const correctedTime = clientNow + timeSkew; 
+    
+    return correctedTime;
+}
