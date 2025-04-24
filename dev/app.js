@@ -5856,7 +5856,6 @@ class WSManager {
       if (myAccount && myAccount.keys && myAccount.keys.address) {
         console.log('Auto-subscribing to WebSocket events');
         this.subscribe();
-        this.heartbeat()
       } else {
         console.warn('Cannot auto-subscribe: No account information available');
       }
@@ -5944,13 +5943,6 @@ class WSManager {
       this.subscribed = false;
       return false;
     }
-  }
-
-  heartbeat(){
-    this.subscribe()
-    setTimeout(() => {
-        this.heartbeat()
-    }, 5000);
   }
 
   /**
