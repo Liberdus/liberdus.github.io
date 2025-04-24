@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'p'
+const version = 'q'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -5828,15 +5828,7 @@ class WSManager {
     try {
       console.log('Creating new WebSocket instance');
       this.ws = new WebSocket(network.websocket.url);
-      
-      // Add error event handler before setupEventHandlers
-      this.ws.onerror = (error) => {
-        updateWebSocketIndicator();
-        console.error('WebSocket error occurred:', error);
-        console.log('WebSocket readyState at error:', this.ws ? this.ws.readyState : 'ws is null');
-        this.handleConnectionFailure();
-      };
-      
+      this.setupEventHandlers();
     } catch (error) {
       console.error('WebSocket connection creation error:', error);
       this.handleConnectionFailure();
@@ -5909,6 +5901,13 @@ class WSManager {
       }
     };
 
+    // Add error event handler before setupEventHandlers
+    this.ws.onerror = (error) => {
+        updateWebSocketIndicator();
+        console.error('WebSocket error occurred:', error);
+        console.log('WebSocket readyState at error:', this.ws ? this.ws.readyState : 'ws is null');
+        this.handleConnectionFailure();
+    };
   }
 
   /**
@@ -6175,8 +6174,6 @@ class WSManager {
                 wsManager.connect();
                 initInfo.status = 'connecting';
             }
-
-            this.setupEventHandlers();
             console.log('WebSocket Manager Status:', JSON.stringify(initInfo, null, 2));
             
         } catch (error) {
