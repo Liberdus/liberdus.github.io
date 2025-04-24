@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -4963,7 +4963,8 @@ async function handleConnectivityChange(event) {
 
         // Verify username is still valid on the network
         await verifyUsernameOnReconnect();
-        
+        // Initialize WebSocket connection regardless of view
+        wsManager.initializeWebSocketManager();
         // Force update data with reconnection handling
         if (myAccount && myAccount.keys) {
             try {
