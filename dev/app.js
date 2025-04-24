@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'   // Also increment this when you increment version.html
+const version = 'u'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -3613,6 +3613,8 @@ function openHistoryModal() {
 
 function closeHistoryModal() {
     document.getElementById('historyModal').classList.remove('active');
+    document.getElementById('openHistoryModal').classList.remove('has-notification');
+    document.getElementById('switchToWallet').classList.remove('has-notification');
 }
 
 function updateHistoryAddresses() {         // TODO get rid of this function after changing all refrences 
@@ -3867,12 +3869,13 @@ async function getChats(keys, retry = 0) {  // needs to return the number of cha
     if (senders && senders.chats && chatCount){     // TODO check if above is working
         await processChats(senders.chats, keys)
     } else {
-        if(retry > 0){
-            console.log('getChats retry', retry)
-            if (retry < 3) {
-                setTimeout(() => getChats(keys, retry + 1), 1000);
+        if (retry > 0) {
+            const getChatsRetryLimit = 3;
+            if (retry <= getChatsRetryLimit) {
+                console.log('getChats retry', retry, 'of', getChatsRetryLimit)
+                setTimeout(() => getChats(keys, retry + 1), 1000 * retry);
             } else {
-                console.error('Failed to get chats after 3 retries');
+                console.error('Failed to get chats after', getChatsRetryLimit, 'retries');
             }
         }
     }

@@ -1,12 +1,12 @@
 const SW_VERSION = '2025.03.27.10.41';
 
 // Cache names with proper versioning
-const CACHE_VERSION = '1.0.0';
+/* const CACHE_VERSION = '1.0.0';
 const STATIC_CACHE = `static-${CACHE_VERSION}`;
-const DYNAMIC_CACHE = `dynamic-${CACHE_VERSION}`;
+const DYNAMIC_CACHE = `dynamic-${CACHE_VERSION}`; */
 
 // Resources to precache
-const PRECACHE_URLS = [
+/* const PRECACHE_URLS = [
   './',
   './index.html',
   './styles.css',
@@ -16,7 +16,7 @@ const PRECACHE_URLS = [
   './media/liberdus_logo_50.png',
   './media/liberdus_logo_250.png'
 ];
-
+ */
 // Simplified state management
 const state = {
     pollInterval: null,
@@ -26,9 +26,9 @@ const state = {
     notifiedChats: new Set()
 };
 
-// Install event - set up caching
+// Install event 
 self.addEventListener('install', (event) => {
-  console.log('[Service Worker] Installing, version:', CACHE_VERSION);
+  /* console.log('[Service Worker] Installing, version:', CACHE_VERSION);
   
   event.waitUntil(
     (async () => {
@@ -68,7 +68,7 @@ self.addEventListener('install', (event) => {
         // Don't throw - allow installation even if caching fails
       }
     })()
-  );
+  ); */
 
   // Activate immediately
   self.skipWaiting();
@@ -77,8 +77,13 @@ self.addEventListener('install', (event) => {
 // Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
   console.log('[Service Worker] Activating new service worker');
-
+  // Take control of all clients immediately
   event.waitUntil(
+    (async () => {
+      await self.clients.claim();
+    })()
+  );
+/*   event.waitUntil(
     (async () => {
       try {
         // Clean up old caches
@@ -95,8 +100,7 @@ self.addEventListener('activate', (event) => {
             })
         );
 
-        // Take control of all clients immediately
-        await self.clients.claim();
+
         
         // Verify cache contents after activation
         const cache = await caches.open(STATIC_CACHE);
@@ -115,11 +119,11 @@ self.addEventListener('activate', (event) => {
         // Don't throw - allow activation even if cleanup fails
       }
     })()
-  );
+  ); */
 });
 
 // Function to clean up old cache entries
-async function cleanupOldCacheEntries() {
+/* async function cleanupOldCacheEntries() {
   try {
     const MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
     const now = Date.now();
@@ -157,10 +161,10 @@ async function cleanupOldCacheEntries() {
   } catch (error) {
     console.error('[Service Worker] Cache cleanup failed:', error);
   }
-}
+} */
 
 // Helper function to determine caching strategy based on request
-function getCacheStrategy(request) {
+/* function getCacheStrategy(request) {
   const url = new URL(request.url);
   
   // Static assets - Cache First
@@ -191,10 +195,10 @@ function getCacheStrategy(request) {
   
   // Default to network first
   return 'network-first';
-}
+} */
 
 // Fetch event - handle caching strategies
-self.addEventListener('fetch', (event) => {
+/* self.addEventListener('fetch', (event) => {
   const strategy = getCacheStrategy(event.request);
   
   switch (strategy) {
@@ -210,10 +214,10 @@ self.addEventListener('fetch', (event) => {
     default:
       event.respondWith(networkFirst(event.request));
   }
-});
+}); */
 
 // Cache-First Strategy
-async function cacheFirst(request) {
+/* async function cacheFirst(request) {
   try {
     const cache = await caches.open(STATIC_CACHE);
     const cached = await cache.match(request);
@@ -244,10 +248,10 @@ async function cacheFirst(request) {
     console.error('[Service Worker] Cache-first strategy failed:', error);
     throw error;
   }
-}
+} */
 
 // Network-First Strategy
-async function networkFirst(request) {
+/* async function networkFirst(request) {
   try {
     const response = await fetch(request);
     
@@ -281,10 +285,10 @@ async function networkFirst(request) {
     
     throw error;
   }
-}
+} */
 
 // Network-Only Strategy - No Caching
-async function networkOnly(request) {
+/* async function networkOnly(request) {
   try {
     return await fetch(request);
   } catch (error) {
@@ -301,10 +305,10 @@ async function networkOnly(request) {
     
     throw error;
   }
-}
+} */
 
 // Helper function to determine if a request should not be cached
-function shouldNotCache(request) {
+/* function shouldNotCache(request) {
   const url = new URL(request.url);
   
   // Don't cache API endpoints that contain sensitive/frequently changing data
@@ -331,16 +335,16 @@ function shouldNotCache(request) {
   }
   
   return false;
-}
+} */
 
 // Background sync event
-self.addEventListener('sync', (event) => {
+/* self.addEventListener('sync', (event) => {
   if (event.tag === 'sync-messages') {
     event.waitUntil(syncMessages());
   } else if (event.tag === 'sync-transactions') {
     event.waitUntil(syncTransactions());
   }
-});
+}); */
 
 // Handle messages from the client
 self.addEventListener('message', (event) => {
@@ -522,7 +526,7 @@ self.addEventListener('terminate', event => {
 });
 
 // Set up periodic cache cleanup
-function setupPeriodicCacheCleanup() {
+/* function setupPeriodicCacheCleanup() {
   // Clean up cache every 24 hours
   const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
   
@@ -535,4 +539,4 @@ function setupPeriodicCacheCleanup() {
   }, CLEANUP_INTERVAL);
   
   console.log('[Service Worker] Periodic cache cleanup scheduled');
-}
+} */
