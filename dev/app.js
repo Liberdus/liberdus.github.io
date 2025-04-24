@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'v'
+const version = 'x'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -579,7 +579,7 @@ async function handleCreateAccount(event) {
     // Store the account data in localStorage
     localStorage.setItem(`${username}_${netid}`, stringify(myData));
 
-    requestNotificationPermission();
+    /* requestNotificationPermission(); */
 
     // enable submit button
     submitButton.disabled = false;
@@ -630,7 +630,7 @@ async function handleSignIn(event) {
     if (!myData) { console.log('Account data not found'); return }
     myAccount = myData.account;
 
-    requestNotificationPermission();
+    /* requestNotificationPermission(); */
 
     // Close modal and proceed to app
     closeSignInModal();
@@ -731,11 +731,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         await registerServiceWorker();
         setupServiceWorkerMessaging(); 
         setupAppStateManagement();
-        setupConnectivityDetection();
     } else {
         // Web-only mode
         console.log('Running in web-only mode, skipping service worker initialization');
     }
+
+    setupConnectivityDetection();
 
     document.getElementById('versionDisplay').textContent = myVersion + ' '+version;
     document.getElementById('networkNameDisplay').textContent = network.name;
@@ -1756,7 +1757,7 @@ async function handleImportFile(event) {
         // Store the localStore entry for username_netid
         localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
 
-        requestNotificationPermission();
+        /* requestNotificationPermission(); */
 
 /*
         // Refresh form data and chat list
@@ -4571,7 +4572,7 @@ function pqSharedKey(recipientKey, encKey){  // inputs base64 or binary, outputs
 }
 
 
-function requestNotificationPermission() {
+/* function requestNotificationPermission() {
     if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission()
             .then(permission => {
@@ -4586,7 +4587,7 @@ function requestNotificationPermission() {
                 console.error('Error during notification permission request:', error);
             });
     }
-}
+} */
 
 // Add these search-related functions
 function searchMessages(searchText) {
@@ -4990,10 +4991,10 @@ async function handleConnectivityChange(event) {
 // Setup connectivity detection
 function setupConnectivityDetection() {
     // Only setup offline detection if running as installed PWA
-    if (!checkIsInstalledPWA()) {
+    /* if (!checkIsInstalledPWA()) {
         isOnline = true; // Always consider online in web mode
         return;
-    }
+    } */
 
     // Listen for browser online/offline events
     window.addEventListener('online', handleConnectivityChange);
