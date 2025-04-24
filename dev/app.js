@@ -1293,7 +1293,7 @@ async function updateChatList(force, retry = 0) {
                     if (retryCount > maxRetries) {
                         throw networkError; // Rethrow if max retries reached
                     }
-                    console.log(`Retry ${retryCount}/${maxRetries} for chat update...`);
+                    console.log(`Retry ${retryCount}/${maxRetries} for chat update...${Date.now()}`);
                     await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Increasing backoff
                 }
             }
