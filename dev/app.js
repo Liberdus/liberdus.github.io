@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'
+const version = 'r'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6145,10 +6145,10 @@ class WSManager {
     // Initialize WebSocket manager if not already created
     initializeWebSocketManager() {
 
-        if (wsManager.isConnected()) {
-            if(!wsManager.isSubscribed()) {
+        if (this.isConnected()) {
+            if(!this.isSubscribed()) {
                 console.log('WebSocket is already connected but not subscribed, subscribing');
-                wsManager.subscribe();
+                this.subscribe();
                 return;
             }
             console.log('WebSocket is already connected and subscribed');
@@ -6171,7 +6171,7 @@ class WSManager {
             initInfo.status = 'created';
             
             if (initInfo.account.available) {
-                wsManager.connect();
+                this.connect();
                 initInfo.status = 'connecting';
             }
             console.log('WebSocket Manager Status:', JSON.stringify(initInfo, null, 2));
@@ -6181,7 +6181,7 @@ class WSManager {
                 error: error.message,
                 stack: error.stack
             }, null, 2));
-            wsManager = null;
+            this.handleConnectionFailure();
         }
     }
 }
