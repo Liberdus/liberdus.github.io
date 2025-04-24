@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 's'
+const version = 't'   // Also increment this when you increment version.html
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -5856,6 +5856,7 @@ class WSManager {
       if (myAccount && myAccount.keys && myAccount.keys.address) {
         console.log('Auto-subscribing to WebSocket events');
         this.subscribe();
+        this.heartbeat()
       } else {
         console.warn('Cannot auto-subscribe: No account information available');
       }
@@ -5943,6 +5944,13 @@ class WSManager {
       this.subscribed = false;
       return false;
     }
+  }
+
+  heartbeat(){
+    this.subscribe()
+    setTimeout(() => {
+        this.heartbeat()
+    }, 5000);
   }
 
   /**
@@ -6072,7 +6080,6 @@ class WSManager {
    * Check if WebSockets are supported in the current browser
    */
   checkWebSocketSupport() {
-    updateWebSocketIndicator();
     const supportInfo = {
       webSocketAvailable: typeof WebSocket !== 'undefined',
       browser: {
