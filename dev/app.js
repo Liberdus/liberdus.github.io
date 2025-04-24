@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'a'
+const version = 'b'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -5019,6 +5019,7 @@ function markConnectivityDependentElements() {
         '#handleSendMessage',
         '.message-input',
         '#newChatButton',
+        '#chatSendMoneyButton',
         
         // Wallet related
         '#openSendModal',
@@ -5034,6 +5035,7 @@ function markConnectivityDependentElements() {
         '#accountForm button[type="submit"]',
         '#createAccountForm button[type="submit"]',
         '#importForm button[type="submit"]',
+        '#contactInfoSendButton',
 
         // menu list buttons
         '.menu-item[id="openAccountForm"]',
