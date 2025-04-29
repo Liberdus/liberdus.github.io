@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v-51" />
+    <link rel="stylesheet" href="./styles.css?v=2025.04.29.16.57" />
     <link rel="manifest" href="./manifest.json" />
   </head>
   <body>
-    <script src="./app.js?v-51" type="module"></script>
+    <script src="./app.js?v=2025.04.29.16.57" type="module"></script>
     <div class="container">
       <header class="header" id="header">
         <div id="logo">
@@ -876,7 +876,7 @@
       <div class="modal" id="exportModal">
         <div class="modal-header">
           <button class="back-button" id="closeExportForm"></button>
-          <div class="modal-title">Backup Data</div>
+          <div class="modal-title">Backup Account</div>
         </div>
         <div class="form-container">
           <form id="exportForm">
@@ -970,10 +970,10 @@
         <div class="form-container">
           <div style="padding: 1rem">
             <p>
-              Before removing your account, please export your data to ensure
+              Before removing your account, please export your account data to ensure
               you have a backup. This action only removes the account from this
-              device and not from the network. You can still use the account
-              after importing it.
+              device and not from the network. You can use the account again
+              after restoring it from the backup file.
             </p>
             <button
               id="confirmRemoveAccount"
@@ -1089,13 +1089,90 @@
       </div>
 
       <!-- Validator Modal -->
-      <div class="modal" id="validatorModal">
+      <div class="modal fixed-header" id="validatorModal">
         <div class="modal-header">
           <button class="back-button" id="closeValidatorModal"></button>
           <div class="modal-title">Validator Options</div>
         </div>
         <div class="modal-content">
-          <p>Manage your validator stake:</p>
+          <!-- Loading State -->
+          <div
+            id="validator-loading"
+            style="text-align: center; padding: 1rem; display: none"
+          >
+            <div class="spinner"></div>
+            <!-- Add spinner styles if needed -->
+            Loading validator details...
+          </div>
+
+          <!-- Error Message Area -->
+          <div
+            id="validator-error-message"
+            class="error-message"
+            style="
+              display: none;
+              padding: 1rem;
+              color: #dc3545;
+              text-align: center;
+            "
+          >
+            <!-- Error text will be populated here -->
+          </div>
+
+          <!-- Validator Details Display Area -->
+          <div
+            id="validator-details"
+            class="validator-info-container"
+            style="display: block"
+          >
+            <div class="info-section">
+              <h4>Your Stake Info</h4>
+              <div class="info-item vertical-layout">
+                <span class="info-label" id="validator-nominee-label"
+                  >Nominated Validator:</span
+                >
+                <span class="info-value code" id="validator-nominee"></span>
+              </div>
+              <div class="info-item" id="validator-user-stake-lib-item">
+                <span class="info-label">Staked Amount (LIB):</span>
+                <span class="info-value" id="validator-user-stake-lib"></span>
+              </div>
+              <div class="info-item" id="validator-user-stake-usd-item">
+                <span class="info-label">Staked Amount (USD):</span>
+                <span class="info-value" id="validator-user-stake-usd"></span>
+              </div>
+            </div>
+
+            <div class="info-section">
+              <h4>Network Staking Info</h4>
+              <div class="info-item">
+                <span class="info-label">Min Stake Required (USD):</span>
+                <span
+                  class="info-value"
+                  id="validator-network-stake-usd"
+                ></span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Min Stake Required (LIB):</span>
+                <span
+                  class="info-value"
+                  id="validator-network-stake-lib"
+                ></span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Stability Factor (USD/LIB):</span>
+                <span class="info-value" id="validator-stability-factor"></span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Market Price (USD/LIB):</span>
+                <span class="info-value" id="validator-market-price"></span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Min Stake at Market (USD):</span>
+                <span class="info-value" id="validator-market-stake-usd"></span>
+              </div>
+            </div>
+          </div>
 
           <div class="action-item">
             <button id="openStakeModal" class="button full-width">Stake</button>

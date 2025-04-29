@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'c'
+const version = 'd'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -777,11 +777,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     document.getElementById('closeCreateAccountModal').addEventListener('click', closeCreateAccountModal);
     document.getElementById('createAccountForm').addEventListener('submit', handleCreateAccount);
-    
-    // Import Account now opens Import File Modal
-    importAccountBtn.addEventListener('click', openImportFileModal);
-    
-    
+       
     // Account Form Modal
     document.getElementById('openAccountForm').addEventListener('click', openAccountForm);
     document.getElementById('openExplorer').addEventListener('click', () => {
@@ -792,9 +788,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     document.getElementById('closeAccountForm').addEventListener('click', closeAccountForm);
     document.getElementById('accountForm').addEventListener('submit', handleAccountUpdate);
-//            document.getElementById('openImportFormMenu').addEventListener('click', openImportFileModal);
-    document.getElementById('closeImportForm').addEventListener('click', closeImportFileModal);
-    document.getElementById('importForm').addEventListener('submit', handleImportFile);
+    
+    restoreAccountModal.load()
     
     // Validator Modals
     document.getElementById('openValidator').addEventListener('click', openValidatorModal);
@@ -811,9 +806,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('unstakeForm').addEventListener('submit', handleUnstakeSubmit); // Function to be implemented
 
     // Export Form Modal
-    document.getElementById('openExportForm').addEventListener('click', openExportForm);
-    document.getElementById('closeExportForm').addEventListener('click', closeExportForm);
-    document.getElementById('exportForm').addEventListener('submit', handleExport);
+    backupAccountModal.load()
     
     // Remove Account Modal
     removeAccountModal.load()
@@ -1668,14 +1661,6 @@ function closeAccountForm() {
     document.getElementById('accountModal').classList.remove('active');
 }
 
-function openExportForm() {
-    document.getElementById('exportModal').classList.add('active');
-}
-
-function closeExportForm() {
-    document.getElementById('exportModal').classList.remove('active');
-}
-
 // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
 // Decrypt data using ChaCha20-Poly1305
 async function decryptData(encryptedData, password) {
@@ -1689,95 +1674,6 @@ async function decryptData(encryptedData, password) {
 
     // Decrypt the data using ChaCha20-Poly1305
     return decryptChacha(key, encryptedData);
-}
-
-function openImportFileModal() {
-    document.getElementById('importModal').classList.add('active');
-}
-
-function closeImportFileModal() {
-    document.getElementById('importModal').classList.remove('active');
-}
-
-async function handleImportFile(event) {
-    event.preventDefault();
-    const fileInput = document.getElementById('importFile');
-    const passwordInput = document.getElementById('importPassword');
-    const messageElement = document.getElementById('importMessage');
-    
-    try {
-        // Read the file
-        const file = fileInput.files[0];
-        let fileContent = await file.text();
-        const isNotEncryptedData = fileContent.match('{')
-
-        // Check if data is encrypted and decrypt if necessary
-        if ( ! isNotEncryptedData) {
-            if (!passwordInput.value.trim()) {
-                alert('Password required for encrypted data');
-                return
-            }
-            fileContent = await decryptData(fileContent, passwordInput.value.trim());
-            if (fileContent == null){ throw "" }
-        }
-
-        // We first parse to jsonData so that if the parse does not work we don't destroy myData
-        myData = parse(fileContent)
-        // also need to set myAccount
-        const acc = myData.account  // this could have other things which are not needed
-        myAccount = {
-            netid: acc.netid,
-            username: acc.username,
-            keys: {
-                address: acc.keys.address,
-                public: acc.keys.public,
-                secret: acc.keys.secret,
-                type: acc.keys.type
-            }
-        }
-        // Get existing accounts or create new structure
-        const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-        // Ensure netid exists
-        if (!existingAccounts.netids[myAccount.netid]) {
-            existingAccounts.netids[myAccount.netid] = { usernames: {} };
-        }
-        // Store updated accounts back in localStorage
-        existingAccounts.netids[myAccount.netid].usernames[myAccount.username] = {address: myAccount.keys.address};
-        localStorage.setItem('accounts', stringify(existingAccounts));
-
-        // Store the localStore entry for username_netid
-        localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
-
-        /* requestNotificationPermission(); */
-
-/*
-        // Refresh form data and chat list
-//                loadAccountFormData();
-        await updateChatList();
-*/
-
-        // Show success message
-        messageElement.textContent = 'Data imported successfully!';
-        messageElement.classList.add('active');
-        
-        // Reset form and close modal after delay
-        setTimeout(() => {
-            messageElement.classList.remove('active');
-            closeImportFileModal();
-            window.location.reload();  // need to go through Sign In to make sure imported account exists on network
-            fileInput.value = '';
-            passwordInput.value = '';
-        }, 2000);
-        
-    } catch (error) {
-        messageElement.textContent = error.message || 'Import failed. Please check file and password.';
-        messageElement.style.color = '#dc3545';
-        messageElement.classList.add('active');
-        setTimeout(() => {
-            messageElement.classList.remove('active');
-            messageElement.style.color = '#28a745';
-        }, 3000);
-    }
 }
 
 
@@ -1795,37 +1691,6 @@ async function encryptData(data, password) {
     // Encrypt the data using ChaCha20-Poly1305
     const encrypted = encryptChacha(key, data);
     return encrypted
-}
-
-async function handleExport(event) {
-    event.preventDefault();
-
-    const password = document.getElementById('exportPassword').value;
-    const jsonData = stringify(myData, null, 2);
-    
-    try {
-        // Encrypt data if password is provided
-        const finalData = password ? 
-            await encryptData(jsonData, password) : 
-            jsonData;
-        
-        // Create and trigger download
-        const blob = new Blob([finalData], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${myAccount.username}-export-${new Date().toISOString().split('T')[0]}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        
-        // Close export modal
-        closeExportForm();
-    } catch (error) {
-        console.error('Encryption failed:', error);
-        alert('Failed to encrypt data. Please try again.');
-    }
 }
 
 function openNewChatModal() {
@@ -6326,12 +6191,223 @@ function updateWebSocketIndicator() {
 }
 
 // Validator Modals
-function openValidatorModal() {
-    document.getElementById('validatorModal').classList.add('active');
+async function openValidatorModal() {
+    // Get modal elements
+    const validatorModal = document.getElementById('validatorModal');
+    const loadingElement = document.getElementById('validator-loading');
+    const errorElement = document.getElementById('validator-error-message');
+    const detailsElement = document.getElementById('validator-details');
+    // Get elements needed for conditional logic early
+    const nomineeLabelElement = document.getElementById('validator-nominee-label');
+    const nomineeValueElement = document.getElementById('validator-nominee');
+    const userStakeLibItem = document.getElementById('validator-user-stake-lib-item');
+    const userStakeUsdItem = document.getElementById('validator-user-stake-usd-item');
+
+    // Reset UI: Show loading, hide details and error, reset conditional elements
+    if (loadingElement) loadingElement.style.display = 'block';
+    if (detailsElement) detailsElement.style.display = 'none';
+    if (errorElement) {
+        errorElement.style.display = 'none';
+        errorElement.textContent = ''; // Clear previous errors
+    }
+    // Reset conditional elements to default state (label text might change later)
+    if (nomineeLabelElement) nomineeLabelElement.textContent = 'Nominated Validator:'; // Default label
+    if (nomineeValueElement) nomineeValueElement.textContent = ''; // Clear value initially
+    // Ensure stake items are visible by default (using flex as defined in styles.css)
+    if (userStakeLibItem) userStakeLibItem.style.display = 'flex';
+    if (userStakeUsdItem) userStakeUsdItem.style.display = 'flex';
+
+
+    if (validatorModal) validatorModal.classList.add('active'); // Open modal immediately
+
+    try {
+        // Fetch Data Concurrently
+        const userAddress = myData?.account?.keys?.address;
+        if (!userAddress) {
+            console.warn("User address not found in myData. Skipping user account fetch.");
+            // Decide how to handle this - maybe show an error or a specific state?
+            // For now, we'll proceed, but nominee/user stake will be unavailable.
+        }
+        const [userAccountData, networkAccountData, marketPriceData] = await Promise.all([
+            userAddress ? queryNetwork(`/account/${longAddress(userAddress)}`) : Promise.resolve(null), // Fetch User Data if available
+            queryNetwork('/account/0000000000000000000000000000000000000000000000000000000000000000'), // Fetch Network Data
+            getMarketPrice() // Fetch Market Price
+        ]);
+
+        // Extract Raw Data
+        // Use optional chaining extensively in case userAccountData is null
+        const nominee = userAccountData?.account?.operatorAccountInfo?.nominee;
+        const userStakedBaseUnits = userAccountData?.account?.operatorAccountInfo?.stake?.value;
+
+        // Network data should generally be available, but check anyway
+        const stakeRequiredUsdBaseUnits = networkAccountData?.account?.current?.stakeRequiredUsd?.value;
+        const stabilityScaleMul = networkAccountData?.account?.current?.stabilityScaleMul;
+        const stabilityScaleDiv = networkAccountData?.account?.current?.stabilityScaleDiv;
+
+        // Extract market price (will be null if fetch failed or returned null)
+        const marketPrice = marketPriceData;
+
+        // Calculate Derived Values
+        let stabilityFactor = null;
+        if (stabilityScaleMul != null && stabilityScaleDiv != null && Number(stabilityScaleDiv) !== 0) {
+            stabilityFactor = Number(stabilityScaleMul) / Number(stabilityScaleDiv);
+        }
+
+        let stakeAmountLibBaseUnits = null;
+        if (stakeRequiredUsdBaseUnits != null && typeof stakeRequiredUsdBaseUnits === 'string' &&
+            stabilityScaleMul != null && typeof stabilityScaleMul === 'number' &&
+            stabilityScaleDiv != null && typeof stabilityScaleDiv === 'number' && stabilityScaleDiv !== 0)
+        {
+            try {
+                const requiredUsdBigInt = BigInt('0x' + stakeRequiredUsdBaseUnits);
+                const scaleMulBigInt = BigInt(stabilityScaleMul);
+                const scaleDivBigInt = BigInt(stabilityScaleDiv);
+                // Avoid division by zero if scaleMulBigInt is 0
+                if (scaleMulBigInt !== 0n) {
+                    stakeAmountLibBaseUnits = (requiredUsdBigInt * scaleDivBigInt) / scaleMulBigInt;
+                } else {
+                     console.warn("Stability scale multiplier is zero, cannot calculate LIB stake amount.");
+                }
+            } catch (e) {
+                console.error("Error calculating stakeAmountLibBaseUnits with BigInt:", e, {
+                    stakeRequiredUsdBaseUnits,
+                    stabilityScaleMul,
+                    stabilityScaleDiv
+                });
+            }
+        }
+
+        let userStakedUsd = null;
+        // TODO: Calculate User Staked Amount (USD) using market price - Use stability factor if available?
+        // For now, using market price as implemented previously.
+        if (userStakedBaseUnits != null && marketPrice != null) {
+            try {
+                const userStakedLib = Number(BigInt('0x' + userStakedBaseUnits)) / 1e18;
+                userStakedUsd = userStakedLib * marketPrice;
+            } catch (e) {
+                console.error("Error calculating userStakedUsd:", e);
+            }
+        }
+
+        let marketStakeUsdBaseUnits = null;
+        // Calculate Min Stake at Market (USD) using BigInt and market price
+        if (stakeAmountLibBaseUnits != null && marketPrice != null) {
+            try {
+                const stakeAmountLib = Number(stakeAmountLibBaseUnits) / 1e18;
+                const marketStakeUsd = stakeAmountLib * marketPrice;
+                // Approximate back to base units (assuming 18 decimals for USD base units)
+                marketStakeUsdBaseUnits = BigInt(Math.round(marketStakeUsd * 1e18));
+            } catch (e) {
+                console.error("Error calculating marketStakeUsdBaseUnits:", e);
+            }
+        }
+
+
+        // Format & Update UI
+        // Get references for network info elements
+        const networkStakeUsdValue = document.getElementById('validator-network-stake-usd');
+        const networkStakeLibValue = document.getElementById('validator-network-stake-lib');
+        const stabilityFactorValue = document.getElementById('validator-stability-factor');
+        const marketPriceValue = document.getElementById('validator-market-price');
+        const marketStakeUsdValue = document.getElementById('validator-market-stake-usd');
+
+        // Format Network Info unconditionally
+        const displayNetworkStakeUsd = stakeRequiredUsdBaseUnits ? '$' + big2str(BigInt('0x' + stakeRequiredUsdBaseUnits), 18).slice(0, 6) : 'N/A';
+        const displayNetworkStakeLib = stakeAmountLibBaseUnits ? big2str(stakeAmountLibBaseUnits, 18).slice(0, 6) : 'N/A';
+        const displayStabilityFactor = stabilityFactor ? stabilityFactor.toFixed(4) : 'N/A';
+        const displayMarketPrice = marketPrice ? '$' + marketPrice.toFixed(4) : 'N/A';
+        const displayMarketStakeUsd = marketStakeUsdBaseUnits ? '$' + big2str(marketStakeUsdBaseUnits, 18).slice(0, 6) : 'N/A';
+
+        if (networkStakeUsdValue) networkStakeUsdValue.textContent = displayNetworkStakeUsd;
+        if (networkStakeLibValue) networkStakeLibValue.textContent = displayNetworkStakeLib;
+        if (stabilityFactorValue) stabilityFactorValue.textContent = displayStabilityFactor;
+        if (marketPriceValue) marketPriceValue.textContent = displayMarketPrice;
+        if (marketStakeUsdValue) marketStakeUsdValue.textContent = displayMarketStakeUsd;
+
+        // Conditional Logic for Nominee and User Stake
+        if (!nominee) {
+            // Case: No Nominee
+            if (nomineeLabelElement) nomineeLabelElement.textContent = 'No Nominated Validator';
+            if (nomineeValueElement) nomineeValueElement.textContent = ''; // Ensure value is empty
+            if (userStakeLibItem) userStakeLibItem.style.display = 'none'; // Hide LIB stake item
+            if (userStakeUsdItem) userStakeUsdItem.style.display = 'none'; // Hide USD stake item
+        } else {
+            // Case: Nominee Exists
+            // Get references for user stake values
+             const userStakeLibValue = document.getElementById('validator-user-stake-lib');
+             const userStakeUsdValue = document.getElementById('validator-user-stake-usd');
+
+            // Format User Stake Values
+            const displayNominee = nominee; // Already checked it exists
+            const displayUserStakedLib = userStakedBaseUnits ? big2str(BigInt('0x' + userStakedBaseUnits), 18).slice(0, 6) : 'N/A';
+            const displayUserStakedUsd = userStakedUsd != null ? '$' + userStakedUsd.toFixed(4) : 'N/A';
+
+            if (nomineeLabelElement) nomineeLabelElement.textContent = 'Nominated Validator:'; // Ensure correct label
+            if (nomineeValueElement) nomineeValueElement.textContent = displayNominee;
+            if (userStakeLibValue) userStakeLibValue.textContent = displayUserStakedLib;
+            if (userStakeUsdValue) userStakeUsdValue.textContent = displayUserStakedUsd;
+            // Ensure items are visible (using flex as defined in CSS) - redundant due to reset, but safe
+            if (userStakeLibItem) userStakeLibItem.style.display = 'flex';
+            if (userStakeUsdItem) userStakeUsdItem.style.display = 'flex';
+        }
+
+        // Show the details section now that it's populated correctly
+        if (detailsElement) detailsElement.style.display = 'block'; // Or 'flex' if it's a flex container
+
+    } catch (error) {
+        console.error("Error fetching validator details:", error);
+        // Display error in UI
+        if (errorElement) {
+            errorElement.textContent = 'Failed to load validator details. Please try again later.';
+            errorElement.style.display = 'block';
+        }
+        // Ensure details are hidden if an error occurs
+        if (detailsElement) detailsElement.style.display = 'none';
+    } finally {
+        // Hide loading indicator regardless of success or failure
+        if (loadingElement) loadingElement.style.display = 'none';
+    }
 }
 
 function closeValidatorModal() {
     document.getElementById('validatorModal').classList.remove('active');
+}
+
+// fetching market price by invoking `updateAssetPricesIfNeeded` and extracting from myData.assetPrices
+async function getMarketPrice() {
+
+    try {
+        // Ensure asset prices are potentially updated by the central function
+        await updateAssetPricesIfNeeded();
+
+        // Check if wallet data and assets exist after the update attempt
+        if (!myData?.wallet?.assets) {
+            console.warn("getMarketPrice: Wallet assets not available in myData.");
+            return null;
+        }
+
+        // Find the LIB asset in the myData structure
+        const libAsset = myData.wallet.assets.find(asset => asset.id === 'liberdus');
+
+        if (libAsset) {
+            // Check if the price exists and is a valid number on the found asset
+            if (typeof libAsset.price === 'number' && !isNaN(libAsset.price)) {
+                // console.log(`getMarketPrice: Retrieved LIB price from myData: ${libAsset.price}`); // Optional: For debugging
+                return libAsset.price;
+            } else {
+                // Price might be missing if the initial fetch failed or hasn't happened yet
+                console.warn(`getMarketPrice: LIB asset found in myData, but its price is missing or invalid (value: ${libAsset.price}).`);
+                return null;
+            }
+        } else {
+            console.warn("getMarketPrice: LIB asset not found in myData.wallet.assets.");
+            return null;
+        }
+
+    } catch (error) {
+        console.error("getMarketPrice: Error occurred while trying to get price from myData:", error);
+        return null; // Return null on any unexpected error during the process
+    }
 }
 
 // Stake Modal
@@ -6464,80 +6540,28 @@ async function handleUnstakeSubmit(event) {
  }
 
  async function postStake(nodeAddress, amount, keys) {
-    /* {
-        "isInternalTx": true,
-        "internalTXType": 6,
-        "nominator": "<your_eoa_address>",
-        "timestamp": 1678886400000, // Example timestamp (milliseconds since epoch)
-        "nominee": "<node_public_key>",
-        "stake": "<stake_amount_in_wei>" 
-    } */
-    /* const stakeTx = {
-        isInternalTx: true,
-        internalTXType: 6,
-        nominator: myAccount.address,
-        timestamp: getCorrectedTimestamp(),
-        nominee: nodeAddress,
-        stake: amount
-    }; */
-
-    /* {
-        "type": "stake",
-        "from": "<your_account_address>",
-        "stake": "1000000000000000000", // Stake amount as a string (to represent bigint)
-        "sign": {
-            "owner": "<your_account_address>", // Must match 'from'
-            "sig": "<transaction_signature>"   // Cryptographic signature
-        }
-    } */
     const stakeTx = {
-        type: "stake",
-        from: longAddress(nodeAddress), // convert to long address currently is 64 characters hex
+        type: "deposit_stake",
+        nominator: longAddress(myAccount.keys.address),
+        nominee: nodeAddress,
         stake: amount,
+        timestamp: getCorrectedTimestamp(),
     };
-    console.log("Debug: myAccount", myAccount);
-    console.log("Debug: staking with address", nodeAddress, "and amount", amount);
-    console.log("DEBUG: Staking with keys:", keys); 
 
-    // TODO: uncomment when implemented on backend
     const response = await injectTx(stakeTx, keys);
     return response;
  }
 
  async function postUnstake(nodeAddress) {
-    /* {
-        "isInternalTx": true,
-        "internalTXType": 7,
-        "nominator": "<your_eoa_address>",
-        "timestamp": 1678886400000, // Example timestamp (milliseconds since epoch)
-        "nominee": "<node_public_key>",
-        "force": false 
-    } */
-    /* const unstakeTx = {
-        isInternalTx: true,
-        internalTXType: 7,
-        nominator: myAccount.address,
-        timestamp: getCorrectedTimestamp(),
-        nominee: nodeAddress,
-        force: false
-    }; */
-
-    /* {
-        "type": "stake",
-        "from": "<your_account_address>",
-        "stake": "1000000000000000000", // Stake amount as a string (to represent bigint)
-        "sign": {
-            "owner": "<your_account_address>", // Must match 'from'
-            "sig": "<transaction_signature>"   // Cryptographic signature
-        }
-    } */
+    // TODO: need to query network for the correct nominator address
     const unstakeTx = {
-        type: "unstake",
-        from: myAccount?.keys?.address,
-        stake: amount,
+        type: "withdraw_stake",
+        nominator: longAddress(myAccount?.keys?.address),
+        nominee: nodeAddress,
+        force: false,
+        timestamp: getCorrectedTimestamp(),
     };
     
-    // TODO: uncomment when implemented on backend
     const response = await injectTx(unstakeTx, myAccount.keys);
     return response;
  }
@@ -6597,3 +6621,149 @@ async function handleUnstakeSubmit(event) {
     }
 }
 const removeAccountModal = new RemoveAccountModal()
+
+class BackupAccountModal {
+    constructor() {
+    }
+
+    load() {  // called when the DOM is loaded; can setup event handlers here
+        this.modal = document.getElementById('exportModal');
+        document.getElementById('openExportForm').addEventListener('click', () => this.open());
+        document.getElementById('closeExportForm').addEventListener('click', () => this.close());
+        document.getElementById('exportForm').addEventListener('submit', (event) => this.handleSubmit(event));
+    }
+
+    open() {  // called when the modal needs to be opened
+        this.modal.classList.add('active');
+    }
+
+    close() {  // called when the modal needs to be closed
+        this.modal.classList.remove('active');
+    }
+
+    async handleSubmit(event) {
+        event.preventDefault();
+
+        const password = document.getElementById('exportPassword').value;
+        const jsonData = stringify(myData, null, 2);
+        
+        try {
+            // Encrypt data if password is provided
+            const finalData = password ? 
+                await encryptData(jsonData, password) : 
+                jsonData;
+            
+            // Create and trigger download
+            const blob = new Blob([finalData], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${myAccount.username}-export-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            // Close export modal
+            this.close();
+        } catch (error) {
+            console.error('Encryption failed:', error);
+            alert('Failed to encrypt data. Please try again.');
+        }
+    }
+}
+const backupAccountModal = new BackupAccountModal()
+
+class RestoreAccountModal {
+    constructor() {
+    }
+
+    load() {  // called when the DOM is loaded; can setup event handlers here
+        this.modal = document.getElementById('importModal');
+        document.getElementById('importAccountButton').addEventListener('click', () => this.open());
+        document.getElementById('closeImportForm').addEventListener('click', () => this.close());
+        document.getElementById('importForm').addEventListener('submit', (event) => this.handleSubmit(event));
+    }
+
+    open() {  // called when the modal needs to be opened
+        this.modal.classList.add('active');
+    }
+
+    close() {  // called when the modal needs to be closed
+        this.modal.classList.remove('active');
+    }
+
+    async handleSubmit(event) {
+        event.preventDefault();
+        const fileInput = document.getElementById('importFile');
+        const passwordInput = document.getElementById('importPassword');
+        const messageElement = document.getElementById('importMessage');
+    
+        try {
+            // Read the file
+            const file = fileInput.files[0];
+            let fileContent = await file.text();
+            const isNotEncryptedData = fileContent.match('{')
+    
+            // Check if data is encrypted and decrypt if necessary
+            if (!isNotEncryptedData) {
+                if (!passwordInput.value.trim()) {
+                    alert('Password required for encrypted data');
+                    return
+                }
+                fileContent = await decryptData(fileContent, passwordInput.value.trim());
+                if (fileContent == null){ throw "" }
+            }
+    
+            // We first parse to jsonData so that if the parse does not work we don't destroy myData
+            myData = parse(fileContent)
+            // also need to set myAccount
+            const acc = myData.account  // this could have other things which are not needed
+            myAccount = {
+                netid: acc.netid,
+                username: acc.username,
+                keys: {
+                    address: acc.keys.address,
+                    public: acc.keys.public,
+                    secret: acc.keys.secret,
+                    type: acc.keys.type
+                }
+            }
+            // Get existing accounts or create new structure
+            const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+            // Ensure netid exists
+            if (!existingAccounts.netids[myAccount.netid]) {
+                existingAccounts.netids[myAccount.netid] = { usernames: {} };
+            }
+            // Store updated accounts back in localStorage
+            existingAccounts.netids[myAccount.netid].usernames[myAccount.username] = {address: myAccount.keys.address};
+            localStorage.setItem('accounts', stringify(existingAccounts));
+    
+            // Store the localStore entry for username_netid
+            localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
+    
+            // Show success message
+            messageElement.textContent = 'Data imported successfully!';
+            messageElement.classList.add('active');
+    
+            // Reset form and close modal after delay
+            setTimeout(() => {
+                messageElement.classList.remove('active');
+                this.close();
+                window.location.reload();  // need to go through Sign In to make sure imported account exists on network
+                fileInput.value = '';
+                passwordInput.value = '';
+            }, 2000);
+    
+        } catch (error) {
+            messageElement.textContent = error.message || 'Import failed. Please check file and password.';
+            messageElement.style.color = '#dc3545';
+            messageElement.classList.add('active');
+            setTimeout(() => {
+                messageElement.classList.remove('active');
+                messageElement.style.color = '#28a745';
+            }, 3000);
+        }
+    }
+}
+const restoreAccountModal = new RestoreAccountModal()
