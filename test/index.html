@@ -53,30 +53,47 @@
       https://github.com/davidshimjs/qrcodejs
       https://github.com/davidshimjs/qrcodejs/blob/master/qrcode.js
     -->
-    <script src="./log-utils.js"></script>
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=2025.05.02.13.59" />
     <link rel="manifest" href="./manifest.json" />
   </head>
   <body>
-    <script src="./app.js?v=11" type="module"></script>
+    <script src="./app.js?v=2025.05.02.13.59" type="module"></script>
     <div class="container">
       <header class="header" id="header">
-        <div id="logo"><img src="./media/liberdus_logo_50.png" /></div>
+        <div id="logo">
+          <a
+            href="https://liberdus.com"
+            target="_blank"
+            title="Visit Liberdus website"
+            class="logo-link"
+            ><img src="./media/liberdus_logo_50.png"
+          /></a>
+        </div>
         <div class="app-name">Liberdus</div>
         <div class="header-icons">
           <div class="offline-indicator" id="offlineIndicator">Offline</div>
+          <div id="wsStatusIndicator" class="ws-status-indicator">
+            WebSocket
+          </div>
           <button class="icon-button" id="toggleMenu"></button>
         </div>
       </header>
 
       <div class="welcome-screen" id="welcomeScreen">
-        <img
-          src="./media/liberdus_logo_250.png"
-          alt="Liberdus Logo"
-          style="margin-bottom: 20px"
-        />
+        <a
+          href="https://liberdus.com"
+          target="_blank"
+          title="Visit Liberdus website"
+          class="logo-link"
+        >
+          <img
+            src="./media/liberdus_logo_250.png"
+            alt="Liberdus Logo"
+            style="margin-bottom: 20px"
+          />
+        </a>
         <h1>
           Liberdus<br />
           <div
@@ -96,9 +113,6 @@
           </button>
           <button id="addToHomeScreenButton" class="secondary-button hidden">
             Install
-          </button>
-          <button id="clearCacheButton" class="secondary-button hidden">
-            Check Update
           </button>
         </div>
         <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
@@ -218,9 +232,10 @@
           <div class="modal-title">Menu</div>
         </div>
         <ul class="menu-list">
-          <li class="menu-item" id="openAccountForm">Account</li>
+          <li class="menu-item" id="openAccountForm">Profile</li>
           <li class="menu-item" id="openExportForm">Backup</li>
           <li class="menu-item" id="openNetwork">Gateway</li>
+          <li class="menu-item" id="openValidator">Validator</li>
           <!--                <li class="menu-item" id="openSettings">Settings</li> -->
           <li class="menu-item" id="openExplorer">Explorer</li>
           <li class="menu-item" id="openMonitor">Network</li>
@@ -229,7 +244,6 @@
 -->
           <li class="menu-item" id="openRemoveAccount">Remove</li>
           <li class="menu-item" id="openAbout">About</li>
-          <li class="menu-item" id="openLogs">View Logs</li>
           <li class="menu-item" id="handleSignOut">Sign Out</li>
         </ul>
       </div>
@@ -385,8 +399,7 @@
                   type="button"
                   id="togglePrivateKeyVisibility"
                   class="password-toggle-btn"
-                >
-                </button>
+                ></button>
               </div>
               <small>
                 If you want to use an existing private key enter it here.
@@ -405,9 +418,12 @@
       <div class="modal fixed-header" id="accountModal">
         <div class="modal-header">
           <button class="back-button" id="closeAccountForm"></button>
-          <div class="modal-title">Account</div>
+          <div class="modal-title">My Profile</div>
         </div>
         <div class="form-container">
+          <div class="profile-sharing-note">
+            This information is shared with your friends
+          </div>
           <form id="accountForm">
             <div class="form-group">
               <label for="name">Name</label>
@@ -430,9 +446,6 @@
               <input type="text" id="x" class="form-control" />
             </div>
             <button type="submit" class="update-button">Update Profile</button>
-            <div id="successMessage" class="success-message">
-              Profile updated successfully!
-            </div>
           </form>
         </div>
       </div>
@@ -465,9 +478,6 @@
               />
             </div>
             <button type="submit" class="update-button">Load Account</button>
-            <div id="importMessage" class="success-message">
-              Account imported successfully!
-            </div>
           </form>
         </div>
       </div>
@@ -753,16 +763,16 @@
                     >Fee: <span id="transactionFee">0.00</span> LIB</span
                   >
                 </div>
-                <div id="balanceWarning" class="balance-warning"></div>
               </div>
               <input
                 type="number"
                 id="sendAmount"
                 class="form-control"
                 step="any"
-                min="0"
+                min="0.000000000000000001"
                 required
               />
+              <div id="balanceWarning" class="balance-warning"></div>
             </div>
             <div class="form-group">
               <label for="sendMemo">Memo (Optional)</label>
@@ -827,21 +837,6 @@
         </div>
       </div>
 
-      <!-- QR Scan Modal -->
-      <div class="modal fixed-header" id="qrScanModal">
-        <div class="modal-header">
-          <button class="back-button" id="closeQRScanModal"></button>
-          <div class="modal-title">Scan QR</div>
-        </div>
-        <div class="scanner-container">
-          <p id="scan-waiting" class="status"></p>
-          <video id="video"></video>
-          <div class="scan-region-highlight"></div>
-          <div class="scan-highlight" id="scan-highlight"></div>
-          <canvas id="canvas"></canvas>
-        </div>
-      </div>
-
       <!-- History Modal -->
       <div class="modal fixed-header" id="historyModal">
         <div class="modal-header">
@@ -863,7 +858,7 @@
       <div class="modal" id="exportModal">
         <div class="modal-header">
           <button class="back-button" id="closeExportForm"></button>
-          <div class="modal-title">Backup Data</div>
+          <div class="modal-title">Backup Account</div>
         </div>
         <div class="form-container">
           <form id="exportForm">
@@ -957,10 +952,10 @@
         <div class="form-container">
           <div style="padding: 1rem">
             <p>
-              Before removing your account, please export your data to ensure
-              you have a backup. This action only removes the account from this
-              device and not from the network. You can still use the account
-              after importing it.
+              Before removing your account, please export your account data to
+              ensure you have a backup. This action only removes the account
+              from this device and not from the network. You can use the account
+              again after restoring it from the backup file.
             </p>
             <button
               id="confirmRemoveAccount"
@@ -970,19 +965,6 @@
               Remove
             </button>
           </div>
-        </div>
-      </div>
-
-      <!-- Logs Modal -->
-      <div class="modal" id="logsModal">
-        <div class="modal-header">
-          <button class="back-button" id="closeLogsModal"></button>
-          <div class="modal-title">Logs</div>
-          <button id="refreshLogs" class="secondary-button">Refresh</button>
-          <button id="clearLogs" class="secondary-button">Clear</button>
-        </div>
-        <div class="logs-container" id="logsContainer">
-          <!-- Logs will be populated here -->
         </div>
       </div>
 
@@ -1087,7 +1069,244 @@
           </div>
         </div>
       </div>
+
+      <!-- Validator Modal -->
+      <div class="modal fixed-header" id="validatorModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeValidatorModal"></button>
+          <div class="modal-title">Validator Options</div>
+        </div>
+        <div class="modal-content">
+          <!-- Loading State -->
+          <div
+            id="validator-loading"
+            style="text-align: center; padding: 1rem; display: none"
+          >
+            <div class="spinner"></div>
+            <!-- Add spinner styles if needed -->
+            Loading validator details...
+          </div>
+
+          <!-- Error Message Area -->
+          <div
+            id="validator-error-message"
+            class="error-message"
+            style="
+              display: none;
+              padding: 1rem;
+              color: #dc3545;
+              text-align: center;
+            "
+          >
+            <!-- Error text will be populated here -->
+          </div>
+
+          <!-- Validator Details Display Area -->
+          <div
+            id="validator-details"
+            class="validator-info-container"
+            style="display: block"
+          >
+            <div class="info-section">
+              <h4>Your Stake Info</h4>
+              <div class="info-item vertical-layout">
+                <span class="info-label" id="validator-nominee-label"
+                  >Nominated Validator:</span
+                >
+                <span class="info-value code" id="validator-nominee"></span>
+              </div>
+              <div class="info-item" id="validator-user-stake-lib-item">
+                <span class="info-label">Staked Amount (LIB):</span>
+                <span class="info-value" id="validator-user-stake-lib"></span>
+              </div>
+              <div class="info-item" id="validator-user-stake-usd-item">
+                <span class="info-label">Staked Amount (USD):</span>
+                <span class="info-value" id="validator-user-stake-usd"></span>
+              </div>
+            </div>
+
+            <div class="info-section">
+              <h4>Network Staking Info</h4>
+              <div class="info-item">
+                <span class="info-label">Min Stake Required (USD):</span>
+                <span
+                  class="info-value"
+                  id="validator-network-stake-usd"
+                ></span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Min Stake Required (LIB):</span>
+                <span
+                  class="info-value"
+                  id="validator-network-stake-lib"
+                ></span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Stability Factor (USD/LIB):</span>
+                <span class="info-value" id="validator-stability-factor"></span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Market Price (USD/LIB):</span>
+                <span class="info-value" id="validator-market-price"></span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Min Stake at Market (USD):</span>
+                <span class="info-value" id="validator-market-stake-usd"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="action-item">
+            <button id="openStakeModal" class="button full-width">Stake</button>
+            <p class="action-description">
+              Delegate LIB to a validator node to earn rewards.
+            </p>
+          </div>
+
+          <div class="action-item">
+            <button
+              id="submitUnstake"
+              class="button full-width secondary-button"
+            >
+              Unstake
+            </button>
+            <p class="action-description">
+              Withdraw your delegated LIB from a validator node.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stake Modal -->
+      <div class="modal fixed-header" id="stakeModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeStakeModal"></button>
+          <div class="modal-title">Stake Validator</div>
+        </div>
+        <div class="form-container">
+          <form id="stakeForm">
+            <div class="form-group">
+              <label for="stakeNodeAddress">Validator Node Address</label>
+              <div style="display: flex; align-items: center; gap: 0.5rem">
+                <input
+                  type="text"
+                  id="stakeNodeAddress"
+                  class="form-control"
+                  required
+                  placeholder="Enter long node address"
+                  style="flex: 1"
+                />
+                <button
+                  type="button"
+                  id="uploadStakeQRButton"
+                  class="icon-button"
+                  title="Upload Stake Address QR"
+                  style="flex-shrink: 0"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="24"
+                    height="24"
+                    style="fill: #007bff"
+                  >
+                    <path
+                      d="M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z"
+                    />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  id="scanStakeQRButton"
+                  class="icon-button"
+                  title="Scan Stake Address QR"
+                  style="flex-shrink: 0"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="24"
+                    height="24"
+                    style="fill: #007bff"
+                  >
+                    <path
+                      d="M3,3 L10,3 L10,10 L3,10 Z M5,5 L5,8 L8,8 L8,5 Z M14,3 L21,3 L21,10 L14,10 Z M16,5 L16,8 L19,8 L19,5 Z M3,14 L10,14 L10,21 L3,21 Z M5,16 L5,19 L8,19 L8,16 Z M14,14 L21,14 L21,21 L14,21 Z M16,16 L16,19 L19,19 L19,16 Z M11,3 L13,3 L13,10 L11,10 Z M11,14 L13,14 L13,21 L11,21 Z M3,11 L10,11 L10,13 L3,13 Z M14,11 L21,11 L21,13 L14,13 Z"
+                    />
+                  </svg>
+                </button>
+                <!-- File input for Stake QR code upload -->
+                <input
+                  type="file"
+                  id="stakeQrFileInput"
+                  accept="image/*"
+                  style="
+                    display: none;
+                    position: absolute;
+                    width: 1px;
+                    height: 1px;
+                    overflow: hidden;
+                  "
+                  aria-hidden="true"
+                />
+              </div>
+              <div
+                id="stakeNodeAddressWarning"
+                class="validation-warning"
+                style="display: none"
+              ></div>
+            </div>
+            <div class="form-group">
+              <label for="stakeAmount">Stake Amount</label>
+              <div
+                id="stakeAvailableBalanceDisplay"
+                class="available-balance-display"
+              ></div>
+              <input
+                type="number"
+                id="stakeAmount"
+                class="form-control"
+                required
+                placeholder="Enter amount to stake"
+                min="0.000000000000000001"
+                step="any"
+              />
+              <div
+                id="stakeAmountWarning"
+                class="validation-warning"
+                style="display: none"
+              ></div>
+            </div>
+            <button type="submit" id="submitStake" class="button full-width">
+              Submit Stake
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- QR Scan Modal -->
+      <div class="modal fixed-header" id="qrScanModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeQRScanModal"></button>
+          <div class="modal-title">Scan QR</div>
+        </div>
+        <div class="scanner-container">
+          <p id="scan-waiting" class="status"></p>
+          <video id="video"></video>
+          <div class="scan-region-highlight"></div>
+          <div class="scan-highlight" id="scan-highlight"></div>
+          <canvas id="canvas"></canvas>
+        </div>
+      </div>
     </div>
+    <!-- Audio element for notification sounds -->
+    <audio
+      id="notificationSound"
+      src="media/chatSound.mp3"
+      preload="auto"
+    ></audio>
+    <audio
+      id="transferSound"
+      src="media/paymentSound.mp3"
+      preload="auto"
+    ></audio>
     <!-- Toast container -->
     <div class="toast-container" id="toastContainer"></div>
   </body>

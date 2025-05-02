@@ -99,7 +99,7 @@ export function linkifyUrls(text) {
     if (!text) return '';
 
     // escape html characters in the text
-    text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    text = escapeHtml(text);
 
     // Updated Regex: Only match explicit http:// or https://
     const urlRegex = /(\b(https?):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/gi;
@@ -123,6 +123,78 @@ export function linkifyUrls(text) {
         return `<a href="${properUrl}" target="_blank" rel="noopener noreferrer">${escapedUrl}</a>`;
     });
 }
+
+export function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+export function debounce(func, waitFn) {
+    let timeout;
+    return function executedFunction(...args) {
+        const wait = typeof waitFn === 'function' ? waitFn(args[0]) : waitFn;
+        
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+export function truncateMessage(message, maxLength = 100) {
+    // If the message fits or is shorter, return it as is.
+    if (message.length <= maxLength) {
+        return message;
+    }
+
+    const firstMarkStart = message.indexOf('<mark>');
+
+    // Case 1: No highlight found
+    if (firstMarkStart === -1) {
+        // Default behavior: truncate from the beginning
+        return message.substring(0, maxLength) + '...';
+    }
+
+    // Case 2: Highlight found
+    // Aim to show some context before the highlight. Adjust ratio as needed.
+    const charsToShowBefore = Math.floor(maxLength * 0.3); // e.g., 30 chars for maxLength 100
+
+    // Calculate the ideal starting point
+    let startIndex = Math.max(0, firstMarkStart - charsToShowBefore);
+
+    // Calculate the ending point based on start + maxLength
+    let endIndex = Math.min(message.length, startIndex + maxLength);
+
+    // --- Adjustment for hitting the end ---
+    // If the calculated window ends exactly at the message end,
+    // it might be shorter than maxLength if the highlight was very close to the end.
+    // In this case, pull the startIndex back to ensure we show the full maxLength window
+    // ending at the message end.
+    if (endIndex === message.length) {
+         startIndex = Math.max(0, message.length - maxLength);
+    }
+    // --- End Adjustment ---
+
+
+    // Extract the substring
+    let preview = message.substring(startIndex, endIndex);
+
+    // Add ellipsis prefix if we didn't start at the beginning
+    if (startIndex > 0) {
+        preview = '...' + preview;
+    }
+
+    // Add ellipsis suffix if we didn't end at the very end
+    if (endIndex < message.length) {
+        preview = preview + '...';
+    }
+
+    return preview;
+}
+
 
 export function ab2base64(buffer) {
     let binary = '';
@@ -314,6 +386,12 @@ export function bigxnum2big_old(bigIntNum, floatNum) {
     return result;
 }
 
+/**
+ * Convert a string number to a BigInt number
+ * @param {BigInt} bigIntNum - The base BigInt number
+ * @param {string} stringNum - The string number to convert
+ * @returns {BigInt} The converted BigInt number
+ */
 export function bigxnum2big(bigIntNum, stringNum) {
     stringNum = stringNum.trim().replace(/\.0*$/, '')
     // Find decimal point position if it exists
@@ -363,6 +441,12 @@ export function bigxnum2num(bigIntNum, floatNum) {
     return result;
 }
 
+/**
+ * Convert a BigInt number to a string number with decimals
+ * @param {BigInt} amount - The amount to convert
+ * @param {number} decimals - The number of decimals
+ * @returns {string} The converted string number
+ */
 export function big2str(amount, decimals) {
     let amountString = amount.toString();
     // Pad with zeros if needed
