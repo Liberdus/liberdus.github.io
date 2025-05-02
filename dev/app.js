@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'd'
+const version = 'e'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -675,19 +675,6 @@ function newDataRecord(myAccount){
     return myData
 }
 
-// Function to open the About modal
-function openAboutModal() {
-    document.getElementById('aboutModal').classList.add('active');
-    document.getElementById('versionDisplayAbout').textContent = myVersion + ' '+version;
-    document.getElementById('networkNameAbout').textContent = network.name;
-    document.getElementById('netIdAbout').textContent = network.netid;
-}
-
-// Function to close the About modal
-function closeAboutModal() {
-    document.getElementById('aboutModal').classList.remove('active');
-}
-
 // Check if app is running as installed PWA
 function checkIsInstalledPWA() {
     return window.matchMedia('(display-mode: standalone)').matches || 
@@ -759,8 +746,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('closeMenu').addEventListener('click', toggleMenu);
 
     // About Modal
-    document.getElementById('openAbout').addEventListener('click', openAboutModal);
-    document.getElementById('closeAboutModal').addEventListener('click', closeAboutModal);
+    aboutModal.load()
 
     // Sign In Modal
     signInBtn.addEventListener('click', openSignInModal);
@@ -779,15 +765,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('createAccountForm').addEventListener('submit', handleCreateAccount);
        
     // Account Form Modal
-    document.getElementById('openAccountForm').addEventListener('click', openAccountForm);
+    myProfileModal.load()
+
     document.getElementById('openExplorer').addEventListener('click', () => {
-        window.open(network.explorer.url, '_blank');
+        window.open('./explorer', '_blank');
     });
     document.getElementById('openMonitor').addEventListener('click', () => {
-        window.open(network.monitor.url, '_blank');
+        window.open('./network', '_blank');
     });
-    document.getElementById('closeAccountForm').addEventListener('click', closeAccountForm);
-    document.getElementById('accountForm').addEventListener('submit', handleAccountUpdate);
     
     restoreAccountModal.load()
     
@@ -795,15 +780,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('openValidator').addEventListener('click', openValidatorModal);
     document.getElementById('closeValidatorModal').addEventListener('click', closeValidatorModal);
     document.getElementById('openStakeModal').addEventListener('click', openStakeModal);
-    document.getElementById('openUnstakeModal').addEventListener('click', openUnstakeModal);
+    document.getElementById('submitUnstake').addEventListener('click', confirmAndUnstakeCurrentUserNominee);
 
     // Stake Modal
     document.getElementById('closeStakeModal').addEventListener('click', closeStakeModal);
     document.getElementById('stakeForm').addEventListener('submit', handleStakeSubmit); // Function to be implemented
-
-    // Unstake Modal
-    document.getElementById('closeUnstakeModal').addEventListener('click', closeUnstakeModal);
-    document.getElementById('unstakeForm').addEventListener('submit', handleUnstakeSubmit); // Function to be implemented
 
     // Export Form Modal
     backupAccountModal.load()
@@ -812,11 +793,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     removeAccountModal.load()
 
     // Gateway Menu
-    document.getElementById('openNetwork').addEventListener('click', openGatewayForm);
-    document.getElementById('closeGatewayForm').addEventListener('click', closeGatewayForm);
-    document.getElementById('gatewayForm').addEventListener('submit', handleGatewayForm);
-    document.getElementById('addGatewayButton').addEventListener('click', openAddGatewayForm);
-    document.getElementById('closeAddEditGatewayForm').addEventListener('click', closeAddEditGatewayForm);
+    gatewayModal.load()
 
     // TODO add comment about which send form this is for chat or assets
     document.getElementById('openSendModal').addEventListener('click', openSendModal);
@@ -963,6 +940,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Omar added
     document.getElementById('scanQRButton').addEventListener('click', openQRScanModal);
+    document.getElementById('scanStakeQRButton').addEventListener('click', openQRScanModal);
     document.getElementById('closeQRScanModal').addEventListener('click', closeQRScanModal);
     
     // File upload handlers
@@ -970,7 +948,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('qrFileInput').click();
     });
 
-    document.getElementById('qrFileInput').addEventListener('change', handleQRFileSelect);
+    document.getElementById('uploadStakeQRButton').addEventListener('click', () => {
+        document.getElementById('stakeQrFileInput').click();
+    });
+
+    document.getElementById('qrFileInput').addEventListener('change', (event) => handleQRFileSelect(event, fillPaymentFromQR));
+    document.getElementById('stakeQrFileInput').addEventListener('change', (event) => handleQRFileSelect(event, fillStakeAddressFromQR));
 
     const nameInput = document.getElementById('editContactNameInput');
     const nameActionButton = nameInput.parentElement.querySelector('.field-action-button');
@@ -1022,6 +1005,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     // handle openSendModal sendToAddress username input change
     document.getElementById('sendToAddress').addEventListener('input', (e) => {
         handleOpenSendModalInput(e);
+    });
+
+    const debounceValidateStakeInputs = debounce(validateStakeInputs, 300);
+    // Add input listeners for stake modal validation
+    document.getElementById('stakeNodeAddress').addEventListener('input', debounceValidateStakeInputs);
+    document.getElementById('stakeAmount').addEventListener('input', debounceValidateStakeInputs);
+
+    // Add custom validation message for minimum amount
+    const sendAmountInput = document.getElementById('sendAmount');
+    sendAmountInput.addEventListener('invalid', (event) => {
+        if (event.target.validity.rangeUnderflow) {
+            event.target.setCustomValidity('Value must be at least 1 wei (1×10⁻¹⁸ LIB).');
+        }
+    });
+    sendAmountInput.addEventListener('input', (event) => {
+        // Clear custom validity message when user types
+        event.target.setCustomValidity('');
     });
 
     setupAddToHomeScreen()
@@ -1646,21 +1646,6 @@ function toggleMenu() {
 //    document.getElementById('accountModal').classList.remove('active');
 }
 
-function openAccountForm() {
-    document.getElementById('accountModal').classList.add('active');
-    if (myData && myData.account) {
-        document.getElementById('name').value = myData.account.name || '';
-        document.getElementById('email').value = myData.account.email || '';
-        document.getElementById('phone').value = myData.account.phone || '';
-        document.getElementById('linkedin').value = myData.account.linkedin || '';
-        document.getElementById('x').value = myData.account.x || '';
-    }
-}
-
-function closeAccountForm() {
-    document.getElementById('accountModal').classList.remove('active');
-}
-
 // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
 // Decrypt data using ChaCha20-Poly1305
 async function decryptData(encryptedData, password) {
@@ -1746,7 +1731,7 @@ function handleUsernameInput(e) {
             usernameAvailable.style.color = '#28a745';
             usernameAvailable.style.display = 'inline';
             submitButton.disabled = false;
-        } else if ((taken == 'available') || (taken == 'mine')) {
+        } else if ((taken == 'mine') || (taken == 'available')) {
             usernameAvailable.textContent = 'not found';
             usernameAvailable.style.color = '#dc3545';
             usernameAvailable.style.display = 'inline';
@@ -2149,31 +2134,6 @@ function closeReceiveModal() {
     modal.classList.remove('active');
 }
 
-// Show preview of QR data
-function previewQRData(paymentData) {
-    const previewElement = document.getElementById('qrDataPreview');
-    const previewContent = previewElement.querySelector('.preview-content');
-    
-    // Create minimized version (single line)
-    let minimizedPreview = `${paymentData.u} • ${paymentData.s}`;
-    if (paymentData.a) {
-        minimizedPreview += ` • ${paymentData.a} ${paymentData.s}`;
-    }
-    if (paymentData.m) {
-        const shortMemo = paymentData.m.length > 20 ? 
-            paymentData.m.substring(0, 20) + '...' : 
-            paymentData.m;
-        minimizedPreview += ` • Memo: ${shortMemo}`;
-    }
-    
-    // SET minimizedPreview directly as innerHTML
-    previewContent.innerHTML = minimizedPreview;
-    
-    // Ensure consistent height and style for the single line preview
-    previewElement.style.height = 'auto'; // Let content determine height initially
-    previewElement.classList.remove('minimized'); // Ensure minimized class is not present
-}
-
 function updateReceiveAddresses() {
     // Update display address
     updateDisplayAddress();
@@ -2435,7 +2395,12 @@ function handleOpenSendModalInput(e){
             usernameAvailable.style.color = '#28a745';
             usernameAvailable.style.display = 'inline';
             submitButton.disabled = false;
-        } else if ((taken == 'available') || (taken == 'mine')) {
+        } else if((taken == 'mine')) {
+            usernameAvailable.textContent = 'mine';
+            usernameAvailable.style.color = '#dc3545';
+            usernameAvailable.style.display = 'inline';
+            submitButton.disabled = true;
+        } else if ((taken == 'available')) {
             usernameAvailable.textContent = 'not found';
             usernameAvailable.style.color = '#dc3545';
             usernameAvailable.style.display = 'inline';
@@ -2462,29 +2427,69 @@ function closeQRScanModal(){
     stopCamera()
 }
 
-function fillPaymentFromQR(data){
-    console.log('in fill', data)
+function fillPaymentFromQR(data) {
+    console.log('Attempting to fill payment form from QR:', data);
+
+    // Explicitly check for the required prefix
+    if (!data || !data.startsWith('liberdus://')) {
+        console.error("Invalid payment QR code format. Missing 'liberdus://' prefix.", data);
+        showToast("Invalid payment QR code format.", 3000, "error");
+        // Optionally clear fields or leave them as they were
+        document.getElementById('sendToAddress').value = '';
+        document.getElementById('sendAmount').value = '';
+        document.getElementById('sendMemo').value = '';
+        return; // Stop processing if the format is wrong
+    }
 
     // Clear existing fields first
     document.getElementById('sendToAddress').value = '';
     document.getElementById('sendAmount').value = '';
     document.getElementById('sendMemo').value = '';
 
-    data = data.replace('liberdus://', '')
-    const paymentData = JSON.parse(atob(data))
-    console.log("Read payment data:", JSON.stringify(paymentData, null, 2));
-    if (paymentData.u){
-        document.getElementById('sendToAddress').value = paymentData.u
+    try {
+        // Remove the prefix and process the base64 data
+        const base64Data = data.substring('liberdus://'.length);
+        const jsonData = atob(base64Data);
+        const paymentData = JSON.parse(jsonData);
+
+        console.log("Read payment data:", JSON.stringify(paymentData, null, 2));
+        
+        if (paymentData.u) {
+            document.getElementById('sendToAddress').value = paymentData.u;
+        }
+        if (paymentData.a) {
+            document.getElementById('sendAmount').value = paymentData.a;
+        }
+        if (paymentData.m) {
+            document.getElementById('sendMemo').value = paymentData.m;
+        }
+
+        // Trigger username validation and amount validation
+        document.getElementById('sendToAddress').dispatchEvent(new Event('input'));
+        document.getElementById('sendAmount').dispatchEvent(new Event('input'));
+
+    } catch (error) {
+        console.error("Error parsing payment QR data:", error, data);
+        showToast("Failed to parse payment QR data.", 3000, "error");
+        // Clear fields on error
+        document.getElementById('sendToAddress').value = '';
+        document.getElementById('sendAmount').value = '';
+        document.getElementById('sendMemo').value = '';
     }
-    if (paymentData.a){
-        document.getElementById('sendAmount').value = paymentData.a
+}
+
+function fillStakeAddressFromQR(data) {
+    console.log('Filling stake address from QR data:', data);
+
+    // Directly set the value of the stakeNodeAddress input field
+    const stakeNodeAddressInput = document.getElementById('stakeNodeAddress');
+    if (stakeNodeAddressInput) {
+        stakeNodeAddressInput.value = data;
+        stakeNodeAddressInput.dispatchEvent(new Event('input')); 
+    } else {
+        console.error('Stake node address input field not found!');
+        showToast("Could not find stake address field.", 3000, "error");
     }
-    if (paymentData.m){
-        document.getElementById('sendMemo').value = paymentData.m
-    }
-    // Trigger username validation and amount validation
-    document.getElementById('sendToAddress').dispatchEvent(new Event('input'));
-    document.getElementById('sendAmount').dispatchEvent(new Event('input'));
 }
 
 async function closeSendModal() {
@@ -2583,6 +2588,14 @@ async function handleSendAsset(event) {
     event.preventDefault();
     const confirmButton = document.getElementById('confirmSendButton');
     const cancelButton = document.getElementById('cancelSendButton');
+    const username = normalizeUsername(document.getElementById('sendToAddress').value);
+
+    // if it's your own username disable the send button
+    if (username == myAccount.username) {
+        confirmButton.disabled = true;
+        showToast('You cannot send assets to yourself', 3000, 'error');
+        return;
+    }
 
     if ((getCorrectedTimestamp() - handleSendAsset.timestamp) < 2000 || confirmButton.disabled) {
         return;
@@ -2594,9 +2607,7 @@ async function handleSendAsset(event) {
     handleSendAsset.timestamp = getCorrectedTimestamp()
     const wallet = myData.wallet;
     const assetIndex = document.getElementById('sendAsset').value;  // TODO include the asset id and symbol in the tx
-    const fromAddress = myAccount.keys.address;
     const amount = bigxnum2big(wei, document.getElementById('sendAmount').value);
-    const username = normalizeUsername(document.getElementById('sendToAddress').value);
     const memoIn = document.getElementById('sendMemo').value || '';
     const memo = memoIn.trim()
     const keys = myAccount.keys;
@@ -3147,6 +3158,11 @@ async function handleSendMessage() {
         const currentAddress = appendChatModal.address
         if (!currentAddress) return;
 
+        // Check if trying to message self
+        if (currentAddress === myAccount.address) {
+            return;
+        }
+
         // Get sender's keys from wallet
         const keys = myAccount.keys;
         if (!keys) {
@@ -3523,35 +3539,6 @@ function handleHistoryItemClick(event) {
             openChatModal(address);
         }
     }
-}
-
-// Form to allow user to enter info about themself
-function handleAccountUpdate(event) {
-    event.preventDefault();
-
-    // Get form data
-    const formData = {
-        name: document.getElementById('name').value,
-        email: document.getElementById('email').value,
-        phone: document.getElementById('phone').value,
-        linkedin: document.getElementById('linkedin').value,
-        x: document.getElementById('x').value
-    };
-
-    // TODO massage the inputs and check for correct formats; for now assume it is all good
-
-    // Save to myData.account
-    myData.account = { ...myData.account, ...formData };
-
-    // Show success message
-    const successMessage = document.getElementById('successMessage');
-    successMessage.classList.add('active');
-    
-    // Hide success message after 2 seconds
-    setTimeout(() => {
-        successMessage.classList.remove('active');
-        closeAccountForm();
-    }, 2000);
 }
 
 async function queryNetwork(url) {
@@ -5041,269 +5028,6 @@ function initializeGatewayConfig() {
     }
 }
 
-// Function to open the gateway form
-function openGatewayForm() {
-    // Initialize gateway configuration if needed
-    initializeGatewayConfig();
-
-    // Show gateway modal
-    document.getElementById('gatewayModal').classList.add('active');
-
-    // Populate gateway list
-    updateGatewayList();
-}
-
-// Function to close the gateway form
-function closeGatewayForm() {
-    document.getElementById('gatewayModal').classList.remove('active');
-}
-
-// Function to open the add gateway form
-function openAddGatewayForm() {
-    // Hide gateway modal
-    document.getElementById('gatewayModal').classList.remove('active');
-    
-    // Reset form
-    document.getElementById('gatewayForm').reset();
-    document.getElementById('gatewayEditIndex').value = -1;
-    document.getElementById('addEditGatewayTitle').textContent = 'Add Gateway';
-    
-    // Show add/edit gateway modal
-    document.getElementById('addEditGatewayModal').classList.add('active');
-}
-
-// Function to open the edit gateway form
-function openEditGatewayForm(index) {
-    // Hide gateway modal
-    document.getElementById('gatewayModal').classList.remove('active');
-    
-    // Get gateway data
-    const gateway = myData.network.gateways[index];
-    
-    // Populate form
-    document.getElementById('gatewayName').value = gateway.name;
-    document.getElementById('gatewayProtocol').value = gateway.protocol;
-    document.getElementById('gatewayHost').value = gateway.host;
-    document.getElementById('gatewayPort').value = gateway.port;
-    document.getElementById('gatewayEditIndex').value = index;
-    document.getElementById('addEditGatewayTitle').textContent = 'Edit Gateway';
-    
-    // Show add/edit gateway modal
-    document.getElementById('addEditGatewayModal').classList.add('active');
-}
-
-// Function to close the add/edit gateway form
-function closeAddEditGatewayForm() {
-    document.getElementById('addEditGatewayModal').classList.remove('active');
-    document.getElementById('gatewayModal').classList.add('active');
-    updateGatewayList();
-}
-
-// Function to update the gateway list display
-function updateGatewayList() {
-    const gatewayList = document.getElementById('gatewayList');
-
-    // Clear existing list
-    gatewayList.innerHTML = '';
-
-    // If no gateways, show empty state
-    if (myData.network.gateways.length === 0) {
-        gatewayList.innerHTML = `
-            <div class="empty-state">
-                <div style="font-weight: bold; margin-bottom: 0.5rem">No Gateways</div>
-                <div>Add a gateway to get started</div>
-            </div>`;
-        return;
-    }
-
-    // Add "Use Random Selection" option first
-    const randomOption = document.createElement('div');
-    randomOption.className = 'gateway-item random-option';
-    randomOption.innerHTML = `
-        <div class="gateway-info">
-            <div class="gateway-name">Random Selection</div>
-            <div class="gateway-url">Selects random gateway from list</div>
-        </div>
-        <div class="gateway-actions">
-            <label class="default-toggle">
-                <input type="radio" name="defaultGateway" ${myData.network.defaultGatewayIndex === -1 ? 'checked' : ''}>
-                <span>Default</span>
-            </label>
-        </div>
-    `;
-
-    // Add event listener for random selection
-    const randomToggle = randomOption.querySelector('input[type="radio"]');
-    randomToggle.addEventListener('change', () => {
-        if (randomToggle.checked) {
-            setDefaultGateway(-1);
-        }
-    });
-
-    gatewayList.appendChild(randomOption);
-
-    // Add each gateway to the list
-    myData.network.gateways.forEach((gateway, index) => {
-        const isDefault = index === myData.network.defaultGatewayIndex;
-        const canRemove = !gateway.isSystem;
-
-        const gatewayItem = document.createElement('div');
-        gatewayItem.className = 'gateway-item';
-        gatewayItem.innerHTML = `
-            <div class="gateway-info">
-                <div class="gateway-name">${escapeHtml(gateway.name)}</div>
-                <div class="gateway-url">${gateway.protocol}://${escapeHtml(gateway.host)}:${gateway.port}</div>
-                ${gateway.isSystem ? '<span class="system-badge">System</span>' : ''}
-            </div>
-            <div class="gateway-actions">
-                <label class="default-toggle">
-                    <input type="radio" name="defaultGateway" ${isDefault ? 'checked' : ''}>
-                    <span>Default</span>
-                </label>
-                <button class="icon-button edit-button" title="Edit">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                    </svg>
-                </button>
-                ${canRemove ? `
-                    <button class="icon-button remove-button" title="Remove">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M3 6h18"></path>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
-                            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        </svg>
-                    </button>
-                ` : ''}
-            </div>
-        `;
-
-        // Add event listeners
-        const defaultToggle = gatewayItem.querySelector('input[type="radio"]');
-        defaultToggle.addEventListener('change', () => {
-            if (defaultToggle.checked) {
-                setDefaultGateway(index);
-            }
-        });
-
-        const editButton = gatewayItem.querySelector('.edit-button');
-        editButton.addEventListener('click', () => {
-            openEditGatewayForm(index);
-        });
-
-        if (canRemove) {
-            const removeButton = gatewayItem.querySelector('.remove-button');
-            removeButton.addEventListener('click', () => {
-                confirmRemoveGateway(index);
-            });
-        }
-
-        gatewayList.appendChild(gatewayItem);
-    });
-}
-
-// Function to add a new gateway
-function addGateway(protocol, host, port, name) {
-    // Initialize if needed
-    initializeGatewayConfig();
-
-    // Add the new gateway
-    myData.network.gateways.push({
-        protocol,
-        host,
-        port,
-        name,
-        isSystem: false,
-        isDefault: false
-    });
-
-    // Update the UI
-    updateGatewayList();
-
-    // Show success message
-    showToast('Gateway added successfully');
-}
-
-// Function to update an existing gateway
-function updateGateway(index, protocol, host, port, name) {
-    // Check if index is valid
-    if (index >= 0 && index < myData.network.gateways.length) {
-        const gateway = myData.network.gateways[index];
-
-        // Update gateway properties
-        gateway.protocol = protocol;
-        gateway.host = host;
-        gateway.port = port;
-        gateway.name = name;
-
-        // Update the UI
-        updateGatewayList();
-
-        // Show success message
-        showToast('Gateway updated successfully');
-    }
-}
-
-// Function to confirm gateway removal
-function confirmRemoveGateway(index) {
-    if (confirm('Are you sure you want to remove this gateway?')) {
-        removeGateway(index);
-    }
-}
-
-// Function to remove a gateway
-function removeGateway(index) {
-    // Check if index is valid
-    if (index >= 0 && index < myData.network.gateways.length) {
-        const gateway = myData.network.gateways[index];
-
-        // Only allow removing non-system gateways
-        if (!gateway.isSystem) {
-            // If this was the default gateway, reset to random selection
-            if (myData.network.defaultGatewayIndex === index) {
-                myData.network.defaultGatewayIndex = -1;
-            } else if (myData.network.defaultGatewayIndex > index) {
-                // Adjust default gateway index if needed
-                myData.network.defaultGatewayIndex--;
-            }
-
-            // Remove the gateway
-            myData.network.gateways.splice(index, 1);
-
-            // Update the UI
-            updateGatewayList();
-
-            // Show success message
-            showToast('Gateway removed successfully');
-        }
-    }
-}
-
-// Function to set the default gateway
-function setDefaultGateway(index) {
-    // Reset all gateways to non-default
-    myData.network.gateways.forEach(gateway => {
-        gateway.isDefault = false;
-    });
-
-    // Set the new default gateway index
-    myData.network.defaultGatewayIndex = index;
-
-    // If setting a specific gateway as default, mark it
-    if (index >= 0 && index < myData.network.gateways.length) {
-        myData.network.gateways[index].isDefault = true;
-    }
-
-    // Update the UI
-    updateGatewayList();
-
-    // Show success message
-    const message = index === -1 
-        ? 'Using random gateway selection for better reliability' 
-        : 'Default gateway set';
-    showToast(message);
-}
-
 // Function to get the gateway to use for a request
 function getGatewayForRequest() {
     //TODO: ask Omar if we should just let use edit network.js or keep current logic where when we sign in it uses network.js and when signed in we use myData.network.gateways
@@ -5332,39 +5056,6 @@ function getGatewayForRequest() {
     return myData.network.gateways[
         Math.floor(Math.random() * myData.network.gateways.length)
     ];
-}
-
-// Function to handle the gateway form submission
-function handleGatewayForm(event) {
-    event.preventDefault();
-
-    // Get form data
-    const formData = {
-        protocol: document.getElementById('gatewayProtocol').value,
-        host: document.getElementById('gatewayHost').value,
-        port: parseInt(document.getElementById('gatewayPort').value),
-        name: document.getElementById('gatewayName').value
-    };
-
-    // Get the edit index (if editing)
-    const editIndex = parseInt(document.getElementById('gatewayEditIndex').value);
-
-    if (editIndex >= 0) {
-        // Update existing gateway
-        updateGateway(
-            editIndex,
-            formData.protocol,
-            formData.host,
-            formData.port,
-            formData.name
-        );
-    } else {
-        // Add new gateway
-        addGateway(formData.protocol, formData.host, formData.port, formData.name);
-    }
-
-    // Close the form
-    closeAddEditGatewayForm();
 }
 
 async function startCamera() {
@@ -5484,7 +5175,7 @@ function readQRCode(){
             }
         } catch (error) {
             // qr.decodeQR throws error if not found or on error
-            console.log('QR scanning error or not found:', error); // Optional: Log if needed
+            //console.log('QR scanning error or not found:', error); // Optional: Log if needed
         }
     }
 }
@@ -5492,7 +5183,6 @@ function readQRCode(){
 
 // Handle successful scan
 function handleSuccessfulScan(data) {
-    if (! data.match(/^liberdus:\/\//)){ return }  // should start with liberdus://
     const scanHighlight = document.getElementById('scan-highlight');
     // Stop scanning
     if (startCamera.scanInterval) {
@@ -5516,9 +5206,10 @@ function handleSuccessfulScan(data) {
     // Display the result
 //    qrResult.textContent = data;
 //    resultContainer.classList.remove('hidden');
-    console.log(data) 
+    console.log("Raw QR Data Scanned:", data) 
     if (openQRScanModal.fill){
-        openQRScanModal.fill(data)
+        // Call the assigned fill function (e.g., fillPaymentFromQR or fillStakeAddressFromQR)
+        openQRScanModal.fill(data) 
     }
 
     closeQRScanModal()
@@ -5546,7 +5237,7 @@ function stopCamera() {
 }
 
 // Changed to use qr.js library instead of jsQR.js 
-async function handleQRFileSelect(event) {
+async function handleQRFileSelect(event, fillFunction) { // Added fillFunction parameter
     const file = event.target.files[0];
     if (!file) {
         return; // No file selected
@@ -5579,7 +5270,14 @@ async function handleQRFileSelect(event) {
                 });
 
                 if (decodedData) {
-                    handleSuccessfulScan(decodedData);
+                    // handleSuccessfulScan(decodedData); // Original call
+                    if (typeof fillFunction === 'function') {
+                        fillFunction(decodedData); // Call the provided fill function
+                    } else {
+                        console.error('No valid fill function provided for QR file select');
+                        // Fallback or default behavior if needed, e.g., show generic error
+                        showToast('Internal error handling QR data', 3000, 'error'); 
+                    }
                 } else {
                     // qr.decodeQR might throw an error instead of returning null/undefined
                     // This else block might not be reached if errors are always thrown
@@ -6096,8 +5794,9 @@ function insertSorted(array, item, timestampField = 'timestamp') {
   }
 
 /**
- * Calculates the time difference between the client's local time and the server's time.
- * Fetches UTC time from a remote API, compares it to local time, and stores the difference in `timeSkew`.
+ * Calculates the time difference between the client's local time and the network gateway's time.
+ * Fetches the timestamp from the '/timestamp' endpoint on a network gateway using queryNetwork,
+ * compares it to local time, and stores the difference in `timeSkew`.
  * Includes a retry mechanism for transient network errors.
  *
  * @param {number} [retryCount=0] - The current retry attempt number.
@@ -6105,54 +5804,52 @@ function insertSorted(array, item, timestampField = 'timestamp') {
 async function timeDifference(retryCount = 0) {
     const maxRetries = 2; // Maximum number of retries
     const retryDelay = 1000; // Delay between retries in milliseconds (1 second)
+    const timestampEndpoint = '/timestamp'; // Endpoint to query
 
     try {
-        // Add 'cache: "no-store"' to potentially help with hard-refresh issues,
-        // ensuring we always go to the network.
-        // Try a different API: TimeAPI.io
-        const response = await fetch('https://timeapi.io/api/time/current/zone?timeZone=UTC', { cache: 'no-store' });
+        // Use queryNetwork to fetch the timestamp from a gateway
+        const data = await queryNetwork(timestampEndpoint);
 
-        if (!response.ok) {
-            // Throw an error for bad HTTP status codes (e.g., 4xx, 5xx)
-            throw new Error(`HTTP error! status: ${response.status}`);
+        // queryNetwork returns null on network errors or if offline
+        if (data === null) {
+            // Throw an error to trigger the retry logic
+            throw new Error(`queryNetwork returned null for ${timestampEndpoint}`);
         }
 
-        const data = await response.json();
         const clientTimeMs = Date.now(); // Get client time as close as possible to response processing
-        // Adjust for TimeAPI.io response format
-        const serverTimeString = data.dateTime.endsWith("Z") ? data.dateTime : data.dateTime + "Z";
 
-        const serverTimeMs = new Date(serverTimeString).getTime();
-        if (isNaN(serverTimeMs)) {
-            console.error('Error parsing server time:', serverTimeString);
-            // Don't retry on parsing errors, it's likely a data issue
+        // Extract server time directly from the 'timestamp' field
+        if (!data || typeof data.timestamp !== 'number' || isNaN(data.timestamp)) {
+            console.error('Error: Invalid or missing server timestamp received from gateway:', data);
+            // Don't retry on parsing errors, it's likely a data issue from the gateway
             return;
         }
+
+        const serverTimeMs = data.timestamp;
 
         const difference = serverTimeMs - clientTimeMs;
         timeSkew = difference; // Store the calculated skew
 
-        // Optional: Keep logging for verification
-        // update since we are using TimeAPI.io
-        console.log(`Server time (UTC): ${serverTimeString}`);
-        console.log(`Client time (local): ${new Date(clientTimeMs).toISOString()}`);
-        console.log(`Time difference (Server - Client): ${difference} ms`);
+        // Optional: Update logging for verification
+        //console.log(`Gateway time (UTC ms): ${serverTimeMs} (${new Date(serverTimeMs).toISOString()})`);
+        //console.log(`Client time (local ms): ${clientTimeMs} (${new Date(clientTimeMs).toISOString()})`);
+        //console.log(`Time difference (Gateway - Client): ${difference} ms`);
         const minutes = Math.floor(Math.abs(difference) / 60000);
         const seconds = Math.floor((Math.abs(difference) % 60000) / 1000);
         const milliseconds = Math.abs(difference) % 1000;
         const sign = difference < 0 ? "-" : "+";
         console.log(`Time difference: ${sign}${minutes}m ${seconds}s ${milliseconds}ms`);
-        console.log(`Successfully obtained time skew (${timeSkew}ms) on attempt ${retryCount + 1}.`);
-
+        console.log(`Successfully obtained time skew (${timeSkew}ms) from gateway endpoint ${timestampEndpoint} on attempt ${retryCount + 1}.`);
 
     } catch (error) {
-        console.warn(`Attempt ${retryCount + 1} failed to fetch time:`, error);
+        // Handle errors from queryNetwork (e.g., network issues, gateway unavailable)
+        console.warn(`Attempt ${retryCount + 1} failed to fetch time via queryNetwork(${timestampEndpoint}):`, error);
 
         if (retryCount < maxRetries) {
             console.log(`Retrying time fetch in ${retryDelay}ms... (Attempt ${retryCount + 2})`);
             setTimeout(() => timeDifference(retryCount + 1), retryDelay);
         } else {
-            console.error(`Failed to fetch time from API after ${maxRetries + 1} attempts. Time skew might be inaccurate.`);
+            console.error(`Failed to fetch time from gateway endpoint ${timestampEndpoint} after ${maxRetries + 1} attempts. Time skew might be inaccurate.`);
             // Keep timeSkew at its default (0) or last known value if applicable
         }
     }
@@ -6202,6 +5899,7 @@ async function openValidatorModal() {
     const nomineeValueElement = document.getElementById('validator-nominee');
     const userStakeLibItem = document.getElementById('validator-user-stake-lib-item');
     const userStakeUsdItem = document.getElementById('validator-user-stake-usd-item');
+    const unstakeButton = document.getElementById('submitUnstake');
 
     // Reset UI: Show loading, hide details and error, reset conditional elements
     if (loadingElement) loadingElement.style.display = 'block';
@@ -6216,9 +5914,13 @@ async function openValidatorModal() {
     // Ensure stake items are visible by default (using flex as defined in styles.css)
     if (userStakeLibItem) userStakeLibItem.style.display = 'flex';
     if (userStakeUsdItem) userStakeUsdItem.style.display = 'flex';
+    // Disable unstake button initially while loading/checking
+    if (unstakeButton) unstakeButton.disabled = true;
 
 
     if (validatorModal) validatorModal.classList.add('active'); // Open modal immediately
+
+    let nominee = null;
 
     try {
         // Fetch Data Concurrently
@@ -6236,7 +5938,7 @@ async function openValidatorModal() {
 
         // Extract Raw Data
         // Use optional chaining extensively in case userAccountData is null
-        const nominee = userAccountData?.account?.operatorAccountInfo?.nominee;
+        nominee = userAccountData?.account?.operatorAccountInfo?.nominee;
         const userStakedBaseUnits = userAccountData?.account?.operatorAccountInfo?.stake?.value;
 
         // Network data should generally be available, but check anyway
@@ -6311,9 +6013,12 @@ async function openValidatorModal() {
         const marketPriceValue = document.getElementById('validator-market-price');
         const marketStakeUsdValue = document.getElementById('validator-market-stake-usd');
 
+        // set stakeForm dataset.minStake to big2str(stakeAmountLibBaseUnits, 18) for 
+        document.getElementById('stakeForm').dataset.minStake = big2str(stakeAmountLibBaseUnits, 18);
+
         // Format Network Info unconditionally
         const displayNetworkStakeUsd = stakeRequiredUsdBaseUnits ? '$' + big2str(BigInt('0x' + stakeRequiredUsdBaseUnits), 18).slice(0, 6) : 'N/A';
-        const displayNetworkStakeLib = stakeAmountLibBaseUnits ? big2str(stakeAmountLibBaseUnits, 18).slice(0, 6) : 'N/A';
+        const displayNetworkStakeLib = stakeAmountLibBaseUnits ? big2str(stakeAmountLibBaseUnits, 18).slice(0, 7) : 'N/A';
         const displayStabilityFactor = stabilityFactor ? stabilityFactor.toFixed(4) : 'N/A';
         const displayMarketPrice = marketPrice ? '$' + marketPrice.toFixed(4) : 'N/A';
         const displayMarketStakeUsd = marketStakeUsdBaseUnits ? '$' + big2str(marketStakeUsdBaseUnits, 18).slice(0, 6) : 'N/A';
@@ -6363,9 +6068,15 @@ async function openValidatorModal() {
         }
         // Ensure details are hidden if an error occurs
         if (detailsElement) detailsElement.style.display = 'none';
+        // Ensure unstake button remains disabled on error
+        if (unstakeButton) unstakeButton.disabled = true;
     } finally {
         // Hide loading indicator regardless of success or failure
         if (loadingElement) loadingElement.style.display = 'none';
+        // Set final state of unstake button based on whether a nominee was found
+        if (unstakeButton) {
+             unstakeButton.disabled = !nominee;
+        }
     }
 }
 
@@ -6413,8 +6124,30 @@ async function getMarketPrice() {
 // Stake Modal
 function openStakeModal() {
     document.getElementById('stakeModal').classList.add('active');
-    // TODO: input validation and focus on node address input
-    // TODO: disable submit button until inputs are valid
+
+    // Set the correct fill function for the staking context
+    openQRScanModal.fill = fillStakeAddressFromQR; 
+
+    // Display Available Balance
+    const balanceDisplay = document.getElementById('stakeAvailableBalanceDisplay');
+    const libAsset = myData.wallet.assets.find(asset => asset.symbol === 'LIB'); // Assuming LIB is index 0 or find by symbol
+    if (balanceDisplay && libAsset) {
+        // Use big2str for formatting, similar to updateBalanceDisplay but simpler for this context
+        const formattedBalance = big2str(BigInt(libAsset.balance), 18).slice(0, -12); // Show 6 decimal places
+        balanceDisplay.textContent = `Available: ${formattedBalance} ${libAsset.symbol}`;
+    } else if (balanceDisplay) {
+        balanceDisplay.textContent = 'Available: 0.000000 LIB'; // Default if no asset found
+    }
+
+    // fill amount with with the min stake amount
+    const amountInput = document.getElementById('stakeAmount');
+    // get min stake amount from document.getElementById('stakeForm').dataset
+    const minStakeAmountValue = document.getElementById('stakeForm').dataset.minStake;
+    const minStakeAmount = minStakeAmountValue ? minStakeAmountValue : '0'; // Default to 0 if not found
+    if (amountInput && minStakeAmount) amountInput.value = minStakeAmount;
+
+    // Call initial validation
+    validateStakeInputs();
 }
 
 function closeStakeModal() {
@@ -6422,16 +6155,97 @@ function closeStakeModal() {
     // TODO: clear input fields
 }
 
-// Unstake Modal
-function openUnstakeModal() {
-    document.getElementById('unstakeModal').classList.add('active');
-    // TODO: input validation and focus on node address input
-    // TODO: disable submit button until input is valid
+// Check if a validator node is active based on reward times
+async function checkValidatorActivity(validatorAddress) {
+    if (!validatorAddress) {
+        console.error("checkValidatorActivity: No validator address provided.");
+        return { isActive: false, error: "No address provided" }; // Cannot determine activity without address
+    }
+    try {
+        const data = await queryNetwork(`/account/${validatorAddress}`);
+        if (data && data.account) {
+            const account = data.account;
+            // Active if reward has started (not 0) but hasn't ended (is 0)
+            const isActive = account.rewardStartTime && account.rewardStartTime !== 0 && (!account.rewardEndTime || account.rewardEndTime === 0);
+            return { isActive: isActive, error: null };
+        } else {
+            console.warn(`checkValidatorActivity: No account data found for validator ${validatorAddress}.`);
+             return { isActive: false, error: "Could not fetch validator data" };
+        }
+    } catch (error) {
+        console.error(`checkValidatorActivity: Error fetching data for validator ${validatorAddress}:`, error);
+        // Network error or other issue fetching data.
+        return { isActive: false, error: "Network error fetching validator status" };
+    }
 }
 
-function closeUnstakeModal() {
-    document.getElementById('unstakeModal').classList.remove('active');
-    // TODO: clear input fields
+// handle Unstake Click with transaction confirmation and submission
+async function confirmAndUnstakeCurrentUserNominee() {
+    // Attempt to read nominee from the DOM element populated by openValidatorModal
+    const nomineeElement = document.getElementById('validator-nominee');
+    const nominee = nomineeElement ? nomineeElement.textContent?.trim() : null;
+
+    // Check if we successfully retrieved a nominee address from the DOM
+    if (!nominee || nominee.length < 10) { // Add a basic sanity check for length
+        showToast('Could not find nominated validator.', 4000, 'error');
+        console.warn("confirmAndUnstakeCurrentUserNominee: Nominee not found or invalid in DOM element #validator-nominee.");
+        return;
+    }
+
+    // Check if the validator is active
+    const activityCheck = await checkValidatorActivity(nominee);
+    if (activityCheck.isActive) {
+        showToast('Cannot unstake from an active validator.', 5000, 'error');
+        console.warn(`confirmAndUnstakeCurrentUserNominee: Validator ${nominee} is active.`);
+        return;
+    } else if (activityCheck.error) {
+        showToast(`Error checking validator status: ${activityCheck.error}`, 5000, 'error');
+        return;
+    }
+
+    // Confirmation dialog
+    const confirmationMessage = `Are you sure you want to unstake from validator: ${nominee}?`;
+    if (window.confirm(confirmationMessage)) {
+        //console.log(`User confirmed unstake from: ${nominee}`);
+        showToast('Submitting unstake transaction...', 10000, 'loading');
+        // Call the function to handle the actual transaction submission
+        await submitUnstakeTransaction(nominee);
+    }
+}
+
+async function submitUnstakeTransaction(nodeAddress) {
+    // disable the unstake button, back button, and submitStake button
+    const unstakeButton = document?.getElementById('submitUnstake');
+    const backButton = document?.getElementById('backButton');
+    const submitStakeButton = document?.getElementById('submitStake');
+    if (unstakeButton) unstakeButton.disabled = true;
+    if (backButton) backButton.disabled = true;
+    if (submitStakeButton) submitStakeButton.disabled = true;
+
+
+    try {
+        const response = await postUnstake(nodeAddress);
+        await new Promise(resolve => setTimeout(resolve, 10000));
+        // Check the response structure for success indicator.
+        if (response && response.result && response.result.success) {
+            // TODO: Update when transaction status check is implemented
+            closeValidatorModal();
+            openValidatorModal();
+        } else {
+            // Try to get a more specific reason for failure
+            const reason = response?.result?.reason || 'Unknown error from API.';
+            showToast(`Unstake failed: ${reason}`, 5000, 'error');
+            console.error('Unstake failed. API Response:', response);
+        }
+    } catch (error) {
+        console.error('Error submitting unstake transaction:', error);
+        // Provide a user-friendly error message
+        showToast('Unstake transaction failed. Network or server error.', 5000, 'error');
+    } finally {
+        if (unstakeButton) unstakeButton.disabled = false;
+        if (backButton) backButton.disabled = false;
+        if (submitStakeButton) submitStakeButton.disabled = false;
+    }
 }
 
 // Stake Form
@@ -6442,6 +6256,9 @@ async function handleStakeSubmit(event) {
 
     const nodeAddressInput = document.getElementById('stakeNodeAddress');
     const amountInput = document.getElementById('stakeAmount');
+
+    const backButton = document.getElementById('backButton');
+    const submitStakeButton = document.getElementById('submitStake');
 
     const nodeAddress = nodeAddressInput.value.trim();
     const amountStr = amountInput.value.trim();
@@ -6463,9 +6280,6 @@ async function handleStakeSubmit(event) {
     let amount_in_wei;
     try {
         amount_in_wei = bigxnum2big(wei, amountStr);
-        if (amount_in_wei <= 0n) {
-            throw new Error('Amount must be positive');
-        }
         // TODO: Add balance check if necessary
     } catch (error) {
         showToast('Invalid amount entered.', 3000, 'error');
@@ -6474,15 +6288,22 @@ async function handleStakeSubmit(event) {
     }
 
     try {
-        showToast('Submitting stake transaction...', 2000, 'loading');
+        showToast('Submitting stake transaction...', 10000, 'loading');
+
+        if (backButton) backButton.disabled = true;
+        if (submitStakeButton) submitStakeButton.disabled = true;
+
         const response = await postStake(nodeAddress, amount_in_wei, myAccount.keys);
         console.log("Stake Response:", response);
+        // wait 5 seconds before checking the response
+        await new Promise(resolve => setTimeout(resolve, 10000));
 
         if (response && response.result && response.result.success) {
-            showToast('Stake transaction submitted successfully!', 3000, 'success');
+            closeValidatorModal();
             nodeAddressInput.value = ''; // Clear form
             amountInput.value = '';
             closeStakeModal();
+            openValidatorModal();
         } else {
             const reason = response?.result?.reason || 'Unknown error';
             showToast(`Stake failed: ${reason}`, 5000, 'error');
@@ -6491,51 +6312,9 @@ async function handleStakeSubmit(event) {
         console.error('Stake transaction error:', error);
         showToast('Stake transaction failed. See console for details.', 5000, 'error');
     } finally {
-        stakeButton.disabled = false;
-    }
- }
- 
- // Unstake Form
-async function handleUnstakeSubmit(event) {
-    event.preventDefault();
-    const unstakeButton = document.getElementById('submitUnstake');
-    unstakeButton.disabled = true;
-
-    const nodeAddressInput = document.getElementById('unstakeNodeAddress');
-    const nodeAddress = nodeAddressInput.value.trim();
-
-    // Basic Validation // TODO: robust validation
-    if (!nodeAddress) {
-        showToast('Please enter the validator node address.', 3000, 'error');
-        unstakeButton.disabled = false;
-        return;
-    }
-
-    // Validate address format // TODO: robust validation
-/*     if (!nodeAddress.startsWith('0x') || nodeAddress.length !== 42) {
-        showToast('Invalid validator node address format.', 3000, 'error');
-        unstakeButton.disabled = false;
-        return;
-    } */
-
-    try {
-        showToast('Submitting unstake transaction...', 2000, 'loading');
-        const response = await postUnstake(nodeAddress);
-        console.log("Unstake Response:", response);
-
-/*         if (response && response.result && response.result.success) {
-            showToast('Unstake transaction submitted successfully!', 3000, 'success');
-            nodeAddressInput.value = ''; // Clear form
-            closeUnstakeModal();
-        } else {
-            const reason = response?.result?.reason || 'Unknown error';
-            showToast(`Unstake failed: ${reason}`, 5000, 'error');
-        } */
-    } catch (error) {
-        console.error('Unstake transaction error:', error);
-        showToast('Unstake transaction failed. See console for details.', 5000, 'error');
-    } finally {
-        unstakeButton.disabled = false;
+        if (stakeButton) stakeButton.disabled = false;
+        if (backButton) backButton.disabled = false;
+        if (submitStakeButton) submitStakeButton.disabled = false;
     }
  }
 
@@ -6697,7 +6476,6 @@ class RestoreAccountModal {
         event.preventDefault();
         const fileInput = document.getElementById('importFile');
         const passwordInput = document.getElementById('importPassword');
-        const messageElement = document.getElementById('importMessage');
     
         try {
             // Read the file
@@ -6708,7 +6486,7 @@ class RestoreAccountModal {
             // Check if data is encrypted and decrypt if necessary
             if (!isNotEncryptedData) {
                 if (!passwordInput.value.trim()) {
-                    alert('Password required for encrypted data');
+                    showToast('Password required for encrypted data', 3000, 'error');
                     return
                 }
                 fileContent = await decryptData(fileContent, passwordInput.value.trim());
@@ -6742,13 +6520,11 @@ class RestoreAccountModal {
             // Store the localStore entry for username_netid
             localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
     
-            // Show success message
-            messageElement.textContent = 'Data imported successfully!';
-            messageElement.classList.add('active');
+            // Show success message using toast
+            showToast('Account restored successfully!', 2000, 'success');
     
             // Reset form and close modal after delay
             setTimeout(() => {
-                messageElement.classList.remove('active');
                 this.close();
                 window.location.reload();  // need to go through Sign In to make sure imported account exists on network
                 fileInput.value = '';
@@ -6756,14 +6532,446 @@ class RestoreAccountModal {
             }, 2000);
     
         } catch (error) {
-            messageElement.textContent = error.message || 'Import failed. Please check file and password.';
-            messageElement.style.color = '#dc3545';
-            messageElement.classList.add('active');
-            setTimeout(() => {
-                messageElement.classList.remove('active');
-                messageElement.style.color = '#28a745';
-            }, 3000);
+            showToast(error.message || 'Import failed. Please check file and password.', 3000, 'error');
         }
     }
 }
 const restoreAccountModal = new RestoreAccountModal()
+
+class GatewayModal {
+    constructor() {
+    }
+
+    load() {
+        this.modal = document.getElementById('gatewayModal');
+        this.addEditModal = document.getElementById('addEditGatewayModal');
+        this.gatewayList = document.getElementById('gatewayList');
+        this.gatewayForm = document.getElementById('gatewayForm');
+
+        // Setup event listeners when DOM is loaded
+        document.getElementById('openNetwork').addEventListener('click', () => this.open());
+        document.getElementById('closeGatewayForm').addEventListener('click', () => this.close());
+        document.getElementById('addGatewayButton').addEventListener('click', () => this.openAddForm());
+        document.getElementById('closeAddEditGatewayForm').addEventListener('click', () => this.closeAddEditForm());
+        this.gatewayForm.addEventListener('submit', (e) => this.handleFormSubmit(e));
+    }
+
+    open() {
+        // Initialize gateway configuration if needed
+        initializeGatewayConfig();
+        this.modal.classList.add('active');
+        this.updateList();
+    }
+
+    close() {
+        this.modal.classList.remove('active');
+    }
+
+    openAddForm() {
+        this.modal.classList.remove('active');
+        this.gatewayForm.reset();
+        document.getElementById('gatewayEditIndex').value = -1;
+        document.getElementById('addEditGatewayTitle').textContent = 'Add Gateway';
+        this.addEditModal.classList.add('active');
+    }
+
+    closeAddEditForm() {
+        this.addEditModal.classList.remove('active');
+        this.modal.classList.add('active');
+        this.updateList();
+    }
+
+    updateList() {
+        // Clear existing list
+        this.gatewayList.innerHTML = '';
+
+        // If no gateways, show empty state
+        if (myData.network.gateways.length === 0) {
+            this.gatewayList.innerHTML = `
+                <div class="empty-state">
+                    <div style="font-weight: bold; margin-bottom: 0.5rem">No Gateways</div>
+                    <div>Add a gateway to get started</div>
+                </div>`;
+            return;
+        }
+
+        // Add "Use Random Selection" option
+        const randomOption = document.createElement('div');
+        randomOption.className = 'gateway-item random-option';
+        randomOption.innerHTML = `
+            <div class="gateway-info">
+                <div class="gateway-name">Random Selection</div>
+                <div class="gateway-url">Selects random gateway from list</div>
+            </div>
+            <div class="gateway-actions">
+                <label class="default-toggle">
+                    <input type="radio" name="defaultGateway" ${myData.network.defaultGatewayIndex === -1 ? 'checked' : ''}>
+                    <span>Default</span>
+                </label>
+            </div>
+        `;
+
+        const randomToggle = randomOption.querySelector('input[type="radio"]');
+        randomToggle.addEventListener('change', () => {
+            if (randomToggle.checked) {
+                this.setDefaultGateway(-1);
+            }
+        });
+
+        this.gatewayList.appendChild(randomOption);
+
+        // Add each gateway to the list
+        myData.network.gateways.forEach((gateway, index) => {
+            const isDefault = index === myData.network.defaultGatewayIndex;
+            const canRemove = !gateway.isSystem;
+
+            const gatewayItem = document.createElement('div');
+            gatewayItem.className = 'gateway-item';
+            gatewayItem.innerHTML = `
+                <div class="gateway-info">
+                    <div class="gateway-name">${escapeHtml(gateway.name)}</div>
+                    <div class="gateway-url">${gateway.protocol}://${escapeHtml(gateway.host)}:${gateway.port}</div>
+                    ${gateway.isSystem ? '<span class="system-badge">System</span>' : ''}
+                </div>
+                <div class="gateway-actions">
+                    <label class="default-toggle">
+                        <input type="radio" name="defaultGateway" ${isDefault ? 'checked' : ''}>
+                        <span>Default</span>
+                    </label>
+                    <button class="icon-button edit-button" title="Edit">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                        </svg>
+                    </button>
+                    ${canRemove ? `
+                        <button class="icon-button remove-button" title="Remove">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 6h18"></path>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                        </button>
+                    ` : ''}
+                </div>
+            `;
+
+            // Add event listeners
+            const defaultToggle = gatewayItem.querySelector('input[type="radio"]');
+            defaultToggle.addEventListener('change', () => {
+                if (defaultToggle.checked) {
+                    this.setDefaultGateway(index);
+                }
+            });
+
+            const editButton = gatewayItem.querySelector('.edit-button');
+            editButton.addEventListener('click', () => {
+                this.openEditForm(index);
+            });
+
+            if (canRemove) {
+                const removeButton = gatewayItem.querySelector('.remove-button');
+                removeButton.addEventListener('click', () => {
+                    this.confirmRemove(index);
+                });
+            }
+
+            this.gatewayList.appendChild(gatewayItem);
+        });
+    }
+
+    openEditForm(index) {
+        this.modal.classList.remove('active');
+        const gateway = myData.network.gateways[index];
+        document.getElementById('gatewayName').value = gateway.name;
+        document.getElementById('gatewayProtocol').value = gateway.protocol;
+        document.getElementById('gatewayHost').value = gateway.host;
+        document.getElementById('gatewayPort').value = gateway.port;
+        document.getElementById('gatewayEditIndex').value = index;
+        document.getElementById('addEditGatewayTitle').textContent = 'Edit Gateway';
+        this.addEditModal.classList.add('active');
+    }
+
+    async handleFormSubmit(event) {
+        event.preventDefault();
+
+        const formData = {
+            protocol: document.getElementById('gatewayProtocol').value,
+            host: document.getElementById('gatewayHost').value,
+            port: parseInt(document.getElementById('gatewayPort').value),
+            name: document.getElementById('gatewayName').value
+        };
+
+        const editIndex = parseInt(document.getElementById('gatewayEditIndex').value);
+
+        if (editIndex >= 0) {
+            this.updateGateway(editIndex, formData.protocol, formData.host, formData.port, formData.name);
+        } else {
+            this.addGateway(formData.protocol, formData.host, formData.port, formData.name);
+        }
+
+        this.closeAddEditForm();
+    }
+
+    confirmRemove(index) {
+        if (confirm('Are you sure you want to remove this gateway?')) {
+            this.removeGateway(index);
+        }
+    }
+
+    addGateway(protocol, host, port, name) {
+        // Initialize if needed
+        initializeGatewayConfig();
+
+        // Add the new gateway
+        myData.network.gateways.push({
+            protocol,
+            host,
+            port,
+            name,
+            isSystem: false,
+            isDefault: false
+        });
+
+        // Update the UI
+        this.updateList();
+
+        // Show success message
+        showToast('Gateway added successfully');
+    }
+
+    updateGateway(index, protocol, host, port, name) {
+        // Check if index is valid
+        if (index >= 0 && index < myData.network.gateways.length) {
+            const gateway = myData.network.gateways[index];
+
+            // Update gateway properties
+            gateway.protocol = protocol;
+            gateway.host = host;
+            gateway.port = port;
+            gateway.name = name;
+
+            // Update the UI
+            this.updateList();
+
+            // Show success message
+            showToast('Gateway updated successfully');
+        }
+    }
+
+    removeGateway(index) {
+        // Check if index is valid
+        if (index >= 0 && index < myData.network.gateways.length) {
+            const gateway = myData.network.gateways[index];
+
+            // Only allow removing non-system gateways
+            if (!gateway.isSystem) {
+                // If this was the default gateway, reset to random selection
+                if (myData.network.defaultGatewayIndex === index) {
+                    myData.network.defaultGatewayIndex = -1;
+                } else if (myData.network.defaultGatewayIndex > index) {
+                    // Adjust default gateway index if needed
+                    myData.network.defaultGatewayIndex--;
+                }
+
+                // Remove the gateway
+                myData.network.gateways.splice(index, 1);
+
+                // Update the UI
+                this.updateList();
+
+                // Show success message
+                showToast('Gateway removed successfully');
+            }
+        }
+    }
+
+    setDefaultGateway(index) {
+        // Reset all gateways to non-default
+        myData.network.gateways.forEach(gateway => {
+            gateway.isDefault = false;
+        });
+
+        // Set the new default gateway index
+        myData.network.defaultGatewayIndex = index;
+
+        // If setting a specific gateway as default, mark it
+        if (index >= 0 && index < myData.network.gateways.length) {
+            myData.network.gateways[index].isDefault = true;
+        }
+
+        // Update the UI
+        this.updateList();
+
+        // Show success message
+        const message = index === -1 
+            ? 'Using random gateway selection for better reliability' 
+            : 'Default gateway set';
+        showToast(message);
+    }
+}
+const gatewayModal = new GatewayModal()
+
+class AboutModal {
+    constructor() {
+        this.modal = document.getElementById('aboutModal');
+    }
+
+    load() {
+        // Set up event listeners
+        document.getElementById('openAbout').addEventListener('click', () => this.open());
+        document.getElementById('closeAboutModal').addEventListener('click', () => this.close());
+        
+        // Set version and network information once during initialization
+        document.getElementById('versionDisplayAbout').textContent = myVersion + ' ' + version;
+        document.getElementById('networkNameAbout').textContent = network.name;
+        document.getElementById('netIdAbout').textContent = network.netid;
+    }
+
+    open() {
+        // Show the modal
+        this.modal.classList.add('active');
+    }
+
+    close() {
+        this.modal.classList.remove('active');
+    }
+}
+const aboutModal = new AboutModal()
+
+class MyProfileModal {
+    constructor() {
+    }
+
+    load() {  // called when the DOM is loaded; can setup event handlers here
+        this.modal = document.getElementById('accountModal');
+        this.closeButton = document.getElementById('closeAccountForm');
+        document.getElementById('openAccountForm').addEventListener('click', () => this.open());
+        this.closeButton.addEventListener('click', () => this.close());
+        document.getElementById('accountForm').addEventListener('submit', (event) => this.handleSubmit(event));
+        this.submitButton = document.querySelector('#accountForm .update-button');
+    }
+
+    open() {  // called when the modal needs to be opened
+        this.modal.classList.add('active');
+        if (myData && myData.account) {
+            document.getElementById('name').value = myData.account.name || '';
+            document.getElementById('email').value = myData.account.email || '';
+            document.getElementById('phone').value = myData.account.phone || '';
+            document.getElementById('linkedin').value = myData.account.linkedin || '';
+            document.getElementById('x').value = myData.account.x || '';
+        }
+    }
+
+    close() {  // called when the modal needs to be closed
+        this.modal.classList.remove('active');
+    }
+
+    async handleSubmit(event) {
+        event.preventDefault();
+        const formData = {
+            name: document.getElementById('name').value,
+            email: document.getElementById('email').value,
+            phone: document.getElementById('phone').value,
+            linkedin: document.getElementById('linkedin').value,
+            x: document.getElementById('x').value
+        };
+
+        // TODO massage the inputs and check for correct formats; for now assume it is all good
+
+        // Save to myData.account
+        myData.account = { ...myData.account, ...formData };
+
+        showToast('Profile updated successfully', 2000, 'success');
+        // disable the close button and submit button
+        this.closeButton.disabled = true;
+        this.submitButton.disabled = true;
+
+        // Hide success message after 2 seconds
+        setTimeout(() => {
+            this.close();
+            // enable the close button and submit button
+            this.closeButton.disabled = false;
+            this.submitButton.disabled = false;
+        }, 2000);
+    }
+}
+const myProfileModal = new MyProfileModal()
+
+function validateStakeInputs() {
+    const nodeAddressInput = document.getElementById('stakeNodeAddress');
+    const amountInput = document.getElementById('stakeAmount');
+    const stakeForm = document.getElementById('stakeForm');
+    const amountWarningElement = document.getElementById('stakeAmountWarning'); // Renamed for clarity
+    const nodeAddressWarningElement = document.getElementById('stakeNodeAddressWarning'); // New warning element
+    const submitButton = document.getElementById('submitStake');
+
+    const nodeAddress = nodeAddressInput.value.trim();
+    const amountStr = amountInput.value.trim();
+    const minStakeAmountStr = stakeForm.dataset.minStake || '0';
+
+    // Default state: button disabled, warnings hidden
+    submitButton.disabled = true;
+    amountWarningElement.style.display = 'none';
+    amountWarningElement.textContent = '';
+    nodeAddressWarningElement.style.display = 'none'; // Hide address warning too
+    nodeAddressWarningElement.textContent = '';
+
+    // Check 1: Empty Fields
+    if ( !amountStr || !nodeAddress) {
+        // Keep button disabled, no specific warning needed for empty fields yet
+        return;
+    }
+
+    // Check 1.5: Node Address Format (64 hex chars)
+    const addressRegex = /^[0-9a-fA-F]{64}$/;
+    if (!addressRegex.test(nodeAddress)) {
+        nodeAddressWarningElement.textContent = 'Invalid node address format (must be 64 hex characters).';
+        nodeAddressWarningElement.style.display = 'block';
+        amountWarningElement.style.display = 'none'; // Hide amount warning if address is bad
+        amountWarningElement.textContent = '';
+        return; // Keep button disabled
+    } else {
+        // Ensure address warning is hidden if format is now valid
+        nodeAddressWarningElement.style.display = 'none';
+        nodeAddressWarningElement.textContent = '';
+    }
+
+    // --- Amount Checks --- 
+    let amountWei;
+    let minStakeWei;
+    try {
+        amountWei = bigxnum2big(wei, amountStr);
+        minStakeWei = bigxnum2big(wei, minStakeAmountStr);
+        /* if (amountWei <= 0n) {
+             amountWarningElement.textContent = 'Amount must be positive.';
+             amountWarningElement.style.display = 'block';
+             return; // Keep button disabled
+        } */
+    } catch (error) {
+        amountWarningElement.textContent = 'Invalid amount format.';
+        amountWarningElement.style.display = 'block';
+        return; // Keep button disabled
+    }
+
+    // Check 2: Minimum Stake Amount
+    if (amountWei < minStakeWei) {
+        const minStakeFormatted = big2str(minStakeWei, 18).slice(0, -16); // Example formatting
+        amountWarningElement.textContent = `Amount must be at least ${minStakeFormatted} LIB.`;
+        amountWarningElement.style.display = 'block';
+        return; // Keep button disabled
+    }
+
+    // Check 3: Sufficient Balance (using existing function)
+    // Assuming LIB is asset index 0 since after creation of wallet, LIB is the first asset
+    const hasInsufficientBalance = validateBalance(amountStr, 0, amountWarningElement);
+    if (hasInsufficientBalance) {
+        // validateBalance already shows the warning in amountWarningElement
+        return; // Keep button disabled
+    }
+
+    // All checks passed: Enable button
+    submitButton.disabled = false;
+    amountWarningElement.style.display = 'none'; // Ensure warning is hidden if balance is sufficient
+    nodeAddressWarningElement.style.display = 'none'; // Ensure address warning is also hidden
+}
