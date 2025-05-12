@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.05.02.13.58" />
+    <link rel="stylesheet" href="./styles.css?v=2025.05.12.10.56" />
     <link rel="manifest" href="./manifest.json" />
   </head>
   <body>
-    <script src="./app.js?v=2025.05.02.13.58" type="module"></script>
+    <script src="./app.js?v=2025.05.12.10.56" type="module"></script>
     <div class="container">
       <header class="header" id="header">
         <div id="logo">
@@ -514,6 +514,7 @@
             placeholder="Type a message..."
             maxlength="2000"
           ></textarea>
+          <input type="hidden" id="retryOfTxId" />
           <button class="send-button" id="handleSendMessage">
             <svg viewBox="0 0 24 24">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
@@ -670,6 +671,23 @@
         </div>
       </div>
 
+      <!-- History Modal -->
+      <div class="modal fixed-header" id="historyModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeHistoryModal"></button>
+          <div class="modal-title">Transaction History</div>
+        </div>
+        <div class="form-container">
+          <div class="form-group">
+            <label for="historyAsset">Asset</label>
+            <select id="historyAsset" class="form-control"></select>
+          </div>
+          <div class="transaction-list" id="transactionList">
+            <!-- Transactions will be populated here -->
+          </div>
+        </div>
+      </div>
+
       <!-- Send Modal -->
       <div class="modal fixed-header" id="sendModal">
         <div class="modal-header">
@@ -782,6 +800,7 @@
                 maxlength="2000"
               ></textarea>
             </div>
+            <input type="hidden" id="retryOfPaymentTxId" />
             <button type="submit" class="update-button">Send</button>
           </form>
 
@@ -834,23 +853,6 @@
             Confirm Send
           </button>
           <button id="cancelSendButton" class="secondary-button">Cancel</button>
-        </div>
-      </div>
-
-      <!-- History Modal -->
-      <div class="modal fixed-header" id="historyModal">
-        <div class="modal-header">
-          <button class="back-button" id="closeHistoryModal"></button>
-          <div class="modal-title">Transaction History</div>
-        </div>
-        <div class="form-container">
-          <div class="form-group">
-            <label for="historyAsset">Asset</label>
-            <select id="historyAsset" class="form-control"></select>
-          </div>
-          <div class="transaction-list" id="transactionList">
-            <!-- Transactions will be populated here -->
-          </div>
         </div>
       </div>
 
@@ -1109,6 +1111,33 @@
           >
             <div class="info-section">
               <h4>Your Stake Info</h4>
+                              <!-- New Skeleton Bars for Pending Nominee Info -->
+                              <div
+                              class="skeleton-item"
+                              id="pending-nominee-skeleton-1"
+                              style="
+                                display: none;
+                                height: 22px;
+                                width: 100%;
+                                margin-top: 4px;
+                                margin-bottom: 8px;
+                                background-color: #e0e0e0;
+                                padding: 0 5px;
+                                box-sizing: border-box;
+                              "
+                            >
+                              <span
+                                id="pending-tx-text-in-bar"
+                                style="
+                                  display: none;
+                                  font-size: 0.75em;
+                                  color: #333;
+                                  line-height: 22px;
+                                  width: 100%;
+                                  text-align: center;
+                                "
+                              ></span>
+                            </div>
               <div class="info-item vertical-layout">
                 <span class="info-label" id="validator-nominee-label"
                   >Nominated Validator:</span
@@ -1293,6 +1322,49 @@
           <div class="scan-region-highlight"></div>
           <div class="scan-highlight" id="scan-highlight"></div>
           <canvas id="canvas"></canvas>
+        </div>
+      </div>
+
+      <!-- Failed Message Modal -->
+      <div class="modal modal-dialog" id="failedMessageModal">
+        <div class="dialog-box-content">
+          <div class="modal-header">
+            <button class="back-button" id="closeFailedMessageModal"></button>
+            <div class="modal-title">Failed Message</div>
+          </div>
+          <div class="form-container">
+            <div class="modal-actions">
+              <button type="button" class="secondary-button delete-button">
+                Delete
+              </button>
+              <button type="button" class="update-button retry-button">
+                Edit & Resend
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Failed Payment Modal -->
+      <div class="modal modal-dialog" id="failedPaymentModal">
+        <div class="dialog-box-content">
+          <div class="modal-header">
+            <button
+              class="back-button"
+              id="closeFailedPaymentModal"
+            ></button>
+            <div class="modal-title">Failed Transaction</div>
+          </div>
+          <div class="form-container">
+            <div class="modal-actions">
+              <button type="button" class="secondary-button delete-button">
+                Delete
+              </button>
+              <button type="button" class="update-button retry-button">
+                Edit & Resend
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

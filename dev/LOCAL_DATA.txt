@@ -68,7 +68,8 @@ LocalStore key "username_netid"; gets read into myData global variable in app.js
           "symbol": "LIB",                                  // optional, symbol of asset that was sent or received
           "timestamp": 1703261400000,
           "sent_timestamp": 1703261400000,
-          "my": false
+          "my": false,
+          "status": "sent"                                  // could be "sent" or "failed"
         }
       ],
       "email": "alice@example.com",

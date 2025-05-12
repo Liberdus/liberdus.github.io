@@ -238,19 +238,6 @@ export async function deriveKey(password, salt, iterations = 100000) {
     );
 }
 
-export async function decryptData(encryptedData, password) {
-    if (!password) return encryptedData;
-
-    // Generate key using 100,000 iterations of blake2b
-    let key = utf82bin(password);
-    for (let i = 0; i < 100000; i++) {
-        key = blake.blake2b(key, null, 32);
-    }
-
-    // Decrypt the data using ChaCha20-Poly1305
-    return decryptChacha(key, encryptedData);
-}
-
 export function isEncryptedData(data) {
     try {
         const parsed = JSON.parse(data);
@@ -260,23 +247,6 @@ export function isEncryptedData(data) {
     } catch {
         return false;
     }
-}
-
-export async function encryptData(data, password) {
-    if (!password) return data;
-
-    // Generate salt
-    const salt = window.crypto.getRandomValues(new Uint8Array(16));
-
-    // Derive key using 100,000 iterations of blake2b
-    let key = utf82bin(password);
-    for (let i = 0; i < 100000; i++) {
-        key = blake.blake2b(key, null, 32);
-    }
-
-    // Encrypt the data using ChaCha20-Poly1305
-    const encrypted = encryptChacha(key, data);
-    return encrypted
 }
 
 export function isValidEthereumAddress(address) {
@@ -358,13 +328,6 @@ export function big2num(bigIntNum) {
     const result = Number(firstFifteen) * Math.pow(10, remainingDigits);
     
     return isNegative ? -result : result;
-}
-
-export function ethHashMessage(message){
-    if (typeof(message) === "string") { message = utf82bin(message); }
-    const MessagePrefix = "\x19Ethereum Signed Message:\n"
-    const str = bin2hex(utf82bin(MessagePrefix)) + bin2hex(utf82bin(String(message.length))) + bin2hex(message)
-    return bin2hex(keccak256(hex2bin(str)))
 }
 
 // This was losing precision because the number was getting converted to float by the caller
@@ -468,39 +431,6 @@ export function bin2base64(bytes) {
 // Convert base64 to Uint8Array
 export function base642bin(str) {
     return Uint8Array.from(atob(str), c => c.charCodeAt(0));
-}
-
-// key is binary, data is string, output is base64
-export function encryptChacha(key, data) {
-    const nonce = window.crypto.getRandomValues(new Uint8Array(24))
-    const cipher = xchacha20poly1305(key, nonce);
-    const encrypted = cipher.encrypt(utf82bin(data));
-    
-    // Combine nonce + encrypted data (which includes authentication tag)
-    const combined = new Uint8Array(nonce.length + encrypted.length);
-    combined.set(nonce);
-    combined.set(encrypted, nonce.length);
-    
-    return bin2base64(combined);
-}
-
-// key is binary, encrypted is base64, output is string
-export function decryptChacha(key, encrypted) {
-    try {
-        // Convert from base64
-        const combined = base642bin(encrypted);
-        
-        // Extract nonce (first 24 bytes) and encrypted data
-        const nonce = combined.slice(0, 24);
-        const data = combined.slice(24);
-        
-        const cipher = xchacha20poly1305(key, nonce);
-        const decrypted = cipher.decrypt(data);
-        return bin2utf8(decrypted);
-    } catch (error) {
-        console.log('Decryption failed: message authentication failed or corrupted data');
-        return 'Decryption failed due to tampered data'
-    }
 }
 
 export function hex2bin(hex){
