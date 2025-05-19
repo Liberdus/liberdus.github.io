@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6622,7 +6622,7 @@ async function submitUnstakeTransaction(nodeAddress) {
         } else {
             // Try to get a more specific reason for failure
             const reason = response?.result?.reason || 'Unknown error from API.';
-            showToast(`Unstake failed: ${reason}`, 5000, 'error');
+            // not showing toast since shown in injectTx
             console.error('Unstake failed. API Response:', response);
         }
     } catch (error) {
@@ -6836,7 +6836,7 @@ class BackupAccountModal {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `${myAccount.username}-export-${new Date().toISOString().split('T')[0]}.json`;
+            a.download = `${myAccount.username}-liberdus-${new Date().toISOString().split('T')[0]}.json`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
