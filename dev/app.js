@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'i'
+const version = 'j'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -6518,6 +6518,18 @@ function openStakeModal() {
     } else if (balanceDisplay) {
         balanceDisplay.textContent = 'Available: 0.000000 LIB'; // Default if no asset found
     }
+
+    // if validator-nominee address from validatorModal is not null, fill the stakeNodeAddress input field with the validator-nominee address
+    const stakeNodeAddressInput = document.getElementById('stakeNodeAddress');
+    const nominee = document.getElementById('validator-nominee')?.textContent?.trim();
+    const stakeNodeAddressGroup = document.getElementById('stakeNodeAddressGroup');
+    const isNominee = !!nominee;
+    
+    // if nominee is not null, fill the stakeNodeAddress input field with the nominee address
+    stakeNodeAddressInput.value = isNominee ? nominee : '';
+    // hide the stakeNodeAddressGroup since pre-filled if there is a nominee
+    stakeNodeAddressGroup.style.display = isNominee ? 'none' : 'block';
+
 
     // fill amount with with the min stake amount
     const amountInput = document.getElementById('stakeAmount');
