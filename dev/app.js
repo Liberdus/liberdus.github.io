@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'j'
+const version = 'k'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -796,6 +796,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     document.getElementById('closeCreateAccountModal').addEventListener('click', closeCreateAccountModal);
     document.getElementById('createAccountForm').addEventListener('submit', handleCreateAccount);
+
+    // Event listener for the private key toggle checkbox
+    const togglePrivateKeyInput = document.getElementById('togglePrivateKeyInput');
+    togglePrivateKeyInput.addEventListener('change', handleTogglePrivateKeyInput);
 
     // Account Form Modal
     myProfileModal.load()
@@ -6529,6 +6533,9 @@ function openStakeModal() {
     stakeNodeAddressInput.value = isNominee ? nominee : '';
     // hide the stakeNodeAddressGroup since pre-filled if there is a nominee
     stakeNodeAddressGroup.style.display = isNominee ? 'none' : 'block';
+    // button submitStake should say "Add Stake" if there is a nominee, otherwise say "Submit Stake"
+    const submitStakeButton = document.getElementById('submitStake');
+    submitStakeButton.textContent = isNominee ? 'Add Stake' : 'Submit Stake';
 
 
     // fill amount with with the min stake amount
@@ -7659,3 +7666,17 @@ const pendingPromiseService = (() => {
 
     return { register, resolve, reject };
   })();
+
+function handleTogglePrivateKeyInput() {
+    const privateKeySection = document.getElementById('privateKeySection');
+    const newPrivateKeyInput = document.getElementById('newPrivateKey');
+
+    // clear the newPrivateKeyInput
+    newPrivateKeyInput.value = '';
+
+    if (togglePrivateKeyInput.checked) {
+        privateKeySection.style.display = 'block';
+    } else {
+        privateKeySection.style.display = 'none';
+    }
+}
