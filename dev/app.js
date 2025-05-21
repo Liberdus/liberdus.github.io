@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'
+const version = 'u'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1166,6 +1166,10 @@ function handleVisibilityChange(e) {
     } else if (document.visibilityState === 'visible') {
         // show error toast to indicate app has been shown
         showToast('App has been shown', 0, 'error');
+
+        //showToast error to show the boolean values for the if checks
+        showToast(`wsManager: ${wsManager}, wsManager.isConnected(): ${wsManager?.isConnected()}, myAccount: ${myAccount}`, 0, 'error');
+
         // Reconnect WebSocket if needed
         if (wsManager && !wsManager.isConnected() && myAccount) {
             showToast('Reconnecting WebSocket', 0, 'error');
