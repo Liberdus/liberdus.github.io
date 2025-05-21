@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'
+const version = 'r'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -893,11 +893,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         item.addEventListener('keydown', ignoreTabKey);
     });
     // add event listener for first-item to prevent shift+tab
-    document.querySelectorAll('.first-item').forEach(item => {
+    document.querySelectorAll('.logo-link').forEach(item => {
         item.addEventListener('keydown', ignoreShiftTabKey);
     });
-    // add event listener for logo link to prevent tab
-    document.getElementById('welcomeScreenLogoLink').addEventListener('keydown', ignoreShiftTabKey);
 
     // Add message click-to-copy handler
     document.querySelector('.messages-list')?.addEventListener('click', handleClickToCopy);
@@ -4742,6 +4740,9 @@ function setupAppStateManagement() {
             const timestamp = getCorrectedTimestamp().toString();
             localStorage.setItem('appPaused', timestamp);
 
+            // error toast to indicate app has been hidden
+            showToast('App has been hidden', 0, 'error');
+
             // Prepare account data for service worker
             const accountData = {
                 address: myAccount.keys.address,
@@ -4762,6 +4763,10 @@ function setupAppStateManagement() {
         } else {
             // App is becoming visible/open
             console.log('📱 App visible - stopping service worker polling');
+
+            // show error toast to indicate app has been shown
+            showToast('App has been shown', 0, 'error');
+
             localStorage.setItem('appPaused', '0');
 
             // Stop polling in service worker
