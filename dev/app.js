@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -875,6 +875,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('closeChatModal').addEventListener('click', closeChatModal);
     document.getElementById('closeContactInfoModal').addEventListener('click', () => contactInfoModal.close());
     document.getElementById('handleSendMessage').addEventListener('click', handleSendMessage);
+    // add event listener for tab key
+    document.getElementById('handleSendMessage').addEventListener('keydown', ignoreTabKey);
+
+    // for back-button presses don't allow shift+tab to work for all back-button classes use ignoreShiftTabKey
+    document.querySelectorAll('.back-button').forEach(button => {
+        button.addEventListener('keydown', ignoreShiftTabKey);
+    });
+
+    // add event listener for unused button
+    document.querySelectorAll('.last-item').forEach(item => {
+        item.addEventListener('keydown', ignoreTabKey);
+    });
 
     // Add message click-to-copy handler
     document.querySelector('.messages-list')?.addEventListener('click', handleClickToCopy);
@@ -1086,6 +1098,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     failedPaymentHeaderCloseButton.addEventListener('click', closeFailedPaymentModalAndClearState);
     failedPaymentModal.addEventListener('click', handleFailedPaymentBackdropClick);
 
+    // add event listener for toggle LIB/USD button
+    document.getElementById('toggleBalance').addEventListener('click', handleToggleBalance);
+
+    const lastItem = document.getElementById('welcomeScreenLastItem');
+    lastItem.focus();
+          
     setupAddToHomeScreen()
 });
 
@@ -1561,6 +1579,13 @@ async function switchView(view) {
                 if (wsManager && !wsManager.isSubscribed()) {
                     pollChatInterval(pollIntervalNormal);
                 }
+            }
+
+            // focus onto last-item in the footer
+            const footer = document.getElementById('footer');
+            const lastItem = footer.querySelector('.last-item');
+            if (lastItem) {
+                lastItem.focus();
             }
         } else if (view === 'contacts') {
             await updateContactsList();
@@ -2415,6 +2440,36 @@ async function openSendModal() {
 }
 
 openSendModal.username = null
+
+/*
+* This function is called when the user clicks the toggle LIB/USD button.
+* Updates the balance symbol and the send amount to the equivalent value in USD/LIB
+*/
+async function handleToggleBalance(e) {
+    e.preventDefault();
+    const balanceSymbol = document.getElementById('balanceSymbol');
+    balanceSymbol.textContent = balanceSymbol.textContent === 'LIB' ? 'USD' : 'LIB';
+    const sendAmount = document.getElementById('sendAmount');
+    const balanceAmount = document.getElementById('balanceAmount');
+    const transactionFee = document.getElementById('transactionFee');
+
+    // check the context value of the button to determine if it's LIB or USD
+    const isLib = balanceSymbol.textContent === 'LIB';
+
+    // get the current price of LIB in USD
+    const marketPrice = await getMarketPrice();
+
+    // if isLib is false, convert the sendAmount to USD
+    if (!isLib) {
+        sendAmount.value = (sendAmount.value * marketPrice);
+        balanceAmount.textContent = (balanceAmount.textContent * marketPrice);
+        transactionFee.textContent = (transactionFee.textContent * marketPrice);
+    } else {
+        sendAmount.value = (sendAmount.value / marketPrice);
+        balanceAmount.textContent = (balanceAmount.textContent / marketPrice);
+        transactionFee.textContent = (transactionFee.textContent / marketPrice);
+    }
+}
 
 let sendModalCheckTimeout;
 function handleOpenSendModalInput(e){
@@ -5791,7 +5846,8 @@ class WSManager {
    * Subscribe to chat events for the current account
    */
   subscribe() {
-    updateWebSocketIndicator();
+    // don't call updateWebSocketIndicator here since that function calls this function
+  //  updateWebSocketIndicator();
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.error('Cannot subscribe: WebSocket not connected');
       return false;
@@ -6064,18 +6120,26 @@ class WSManager {
 let wsManager = new WSManager()        // this is set to new WSManager() for convience
 
 // New functions for send confirmation flow
-function handleSendFormSubmit(event) {
+async function handleSendFormSubmit(event) {
     event.preventDefault();
 
     // Get form values
     const assetSelect = document.getElementById('sendAsset');
     const assetSymbol = assetSelect.options[assetSelect.selectedIndex].text;
     const recipient = document.getElementById('sendToAddress').value;
-    const amount = document.getElementById('sendAmount').value;
+    const balanceSymbol = document.getElementById('balanceSymbol');
+    let amount = document.getElementById('sendAmount').value;
     const memo = document.getElementById('sendMemo').value;
-
     const confirmButton = document.getElementById('confirmSendButton');
     const cancelButton = document.getElementById('cancelSendButton');
+
+    const marketPrice = await getMarketPrice();
+
+    // need to convert to LIB if USD is selected
+    const isLib = balanceSymbol.textContent === 'LIB';
+    if (!isLib) {
+        amount = (amount / marketPrice);
+    }
 
     // Update confirmation modal with values
     document.getElementById('confirmRecipient').textContent = recipient;
@@ -6210,6 +6274,11 @@ function getCorrectedTimestamp() {
 }
 
 function updateWebSocketIndicator() {
+    // added this so that we don't miss messages on phones, since phones drop the ws if not used periodically
+    if (getCorrectedTimestamp() - updateWebSocketIndicator.lastSubscribed > 31000){
+        wsManager.subscribe()
+        updateWebSocketIndicator.lastSubscribed = getCorrectedTimestamp()
+    }
     const indicator = document.getElementById('wsStatusIndicator');
     if (!indicator) return;
     if (!wsManager || !wsManager.isConnected()) {
@@ -6223,6 +6292,7 @@ function updateWebSocketIndicator() {
         indicator.className = 'ws-status-indicator ws-green';
     }
 }
+updateWebSocketIndicator.lastSubscribed = 0
 
 // Validator Modals
 async function openValidatorModal() {
@@ -7680,3 +7750,28 @@ function handleTogglePrivateKeyInput() {
         privateKeySection.style.display = 'none';
     }
 }
+
+/*
+* Used to prevent tab from working.
+* @param {Event} e - The event object.
+*/
+function ignoreTabKey(e) {
+    //console.log('DEBUG: ignoring tab key');
+    // allow shift+tab to work
+    if (e.key === 'Tab' && !e.shiftKey) {
+        e.preventDefault();
+    }
+}
+
+/*
+* Used to prevent shift+tab from working.
+* @param {Event} e - The event object.
+*/
+function ignoreShiftTabKey(e) {
+    //console.log('DEBUG: ignoring shift+tab key');
+    // if key is tab and key.shiftKey is true, prevent default
+    if (e.key === 'Tab' && e.shiftKey) {
+        e.preventDefault();
+    }
+}
+

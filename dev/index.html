@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.05.20.07.26" />
+    <link rel="stylesheet" href="./styles.css?v=2025.05.21.09.40" />
     <link rel="manifest" href="./manifest.json" />
   </head>
   <body>
-    <script src="./app.js?v=2025.05.20.07.26" type="module"></script>
+    <script src="./app.js?v=2025.05.21.09.40" type="module"></script>
     <div class="container">
       <header class="header" id="header">
         <div id="logo">
@@ -118,6 +118,8 @@
         <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
           Version <span id="versionDisplay"></span>
         </div>
+        <!-- Add a unused anchor tag with nothing in it and add a class to it so can't shift and end up on another modal. Should still be displayed but will just show nothing -->
+        <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;" id="welcomeScreenLastItem"> </a>
       </div>
 
       <div class="app-screen" id="chatsScreen">
@@ -195,6 +197,8 @@
           <button class="nav-button" id="switchToContacts">Contacts</button>
           <button class="nav-button" id="switchToWallet">Wallet</button>
         </div>
+        <!-- set focus on last-item in the footer -->
+        <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
       </footer>
 
       <!-- New Chat Modal -->
@@ -222,6 +226,7 @@
             </div>
             <button type="submit" class="update-button">Continue</button>
           </form>
+          <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
         </div>
       </div>
 
@@ -239,13 +244,12 @@
           <!--                <li class="menu-item" id="openSettings">Settings</li> -->
           <li class="menu-item" id="openExplorer">Explorer</li>
           <li class="menu-item" id="openMonitor">Network</li>
-          <!--
-                <li class="menu-item" id="openImportFormMenu">Import</li>
--->
+          <!--<li class="menu-item" id="openImportFormMenu">Import</li>-->
           <li class="menu-item" id="openRemoveAccount">Remove</li>
           <li class="menu-item" id="openAbout">About</li>
           <li class="menu-item" id="handleSignOut">Sign Out</li>
         </ul>
+        <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
       </div>
 
       <!-- About Modal -->
@@ -318,6 +322,7 @@
             </p>
           </div>
         </div>
+        <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
       </div>
 
       <!-- Sign In Modal -->
@@ -350,6 +355,7 @@
               Remove
             </button>
           </form>
+          <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
         </div>
       </div>
 
@@ -421,6 +427,7 @@
               Create Account
             </button>
           </form>
+          <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
         </div>
       </div>
 
@@ -457,6 +464,7 @@
             </div>
             <button type="submit" class="update-button">Update Profile</button>
           </form>
+          <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
         </div>
       </div>
 
@@ -489,6 +497,7 @@
             </div>
             <button type="submit" class="update-button">Load Account</button>
           </form>
+          <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
         </div>
       </div>
 
@@ -531,6 +540,7 @@
             </svg>
           </button>
         </div>
+        <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
       </div>
 
       <!-- Contact Info Modal -->
@@ -605,6 +615,7 @@
             </div>
           </div>
         </div>
+        <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
       </div>
 
       <!-- Receive Modal -->
@@ -679,6 +690,7 @@
             ></textarea>
           </div>
         </div>
+        <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
       </div>
 
       <!-- History Modal -->
@@ -696,6 +708,7 @@
             <!-- Transactions will be populated here -->
           </div>
         </div>
+        <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
       </div>
 
       <!-- Send Modal -->
@@ -781,6 +794,21 @@
             </div>
             <div class="form-group">
               <label for="sendAmount">Amount</label>
+              <div class="amount-container">
+                <input
+                  type="number"
+                  id="sendAmount"
+                  class="form-control"
+                  step="any"
+                  min="0.000000000000000001"
+                  required
+                />
+                <!-- add button to toggle between LIB and USD -->
+                <button id="toggleBalance" class="toggle-balance">
+                  <span id="balanceSymbol">LIB</span>
+                </button>
+              </div>
+              <div id="balanceWarning" class="balance-warning"></div>
               <div id="availableBalance" class="available-balance">
                 <div class="balance-info">
                   <span
@@ -792,15 +820,6 @@
                   >
                 </div>
               </div>
-              <input
-                type="number"
-                id="sendAmount"
-                class="form-control"
-                step="any"
-                min="0.000000000000000001"
-                required
-              />
-              <div id="balanceWarning" class="balance-warning"></div>
             </div>
             <div class="form-group">
               <label for="sendMemo">Memo (Optional)</label>
@@ -832,6 +851,7 @@
             </div>
           </div>
         </div>
+        <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
       </div>
 
       <!-- Send Confirmation Modal -->
@@ -864,6 +884,7 @@
           </button>
           <button id="cancelSendButton" class="secondary-button">Cancel</button>
         </div>
+        <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
       </div>
 
       <!-- Export Modal -->
@@ -885,6 +906,7 @@
             </div>
             <button type="submit" class="update-button">Download Data</button>
           </form>
+          <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
         </div>
       </div>
 
@@ -901,6 +923,7 @@
           <button id="addGatewayButton" class="update-button">
             Add Gateway
           </button>
+          <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
         </div>
       </div>
 
@@ -952,6 +975,7 @@
             </div>
             <button type="submit" class="update-button">Save</button>
           </form>
+          <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
         </div>
       </div>
 
@@ -977,6 +1001,7 @@
               Remove
             </button>
           </div>
+          <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
         </div>
       </div>
 
@@ -1001,6 +1026,7 @@
           <div id="searchResults" class="chat-list">
             <!-- Results will be populated here -->
           </div>
+          <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
         </div>
       </div>
 
@@ -1025,6 +1051,7 @@
           <div id="contactSearchResults" class="chat-list">
             <!-- Contact search results will be populated here -->
           </div>
+          <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
         </div>
       </div>
 
@@ -1079,6 +1106,7 @@
               <div class="contact-info-value" id="editContactX"></div>
             </div>
           </div>
+          <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
         </div>
       </div>
 
@@ -1214,6 +1242,7 @@
             </p>
           </div>
         </div>
+        <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
       </div>
 
       <!-- Stake Modal -->
@@ -1317,6 +1346,7 @@
               Submit Stake
             </button>
           </form>
+          <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
         </div>
       </div>
 
@@ -1333,6 +1363,7 @@
           <div class="scan-highlight" id="scan-highlight"></div>
           <canvas id="canvas"></canvas>
         </div>
+        <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
       </div>
 
       <!-- Failed Message Modal -->
@@ -1353,6 +1384,7 @@
             </div>
           </div>
         </div>
+        <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
       </div>
 
       <!-- Failed Payment Modal -->
@@ -1374,6 +1406,7 @@
           </div>
         </div>
       </div>
+      <a class="last-item" href="#" style="display: block; width: 0; height: 0; border: none; background: none;"> </a>
     </div>
     <!-- Audio element for notification sounds -->
     <audio
