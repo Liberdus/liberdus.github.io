@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1156,29 +1156,17 @@ console.log('stop back button')
 async function handleVisibilityChange(e) {
     console.log('in handleVisibilityChange', document.visibilityState);
     if (document.visibilityState === 'hidden') {
-        // error toast to indicate app has been hidden
-        showToast('App has been hidden', 0, 'error');
         saveState();
         if (handleSignOut.exit) {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             return;
         }
     } else if (document.visibilityState === 'visible') {
-        // show error toast to indicate app has been shown
-        showToast('App has been shown', 0, 'error');
-
-        //showToast error to show the boolean values for the if checks
-        showToast(`wsManager: ${JSON.stringify(wsManager)}, wsManager.isConnected(): ${wsManager?.isConnected()}, myAccount: ${JSON.stringify(myAccount)}`, 0, 'error');
-
         // Reconnect WebSocket if needed
         if (wsManager && !wsManager.isConnected() && myAccount) {
-            showToast('Reconnecting WebSocket', 0, 'error');
             wsManager.connect();
         }
-        // add line here to updateChatData and updateChatList
-        // set timeout to 500ms
         setTimeout(async () => {
-            showToast('Updating chat data and chat list from handleVisibilityChange', 0, 'error');
             await updateChatData();
             await updateChatList();
         }, 1000);
@@ -1419,7 +1407,10 @@ async function updateChatList() {
         const contact = contacts[chat.address];
 
         // If contact doesn't exist, skip this chat item
-        if (!contact) return null;
+        if (!contact) {
+            console.log('no contact for chat', chat.address)
+            return null;
+        }
 
         const latestActivity = contact.messages && contact.messages.length > 0 ? contact.messages[0] : null;
 
@@ -4166,8 +4157,7 @@ function playChatSound(shouldPlay) {
             notificationAudio.play().catch(error => {
                 console.warn("Notification sound playback failed:", error);
             });
-            // invoke vibration
-            navigator.vibrate(100);
+            //navigator.vibrate(100);
         }
     }
 }
@@ -4179,8 +4169,7 @@ function playTransferSound(shouldPlay) {
             notificationAudio.play().catch(error => {
                 console.warn("Notification sound playback failed:", error);
             });
-            // invoke vibration
-            navigator.vibrate(100);
+            //navigator.vibrate(100);
         }
     }
 }
@@ -4760,9 +4749,6 @@ function setupAppStateManagement() {
             const timestamp = getCorrectedTimestamp().toString();
             localStorage.setItem('appPaused', timestamp);
 
-            // error toast to indicate app has been hidden
-            showToast('App has been hidden', 0, 'error');
-
             // Prepare account data for service worker
             const accountData = {
                 address: myAccount.keys.address,
@@ -4783,10 +4769,6 @@ function setupAppStateManagement() {
         } else {
             // App is becoming visible/open
             console.log('📱 App visible - stopping service worker polling');
-
-            // show error toast to indicate app has been shown
-            showToast('App has been shown', 0, 'error');
-
             localStorage.setItem('appPaused', '0');
 
             // Stop polling in service worker
@@ -5770,7 +5752,6 @@ class WSManager {
     updateWebSocketIndicator();
     // Check if ws is not null and readyState is either CONNECTING or OPEN
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
-      showToast('WebSocket connection already established inside of WSManager.connect', 0, 'error');
       console.log('WebSocket connection already established');
       return;
     }
@@ -5875,7 +5856,6 @@ class WSManager {
         updateWebSocketIndicator();
         console.error('WebSocket error occurred:', error);
         console.log('WebSocket readyState at error:', this.ws ? this.ws.readyState : 'ws is null');
-        showToast('WebSocket error occurred. Handling in wsManager.onerror', 0, 'error');
         this.handleConnectionFailure();
     };
   }
@@ -6020,8 +6000,6 @@ class WSManager {
     console.log('Reconnection Schedule:', JSON.stringify(reconnectInfo, null, 2));
 
     setTimeout(() => {
-      // show error toast to indicate app has been shown
-      showToast('Reconnecting to WebSocket. inside of handleConnectionFailure', 0, 'error');
       console.log('Reconnecting to WebSocket');
       this.connect();
     }, delay);
