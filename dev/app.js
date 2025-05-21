@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'r'
+const version = 's'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1156,12 +1156,16 @@ console.log('stop back button')
 function handleVisibilityChange(e) {
     console.log('in handleVisibilityChange', document.visibilityState);
     if (document.visibilityState === 'hidden') {
+        // error toast to indicate app has been hidden
+        showToast('App has been hidden', 0, 'error');
         saveState();
         if (handleSignOut.exit) {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             return;
         }
     } else if (document.visibilityState === 'visible') {
+        // show error toast to indicate app has been shown
+        showToast('App has been shown', 0, 'error');
         // Reconnect WebSocket if needed
         if (wsManager && !wsManager.isConnected() && myAccount) {
             wsManager.connect();
