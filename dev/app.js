@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1153,7 +1153,7 @@ console.log('stop back button')
 }
 
 // This is for installed apps where we can't stop the back button; just save the state
-function handleVisibilityChange(e) {
+async function handleVisibilityChange(e) {
     console.log('in handleVisibilityChange', document.visibilityState);
     if (document.visibilityState === 'hidden') {
         // error toast to indicate app has been hidden
@@ -1177,9 +1177,10 @@ function handleVisibilityChange(e) {
         }
         // add line here to updateChatData and updateChatList
         // set timeout to 500ms
-        setTimeout(() => {
-            updateChatData();
-            updateChatList();
+        setTimeout(async () => {
+            showToast('Updating chat data and chat list from handleVisibilityChange', 0, 'error');
+            await updateChatData();
+            await updateChatList();
         }, 1000);
     }
 }
