@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -5759,6 +5759,7 @@ class WSManager {
     updateWebSocketIndicator();
     // Check if ws is not null and readyState is either CONNECTING or OPEN
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+      showToast('WebSocket connection already established inside of WSManager.connect', 0, 'error');
       console.log('WebSocket connection already established');
       return;
     }
@@ -5863,6 +5864,7 @@ class WSManager {
         updateWebSocketIndicator();
         console.error('WebSocket error occurred:', error);
         console.log('WebSocket readyState at error:', this.ws ? this.ws.readyState : 'ws is null');
+        showToast('WebSocket error occurred. Handling in wsManager.onerror', 0, 'error');
         this.handleConnectionFailure();
     };
   }
@@ -6007,6 +6009,8 @@ class WSManager {
     console.log('Reconnection Schedule:', JSON.stringify(reconnectInfo, null, 2));
 
     setTimeout(() => {
+      // show error toast to indicate app has been shown
+      showToast('Reconnecting to WebSocket. inside of handleConnectionFailure', 0, 'error');
       console.log('Reconnecting to WebSocket');
       this.connect();
     }, delay);
