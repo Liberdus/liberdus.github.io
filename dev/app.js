@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'c'
+const version = 'd'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -707,7 +707,7 @@ function newDataRecord(myAccount){
         },
         settings: {
             encrypt: true,
-            toll: 1
+            toll: 0n
         }
     }
 
@@ -824,6 +824,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('closeValidatorModal').addEventListener('click', closeValidatorModal);
     document.getElementById('openStakeModal').addEventListener('click', openStakeModal);
     document.getElementById('submitUnstake').addEventListener('click', confirmAndUnstakeCurrentUserNominee);
+
+    // Toll Modal
+    tollModal.load()
 
     // Stake Modal
     document.getElementById('closeStakeModal').addEventListener('click', closeStakeModal);
@@ -1407,10 +1410,7 @@ async function updateChatList() {
         const contact = contacts[chat.address];
 
         // If contact doesn't exist, skip this chat item
-        if (!contact) {
-            console.log('no contact for chat', chat.address)
-            return null;
-        }
+        if (!contact) return null;
 
         const latestActivity = contact.messages && contact.messages.length > 0 ? contact.messages[0] : null;
 
@@ -4157,7 +4157,6 @@ function playChatSound(shouldPlay) {
             notificationAudio.play().catch(error => {
                 console.warn("Notification sound playback failed:", error);
             });
-            //navigator.vibrate(100);
         }
     }
 }
@@ -4169,7 +4168,6 @@ function playTransferSound(shouldPlay) {
             notificationAudio.play().catch(error => {
                 console.warn("Notification sound playback failed:", error);
             });
-            //navigator.vibrate(100);
         }
     }
 }
@@ -5826,15 +5824,15 @@ class WSManager {
         const data = JSON.parse(event.data);
 
         // Check if this is a subscription response
-        if (data.result !== undefined) {
-            if (data.result === true) {
+        if (data.id !== null && data.result !== undefined) {
+            if (data.result.subscription_status === true) {
               console.log('Server confirmed subscription successful');
               this.subscribed = true;
             } else if (data.error) {
               console.error('Server rejected subscription:', data.error);
               this.subscribed = false;
             }
-          } else if (data.account_id && data.timestamp) {
+          } else if (!data.id  && data.result.account_id && data.result.timestamp) {
             console.log('Received new chat notification in ws');
             const gotChats = await updateChatData();
             console.log('gotChats inside of ws.onmessage', gotChats);
@@ -5881,6 +5879,8 @@ class WSManager {
 
       // Create subscription message directly with the required format
       const subscribeMessage = {
+        jsonrpc: "2.0",
+        id: 1,
         method: "ChatEvent",
         params: ["subscribe", longAddress(myAccount.keys.address)]
       };
@@ -5915,6 +5915,8 @@ class WSManager {
       console.log('Unsubscribing from chat events');
 
       const unsubscribeMessage = {
+        jsonrpc: "2.0",
+        id: 1,    
         method: "ChatEvent",
         params: ["unsubscribe", longAddress(myAccount.keys.address)]
       };
@@ -6807,10 +6809,6 @@ async function handleStakeSubmit(event) {
             amountInput.value = '';
             closeStakeModal();
             openValidatorModal();
-        } else {
-            const reason = response?.result?.reason || 'Unknown error';
-            //showToast(`Stake failed: ${reason}`, 5000, 'error');
-            // after toast shown, stays in stakeModal
         }
     } catch (error) {
         console.error('Stake transaction error:', error);
@@ -7318,6 +7316,112 @@ class GatewayModal {
 }
 const gatewayModal = new GatewayModal()
 
+class TollModal {
+    constructor() {
+        this.modal = document.getElementById('tollModal');
+        this.currentCurrency = 'LIB'; // Initialize currency state
+        this.oldToll = null;
+    }
+
+    load() {
+        document.getElementById('openToll').addEventListener('click', () => this.open());
+        document.getElementById('closeTollModal').addEventListener('click', () => this.close());
+        document.getElementById('toggleTollCurrency').addEventListener('click', (event) => this.handleToggleTollCurrency(event));
+        document.getElementById('tollForm').addEventListener('submit', (event) => this.saveAndPostNewToll(event));
+    }
+
+    open() {
+        this.modal.classList.add('active');
+        // set currentTollValue to the toll value in wei
+        const toll = big2str(myData.settings.toll, 18)
+        document.getElementById('currentTollValue').textContent = toll == 0 ? '0' : toll
+        this.currentCurrency = 'LIB'; // Reset currency state
+        document.getElementById('tollCurrencySymbol').textContent = this.currentCurrency;
+        document.getElementById('newTollAmountInput').value = ''; // Clear input field
+    }
+    
+    close() {
+        this.modal.classList.remove('active');
+    }    
+
+    async handleToggleTollCurrency(event) {
+        event.preventDefault();
+        const newTollAmountInput = document.getElementById('newTollAmountInput');
+        const tollCurrencySymbol = document.getElementById('tollCurrencySymbol');
+
+        this.currentCurrency = this.currentCurrency === 'LIB' ? 'USD' : 'LIB';
+        tollCurrencySymbol.textContent = this.currentCurrency;
+
+        const marketPrice = await getMarketPrice();
+        if (newTollAmountInput.value !== '') {
+            const currentValue = parseFloat(newTollAmountInput.value);
+            const convertedValue = this.currentCurrency === 'USD' ? currentValue * marketPrice : currentValue / marketPrice;
+            newTollAmountInput.value = convertedValue.toFixed(6);
+        }
+    }
+
+    async saveAndPostNewToll(event) {
+        event.preventDefault();
+        const newTollAmountInput = document.getElementById('newTollAmountInput');
+        let newTollValue = parseFloat(newTollAmountInput.value);
+
+        if (isNaN(newTollValue) || newTollValue < 0) {
+            // console.error("Invalid toll amount");
+            showToast('Invalid toll amount entered.', 'error');
+            return;
+        }
+
+        if (this.currentCurrency === 'USD') {
+            const marketPrice = await getMarketPrice();
+            if (marketPrice && marketPrice > 0) {
+                newTollValue = newTollValue / marketPrice;
+            }
+            else {
+                // console.error("Could not fetch market price to save toll in LIB.");
+                showToast('Error fetching market price. Cannot save toll.', 'error');
+                return;
+            }
+        }
+
+        // Assuming newTollValue is now in LIB, convert to wei (smallest unit, 10^18)
+        const newBigIntInWei = bigxnum2big(wei, newTollValue.toString());
+
+        // Post the new toll to the network
+        const response = await this.postToll(newBigIntInWei/wei);
+
+        if (response && response.result && response.result.success) {
+            this.editMyDataToll(newBigIntInWei);
+        }
+        else {
+            console.error(`Toll submission failed for txid: ${response.txid}`);
+            return;
+        }
+        
+        // Update the display for currentTollValue
+        document.getElementById('currentTollValue').textContent = newTollValue == 0 ? '0' : newTollValue.toFixed(6) // Display with 6 decimals for consistency
+    }
+
+    editMyDataToll(toll) {
+        this.oldToll = myData.settings.toll;
+        myData.settings.toll = toll;
+    }
+
+    async postToll(toll) {
+        const tollTx = {
+            from: longAddress(myAccount.keys.address),
+            toll: toll,
+            type: "toll",
+            timestamp: getCorrectedTimestamp(),
+        };
+    
+        const txid = await signObj(tollTx, myAccount.keys)
+        const response = await injectTx(tollTx, txid);
+        return response;
+    }
+}
+
+const tollModal = new TollModal()
+
 class AboutModal {
     constructor() {
         this.modal = document.getElementById('aboutModal');
@@ -7614,6 +7718,10 @@ async function checkPendingTransactions() {
                         openValidatorModal();
                     }
                 }
+
+                if (type === 'toll') {
+                    console.log(`Toll transaction successfully processed!`);
+                }
             }
             else if (res?.transaction?.success === false) {
                 console.log(`DEBUG: txid ${txid} failed, removing completely`);
@@ -7629,7 +7737,13 @@ async function checkPendingTransactions() {
                         showToast(`Unstake failed: ${failureReason}`, 0, "error");
                 } else if (type === 'deposit_stake') {
                         showToast(`Stake failed: ${failureReason}`, 0, "error");
-                    } else { // for messages, transfer etc.
+                    } 
+                    else if (type === 'toll') {
+                        showToast(`Toll submission failed! Reverting to old toll: ${tollModal.oldToll}. Failure reason: ${failureReason}. `, 0, "error");
+                        // revert the local myData.settings.toll to the old value
+                        tollModal.editMyDataToll(tollModal.oldToll);
+                    }
+                    else { // for messages, transfer etc.
                         showToast(failureReason, 0, "error");
                     }
 
@@ -7637,7 +7751,6 @@ async function checkPendingTransactions() {
                     updateTransactionStatus(txid, toAddress, 'failed', type);
                     refreshCurrentView(txid);
                 }
-
                 // Remove from pending array
                 myData.pending.splice(i, 1);
 
