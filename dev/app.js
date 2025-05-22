@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'd'
+const version = 'e'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -7334,7 +7334,8 @@ class TollModal {
         this.modal.classList.add('active');
         // set currentTollValue to the toll value in wei
         const toll = big2str(myData.settings.toll, 18)
-        document.getElementById('currentTollValue').textContent = toll == 0 ? '0' : toll
+        const tollValue = toll == 0 ? '0' : toll
+        document.getElementById('currentTollValue').textContent = tollValue + ' LIB'
         this.currentCurrency = 'LIB'; // Reset currency state
         document.getElementById('tollCurrencySymbol').textContent = this.currentCurrency;
         document.getElementById('newTollAmountInput').value = ''; // Clear input field
@@ -7358,6 +7359,11 @@ class TollModal {
             const convertedValue = this.currentCurrency === 'USD' ? currentValue * marketPrice : currentValue / marketPrice;
             newTollAmountInput.value = convertedValue.toFixed(6);
         }
+
+        // convert `currentTollValue`
+        const currentTollValue = big2str(myData.settings.toll, 18);
+        const convertedValue = this.currentCurrency === 'USD' ? currentTollValue * marketPrice : currentTollValue;
+        document.getElementById('currentTollValue').textContent = this.currentCurrency === 'USD' ? `$${convertedValue}` : `${convertedValue} LIB`;
     }
 
     async saveAndPostNewToll(event) {
