@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.05.26.10.23" />
+    <link rel="stylesheet" href="./styles.css?v=2025.05.26.12.22" />
     <link rel="manifest" href="./manifest.json" />
   </head>
   <body>
-    <script src="./app.js?v=2025.05.26.10.23" type="module"></script>
+    <script src="./app.js?v=2025.05.26.12.22" type="module"></script>
     <div class="container">
       <header class="header" id="header">
         <div id="logo">
@@ -281,6 +281,7 @@
           <li class="menu-item" id="openMonitor">Network</li>
           <!--<li class="menu-item" id="openImportFormMenu">Import</li>-->
           <li class="menu-item" id="openRemoveAccount">Remove</li>
+          <li class="menu-item" id="openContact">Contact Us</li>
           <li class="menu-item" id="openAbout">About</li>
           <li class="menu-item" id="handleSignOut">Sign Out</li>
         </ul>
@@ -296,6 +297,34 @@
           "
         >
         </a>
+      </div>
+
+      <!-- Contact Modal -->
+      <div class="modal" id="contactModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeContactModal"></button>
+          <div class="modal-title">Contact Us</div>
+        </div>
+        <div class="form-container">
+          <div style="padding: 1rem">
+            <p>Please contact our team to report bugs or make suggestions.</p>
+            <button id="submitFeedback" class="update-button" style="margin-top: 1rem">
+              Submit Feedback
+            </button>
+          </div>
+          <a
+            class="last-item"
+            href="#"
+            style="
+              display: block;
+              width: 0;
+              height: 0;
+              border: none;
+              background: none;
+            "
+          >
+          </a>
+        </div>
       </div>
 
       <!-- About Modal -->
