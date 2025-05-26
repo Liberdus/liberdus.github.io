@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'j'
+const version = 'k'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -7729,7 +7729,8 @@ async function checkPendingTransactions() {
 
             let endpointPath = `/transaction/${txid}`;
             if (submittedts < twentySecondsAgo || submittedts < thirtySecondsAgo) {
-                endpointPath = `/old_receipt/${txid}`;
+                // /collector/api/transaction?appReceiptId=<txId>
+                endpointPath = `collector/api/transaction?appReceiptId=${txid}`;
             }
             //console.log(`DEBUG: txid ${txid} endpointPath: ${endpointPath}`);
             const res = await queryNetwork(endpointPath);
