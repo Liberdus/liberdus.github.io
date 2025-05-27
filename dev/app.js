@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'n'
+const version = 'o'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2777,16 +2777,13 @@ async function handleSendAsset(event) {
     let toAddress;
 
     // Validate amount including transaction fee
-    if (validateBalance(amount, assetIndex)) {
+    if (await validateBalance(amount, assetIndex)) {
         await getNetworkParams();
         const txFeeInLIB = (parameters.current.transactionFee || 1n);
-        const amountInWei = bigxnum2big(wei, amount.toString());
         const balance = BigInt(wallet.assets[assetIndex].balance);
-
-        const amountStr = big2str(amountInWei, 18).slice(0, -16);
+        const amountStr = big2str(amount, 18).slice(0, -16);
         const feeStr = big2str(txFeeInLIB, 18).slice(0, -16);
         const balanceStr = big2str(balance, 18).slice(0, -16);
-
         alert(`Insufficient balance: ${amountStr} + ${feeStr} (fee) > ${balanceStr} LIB`);
         return;
     }
