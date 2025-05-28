@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'
+const version = 'u'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1181,6 +1181,10 @@ console.log('stop back button')
 // This is for installed apps where we can't stop the back button; just save the state
 async function handleVisibilityChange(e) {
     console.log('in handleVisibilityChange', document.visibilityState);
+    if (!myAccount) {
+        return;
+    }
+
     if (document.visibilityState === 'hidden') {
         saveState();
         if (handleSignOut.exit) {
