@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'r'
+const version = 's'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -120,9 +120,9 @@ import {
 // Put standalone conversion function in lib.js
 import { normalizeUsername, generateIdenticon, formatTime,
     isValidEthereumAddress,
-    normalizeAddress, longAddress, utf82bin, bin2utf8, bigxnum2big,
-    big2str, base642bin, bin2base64, hex2bin, bin2hex, linkifyUrls, escapeHtml,
-    debounce, truncateMessage
+    normalizeAddress, longAddress, utf82bin, bigxnum2big,
+    big2str, bin2base64, hex2bin, bin2hex, linkifyUrls, escapeHtml,
+    debounce, truncateMessage, bigxnum2num
 } from './lib.js';
 
 const weiDigits = 18;
@@ -844,6 +844,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Gateway Menu
     gatewayModal.load()
 
+    // Invite Modal
+    inviteModal.load()
+
     // TODO add comment about which send form this is for chat or assets
     document.getElementById('openSendModal').addEventListener('click', openSendModal);
     document.getElementById('closeSendModal').addEventListener('click', closeSendModal);
@@ -921,6 +924,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelector('.message-input')?.addEventListener('input', function() {
         this.style.height = '48px';
         this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+    });
+
+    // Add focus event listener for message input to handle scrolling
+    document.querySelector('.message-input')?.addEventListener('focus', function() {
+        const messagesContainer = document.querySelector('.messages-container');
+        if (messagesContainer) {
+            // Check if we're already at the bottom (within 50px threshold)
+            const isAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight <= 50;
+            if (isAtBottom) {
+                // Wait for keyboard to appear and viewport to adjust
+                setTimeout(() => {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }, 300); // Increased delay to ensure keyboard is fully shown
+            }
+        }
     });
 
     // Add new search functionality
@@ -1968,27 +1986,35 @@ function createNewContact(addr, username){
     c.toll = 0n
 }
 
-// TODO: below input field `message-input` displays `toll:` and prefill with the toll field value of the contact in localStorage
-// TODO: have a function that we run but not async that will query the contact's toll field from the network and set it to the contact's toll field in localStorage and updates the UI element that displays the toll field value
+/**
+ * Opens the chat modal for the given address.
+ * @param {string} address - The address of the contact to open the chat modal for.
+ * @returns {void}
+ */
 async function openChatModal(address) {
     const modal = document.getElementById('chatModal');
     const modalAvatar = modal.querySelector('.modal-avatar');
     const modalTitle = modal.querySelector('.modal-title');
     const messagesList = modal.querySelector('.messages-list');
     const editButton = document.getElementById('chatEditButton');
-    const tollValue = document.getElementById('tollValue');
     document.getElementById('newChatButton').classList.remove('visible');
     const contact = myData.contacts[address]
     // Set user info
     modalTitle.textContent = contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`;
 
+    // set the address data attribute
+    modal.dataset.address = address;
+
+    // update the toll value. Will not await this and it'll update the toll value while the modal is open.
+    updateTollValue(address);
+
+    // update local contact object with the toll required to send and receive
+    updateTollRequired(address);
+
     // clear hidden txid input
     document.getElementById('retryOfTxId').value = '';
 
-    const tollValueString = big2str(contact.toll || 0n, 18)
-
-    // prefill the toll value
-    tollValue.textContent = tollValueString + ' LIB';
+    updateTollAmountUI(address);
 
     // Add data attributes to store the username and address
     const sendMoneyButton = document.getElementById('chatSendMoneyButton');
@@ -2049,6 +2075,95 @@ async function openChatModal(address) {
     }
 }
 openChatModal.toll = null;
+
+/**
+ * updateTollAmountUI 
+ */
+function updateTollAmountUI(address) {
+    const tollValue = document.getElementById('tollValue');
+    const contact = myData.contacts[address]
+    const tollValueString = big2str(contact.toll || 0n, 6)
+
+    if (contact.tollRequiredToSend == 1) {
+        tollValue.textContent = tollValueString + ' LIB';
+    } else {
+        tollValue.textContent = `free (${tollValueString} LIB)`;
+    }
+}
+
+/**
+ * updateTollRequired queries contact object and updates the tollRequiredByMe and tollRequiredByOther fields
+ * @param {string} address - the address of the contact
+ * @returns {void}
+ */
+async function updateTollRequired(address) {
+    const myAddr = longAddress(myAccount.keys.address);
+    const contactAddr = longAddress(address);
+    // use `hashBytes([fromAddr, toAddr].sort().join``)` to get the hash of the sorted addresses and have variable to keep track fromAddr which will be the current users order in the array
+    const sortedAddresses = [myAddr, contactAddr].sort();
+    const hash = hashBytes(sortedAddresses.join(''));
+    const myIndex = sortedAddresses.indexOf(myAddr);
+    const toIndex = 1 - myIndex;
+
+    // console.log(`hash: ${hash}`);
+
+    try {
+        // query the contact's toll field from the network
+        const contactAccountData = await queryNetwork(`/account/${hash}`);
+
+        if (contactAccountData.account == null) {
+            console.warn(`Contact account data is null for address: ${address}`);
+            return;
+        }
+
+        const localContact = myData.contacts[address]
+        if(contactAccountData.account.type == 'ChatAccount') {
+            localContact.tollRequiredToSend = contactAccountData.account.toll.required[myIndex]
+            localContact.tollRequiredToReceive = contactAccountData.account.toll.required[toIndex]
+        }
+
+        if (document.getElementById('chatModal').classList.contains('active') && document.getElementById('chatModal').dataset.address === address) {
+            updateTollAmountUI(address);
+        }
+
+        // console.log(`localContact.tollRequiredToSend: ${localContact.tollRequiredToSend}`);
+        // console.log(`localContact.tollRequiredToReceive: ${localContact.tollRequiredToReceive}`); 
+    } catch (error) {
+        console.warn(`Error updating contact toll required to send and receive: ${error}`);
+    }
+}
+
+/**
+ * Invoked when opening chatModal. In the background, it will query the contact's toll field from the network. 
+ * If the queried toll value is different from the toll field in localStorage, it will update the toll field in localStorage and update the UI element that displays the toll field value.
+ * @param {string} address - the address of the contact
+ * @returns {void} 
+ */
+async function updateTollValue(address) {
+    // query the contact's toll field from the network
+    const contactAccountData = await queryNetwork(`/account/${longAddress(address)}`);
+
+    const queriedToll = contactAccountData?.account?.data?.toll/* ?.value; // type bigint
+    const queriedTollUnit = contactAccountData?.account?.data?.toll?.unit; // type string */
+    // console.log(`type of queriedToll: ${typeof queriedToll}`);
+    // console.log(`queriedToll: ${JSON.stringify(big2str(queriedToll, 18), null, 2)}`);
+    
+
+    // update the toll value in the UI if the queried toll value is different from the toll field in localStorage
+    if (myData.contacts[address].toll != queriedToll) {
+        myData.contacts[address].toll = queriedToll;
+        const tollValueString = big2str(queriedToll*wei, 18)
+        // console.log(`tollValueString: ${tollValueString}`);
+        // if correct modal is open for this address, update the toll value
+        if (document.getElementById('chatModal').classList.contains('active') && document.getElementById('chatModal').dataset.address === address) {
+            updateTollAmountUI(address);
+        }
+    } else {
+        console.log(`Returning early since queried toll value is the same as the toll field in localStorage`);
+        // return early
+        return;
+    }
+}
 
 function appendChatModal(highlightNewMessage = false) {
     const currentAddress = appendChatModal.address; // Use a local constant
@@ -7369,12 +7484,14 @@ class TollModal {
         document.getElementById('tollForm').addEventListener('submit', (event) => this.saveAndPostNewToll(event));
     }
 
-    open() {
+    async open() {
         this.modal.classList.add('active');
         // set currentTollValue to the toll value in wei
-        const toll = big2str(myData.settings.toll, 18)
-        const tollValue = toll == 0 ? '0' : toll
-        document.getElementById('currentTollValue').textContent = tollValue + ' LIB'
+        const toll = myData.settings.toll || 0n
+        const tollUnit = myData.settings.tollUnit || 'LIB'
+
+        this.updateTollDisplay(toll, tollUnit);
+
         this.currentCurrency = 'LIB'; // Reset currency state
         document.getElementById('tollCurrencySymbol').textContent = this.currentCurrency;
         document.getElementById('newTollAmountInput').value = ''; // Clear input field
@@ -7392,17 +7509,17 @@ class TollModal {
         this.currentCurrency = this.currentCurrency === 'LIB' ? 'USD' : 'LIB';
         tollCurrencySymbol.textContent = this.currentCurrency;
 
-        const marketPrice = await getMarketPrice();
+        const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
         if (newTollAmountInput.value !== '') {
             const currentValue = parseFloat(newTollAmountInput.value);
-            const convertedValue = this.currentCurrency === 'USD' ? currentValue * marketPrice : currentValue / marketPrice;
-            newTollAmountInput.value = convertedValue.toFixed(6);
+            const convertedValue = this.currentCurrency === 'USD' ? currentValue * scalabilityFactor : currentValue / scalabilityFactor;
+            newTollAmountInput.value = convertedValue.toString();
         }
 
         // convert `currentTollValue`
-        const currentTollValue = big2str(myData.settings.toll, 18);
-        const convertedValue = this.currentCurrency === 'USD' ? currentTollValue * marketPrice : currentTollValue;
-        document.getElementById('currentTollValue').textContent = this.currentCurrency === 'USD' ? `$${convertedValue}` : `${convertedValue} LIB`;
+        //const currentTollValue = big2str(myData.settings.toll, 18);
+        //const convertedValue = this.currentCurrency === 'USD' ? currentTollValue * marketPrice : currentTollValue;
+        //document.getElementById('currentTollValue').textContent = this.currentCurrency === 'USD' ? `$${convertedValue}` : `${convertedValue} LIB`;
     }
 
     async saveAndPostNewToll(event) {
@@ -7415,48 +7532,56 @@ class TollModal {
             showToast('Invalid toll amount entered.', 'error');
             return;
         }
-
-        if (this.currentCurrency === 'USD') {
-            const marketPrice = await getMarketPrice();
-            if (marketPrice && marketPrice > 0) {
-                newTollValue = newTollValue / marketPrice;
-            }
-            else {
-                // console.error("Could not fetch market price to save toll in LIB.");
-                showToast('Error fetching market price. Cannot save toll.', 'error');
-                return;
-            }
-        }
-
-        // Assuming newTollValue is now in LIB, convert to wei (smallest unit, 10^18)
-        const newBigIntInWei = bigxnum2big(wei, newTollValue.toString());
+        const newToll = bigxnum2big(wei, newTollAmountInput.value);
 
         // Post the new toll to the network
-        const response = await this.postToll(newBigIntInWei/wei);
+        const response = await this.postToll(newToll, this.currentCurrency);
 
         if (response && response.result && response.result.success) {
-            this.editMyDataToll(newBigIntInWei);
+            this.editMyDataToll(newToll, this.currentCurrency);
         }
         else {
             console.error(`Toll submission failed for txid: ${response.txid}`);
             return;
         }
         
-        // Update the display for currentTollValue
-        document.getElementById('currentTollValue').textContent = newTollValue == 0 ? '0' : newTollValue.toFixed(6) // Display with 6 decimals for consistency
+        // Update the display for tollAmountLIB and tollAmountUSD
+        this.updateTollDisplay(newToll, this.currentCurrency);
     }
 
-    editMyDataToll(toll) {
+    updateTollDisplay(toll, tollUnit) {
+        const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+        let tollValueLib = ''
+        let tollValueUSD = ''
+
+        if (tollUnit == 'LIB') {
+            tollValueLib = big2str(toll, 18)
+            tollValueUSD = (parseFloat(big2str(toll, 18)) * scalabilityFactor).toString()
+        } else {
+            tollValueUSD = big2str(toll, 18)
+            tollValueLib = (parseFloat(big2str(toll, 18)) / scalabilityFactor).toString()
+        }
+
+        tollValueLib = parseFloat(tollValueLib).toString()
+        tollValueUSD = parseFloat(tollValueUSD).toString()
+
+        document.getElementById('tollAmountLIB').textContent = tollValueLib + ' LIB'
+        document.getElementById('tollAmountUSD').textContent = tollValueUSD + ' USD'
+    }
+
+    editMyDataToll(toll, tollUnit) {
         this.oldToll = myData.settings.toll;
         myData.settings.toll = toll;
+        myData.settings.tollUnit = tollUnit;
     }
 
-    async postToll(toll) {
+    async postToll(toll, tollUnit) {
         const tollTx = {
             from: longAddress(myAccount.keys.address),
             toll: toll,
             type: "toll",
             timestamp: getCorrectedTimestamp(),
+            tollUnit: tollUnit,
         };
     
         const txid = await signObj(tollTx, myAccount.keys)
@@ -7466,6 +7591,90 @@ class TollModal {
 }
 
 const tollModal = new TollModal()
+
+// Invite Modal
+class InviteModal {
+    constructor() {
+        this.modal = document.getElementById('inviteModal');
+        this.inviteEmailInput = document.getElementById('inviteEmail');
+        this.invitePhoneInput = document.getElementById('invitePhone');
+        this.submitButton = document.querySelector('#inviteForm button[type="submit"]');
+    }
+
+    load() {
+        // Set up event listeners
+        document.getElementById('openInvite').addEventListener('click', () => this.open());
+        document.getElementById('closeInviteModal').addEventListener('click', () => this.close());
+        document.getElementById('inviteForm').addEventListener('submit', (event) => this.handleSubmit(event));
+
+        // Add input event listeners for email and phone fields
+        this.inviteEmailInput.addEventListener('input', () => this.validateInputs());
+        this.invitePhoneInput.addEventListener('input', () => this.validateInputs());
+    }
+
+    validateInputs() {
+        const email = this.inviteEmailInput.value.trim();
+        const phone = this.invitePhoneInput.value.trim();
+        if (email || phone) {
+            this.submitButton.disabled = false;
+        } else {
+            this.submitButton.disabled = true;
+        }
+    }
+
+    open() {
+        // Clear any previous values
+        this.inviteEmailInput.value = '';
+        this.invitePhoneInput.value = '';
+        this.validateInputs(); // Set initial button state
+        this.modal.classList.add('active');
+    }
+
+    close() {
+        this.modal.classList.remove('active');
+    }
+
+    async handleSubmit(event) {
+        event.preventDefault();
+
+        const email = this.inviteEmailInput.value.trim();
+        const phone = this.invitePhoneInput.value.trim();
+
+        if (!email && !phone) {
+            showToast('Please enter either an email or phone number', 3000, 'error');
+            // Ensure button is disabled again if somehow submitted while empty
+            this.submitButton.disabled = true;
+            return;
+        }
+
+        try {
+            const response = await fetch('http://arimaa.com:5050/api/invite', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user: myAccount.username,
+                    email: email || undefined,
+                    phone: phone || undefined
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                showToast('Invitation sent successfully!', 3000, 'success');
+                this.close();
+            } else {
+                showToast(data.error || 'Failed to send invitation', 3000, 'error');
+            }
+        } catch (error) {
+            showToast('Failed to send invitation. Please try again.', 3000, 'error');
+        }
+    }
+}
+const inviteModal = new InviteModal()
+
 
 class AboutModal {
     constructor() {

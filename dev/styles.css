@@ -4468,3 +4468,14 @@ small {
   margin-top: 0.1rem; /* Fine-tune spacing if needed */
   margin-bottom: 0.35rem; /* Space before the current-toll-value-box */
 }
+
+.modal-summary {
+  font-size: 0.9em;
+  color: #666;
+  margin-bottom: 15px;
+  text-align: center;
+}
+
+.form-container {
+  padding: 20px;
+}
