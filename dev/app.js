@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'v'
+const version = 'w'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1988,6 +1988,7 @@ function createNewContact(addr, username){
     c.timestamp = getCorrectedTimestamp()
     c.unread = 0
     c.toll = 0n
+    c.friend = 1
 }
 
 /**
@@ -1996,6 +1997,7 @@ function createNewContact(addr, username){
  * @returns {void}
  */
 async function openChatModal(address) {
+    friendModal.setAddress(address);
     const modal = document.getElementById('chatModal');
     const modalAvatar = modal.querySelector('.modal-avatar');
     const modalTitle = modal.querySelector('.modal-title');
@@ -2046,17 +2048,13 @@ async function openChatModal(address) {
     };
 
     // Add click handler for edit button
+    // TODO: create event listener instead of onclick here
     editButton.onclick = () => {
         const contact = myData.contacts[address];
         if (contact) {
             contactInfoModal.open(createDisplayInfo(contact));
         }
     };
-
-    // query for the contact account data to retrieve the contact's fee
-    const contactAccountData = await queryNetwork(`/account/${longAddress(address)}`);
-    openChatModal.toll = contactAccountData?.account?.data?.toll; // type bigint
-    //console.log(`DEBUG: openChatModal.fee: ${JSON.stringify(big2str(openChatModal.fee * wei, 18), null, 2)}`);
 
     // Show modal
     modal.classList.add('active');
@@ -2079,6 +2077,7 @@ async function openChatModal(address) {
     }
 }
 openChatModal.toll = null;
+openChatModal.tollUnit = null;
 
 /**
  * updateTollAmountUI 
@@ -2086,7 +2085,7 @@ openChatModal.toll = null;
 function updateTollAmountUI(address) {
     const tollValue = document.getElementById('tollValue');
     const contact = myData.contacts[address];
-    const toll = contact.toll || 0n;
+    let toll = contact.toll || 0n;
     const tollUnit = contact.tollUnit || 'LIB';
     const decimals = 18;
     const mainIsUSD = tollUnit === 'USD';
@@ -2097,6 +2096,7 @@ function updateTollAmountUI(address) {
     const factor = scaleDiv !== 0 ? scaleMul / scaleDiv : 1;
     let mainString, otherString;
     if (mainIsUSD) {
+        toll = bigxnum2big(toll, (1.0/factor).toString())
         mainString = mainValue.toFixed(4) + ' USD';
         const libValue = mainValue / factor;
         otherString = libValue.toFixed(6) + ' LIB';
@@ -2112,6 +2112,9 @@ function updateTollAmountUI(address) {
         display = `free (${mainString} (${otherString}))`;
     }
     tollValue.textContent = display;
+
+    openChatModal.toll = toll
+    openChatModal.tollUnit = tollUnit
 }
 
 /**
@@ -2847,11 +2850,13 @@ async function updateBalanceDisplay(asset) {
 }
 
 
-async function validateBalance(amount, assetIndex, balanceWarning = null) {
+async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
     if (!amount) {
         if (balanceWarning) balanceWarning.style.display = 'none';
+        console.warn('[validateBalance] amount is 0')
         return false;
     } else if (amount < 0) {
+        console.warn('[validateBalance] amount is negative')
         if (balanceWarning) balanceWarning.style.display = 'inline';
         balanceWarning.textContent = 'Amount cannot be negative';
         return false;
@@ -2861,7 +2866,7 @@ async function validateBalance(amount, assetIndex, balanceWarning = null) {
     await getNetworkParams();
     const asset = myData.wallet.assets[assetIndex];
     const feeInWei = (parameters.current.transactionFee || 1n);
-    const totalRequired = bigxnum2big(wei, amount.toString()) + feeInWei;
+    const totalRequired = bigxnum2big(1n, amount.toString()) + feeInWei;
     const hasInsufficientBalance = BigInt(asset.balance) < totalRequired;
 
     if (balanceWarning) {
@@ -2920,7 +2925,7 @@ async function handleSendAsset(event) {
     let toAddress;
 
     // Validate amount including transaction fee
-    if (await validateBalance(amount, assetIndex)) {
+    if (!await validateBalance(amount, assetIndex)) {
         await getNetworkParams();
         const txFeeInLIB = (parameters.current.transactionFee || 1n);
         const balance = BigInt(wallet.assets[assetIndex].balance);
@@ -3146,29 +3151,6 @@ class ContactInfoModalManager {
             this.close();
         });
 
-        // Add friend button
-        document.getElementById('addFriendButton').addEventListener('click', () => {
-            if (!this.currentContactAddress) return;
-
-            const contact = myData.contacts[this.currentContactAddress];
-            if (!contact) return;
-
-            // Toggle friend status
-            contact.friend = !contact.friend;
-
-            // Show appropriate toast message
-            showToast(contact.friend ? 'Added to friends' : 'Removed from friends');
-
-            // Update button appearance
-            this.updateFriendButton(contact.friend);
-
-            // Mark that we need to update the contact list
-            this.needsContactListUpdate = true;
-
-            // Save state
-            saveState();
-        });
-
         document.getElementById('nameEditButton').addEventListener('click', openEditContactModal);
 
         // Add close button handler for edit contact modal
@@ -3187,14 +3169,14 @@ class ContactInfoModalManager {
     }
 
     // Update friend button text based on current status
-    updateFriendButton(isFriend) {
+    /* updateFriendButton(isFriend) {
         const button = document.getElementById('addFriendButton');
         if (isFriend) {
             button.classList.add('removing');
         } else {
             button.classList.remove('removing');
         }
-    }
+    } */
 
     // Update contact info values
     async updateContactInfo(displayInfo) {
@@ -3242,6 +3224,7 @@ class ContactInfoModalManager {
 
     // Open the modal
     async open(displayInfo) {
+        friendModal.setAddress(displayInfo.address);
         this.currentContactAddress = displayInfo.address;
         await this.updateContactInfo(displayInfo);
         this.setupChatButton(displayInfo);
@@ -3249,7 +3232,7 @@ class ContactInfoModalManager {
         // Update friend button status
         const contact = myData.contacts[displayInfo.address];
         if (contact) {
-            this.updateFriendButton(contact.friend || false);
+            //this.updateFriendButton(contact.friend || false);
         }
 
         this.modal.classList.add('active');
@@ -3267,6 +3250,132 @@ class ContactInfoModalManager {
         }
     }
 }
+
+class FriendModal {
+    constructor() {
+        this.modal = document.getElementById('friendModal');
+        this.friendForm = document.getElementById('friendForm');
+        this.currentContactAddress = null;
+        this.needsContactListUpdate = false;  // track if we need to update the contact list
+        this.setupEventListeners();
+    }
+
+    setupEventListeners() {
+        // Add friend button
+        document.getElementById('addFriendButtonContactInfo').addEventListener('click', () => {
+            if (!this.currentContactAddress) return;
+            this.openFriendModal();
+        });
+
+        document.getElementById('addFriendButtonChat').addEventListener('click', () => {
+            if (!this.currentContactAddress) return;
+            this.openFriendModal();
+        });
+
+        // Friend modal form submission
+        this.friendForm.addEventListener('submit', (event) => this.handleFriendSubmit(event));
+
+        // Friend modal close button
+        this.modal.querySelector('.back-button').addEventListener('click', () => this.closeFriendModal());
+    }
+
+    // Open the friend modal
+    openFriendModal() {
+        const contact = myData.contacts[this.currentContactAddress];
+        if (!contact) return;
+        
+        // Set the current friend status
+        const status = contact?.friend ? 'friend' : 'unknown';
+        const radio = this.friendForm.querySelector(`input[value="${status}"]`);
+        if (radio) radio.checked = true;
+        
+        this.modal.classList.add('active');
+    }
+
+    // Close the friend modal
+    closeFriendModal() {
+        this.modal.classList.remove('active');
+    }
+
+    async postUpdateTollRequired(address, friend) {
+        // 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+        // required = 1 if toll required, 0 if not and 2 to block other party
+        const requiredNum = friend === 3 || friend === 2 ? 0 : friend === 1 ? 1 : friend === 0 ? 2 : 1;
+        const fromAddr = longAddress(myAccount.keys.address)
+        const toAddr = longAddress(address)
+        const chatId_ = hashBytes([fromAddr, toAddr].sort().join``)
+        console.log('DEBUG 1:chatId_', chatId_)
+        
+        const tx = {
+            from: fromAddr,
+            to: toAddr,
+            chatId: chatId_,
+            required: requiredNum,
+            type: 'update_chat_toll',
+            timestamp: getCorrectedTimestamp(),
+            friend: friend
+        }
+        const txid = await signObj(tx, myAccount.keys)
+        const res = await injectTx(tx, txid)
+        return res
+    }
+
+    /**
+     * Handle friend form submission
+     * 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+     * @param {Event} event 
+     * @returns {Promise<void>}
+     */
+    async handleFriendSubmit(event) {
+        event.preventDefault();
+        
+        if (!this.currentContactAddress) return;
+        
+        const contact = myData.contacts[this.currentContactAddress];
+        if (!contact) return;
+
+        const selectedStatus = this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value;
+        if (!selectedStatus) return;
+
+        // send transaction to update chat toll
+        const res = await this.postUpdateTollRequired(this.currentContactAddress, contact.friend)
+        if (res?.transaction?.success === false) {
+            console.log(`[handleFriendSubmit] update_chat_toll transaction failed: ${res?.transaction?.reason}. Did not update contact status.`);
+            return;
+        }
+
+        // Update friend status based on selected value
+        contact.friend = Number(selectedStatus);
+
+        // Show appropriate toast message depending value 0,1,2,3
+        showToast(
+            contact.friend === 0 ? 'Blocked' :
+            contact.friend === 1 ? 'Added as Other' :
+            contact.friend === 2 ? 'Added as Acquaintance' :
+            contact.friend === 3 ? 'Added as Friend' :
+            'Error updating friend status'
+        );
+
+        // Update button appearance
+        //this.updateFriendButton(contact.friend);
+
+        // Mark that we need to update the contact list
+        this.needsContactListUpdate = true;
+
+        // Save state
+        saveState();
+
+        // Close the friend modal
+        this.closeFriendModal();
+    }
+
+    // setAddress fuction that sets a global variable that can be used to set the currentContactAddress
+    setAddress(address) {
+        this.currentContactAddress = address;
+    }
+}
+
+const friendModal = new FriendModal();
 
 async function openEditContactModal() {
     const editContactModal = document.getElementById('editContactModal');
@@ -3479,6 +3588,13 @@ async function handleSendMessage() {
         const message = messageInput.value.trim();
         if (!message) return;
 
+        const sufficientBalance = await validateBalance(openChatModal.toll)
+        if (!sufficientBalance) {
+            showToast('Insufficient balance for toll and fee', 0, 'error');
+            sendButton.disabled = false;
+            return;
+        }
+
         const modal = document.getElementById('chatModal');
         //const modalTitle = modal.querySelector('.modal-title');
         const messagesList = modal.querySelector('.messages-list');
@@ -3566,7 +3682,7 @@ async function handleSendMessage() {
         // can create a function to query the account and get the receivers toll they've set
         // TODO: will need to query network and receiver account where we validate
         // TODO: decided to query everytime we do openChatModal and save as global variable. We don't need to clear it but we can clear it when closing the modal but should get reset when opening the modal again anyway
-        const toll = 1n * wei;
+        const toll = openChatModal.toll;
 
         const chatMessageObj = await createChatMessage(currentAddress, payload, toll, keys);
         const txid = await signObj(chatMessageObj, keys)
@@ -4673,7 +4789,7 @@ async function createChatMessage(to, payload, toll, keys) {
         type: 'message',
         from: fromAddr,
         to: toAddr,
-        amount: BigInt(toll),       // not sure if this is used by the backend
+        amount: toll,       // not sure if this is used by the backend
         chatId: hashBytes([fromAddr, toAddr].sort().join``),
         message: 'x',
         xmessage: payload,
@@ -4773,6 +4889,8 @@ async function injectTx(tx, txid){
             if (tx.type === 'register') {
                 pendingTxData.username = tx.alias;
                 pendingTxData.address = tx.from; // User's address (longAddress form)
+            } else if (tx.type === 'update_chat_toll') {
+                pendingTxData.friend = tx.friend;
             } else if (tx.type === 'message' || tx.type === 'transfer' || tx.type === 'deposit_stake' || tx.type === 'withdraw_stake') {
                 pendingTxData.to = tx.to;
             }
@@ -7928,7 +8046,7 @@ async function validateStakeInputs() {
 
     // Check 3: Sufficient Balance (using existing function)
     // Assuming LIB is asset index 0 since after creation of wallet, LIB is the first asset
-    const hasSufficientBalance = await validateBalance(amountStr, 0, amountWarningElement);
+    const hasSufficientBalance = await validateBalance(amountWei, 0, amountWarningElement);
     if (!hasSufficientBalance) {
         // validateBalance already shows the warning in amountWarningElement
         return; // Keep button disabled
@@ -8046,6 +8164,10 @@ async function checkPendingTransactions() {
                 if (type === 'toll') {
                     console.log(`Toll transaction successfully processed!`);
                 }
+
+                if (type === 'update_chat_toll') {
+                    console.log(`DEBUG: update_chat_toll transaction successfully processed!`);
+                }
             }
             else if (res?.transaction?.success === false) {
                 console.log(`DEBUG: txid ${txid} failed, removing completely`);
@@ -8066,6 +8188,11 @@ async function checkPendingTransactions() {
                         showToast(`Toll submission failed! Reverting to old toll: ${tollModal.oldToll}. Failure reason: ${failureReason}. `, 0, "error");
                         // revert the local myData.settings.toll to the old value
                         tollModal.editMyDataToll(tollModal.oldToll);
+                    } 
+                    else if (type === 'update_chat_toll') {
+                        showToast(`Update contact status failed: ${failureReason}. Reverting contact to old status.`, 0, "error");
+                        // revert the local myData.contacts[toAddress].friend to the old value
+                        myData.contacts[pendingTxInfo.to].friend = pendingTxInfo.friend;
                     }
                     else { // for messages, transfer etc.
                         showToast(failureReason, 0, "error");

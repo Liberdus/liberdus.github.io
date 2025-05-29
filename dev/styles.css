@@ -4479,3 +4479,59 @@ small {
 .form-container {
   padding: 20px;
 }
+
+/* Friend Modal Styles */
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.radio-option {
+    display: flex;
+    align-items: flex-start;
+    padding: 12px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.radio-option:hover {
+    background-color: var(--hover-color);
+}
+
+.radio-option input[type="radio"] {
+    margin: 0;
+    margin-right: 12px;
+    margin-top: 2px;
+}
+
+.radio-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.radio-label {
+    font-weight: 700;
+    text-align: left;
+    margin-bottom: 4px;
+}
+
+.radio-description {
+    font-size: 0.9em;
+    color: var(--text-secondary);
+    text-align: left;
+    padding-left: 8px;
+}
+
+.radio-option input[type="radio"]:checked {
+    accent-color: var(--primary-color);
+}
+
+.radio-option input[type="radio"]:checked + .radio-content .radio-label {
+    color: var(--primary-color);
+}
