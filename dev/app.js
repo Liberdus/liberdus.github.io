@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2136,7 +2136,7 @@ async function updateTollRequired(address) {
 
     try {
         // query the contact's toll field from the network
-        const contactAccountData = await queryNetwork(`/account/${hash}`);
+        const contactAccountData = await queryNetwork(`/messages/${hash}/toll`);
 
         if (contactAccountData.account == null) {
             console.warn(`Contact account data is null for address: ${address}`);
@@ -2145,8 +2145,8 @@ async function updateTollRequired(address) {
 
         const localContact = myData.contacts[address]
         if(contactAccountData.account.type == 'ChatAccount') {
-            localContact.tollRequiredToSend = contactAccountData.account.toll.required[myIndex]
-            localContact.tollRequiredToReceive = contactAccountData.account.toll.required[toIndex]
+            localContact.tollRequiredToSend = contactAccountData.toll.required[myIndex]
+            localContact.tollRequiredToReceive = contactAccountData.toll.required[toIndex]
         }
 
         if (document.getElementById('chatModal').classList.contains('active') && document.getElementById('chatModal').dataset.address === address) {
@@ -3281,7 +3281,7 @@ class FriendModal {
         if (!contact) return;
         
         // Set the current friend status
-        const status = contact?.friend === 0 ? '0' : contact?.friend === 1 ? '1' : contact?.friend === 2 ? '2' : '3';
+        const status = contact?.friend.toString();
         const radio = this.friendForm.querySelector(`input[value="${status}"]`);
         if (radio) radio.checked = true;
         
