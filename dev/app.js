@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'w'
+const version = 'x'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -2005,6 +2005,7 @@ async function openChatModal(address) {
     const editButton = document.getElementById('chatEditButton');
     document.getElementById('newChatButton').classList.remove('visible');
     const contact = myData.contacts[address]
+    friendModal.updateFriendButton(contact, 'addFriendButtonChat');
     // Set user info
     modalTitle.textContent = contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`;
 
@@ -2968,34 +2969,36 @@ async function handleSendAsset(event) {
 
     if (!myData.contacts[toAddress]) { createNewContact(toAddress, username) }
 
-    // Get recipient's public key from contacts
-    let recipientPubKey = myData.contacts[toAddress]?.public;
-    let pqRecPubKey = myData.contacts[toAddress]?.pqPublic
-    if (!recipientPubKey || !pqRecPubKey) {
-        const recipientInfo = await queryNetwork(`/account/${longAddress(toAddress)}`)
-        if (!recipientInfo?.account?.publicKey){
-            console.log(`no public key found for recipient ${toAddress}`)
-            return
+    let encMemo = ''
+    let pqEncSharedKey = ''
+    if (memo && myData.contacts[toAddress]?.pqPublic) {
+
+        // Get recipient's public key from contacts
+        let recipientPubKey = myData.contacts[toAddress]?.public;
+        let pqRecPubKey = myData.contacts[toAddress]?.pqPublic
+        if (!recipientPubKey || !pqRecPubKey) {
+            const recipientInfo = await queryNetwork(`/account/${longAddress(toAddress)}`)
+            if (!recipientInfo?.account?.publicKey){
+                console.log(`no public key found for recipient ${toAddress}`)
+                return
+            }
+            recipientPubKey = recipientInfo.account.publicKey
+            myData.contacts[toAddress].public = recipientPubKey
+            pqRecPubKey = recipientInfo.account.pqPublicKey
+            myData.contacts[toAddress].pqPublic = pqRecPubKey
         }
-        recipientPubKey = recipientInfo.account.publicKey
-        myData.contacts[toAddress].public = recipientPubKey
-        pqRecPubKey = recipientInfo.account.pqPublicKey
-        myData.contacts[toAddress].pqPublic = pqRecPubKey
-    }
 
-    // Generate shared secret using ECDH and take first 32 bytes
-    let dhkey = ecSharedKey(keys.secret, recipientPubKey)
-    const  { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey)
-    const combined = new Uint8Array(dhkey.length + sharedSecret.length)
-    combined.set(dhkey)
-    combined.set(sharedSecret, dhkey.length)
-    dhkey = deriveDhKey(combined);
-
+        // Generate shared secret using ECDH and take first 32 bytes
+        let dhkey = ecSharedKey(keys.secret, recipientPubKey)
+        const  { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey)
+        const combined = new Uint8Array(dhkey.length + sharedSecret.length)
+        combined.set(dhkey)
+        combined.set(sharedSecret, dhkey.length)
+        dhkey = deriveDhKey(combined);
+        pqEncSharedKey = bin2base64(cipherText)
 
     // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
     // Encrypt message using shared secret
-    let encMemo = ''
-    if (memo){
         encMemo = encryptChacha(dhkey, memo)
     }
 
@@ -3011,25 +3014,28 @@ async function handleSendAsset(event) {
         document.getElementById('retryOfPaymentTxId').value = '';
     }
 
-    // Create sender info object
-    const senderInfo = {
-        username: myAccount.username,
-        name: myData.account.name,
-        email: myData.account.email,
-        phone: myData.account.phone,
-        linkedin: myData.account.linkedin,
-        x: myData.account.x
-    };
-    // Encrypt sender info
-    const encSenderInfo = encryptChacha(dhkey, stringify(senderInfo));
-
+    // only include the sender info if the recipient is is a friend and has a pqKey
+    let encSenderInfo = ''
+    if (myData.contacts[toAddress]?.pqPublic && myData.contacts[toAddress]?.friend === 3) {
+        // Create sender info object
+        const senderInfo = {
+            username: myAccount.username,
+            name: myData.account.name,
+            email: myData.account.email,
+            phone: myData.account.phone,
+            linkedin: myData.account.linkedin,
+            x: myData.account.x
+        };
+        // Encrypt sender info
+        encSenderInfo = encryptChacha(dhkey, stringify(senderInfo));
+    }
     // Create message payload
     const payload = {
         message: encMemo,  // we need to call this field message, so we can use decryptMessage()
         senderInfo: encSenderInfo,
         encrypted: true,
         encryptionMethod: 'xchacha20poly1305',
-        pqEncSharedKey: bin2base64(cipherText),
+        pqEncSharedKey: pqEncSharedKey,
         sent_timestamp: getCorrectedTimestamp()
     };
 
@@ -3168,16 +3174,6 @@ class ContactInfoModalManager {
         });
     }
 
-    // Update friend button text based on current status
-    /* updateFriendButton(isFriend) {
-        const button = document.getElementById('addFriendButton');
-        if (isFriend) {
-            button.classList.add('removing');
-        } else {
-            button.classList.remove('removing');
-        }
-    } */
-
     // Update contact info values
     async updateContactInfo(displayInfo) {
         // Update avatar section
@@ -3232,7 +3228,7 @@ class ContactInfoModalManager {
         // Update friend button status
         const contact = myData.contacts[displayInfo.address];
         if (contact) {
-            //this.updateFriendButton(contact.friend || false);
+            friendModal.updateFriendButton(contact, 'addFriendButtonContactInfo');
         }
 
         this.modal.classList.add('active');
@@ -3285,7 +3281,7 @@ class FriendModal {
         if (!contact) return;
         
         // Set the current friend status
-        const status = contact?.friend ? 'friend' : 'unknown';
+        const status = contact?.friend === 0 ? '0' : contact?.friend === 1 ? '1' : contact?.friend === 2 ? '2' : '3';
         const radio = this.friendForm.querySelector(`input[value="${status}"]`);
         if (radio) radio.checked = true;
         
@@ -3356,14 +3352,15 @@ class FriendModal {
             'Error updating friend status'
         );
 
-        // Update button appearance
-        //this.updateFriendButton(contact.friend);
-
         // Mark that we need to update the contact list
         this.needsContactListUpdate = true;
 
         // Save state
         saveState();
+
+        // Update the friend button
+        this.updateFriendButton(contact, 'addFriendButtonContactInfo');
+        this.updateFriendButton(contact, 'addFriendButtonChat');
 
         // Close the friend modal
         this.closeFriendModal();
@@ -3372,6 +3369,20 @@ class FriendModal {
     // setAddress fuction that sets a global variable that can be used to set the currentContactAddress
     setAddress(address) {
         this.currentContactAddress = address;
+    }
+
+    /**
+     * Update the friend button based on the contact's friend status
+     * @param {Object} contact - The contact object
+     * @param {string} buttonId - The ID of the button to update
+     * @returns {void}
+     */
+    updateFriendButton(contact, buttonId) {
+        const button = document.getElementById(buttonId);
+        // Remove all status classes
+        button.classList.remove('status-0', 'status-1', 'status-2', 'status-3');
+        // Add the current status class
+        button.classList.add(`status-${contact.friend}`);
     }
 }
 

@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.05.29.17.12" />
+    <link rel="stylesheet" href="./styles.css?v=2025.05.30.09.18" />
     <link rel="manifest" href="./manifest.json" />
   </head>
   <body>
-    <script src="./app.js?v=2025.05.29.17.12" type="module"></script>
+    <script src="./app.js?v=2025.05.30.09.18" type="module"></script>
     <div class="container">
       <header class="header" id="header">
         <div id="logo">
@@ -792,29 +792,31 @@
         <div class="modal-content">
           <form id="friendForm">
             <div class="radio-group">
-              <label class="radio-option">
-                <input type="radio" name="friendStatus" value="3" checked>
+              <label class="radio-option status-3">
+                <input type="radio" name="friendStatus" value="3" checked />
                 <div class="radio-content">
                   <span class="radio-label">Friend</span>
-                  <span class="radio-description">Share my profile info and no toll required</span>
+                  <span class="radio-description"
+                    >Share my profile info and no toll required</span
+                  >
                 </div>
               </label>
-              <label class="radio-option">
-                <input type="radio" name="friendStatus" value="2">
+              <label class="radio-option status-2">
+                <input type="radio" name="friendStatus" value="2" />
                 <div class="radio-content">
                   <span class="radio-label">Acquaintance</span>
                   <span class="radio-description">No toll required</span>
                 </div>
               </label>
-              <label class="radio-option">
-                <input type="radio" name="friendStatus" value="1">
+              <label class="radio-option status-1">
+                <input type="radio" name="friendStatus" value="1" />
                 <div class="radio-content">
                   <span class="radio-label">Other</span>
                   <span class="radio-description">Toll required</span>
                 </div>
               </label>
-              <label class="radio-option">
-                <input type="radio" name="friendStatus" value="0">
+              <label class="radio-option status-0">
+                <input type="radio" name="friendStatus" value="0" />
                 <div class="radio-content">
                   <span class="radio-label">Blocked</span>
                   <span class="radio-description">Cannot send me messages</span>
