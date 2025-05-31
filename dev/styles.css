@@ -4003,7 +4003,6 @@ small {
   font-weight: var(--font-weight-bold);
   margin: 1rem auto; /* Center button */
   display: block; /* Needed for margin: auto */
-  cursor: pointer;
 }
 
 #stakeModal #submitStake:hover:not(:disabled) {
