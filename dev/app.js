@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'z'
+const version = 'a'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -893,8 +893,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('handleSignOut').addEventListener('click', handleSignOut);
     document.getElementById('closeContactInfoModal').addEventListener('click', () => contactInfoModal.close());
 
-    // add event listener for tab key
-    document.getElementById('handleSendMessage').addEventListener('keydown', ignoreTabKey);
     // add event listener for back-button presses to prevent shift+tab
     document.querySelectorAll('.back-button').forEach(button => {
         button.addEventListener('keydown', ignoreShiftTabKey);
@@ -918,27 +916,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('newChatButton').addEventListener('click', openNewChatModal);
     document.getElementById('closeNewChatModal').addEventListener('click', closeNewChatModal);
     document.getElementById('newChatForm').addEventListener('submit', handleNewChat);
-
-    // Add input event listener for message textarea auto-resize
-    document.querySelector('.message-input')?.addEventListener('input', function() {
-        this.style.height = '48px';
-        this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-    });
-
-    // Add focus event listener for message input to handle scrolling
-    document.querySelector('.message-input')?.addEventListener('focus', function() {
-        const messagesContainer = document.querySelector('.messages-container');
-        if (messagesContainer) {
-            // Check if we're already at the bottom (within 50px threshold)
-            const isAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight <= 50;
-            if (isAtBottom) {
-                // Wait for keyboard to appear and viewport to adjust
-                setTimeout(() => {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                }, 300); // Increased delay to ensure keyboard is fully shown
-            }
-        }
-    });
 
     // Add new search functionality
     const searchInput = document.getElementById('searchInput');
@@ -4144,33 +4121,6 @@ The main difference between a chat message and an asset transfer is
     A sender can retract a message if it has not been read yet and it has been less than one minute since the message was sent
         * However, this does not gaurantee that the recipient has not already downloaded the message and may read it later
 `
-
-/**
- * Create a chat message object
- * @param {string} to - The address of the recipient
- * @param {string} payload - The payload of the message
- * @param {number} toll - The toll of the message
- * @param {Object} keys - The keys of the sender
- * @returns {Object} The chat message object
- */
-async function createChatMessage(to, payload, toll, keys) {
-    const toAddr = longAddress(to);
-    const fromAddr = longAddress(keys.address)
-    await getNetworkParams();
-    const tx = {
-        type: 'message',
-        from: fromAddr,
-        to: toAddr,
-        amount: toll,       // not sure if this is used by the backend
-        chatId: hashBytes([fromAddr, toAddr].sort().join``),
-        message: 'x',
-        xmessage: payload,
-        timestamp: getCorrectedTimestamp(),
-        network: NETWORK_ACCOUNT_ID,
-        fee: (parameters.current.transactionFee || 1n)           // This is not used by the backend
-    }
-    return tx
-}
 
 async function postAssetTransfer(to, amount, memo, keys) {
     const toAddr = longAddress(to)
@@ -7431,6 +7381,8 @@ class ChatModal {
         this.editButton = document.getElementById('chatEditButton');
         this.sendMoneyButton = document.getElementById('chatSendMoneyButton');
         this.retryOfTxId = document.getElementById('retryOfTxId');
+        this.messageInput = document.querySelector('.message-input');
+        
         
         // used by updateTollValue and updateTollRequired
         this.toll = null;
@@ -7440,28 +7392,31 @@ class ChatModal {
 
     load() {
         // Add message click-to-copy handler
-        // TODO: check to understand why we need to bind this here
         this.messagesList.addEventListener('click', this.handleClickToCopy.bind(this));
         this.sendButton.addEventListener('click', this.handleSendMessage.bind(this));
         this.closeButton.addEventListener('click', this.close.bind(this));
-    }
-    
-    close() {
-        this.modal.classList.remove('active');
-        if (document.getElementById('chatsScreen').classList.contains('active')) {
-            updateChatList()
-            document.getElementById('newChatButton').classList.add('visible');
-        }
-        if (document.getElementById('contactsScreen').classList.contains('active')) {
-            updateContactsList()
-            document.getElementById('newChatButton').classList.add('visible');
-        }
-        this.address = null
-        if (isOnline) {
-            if (wsManager && !wsManager.isSubscribed()) {
-                pollChatInterval(pollIntervalNormal) // back to polling at slower rate
+        this.sendButton.addEventListener('keydown', ignoreTabKey);
+
+        // Add input event listener for message textarea auto-resize
+        this.messageInput.addEventListener('input', function() {
+            this.style.height = '48px';
+            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        });
+
+        // Add focus event listener for message input to handle scrolling
+        this.messageInput.addEventListener('focus', function() {
+            const messagesContainer = document.querySelector('.messages-container');
+            if (messagesContainer) {
+                // Check if we're already at the bottom (within 50px threshold)
+                const isAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight <= 50;
+                if (isAtBottom) {
+                    // Wait for keyboard to appear and viewport to adjust
+                    setTimeout(() => {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }, 300); // Increased delay to ensure keyboard is fully shown
+                }
             }
-        }
+        });
     }
 
     /**
@@ -7476,9 +7431,6 @@ class ChatModal {
         friendModal.updateFriendButton(contact, 'addFriendButtonChat');
         // Set user info
         this.modalTitle.textContent = contact.name || contact.senderInfo?.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`;
-
-        // set the address data attribute
-        /* modal.dataset.address = address; */
 
         // update the toll value. Will not await this and it'll update the toll value while the modal is open.
         updateTollValue(address);
@@ -7545,6 +7497,24 @@ class ChatModal {
             }
         }
     }
+    
+    close() {
+        this.modal.classList.remove('active');
+        if (document.getElementById('chatsScreen').classList.contains('active')) {
+            updateChatList()
+            document.getElementById('newChatButton').classList.add('visible');
+        }
+        if (document.getElementById('contactsScreen').classList.contains('active')) {
+            updateContactsList()
+            document.getElementById('newChatButton').classList.add('visible');
+        }
+        this.address = null
+        if (isOnline) {
+            if (wsManager && !wsManager.isSubscribed()) {
+                pollChatInterval(pollIntervalNormal) // back to polling at slower rate
+            }
+        }
+    }
 
     /**
      * Invoked when the user clicks the Send button in a recipient (appendChatModal.address) chat modal
@@ -7554,11 +7524,13 @@ class ChatModal {
         this.sendButton.disabled = true; // Disable the button
 
         try {
-            const messageInput = document.querySelector('.message-input');
-            messageInput.focus(); // Add focus back to keep keyboard open
+            this.messageInput.focus(); // Add focus back to keep keyboard open
 
-            const message = messageInput.value.trim();
-            if (!message) return;
+            const message = this.messageInput.value.trim();
+            if (!message) {
+                this.sendButton.disabled = false;
+                return;
+            }
 
             const sufficientBalance = await validateBalance(this.toll)
             if (!sufficientBalance) {
@@ -7567,7 +7539,7 @@ class ChatModal {
                 return;
             }
 
-            const messagesList = this.messagesList;
+            //const messagesList = this.messagesList;
 
             // Get current chat data
             const chatsData = myData
@@ -7654,7 +7626,7 @@ class ChatModal {
             // TODO: decided to query everytime we do chatModal.open and save as global variable. We don't need to clear it but we can clear it when closing the modal but should get reset when opening the modal again anyway
             const toll = this.toll;
 
-            const chatMessageObj = await createChatMessage(currentAddress, payload, toll, keys);
+            const chatMessageObj = await this.createChatMessage(currentAddress, payload, toll, keys);
             const txid = await signObj(chatMessageObj, keys)
 
             // if there a hidden txid input, get the value to be used to delete that txid from relevant data stores
@@ -7694,14 +7666,14 @@ class ChatModal {
             insertSorted(chatsData.chats, chatUpdate, 'timestamp');
 
             // Clear input and reset height
-            messageInput.value = '';
-            messageInput.style.height = '48px'; // original height
+            this.messageInput.value = '';
+            this.messageInput.style.height = '48px'; // original height
 
             // Update the chat modal UI immediately
             this.appendChatModal() // This should now display the 'sending' message
 
             // Scroll to bottom of chat modal
-            messagesList.parentElement.scrollTop = messagesList.parentElement.scrollHeight;
+            this.messagesList.parentElement.scrollTop = this.messagesList.parentElement.scrollHeight;
             // --- End Optimistic UI Update ---
 
             //console.log('payload is', payload)
@@ -7742,6 +7714,33 @@ class ChatModal {
         }
     }
 
+    /**
+     * Create a chat message object
+     * @param {string} to - The address of the recipient
+     * @param {string} payload - The payload of the message
+     * @param {number} toll - The toll of the message
+     * @param {Object} keys - The keys of the sender
+     * @returns {Object} The chat message object
+     */
+    async createChatMessage(to, payload, toll, keys) {
+        const toAddr = longAddress(to);
+        const fromAddr = longAddress(keys.address)
+        await getNetworkParams();
+        const tx = {
+            type: 'message',
+            from: fromAddr,
+            to: toAddr,
+            amount: toll,       // not sure if this is used by the backend
+            chatId: hashBytes([fromAddr, toAddr].sort().join``),
+            message: 'x',
+            xmessage: payload,
+            timestamp: getCorrectedTimestamp(),
+            network: NETWORK_ACCOUNT_ID,
+            fee: (parameters.current.transactionFee || 1n)           // This is not used by the backend
+        }
+        return tx
+    }
+
     appendChatModal(highlightNewMessage = false) {
         const currentAddress = this.address; // Use a local constant
         console.log('appendChatModal running for address:', currentAddress, 'Highlight:', highlightNewMessage);
@@ -7754,10 +7753,8 @@ class ChatModal {
         }
         const messages = contact.messages; // Already sorted descending
     
-        const modal = this.modal;
-        if (!modal) return;
-        const messagesList = this.messagesList;
-        if (!messagesList) return;
+        if (!this.modal) return;
+        if (!this.messagesList) return;
     
         // --- 1. Identify the actual newest received message data item ---
         // Since messages are sorted descending (newest first), the first item with my: false is the newest received.
@@ -7765,7 +7762,7 @@ class ChatModal {
         console.log('appendChatModal: Identified newestReceivedItem data:', newestReceivedItem);
     
         // 2. Clear the entire list
-        messagesList.innerHTML = '';
+        this.messagesList.innerHTML = '';
     
         // 3. Iterate backwards through messages (oldest to newest for rendering order)
         // messages are already sorted descending (newest first) in myData
@@ -7819,7 +7816,7 @@ class ChatModal {
     
             // 4. Append the constructed HTML
             // Insert at the end of the list to maintain correct chronological order
-            messagesList.insertAdjacentHTML('beforeend', messageHTML);
+            this.messagesList.insertAdjacentHTML('beforeend', messageHTML);
             // The newest received element will be found after the loop completes
         }
     
@@ -7828,12 +7825,12 @@ class ChatModal {
     
         // 6. Delayed Scrolling & Highlighting Logic (after loop)
         setTimeout(() => {
-            const messageContainer = messagesList.parentElement;
+            const messageContainer = this.messagesList.parentElement;
     
             // Find the DOM element for the actual newest received item using its timestamp
             // Only proceed if newestReceivedItem was found and highlightNewMessage is true
             if (newestReceivedItem && highlightNewMessage) {
-                const newestReceivedElementDOM = messagesList.querySelector(`[data-message-timestamp="${newestReceivedItem.timestamp}"]`);
+                const newestReceivedElementDOM = this.messagesList.querySelector(`[data-message-timestamp="${newestReceivedItem.timestamp}"]`);
     
                 if (newestReceivedElementDOM) {
                     // Found the element, scroll to and highlight it
@@ -7965,9 +7962,6 @@ class FailedMessageModal {
      * @returns {void}
      */
     handleFailedMessageClick(messageEl) {
-        // TODO: create failedMessageModal class and use it here
-        const modal = document.getElementById('failedMessageModal');
-
         // Get the message content and txid from the original failed message element
         const messageContent = messageEl.querySelector('.message-content').textContent;
         const originalTxid = messageEl.dataset.txid;
@@ -7977,8 +7971,8 @@ class FailedMessageModal {
         this.handleFailedMessageClick.txid = originalTxid;
 
         // Show the modal
-        if (modal) {
-            modal.classList.add('active');
+        if (this.modal) {
+            this.modal.classList.add('active');
         }
     }
 
@@ -7988,30 +7982,26 @@ class FailedMessageModal {
      * @returns {void}
      */
     handleFailedMessageRetry() {
-        const failedMessageModal = document.getElementById('failedMessageModal');
-        const mainChatInput = document.querySelector('#chatModal .message-input');
-        const retryTxIdInput = this.retryOfTxId;
-
         // Use the values stored when handleFailedMessage was called
         const messageToRetry = this.handleFailedMessageClick.handleFailedMessage;
         const originalTxid = this.handleFailedMessageClick.txid;
 
-        if (mainChatInput && retryTxIdInput && typeof messageToRetry === 'string' && typeof originalTxid === 'string') {
-            mainChatInput.value = messageToRetry;
-            retryTxIdInput.value = originalTxid;
+        if (this.messageInput && this.retryTxIdInput && typeof messageToRetry === 'string' && typeof originalTxid === 'string') {
+            this.messageInput.value = messageToRetry;
+            this.retryTxIdInput.value = originalTxid;
 
-            if (failedMessageModal) {
-                failedMessageModal.classList.remove('active');
+            if (this.modal) {
+                this.modal.classList.remove('active');
             }
-            mainChatInput.focus();
+            this.messageInput.focus();
 
             // Clear the stored values after use
             this.handleFailedMessageClick.handleFailedMessage = '';
             this.handleFailedMessageClick.txid = '';
         } else {
             console.error('Error preparing message retry: Necessary elements or data missing.');
-            if (failedMessageModal) {
-                failedMessageModal.classList.remove('active');
+            if (this.modal) {
+                this.modal.classList.remove('active');
             }
         }
     }
@@ -8022,15 +8012,14 @@ class FailedMessageModal {
      * @returns {void}
      */
     handleFailedMessageDelete() {
-        const failedMessageModal = document.getElementById('failedMessageModal');
         const originalTxid = this.handleFailedMessageClick.txid;
 
         if (typeof originalTxid === 'string' && originalTxid) {
             const currentAddress = this.address
             removeFailedTx(originalTxid, currentAddress)
 
-            if (failedMessageModal) {
-                failedMessageModal.classList.remove('active');
+            if (this.modal) {
+                this.modal.classList.remove('active');
             }
 
             // Clear the stored values
@@ -8040,8 +8029,8 @@ class FailedMessageModal {
             this.appendChatModal();
         } else {
             console.error('Error deleting message: TXID not found.');
-            if (failedMessageModal) {
-                failedMessageModal.classList.remove('active');
+            if (this.modal) {
+                this.modal.classList.remove('active');
             }
         }
     }
@@ -8052,9 +8041,8 @@ class FailedMessageModal {
      * @returns {void}
      */
     closeFailedMessageModalAndClearState() {
-        const failedMessageModal = document.getElementById('failedMessageModal');
-        if (failedMessageModal) {
-            failedMessageModal.classList.remove('active');
+        if (this.modal) {
+            this.modal.classList.remove('active');
         }
         // Clear the stored values when modal is closed
         this.handleFailedMessageClick.handleFailedMessage = '';
@@ -8068,9 +8056,8 @@ class FailedMessageModal {
      * @returns {void}
      */
     handleFailedMessageBackdropClick(event) {
-        const failedMessageModal = document.getElementById('failedMessageModal');
-        if (event.target === failedMessageModal) {
-            closeFailedMessageModalAndClearState();
+        if (event.target === this.modal) {
+            this.closeFailedMessageModalAndClearState();
         }
     }
 }
@@ -8249,7 +8236,7 @@ function refreshCurrentView(txid) { // contactAddress is kept for potential futu
     const chatModal = chatModal.modal;
     const chatsScreen = document.getElementById('chatsScreen');
     const historyModal = document.getElementById('historyModal');
-    const messagesList = chatModal ? chatModal.querySelector('.messages-list') : null;
+    const messagesList = chatModal ? chatModal.messagesList : null;
 
     // 1. Refresh History Modal if active
     if (historyModal && historyModal.classList.contains('active')) {
