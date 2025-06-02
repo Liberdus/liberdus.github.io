@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -8242,9 +8242,6 @@ async function checkPendingTransactions() {
                         username: pendingTxInfo.username,
                         address: pendingTxInfo.address
                     });
-
-                    // update wallet balances
-                    await updateWalletBalances();
                 }
 
                 if (res?.transaction?.type === 'withdraw_stake') {
@@ -8274,6 +8271,9 @@ async function checkPendingTransactions() {
                 if (type === 'update_chat_toll') {
                     console.log(`DEBUG: update_chat_toll transaction successfully processed!`);
                 }
+
+                // update wallet balances
+                await updateWalletBalances();
             }
             else if (res?.transaction?.success === false) {
                 console.log(`DEBUG: txid ${txid} failed, removing completely`);
@@ -8286,10 +8286,8 @@ async function checkPendingTransactions() {
                 } else {
                     // Show toast notification with the failure reason
                     if (type === 'withdraw_stake') {
-                        console.log(`DEBUG: showing toast for failure reason: ${failureReason}`);
                         showToast(`Unstake failed: ${failureReason}`, 0, "error");
                     } else if (type === 'deposit_stake') {
-                        console.log(`DEBUG: showing toast for failure reason: ${failureReason}`);
                         showToast(`Stake failed: ${failureReason}`, 0, "error");
                     } 
                     else if (type === 'toll') {
@@ -8303,7 +8301,6 @@ async function checkPendingTransactions() {
                         myData.contacts[pendingTxInfo.to].friend = pendingTxInfo.friend;
                     }
                     else { // for messages, transfer etc.
-                        console.log(`DEBUG: showing toast for failure reason: ${failureReason}`);
                         showToast(failureReason, 0, "error");
                     }
 
@@ -8311,7 +8308,6 @@ async function checkPendingTransactions() {
                     updateTransactionStatus(txid, toAddress, 'failed', type);
                     chatModal.refreshCurrentView(txid);
                 }
-                console.log(`DEBUG: removing txid ${txid} from pending array. i = ${i}`);
                 // Remove from pending array
                 myData.pending.splice(i, 1);
 
