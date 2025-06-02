@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'f'
+const version = 'g'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -8263,6 +8263,7 @@ async function checkPendingTransactions() {
                         myData.contacts[pendingTxInfo.to].friend = pendingTxInfo.friend;
                     }
                     else { // for messages, transfer etc.
+                        console.log(`DEBUG: showing toast for failure reason: ${failureReason}`);
                         showToast(failureReason, 0, "error");
                     }
 
@@ -8270,6 +8271,7 @@ async function checkPendingTransactions() {
                     updateTransactionStatus(txid, toAddress, 'failed', type);
                     refreshCurrentView(txid);
                 }
+                console.log(`DEBUG: removing txid ${txid} from pending array. i = ${i}`);
                 // Remove from pending array
                 myData.pending.splice(i, 1);
 

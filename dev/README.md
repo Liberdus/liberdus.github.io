@@ -58,6 +58,8 @@ Try out the application at [liberdus.com/test](https://liberdus.com/test)
    # Follow the setup instructions in the proxy server README
    ```
 
+TODO: add instructions to run collector
+
 5. Access the application in your browser at `http://localhost:8000` (or whichever port your HTTP server is using)
 
 ## Architecture
