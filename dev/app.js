@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'c'
+const version = 'e'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1712,6 +1712,8 @@ function createNewContact(addr, username){
     c.timestamp = getCorrectedTimestamp()
     c.unread = 0
     c.toll = 0n
+    c.tollRequiredToReceive = 1
+    c.tollRequiredToSend = 1
     c.friend = 1
 }
 
@@ -1773,15 +1775,16 @@ async function updateTollRequired(address) {
         // query the contact's toll field from the network
         const contactAccountData = await queryNetwork(`/messages/${hash}/toll`);
 
-        if (contactAccountData.toll.required == null) {
-            console.warn(`Contact account data is null for address: ${address}`);
+        if (contactAccountData?.error === "No account with the given chatId") {
+            console.warn(`chatId has not been created yet: ${address}`, contactAccountData.error);
+        } else if (contactAccountData?.error) {
+            console.warn(`Error querying toll required for address: ${address}`, contactAccountData.error);
             return;
         }
 
         const localContact = myData.contacts[address]
         localContact.tollRequiredToSend = contactAccountData.toll.required[myIndex]
         localContact.tollRequiredToReceive = contactAccountData.toll.required[toIndex]
-        
 
         if (chatModal.modal.classList.contains('active') && chatModal.address === address) {
             updateTollAmountUI(address);
