@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'e'
+const version = 'f'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -1778,7 +1778,7 @@ async function updateTollRequired(address) {
         if (contactAccountData?.error === "No account with the given chatId") {
             console.warn(`chatId has not been created yet: ${address}`, contactAccountData.error);
         } else if (contactAccountData?.error) {
-            console.warn(`Error querying toll required for address: ${address}`, contactAccountData.error);
+            console.error(`Error querying toll required for address: ${address}`, contactAccountData.error);
             return;
         }
 
