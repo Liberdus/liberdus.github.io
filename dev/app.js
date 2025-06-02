@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'
+const version = 'u'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -7069,7 +7069,9 @@ class ChatModal {
      * @returns {void}
      */
     close() {
-        this.sendReadTransaction(this.address);
+        if (this.newestReceivedMessage) {
+            this.sendReadTransaction(this.address);
+        }
         this.modal.classList.remove('active');
         if (document.getElementById('chatsScreen').classList.contains('active')) {
             updateChatList()
@@ -7093,18 +7095,12 @@ class ChatModal {
      * @returns {void}
      */
     async sendReadTransaction(contactAddress) {
-        console.log('DEBUG1:sendReadTransaction running for address:', contactAddress);
         const contact = myData.contacts[contactAddress];
         const latestMessage = this.newestReceivedMessage;
-        console.log('DEBUG2:latestMessage:', latestMessage);
-        console.log('DEBUG3:contact.timestamp < latestMessage.timestamp:', contact.timestamp, latestMessage.timestamp);
         if (contact.timestamp < latestMessage.timestamp) {
-            console.log('DEBUG4:contact.timestamp < latestMessage.timestamp: sending read transaction');
             const readTransaction = await this.createReadTransaction(contactAddress);
-            console.log('DEBUG4:readTransaction:', readTransaction);
             const txid = await signObj(readTransaction, myAccount.keys)
             const response = await injectTx(readTransaction, txid)
-
             if (!response || !response.result || !response.result.success) {
                 console.warn('read transaction failed to send', response)
             } else {
@@ -7380,7 +7376,6 @@ class ChatModal {
         const newestReceivedItem = messages.find(item => !item.my);
         console.log('appendChatModal: Identified newestReceivedItem data:', newestReceivedItem);
         this.newestReceivedMessage = newestReceivedItem;
-        console.log('DEBUG5:[appendChatModal] newestReceivedMessage:', this.newestReceivedMessage);
     
         // 2. Clear the entire list
         this.messagesList.innerHTML = '';
