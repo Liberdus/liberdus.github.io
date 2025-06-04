@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -556,11 +556,26 @@ async function handleCreateAccount(event) {
             pqSeed: pqSeed,  // store only the 64 byte seed instead of 32,000 byte public and secret keys
         }
     };
-
-    // Create new data entry
-    myData = newDataRecord(myAccount);
     let waitingToastId = showToast('Creating account...', 0, 'loading');
-    const res = await postRegisterAlias(username, myAccount.keys);
+    let res;
+    // Create new data entry
+    try {
+        await getNetworkParams();
+        myData = newDataRecord(myAccount);
+        res = await postRegisterAlias(username, myAccount.keys);
+    } catch (error) {
+        submitButton.disabled = false;
+        toggleButton.disabled = false;
+        usernameInput.disabled = false;
+        privateKeyInput.disabled = false;
+        backButton.disabled = false;
+        if (waitingToastId) hideToast(waitingToastId);
+        showToast(`Failed to fetch network parameters, try again later.`, 0, 'error');
+        console.error('Failed to fetch network parameters, using defaults:', error);
+        return;
+    }
+    
+    
 
     if (res && res.result && res.result.success && res.txid) {
         const txid = res.txid;
@@ -751,8 +766,8 @@ function newDataRecord(myAccount){
         },
         settings: {
             encrypt: true,
-            toll: parameters.current.defaultToll || 1n * wei,
-            tollUnit: parameters.current.defaultTollUnit || "LIB",
+            toll: parameters?.current?.defaultToll || 1n * wei,
+            tollUnit: parameters?.current?.defaultTollUnit || "LIB",
         }
     }
 
@@ -864,9 +879,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     restoreAccountModal.load()
 
     // Validator Modals
-    document.getElementById('openValidator').addEventListener('click', openValidatorModal);
-    document.getElementById('closeValidatorModal').addEventListener('click', closeValidatorModal);
-    document.getElementById('submitUnstake').addEventListener('click', confirmAndUnstakeCurrentUserNominee);
+    validatorStakingModal.load()
 
     // Toll Modal
     tollModal.load()
@@ -1750,7 +1763,7 @@ function createNewContact(addr, username){
     c.address = address
     if (username){ c.username = normalizeUsername(username) }
     c.messages = []
-    c.timestamp = getCorrectedTimestamp()
+    c.timestamp = 0
     c.unread = 0
     c.toll = 0n
     c.tollRequiredToReceive = 1
@@ -1763,6 +1776,7 @@ function createNewContact(addr, username){
  */
 function updateTollAmountUI(address) {
     const tollValue = document.getElementById('tollValue');
+    tollValue.style.color = 'black';
     const contact = myData.contacts[address];
     let toll = contact.toll || 0n;
     const tollUnit = contact.tollUnit || 'LIB';
@@ -1787,7 +1801,12 @@ function updateTollAmountUI(address) {
     let display;
     if (contact.tollRequiredToSend == 1) {
         display = `${mainString} (${otherString})`;
+    } else if (contact.tollRequiredToSend == 2) {
+        tollValue.style.color = 'red';
+        display = `blocked`;
     } else {
+        // light green used to show success
+        tollValue.style.color = '#28a745';
         display = `free (${mainString} (${otherString}))`;
     }
     tollValue.textContent = display;
@@ -1824,8 +1843,8 @@ async function updateTollRequired(address) {
         }
 
         const localContact = myData.contacts[address]
-        localContact.tollRequiredToSend = contactAccountData.toll.required[myIndex]
-        localContact.tollRequiredToReceive = contactAccountData.toll.required[toIndex]
+        localContact.tollRequiredToSend = contactAccountData.toll.required[toIndex]
+        localContact.tollRequiredToReceive = contactAccountData.toll.required[myIndex]
 
         if (chatModal.modal.classList.contains('active') && chatModal.address === address) {
             updateTollAmountUI(address);
@@ -2293,34 +2312,44 @@ async function handleSendAsset(event) {
 
     if (!myData.contacts[toAddress]) { createNewContact(toAddress, username) }
 
-    let encMemo = ''
+    // Get recipient's public key from contacts
+    let recipientPubKey = myData.contacts[toAddress]?.public;
+    let pqRecPubKey = myData.contacts[toAddress]?.pqPublic
     let pqEncSharedKey = ''
-    if (memo && myData.contacts[toAddress]?.pqPublic) {
-
-        // Get recipient's public key from contacts
-        let recipientPubKey = myData.contacts[toAddress]?.public;
-        let pqRecPubKey = myData.contacts[toAddress]?.pqPublic
-        if (!recipientPubKey || !pqRecPubKey) {
-            const recipientInfo = await queryNetwork(`/account/${longAddress(toAddress)}`)
-            if (!recipientInfo?.account?.publicKey){
-                console.log(`no public key found for recipient ${toAddress}`)
-                return
-            }
+    if (!recipientPubKey || !pqRecPubKey) {
+        const recipientInfo = await queryNetwork(`/account/${longAddress(toAddress)}`)
+        if (!recipientInfo?.account?.publicKey){
+            console.log(`no public key found for recipient ${toAddress}`)
+            return
+        }
+        if (recipientInfo.account.publicKey) {  
             recipientPubKey = recipientInfo.account.publicKey
             myData.contacts[toAddress].public = recipientPubKey
+        }
+        if (recipientInfo.account.pqPublicKey) {
             pqRecPubKey = recipientInfo.account.pqPublicKey
             myData.contacts[toAddress].pqPublic = pqRecPubKey
         }
+    }
+    let dhkey = ''
+    let sharedKeyMethod = 'none'
+    if (recipientPubKey){
+        dhkey = ecSharedKey(keys.secret, recipientPubKey)
+        sharedKeyMethod = 'ec'
+        if (pqRecPubKey) {
+            // Generate shared secret using ECDH and take first 32 bytes
+            const  { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey)
+            const combined = new Uint8Array(dhkey.length + sharedSecret.length)
+            combined.set(dhkey)
+            combined.set(sharedSecret, dhkey.length)
+            dhkey = deriveDhKey(combined);
+            pqEncSharedKey = bin2base64(cipherText)
+            sharedKeyMethod = 'pq'
+        }
+    }
 
-        // Generate shared secret using ECDH and take first 32 bytes
-        let dhkey = ecSharedKey(keys.secret, recipientPubKey)
-        const  { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey)
-        const combined = new Uint8Array(dhkey.length + sharedSecret.length)
-        combined.set(dhkey)
-        combined.set(sharedSecret, dhkey.length)
-        dhkey = deriveDhKey(combined);
-        pqEncSharedKey = bin2base64(cipherText)
-
+    let encMemo = ''
+    if (memo && sharedKeyMethod !== 'none') {
     // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
     // Encrypt message using shared secret
         encMemo = encryptChacha(dhkey, memo)
@@ -2340,9 +2369,10 @@ async function handleSendAsset(event) {
 
     // only include the sender info if the recipient is is a friend and has a pqKey
     let encSenderInfo = ''
-    if (myData.contacts[toAddress]?.pqPublic && myData.contacts[toAddress]?.friend === 3) {
+    let senderInfo = ''
+    if (pqRecPubKey && myData.contacts[toAddress]?.friend === 3) {
         // Create sender info object
-        const senderInfo = {
+        senderInfo = {
             username: myAccount.username,
             name: myData.account.name,
             email: myData.account.email,
@@ -2350,8 +2380,20 @@ async function handleSendAsset(event) {
             linkedin: myData.account.linkedin,
             x: myData.account.x
         };
-        // Encrypt sender info
+    }
+    else if (recipientPubKey) {
+        senderInfo = {
+            username: myAccount.username
+        }
+    }
+    else {
+        senderInfo = { username: myAccount.address }
+    }
+    if (sharedKeyMethod !== 'none') {
         encSenderInfo = encryptChacha(dhkey, stringify(senderInfo));
+    }
+    else {
+        encSenderInfo = stringify(senderInfo);
     }
     // Create message payload
     const payload = {
@@ -2360,6 +2402,7 @@ async function handleSendAsset(event) {
         encrypted: true,
         encryptionMethod: 'xchacha20poly1305',
         pqEncSharedKey: pqEncSharedKey,
+        sharedKeyMethod: sharedKeyMethod,
         sent_timestamp: getCorrectedTimestamp()
     };
 
@@ -2630,7 +2673,7 @@ class FriendModal {
             to: toAddr,
             chatId: chatId_,
             required: requiredNum,
-            type: 'update_chat_toll',
+            type: 'update_toll_required',
             timestamp: getCorrectedTimestamp(),
             friend: friend
         }
@@ -2659,7 +2702,7 @@ class FriendModal {
         // send transaction to update chat toll
         const res = await this.postUpdateTollRequired(this.currentContactAddress, Number(selectedStatus))
         if (res?.transaction?.success === false) {
-            console.log(`[handleFriendSubmit] update_chat_toll transaction failed: ${res?.transaction?.reason}. Did not update contact status.`);
+            console.log(`[handleFriendSubmit] update_toll_required transaction failed: ${res?.transaction?.reason}. Did not update contact status.`);
             return;
         }
 
@@ -3097,11 +3140,6 @@ async function updateAssetPricesIfNeeded() {
 }
 
 function openHistoryModal() {
-    // remove notification from wallet-action-button if it is active
-    if (document.getElementById('openHistoryModal').classList.contains('has-notification')) {
-        document.getElementById('openHistoryModal').classList.remove('has-notification');
-    }
-
     const modal = document.getElementById('historyModal');
     modal.classList.add('active');
 
@@ -3222,7 +3260,7 @@ function handleHistoryItemClick(event) {
         // Check if this is a stake/unstake transaction by looking at the memo
         const memo = item.querySelector('.transaction-memo')?.textContent;
         if (memo === 'stake' || memo === 'unstake') {
-            openValidatorModal();
+            validatorStakingModal.open();
             return;
         }
 
@@ -3816,8 +3854,10 @@ async function injectTx(tx, txid){
             if (tx.type === 'register') {
                 pendingTxData.username = tx.alias;
                 pendingTxData.address = tx.from; // User's address (longAddress form)
-            } else if (tx.type === 'update_chat_toll') {
+            } else if (tx.type === 'update_toll_required') {
                 pendingTxData.friend = tx.friend;
+            } else if (tx.type === 'read') {
+                pendingTxData.oldContactTimestamp = tx.oldContactTimestamp;
             } else if (tx.type === 'message' || tx.type === 'transfer' || tx.type === 'deposit_stake' || tx.type === 'withdraw_stake') {
                 pendingTxData.to = tx.to;
             }
@@ -5508,229 +5548,6 @@ function updateWebSocketIndicator() {
 updateWebSocketIndicator.lastSubscribed = 0
 
 // Validator Modals
-async function openValidatorModal() {
-    // Get modal elements
-    const validatorModal = document.getElementById('validatorModal');
-    const loadingElement = document.getElementById('validator-loading');
-    const errorElement = document.getElementById('validator-error-message');
-    const detailsElement = document.getElementById('validator-details');
-    // Get elements needed for conditional logic early
-    const nomineeLabelElement = document.getElementById('validator-nominee-label');
-    const nomineeValueElement = document.getElementById('validator-nominee');
-    const userStakeLibItem = document.getElementById('validator-user-stake-lib-item');
-    const userStakeUsdItem = document.getElementById('validator-user-stake-usd-item');
-    const unstakeButton = document.getElementById('submitUnstake');
-    const stakeButton = document.getElementById('openStakeModal');
-    const pendingSkeletonBar1 = document.getElementById('pending-nominee-skeleton-1');
-    const pendingTxTextInBar = document.getElementById('pending-tx-text-in-bar');
-
-    // Reset UI
-    if (loadingElement) loadingElement.style.display = 'block';
-    if (detailsElement) detailsElement.style.display = 'none';
-    if (errorElement) {
-        errorElement.style.display = 'none';
-        errorElement.textContent = ''; // Clear previous errors
-    }
-    // Reset conditional elements to default state (label text might change later)
-    if (nomineeLabelElement) nomineeLabelElement.textContent = 'Nominated Validator:'; // Default label
-    if (nomineeValueElement) nomineeValueElement.textContent = ''; // Clear value initially
-    // Ensure stake items are visible by default (using flex as defined in styles.css)
-    if (userStakeLibItem) userStakeLibItem.style.display = 'flex';
-    if (userStakeUsdItem) userStakeUsdItem.style.display = 'flex';
-    // Disable unstake button initially while loading/checking
-    if (unstakeButton) unstakeButton.disabled = true;
-    if (stakeButton) stakeButton.disabled = false;
-
-    if (validatorModal) validatorModal.classList.add('active'); // Open modal immediately
-
-    // --- START: New logic for text in skeleton bar ---
-    // Reset elements to default state before checking for pending tx
-    // Pending Transaction UI
-    if (nomineeValueElement) nomineeValueElement.style.display = ''; // Show actual nominee value by default
-    if (pendingTxTextInBar) pendingTxTextInBar.style.display = 'none';
-    if (pendingSkeletonBar1) pendingSkeletonBar1.style.display = 'none';
-
-    let currentPendingTx = null;
-    if (myData && myData.pending && Array.isArray(myData.pending) && myData.pending.length > 0) {
-        currentPendingTx = myData.pending.find(
-            tx => tx.type === 'deposit_stake' || tx.type === 'withdraw_stake'
-        );
-    }
-
-    if (currentPendingTx) {
-        if (detailsElement) detailsElement.style.display = 'block'; // Ensure main section is visible
-        if (pendingSkeletonBar1) pendingSkeletonBar1.style.display = 'flex'; // Use flex to help center text in span
-        if (pendingTxTextInBar) {
-            pendingTxTextInBar.textContent = currentPendingTx.type === 'withdraw_stake' ? 'Pending Unstake Transaction' : 'Pending Stake Transaction';
-            pendingTxTextInBar.style.display = 'block';
-        }
-        if (currentPendingTx.type === 'deposit_stake' && stakeButton) stakeButton.disabled = true;
-    }
-    // --- END: New logic for text in skeleton bar ---
-
-    let nominee = null;
-
-    try {
-        // Fetch Data Concurrently
-        const userAddress = myData?.account?.keys?.address;
-        if (!userAddress) {
-            console.warn("User address not found in myData. Skipping user account fetch.");
-            // Decide how to handle this - maybe show an error or a specific state?
-            // For now, we'll proceed, but nominee/user stake will be unavailable.
-        }
-
-        const [userAccountData, networkAccountData, updatePrices] = await Promise.all([
-            userAddress ? queryNetwork(`/account/${longAddress(userAddress)}`) : Promise.resolve(null), // Fetch User Data if available
-            queryNetwork('/account/0000000000000000000000000000000000000000000000000000000000000000'), // Fetch Network Data
-            updateWalletBalances()
-        ]);
-
-        // Extract Raw Data (API values are now actual BigInt objects or other types)
-        nominee = userAccountData?.account?.operatorAccountInfo?.nominee; // string
-        const userStakedBaseUnits = userAccountData?.account?.operatorAccountInfo?.stake; // BigInt object
-
-        const stakeRequiredUsd = networkAccountData?.account?.current?.stakeRequiredUsd; // BigInt object
-        const stabilityScaleMul = networkAccountData?.account?.current?.stabilityScaleMul; // number
-        const stabilityScaleDiv = networkAccountData?.account?.current?.stabilityScaleDiv; // number
-
-        const marketPrice = await getMarketPrice(); // number or null
-
-        // Calculate Derived Values
-        let stabilityFactor = null;
-        if (stabilityScaleMul != null && stabilityScaleDiv != null && Number(stabilityScaleDiv) !== 0) {
-            stabilityFactor = Number(stabilityScaleMul) / Number(stabilityScaleDiv);
-        }
-
-        let stakeAmountLibBaseUnits = null; // This will be a BigInt object or null
-        if (stakeRequiredUsd != null && typeof stakeRequiredUsd === 'bigint' &&
-            stabilityScaleMul != null && typeof stabilityScaleMul === 'number' &&
-            stabilityScaleDiv != null && typeof stabilityScaleDiv === 'number' && stabilityScaleDiv !== 0) {
-            try {
-                // No need to parse stakeRequiredUsd from string, it's already a BigInt
-                const scaleMulBigInt = BigInt(stabilityScaleMul);
-                const scaleDivBigInt = BigInt(stabilityScaleDiv);
-                if (scaleMulBigInt !== 0n) {
-                    stakeAmountLibBaseUnits = (stakeRequiredUsd * scaleDivBigInt) / scaleMulBigInt;
-                } else {
-                     console.warn("Stability scale multiplier is zero, cannot calculate LIB stake amount.");
-                }
-            } catch (e) {
-                console.error("Error calculating stakeAmountLibBaseUnits with BigInt:", e, {
-                    stakeRequiredUsdBaseUnits,
-                    stabilityScaleMul,
-                    stabilityScaleDiv
-                });
-            }
-        }
-
-        let userStakedUsd = null; // number or null
-        // TODO: Calculate User Staked Amount (USD) using market price - Use stability factor if available?
-        // For now, using market price as implemented previously.
-        if (userStakedBaseUnits != null && typeof userStakedBaseUnits === 'bigint' && marketPrice != null) { // Check it's a BigInt
-            try {
-                // userStakedBaseUnits is already a BigInt object
-                const userStakedLib = Number(userStakedBaseUnits) / 1e18;
-                userStakedUsd = userStakedLib * marketPrice;
-            } catch (e) {
-                console.error("Error calculating userStakedUsd:", e, { userStakedBaseUnits, marketPrice });
-            }
-        }
-
-        let marketStakeUsdBaseUnits = null; // BigInt object or null
-        // Calculate Min Stake at Market (USD) using BigInt and market price
-        if (stakeAmountLibBaseUnits !== null && marketPrice != null) { // stakeAmountLibBaseUnits is BigInt object here
-            try {
-                const stakeAmountLib = Number(stakeAmountLibBaseUnits) / 1e18;
-                const marketStakeUsd = stakeAmountLib * marketPrice;
-                // Approximate back to base units (assuming 18 decimals for USD base units)
-                marketStakeUsdBaseUnits = BigInt(Math.round(marketStakeUsd * 1e18));
-            } catch (e) {
-                console.error("Error calculating marketStakeUsdBaseUnits:", e, { stakeAmountLibBaseUnits, marketPrice });
-            }
-        }
-
-
-        // Format & Update UI
-        // Get references for network info elements
-        const networkStakeUsdValue = document.getElementById('validator-network-stake-usd');
-        const networkStakeLibValue = document.getElementById('validator-network-stake-lib');
-        const stabilityFactorValue = document.getElementById('validator-stability-factor');
-        const marketPriceValue = document.getElementById('validator-market-price');
-        const marketStakeUsdValue = document.getElementById('validator-market-stake-usd');
-        const stakeForm = document.getElementById('stakeForm');
-
-        // stakeAmountLibBaseUnits is a BigInt object or null. Pass its string representation to big2str.
-        if (stakeForm) stakeForm.dataset.minStake = stakeAmountLibBaseUnits === null ? '0' : big2str(stakeAmountLibBaseUnits, 18);
-
-        // stakeRequiredUsd is a BigInt object or null/undefined. Pass its string representation.
-        const displayNetworkStakeUsd = stakeRequiredUsd != null ? '$' + big2str(stakeRequiredUsd, 18).slice(0, 6) : 'N/A';
-        // stakeAmountLibBaseUnits is a BigInt object or null. Pass its string representation.
-        const displayNetworkStakeLib = stakeAmountLibBaseUnits !== null ? big2str(stakeAmountLibBaseUnits, 18).slice(0, 7) : 'N/A';
-        const displayStabilityFactor = stabilityFactor ? stabilityFactor.toFixed(4) : 'N/A';
-        const displayMarketPrice = marketPrice ? '$' + marketPrice.toFixed(4) : 'N/A';
-        // marketStakeUsdBaseUnits is a BigInt object or null. Pass its string representation.
-        const displayMarketStakeUsd = marketStakeUsdBaseUnits !== null ? '$' + big2str(marketStakeUsdBaseUnits, 18).slice(0, 6) : 'N/A';
-
-        if (networkStakeUsdValue) networkStakeUsdValue.textContent = displayNetworkStakeUsd;
-        if (networkStakeLibValue) networkStakeLibValue.textContent = displayNetworkStakeLib;
-        if (stabilityFactorValue) stabilityFactorValue.textContent = displayStabilityFactor;
-        if (marketPriceValue) marketPriceValue.textContent = displayMarketPrice;
-        if (marketStakeUsdValue) marketStakeUsdValue.textContent = displayMarketStakeUsd;
-
-        if (!nominee) {
-            if (nomineeLabelElement) nomineeLabelElement.textContent = 'No Nominated Validator';
-            if (nomineeValueElement) nomineeValueElement.textContent = ''; // Ensure value is empty
-            if (userStakeLibItem) userStakeLibItem.style.display = 'none'; // Hide LIB stake item
-            if (userStakeUsdItem) userStakeUsdItem.style.display = 'none'; // Hide USD stake item
-        } else {
-            // Case: Nominee Exists
-            // Get references for user stake values
-             const userStakeLibValue = document.getElementById('validator-user-stake-lib');
-             const userStakeUsdValue = document.getElementById('validator-user-stake-usd');
-
-            // userStakedBaseUnits is a BigInt object or null/undefined. Pass its string representation.
-            const displayUserStakedLib = userStakedBaseUnits != null ? big2str(userStakedBaseUnits, 18).slice(0, 6) : 'N/A';
-            const displayUserStakedUsd = userStakedUsd != null ? '$' + userStakedUsd.toFixed(4) : 'N/A';
-
-            if (nomineeLabelElement) nomineeLabelElement.textContent = 'Nominated Validator:';
-            if (nomineeValueElement) nomineeValueElement.textContent = nominee;
-            if (userStakeLibValue) userStakeLibValue.textContent = displayUserStakedLib;
-            if (userStakeUsdValue) userStakeUsdValue.textContent = displayUserStakedUsd;
-            // Ensure items are visible (using flex as defined in CSS) - redundant due to reset, but safe
-            if (userStakeLibItem) userStakeLibItem.style.display = 'flex';
-            if (userStakeUsdItem) userStakeUsdItem.style.display = 'flex';
-        }
-
-        if (detailsElement) detailsElement.style.display = 'block'; // Or 'flex' if it's a flex container
-
-    } catch (error) {
-        console.error("Error fetching validator details:", error);
-        // Display error in UI
-        if (errorElement) {
-            errorElement.textContent = 'Failed to load validator details. Please try again later.';
-            errorElement.style.display = 'block';
-        }
-        // Ensure details are hidden if an error occurs
-        if (detailsElement) detailsElement.style.display = 'none';
-        // Ensure unstake button remains disabled on error
-        if (unstakeButton) unstakeButton.disabled = true;
-    } finally {
-        // Hide loading indicator regardless of success or failure
-        if (loadingElement) loadingElement.style.display = 'none';
-        // Set final state of unstake button based on whether a nominee was found
-        if (unstakeButton) {
-             unstakeButton.disabled = !nominee;
-        }
-        if (currentPendingTx) {
-            unstakeButton.disabled = true;
-            stakeButton.disabled = true;
-        }
-    }
-}
-
-function closeValidatorModal() {
-    document.getElementById('validatorModal').classList.remove('active');
-}
 
 // fetching market price by invoking `updateAssetPricesIfNeeded` and extracting from myData.assetPrices
 async function getMarketPrice() {
@@ -5768,122 +5585,6 @@ async function getMarketPrice() {
         return null; // Return null on any unexpected error during the process
     }
 }
-
-// Check if a validator node is active based on reward times
-async function checkValidatorActivity(validatorAddress) {
-    if (!validatorAddress) {
-        console.error("checkValidatorActivity: No validator address provided.");
-        return { isActive: false, error: "No address provided" }; // Cannot determine activity without address
-    }
-    try {
-        const data = await queryNetwork(`/account/${validatorAddress}`);
-        if (data && data.account) {
-            const account = data.account;
-            // Active if reward has started (not 0) but hasn't ended (is 0)
-            const isActive = account.rewardStartTime && account.rewardStartTime !== 0 && (!account.rewardEndTime || account.rewardEndTime === 0);
-            return { isActive: isActive, error: null };
-        } else {
-            console.warn(`checkValidatorActivity: No account data found for validator ${validatorAddress}.`);
-             return { isActive: false, error: "Could not fetch validator data" };
-        }
-    } catch (error) {
-        console.error(`checkValidatorActivity: Error fetching data for validator ${validatorAddress}:`, error);
-        // Network error or other issue fetching data.
-        return { isActive: false, error: "Network error fetching validator status" };
-    }
-}
-
-// handle Unstake Click with transaction confirmation and submission
-async function confirmAndUnstakeCurrentUserNominee() {
-    // Attempt to read nominee from the DOM element populated by openValidatorModal
-    const nomineeElement = document.getElementById('validator-nominee');
-    const nominee = nomineeElement ? nomineeElement.textContent?.trim() : null;
-
-    // Check if we successfully retrieved a nominee address from the DOM
-    if (!nominee || nominee.length < 10) { // Add a basic sanity check for length
-        showToast('Could not find nominated validator.', 4000, 'error');
-        console.warn("confirmAndUnstakeCurrentUserNominee: Nominee not found or invalid in DOM element #validator-nominee.");
-        return;
-    }
-
-    // Check if the validator is active
-    const activityCheck = await checkValidatorActivity(nominee);
-    if (activityCheck.isActive) {
-        showToast('Cannot unstake from an active validator.', 5000, 'error');
-        console.warn(`confirmAndUnstakeCurrentUserNominee: Validator ${nominee} is active.`);
-        return;
-    } else if (activityCheck.error) {
-        showToast(`Error checking validator status: ${activityCheck.error}`, 5000, 'error');
-        return;
-    }
-
-    // Confirmation dialog
-    const confirmationMessage = `Are you sure you want to unstake from validator: ${nominee}?`;
-    if (window.confirm(confirmationMessage)) {
-        //console.log(`User confirmed unstake from: ${nominee}`);
-        showToast('Submitting unstake transaction...', 3000, 'loading');
-        // Call the function to handle the actual transaction submission
-        await submitUnstakeTransaction(nominee);
-    }
-}
-
-async function submitUnstakeTransaction(nodeAddress) {
-    // disable the unstake button, back button, and submitStake button
-    const unstakeButton = document?.getElementById('submitUnstake');
-    const backButton = document?.getElementById('backButton');
-    const submitStakeButton = document?.getElementById('submitStake');
-    if (unstakeButton) unstakeButton.disabled = true;
-    if (backButton) backButton.disabled = true;
-    if (submitStakeButton) submitStakeButton.disabled = true;
-
-
-    try {
-        const response = await postUnstake(nodeAddress);
-        if (response && response.result && response.result.success) {
-
-            myData.wallet.history.unshift({
-                nominee: nodeAddress,
-                amount: bigxnum2big(wei, '0'),
-                memo: 'unstake',
-                sign: 1,
-                status: 'sent',
-                timestamp: getCorrectedTimestamp(),
-                txid: response.txid
-            });
-
-            closeValidatorModal();
-            openValidatorModal();
-        } else {
-            // Try to get a more specific reason for failure
-            const reason = response?.result?.reason || 'Unknown error from API.';
-            // not showing toast since shown in injectTx
-            console.error('Unstake failed. API Response:', response);
-        }
-    } catch (error) {
-        console.error('Error submitting unstake transaction:', error);
-        // Provide a user-friendly error message
-        showToast('Unstake transaction failed. Network or server error.', 5000, 'error');
-    } finally {
-        if (unstakeButton) unstakeButton.disabled = false;
-        if (backButton) backButton.disabled = false;
-        if (submitStakeButton) submitStakeButton.disabled = false;
-    }
-}
-
- async function postUnstake(nodeAddress) {
-    // TODO: need to query network for the correct nominator address
-    const unstakeTx = {
-        type: "withdraw_stake",
-        nominator: longAddress(myAccount?.keys?.address),
-        nominee: nodeAddress,
-        force: false,
-        timestamp: getCorrectedTimestamp(),
-    };
-
-    const txid = await signObj(unstakeTx, myAccount.keys)
-    const response = await injectTx(unstakeTx, txid);
-    return response;
- }
 
  class RemoveAccountModal {
     constructor(){
@@ -6695,6 +6396,355 @@ class MyProfileModal {
 }
 const myProfileModal = new MyProfileModal()
 
+class ValidatorStakingModal {
+    constructor() {
+        // Modal and main buttons
+        this.modal = document.getElementById('validatorModal');
+        this.stakeButton = document.getElementById('openStakeModal');
+        this.unstakeButton = document.getElementById('submitUnstake');
+        this.backButton = document.getElementById('closeValidatorModal');
+        
+        // UI state elements
+        this.detailsElement = document.getElementById('validator-details');
+        this.loadingElement = document.getElementById('validator-loading');
+        this.errorElement = document.getElementById('validator-error-message');
+        
+        // Display elements
+        this.totalStakeElement = document.getElementById('validator-total-stake');
+        this.totalStakeUsdElement = document.getElementById('validator-total-stake-usd');
+        this.userStakeLibElement = document.getElementById('validator-user-stake-lib');
+        this.userStakeUsdElement = document.getElementById('validator-user-stake-usd');
+        this.nomineeLabelElement = document.getElementById('validator-nominee-label');
+        this.nomineeValueElement = document.getElementById('validator-nominee');
+
+        // Skeleton bar elements
+        this.pendingSkeletonBar = document.getElementById('pending-nominee-skeleton-1');
+        this.pendingTxTextInBar = document.getElementById('pending-tx-text-in-bar');
+
+        // Network info elements
+        this.networkStakeUsdValue = document.getElementById('validator-network-stake-usd');
+        this.networkStakeLibValue = document.getElementById('validator-network-stake-lib');
+        this.stabilityFactorValue = document.getElementById('validator-stability-factor');
+        this.marketPriceValue = document.getElementById('validator-market-price');
+        this.marketStakeUsdValue = document.getElementById('validator-market-stake-usd');
+        this.stakeForm = document.getElementById('stakeForm');
+    }
+
+    load() {
+        // Setup event listeners when DOM is loaded
+        // stakeButton handling is in the StakeValidatorModal
+        this.unstakeButton.addEventListener('click', () => this.handleUnstake());
+
+        // Add listeners for opening and closing the modal
+        document.getElementById('openValidator').addEventListener('click', () => this.open());
+        this.backButton.addEventListener('click', () => this.close());
+    }
+
+    async open() {
+        // Reset UI state
+        this.loadingElement.style.display = 'block';
+        this.detailsElement.style.display = 'none';
+        this.errorElement.style.display = 'none';
+        this.errorElement.textContent = '';
+
+        // Reset conditional elements to default state
+        this.nomineeLabelElement.textContent = 'Nominated Validator:';
+        this.nomineeValueElement.textContent = '';
+        // Ensure stake items are visible by default
+        this.userStakeLibElement.style.display = 'flex';
+        this.userStakeUsdElement.style.display = 'flex';
+        // Disable unstake button initially
+        this.unstakeButton.disabled = true;
+        this.stakeButton.disabled = false;
+
+        // Show the modal
+        this.modal.classList.add('active');
+        
+        // logic for text in skeleton bar
+        // Pending Transaction UI
+        this.nomineeValueElement.style.display = ''; // as in the original code
+        this.pendingTxTextInBar.style.display = 'none';
+        this.pendingSkeletonBar.style.display = 'none';
+
+        let currentPendingTx = null;
+        if (myData && myData.pending && Array.isArray(myData.pending) && myData.pending.length > 0) {
+            currentPendingTx = myData.pending.find(
+                tx => tx.type === 'deposit_stake' || tx.type === 'withdraw_stake'
+            );
+        }
+
+        if (currentPendingTx) {
+            this.detailsElement.style.display = 'block';
+            this.pendingSkeletonBar.style.display = 'flex';
+            this.pendingTxTextInBar.textContent = currentPendingTx.type === 'withdraw_stake' ? 'Pending Unstake Transaction' : 'Pending Stake Transaction';
+            this.pendingTxTextInBar.style.display = 'block';
+
+            if (currentPendingTx.type === 'deposit_stake') {
+                this.stakeButton.disabled = true;
+            }
+        }
+        
+        let nominee = null;
+
+        try {
+            // Fetch Data Concurrently
+            const userAddress = myData?.account?.keys?.address;
+            if (!userAddress) {
+                console.warn("User address not found in myData. Skipping user account fetch.");
+                // Decide how to handle this - maybe show an error or a specific state?
+                // For now, we'll proceed, but nominee/user stake will be unavailable.
+            }
+
+            const [userAccountData, networkAccountData, updatePrices] = await Promise.all([
+                userAddress ? queryNetwork(`/account/${longAddress(userAddress)}`) : Promise.resolve(null), // Fetch User Data if available
+                queryNetwork('/account/0000000000000000000000000000000000000000000000000000000000000000'), // Fetch Network Data
+                updateWalletBalances()
+            ]);
+
+            // Extract Raw Data (API values are now actual BigInt objects or other types)
+            nominee = userAccountData?.account?.operatorAccountInfo?.nominee; // string
+            const userStakedBaseUnits = userAccountData?.account?.operatorAccountInfo?.stake; // BigInt object
+
+            const stakeRequiredUsd = networkAccountData?.account?.current?.stakeRequiredUsd; // BigInt object
+            const stabilityScaleMul = networkAccountData?.account?.current?.stabilityScaleMul; // number
+            const stabilityScaleDiv = networkAccountData?.account?.current?.stabilityScaleDiv; // number
+
+            const marketPrice = await getMarketPrice(); // number or null
+
+            // Calculate Derived Values
+            let stabilityFactor = null;
+            if (stabilityScaleMul != null && stabilityScaleDiv != null && Number(stabilityScaleDiv) !== 0) {
+                stabilityFactor = Number(stabilityScaleMul) / Number(stabilityScaleDiv);
+            }
+
+            let stakeAmountLibBaseUnits = null; // This will be a BigInt object or null
+            if (stakeRequiredUsd != null && typeof stakeRequiredUsd === 'bigint' &&
+                stabilityScaleMul != null && typeof stabilityScaleMul === 'number' &&
+                stabilityScaleDiv != null && typeof stabilityScaleDiv === 'number' && stabilityScaleDiv !== 0) {
+                try {
+                    // No need to parse stakeRequiredUsd from string, it's already a BigInt
+                    const scaleMulBigInt = BigInt(stabilityScaleMul);
+                    const scaleDivBigInt = BigInt(stabilityScaleDiv);
+                    if (scaleMulBigInt !== 0n) {
+                        stakeAmountLibBaseUnits = (stakeRequiredUsd * scaleDivBigInt) / scaleMulBigInt;
+                    } else {
+                        console.warn("Stability scale multiplier is zero, cannot calculate LIB stake amount.");
+                    }
+                } catch (e) {
+                    console.error("Error calculating stakeAmountLibBaseUnits with BigInt:", e, {
+                        stakeRequiredUsdBaseUnits,
+                        stabilityScaleMul,
+                        stabilityScaleDiv
+                    });
+                }
+            }
+
+            let userStakedUsd = null; // number or null
+            // TODO: Calculate User Staked Amount (USD) using market price - Use stability factor if available?
+            // For now, using market price as implemented previously.
+            if (userStakedBaseUnits != null && typeof userStakedBaseUnits === 'bigint' && marketPrice != null) { // Check it's a BigInt
+                try {
+                    // userStakedBaseUnits is already a BigInt object
+                    const userStakedLib = Number(userStakedBaseUnits) / 1e18;
+                    userStakedUsd = userStakedLib * marketPrice;
+                } catch (e) {
+                    console.error("Error calculating userStakedUsd:", e, { userStakedBaseUnits, marketPrice });
+                }
+            }
+
+            let marketStakeUsdBaseUnits = null; // BigInt object or null
+            // Calculate Min Stake at Market (USD) using BigInt and market price
+            if (stakeAmountLibBaseUnits !== null && marketPrice != null) { // stakeAmountLibBaseUnits is BigInt object here
+                try {
+                    const stakeAmountLib = Number(stakeAmountLibBaseUnits) / 1e18;
+                    const marketStakeUsd = stakeAmountLib * marketPrice;
+                    // Approximate back to base units (assuming 18 decimals for USD base units)
+                    marketStakeUsdBaseUnits = BigInt(Math.round(marketStakeUsd * 1e18));
+                } catch (e) {
+                    console.error("Error calculating marketStakeUsdBaseUnits:", e, { stakeAmountLibBaseUnits, marketPrice });
+                }
+            }
+
+
+            // Format & Update UI
+
+            // stakeAmountLibBaseUnits is a BigInt object or null. Pass its string representation to big2str.
+            this.stakeForm.dataset.minStake = stakeAmountLibBaseUnits === null ? '0' : big2str(stakeAmountLibBaseUnits, 18);
+
+            // stakeRequiredUsd is a BigInt object or null/undefined. Pass its string representation.
+            const displayNetworkStakeUsd = stakeRequiredUsd != null ? '$' + big2str(stakeRequiredUsd, 18).slice(0, 6) : 'N/A';
+            // stakeAmountLibBaseUnits is a BigInt object or null. Pass its string representation.
+            const displayNetworkStakeLib = stakeAmountLibBaseUnits !== null ? big2str(stakeAmountLibBaseUnits, 18).slice(0, 7) : 'N/A';
+            const displayStabilityFactor = stabilityFactor ? stabilityFactor.toFixed(4) : 'N/A';
+            const displayMarketPrice = marketPrice ? '$' + marketPrice.toFixed(4) : 'N/A';
+            // marketStakeUsdBaseUnits is a BigInt object or null. Pass its string representation.
+            const displayMarketStakeUsd = marketStakeUsdBaseUnits !== null ? '$' + big2str(marketStakeUsdBaseUnits, 18).slice(0, 6) : 'N/A';
+
+            this.networkStakeUsdValue.textContent = displayNetworkStakeUsd;
+            this.networkStakeLibValue.textContent = displayNetworkStakeLib;
+            this.stabilityFactorValue.textContent = displayStabilityFactor;
+            this.marketPriceValue.textContent = displayMarketPrice;
+            this.marketStakeUsdValue.textContent = displayMarketStakeUsd;
+
+            if (!nominee) {
+                this.nomineeLabelElement.textContent = 'No Nominated Validator';
+                this.nomineeValueElement.textContent = ''; // Ensure value is empty
+                this.userStakeLibElement.style.display = 'none'; // Hide LIB stake item
+                this.userStakeUsdElement.style.display = 'none'; // Hide USD stake item
+            } else {
+                // Case: Nominee Exists
+
+                // userStakedBaseUnits is a BigInt object or null/undefined. Pass its string representation.
+                const displayUserStakedLib = userStakedBaseUnits != null ? big2str(userStakedBaseUnits, 18).slice(0, 6) : 'N/A';
+                const displayUserStakedUsd = userStakedUsd != null ? '$' + userStakedUsd.toFixed(4) : 'N/A';
+
+                this.nomineeLabelElement.textContent = 'Nominated Validator:';
+                this.nomineeValueElement.textContent = nominee;
+                this.userStakeLibElement.textContent = displayUserStakedLib;
+                this.userStakeUsdElement.textContent = displayUserStakedUsd;
+                // Ensure items are visible (using flex as defined in CSS) - redundant due to reset, but safe
+                this.userStakeLibElement.style.display = 'flex';
+                this.userStakeUsdElement.style.display = 'flex';
+            }
+
+            this.detailsElement.style.display = 'block'; // Or 'flex' if it's a flex container
+
+        } catch (error) {
+            console.error("Error fetching validator details:", error);
+            // Display error in UI
+            this.errorElement.textContent = 'Failed to load validator details. Please try again later.';
+            this.errorElement.style.display = 'block';
+            // Ensure details are hidden if an error occurs
+            this.detailsElement.style.display = 'none';
+            // Ensure unstake button remains disabled on error
+            this.unstakeButton.disabled = true;
+        } finally {
+            // Hide loading indicator regardless of success or failure
+            this.loadingElement.style.display = 'none';
+            // Set final state of unstake button based on whether a nominee was found
+            this.unstakeButton.disabled = !nominee;
+            
+            if (currentPendingTx) {
+                this.unstakeButton.disabled = true;
+                this.stakeButton.disabled = true;
+            }
+        }
+    }
+
+    close() {
+        this.modal.classList.remove('active');
+    }
+
+    async handleUnstake() {
+        // Attempt to read nominee from the DOM element populated by openValidatorModal
+        const nominee = this.nomineeValueElement.textContent.trim();
+
+        // Check if we successfully retrieved a nominee address from the DOM
+        if (!nominee || nominee.length < 10) { // Add a basic sanity check for length
+            showToast('Could not find nominated validator.', 4000, 'error');
+            console.warn("ValidatorStakingModal: Nominee not found or invalid in DOM element #validator-nominee.");
+            return;
+        }
+
+        // Check if the validator is active
+        const activityCheck = await this.checkValidatorActivity(nominee);
+        if (activityCheck.isActive) {
+            showToast('Cannot unstake from an active validator.', 5000, 'error');
+            console.warn(`ValidatorStakingModal: Validator ${nominee} is active.`);
+            return;
+        } else if (activityCheck.error) {
+            showToast(`Error checking validator status: ${activityCheck.error}`, 5000, 'error');
+            return;
+        }
+
+        // Confirmation dialog
+        const confirmationMessage = `Are you sure you want to unstake from validator: ${nominee}?`;
+        if (window.confirm(confirmationMessage)) {
+            //console.log(`User confirmed unstake from: ${nominee}`);
+            showToast('Submitting unstake transaction...', 3000, 'loading');
+            // Call the function to handle the actual transaction submission
+            await this.submitUnstakeTransaction(nominee);
+        }
+    }
+
+    async submitUnstakeTransaction(nodeAddress) {
+        // disable the unstake button, back button, and submitStake button
+        this.unstakeButton.disabled = true;
+        this.backButton.disabled = true;
+        this.stakeButton.disabled = true;
+    
+        try {
+            const response = await this.postUnstake(nodeAddress);
+            if (response && response.result && response.result.success) {
+    
+                myData.wallet.history.unshift({
+                    nominee: nodeAddress,
+                    amount: bigxnum2big(wei, '0'),
+                    memo: 'unstake',
+                    sign: 1,
+                    status: 'sent',
+                    timestamp: getCorrectedTimestamp(),
+                    txid: response.txid
+                });
+    
+                this.close();
+                this.open();
+            } else {
+                // not showing toast since shown in injectTx
+                console.error('Unstake failed. API Response:', response);
+            }
+        } catch (error) {
+            console.error('Error submitting unstake transaction:', error);
+            // Provide a user-friendly error message
+            showToast('Unstake transaction failed. Network or server error.', 5000, 'error');
+        } finally {
+            this.unstakeButton.disabled = false;
+            this.backButton.disabled = false;
+            this.stakeButton.disabled = false;
+        }
+    }
+
+    async postUnstake(nodeAddress) {
+        // TODO: need to query network for the correct nominator address
+        const unstakeTx = {
+            type: "withdraw_stake",
+            nominator: longAddress(myAccount?.keys?.address),
+            nominee: nodeAddress,
+            force: false,
+            timestamp: getCorrectedTimestamp(),
+        };
+    
+        const txid = await signObj(unstakeTx, myAccount.keys)
+        const response = await injectTx(unstakeTx, txid);
+        return response;
+     }
+    
+
+    async checkValidatorActivity(validatorAddress) {
+        if (!validatorAddress) {
+            console.error("ValidatorStakingModal: No validator address provided.");
+            return { isActive: false, error: "No address provided" }; // Cannot determine activity without address
+        }
+        try {
+            const data = await queryNetwork(`/account/${validatorAddress}`);
+            if (data && data.account) {
+                const account = data.account;
+                // Active if reward has started (not 0) but hasn't ended (is 0)
+                const isActive = account.rewardStartTime && account.rewardStartTime !== 0 && (!account.rewardEndTime || account.rewardEndTime === 0);
+                return { isActive: isActive, error: null };
+            } else {
+                console.warn(`ValidatorStakingModal: No account data found for validator ${validatorAddress}.`);
+                return { isActive: false, error: "Could not fetch validator data" };
+            }
+        } catch (error) {
+            console.error(`ValidatorStakingModal: Error fetching data for validator ${validatorAddress}:`, error);
+            // Network error or other issue fetching data.
+            return { isActive: false, error: "Network error fetching validator status" };
+        }
+    }
+}
+const validatorStakingModal = new ValidatorStakingModal()
+
 class StakeValidatorModal {
     constructor() {
         this.modal = document.getElementById('stakeModal');
@@ -6808,11 +6858,11 @@ class StakeValidatorModal {
 
                 showToast('Submitted stake transaction...', 3000, 'loading');
 
-                closeValidatorModal();
+                validatorStakingModal.close();
                 this.nodeAddressInput.value = ''; // Clear form
                 this.amountInput.value = '';
                 this.close();
-                openValidatorModal();
+                validatorStakingModal.open();
             }
         } catch (error) {
             console.error('Stake transaction error:', error);
@@ -6944,6 +6994,7 @@ class ChatModal {
         this.retryOfTxId = document.getElementById('retryOfTxId');
         this.messageInput = document.querySelector('.message-input');
         this.newestReceivedMessage = null;
+        this.newestSentMessage = null;
         
         
         // used by updateTollValue and updateTollRequired
@@ -7070,8 +7121,12 @@ class ChatModal {
      */
     close() {
         if (this.newestReceivedMessage) {
+            console.log(`[close] invoking sendReadTransaction`)
             this.sendReadTransaction(this.address);
         }
+
+        this.sendReclaimTollTransaction(this.address);
+
         this.modal.classList.remove('active');
         if (document.getElementById('chatsScreen').classList.contains('active')) {
             updateChatList()
@@ -7090,6 +7145,71 @@ class ChatModal {
     }
 
     /**
+     * Send a reclaim toll if the newest sent message is older than 7 days and the contact has a value not 0 in payOnReplay or payOnRead
+     * @param {string} contactAddress - The address of the contact
+     * @returns {Promise<void>}
+     */
+    async sendReclaimTollTransaction(contactAddress) {
+        console.log(`[sendReclaimTollTransaction] entering function`)
+        const sevenDaysAgo = getCorrectedTimestamp() -  (7 * 24 * 60 * 60 * 1000);
+        console.log(`this.newestSentMessage: ${!!this.newestSentMessage}`)
+        console.log(`this.newestSentMessage?.timestamp: ${this.newestSentMessage?.timestamp}`)
+        console.log(`sevenDaysAgo: ${sevenDaysAgo}`)
+        console.log(`this.newestSentMessage?.timestamp > sevenDaysAgo: ${this.newestSentMessage?.timestamp < sevenDaysAgo}`)
+        if (!this.newestSentMessage || this.newestSentMessage?.timestamp > sevenDaysAgo) {
+            console.log(`[sendReclaimTollTransaction] newestSentMessage is null or timestamp is less than 7 days ago, skipping reclaim toll transaction`)
+            return;
+        }
+        const canReclaimToll = await this.canSenderReclaimToll(contactAddress)
+        if (!canReclaimToll) {
+            console.log(`[sendReclaimTollTransaction] does not have a value not 0 in payOnReplay or payOnRead, skipping reclaim toll transaction`)
+            return;
+        }
+
+        const tx = {
+            type: 'reclaim_toll',
+            from: longAddress(myData.account.keys.address),
+            to: longAddress(contactAddress),
+            chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join``),
+            timestamp: getCorrectedTimestamp(),
+        }
+        const txid = await signObj(tx, myAccount.keys)
+        const response = await injectTx(tx, txid)
+        if (!response || !response.result || !response.result.success) {
+            console.warn('reclaim toll transaction failed to send', response)
+        } else {
+            console.log('reclaim toll transaction sent successfully')
+        }
+    }
+
+    /**
+     * return true if when we query chatID account , then check payOnReplay and payOnRead for index of the receiver has a value not 0
+     * @param {string} contactAddress - The address of the contact
+     * @returns {Promise<boolean>} - True if the contact has a value not 0 in payOnReplay or payOnRead, false otherwise
+     */
+    async canSenderReclaimToll(contactAddress) {
+        const contact = myData.contacts[contactAddress];
+        // keep track receiver index during the sort
+        const sortedAddresses = [longAddress(myData.account.keys.address), longAddress(contactAddress)].sort()
+        const receiverIndex = sortedAddresses.indexOf(longAddress(contactAddress))
+        const chatId = hashBytes(sortedAddresses.join``);
+        const chatIdAccount = await queryNetwork(`/messages/${chatId}/toll`)
+        if (!chatIdAccount || !chatIdAccount.toll) {
+            console.warn('chatIdAccount not found', chatIdAccount)
+            return false
+        }
+        const payOnReply = chatIdAccount.toll.payOnReply[receiverIndex] // bigint
+        const payOnRead = chatIdAccount.toll.payOnRead[receiverIndex] // bigint
+        if (payOnReply !== 0n) {
+            return true
+        }
+        if (payOnRead !== 0n) {
+            return true
+        }
+        return false
+    }
+
+    /**
      * Sends a read transaction to the contact if the contact's timestamp is less than the newest received message's timestamp
      * @param {string} contactAddress - The address of the contact
      * @returns {void}
@@ -7097,9 +7217,18 @@ class ChatModal {
     async sendReadTransaction(contactAddress) {
         const contact = myData.contacts[contactAddress];
         const latestMessage = this.newestReceivedMessage;
+        // if the other party is not required to pay toll, then don't send a read transaction.
+        if (contact.tollRequiredToReceive === 0) {
+            console.log(`[sendReadTransaction] contact does not need to pay toll, skipping read transaction`)
+            return;
+        }
+        console.log(`[sendReadTransaction] contact.timestamp: ${contact.timestamp}, latestMessage.timestamp: ${latestMessage.timestamp}`)
+        console.log(`[sendReadTransaction] contact.timestamp < latestMessage.timestamp: ${contact.timestamp < latestMessage.timestamp}`)
         if (contact.timestamp < latestMessage.timestamp) {
+            console.log(`[sendReadTransaction] injecting read transaction`)
             const readTransaction = await this.createReadTransaction(contactAddress);
             const txid = await signObj(readTransaction, myAccount.keys)
+            showToast(`Sending read transaction`, 3000, 'info');
             const response = await injectTx(readTransaction, txid)
             if (!response || !response.result || !response.result.success) {
                 console.warn('read transaction failed to send', response)
@@ -7121,6 +7250,7 @@ class ChatModal {
             to: longAddress(contactAddress),
             chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join``),
             timestamp: getCorrectedTimestamp(),
+            oldContactTimestamp: myData.contacts[contactAddress].timestamp,
         }
         return readTransaction;
     }
@@ -7132,6 +7262,13 @@ class ChatModal {
      */
     async handleSendMessage() {
         this.sendButton.disabled = true; // Disable the button
+
+        // if user is blocked, don't send message, show toast
+        if (myData.contacts[this.address].tollRequiredToSend == 2) {
+            showToast('You are blocked by this user', 0, 'error');
+            this.sendButton.disabled = false;
+            return;
+        }
 
         try {
             this.messageInput.focus(); // Add focus back to keep keyboard open
@@ -7376,6 +7513,7 @@ class ChatModal {
         const newestReceivedItem = messages.find(item => !item.my);
         console.log('appendChatModal: Identified newestReceivedItem data:', newestReceivedItem);
         this.newestReceivedMessage = newestReceivedItem;
+        this.newestSentMessage = messages.find(item => item.my);
     
         // 2. Clear the entire list
         this.messagesList.innerHTML = '';
@@ -8364,8 +8502,9 @@ async function checkPendingTransactions() {
             //console.log(`DEBUG: txid ${txid} endpointPath: ${endpointPath}`);
             const res = await queryNetwork(endpointPath);
             //console.log(`DEBUG: txid ${txid} res: ${JSON.stringify(res)}`);
-
-            if (submittedts < thirtySecondsAgo && res.transaction === null) {
+            if (submittedts < thirtySecondsAgo && 
+                (res.transaction === null || Object.keys(res.transaction).length === 0)
+            ) {
                 console.error(`DEBUG: txid ${txid} timed out, removing completely`);
                 // remove the pending tx from the pending array
                 myData.pending.splice(i, 1);
@@ -8398,8 +8537,8 @@ async function checkPendingTransactions() {
                     showToast(`${type === 'deposit_stake' ? 'Stake' : 'Unstake'} transaction successful`, 5000, 'success');
                     // refresh only if validator modal is open
                     if (document.getElementById('validatorModal').classList.contains('active')) {
-                        closeValidatorModal();
-                        openValidatorModal();
+                        validatorStakingModal.close();
+                        validatorStakingModal.open();
                     }
                 }
 
@@ -8407,8 +8546,16 @@ async function checkPendingTransactions() {
                     console.log(`Toll transaction successfully processed!`);
                 }
 
-                if (type === 'update_chat_toll') {
-                    console.log(`DEBUG: update_chat_toll transaction successfully processed!`);
+                if (type === 'update_toll_required') {
+                    console.log(`DEBUG: update_toll_required transaction successfully processed!`);
+                }
+
+                if (type === 'read') {
+                    console.log(`DEBUG: read transaction successfully processed!`);
+                }
+
+                if (type === 'reclaim_toll') {
+                    console.log(`DEBUG: reclaim_toll transaction successfully processed!`);
                 }
             }
             else if (res?.transaction?.success === false) {
@@ -8431,10 +8578,17 @@ async function checkPendingTransactions() {
                         // revert the local myData.settings.toll to the old value
                         tollModal.editMyDataToll(tollModal.oldToll);
                     } 
-                    else if (type === 'update_chat_toll') {
+                    else if (type === 'update_toll_required') {
                         showToast(`Update contact status failed: ${failureReason}. Reverting contact to old status.`, 0, "error");
                         // revert the local myData.contacts[toAddress].friend to the old value
                         myData.contacts[pendingTxInfo.to].friend = pendingTxInfo.friend;
+                    } else if (type === 'read') {
+                        showToast(`Read transaction failed: ${failureReason}`, 0, "error");
+                        // revert the local myData.contacts[toAddress].timestamp to the old value
+                        myData.contacts[pendingTxInfo.to].timestamp = pendingTxInfo.oldContactTimestamp;
+                    }
+                    else if (type === 'reclaim_toll') {
+                        showToast(`Reclaim toll failed: ${failureReason}`, 0, "error");
                     }
                     else { // for messages, transfer etc.
                         showToast(failureReason, 0, "error");
@@ -8454,8 +8608,8 @@ async function checkPendingTransactions() {
 
                     if (document.getElementById('validatorModal').classList.contains('active')) {
                         // refresh the validator modal
-                        closeValidatorModal();
-                        openValidatorModal();
+                        validatorStakingModal.close();
+                        validatorStakingModal.open();
                     }
                 }
             } else {
