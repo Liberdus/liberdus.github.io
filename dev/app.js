@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'v'
+const version = 'x'
 let myVersion = '0'
 async function checkVersion(){
     myVersion = localStorage.getItem('version') || '0';
@@ -7120,8 +7120,8 @@ class ChatModal {
      * @returns {void}
      */
     close() {
-        if (this.newestReceivedMessage) {
-            console.log(`[close] invoking sendReadTransaction`)
+        // if newestRecevied message does not have an amount property, then send a read transaction
+        if (this.newestReceivedMessage && !this?.newestReceivedMessage?.amount) {
             this.sendReadTransaction(this.address);
         }
 
