@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -950,15 +950,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   // New Chat Modal
   newChatModal.load();
 
-  // Send Modal
-  sendModal.load();
+  // Send Asset Modal
+  sendAssetFormModal.load();
 
-  // Add event listeners for send confirmation modal
+  // Add event listeners for send asset confirmation modal
   document
-    .getElementById('closeSendConfirmationModal')
-    .addEventListener('click', closeSendConfirmationModal);
+    .getElementById('closeSendAssetConfirmModal')
+    .addEventListener('click', closeSendAssetConfirmModal);
   document.getElementById('confirmSendButton').addEventListener('click', handleSendAsset);
-  document.getElementById('cancelSendButton').addEventListener('click', closeSendConfirmationModal);
+  document.getElementById('cancelSendButton').addEventListener('click', closeSendAssetConfirmModal);
 
   document.getElementById('openReceiveModal').addEventListener('click', openReceiveModal);
   document.getElementById('closeReceiveModal').addEventListener('click', closeReceiveModal);
@@ -1119,15 +1119,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('contactInfoSendButton').addEventListener('click', () => {
     const contactUsername = document.getElementById('contactInfoUsername');
     if (contactUsername) {
-      sendModal.username = contactUsername.textContent;
+      sendAssetFormModal.username = contactUsername.textContent;
     }
-    sendModal.open();
+    sendAssetFormModal.open();
   });
 
   document.getElementById('chatSendMoneyButton').addEventListener('click', (event) => {
     const button = event.currentTarget;
-    sendModal.username = button.dataset.username;
-    sendModal.open();
+    sendAssetFormModal.username = button.dataset.username;
+    sendAssetFormModal.open();
   });
 
   // Add listener for the password visibility toggle
@@ -1153,6 +1153,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // create account button listener to clear message input on create account
   document.getElementById('newUsername').addEventListener('input', handleCreateAccountInput);
+  document.getElementById('newUsername').addEventListener('paste', handlePaste);
+  document.getElementById('newUsername').addEventListener('input', filterUsernameInput);
 
   // Event Listerns for FailedPaymentModal
   const failedPaymentModal = document.getElementById('failedPaymentModal');
@@ -1850,7 +1852,14 @@ function toggleMenu() {
 }
 
 // create new contact
-function createNewContact(addr, username) {
+/**
+ * createNewContact
+ * @param {string} addr - the address of the contact
+ * @param {string} username - the username of the contact
+ * @param {number = 1} friendStatus - the friend status of the contact, default is 1
+ * @returns {void}
+ */
+function createNewContact(addr, username, friendStatus = 1) {
   const address = normalizeAddress(addr);
   if (myData.contacts[address]) {
     return;
@@ -1866,7 +1875,7 @@ function createNewContact(addr, username) {
   c.toll = 0n;
   c.tollRequiredToReceive = 1;
   c.tollRequiredToSend = 1;
-  c.friend = 1;
+  c.friend = friendStatus;
 }
 
 /**
@@ -2415,7 +2424,7 @@ async function handleSendAsset(event) {
   }
 
   if (!myData.contacts[toAddress]) {
-    createNewContact(toAddress, username);
+    createNewContact(toAddress, username, 2);
   }
 
   // Get recipient's public key from contacts
@@ -2520,11 +2529,12 @@ async function handleSendAsset(event) {
         } */
 
     // Create contact if it doesn't exit
-    if (!myData.contacts[toAddress].messages) {
-      createNewContact(toAddress);
+    /* if (!myData.contacts[toAddress].messages) {
+      const username = document.getElementById('sendToAddress').value;
+      createNewContact(toAddress, username, 2);
       // TODO can pass the username to createNewConact and get rid of the following line
-      myData.contacts[toAddress].username = normalizeUsername(recipientInput);
-    }
+      // myData.contacts[toAddress].username = normalizeUsername(recipientInput);
+    } */
 
     // Add transaction to history
     const currentTime = getCorrectedTimestamp();
@@ -2590,8 +2600,8 @@ async function handleSendAsset(event) {
       chatModal.appendChatModal(); // Re-render the chat modal and highlight the new item
     }
 
-    sendModal.close();
-    closeSendConfirmationModal();
+    sendAssetFormModal.close();
+    closeSendAssetConfirmModal();
     document.getElementById('sendToAddress').value = '';
     document.getElementById('sendAmount').value = '';
     document.getElementById('sendMemo').value = '';
@@ -3102,10 +3112,10 @@ handleFailedPaymentClick.memo = '';
 
 /**
  * Invoked when the user clicks the retry button in the failed payment modal
- * It will fill the sendModal with the payment content and txid of the failed payment in a hidden input field in the sendModal
+ * It will fill the sendAssetFormModal with the payment content and txid of the failed payment in a hidden input field in the sendAssetFormModal
  */
 function handleFailedPaymentRetry() {
-  const retryOfPaymentTxId = sendModal.retryTxIdInput;
+  const retryOfPaymentTxId = sendAssetFormModal.retryTxIdInput;
 
   // close the failed payment modal
   const failedPaymentModal = document.getElementById('failedPaymentModal');
@@ -3113,23 +3123,23 @@ function handleFailedPaymentRetry() {
     failedPaymentModal.classList.remove('active');
   }
 
-  if (sendModal.modal && retryOfPaymentTxId) {
-    sendModal.open();
+  if (sendAssetFormModal.modal && retryOfPaymentTxId) {
+    sendAssetFormModal.open();
 
     // 1. fill in hidden retryOfPaymentTxId input
     retryOfPaymentTxId.value = handleFailedPaymentClick.txid;
 
     // 2. fill in the memo input
-    sendModal.querySelector('#sendMemo').value = handleFailedPaymentClick.memo;
+    sendAssetFormModal.querySelector('#sendMemo').value = handleFailedPaymentClick.memo;
 
     // 3. fill in the to address input
     // find username in myData.contacts[handleFailedPaymentClick.address].senderInfo.username
     // enter as an input to invoke the oninput event
-    sendModal.usernameInput.value =
+    sendAssetFormModal.usernameInput.value =
       myData.contacts[handleFailedPaymentClick.address]?.senderInfo?.username ||
       handleFailedPaymentClick.address ||
       '';
-    sendModal.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    sendAssetFormModal.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
 
     // 4. fill in the amount input
     // get the amount from myData.wallet.history since we need to the bigint value
@@ -3138,7 +3148,7 @@ function handleFailedPaymentRetry() {
     )?.amount;
     // convert bigint to string
     const amountStr = big2str(amount, 18);
-    sendModal.amountInput.value = amountStr;
+    sendAssetFormModal.amountInput.value = amountStr;
   }
 }
 
@@ -4553,11 +4563,12 @@ function showToast(message, duration = 2000, type = 'default') {
       closeBtn.className = 'toast-close-btn';
       closeBtn.setAttribute('aria-label', 'Close');
       closeBtn.innerHTML = '&times;';
-      closeBtn.onclick = (e) => {
-        e.stopPropagation();
+      toast.appendChild(closeBtn);
+
+      // Make the whole toast clickable
+      toast.onclick = () => {
         hideToast(toastId);
       };
-      toast.appendChild(closeBtn);
     } else if (duration > 0) {
       setTimeout(() => {
         hideToast(toastId);
@@ -4700,7 +4711,7 @@ function markConnectivityDependentElements() {
     '#chatSendMoneyButton',
 
     // Wallet related
-    '#openSendModal',
+    '#openSendAssetFormModal',
     '#refreshBalance',
     '#sendForm button[type="submit"]',
 
@@ -5615,9 +5626,9 @@ class WSManager {
 
 let wsManager = new WSManager(); // this is set to new WSManager() for convience
 
-function closeSendConfirmationModal() {
-  document.getElementById('sendConfirmationModal').classList.remove('active');
-  document.getElementById('sendModal').classList.add('active');
+function closeSendAssetConfirmModal() {
+  document.getElementById('sendAssetConfirmModal').classList.remove('active');
+  document.getElementById('sendAssetFormModal').classList.add('active');
 }
 
 /**
@@ -7293,10 +7304,18 @@ class ChatModal {
     this.closeButton.addEventListener('click', this.close.bind(this));
     this.sendButton.addEventListener('keydown', ignoreTabKey);
 
+    // Add debounced draft saving
+    this.debouncedSaveDraft = debounce((text) => {
+      this.saveDraft(text);
+    }, 500);
+
     // Add input event listener for message textarea auto-resize
-    this.messageInput.addEventListener('input', function () {
-      this.style.height = '48px';
-      this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+    this.messageInput.addEventListener('input', (e) => {
+      this.messageInput.style.height = '48px';
+      this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
+
+      // Save draft (text is already limited to 2000 chars by maxlength attribute)
+      this.debouncedSaveDraft(e.target.value);
     });
 
     // Add focus event listener for message input to handle scrolling
@@ -7382,6 +7401,9 @@ class ChatModal {
         contactInfoModal.open(createDisplayInfo(contact));
       }
     };
+
+    // Load any draft message
+    this.loadDraft(address);
 
     // Show modal
     this.modal.classList.add('active');
@@ -7750,9 +7772,10 @@ class ChatModal {
 
       insertSorted(chatsData.chats, chatUpdate, 'timestamp');
 
-      // Clear input and reset height
+      // Clear input and reset height, and delete any saved draft
       this.messageInput.value = '';
       this.messageInput.style.height = '48px'; // original height
+      contact.draft = '';
 
       // Update the chat modal UI immediately
       this.appendChatModal(); // This should now display the 'sending' message
@@ -7991,7 +8014,7 @@ class ChatModal {
         failedMessageModal.handleFailedPaymentClick(messageEl.dataset.txid, messageEl);
       }
 
-      // TODO: if message is a payment open sendModal and fill with information in the payment message?
+      // TODO: if message is a payment open sendAssetFormModal and fill with information in the payment message?
 
       return;
     }
@@ -8080,6 +8103,35 @@ class ChatModal {
       updateChatList();
     }
     // No other active view to refresh in this context
+  }
+
+  /**
+   * Saves a draft message for the current contact
+   * @param {string} text - The draft message text to save
+   */
+  saveDraft(text) {
+    if (this.address && myData.contacts[this.address]) {
+      // Sanitize the text before saving
+      const sanitizedText = escapeHtml(text);
+      myData.contacts[this.address].draft = sanitizedText;
+    }
+  }
+
+  /**
+   * Loads a draft message for the current contact if one exists
+   */
+  loadDraft(address) {
+    // Always clear the input first
+    this.messageInput.value = '';
+    this.messageInput.style.height = '48px';
+
+    // Load draft if exists
+    const contact = myData.contacts[address];
+    if (contact?.draft) {
+      this.messageInput.value = contact.draft;
+      // Trigger resize
+      this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
+    }
   }
 }
 
@@ -8251,6 +8303,8 @@ class NewChatModal {
       'input',
       debounce(this.handleUsernameInput.bind(this), 300)
     );
+    this.recipientInput.addEventListener('paste', handlePaste);
+    this.recipientInput.addEventListener('input', filterUsernameInput);
   }
 
   /**
@@ -8342,7 +8396,7 @@ class NewChatModal {
 
     // Check if contact exists
     if (!chatsData.contacts[recipientAddress]) {
-      createNewContact(recipientAddress);
+      createNewContact(recipientAddress, username, 2);
     }
     chatsData.contacts[recipientAddress].username = username;
 
@@ -8420,12 +8474,12 @@ class NewChatModal {
 
 const newChatModal = new NewChatModal();
 
-// Send Modal
-class SendModal {
+// Send Asset Form Modal
+class SendAssetFormModal {
   constructor() {
-    this.modal = document.getElementById('sendModal');
-    this.openSendModalButton = document.getElementById('openSendModal');
-    this.closeSendModalButton = document.getElementById('closeSendModal');
+    this.modal = document.getElementById('sendAssetFormModal');
+    this.openSendAssetFormModalButton = document.getElementById('openSendAssetFormModal');
+    this.closeSendAssetFormModalButton = document.getElementById('closeSendAssetFormModal');
     this.sendForm = document.getElementById('sendForm');
     this.username = null;
     this.usernameInput = document.getElementById('sendToAddress');
@@ -8435,20 +8489,20 @@ class SendModal {
     this.usernameAvailable = document.getElementById('sendToAddressError');
     this.submitButton = document.querySelector('#sendForm button[type="submit"]');
     this.assetSelectDropdown = document.getElementById('sendAsset');
-    this.sendModalCheckTimeout = null;
+    this.sendAssetFormModalCheckTimeout = null;
     this.balanceSymbol = document.getElementById('balanceSymbol');
     this.availableBalance = document.getElementById('availableBalance');
     this.toggleBalanceButton = document.getElementById('toggleBalance');
   }
 
   /**
-   * Loads the send modal event listeners
+   * Loads the send asset form modal event listeners
    * @returns {void}
    */
   load() {
     // TODO add comment about which send form this is for chat or assets
-    this.openSendModalButton.addEventListener('click', this.open.bind(this));
-    this.closeSendModalButton.addEventListener('click', this.close.bind(this));
+    this.openSendAssetFormModalButton.addEventListener('click', this.open.bind(this));
+    this.closeSendAssetFormModalButton.addEventListener('click', this.close.bind(this));
     this.sendForm.addEventListener('submit', this.handleSendFormSubmit.bind(this));
     // TODO: need to add check that it's not a back/delete key
     this.usernameInput.addEventListener('input', async (e) => {
@@ -8474,10 +8528,12 @@ class SendModal {
     });
     // event listener for toggle LIB/USD button
     this.toggleBalanceButton.addEventListener('click', this.handleToggleBalance.bind(this));
+    this.usernameInput.addEventListener('paste', handlePaste);
+    this.usernameInput.addEventListener('input', filterUsernameInput);
   }
 
   /**
-   * Opens the send modal
+   * Opens the send asset modal
    * @returns {void}
    */
   async open() {
@@ -8514,7 +8570,7 @@ class SendModal {
   }
 
   /**
-   * Closes the send modal
+   * Closes the send asset modal
    * @returns {void}
    */
   async close() {
@@ -8536,8 +8592,8 @@ class SendModal {
     const usernameAvailable = this.usernameAvailable;
 
     // Clear previous timeout
-    if (this.sendModalCheckTimeout) {
-      clearTimeout(this.sendModalCheckTimeout);
+    if (this.sendAssetFormModalCheckTimeout) {
+      clearTimeout(this.sendAssetFormModalCheckTimeout);
     }
 
     // Check if username is too short
@@ -8550,7 +8606,7 @@ class SendModal {
     }
 
     // Check network availability
-    this.sendModalCheckTimeout = setTimeout(async () => {
+    this.sendAssetFormModalCheckTimeout = setTimeout(async () => {
       const taken = await checkUsernameAvailability(username, myAccount.keys.address);
       if (taken == 'taken') {
         usernameAvailable.textContent = 'found';
@@ -8613,12 +8669,12 @@ class SendModal {
       memoGroup.style.display = 'none';
     }
 
-    // Hide send modal and show confirmation modal
+    // Hide send asset modal and show confirmation modal
     this.modal.classList.remove('active');
 
     confirmButton.disabled = false;
     cancelButton.disabled = false;
-    document.getElementById('sendConfirmationModal').classList.add('active');
+    document.getElementById('sendAssetConfirmModal').classList.add('active');
   }
 
   /**
@@ -8636,7 +8692,7 @@ class SendModal {
   }
 
   /**
-   * Updates the available balance in the send modal based on the asset
+   * Updates the available balance in the send asset modal based on the asset
    * @returns {void}
    */
   async updateAvailableBalance() {
@@ -8658,7 +8714,7 @@ class SendModal {
   }
 
   /**
-   * Updates the balance display in the send modal based on the asset
+   * Updates the balance display in the send asset modal based on the asset
    * @param {object} asset - The asset to update the balance display for
    * @returns {void}
    */
@@ -8809,7 +8865,7 @@ class SendModal {
   }
 }
 
-const sendModal = new SendModal();
+const sendAssetFormModal = new SendAssetFormModal();
 
 /**
  * Remove failed transaction from the contacts messages, pending, and wallet history
@@ -9130,3 +9186,28 @@ async function getNetworkParams() {
   }
 }
 getNetworkParams.timestamp = 0;
+
+function filterUsernameInput(e) {
+  const input = e.target;
+  const filteredValue = input.value.replace(/[^a-zA-Z0-9]/g, '');
+  if (input.value !== filteredValue) {
+    input.value = filteredValue;
+  }
+}
+
+function handlePaste(e) {
+  e.preventDefault(); // Prevent the default paste
+  const pastedText = (e.clipboardData || window.clipboardData).getData('text');
+  const filteredText = pastedText.replace(/[^a-zA-Z0-9]/g, '');
+  const input = e.target;
+
+  // Get the current cursor position
+  const start = input.selectionStart;
+  const end = input.selectionEnd;
+
+  // Insert the filtered text at cursor position
+  input.value = input.value.substring(0, start) + filteredText + input.value.substring(end);
+
+  // Set cursor position after the pasted text
+  input.setSelectionRange(start + filteredText.length, start + filteredText.length);
+}
