@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.06.05.17.04" />
+    <link rel="stylesheet" href="./styles.css?v=2025.06.09.12.48" />
     <link rel="manifest" href="./manifest.json" />
   </head>
   <body>
-    <script src="./app.js?v=2025.06.05.17.04" type="module"></script>
+    <script src="./app.js?v=2025.06.09.12.48" type="module"></script>
     <div class="container">
       <header class="header" id="header">
         <div id="logo">
@@ -1363,7 +1363,8 @@
               <div class="form-text help-text">
                 Sets a new toll amount a sender must pay to send a message or payment to you. All
                 tolls are received in LIB. If you enter a USD amount, you will receive the
-                equivalent LIB value at market price.
+                equivalent LIB value at market price. Aside from 0 (no toll), there is a minimum
+                toll as shown below.
               </div>
               <div class="amount-container">
                 <input
@@ -1379,6 +1380,7 @@
                   <span id="tollCurrencySymbol">LIB</span>
                 </button>
               </div>
+              <div id="minTollDisplay" class="form-text help-text">Minimum toll: Loading...</div>
             </div>
             <button type="submit" id="saveNewTollButton" class="update-button">Save Changes</button>
           </form>

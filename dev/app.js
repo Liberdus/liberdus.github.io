@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'z'
+const version = 'b'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -329,7 +329,6 @@ async function handleUsernameOnSignInModal() {
   // Enable submit button when an account is selected
   const username = usernameSelect.value;
   const notFoundMessage = document.getElementById('usernameNotFound');
-  const options = usernameSelect.options;
   if (!username) {
     submitButton.disabled = true;
     notFoundMessage.style.display = 'none';
@@ -1005,7 +1004,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Add new search functionality
-  const searchInput = document.getElementById('searchInput');
   const messageSearch = document.getElementById('messageSearch');
   const searchModal = document.getElementById('searchModal');
 
@@ -1175,7 +1173,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupAddToHomeScreen();
 });
 
-function handleUnload(e) {
+function handleUnload() {
   console.log('in handleUnload');
   if (handleSignOut.exit) {
     return;
@@ -1211,7 +1209,7 @@ function handleBeforeUnload(e) {
 }
 
 // This is for installed apps where we can't stop the back button; just save the state
-async function handleVisibilityChange(e) {
+async function handleVisibilityChange() {
   console.log('in handleVisibilityChange', document.visibilityState);
   if (!myAccount) {
     return;
@@ -1424,7 +1422,7 @@ function setupAddToHomeScreen() {
     updateButtonVisibility();
 
     // Listen for display mode changes
-    window.matchMedia('(display-mode: standalone)').addEventListener('change', (evt) => {
+    window.matchMedia('(display-mode: standalone)').addEventListener('change', () => {
       updateButtonVisibility();
     });
   }
@@ -1498,8 +1496,8 @@ async function updateChatList() {
       // Check if the latest activity is a payment/transfer message
       if (typeof latestActivity.amount === 'bigint') {
         // Latest item is a payment/transfer
-        const amountStr = big2str(latestActivity.amount, 18);
-        const amountDisplay = `${amountStr.slice(0, 6)} ${latestActivity.symbol || 'LIB'}`;
+        const amountStr = parseFloat(big2str(latestActivity.amount, 18)).toFixed(6);
+        const amountDisplay = `${amountStr} ${latestActivity.symbol || 'LIB'}`;
         const directionText = latestActivity.my ? '-' : '+';
         // Create payment preview text
         previewHTML = `<span class="payment-preview">${directionText} ${amountDisplay}</span>`;
@@ -1897,13 +1895,13 @@ function updateTollAmountUI(address) {
   let mainString, otherString;
   if (mainIsUSD) {
     toll = bigxnum2big(toll, (1.0 / factor).toString());
-    mainString = mainValue.toFixed(4) + ' USD';
+    mainString = mainValue.toFixed(6) + ' USD';
     const libValue = mainValue / factor;
     otherString = libValue.toFixed(6) + ' LIB';
   } else {
     mainString = mainValue.toFixed(6) + ' LIB';
     const usdValue = mainValue * factor;
-    otherString = usdValue.toFixed(4) + ' USD';
+    otherString = usdValue.toFixed(6) + ' USD';
   }
   let display;
   if (contact.tollRequiredToSend == 1) {
@@ -2926,9 +2924,6 @@ async function openEditContactModal() {
     return;
   }
 
-  // Create display info object using the same format as contactInfoModal
-  const displayInfo = createDisplayInfo(myData.contacts[currentContactAddress]);
-
   // Create a handler function to focus the input after the modal transition
   const editContactFocusHandler = () => {
     nameInput.focus();
@@ -3231,7 +3226,7 @@ async function updateWalletView() {
                     <div class="asset-name">${asset.name}</div>
                     <div class="asset-symbol">$${asset.price} / ${asset.symbol}</div>
                 </div>
-                <div class="asset-balance">${(Number(asset.balance) / Number(wei)).toPrecision(4)}<br><span class="asset-symbol">$${asset.networth}</span></div>
+                <div class="asset-balance">${(Number(asset.balance) / Number(wei)).toFixed(6)}<br><span class="asset-symbol">$${asset.networth.toFixed(6)}</span></div>
             </div>
         `;
     })
@@ -3346,7 +3341,7 @@ async function updateTransactionHistory() {
                     ${tx.sign === -1 ? '↑ Sent' : '↓ Received'}
                 </div>
                 <div class="transaction-amount">
-                    ${tx.sign === -1 ? '-' : '+'} ${(Number(tx.amount) / Number(wei)).toPrecision(4)} ${asset.symbol}
+                    ${tx.sign === -1 ? '-' : '+'} ${(Number(tx.amount) / Number(wei)).toFixed(6)} ${asset.symbol}
                 </div>
             </div>
             <div class="transaction-details">
@@ -3870,12 +3865,8 @@ async function processChats(chats, keys) {
           myData.chats.splice(insertIndex, 0, chatUpdate);
         }
 
-        // Show toast notification for new messages
         // Only suppress notification if we're ACTIVELY viewing this chat and if not a transfer
         if (!inActiveChatWithSender && !hasNewTransfer) {
-          // Get name of sender
-          const senderName = contact.name || contact.username || `${from.slice(0, 8)}...`;
-
           // Add notification indicator to Chats tab if we're not on it
           const chatsButton = document.getElementById('switchToChats');
           if (!document.getElementById('chatsScreen').classList.contains('active')) {
@@ -3972,7 +3963,7 @@ async function postAssetTransfer(to, amount, memo, keys) {
 async function postRegisterAlias(alias, keys) {
   const aliasBytes = utf82bin(alias);
   const aliasHash = hashBytes(aliasBytes);
-  const { publicKey, secretKey } = generatePQKeys(keys.pqSeed);
+  const { publicKey } = generatePQKeys(keys.pqSeed);
   const pqPublicKey = bin2base64(publicKey);
   const tx = {
     type: 'register',
@@ -4382,7 +4373,7 @@ function handleSearchResultClick(result) {
   }
 }
 
-function handleSearchInputClick(e) {
+function handleSearchInputClick() {
   const messageSearch = document.getElementById('messageSearch');
   const searchModal = document.getElementById('searchModal');
 
@@ -4594,7 +4585,7 @@ function hideToast(toastId) {
 }
 
 // Show update notification to user
-function showUpdateNotification(registration) {
+function showUpdateNotification() {
   // Create update notification
   const updateNotification = document.createElement('div');
   updateNotification.className = 'update-notification';
@@ -4634,7 +4625,7 @@ async function updateServiceWorker() {
 }
 
 // Handle online/offline events
-async function handleConnectivityChange(event) {
+async function handleConnectivityChange() {
   const wasOffline = !isOnline;
   isOnline = navigator.onLine;
 
@@ -4923,7 +4914,6 @@ function getGatewayForRequest() {
 
 async function startCamera() {
   const video = document.getElementById('video');
-  const canvasElement = document.getElementById('canvas');
   try {
     // First check if camera API is supported
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -5052,7 +5042,7 @@ function readQRCode() {
 
 // Handle successful scan
 function handleSuccessfulScan(data) {
-  const scanHighlight = document.getElementById('scan-highlight');
+  // const scanHighlight = document.getElementById('scan-highlight');
   // Stop scanning
   if (startCamera.scanInterval) {
     clearInterval(startCamera.scanInterval);
@@ -6296,6 +6286,8 @@ class TollModal {
     this.modal = document.getElementById('tollModal');
     this.currentCurrency = 'LIB'; // Initialize currency state
     this.oldToll = null;
+    this.minToll = null; // Will be set from network account
+    this.minTollDisplay = document.getElementById('minTollDisplay');
   }
 
   load() {
@@ -6315,11 +6307,18 @@ class TollModal {
     const toll = myData.settings.toll || 0n;
     const tollUnit = myData.settings.tollUnit || 'LIB';
 
+    // Fetch network parameters to get minToll
+    this.minToll = parameters?.current?.minToll || 1n * wei; // Default to 1 LIB if not set
+
     this.updateTollDisplay(toll, tollUnit);
 
     this.currentCurrency = 'LIB'; // Reset currency state
     document.getElementById('tollCurrencySymbol').textContent = this.currentCurrency;
     document.getElementById('newTollAmountInput').value = ''; // Clear input field
+
+    // Update min toll display under input
+    const minTollValue = parseFloat(big2str(this.minToll, 18)).toFixed(6); // Show 6 decimal places
+    this.minTollDisplay.textContent = `Minimum toll: ${minTollValue} LIB`;
   }
 
   close() {
@@ -6350,10 +6349,13 @@ class TollModal {
       newTollAmountInput.value = convertedValue.toString();
     }
 
-    // convert `currentTollValue`
-    //const currentTollValue = big2str(myData.settings.toll, 18);
-    //const convertedValue = this.currentCurrency === 'USD' ? currentTollValue * marketPrice : currentTollValue;
-    //document.getElementById('currentTollValue').textContent = this.currentCurrency === 'USD' ? `$${convertedValue}` : `${convertedValue} LIB`;
+    // Update min toll display with converted value
+    if (this.currentCurrency === 'USD') {
+      const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
+      this.minTollDisplay.textContent = `Minimum toll: ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD`; // Show 4 decimal places for USD
+    } else {
+      this.minTollDisplay.textContent = `Minimum toll: ${parseFloat(big2str(this.minToll, 18)).toFixed(6)} LIB`; // Show 6 decimal places for LIB
+    }
   }
 
   /**
@@ -6368,10 +6370,37 @@ class TollModal {
 
     if (isNaN(newTollValue) || newTollValue < 0) {
       // console.error("Invalid toll amount");
-      showToast('Invalid toll amount entered.', 'error');
+      showToast('Invalid toll amount entered.', 0, 'error');
       return;
     }
+
     const newToll = bigxnum2big(wei, newTollAmountInput.value);
+
+    // Check if the toll is non-zero but less than minimum
+    if (newToll > 0n) {
+      if (this.currentCurrency === 'LIB' && newToll < this.minToll) {
+        showToast(
+          `Toll must be at least ${parseFloat(big2str(this.minToll, 18)).toFixed(6)} LIB`,
+          0,
+          'error'
+        );
+        return;
+      }
+      if (this.currentCurrency === 'USD') {
+        const scalabilityFactor =
+          parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+        const newTollLIB = bigxnum2big(newToll, (1 / scalabilityFactor).toString());
+        if (newTollLIB < this.minToll) {
+          const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
+          showToast(
+            `Toll must be at least ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD`,
+            0,
+            'error'
+          );
+          return;
+        }
+      }
+    }
 
     // Post the new toll to the network
     const response = await this.postToll(newToll, this.currentCurrency);
@@ -6749,7 +6778,7 @@ class ValidatorStakingModal {
         // For now, we'll proceed, but nominee/user stake will be unavailable.
       }
 
-      const [userAccountData, networkAccountData, updatePrices] = await Promise.all([
+      const [userAccountData, networkAccountData] = await Promise.all([
         userAddress ? queryNetwork(`/account/${longAddress(userAddress)}`) : Promise.resolve(null), // Fetch User Data if available
         queryNetwork('/account/0000000000000000000000000000000000000000000000000000000000000000'), // Fetch Network Data
         updateWalletBalances(),
@@ -6796,7 +6825,6 @@ class ValidatorStakingModal {
           }
         } catch (e) {
           console.error('Error calculating stakeAmountLibBaseUnits with BigInt:', e, {
-            stakeRequiredUsdBaseUnits,
             stabilityScaleMul,
             stabilityScaleDiv,
           });
@@ -6853,8 +6881,8 @@ class ValidatorStakingModal {
       // stakeAmountLibBaseUnits is a BigInt object or null. Pass its string representation.
       const displayNetworkStakeLib =
         stakeAmountLibBaseUnits !== null ? big2str(stakeAmountLibBaseUnits, 18).slice(0, 7) : 'N/A';
-      const displayStabilityFactor = stabilityFactor ? stabilityFactor.toFixed(4) : 'N/A';
-      const displayMarketPrice = marketPrice ? '$' + marketPrice.toFixed(4) : 'N/A';
+      const displayStabilityFactor = stabilityFactor ? stabilityFactor.toFixed(6) : 'N/A';
+      const displayMarketPrice = marketPrice ? '$' + marketPrice.toFixed(6) : 'N/A';
       // marketStakeUsdBaseUnits is a BigInt object or null. Pass its string representation.
       const displayMarketStakeUsd =
         marketStakeUsdBaseUnits !== null
@@ -6878,7 +6906,7 @@ class ValidatorStakingModal {
         // userStakedBaseUnits is a BigInt object or null/undefined. Pass its string representation.
         const displayUserStakedLib =
           userStakedBaseUnits != null ? big2str(userStakedBaseUnits, 18).slice(0, 6) : 'N/A';
-        const displayUserStakedUsd = userStakedUsd != null ? '$' + userStakedUsd.toFixed(4) : 'N/A';
+        const displayUserStakedUsd = userStakedUsd != null ? '$' + userStakedUsd.toFixed(6) : 'N/A';
 
         this.nomineeLabelElement.textContent = 'Nominated Validator:';
         this.nomineeValueElement.textContent = nominee;
@@ -7549,7 +7577,6 @@ class ChatModal {
    * @returns {Promise<boolean>} - True if the contact has a value not 0 in payOnReplay or payOnRead, false otherwise
    */
   async canSenderReclaimToll(contactAddress) {
-    const contact = myData.contacts[contactAddress];
     // keep track receiver index during the sort
     const sortedAddresses = [
       longAddress(myData.account.keys.address),
@@ -7907,7 +7934,8 @@ class ChatModal {
         // Assuming LIB (18 decimals) for now. TODO: Handle different asset decimals if needed.
         // Format amount correctly using big2str
         const amountStr = big2str(itemAmount, 18);
-        const amountDisplay = `${amountStr.slice(0, 6)} ${item.symbol || 'LIB'}`; // Use item.symbol or fallback
+        const amountNum = parseFloat(amountStr);
+        const amountDisplay = `${amountNum.toFixed(6)} ${item.symbol || 'LIB'}`;
 
         // Check item.my for sent/received
 
@@ -8698,7 +8726,6 @@ class SendAssetFormModal {
   async updateAvailableBalance() {
     const walletData = myData.wallet;
     const assetIndex = this.assetSelectDropdown.value;
-    const balanceWarning = this.balanceWarning;
 
     // Check if we have any assets
     if (!walletData.assets || walletData.assets.length === 0) {
@@ -8764,14 +8791,11 @@ class SendAssetFormModal {
    */
   updateSendAddresses() {
     const walletData = myData.wallet;
-    const assetIndex = document.getElementById('sendAsset').value;
-    // TODO: why is this commented out? are we not using it in the if block?
-    //    const addressSelect = document.getElementById('sendFromAddress');
+    // const assetIndex = document.getElementById('sendAsset').value;
 
     // Check if we have any assets
     if (!walletData.assets || walletData.assets.length === 0) {
-      addressSelect.innerHTML = '<option value="">No addresses available</option>';
-      this.updateAvailableBalance();
+      showToast('No addresses available', 0, 'error');
       return;
     }
 
@@ -9009,6 +9033,12 @@ async function checkPendingTransactions() {
             );
             // revert the local myData.settings.toll to the old value
             tollModal.editMyDataToll(tollModal.oldToll);
+            // check if the toll modal is open
+            if (tollModal.modal.classList.contains('active')) {
+              // change the tollAmountLIB and tollAmountUSD to the old value
+              tollModal.tollAmountLIB = tollModal.oldToll;
+              tollModal.tollAmountUSD = tollModal.oldToll;
+            }
           } else if (type === 'update_toll_required') {
             showToast(
               `Update contact status failed: ${failureReason}. Reverting contact to old status.`,
@@ -9115,6 +9145,7 @@ const pendingPromiseService = (() => {
 function handleTogglePrivateKeyInput() {
   const privateKeySection = document.getElementById('privateKeySection');
   const newPrivateKeyInput = document.getElementById('newPrivateKey');
+  const togglePrivateKeyInput = document.getElementById('togglePrivateKeyInput');
 
   // clear the newPrivateKeyInput
   newPrivateKeyInput.value = '';

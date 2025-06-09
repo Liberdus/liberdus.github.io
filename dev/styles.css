@@ -4585,3 +4585,10 @@ small {
 #friendModal .radio-group {
   gap: 20px;
 }
+
+#minTollDisplay {
+  font-size: 0.9em;
+  color: #666;
+  margin-top: 4px;
+  text-align: left;
+}
