@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -195,8 +195,11 @@ async function checkOnlineStatus() {
   }
 }
 
-async function checkUsernameAvailability(username, address) {
-  // First check if we're offline
+async function checkUsernameAvailability(username, address, foundAddressObject) {
+  if (foundAddressObject){
+    foundAddressObject.address = null;
+  }
+// First check if we're offline
   if (!isOnline) {
     console.log('Checking username availability offline');
     // When offline, check local storage only
@@ -217,6 +220,9 @@ async function checkUsernameAvailability(username, address) {
     // If we have the username but address doesn't match
     if (netidAccounts?.usernames && netidAccounts.usernames[username]) {
       console.log('Username found locally but address does not match');
+      if (foundAddressObject) {
+        foundAddressObject.address = netidAccounts.usernames[username].address;
+      }
       return 'taken';
     }
 
@@ -242,6 +248,9 @@ async function checkUsernameAvailability(username, address) {
     if (data && data.address) {
       if (address && normalizeAddress(data.address) === normalizeAddress(address)) {
         return 'mine';
+      }
+      if (foundAddressObject) {
+        foundAddressObject.address = data.address;
       }
       return 'taken';
     }
@@ -2313,13 +2322,13 @@ function fillStakeAddressFromQR(data) {
  * @returns {Promise<boolean>} - A promise that resolves to true if the balance is sufficient, false otherwise
  */
 async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
+  if (balanceWarning) balanceWarning.style.display = 'none';
   if (!amount) {
-    if (balanceWarning) balanceWarning.style.display = 'none';
     console.warn('[validateBalance] amount is 0');
     return false;
   } else if (amount < 0) {
     console.warn('[validateBalance] amount is negative');
-    if (balanceWarning) balanceWarning.style.display = 'inline';
+    if (balanceWarning) balanceWarning.style.display = 'block';
     balanceWarning.textContent = 'Amount cannot be negative';
     return false;
   }
@@ -2876,6 +2885,9 @@ class FriendModal {
     button.classList.remove('status-0', 'status-1', 'status-2', 'status-3');
     // Add the current status class
     button.classList.add(`status-${contact.friend}`);
+
+    // Simply hide the button if there are no messages
+    button.style.display = contact.messages && contact.messages.length > 0 ? 'block' : 'none';
   }
 }
 
@@ -8521,6 +8533,10 @@ class SendAssetFormModal {
     this.balanceSymbol = document.getElementById('balanceSymbol');
     this.availableBalance = document.getElementById('availableBalance');
     this.toggleBalanceButton = document.getElementById('toggleBalance');
+    this.foundAddressObject = {address:null};
+    this.needTollInfo = false;
+    this.tollInfo = {};
+    this.tollMemoSpan = document.getElementById('tollMemo');
   }
 
   /**
@@ -8536,6 +8552,8 @@ class SendAssetFormModal {
     this.usernameInput.addEventListener('input', async (e) => {
       this.handleSendToAddressInput(e);
     });
+    this.usernameInput.addEventListener('paste', handlePaste);
+    this.usernameInput.addEventListener('input', filterUsernameInput);
 
     this.availableBalance.addEventListener('click', this.fillAmount.bind(this));
     this.assetSelectDropdown.addEventListener('change', () => {
@@ -8556,8 +8574,7 @@ class SendAssetFormModal {
     });
     // event listener for toggle LIB/USD button
     this.toggleBalanceButton.addEventListener('click', this.handleToggleBalance.bind(this));
-    this.usernameInput.addEventListener('paste', handlePaste);
-    this.usernameInput.addEventListener('input', filterUsernameInput);
+    this.memoInput.addEventListener('input', this.handleMemoInputChange.bind(this))
   }
 
   /**
@@ -8572,6 +8589,8 @@ class SendAssetFormModal {
     this.amountInput.value = '';
     this.memoInput.value = '';
     this.retryTxIdInput.value = '';
+    this.tollMemoSpan.textContent = '';
+    this.foundAddressObject.address = null;
 
     this.usernameAvailable.style.display = 'none';
     this.submitButton.disabled = true;
@@ -8624,6 +8643,9 @@ class SendAssetFormModal {
       clearTimeout(this.sendAssetFormModalCheckTimeout);
     }
 
+    this.clearFormInfo()
+    this.foundAddressObject.address = null;
+
     // Check if username is too short
     if (username.length < 3) {
       usernameAvailable.textContent = 'too short';
@@ -8635,7 +8657,11 @@ class SendAssetFormModal {
 
     // Check network availability
     this.sendAssetFormModalCheckTimeout = setTimeout(async () => {
-      const taken = await checkUsernameAvailability(username, myAccount.keys.address);
+      const taken = await checkUsernameAvailability(
+        username,
+        myAccount.keys.address,
+        this.foundAddressObject
+      );
       if (taken == 'taken') {
         usernameAvailable.textContent = 'found';
         usernameAvailable.style.color = '#28a745';
@@ -8653,8 +8679,102 @@ class SendAssetFormModal {
         usernameAvailable.style.color = '#dc3545';
         usernameAvailable.style.display = 'inline';
       }
-      await this.refreshSendButtonDisabledState(); // Update button state based on new address status and current amount status
+      // check if found
+      if (this.foundAddressObject.address) {
+        this.needTollInfo = true;
+        await this.validateForm();
+      }
+      else{
+        await this.refreshSendButtonDisabledState();
+      }
     }, 1000);
+  }
+
+  async validateForm() {
+    if (this.needTollInfo) {
+      const myAddr = longAddress(myAccount.keys.address);
+      const contactAddr = longAddress(this.foundAddressObject.address);
+      const sortedAddresses = [myAddr, contactAddr].sort();
+      const chatId = hashBytes(sortedAddresses.join(''));
+      const myIndex = sortedAddresses.indexOf(myAddr);
+      const toIndex = 1 - myIndex;
+
+      // query
+      const tollInfo_ = await queryNetwork(`/messages/${chatId}/toll`);
+      //console.warn(`DEBUG: tollInfo_ ${JSON.stringify(tollInfo_, null, 2)}`);
+      // query account for toll set by receiver
+      const accountData = await queryNetwork(`/account/${this.foundAddressObject.address}`);
+      const queriedToll = accountData?.account?.data?.toll; // type bigint
+      const queriedTollUnit = accountData?.account?.data?.tollUnit; // type string
+      this.tollInfo = {
+        toll: queriedToll,
+        tollUnit: queriedTollUnit,
+        required: tollInfo_.toll.required[toIndex],
+      };
+      this.needTollInfo = false;
+    }
+    if (this.tollInfo.required !== undefined && this.tollInfo.toll !== undefined) {
+      // build string to display under memo input. with lib amoutn and (usd amount)
+      /* const tollInfoString = `Toll:  */
+      this.updateMemoTollUI();
+      this.refreshSendButtonDisabledState()
+    }
+  }
+
+  /**
+   * updateTollAmountUI
+   */
+  updateMemoTollUI() {
+    this.tollMemoSpan.style.color = 'black';
+    let toll = this.tollInfo.toll || 0n;
+    const tollUnit = this.tollInfo.tollUnit || 'LIB';
+    const decimals = 18;
+    const mainIsUSD = tollUnit === 'USD';
+    const mainValue = parseFloat(big2str(toll, decimals));
+    // Conversion factor (USD/LIB)
+    const scaleMul = parameters.current.stabilityScaleMul || 1;
+    const scaleDiv = parameters.current.stabilityScaleDiv || 1;
+    const factor = scaleDiv !== 0 ? scaleMul / scaleDiv : 1;
+    let mainString, otherString;
+    if (mainIsUSD) {
+      toll = bigxnum2big(toll, (1.0 / factor).toString());
+      mainString = mainValue.toFixed(6) + ' USD';
+      const libValue = mainValue / factor;
+      otherString = libValue.toFixed(6) + ' LIB';
+    } else {
+      mainString = mainValue.toFixed(6) + ' LIB';
+      const usdValue = mainValue * factor;
+      otherString = usdValue.toFixed(6) + ' USD';
+    }
+    let display;
+    if (this.tollInfo.required == 1) {
+      display = `${mainString} (${otherString})`;
+      if (this.memoInput.value.trim() == ''){
+        display = ''
+      }
+    } else if (this.tollInfo.required == 2) {
+      this.tollMemoSpan.style.color = 'red';
+      display = `blocked`;
+    } else {
+      // light green used to show success
+      this.tollMemoSpan.style.color = '#28a745';
+      display = `free (${mainString} (${otherString}))`;
+    }
+    //display the container
+    if (display != ''){
+      display = 'Toll: ' + display
+    }
+    this.tollMemoSpan.textContent = display;
+  }
+
+  clearFormInfo(){
+    this.tollMemoSpan.textContent = ''
+  }
+
+  handleMemoInputChange(){
+    if (this.foundAddressObject.address) {
+      this.validateForm();
+    }
   }
 
   /**
@@ -8715,7 +8835,20 @@ class SendAssetFormModal {
     const feeInWei = parameters.current.transactionFee || 1n * wei;
     const maxAmount = BigInt(asset.balance) - feeInWei;
 
-    this.amountInput.value = big2str(maxAmount > 0n ? maxAmount : 0n, 18).slice(0, -16);
+    // Check if we're in USD mode
+    const isUSD = this.balanceSymbol.textContent === 'USD';
+
+    if (isUSD) {
+      const scalabilityFactor =
+        parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+      // Convert to USD before displaying
+      const maxAmountUSD =
+        parseFloat(big2str(maxAmount > 0n ? maxAmount : 0n, 18)) * scalabilityFactor;
+      this.amountInput.value = maxAmountUSD.toString();
+    } else {
+      // Display in LIB
+      this.amountInput.value = big2str(maxAmount > 0n ? maxAmount : 0n, 18).slice(0, -16);
+    }
     this.amountInput.dispatchEvent(new Event('input'));
   }
 
@@ -8748,7 +8881,7 @@ class SendAssetFormModal {
   async updateBalanceDisplay(asset) {
     if (!asset) {
       document.getElementById('balanceAmount').textContent = '0.0000';
-      document.getElementById('balanceSymbol').textContent = '';
+      document.getElementById('availableBalanceSymbol').textContent = '';
       document.getElementById('transactionFee').textContent = '0.00';
       return;
     }
@@ -8773,15 +8906,17 @@ class SendAssetFormModal {
 
     // Set the base LIB values first
     document.getElementById('balanceAmount').textContent = balanceInLIB;
-    document.getElementById('transactionFee').textContent = feeInLIB;
+    document.getElementById('transactionFee').textContent = feeInLIB + ' LIB';
+    document.getElementById('availableBalanceSymbol').textContent = asset.symbol;
 
     // If currently showing USD, convert the displayed values
     if (isCurrentlyUSD) {
       const balanceAmount = document.getElementById('balanceAmount');
       const transactionFee = document.getElementById('transactionFee');
 
-      balanceAmount.textContent = (parseFloat(balanceInLIB) * scalabilityFactor).toString();
-      transactionFee.textContent = (parseFloat(feeInLIB) * scalabilityFactor).toString();
+      balanceAmount.textContent = '$' + (parseFloat(balanceInLIB) * scalabilityFactor).toString();
+      transactionFee.textContent = '$' + (parseFloat(feeInLIB) * scalabilityFactor).toString();
+      document.getElementById('availableBalanceSymbol').textContent = '';
     }
   }
 
@@ -8840,12 +8975,48 @@ class SendAssetFormModal {
 
     const submitButton = document.querySelector('#sendForm button[type="submit"]');
 
+    let isAmountAndTollValid = true;
+    if (this.foundAddressObject.address){
+      if (amountInput.value.trim() != ''){
+        isAmountAndTollValid = this.validateToll(amountBigInt, assetIndex, balanceWarning)
+        console.log('ismountAndTollValid '+isAmountAndTollValid)
+      }
+    }
     // Enable button only if both conditions are met.
-    if (isAddressConsideredValid && isAmountAndBalanceValid) {
+    if (isAddressConsideredValid && isAmountAndBalanceValid && isAmountAndTollValid) {
       submitButton.disabled = false;
     } else {
       submitButton.disabled = true;
     }
+  }
+
+  validateToll(amount, assetIndex = 0, balanceWarning = null){
+    // check if user is required to pay a toll
+    if (this.tollInfo.required == 1){
+      if (this.memoInput.value.trim() != ''){
+        console.log('checking if toll > amount')
+        const scaleMul = parameters.current.stabilityScaleMul || 1;
+        const scaleDiv = parameters.current.stabilityScaleDiv || 1;
+        const factor = scaleDiv !== 0 ? scaleMul / scaleDiv : 1;
+        let amountInLIB = amount;
+        /*
+        if (this.balanceSymbol.textContent !== 'LIB'){
+          amountInLIB = bigxnum2big(amount, (1.0 / factor).toString());
+        }
+        */
+        let tollInLIB = this.tollInfo.toll;
+        if (this.tollInfo.tollUnit !== 'LIB'){
+          tollInLIB = bigxnum2big(this.tollInfo.toll, (1.0 / factor).toString());
+        }
+        console.log(`toll > amount  ${big2str(tollInLIB,8)} > ${big2str(amountInLIB,8)} : ${tollInLIB>amountInLIB}`)
+        if (tollInLIB > amountInLIB){
+          balanceWarning.textContent = 'Amount is less than toll for memo.'
+          balanceWarning.style.display = 'block'
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
   /**
@@ -8880,11 +9051,13 @@ class SendAssetFormModal {
     if (!isLib) {
       sendAmount.value = sendAmount.value * scalabilityFactor;
       balanceAmount.textContent = '$' + (parseFloat(balanceInLIB) * scalabilityFactor).toString();
+      document.getElementById('availableBalanceSymbol').textContent = '';
       transactionFee.textContent = '$' + (parseFloat(feeInLIB) * scalabilityFactor).toString();
     } else {
       sendAmount.value = sendAmount.value / scalabilityFactor;
       balanceAmount.textContent = balanceInLIB;
-      transactionFee.textContent = feeInLIB;
+      document.getElementById('availableBalanceSymbol').textContent = 'LIB';
+      transactionFee.textContent = feeInLIB + ' LIB';
     }
   }
 }
