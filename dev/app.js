@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'd'
+const version = 'e'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1997,9 +1997,9 @@ async function updateTollValue(address) {
   const queriedToll = contactAccountData?.account?.data?.toll; // type bigint
   const queriedTollUnit = contactAccountData?.account?.data?.tollUnit; // type string */
 
-  // update the toll value in the UI if the queried toll value is different from the toll field in localStorage
+  // update the toll value in the UI if the queried toll value is different from the toll value or toll unit in localStorage
   if (
-    myData.contacts[address].toll != queriedToll &&
+    myData.contacts[address].toll != queriedToll ||
     myData.contacts[address].tollUnit != queriedTollUnit
   ) {
     myData.contacts[address].toll = queriedToll;
