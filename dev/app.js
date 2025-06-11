@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'c'
+const version = 'd'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -11,7 +11,7 @@ async function checkVersion() {
     newVersion = await response.text();
   } catch (error) {
     console.error('Version check failed:', error);
-    alert('Version check failed. Your Internet connection may be down.');
+    showToast('Version check failed. Your Internet connection may be down.', 0, 'error');
     // Only trigger offline UI if it's a network error
     if (!navigator.onLine || error instanceof TypeError) {
       isOnline = false;
@@ -25,7 +25,7 @@ async function checkVersion() {
   console.log(parseInt(myVersion.replace(/\D/g, '')), parseInt(newVersion.replace(/\D/g, '')));
   if (parseInt(myVersion.replace(/\D/g, '')) != parseInt(newVersion.replace(/\D/g, ''))) {
     if (parseInt(myVersion.replace(/\D/g, '')) > 0) {
-      alert('Updating to new version: ' + newVersion + ' ' + version);
+      showToast('Updating to new version: ' + newVersion + ' ' + version, 3000, 'info');
     }
     localStorage.setItem('version', newVersion); // Save new version
     forceReload([
@@ -196,10 +196,10 @@ async function checkOnlineStatus() {
 }
 
 async function checkUsernameAvailability(username, address, foundAddressObject) {
-  if (foundAddressObject){
+  if (foundAddressObject) {
     foundAddressObject.address = null;
   }
-// First check if we're offline
+  // First check if we're offline
   if (!isOnline) {
     console.log('Checking username availability offline');
     // When offline, check local storage only
@@ -392,6 +392,7 @@ function openCreateAccountModal() {
 let createAccountCheckTimeout;
 function handleCreateAccountInput(e) {
   const username = normalizeUsername(e.target.value);
+  e.target.value = username;
   const usernameAvailable = document.getElementById('newUsernameAvailable');
   const submitButton = document.querySelector('#createAccountForm button[type="submit"]');
 
@@ -1160,8 +1161,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // create account button listener to clear message input on create account
   document.getElementById('newUsername').addEventListener('input', handleCreateAccountInput);
-  document.getElementById('newUsername').addEventListener('paste', handlePaste);
-  document.getElementById('newUsername').addEventListener('input', filterUsernameInput);
 
   // Event Listerns for FailedPaymentModal
   const failedPaymentModal = document.getElementById('failedPaymentModal');
@@ -1344,9 +1343,11 @@ function setupAddToHomeScreen() {
         // Non-Safari iOS browsers
         addToHomeScreenButton.addEventListener('click', () => {
           const currentUrl = window.location.href;
-          alert(
+          showToast(
             'Open in Safari...\n\n' +
-              'iOS only supports adding to home screen through Safari browser.'
+              'iOS only supports adding to home screen through Safari browser.',
+            5000,
+            'info'
           );
           // Open the current URL in Safari
           window.location.href = currentUrl;
@@ -1354,11 +1355,13 @@ function setupAddToHomeScreen() {
       } else {
         // iOS Safari - Show numbered install instructions
         addToHomeScreenButton.addEventListener('click', () => {
-          alert(
+          showToast(
             'To add to home screen:\n\n' +
               '1. Tap the share button (rectangle with arrow) at the bottom of Safari\n' +
               '2. Scroll down and tap "Add to Home Screen"\n' +
-              '3. Tap "Add" in the top right'
+              '3. Tap "Add" in the top right',
+            10000,
+            'info'
           );
         });
       }
@@ -1385,15 +1388,23 @@ function setupAddToHomeScreen() {
             addToHomeScreenButton.style.display = 'none';
           }
         } else if (isOpera) {
-          alert(
-            'Installation is not supported in Opera browser. Please use Google Chrome or Microsoft Edge.'
+          showToast(
+            'Installation is not supported in Opera browser. Please use Google Chrome or Microsoft Edge.',
+            5000,
+            'info'
           );
         } else if (isFirefox) {
-          alert(
-            'Installation is not supported in Firefox browser. Please use Google Chrome or Microsoft Edge.'
+          showToast(
+            'Installation is not supported in Firefox browser. Please use Google Chrome or Microsoft Edge.',
+            5000,
+            'info'
           );
         } else {
-          alert('This app is already installed or cannot be installed on this device/browser.');
+          showToast(
+            'This app is already installed or cannot be installed on this device/browser.',
+            5000,
+            'info'
+          );
         }
       });
     } else {
@@ -2396,17 +2407,21 @@ async function handleSendAsset(event) {
     const amountStr = big2str(amount, 18).slice(0, -16);
     const feeStr = big2str(txFeeInLIB, 18).slice(0, -16);
     const balanceStr = big2str(balance, 18).slice(0, -16);
-    alert(`Insufficient balance: ${amountStr} + ${feeStr} (fee) > ${balanceStr} LIB`);
+    showToast(
+      `Insufficient balance: ${amountStr} + ${feeStr} (fee) > ${balanceStr} LIB`,
+      0,
+      'error'
+    );
     return;
   }
 
   // Validate username - must be username; address not supported
   if (username.startsWith('0x')) {
-    alert('Address not supported; enter username instead.');
+    showToast('Address not supported; enter username instead.', 0, 'error');
     return;
   }
   if (username.length < 3) {
-    alert('Username too short');
+    showToast('Username too short', 0, 'error');
     return;
   }
   try {
@@ -2420,13 +2435,13 @@ async function handleSendAsset(event) {
 */
     const data = await queryNetwork(`/address/${usernameHash}`);
     if (!data || !data.address) {
-      alert('Username not found');
+      showToast('Username not found', 0, 'error');
       return;
     }
     toAddress = normalizeAddress(data.address);
   } catch (error) {
     console.error('Error looking up username:', error);
-    alert('Error looking up username');
+    showToast('Error looking up username', 0, 'error');
     return;
   }
 
@@ -2623,7 +2638,7 @@ async function handleSendAsset(event) {
 */
   } catch (error) {
     console.error('Transaction error:', error);
-    alert('Transaction failed. Please try again.');
+    showToast('Transaction failed. Please try again.', 0, 'error');
   }
 }
 handleSendAsset.timestamp = getCorrectedTimestamp();
@@ -5915,7 +5930,7 @@ class BackupAccountModal {
       this.close();
     } catch (error) {
       console.error('Encryption failed:', error);
-      alert('Failed to encrypt data. Please try again.');
+      showToast('Failed to encrypt data. Please try again.', 0, 'error');
     }
   }
 }
@@ -7704,7 +7719,7 @@ class ChatModal {
       // Get sender's keys from wallet
       const keys = myAccount.keys;
       if (!keys) {
-        alert('Keys not found for sender address');
+        showToast('Keys not found for sender address', 0, 'error');
         return;
       }
 
@@ -7855,7 +7870,7 @@ class ChatModal {
       }
     } catch (error) {
       console.error('Message error:', error);
-      alert('Failed to send message. Please try again.');
+      showToast('Failed to send message. Please try again.', 0, 'error');
     } finally {
       this.sendButton.disabled = false; // Re-enable the button
     }
@@ -8343,8 +8358,6 @@ class NewChatModal {
       'input',
       debounce(this.handleUsernameInput.bind(this), 300)
     );
-    this.recipientInput.addEventListener('paste', handlePaste);
-    this.recipientInput.addEventListener('input', filterUsernameInput);
   }
 
   /**
@@ -8475,6 +8488,7 @@ class NewChatModal {
     this.submitButton.disabled = true;
 
     const username = normalizeUsername(e.target.value);
+    e.target.value = username;
 
     // Clear previous timeout
     if (this.usernameInputCheckTimeout) {
@@ -8533,10 +8547,14 @@ class SendAssetFormModal {
     this.balanceSymbol = document.getElementById('balanceSymbol');
     this.availableBalance = document.getElementById('availableBalance');
     this.toggleBalanceButton = document.getElementById('toggleBalance');
-    this.foundAddressObject = {address:null};
+    this.foundAddressObject = { address: null };
     this.needTollInfo = false;
     this.tollInfo = {};
     this.tollMemoSpan = document.getElementById('tollMemo');
+    // Add balance element references
+    this.balanceAmount = document.getElementById('balanceAmount');
+    this.transactionFee = document.getElementById('transactionFee');
+    this.balanceWarning = document.getElementById('balanceWarning');
   }
 
   /**
@@ -8552,8 +8570,6 @@ class SendAssetFormModal {
     this.usernameInput.addEventListener('input', async (e) => {
       this.handleSendToAddressInput(e);
     });
-    this.usernameInput.addEventListener('paste', handlePaste);
-    this.usernameInput.addEventListener('input', filterUsernameInput);
 
     this.availableBalance.addEventListener('click', this.fillAmount.bind(this));
     this.assetSelectDropdown.addEventListener('change', () => {
@@ -8574,7 +8590,7 @@ class SendAssetFormModal {
     });
     // event listener for toggle LIB/USD button
     this.toggleBalanceButton.addEventListener('click', this.handleToggleBalance.bind(this));
-    this.memoInput.addEventListener('input', this.handleMemoInputChange.bind(this))
+    this.memoInput.addEventListener('input', this.handleMemoInputChange.bind(this));
   }
 
   /**
@@ -8636,6 +8652,7 @@ class SendAssetFormModal {
   async handleSendToAddressInput(e) {
     // Check availability on input changes
     const username = normalizeUsername(e.target.value);
+    e.target.value = username;
     const usernameAvailable = this.usernameAvailable;
 
     // Clear previous timeout
@@ -8643,7 +8660,7 @@ class SendAssetFormModal {
       clearTimeout(this.sendAssetFormModalCheckTimeout);
     }
 
-    this.clearFormInfo()
+    this.clearFormInfo();
     this.foundAddressObject.address = null;
 
     // Check if username is too short
@@ -8683,8 +8700,7 @@ class SendAssetFormModal {
       if (this.foundAddressObject.address) {
         this.needTollInfo = true;
         await this.validateForm();
-      }
-      else{
+      } else {
         await this.refreshSendButtonDisabledState();
       }
     }, 1000);
@@ -8717,7 +8733,7 @@ class SendAssetFormModal {
       // build string to display under memo input. with lib amoutn and (usd amount)
       /* const tollInfoString = `Toll:  */
       this.updateMemoTollUI();
-      this.refreshSendButtonDisabledState()
+      this.refreshSendButtonDisabledState();
     }
   }
 
@@ -8749,8 +8765,8 @@ class SendAssetFormModal {
     let display;
     if (this.tollInfo.required == 1) {
       display = `${mainString} (${otherString})`;
-      if (this.memoInput.value.trim() == ''){
-        display = ''
+      if (this.memoInput.value.trim() == '') {
+        display = '';
       }
     } else if (this.tollInfo.required == 2) {
       this.tollMemoSpan.style.color = 'red';
@@ -8761,17 +8777,17 @@ class SendAssetFormModal {
       display = `free (${mainString} (${otherString}))`;
     }
     //display the container
-    if (display != ''){
-      display = 'Toll: ' + display
+    if (display != '') {
+      display = 'Toll: ' + display;
     }
     this.tollMemoSpan.textContent = display;
   }
 
-  clearFormInfo(){
-    this.tollMemoSpan.textContent = ''
+  clearFormInfo() {
+    this.tollMemoSpan.textContent = '';
   }
 
-  handleMemoInputChange(){
+  handleMemoInputChange() {
     if (this.foundAddressObject.address) {
       this.validateForm();
     }
@@ -8834,6 +8850,7 @@ class SendAssetFormModal {
     const asset = myData.wallet.assets[this.assetSelectDropdown.value];
     const feeInWei = parameters.current.transactionFee || 1n * wei;
     const maxAmount = BigInt(asset.balance) - feeInWei;
+    const maxAmountStr = big2str(maxAmount > 0n ? maxAmount : 0n, 18).slice(0, -16);
 
     // Check if we're in USD mode
     const isUSD = this.balanceSymbol.textContent === 'USD';
@@ -8842,12 +8859,10 @@ class SendAssetFormModal {
       const scalabilityFactor =
         parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
       // Convert to USD before displaying
-      const maxAmountUSD =
-        parseFloat(big2str(maxAmount > 0n ? maxAmount : 0n, 18)) * scalabilityFactor;
-      this.amountInput.value = maxAmountUSD.toString();
+      this.amountInput.value = (parseFloat(maxAmountStr) * scalabilityFactor).toString();
     } else {
       // Display in LIB
-      this.amountInput.value = big2str(maxAmount > 0n ? maxAmount : 0n, 18).slice(0, -16);
+      this.amountInput.value = maxAmountStr;
     }
     this.amountInput.dispatchEvent(new Event('input'));
   }
@@ -8880,9 +8895,8 @@ class SendAssetFormModal {
    */
   async updateBalanceDisplay(asset) {
     if (!asset) {
-      document.getElementById('balanceAmount').textContent = '0.0000';
-      document.getElementById('availableBalanceSymbol').textContent = '';
-      document.getElementById('transactionFee').textContent = '0.00';
+      this.balanceAmount.textContent = '0.0000';
+      this.transactionFee.textContent = '0.00';
       return;
     }
 
@@ -8892,32 +8906,18 @@ class SendAssetFormModal {
       parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
 
     // Preserve the current toggle state (LIB/USD) instead of overwriting it
-    const balanceSymbolElement = document.getElementById('balanceSymbol');
-    const currentSymbol = balanceSymbolElement.textContent;
+    const currentSymbol = this.balanceSymbol.textContent;
     const isCurrentlyUSD = currentSymbol === 'USD';
 
     // Only set to asset symbol if it's empty (initial state)
     if (!currentSymbol) {
-      balanceSymbolElement.textContent = asset.symbol;
+      this.balanceSymbol.textContent = asset.symbol;
     }
 
     const balanceInLIB = big2str(BigInt(asset.balance), 18).slice(0, -12);
     const feeInLIB = big2str(txFeeInLIB, 18).slice(0, -16);
 
-    // Set the base LIB values first
-    document.getElementById('balanceAmount').textContent = balanceInLIB;
-    document.getElementById('transactionFee').textContent = feeInLIB + ' LIB';
-    document.getElementById('availableBalanceSymbol').textContent = asset.symbol;
-
-    // If currently showing USD, convert the displayed values
-    if (isCurrentlyUSD) {
-      const balanceAmount = document.getElementById('balanceAmount');
-      const transactionFee = document.getElementById('transactionFee');
-
-      balanceAmount.textContent = '$' + (parseFloat(balanceInLIB) * scalabilityFactor).toString();
-      transactionFee.textContent = '$' + (parseFloat(feeInLIB) * scalabilityFactor).toString();
-      document.getElementById('availableBalanceSymbol').textContent = '';
-    }
+    this.updateBalanceAndFeeDisplay(balanceInLIB, feeInLIB, isCurrentlyUSD, scalabilityFactor);
   }
 
   /**
@@ -8943,20 +8943,16 @@ class SendAssetFormModal {
    * @returns {Promise<void>}
    */
   async refreshSendButtonDisabledState() {
-    const sendToAddressError = document.getElementById('sendToAddressError');
     // Address is valid if its error/status message is visible and set to 'found'.
     const isAddressConsideredValid =
-      sendToAddressError.style.display === 'inline' && sendToAddressError.textContent === 'found';
-    //console.log(`isAddressConsideredValid ${isAddressConsideredValid}`);
+      this.usernameAvailable.style.display === 'inline' &&
+      this.usernameAvailable.textContent === 'found';
 
-    const amountInput = document.getElementById('sendAmount');
-    const amount = amountInput.value;
-    const assetIndex = document.getElementById('sendAsset').value;
-    const balanceWarning = document.getElementById('balanceWarning');
+    const amount = this.amountInput.value;
+    const assetIndex = this.assetSelectDropdown.value;
 
     // Check if amount is in USD and convert to LIB for validation
-    const balanceSymbol = document.getElementById('balanceSymbol');
-    const isUSD = balanceSymbol.textContent === 'USD';
+    const isUSD = this.balanceSymbol.textContent === 'USD';
     let amountForValidation = amount;
 
     if (isUSD && amount) {
@@ -8970,31 +8966,32 @@ class SendAssetFormModal {
     const amountBigInt = bigxnum2big(wei, amountForValidation.toString());
 
     // validateBalance returns false if the amount/balance is invalid.
-    const isAmountAndBalanceValid = await validateBalance(amountBigInt, assetIndex, balanceWarning);
-    console.log(`isAmountAndBalanceValid ${isAmountAndBalanceValid}`);
-
-    const submitButton = document.querySelector('#sendForm button[type="submit"]');
+    const isAmountAndBalanceValid = await validateBalance(
+      amountBigInt,
+      assetIndex,
+      this.balanceWarning
+    );
 
     let isAmountAndTollValid = true;
-    if (this.foundAddressObject.address){
-      if (amountInput.value.trim() != ''){
-        isAmountAndTollValid = this.validateToll(amountBigInt, assetIndex, balanceWarning)
-        console.log('ismountAndTollValid '+isAmountAndTollValid)
+    if (this.foundAddressObject.address) {
+      if (this.amountInput.value.trim() != '') {
+        isAmountAndTollValid = this.validateToll(amountBigInt);
+        console.log('ismountAndTollValid ' + isAmountAndTollValid);
       }
     }
     // Enable button only if both conditions are met.
     if (isAddressConsideredValid && isAmountAndBalanceValid && isAmountAndTollValid) {
-      submitButton.disabled = false;
+      this.submitButton.disabled = false;
     } else {
-      submitButton.disabled = true;
+      this.submitButton.disabled = true;
     }
   }
 
-  validateToll(amount, assetIndex = 0, balanceWarning = null){
+  validateToll(amount) {
     // check if user is required to pay a toll
-    if (this.tollInfo.required == 1){
-      if (this.memoInput.value.trim() != ''){
-        console.log('checking if toll > amount')
+    if (this.tollInfo.required == 1) {
+      if (this.memoInput.value.trim() != '') {
+        console.log('checking if toll > amount');
         const scaleMul = parameters.current.stabilityScaleMul || 1;
         const scaleDiv = parameters.current.stabilityScaleDiv || 1;
         const factor = scaleDiv !== 0 ? scaleMul / scaleDiv : 1;
@@ -9005,13 +9002,15 @@ class SendAssetFormModal {
         }
         */
         let tollInLIB = this.tollInfo.toll;
-        if (this.tollInfo.tollUnit !== 'LIB'){
+        if (this.tollInfo.tollUnit !== 'LIB') {
           tollInLIB = bigxnum2big(this.tollInfo.toll, (1.0 / factor).toString());
         }
-        console.log(`toll > amount  ${big2str(tollInLIB,8)} > ${big2str(amountInLIB,8)} : ${tollInLIB>amountInLIB}`)
-        if (tollInLIB > amountInLIB){
-          balanceWarning.textContent = 'Amount is less than toll for memo.'
-          balanceWarning.style.display = 'block'
+        console.log(
+          `toll > amount  ${big2str(tollInLIB, 8)} > ${big2str(amountInLIB, 8)} : ${tollInLIB > amountInLIB}`
+        );
+        if (tollInLIB > amountInLIB) {
+          this.balanceWarning.textContent = 'Amount is less than toll for memo.';
+          this.balanceWarning.style.display = 'block';
           return false;
         }
       }
@@ -9027,14 +9026,10 @@ class SendAssetFormModal {
    */
   async handleToggleBalance(e) {
     e.preventDefault();
-    const balanceSymbol = document.getElementById('balanceSymbol');
-    balanceSymbol.textContent = balanceSymbol.textContent === 'LIB' ? 'USD' : 'LIB';
-    const sendAmount = document.getElementById('sendAmount');
-    const balanceAmount = document.getElementById('balanceAmount');
-    const transactionFee = document.getElementById('transactionFee');
+    this.balanceSymbol.textContent = this.balanceSymbol.textContent === 'LIB' ? 'USD' : 'LIB';
 
     // check the context value of the button to determine if it's LIB or USD
-    const isLib = balanceSymbol.textContent === 'LIB';
+    const isLib = this.balanceSymbol.textContent === 'LIB';
 
     // get the scalability factor for LIB/USD conversion
     await getNetworkParams();
@@ -9049,15 +9044,30 @@ class SendAssetFormModal {
 
     // if isLib is false, convert the sendAmount to USD
     if (!isLib) {
-      sendAmount.value = sendAmount.value * scalabilityFactor;
-      balanceAmount.textContent = '$' + (parseFloat(balanceInLIB) * scalabilityFactor).toString();
-      document.getElementById('availableBalanceSymbol').textContent = '';
-      transactionFee.textContent = '$' + (parseFloat(feeInLIB) * scalabilityFactor).toString();
+      this.amountInput.value = this.amountInput.value * scalabilityFactor;
     } else {
-      sendAmount.value = sendAmount.value / scalabilityFactor;
-      balanceAmount.textContent = balanceInLIB;
-      document.getElementById('availableBalanceSymbol').textContent = 'LIB';
-      transactionFee.textContent = feeInLIB + ' LIB';
+      this.amountInput.value = this.amountInput.value / scalabilityFactor;
+    }
+
+    this.updateBalanceAndFeeDisplay(balanceInLIB, feeInLIB, !isLib, scalabilityFactor);
+  }
+
+  /**
+   * Updates the display of balance and fee amounts with appropriate formatting
+   * @param {string} balanceInLIB - The balance amount in LIB
+   * @param {string} feeInLIB - The fee amount in LIB
+   * @param {boolean} isUSD - Whether to display in USD format
+   * @param {number} scalabilityFactor - The factor to convert between LIB and USD
+   */
+  updateBalanceAndFeeDisplay(balanceInLIB, feeInLIB, isUSD, scalabilityFactor) {
+    if (isUSD) {
+      this.balanceAmount.textContent =
+        '$' + (parseFloat(balanceInLIB) * scalabilityFactor).toPrecision(6);
+      this.transactionFee.textContent =
+        '$' + (parseFloat(feeInLIB) * scalabilityFactor).toPrecision(2);
+    } else {
+      this.balanceAmount.textContent = balanceInLIB + ' LIB';
+      this.transactionFee.textContent = feeInLIB + ' LIB';
     }
   }
 }
@@ -9391,27 +9401,3 @@ async function getNetworkParams() {
 }
 getNetworkParams.timestamp = 0;
 
-function filterUsernameInput(e) {
-  const input = e.target;
-  const filteredValue = input.value.replace(/[^a-zA-Z0-9]/g, '');
-  if (input.value !== filteredValue) {
-    input.value = filteredValue;
-  }
-}
-
-function handlePaste(e) {
-  e.preventDefault(); // Prevent the default paste
-  const pastedText = (e.clipboardData || window.clipboardData).getData('text');
-  const filteredText = pastedText.replace(/[^a-zA-Z0-9]/g, '');
-  const input = e.target;
-
-  // Get the current cursor position
-  const start = input.selectionStart;
-  const end = input.selectionEnd;
-
-  // Insert the filtered text at cursor position
-  input.value = input.value.substring(0, start) + filteredText + input.value.substring(end);
-
-  // Set cursor position after the pasted text
-  input.setSelectionRange(start + filteredText.length, start + filteredText.length);
-}
