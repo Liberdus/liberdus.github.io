@@ -3643,9 +3643,10 @@ small {
 }
 
 .icon-button.edit-icon {
-  width: 30px;
-  height: 40px;
-  padding: 8px;
+  width: 24px;              /* smaller, matches icon size */
+  height: 24px;             /* smaller, matches icon size */
+  padding: 0;               /* remove extra space */
+  margin-left: 6px;         /* space between value and icon */
   border-radius: 8px;
   background: none;
   border: none;
@@ -3670,7 +3671,7 @@ small {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px; /* space between value and icon */
   width: 100%;
   position: relative;
 }
@@ -3684,8 +3685,8 @@ small {
   opacity: 0.7;
   transition: opacity 0.2s;
   position: absolute;
-  left: calc(50% + 50px);
-  top: -16px; /* Move the icon up slightly */
+  left: calc(43% + 50px);
+  top: -25px; /* Move the icon up slightly */
 }
 
 .contact-info-value-container .icon-button:hover {
@@ -4616,4 +4617,16 @@ small {
   color: var(--secondary-text-color);
   display: inline-block; /* Ensure consistent layout */
   min-height: 1.3em; /* Match parent's line-height */
+}
+
+.last-item {
+  display: block;
+  width: 0;
+  height: 0;
+  border: none;
+  background: none;
+}
+
+.last-item:focus {
+  outline: none;
 }

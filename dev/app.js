@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'f'
+const version = 'g'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -175,6 +175,7 @@ let checkPendingTransactionsIntervalId = null;
 // Used in getNetworkParams function
 const NETWORK_ACCOUNT_UPDATE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes in milliseconds
 const NETWORK_ACCOUNT_ID = '0000000000000000000000000000000000000000000000000000000000000000';
+const MAX_TOLL = 1_000_000; // 1M limit
 
 // TODO - get the parameters from the network
 // mock network parameters
@@ -2644,7 +2645,7 @@ async function handleSendAsset(event) {
 handleSendAsset.timestamp = getCorrectedTimestamp();
 
 // Contact Info Modal Management
-class ContactInfoModalManager {
+class ContactInfoModal {
   constructor() {
     this.modal = document.getElementById('contactInfoModal');
     this.currentContactAddress = null;
@@ -3034,7 +3035,7 @@ function handleSaveEditContact() {
 }
 
 // Create a singleton instance
-const contactInfoModal = new ContactInfoModalManager();
+const contactInfoModal = new ContactInfoModal();
 
 function handleSignOut() {
   // Clear intervals
@@ -4554,7 +4555,7 @@ function createDisplayInfo(contact) {
   };
 }
 
-// Add this function before the ContactInfoModalManager class
+// Add this function before the ContactInfoModal class
 function showToast(message, duration = 2000, type = 'default') {
   const toastContainer = document.getElementById('toastContainer');
   const toast = document.createElement('div');
@@ -6396,7 +6397,6 @@ class TollModal {
     let newTollValue = parseFloat(newTollAmountInput.value);
 
     if (isNaN(newTollValue) || newTollValue < 0) {
-      // console.error("Invalid toll amount");
       showToast('Invalid toll amount entered.', 0, 'error');
       return;
     }
@@ -6426,6 +6426,23 @@ class TollModal {
           );
           return;
         }
+      }
+    }
+
+    // Add maximum toll validation
+    if (this.currentCurrency === 'LIB') {
+      if (newTollValue > MAX_TOLL) {
+        showToast(`Toll cannot exceed ${MAX_TOLL} LIB`, 0, 'error');
+        return;
+      }
+    } else {
+      // For USD, convert the max toll to USD for comparison
+      const scalabilityFactor =
+        parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+      const maxTollUSD = MAX_TOLL * scalabilityFactor;
+      if (newTollValue > maxTollUSD) {
+        showToast(`Toll cannot exceed ${maxTollUSD.toFixed(2)} USD`, 0, 'error');
+        return;
       }
     }
 
@@ -7495,6 +7512,9 @@ class ChatModal {
 
     this.sendReclaimTollTransaction(this.address);
 
+    // Save any unsaved draft before closing
+    this.debouncedSaveDraft(this.messageInput.value);
+
     this.modal.classList.remove('active');
     if (document.getElementById('chatsScreen').classList.contains('active')) {
       updateChatList();
@@ -7829,7 +7849,9 @@ class ChatModal {
       // Clear input and reset height, and delete any saved draft
       this.messageInput.value = '';
       this.messageInput.style.height = '48px'; // original height
-      contact.draft = '';
+
+      // Call debounced save directly with empty string
+      this.debouncedSaveDraft('');
 
       // Update the chat modal UI immediately
       this.appendChatModal(); // This should now display the 'sending' message
@@ -8144,7 +8166,7 @@ class ChatModal {
         console.log(
           `DEBUG: Refreshing active chat modal because failed txid ${txid} was found in the view.`
         );
-        this.modal.appendChatModal(); // This will redraw the messages based on the updated data (where the failed tx is removed)
+        this.appendChatModal(); // This will redraw the messages based on the updated data (where the failed tx is removed)
       } else {
         // The failed txid doesn't correspond to a visible message in the *currently open* chat modal. No UI refresh needed for the modal itself.
         console.log(
@@ -8717,7 +8739,6 @@ class SendAssetFormModal {
 
       // query
       const tollInfo_ = await queryNetwork(`/messages/${chatId}/toll`);
-      //console.warn(`DEBUG: tollInfo_ ${JSON.stringify(tollInfo_, null, 2)}`);
       // query account for toll set by receiver
       const accountData = await queryNetwork(`/account/${this.foundAddressObject.address}`);
       const queriedToll = accountData?.account?.data?.toll; // type bigint
@@ -8725,7 +8746,7 @@ class SendAssetFormModal {
       this.tollInfo = {
         toll: queriedToll,
         tollUnit: queriedTollUnit,
-        required: tollInfo_.toll.required[toIndex],
+        required: tollInfo_?.toll?.required?.[toIndex] ?? 1, // assume toll is required if not set
       };
       this.needTollInfo = false;
     }
@@ -9398,4 +9419,3 @@ async function getNetworkParams() {
   }
 }
 getNetworkParams.timestamp = 0;
-
