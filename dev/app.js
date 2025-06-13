@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'i'
+const version = 'j'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -7713,7 +7713,9 @@ class ChatModal {
       // can create a function to query the account and get the receivers toll they've set
       // TODO: will need to query network and receiver account where we validate
       // TODO: decided to query everytime we do chatModal.open and save as global variable. We don't need to clear it but we can clear it when closing the modal but should get reset when opening the modal again anyway
-      const tollInLib = await convertTollToLib(this.toll, this.tollUnit);
+      let tollInLib =
+        myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : await convertTollToLib(this.toll, this.tollUnit);
+
       const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
       const txid = await signObj(chatMessageObj, keys);
 
