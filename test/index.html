@@ -1,7 +1,7 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
-    <!-- These did not seem to help with avoiding stale pages 
+    <!-- These did not seem to help with avoiding stale pages
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
@@ -55,69 +55,45 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.05.02.13.59" />
+    <link rel="stylesheet" href="./styles.css?v=2025.06.13.12.59" />
     <link rel="manifest" href="./manifest.json" />
   </head>
   <body>
-    <script src="./app.js?v=2025.05.02.13.59" type="module"></script>
+    <script src="./app.js?v=2025.06.13.12.59" type="module"></script>
     <div class="container">
       <header class="header" id="header">
         <div id="logo">
-          <a
-            href="https://liberdus.com"
-            target="_blank"
-            title="Visit Liberdus website"
-            class="logo-link"
+          <a href="https://liberdus.com" target="_blank" title="Visit Liberdus website" class="logo-link"
             ><img src="./media/liberdus_logo_50.png"
           /></a>
         </div>
         <div class="app-name">Liberdus</div>
         <div class="header-icons">
           <div class="offline-indicator" id="offlineIndicator">Offline</div>
-          <div id="wsStatusIndicator" class="ws-status-indicator">
-            WebSocket
-          </div>
+          <div id="wsStatusIndicator" class="ws-status-indicator">WebSocket</div>
           <button class="icon-button" id="toggleMenu"></button>
         </div>
       </header>
 
       <div class="welcome-screen" id="welcomeScreen">
-        <a
-          href="https://liberdus.com"
-          target="_blank"
-          title="Visit Liberdus website"
-          class="logo-link"
-        >
-          <img
-            src="./media/liberdus_logo_250.png"
-            alt="Liberdus Logo"
-            style="margin-bottom: 20px"
-          />
+        <a href="https://liberdus.com" target="_blank" title="Visit Liberdus website" class="logo-link">
+          <img src="./media/liberdus_logo_250.png" alt="Liberdus Logo" style="margin-bottom: 20px" />
         </a>
         <h1>
           Liberdus<br />
-          <div
-            style="font-size: 0.8rem; margin-top: 1px; text-align: center"
-            id="networkNameDisplay"
-          ></div>
+          <div style="font-size: 0.8rem; margin-top: 1px; text-align: center" id="networkNameDisplay"></div>
         </h1>
         <div class="welcome-buttons">
-          <button id="signInButton" class="secondary-button hidden">
-            Sign In
-          </button>
-          <button id="createAccountButton" class="secondary-button hidden">
-            Create Account
-          </button>
-          <button id="importAccountButton" class="secondary-button hidden">
-            Restore Account
-          </button>
-          <button id="addToHomeScreenButton" class="secondary-button hidden">
-            Install
-          </button>
+          <button id="signInButton" class="secondary-button hidden">Sign In</button>
+          <button id="createAccountButton" class="secondary-button hidden">Create Account</button>
+          <button id="importAccountButton" class="secondary-button hidden">Restore Account</button>
+          <button id="addToHomeScreenButton" class="secondary-button hidden">Install</button>
         </div>
         <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
           Version <span id="versionDisplay"></span>
         </div>
+        <!-- Add a unused anchor tag with nothing in it and add a class to it so can't shift and end up on another modal. Should still be displayed but will just show nothing -->
+        <a class="last-item" href="#" id="welcomeScreenLastItem"> </a>
       </div>
 
       <div class="app-screen" id="chatsScreen">
@@ -170,7 +146,7 @@
           </div>
         </div>
         <div class="wallet-actions">
-          <button class="wallet-action-button" id="openSendModal">
+          <button class="wallet-action-button" id="openSendAssetFormModal">
             <span class="action-icon"></span>
             <span class="action-label">Send</span>
           </button>
@@ -195,6 +171,8 @@
           <button class="nav-button" id="switchToContacts">Contacts</button>
           <button class="nav-button" id="switchToWallet">Wallet</button>
         </div>
+        <!-- set focus on last-item in the footer -->
+        <a class="last-item" href="#"> </a>
       </footer>
 
       <!-- New Chat Modal -->
@@ -207,21 +185,21 @@
           <form id="newChatForm">
             <div class="form-group">
               <label for="recipient"
-                >Recipient
-                <span
-                  id="chatRecipientError"
-                  style="color: #dc3545; display: none"
-                ></span
+                >Recipient <span id="chatRecipientError" style="color: #dc3545; display: none"></span
               ></label>
               <input
                 type="text"
                 id="chatRecipient"
                 class="form-control"
+                placeholder="Enter username"
                 required
+                pattern="[a-zA-Z0-9]*"
+                inputmode="text"
               />
             </div>
             <button type="submit" class="update-button">Continue</button>
           </form>
+          <a class="last-item" href="#"> </a>
         </div>
       </div>
 
@@ -233,19 +211,36 @@
         </div>
         <ul class="menu-list">
           <li class="menu-item" id="openAccountForm">Profile</li>
+          <li class="menu-item" id="openToll">Toll</li>
           <li class="menu-item" id="openExportForm">Backup</li>
           <li class="menu-item" id="openNetwork">Gateway</li>
           <li class="menu-item" id="openValidator">Validator</li>
+          <li class="menu-item" id="openInvite">Invite</li>
           <!--                <li class="menu-item" id="openSettings">Settings</li> -->
           <li class="menu-item" id="openExplorer">Explorer</li>
           <li class="menu-item" id="openMonitor">Network</li>
-          <!--
-                <li class="menu-item" id="openImportFormMenu">Import</li>
--->
+          <!--<li class="menu-item" id="openImportFormMenu">Import</li>-->
           <li class="menu-item" id="openRemoveAccount">Remove</li>
+          <li class="menu-item" id="openContact">Contact Us</li>
           <li class="menu-item" id="openAbout">About</li>
           <li class="menu-item" id="handleSignOut">Sign Out</li>
         </ul>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Contact Modal -->
+      <div class="modal" id="contactModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeContactModal"></button>
+          <div class="modal-title">Contact Us</div>
+        </div>
+        <div class="form-container">
+          <div style="padding: 1rem">
+            <p>Please contact our team to report bugs or make suggestions.</p>
+            <button id="submitFeedback" class="update-button" style="margin-top: 1rem">Submit Feedback</button>
+          </div>
+          <a class="last-item" href="#"> </a>
+        </div>
       </div>
 
       <!-- About Modal -->
@@ -263,19 +258,13 @@
             />
             <p>Liberdus is a decentralized messaging and wallet application.</p>
             <br /><br />
-            <div
-              style="font-size: 0.8rem; margin-top: 10px; text-align: center"
-            >
+            <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
               Version <span id="versionDisplayAbout"></span>
             </div>
-            <div
-              style="font-size: 0.8rem; margin-top: 10px; text-align: center"
-            >
+            <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
               Network Name: <span id="networkNameAbout"></span>
             </div>
-            <div
-              style="font-size: 0.8rem; margin-top: 10px; text-align: center"
-            >
+            <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
               Net ID:<br />
               <span style="font-size: 0.7rem" id="netIdAbout"></span>
             </div>
@@ -284,9 +273,7 @@
               <a href="https://liberdus.com" target="_blank">Liberdus.com</a>
             </div>
             <p>
-              <a href="https://github.com/liberdus" target="_blank"
-                >Source Code</a
-              >
+              <a href="https://github.com/liberdus" target="_blank">Source Code</a>
             </p>
             <br />
             <p>
@@ -300,24 +287,17 @@
             <a href="service-worker.js" target="_blank">service-worker.js</a>
             <br />
             <p>
-              <a href="./external/noble-post-quantum.js" target="_blank"
-                >noble-post-quantum.js</a
-              >
-              <a href="./external/noble-secp256k1.js" target="_blank"
-                >noble-secp256k1.js</a
-              >
-              <a href="./external/noble-ciphers.js" target="_blank"
-                >noble-ciphers.js</a
-              >
+              <a href="./external/noble-post-quantum.js" target="_blank">noble-post-quantum.js</a>
+              <a href="./external/noble-secp256k1.js" target="_blank">noble-secp256k1.js</a>
+              <a href="./external/noble-ciphers.js" target="_blank">noble-ciphers.js</a>
               <a href="./external/blake2b.js" target="_blank">blake2b.js</a>
               <a href="./external/keccak256.js" target="_blank">keccak256.js</a>
-              <a href="./external/stringify-shardus.js" target="_blank"
-                >stringify-shardus.js</a
-              >
+              <a href="./external/stringify-shardus.js" target="_blank">stringify-shardus.js</a>
               <a href="./external/qrcode.js" target="_blank">qrcode.js</a>
             </p>
           </div>
         </div>
+        <a class="last-item" href="#"> </a>
       </div>
 
       <!-- Sign In Modal -->
@@ -331,25 +311,16 @@
             <div class="form-group">
               <label for="username"
                 >Select Account
-                <span
-                  id="usernameNotFound"
-                  style="color: #dc3545; display: none; display: inline"
-                ></span
+                <span id="usernameNotFound" style="color: #dc3545; display: none; display: inline"></span
               ></label>
               <select id="username" class="form-control" required></select>
             </div>
-            <button type="submit" class="update-button" disabled>
-              Sign In
-            </button>
-            <button
-              type="button"
-              id="removeAccountButton"
-              class="secondary-button"
-              style="display: none"
-            >
+            <button type="submit" class="update-button" disabled>Sign In</button>
+            <button type="button" id="removeAccountButton" class="secondary-button" style="display: none">
               Remove
             </button>
           </form>
+          <a class="last-item" href="#" id="signInModalLastItem"> </a>
         </div>
       </div>
 
@@ -362,14 +333,10 @@
         <div class="form-container">
           <form id="createAccountForm">
             <div class="form-group">
-              <label for="newUsername"
-                >Username
-                <span
-                  id="newUsernameAvailable"
-                  style="color: #28a745; display: none"
-                  >available</span
-                ></label
-              >
+              <label for="newUsername">
+                Username
+                <span id="newUsernameAvailable" style="color: #28a745; display: none"> available </span>
+              </label>
               <div style="position: relative">
                 <input
                   type="text"
@@ -377,40 +344,41 @@
                   class="form-control"
                   placeholder="Select a username"
                   required
+                  pattern="[a-zA-Z0-9]*"
+                  inputmode="text"
+                  maxlength="20"
                 />
               </div>
             </div>
             <div class="form-group">
-              <label for="newPrivateKey"
-                >Private Key
-                <span
-                  id="newPrivateKeyError"
-                  style="color: #dc3545; display: none"
-                ></span
-              ></label>
-              <div style="position: relative">
-                <input
-                  type="password"
-                  id="newPrivateKey"
-                  class="form-control"
-                  placeholder="Optional private key in hex format"
-                />
-                <button
-                  type="button"
-                  id="togglePrivateKeyVisibility"
-                  class="password-toggle-btn"
-                ></button>
-              </div>
-              <small>
-                If you want to use an existing private key enter it here.
-                Otherwise you can leave this empty to have a private key
-                automatically generated.
-              </small>
+              <input type="checkbox" id="togglePrivateKeyInput" />
+              <label for="togglePrivateKeyInput" style="display: inline; margin-left: 5px"
+                >Use my own private key (Advanced)</label
+              >
             </div>
-            <button type="submit" class="update-button" disabled>
-              Create Account
-            </button>
+            <div id="privateKeySection" style="display: none">
+              <div class="form-group">
+                <label for="newPrivateKey"
+                  >Private Key <span id="newPrivateKeyError" style="color: #dc3545; display: none"></span
+                ></label>
+                <div style="position: relative">
+                  <input
+                    type="password"
+                    id="newPrivateKey"
+                    class="form-control"
+                    placeholder="Optional private key in hex format"
+                  />
+                  <button type="button" id="togglePrivateKeyVisibility" class="password-toggle-btn"></button>
+                </div>
+                <small>
+                  If you want to use an existing private key enter it here. Otherwise you can leave this empty to have a
+                  private key automatically generated.
+                </small>
+              </div>
+            </div>
+            <button type="submit" class="update-button" disabled>Create Account</button>
           </form>
+          <a class="last-item" href="#"> </a>
         </div>
       </div>
 
@@ -421,9 +389,7 @@
           <div class="modal-title">My Profile</div>
         </div>
         <div class="form-container">
-          <div class="profile-sharing-note">
-            This information is shared with your friends
-          </div>
+          <div class="profile-sharing-note">This information is shared with your friends</div>
           <form id="accountForm">
             <div class="form-group">
               <label for="name">Name</label>
@@ -431,11 +397,11 @@
             </div>
             <div class="form-group">
               <label for="email">Email</label>
-              <input type="text" id="email" class="form-control" />
+              <input type="email" id="email" class="form-control" />
             </div>
             <div class="form-group">
               <label for="phone">Phone</label>
-              <input type="text" id="phone" class="form-control" />
+              <input type="tel" id="phone" class="form-control" />
             </div>
             <div class="form-group">
               <label for="linkedin">LinkedIn</label>
@@ -447,6 +413,7 @@
             </div>
             <button type="submit" class="update-button">Update Profile</button>
           </form>
+          <a class="last-item" href="#"> </a>
         </div>
       </div>
 
@@ -460,13 +427,7 @@
           <form id="importForm">
             <div class="form-group">
               <label for="importFile">Select File</label>
-              <input
-                type="file"
-                id="importFile"
-                class="form-control"
-                accept="application/json"
-                required
-              />
+              <input type="file" id="importFile" class="form-control" accept="application/json" required />
             </div>
             <div class="form-group">
               <label for="importPassword">Password (if encrypted)</label>
@@ -479,6 +440,7 @@
             </div>
             <button type="submit" class="update-button">Load Account</button>
           </form>
+          <a class="last-item" href="#"> </a>
         </div>
       </div>
 
@@ -493,33 +455,30 @@
           <!-- Add header actions container for the edit button and send money button -->
 
           <div class="header-actions">
-            <button
-              class="icon-button send-money-icon"
-              id="chatSendMoneyButton"
-              aria-label="Send money"
-            ></button>
-            <button
-              class="icon-button edit-icon"
-              id="chatEditButton"
-              aria-label="Edit contact"
-            ></button>
+            <button class="icon-button send-money-icon" id="chatSendMoneyButton" aria-label="Send money"></button>
+            <button class="icon-button edit-icon" id="chatEditButton" aria-label="Edit contact"></button>
+            <button class="icon-button add-friend-icon" id="addFriendButtonChat" aria-label="Add friend"></button>
           </div>
         </div>
         <div class="messages-container">
           <div class="messages-list"></div>
         </div>
         <div class="message-input-container">
-          <textarea
-            class="message-input"
-            placeholder="Type a message..."
-            maxlength="2000"
-          ></textarea>
+          <div class="message-input-wrapper">
+            <textarea class="message-input" placeholder="Type a message..." maxlength="2000"></textarea>
+            <div class="toll-container">
+              <span class="toll-label">Toll:</span>
+              <span class="toll-value" id="tollValue"></span>
+            </div>
+          </div>
+          <input type="hidden" id="retryOfTxId" />
           <button class="send-button" id="handleSendMessage">
             <svg viewBox="0 0 24 24">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
             </svg>
           </button>
         </div>
+        <a class="last-item" href="#"> </a>
       </div>
 
       <!-- Contact Info Modal -->
@@ -529,19 +488,11 @@
           <div class="modal-title">Contact Info</div>
           <!-- Add header actions container -->
           <div class="header-actions">
-            <button
-              class="icon-button chat-icon"
-              id="contactInfoChatButton"
-              aria-label="Open chat"
-            ></button>
-            <button
-              class="icon-button send-money-icon"
-              id="contactInfoSendButton"
-              aria-label="Send money"
-            ></button>
+            <button class="icon-button chat-icon" id="contactInfoChatButton" aria-label="Open chat"></button>
+            <button class="icon-button send-money-icon" id="contactInfoSendButton" aria-label="Send money"></button>
             <button
               class="icon-button add-friend-icon"
-              id="addFriendButton"
+              id="addFriendButtonContactInfo"
               aria-label="Add friend"
             ></button>
           </div>
@@ -569,11 +520,7 @@
               <div class="contact-info-label">Name</div>
               <div class="contact-info-value-container">
                 <div class="contact-info-value" id="contactInfoName"></div>
-                <button
-                  class="icon-button edit-icon"
-                  id="nameEditButton"
-                  aria-label="Edit name"
-                ></button>
+                <button class="icon-button edit-icon" id="nameEditButton" aria-label="Edit name"></button>
               </div>
             </div>
             <div class="contact-info-item">
@@ -593,6 +540,51 @@
               <div class="contact-info-value" id="contactInfoX"></div>
             </div>
           </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Friend Modal -->
+      <div class="modal" id="friendModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeFriendModal"></button>
+          <div class="modal-title">Friend Status</div>
+        </div>
+        <div class="modal-content">
+          <form id="friendForm">
+            <div class="radio-group">
+              <label class="radio-option status-3">
+                <input type="radio" name="friendStatus" value="3" checked />
+                <div class="radio-content">
+                  <span class="radio-label">Friend</span>
+                  <span class="radio-description">Share my profile info and no toll required</span>
+                </div>
+              </label>
+              <label class="radio-option status-2">
+                <input type="radio" name="friendStatus" value="2" />
+                <div class="radio-content">
+                  <span class="radio-label">Acquaintance</span>
+                  <span class="radio-description">No toll required</span>
+                </div>
+              </label>
+              <label class="radio-option status-1">
+                <input type="radio" name="friendStatus" value="1" />
+                <div class="radio-content">
+                  <span class="radio-label">Other</span>
+                  <span class="radio-description">Toll required</span>
+                </div>
+              </label>
+              <label class="radio-option status-0">
+                <input type="radio" name="friendStatus" value="0" />
+                <div class="radio-content">
+                  <span class="radio-label">Blocked</span>
+                  <span class="radio-description">Cannot send me messages</span>
+                </div>
+              </label>
+            </div>
+            <button type="submit" class="update-button">Update</button>
+          </form>
+          <a class="last-item" href="#"></a>
         </div>
       </div>
 
@@ -625,17 +617,10 @@
                 style="color: #007bff; margin-top: 4px; flex-shrink: 0"
               ></button>
             </div>
-            <div
-              id="qrcode"
-              style="margin-top: 1rem; display: flex; justify-content: center"
-            ></div>
+            <div id="qrcode" style="margin-top: 1rem; display: flex; justify-content: center"></div>
 
             <!-- QR Code Preview (Moved here) -->
-            <div
-              id="qrDataPreview"
-              class="form-control qr-data-preview"
-              style="display: none"
-            >
+            <div id="qrDataPreview" class="form-control qr-data-preview" style="display: none">
               <!-- Error messages will be placed here directly by JS -->
             </div>
           </div>
@@ -668,12 +653,31 @@
             ></textarea>
           </div>
         </div>
+        <a class="last-item" href="#"> </a>
       </div>
 
-      <!-- Send Modal -->
-      <div class="modal fixed-header" id="sendModal">
+      <!-- History Modal -->
+      <div class="modal fixed-header" id="historyModal">
         <div class="modal-header">
-          <button class="back-button" id="closeSendModal"></button>
+          <button class="back-button" id="closeHistoryModal"></button>
+          <div class="modal-title">Transaction History</div>
+        </div>
+        <div class="form-container">
+          <div class="form-group">
+            <label for="historyAsset">Asset</label>
+            <select id="historyAsset" class="form-control"></select>
+          </div>
+          <div class="transaction-list" id="transactionList">
+            <!-- Transactions will be populated here -->
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Send Asset Form Modal -->
+      <div class="modal fixed-header" id="sendAssetFormModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeSendAssetFormModal"></button>
           <div class="modal-title">Send</div>
         </div>
         <div class="form-container">
@@ -684,11 +688,7 @@
             </div>
             <div class="form-group">
               <label for="sendToAddress"
-                >Recipient
-                <span
-                  id="sendToAddressError"
-                  style="color: #dc3545; display: none"
-                ></span
+                >Recipient <span id="sendToAddressError" style="color: #dc3545; display: none"></span
               ></label>
               <div style="display: flex; align-items: center; gap: 0.5rem">
                 <input
@@ -697,6 +697,8 @@
                   class="form-control"
                   placeholder="Enter username or address"
                   required
+                  pattern="[a-zA-Z0-9]*"
+                  inputmode="text"
                   style="flex: 1"
                 />
                 <button
@@ -706,30 +708,14 @@
                   title="Upload QR Code"
                   style="flex-shrink: 0"
                 >
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="24"
-                    height="24"
-                    style="fill: #007bff"
-                  >
+                  <svg viewBox="0 0 24 24" width="24" height="24" style="fill: #007bff">
                     <path
                       d="M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z"
                     />
                   </svg>
                 </button>
-                <button
-                  type="button"
-                  id="scanQRButton"
-                  class="icon-button"
-                  title="Scan QR Code"
-                  style="flex-shrink: 0"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="24"
-                    height="24"
-                    style="fill: #007bff"
-                  >
+                <button type="button" id="scanQRButton" class="icon-button" title="Scan QR Code" style="flex-shrink: 0">
+                  <svg viewBox="0 0 24 24" width="24" height="24" style="fill: #007bff">
                     <path
                       d="M3,3 L10,3 L10,10 L3,10 Z M5,5 L5,8 L8,8 L8,5 Z M14,3 L21,3 L21,10 L14,10 Z M16,5 L16,8 L19,8 L19,5 Z M3,14 L10,14 L10,21 L3,21 Z M5,16 L5,19 L8,19 L8,16 Z M14,14 L21,14 L21,21 L14,21 Z M16,16 L16,19 L19,19 L19,16 Z M11,3 L13,3 L13,10 L11,10 Z M11,14 L13,14 L13,21 L11,21 Z M3,11 L10,11 L10,13 L3,13 Z M14,11 L21,11 L21,13 L14,13 Z"
                     />
@@ -740,75 +726,65 @@
                   type="file"
                   id="qrFileInput"
                   accept="image/*"
-                  style="
-                    display: none;
-                    position: absolute;
-                    width: 1px;
-                    height: 1px;
-                    overflow: hidden;
-                  "
+                  style="display: none; position: absolute; width: 1px; height: 1px; overflow: hidden"
                   aria-hidden="true"
                 />
               </div>
             </div>
             <div class="form-group">
               <label for="sendAmount">Amount</label>
+              <div class="amount-container">
+                <input
+                  type="number"
+                  id="sendAmount"
+                  class="form-control"
+                  step="any"
+                  min="0.000000000000000001"
+                  required
+                />
+                <!-- add button to toggle between LIB and USD -->
+                <button id="toggleBalance" class="toggle-balance">
+                  <span id="balanceSymbol">LIB</span>
+                </button>
+              </div>
+              <div id="balanceWarning" class="balance-warning"></div>
               <div id="availableBalance" class="available-balance">
                 <div class="balance-info">
-                  <span
-                    >Available: <span id="balanceAmount">0.00</span>
-                    <span id="balanceSymbol"></span
-                  ></span>
-                  <span class="fee-info"
-                    >Fee: <span id="transactionFee">0.00</span> LIB</span
-                  >
+                  <span>Available: <span id="balanceAmount">0.00 LIB</span></span>
+                  <span class="fee-info">Fee: <span id="transactionFee">0.00 LIB</span></span>
                 </div>
               </div>
-              <input
-                type="number"
-                id="sendAmount"
-                class="form-control"
-                step="any"
-                min="0.000000000000000001"
-                required
-              />
-              <div id="balanceWarning" class="balance-warning"></div>
             </div>
             <div class="form-group">
               <label for="sendMemo">Memo (Optional)</label>
-              <textarea
-                id="sendMemo"
-                class="form-control"
-                maxlength="2000"
-              ></textarea>
+              <textarea id="sendMemo" class="form-control" maxlength="2000"></textarea>
+              <div class="toll-container" id="memoTollContainer">
+                <span class="toll-memo" id="tollMemo"></span>
+              </div>
             </div>
+            <input type="hidden" id="retryOfPaymentTxId" />
             <button type="submit" class="update-button">Send</button>
           </form>
 
           <!-- QR Scan Container -->
-          <div
-            id="qrScannerContainer"
-            class="qr-scanner-container"
-            style="display: none"
-          >
+          <div id="qrScannerContainer" class="qr-scanner-container" style="display: none">
             <video id="qrVideo" playsinline autoplay></video>
             <div class="scanner-overlay">
               <div class="scanner-guide"></div>
             </div>
             <div class="scanner-controls">
               <button id="closeScanner" class="scanner-button">Cancel</button>
-              <button id="switchCamera" class="scanner-button">
-                Switch Camera
-              </button>
+              <button id="switchCamera" class="scanner-button">Switch Camera</button>
             </div>
           </div>
         </div>
+        <a class="last-item" href="#"> </a>
       </div>
 
-      <!-- Send Confirmation Modal -->
-      <div class="modal fixed-header" id="sendConfirmationModal">
+      <!-- Send Asset Confirmation Modal -->
+      <div class="modal fixed-header" id="sendAssetConfirmModal">
         <div class="modal-header">
-          <button class="back-button" id="closeSendConfirmationModal"></button>
+          <button class="back-button" id="closeSendAssetConfirmModal"></button>
           <div class="modal-title">Confirm Transaction</div>
         </div>
         <div class="form-container">
@@ -830,28 +806,10 @@
               <div id="confirmMemo" class="confirm-value"></div>
             </div>
           </div>
-          <button id="confirmSendButton" class="update-button">
-            Confirm Send
-          </button>
+          <button id="confirmSendButton" class="update-button">Confirm Send</button>
           <button id="cancelSendButton" class="secondary-button">Cancel</button>
         </div>
-      </div>
-
-      <!-- History Modal -->
-      <div class="modal fixed-header" id="historyModal">
-        <div class="modal-header">
-          <button class="back-button" id="closeHistoryModal"></button>
-          <div class="modal-title">Transaction History</div>
-        </div>
-        <div class="form-container">
-          <div class="form-group">
-            <label for="historyAsset">Asset</label>
-            <select id="historyAsset" class="form-control"></select>
-          </div>
-          <div class="transaction-list" id="transactionList">
-            <!-- Transactions will be populated here -->
-          </div>
-        </div>
+        <a class="last-item" href="#"> </a>
       </div>
 
       <!-- Export Modal -->
@@ -873,6 +831,7 @@
             </div>
             <button type="submit" class="update-button">Download Data</button>
           </form>
+          <a class="last-item" href="#"> </a>
         </div>
       </div>
 
@@ -886,9 +845,8 @@
           <div id="gatewayList" class="gateway-list">
             <!-- Gateway items will be populated here -->
           </div>
-          <button id="addGatewayButton" class="update-button">
-            Add Gateway
-          </button>
+          <button id="addGatewayButton" class="update-button">Add Gateway</button>
+          <a class="last-item" href="#"> </a>
         </div>
       </div>
 
@@ -903,13 +861,7 @@
             <input type="hidden" id="gatewayEditIndex" value="-1" />
             <div class="form-group">
               <label for="gatewayName">Name</label>
-              <input
-                type="text"
-                id="gatewayName"
-                class="form-control"
-                placeholder="My Gateway"
-                required
-              />
+              <input type="text" id="gatewayName" class="form-control" placeholder="My Gateway" required />
             </div>
             <div class="form-group">
               <label for="gatewayProtocol">Protocol</label>
@@ -920,26 +872,15 @@
             </div>
             <div class="form-group">
               <label for="gatewayHost">Host</label>
-              <input
-                type="text"
-                id="gatewayHost"
-                class="form-control"
-                placeholder="example.com"
-                required
-              />
+              <input type="text" id="gatewayHost" class="form-control" placeholder="example.com" required />
             </div>
             <div class="form-group">
               <label for="gatewayPort">Port</label>
-              <input
-                type="number"
-                id="gatewayPort"
-                class="form-control"
-                placeholder="3030"
-                required
-              />
+              <input type="number" id="gatewayPort" class="form-control" placeholder="3030" required />
             </div>
             <button type="submit" class="update-button">Save</button>
           </form>
+          <a class="last-item" href="#"> </a>
         </div>
       </div>
 
@@ -952,19 +893,13 @@
         <div class="form-container">
           <div style="padding: 1rem">
             <p>
-              Before removing your account, please export your account data to
-              ensure you have a backup. This action only removes the account
-              from this device and not from the network. You can use the account
-              again after restoring it from the backup file.
+              Before removing your account, please export your account data to ensure you have a backup. This action
+              only removes the account from this device and not from the network. You can use the account again after
+              restoring it from the backup file.
             </p>
-            <button
-              id="confirmRemoveAccount"
-              class="update-button"
-              style="margin-top: 1rem"
-            >
-              Remove
-            </button>
+            <button id="confirmRemoveAccount" class="update-button" style="margin-top: 1rem">Remove</button>
           </div>
+          <a class="last-item" href="#"> </a>
         </div>
       </div>
 
@@ -989,6 +924,7 @@
           <div id="searchResults" class="chat-list">
             <!-- Results will be populated here -->
           </div>
+          <a class="last-item" href="#"> </a>
         </div>
       </div>
 
@@ -1013,6 +949,7 @@
           <div id="contactSearchResults" class="chat-list">
             <!-- Contact search results will be populated here -->
           </div>
+          <a class="last-item" href="#"> </a>
         </div>
       </div>
 
@@ -1043,10 +980,7 @@
                     id="editContactNameInput"
                     placeholder="Enter contact name"
                   />
-                  <button
-                    class="field-action-button clear"
-                    aria-label="Add"
-                  ></button>
+                  <button class="field-action-button clear" aria-label="Add"></button>
                 </div>
               </div>
             </div>
@@ -1067,6 +1001,7 @@
               <div class="contact-info-value" id="editContactX"></div>
             </div>
           </div>
+          <a class="last-item" href="#"> </a>
         </div>
       </div>
 
@@ -1074,14 +1009,11 @@
       <div class="modal fixed-header" id="validatorModal">
         <div class="modal-header">
           <button class="back-button" id="closeValidatorModal"></button>
-          <div class="modal-title">Validator Options</div>
+          <div class="modal-title">Validator Staking</div>
         </div>
         <div class="modal-content">
           <!-- Loading State -->
-          <div
-            id="validator-loading"
-            style="text-align: center; padding: 1rem; display: none"
-          >
+          <div id="validator-loading" style="text-align: center; padding: 1rem; display: none">
             <div class="spinner"></div>
             <!-- Add spinner styles if needed -->
             Loading validator details...
@@ -1091,28 +1023,44 @@
           <div
             id="validator-error-message"
             class="error-message"
-            style="
-              display: none;
-              padding: 1rem;
-              color: #dc3545;
-              text-align: center;
-            "
+            style="display: none; padding: 1rem; color: #dc3545; text-align: center"
           >
             <!-- Error text will be populated here -->
           </div>
 
           <!-- Validator Details Display Area -->
-          <div
-            id="validator-details"
-            class="validator-info-container"
-            style="display: block"
-          >
+          <div id="validator-details" class="validator-info-container" style="display: block">
             <div class="info-section">
               <h4>Your Stake Info</h4>
+              <!-- New Skeleton Bars for Pending Nominee Info -->
+              <div
+                class="skeleton-item"
+                id="pending-nominee-skeleton-1"
+                style="
+                  display: none;
+                  height: 22px;
+                  width: 100%;
+                  margin-top: 4px;
+                  margin-bottom: 8px;
+                  background-color: #e0e0e0;
+                  padding: 0 5px;
+                  box-sizing: border-box;
+                "
+              >
+                <span
+                  id="pending-tx-text-in-bar"
+                  style="
+                    display: none;
+                    font-size: 0.75em;
+                    color: #333;
+                    line-height: 22px;
+                    width: 100%;
+                    text-align: center;
+                  "
+                ></span>
+              </div>
               <div class="info-item vertical-layout">
-                <span class="info-label" id="validator-nominee-label"
-                  >Nominated Validator:</span
-                >
+                <span class="info-label" id="validator-nominee-label">Nominated Validator:</span>
                 <span class="info-value code" id="validator-nominee"></span>
               </div>
               <div class="info-item" id="validator-user-stake-lib-item">
@@ -1129,17 +1077,11 @@
               <h4>Network Staking Info</h4>
               <div class="info-item">
                 <span class="info-label">Min Stake Required (USD):</span>
-                <span
-                  class="info-value"
-                  id="validator-network-stake-usd"
-                ></span>
+                <span class="info-value" id="validator-network-stake-usd"></span>
               </div>
               <div class="info-item">
                 <span class="info-label">Min Stake Required (LIB):</span>
-                <span
-                  class="info-value"
-                  id="validator-network-stake-lib"
-                ></span>
+                <span class="info-value" id="validator-network-stake-lib"></span>
               </div>
               <div class="info-item">
                 <span class="info-label">Stability Factor (USD/LIB):</span>
@@ -1158,23 +1100,66 @@
 
           <div class="action-item">
             <button id="openStakeModal" class="button full-width">Stake</button>
-            <p class="action-description">
-              Delegate LIB to a validator node to earn rewards.
-            </p>
+            <p class="action-description">Delegate LIB to a validator node to earn rewards.</p>
           </div>
 
           <div class="action-item">
-            <button
-              id="submitUnstake"
-              class="button full-width secondary-button"
-            >
-              Unstake
-            </button>
-            <p class="action-description">
-              Withdraw your delegated LIB from a validator node.
-            </p>
+            <button id="submitUnstake" class="button full-width secondary-button">Unstake</button>
+            <p class="action-description">Withdraw your delegated LIB from a validator node.</p>
           </div>
         </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Toll Modal -->
+      <div class="modal" id="tollModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeTollModal"></button>
+          <div class="modal-title">Toll Settings</div>
+        </div>
+        <div class="form-container">
+          <!-- Current Toll Amount Display Area - Moved outside the form -->
+          <div class="toll-display-area">
+            <label for="currentTollValue">Current Toll Amount</label>
+            <div class="form-text help-text">
+              This is the toll amount a sender must pay to send a message or payment to you.
+            </div>
+            <div id="tollAmountLIB" class="current-toll-value-box">
+              <span id="tollAmountLIB">N/A LIB</span>
+            </div>
+            <div id="tollAmountUSD" class="current-toll-value-box">
+              <span id="tollAmountUSD">N/A USD</span>
+            </div>
+          </div>
+
+          <form id="tollForm">
+            <div class="form-group">
+              <label for="newTollAmountInput">Set New Toll Amount</label>
+              <div class="form-text help-text">
+                Sets a new toll amount a sender must pay to send a message or payment to you. All tolls are received in
+                LIB. If you enter a USD amount, you will receive the equivalent LIB value at market price. Aside from 0
+                (no toll), there is a minimum toll as shown below.
+              </div>
+              <div class="amount-container">
+                <input
+                  type="number"
+                  id="newTollAmountInput"
+                  class="form-control"
+                  placeholder="Enter new amount"
+                  step="any"
+                  min="0"
+                  required
+                />
+                <button type="button" id="toggleTollCurrency" class="toggle-balance">
+                  <span id="tollCurrencySymbol">LIB</span>
+                </button>
+              </div>
+              <div id="minTollDisplay" class="form-text help-text">Minimum toll: Loading...</div>
+            </div>
+            <button type="submit" id="saveNewTollButton" class="update-button">Save Changes</button>
+          </form>
+        </div>
+        <a class="last-item" href="#"> </a>
       </div>
 
       <!-- Stake Modal -->
@@ -1185,7 +1170,7 @@
         </div>
         <div class="form-container">
           <form id="stakeForm">
-            <div class="form-group">
+            <div class="form-group" id="stakeNodeAddressGroup">
               <label for="stakeNodeAddress">Validator Node Address</label>
               <div style="display: flex; align-items: center; gap: 0.5rem">
                 <input
@@ -1203,12 +1188,7 @@
                   title="Upload Stake Address QR"
                   style="flex-shrink: 0"
                 >
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="24"
-                    height="24"
-                    style="fill: #007bff"
-                  >
+                  <svg viewBox="0 0 24 24" width="24" height="24" style="fill: #007bff">
                     <path
                       d="M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z"
                     />
@@ -1221,12 +1201,7 @@
                   title="Scan Stake Address QR"
                   style="flex-shrink: 0"
                 >
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="24"
-                    height="24"
-                    style="fill: #007bff"
-                  >
+                  <svg viewBox="0 0 24 24" width="24" height="24" style="fill: #007bff">
                     <path
                       d="M3,3 L10,3 L10,10 L3,10 Z M5,5 L5,8 L8,8 L8,5 Z M14,3 L21,3 L21,10 L14,10 Z M16,5 L16,8 L19,8 L19,5 Z M3,14 L10,14 L10,21 L3,21 Z M5,16 L5,19 L8,19 L8,16 Z M14,14 L21,14 L21,21 L14,21 Z M16,16 L16,19 L19,19 L19,16 Z M11,3 L13,3 L13,10 L11,10 Z M11,14 L13,14 L13,21 L11,21 Z M3,11 L10,11 L10,13 L3,13 Z M14,11 L21,11 L21,13 L14,13 Z"
                     />
@@ -1237,28 +1212,15 @@
                   type="file"
                   id="stakeQrFileInput"
                   accept="image/*"
-                  style="
-                    display: none;
-                    position: absolute;
-                    width: 1px;
-                    height: 1px;
-                    overflow: hidden;
-                  "
+                  style="display: none; position: absolute; width: 1px; height: 1px; overflow: hidden"
                   aria-hidden="true"
                 />
               </div>
-              <div
-                id="stakeNodeAddressWarning"
-                class="validation-warning"
-                style="display: none"
-              ></div>
+              <div id="stakeNodeAddressWarning" class="validation-warning" style="display: none"></div>
             </div>
             <div class="form-group">
               <label for="stakeAmount">Stake Amount</label>
-              <div
-                id="stakeAvailableBalanceDisplay"
-                class="available-balance-display"
-              ></div>
+              <div id="stakeAvailableBalanceDisplay" class="available-balance-display"></div>
               <input
                 type="number"
                 id="stakeAmount"
@@ -1268,16 +1230,11 @@
                 min="0.000000000000000001"
                 step="any"
               />
-              <div
-                id="stakeAmountWarning"
-                class="validation-warning"
-                style="display: none"
-              ></div>
+              <div id="stakeAmountWarning" class="validation-warning" style="display: none"></div>
             </div>
-            <button type="submit" id="submitStake" class="button full-width">
-              Submit Stake
-            </button>
+            <button type="submit" id="submitStake" class="button full-width">Submit Stake</button>
           </form>
+          <a class="last-item" href="#"> </a>
         </div>
       </div>
 
@@ -1294,19 +1251,72 @@
           <div class="scan-highlight" id="scan-highlight"></div>
           <canvas id="canvas"></canvas>
         </div>
+        <a class="last-item" href="#"> </a>
       </div>
+
+      <!-- Failed Message Modal -->
+      <div class="modal modal-dialog" id="failedMessageModal">
+        <div class="dialog-box-content">
+          <div class="modal-header">
+            <button class="back-button" id="closeFailedMessageModal"></button>
+            <div class="modal-title">Failed Message</div>
+          </div>
+          <div class="form-container">
+            <div class="modal-actions">
+              <button type="button" class="secondary-button delete-button">Delete</button>
+              <button type="button" class="update-button retry-button">Edit & Resend</button>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Failed Payment Modal -->
+      <div class="modal modal-dialog" id="failedPaymentModal">
+        <div class="dialog-box-content">
+          <div class="modal-header">
+            <button class="back-button" id="closeFailedPaymentModal"></button>
+            <div class="modal-title">Failed Transaction</div>
+          </div>
+          <div class="form-container">
+            <div class="modal-actions">
+              <button type="button" class="secondary-button delete-button">Delete</button>
+              <button type="button" class="update-button retry-button">Edit & Resend</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Invite Modal -->
+      <div class="modal" id="inviteModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeInviteModal"></button>
+          <div class="modal-title">Invite Friends</div>
+        </div>
+        <div class="form-container">
+          <p class="modal-summary">
+            Enter an email, phone number, or both. If both are provided, an invitation will be sent to each.
+          </p>
+          <form id="inviteForm">
+            <div class="form-group">
+              <label for="inviteEmail">Email</label>
+              <input type="email" id="inviteEmail" class="form-control" placeholder="Enter email address" />
+            </div>
+            <div class="form-group">
+              <label for="invitePhone">Phone Number</label>
+              <input type="tel" id="invitePhone" class="form-control" placeholder="Enter phone number" />
+            </div>
+            <button type="submit" class="update-button">Send Invitation</button>
+          </form>
+          <a class="last-item" href="#"></a>
+        </div>
+      </div>
+
+      <a class="last-item" href="#"> </a>
     </div>
     <!-- Audio element for notification sounds -->
-    <audio
-      id="notificationSound"
-      src="media/chatSound.mp3"
-      preload="auto"
-    ></audio>
-    <audio
-      id="transferSound"
-      src="media/paymentSound.mp3"
-      preload="auto"
-    ></audio>
+    <audio id="notificationSound" src="media/chatSound.mp3" preload="auto"></audio>
+    <audio id="transferSound" src="media/paymentSound.mp3" preload="auto"></audio>
     <!-- Toast container -->
     <div class="toast-container" id="toastContainer"></div>
   </body>

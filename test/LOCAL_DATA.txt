@@ -68,7 +68,8 @@ LocalStore key "username_netid"; gets read into myData global variable in app.js
           "symbol": "LIB",                                  // optional, symbol of asset that was sent or received
           "timestamp": 1703261400000,
           "sent_timestamp": 1703261400000,
-          "my": false
+          "my": false,
+          "status": "sent"                                  // could be "sent" or "failed"
         }
       ],
       "email": "alice@example.com",
@@ -82,6 +83,9 @@ LocalStore key "username_netid"; gets read into myData global variable in app.js
         "linkedin": "tomsun",
         "x": "TomSun"
       }
+      "toll": 0n, // this is the toll amount for sending messages to this contact; set by the user and will be a bigInt
+      "tollRequiredToSend:": 1, // 0 for no toll, 1 for toll required, 2 blocking
+      "tollRequiredToReceive": 1, // 0 for no toll, 1 for toll required, 2 blocking  
     }
   },
   "chats": [    // latest message timestamp sent or received from each contact is listed here; ordered with most recent at the top
@@ -124,7 +128,8 @@ LocalStore key "username_netid"; gets read into myData global variable in app.js
   },
   "settings": {
     "toll": 2,
-    "encrypt": true
+    "encrypt": true,
+    "noticets": 1749764951000  // millisecond timestamp of when the user was shown the system notice
   }
 }
 
