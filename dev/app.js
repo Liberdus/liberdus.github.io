@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'j'
+const version = 'k'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -4027,7 +4027,7 @@ async function injectTx(tx, txid) {
         tx.type === 'deposit_stake' ||
         tx.type === 'withdraw_stake'
       ) {
-        pendingTxData.to = tx.to;
+        pendingTxData.to = normalizeAddress(tx.to);
       }
       myData.pending.push(pendingTxData);
     } else {
@@ -7714,7 +7714,7 @@ class ChatModal {
       // TODO: will need to query network and receiver account where we validate
       // TODO: decided to query everytime we do chatModal.open and save as global variable. We don't need to clear it but we can clear it when closing the modal but should get reset when opening the modal again anyway
       let tollInLib =
-        myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : await convertTollToLib(this.toll, this.tollUnit);
+        myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : this.toll
 
       const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
       const txid = await signObj(chatMessageObj, keys);
@@ -9368,23 +9368,4 @@ function normalizeEmail(s) {
   // Keep only valid email characters
   s = s.replace(/[^a-z0-9._%+-@]/g, '');  
   return s;
-}
-
-/**
- * Converts toll to LIB
- * @param {bigint} toll - The toll amount
- * @param {string} tollUnit - The unit of the toll
- * @returns {Promise<bigint>} The toll amount in LIB
- */
-async function convertTollToLib(toll, tollUnit) {
-  await getNetworkParams();
-  const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
-
-  // If toll is in USD, convert to LIB
-  if (tollUnit === 'USD') {
-    return toll / scalabilityFactor;
-  }
-  
-  // If already in LIB, return as is
-  return toll;
 }
