@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -2321,10 +2321,7 @@ function fillStakeAddressFromQR(data) {
  */
 async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
   if (balanceWarning) balanceWarning.style.display = 'none';
-  if (!amount) {
-    console.warn('[validateBalance] amount is 0');
-    return false;
-  } else if (amount < 0) {
+  if (amount < 0n) {
     console.warn('[validateBalance] amount is negative');
     if (balanceWarning) balanceWarning.style.display = 'block';
     balanceWarning.textContent = 'Amount cannot be negative';
@@ -2334,7 +2331,7 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
   await getNetworkParams();
   const asset = myData.wallet.assets[assetIndex];
   const feeInWei = parameters.current.transactionFee || 1n * wei;
-  const totalRequired = bigxnum2big(1n, amount.toString()) + feeInWei;
+  const totalRequired = amount + feeInWei;
   const hasInsufficientBalance = BigInt(asset.balance) < totalRequired;
 
   if (balanceWarning) {
@@ -2528,6 +2525,16 @@ async function handleSendAsset(event) {
     // Send the transaction using postAssetTransfer
     const response = await postAssetTransfer(toAddress, amount, payload, keys);
 
+    if (!response || !response.result || !response.result.success) {
+      const str = response.result.reason;
+      const regex = /toll/i;
+
+      if (str.match(regex) || str.match(/at least/i)) {
+       await sendAssetFormModal.reopen();
+      }
+      throw new Error('Transaction failed');
+    }
+
     /* if (!response || !response.result || !response.result.success) {
             alert('Transaction failed: ' + response.result.reason);
             return;
@@ -2620,7 +2627,7 @@ async function handleSendAsset(event) {
 */
   } catch (error) {
     console.error('Transaction error:', error);
-    showToast('Transaction failed. Please try again.', 0, 'error');
+    //showToast('Transaction failed. Please try again.', 0, 'error');
   }
 }
 handleSendAsset.timestamp = getCorrectedTimestamp();
@@ -2874,9 +2881,6 @@ class FriendModal {
     button.classList.remove('status-0', 'status-1', 'status-2', 'status-3');
     // Add the current status class
     button.classList.add(`status-${contact.friend}`);
-
-    // Simply hide the button if there are no messages
-    button.style.display = contact.messages && contact.messages.length > 0 ? 'block' : 'none';
   }
 }
 
@@ -3128,7 +3132,7 @@ function handleFailedPaymentRetry() {
     retryOfPaymentTxId.value = handleFailedPaymentClick.txid;
 
     // 2. fill in the memo input
-    sendAssetFormModal.querySelector('#sendMemo').value = handleFailedPaymentClick.memo;
+    sendAssetFormModal.memoInput.value = handleFailedPaymentClick?.memo || '';
 
     // 3. fill in the to address input
     // find username in myData.contacts[handleFailedPaymentClick.address].senderInfo.username
@@ -7330,7 +7334,7 @@ class ChatModal {
   /**
    * Opens the chat modal for the given address.
    * @param {string} address - The address of the contact to open the chat modal for.
-   * @returns {void}
+   * @returns {Promise<void>}
    */
   async open(address) {
     friendModal.setAddress(address);
@@ -7622,7 +7626,8 @@ class ChatModal {
         return;
       }
 
-      const sufficientBalance = await validateBalance(this.toll);
+      const amount = this.tollRequiredToSend ? this.toll : 0n;
+      const sufficientBalance = await validateBalance(amount);
       if (!sufficientBalance) {
         showToast('Insufficient balance for toll and fee', 0, 'error');
         this.sendButton.disabled = false;
@@ -7761,6 +7766,7 @@ class ChatModal {
 
       // Call debounced save directly with empty string
       this.debouncedSaveDraft('');
+      contact.draft = '';
 
       // Update the chat modal UI immediately
       this.appendChatModal(); // This should now display the 'sending' message
@@ -7775,6 +7781,12 @@ class ChatModal {
 
       if (!response || !response.result || !response.result.success) {
         console.log('message failed to send', response);
+        const str = response.result.reason;
+        const regex = /toll/i;
+  
+        if (str.match(regex)) {
+          await this.reopen();
+        }
         //let userMessage = 'Message failed to send. Please try again.';
         //const reason = response.result?.reason || '';
 
@@ -7992,7 +8004,7 @@ class ChatModal {
 
       // If the message is a payment message, show the failed history item modal
       if (messageEl.classList.contains('payment-info')) {
-        failedMessageModal.handleFailedPaymentClick(messageEl.dataset.txid, messageEl);
+        handleFailedPaymentClick(messageEl.dataset.txid, messageEl);
       }
 
       // TODO: if message is a payment open sendAssetFormModal and fill with information in the payment message?
@@ -8111,6 +8123,12 @@ class ChatModal {
       // Trigger resize
       this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
     }
+  }
+
+  async reopen() {
+    const tempAddress = this.address;
+    this.close();
+    await this.open(tempAddress);
   }
 }
 
@@ -8368,6 +8386,9 @@ class NewChatModal {
     // Check if contact exists
     if (!chatsData.contacts[recipientAddress]) {
       createNewContact(recipientAddress, username, 2);
+      // TODO: uncomment after backend support updating tollRequired before chatId is created
+      // update to not require toll
+      //friendModal.postUpdateTollRequired(recipientAddress, 0);
     }
     chatsData.contacts[recipientAddress].username = username;
 
@@ -8513,7 +8534,7 @@ class SendAssetFormModal {
 
   /**
    * Opens the send asset modal
-   * @returns {void}
+   * @returns {Promise<void>}
    */
   async open() {
     this.modal.classList.add('active');
@@ -8552,7 +8573,7 @@ class SendAssetFormModal {
 
   /**
    * Closes the send asset modal
-   * @returns {void}
+   * @returns {Promise<void>}
    */
   async close() {
     await updateChatList();
@@ -8968,6 +8989,21 @@ class SendAssetFormModal {
       this.transactionFee.textContent = feeInLIB + ' LIB';
     }
   }
+
+  /**
+   * Reopens the send asset form modal with the previous values
+   * @returns {Promise<void>}
+   */
+  async reopen() {
+    const tempUsername = this.usernameInput?.value;
+    const tempAmount = this.amountInput?.value;
+    const tempMemo = this.memoInput?.value;
+    await this.close();
+    this.username = tempUsername;
+    await this.open();
+    this.amountInput.value = tempAmount;
+    this.memoInput.value = tempMemo || '';
+  }
 }
 
 const sendAssetFormModal = new SendAssetFormModal();
@@ -9097,7 +9133,16 @@ async function checkPendingTransactions() {
             showToast(`Unstake failed: ${failureReason}`, 0, 'error');
           } else if (type === 'deposit_stake') {
             showToast(`Stake failed: ${failureReason}`, 0, 'error');
-          } else if (type === 'toll') {
+          } else if (type === 'message') {
+            if (chatModal.modal.classList.contains('active')) {
+              await chatModal.reopen();
+            }
+          } else if (type === 'transfer') {
+            if (sendAssetFormModal.modal.classList.contains('active')) {
+              await sendAssetFormModal.reopen();
+            }
+          }
+          else if (type === 'toll') {
             showToast(
               `Toll submission failed! Reverting to old toll: ${tollModal.oldToll}. Failure reason: ${failureReason}. `,
               0,
