@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'r'
+const version = 't'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1184,7 +1184,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const welcomeScreenLastItem = document.getElementById('welcomeScreenLastItem');
   welcomeScreenLastItem.focus();
 
-  setupAddToHomeScreen();
+  // Deprecated - do not want to encourage or confuse users with this feature since on IOS uses seperate local storage
+  //setupAddToHomeScreen();
 });
 
 function handleUnload() {
@@ -1255,7 +1256,7 @@ function saveState() {
   }
 }
 
-function setupAddToHomeScreen() {
+/* function setupAddToHomeScreen() {
   // Add to home screen functionality
   let deferredInstallPrompt;
   let addToHomeScreenButton = document.getElementById('addToHomeScreenButton');
@@ -1446,7 +1447,7 @@ function setupAddToHomeScreen() {
       updateButtonVisibility();
     });
   }
-}
+} */
 
 async function updateChatData() {
   let gotChats = 0;
@@ -7640,12 +7641,8 @@ class ChatModal {
     console.log(`[sendReclaimTollTransaction] entering function`);
     await getNetworkParams();
     const currentTime = getCorrectedTimestamp();
-    // use network param instead of hardcoded 7 days
     const networkTollTimeoutInMs = parameters.current.tollTimeout; 
     const timeSinceNewestSentMessage = currentTime - this.newestSentMessage?.timestamp;
-    console.log(`currentTime: ${currentTime}`);
-    console.log(`networkTollTimeoutInMs: ${networkTollTimeoutInMs}`);
-    console.log(`timeSinceNewestSentMessage: ${timeSinceNewestSentMessage}`);
     if (!this.newestSentMessage || timeSinceNewestSentMessage < networkTollTimeoutInMs) {
       console.log(
         `[sendReclaimTollTransaction] timeSinceNewestSentMessage ${timeSinceNewestSentMessage}ms is less than networkTollTimeoutInMs ${networkTollTimeoutInMs}ms, skipping reclaim toll transaction`
