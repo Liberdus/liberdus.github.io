@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'n'
+const version = 'o'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -7638,16 +7638,18 @@ class ChatModal {
    */
   async sendReclaimTollTransaction(contactAddress) {
     console.log(`[sendReclaimTollTransaction] entering function`);
-    const sevenDaysAgo = getCorrectedTimestamp() - /* 7 * 24 * 60 *  */60 * 1000;
+    await getNetworkParams();
+    // use network param instead of hardcoded 7 days
+    const networkTollExpiredInMs = parameters.current.tollTimeOut; 
     console.log(`this.newestSentMessage: ${!!this.newestSentMessage}`);
     console.log(`this.newestSentMessage?.timestamp: ${this.newestSentMessage?.timestamp}`);
-    console.log(`sevenDaysAgo: ${sevenDaysAgo}`);
+    console.log(`networkTollExpiredInMs: ${networkTollExpiredInMs}`);
     console.log(
-      `this.newestSentMessage?.timestamp > sevenDaysAgo: ${this.newestSentMessage?.timestamp < sevenDaysAgo}`
+      `this.newestSentMessage?.timestamp > networkTollExpiredInMs: ${this.newestSentMessage?.timestamp < networkTollExpiredInMs}`
     );
-    if (!this.newestSentMessage || this.newestSentMessage?.timestamp > sevenDaysAgo) {
+    if (!this.newestSentMessage || this.newestSentMessage?.timestamp > networkTollExpiredInMs) {
       console.log(
-        `[sendReclaimTollTransaction] newestSentMessage is null or timestamp is less than 1 minute ago, skipping reclaim toll transaction`
+        `[sendReclaimTollTransaction] newestSentMessage is null or timestamp is less than networkTollExpiredInMs ${networkTollExpiredInMs}ms, skipping reclaim toll transaction`
       );
       return;
     }
