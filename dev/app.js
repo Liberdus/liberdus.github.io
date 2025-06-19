@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'l'
+const version = 'm'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1924,14 +1924,14 @@ function updateTollAmountUI(address) {
   }
   let display;
   if (contact.tollRequiredToSend == 1) {
-    display = `${mainString} (${otherString})`;
+    display = `${mainString} = ${otherString}`;
   } else if (contact.tollRequiredToSend == 2) {
     tollValue.style.color = 'red';
     display = `blocked`;
   } else {
     // light green used to show success
     tollValue.style.color = '#28a745';
-    display = `free (${mainString} (${otherString}))`;
+    display = `free; ${mainString} = ${otherString}`;
   }
   tollValue.textContent = display;
 
@@ -2321,8 +2321,8 @@ function fillStakeAddressFromQR(data) {
  */
 async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
   if (balanceWarning) balanceWarning.style.display = 'none';
+  // not checking for 0 since we allow 0 amount for messages when toll is not required
   if (amount < 0n) {
-    console.warn('[validateBalance] amount is negative');
     if (balanceWarning) balanceWarning.style.display = 'block';
     balanceWarning.textContent = 'Amount cannot be negative';
     return false;
@@ -3681,12 +3681,26 @@ async function processChats(chats, keys) {
           //console.log("payload", payload)
           decryptMessage(payload, keys); // modifies the payload object
           if (payload.senderInfo) {
-//            contact.senderInfo = JSON.parse(JSON.stringify(payload.senderInfo)); // make a copy
             contact.senderInfo = cleanSenderInfo(payload.senderInfo)
             delete payload.senderInfo;
             if (!contact.username && contact.senderInfo.username) {
-              // TODO check the network to see if the username given with the message maps to the address of this contact
-              contact.username = contact.senderInfo.username;
+              // check if the username given with the message maps to the address of this contact
+              const usernameAddress = await getUsernameAddress(contact.senderInfo.username);
+                if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
+                  contact.username = contact.senderInfo.username;
+                } else {
+                  // username doesn't match address so skipping this message
+                  console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
+                  continue;
+                }
+            } else {
+              if(contact.username) {
+                // if we already have the username, we can use it
+                contact.senderInfo.username = contact.username;
+              } else {
+                console.error(`Username not provided in senderInfo.`)
+                continue
+              }
             }
           }
           //  skip if this tx was processed before and is already in contact.messages;
@@ -3743,12 +3757,26 @@ async function processChats(chats, keys) {
           //console.log("payload", payload)
           decryptMessage(payload, keys); // modifies the payload object
           if (payload.senderInfo) {
-//            contact.senderInfo = JSON.parse(JSON.stringify(payload.senderInfo)); // make a copy
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
             if (!contact.username && contact.senderInfo.username) {
-              // TODO check the network to see if the username given with the message maps to the address of this contact
-              contact.username = contact.senderInfo.username;
+              // check if the username given with the message maps to the address of this contact
+              const usernameAddress = await getUsernameAddress(contact.senderInfo.username);
+                if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
+                  contact.username = contact.senderInfo.username;
+                } else {
+                  // username doesn't match address so skipping this message
+                  console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
+                  continue;
+                }
+            } else {
+              if(contact.username) {
+                // if we already have the username, we can use it
+                contact.senderInfo.username = contact.username;
+              } else {
+                console.error(`Username not provided in senderInfo.`)
+                continue
+              }
             }
           }
           // compute the transaction id (txid)
@@ -3890,6 +3918,36 @@ async function processChats(chats, keys) {
     console.log('Updated global chat timestamp to', newTimestamp);
   }
 }
+
+/**
+ * Get the address of a username and return the address if it exists
+ * @param {string} username - The username to check
+ * @returns {Promise<string|null>} The address of the username or null if it doesn't exist
+ */
+async function getUsernameAddress(username) {
+  const usernameBytes = utf82bin(normalizeUsername(username));
+  const usernameHash = hashBytes(usernameBytes);
+  const randomGateway = getGatewayForRequest();
+  if (!randomGateway) {
+    console.error('No gateway available for username check');
+    return null;
+  }
+  try {
+    const response = await fetch(
+      `${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}/address/${usernameHash}`
+    );
+    const data = await response.json();
+    // if address is not present, return null
+    if (!data || !data.address) {
+      return null;
+    }
+    return data.address;
+  } catch (error) {
+    console.log('Error checking username:', error);
+    return null;
+  }
+}
+
 
 `
 The main difference between a chat message and an asset transfer is
@@ -6238,15 +6296,19 @@ class TollModal {
     this.oldToll = null;
     this.minToll = null; // Will be set from network account
     this.minTollDisplay = document.getElementById('minTollDisplay');
+    this.newTollAmountInputElement = document.getElementById('newTollAmountInput');
+    this.toggleTollCurrencyElement = document.getElementById('toggleTollCurrency');
+    this.openTollElement = document.getElementById('openToll');
+    this.warningMessageElement = document.getElementById('tollWarningMessage');
+    this.saveButton = document.getElementById('saveNewTollButton');
   }
 
   load() {
-    document.getElementById('openToll').addEventListener('click', () => this.open());
+    this.openTollElement.addEventListener('click', () => this.open());
     document.getElementById('closeTollModal').addEventListener('click', () => this.close());
-    document
-      .getElementById('toggleTollCurrency')
-      .addEventListener('click', (event) => this.handleToggleTollCurrency(event));
+    this.toggleTollCurrencyElement.addEventListener('click', (event) => this.handleToggleTollCurrency(event));
     document.getElementById('tollForm').addEventListener('submit', (event) => this.saveAndPostNewToll(event));
+    this.newTollAmountInputElement.addEventListener('input', () => this.updateSaveButtonState());
   }
 
   open() {
@@ -6262,7 +6324,10 @@ class TollModal {
 
     this.currentCurrency = 'LIB'; // Reset currency state
     document.getElementById('tollCurrencySymbol').textContent = this.currentCurrency;
-    document.getElementById('newTollAmountInput').value = ''; // Clear input field
+    this.newTollAmountInputElement.value = ''; // Clear input field
+    this.warningMessageElement.textContent = '';
+    this.warningMessageElement.style.display = 'none';
+    this.saveButton.disabled = true;
 
     // Update min toll display under input
     const minTollValue = parseFloat(big2str(this.minToll, 18)).toFixed(6); // Show 6 decimal places
@@ -6313,6 +6378,9 @@ class TollModal {
     const newTollAmountInput = document.getElementById('newTollAmountInput');
     let newTollValue = parseFloat(newTollAmountInput.value);
 
+    // disable submit button
+    this.saveButton.disabled = true;
+
     if (isNaN(newTollValue) || newTollValue < 0) {
       showToast('Invalid toll amount entered.', 0, 'error');
       return;
@@ -6323,7 +6391,7 @@ class TollModal {
     // Check if the toll is non-zero but less than minimum
     if (newToll > 0n) {
       if (this.currentCurrency === 'LIB' && newToll < this.minToll) {
-        showToast(`Toll must be at least ${parseFloat(big2str(this.minToll, 18)).toFixed(6)} LIB`, 0, 'error');
+        showToast(`Toll must be at least ${parseFloat(big2str(this.minToll, 18)).toFixed(6)} LIB or 0 LIB`, 0, 'error');
         return;
       }
       if (this.currentCurrency === 'USD') {
@@ -6331,7 +6399,7 @@ class TollModal {
         const newTollLIB = bigxnum2big(newToll, (1 / scalabilityFactor).toString());
         if (newTollLIB < this.minToll) {
           const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
-          showToast(`Toll must be at least ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD`, 0, 'error');
+          showToast(`Toll must be at least ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD or 0 USD`, 0, 'error');
           return;
         }
       }
@@ -6362,6 +6430,8 @@ class TollModal {
       console.error(`Toll submission failed for txid: ${response.txid}`);
       return;
     }
+
+    this.newTollAmountInputElement.value = '';
 
     // Update the display for tollAmountLIB and tollAmountUSD
     this.updateTollDisplay(newToll, this.currentCurrency);
@@ -6423,6 +6493,74 @@ class TollModal {
     const txid = await signObj(tollTx, myAccount.keys);
     const response = await injectTx(tollTx, txid);
     return response;
+  }
+
+  /**
+   * Gets the warning message based on input validation
+   * @returns {string|null} - The warning message or null if no warning
+   */
+  getWarningMessage() {
+    const value = this.newTollAmountInputElement.value;
+
+    // return null if just . or ,
+    if (value.trim() === '.' || value.trim() === ',') {
+      return null;
+    }
+
+    // check if input is empty or only whitespace
+    if (value.trim() === '') {
+      return 'Please enter a toll amount';
+    }
+
+    const newTollValue = parseFloat(value);
+
+    // Check if it's a valid number
+    if (isNaN(newTollValue) || newTollValue < 0) {
+      return 'Please enter a valid positive number';
+    }
+
+    // Allow zero toll
+    if (newTollValue === 0) {
+      return null;
+    }
+
+    const newToll = bigxnum2big(wei, value);
+
+    // Check minimum toll requirements
+    if (this.currentCurrency === 'LIB') {
+      if (newToll < this.minToll) {
+        return `Toll must be at least ${parseFloat(big2str(this.minToll, 18)).toFixed(6)} LIB or 0 LIB`;
+      }
+    } else {
+      const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+      const newTollLIB = bigxnum2big(newToll, (1 / scalabilityFactor).toString());
+      if (newTollLIB < this.minToll) {
+        const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
+        return `Toll must be at least ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD or 0 USD`;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Updates the save button state and warning message based on input validation
+   */
+  updateSaveButtonState() {
+    const warningMessage = this.getWarningMessage();
+    const isValid = !warningMessage;
+
+    // Update save button state
+    this.saveButton.disabled = !isValid;
+
+    // Update warning message
+    if (warningMessage) {
+      this.warningMessageElement.textContent = warningMessage;
+      this.warningMessageElement.style.display = 'block';
+    } else {
+      this.warningMessageElement.textContent = '';
+      this.warningMessageElement.style.display = 'none';
+    }
   }
 }
 
@@ -8386,9 +8524,8 @@ class NewChatModal {
     // Check if contact exists
     if (!chatsData.contacts[recipientAddress]) {
       createNewContact(recipientAddress, username, 2);
-      // TODO: uncomment after backend support updating tollRequired before chatId is created
-      // update to not require toll
-      //friendModal.postUpdateTollRequired(recipientAddress, 0);
+      // default to 2 (Acquaintance) so recipient does not need to pay toll
+      friendModal.postUpdateTollRequired(recipientAddress, 2);
     }
     chatsData.contacts[recipientAddress].username = username;
 
@@ -8698,7 +8835,7 @@ class SendAssetFormModal {
     }
     let display;
     if (this.tollInfo.required == 1) {
-      display = `${mainString} (${otherString})`;
+      display = `${mainString} = ${otherString}`;
       if (this.memoInput.value.trim() == '') {
         display = '';
       }
@@ -8708,13 +8845,14 @@ class SendAssetFormModal {
     } else {
       // light green used to show success
       this.tollMemoSpan.style.color = '#28a745';
-      display = `free (${mainString} (${otherString}))`;
+      display = `free; ${mainString} = ${otherString}`;
     }
     //display the container
     if (display != '') {
-      display = 'Toll: ' + display;
+      // want only the word "Toll:" to be black and bold
+      display = '<span style="color: black;">Toll:</span> ' + display;
     }
-    this.tollMemoSpan.textContent = display;
+    this.tollMemoSpan.innerHTML = display;
   }
 
   clearFormInfo() {
@@ -8877,13 +9015,20 @@ class SendAssetFormModal {
     const isAddressConsideredValid =
       this.usernameAvailable.style.display === 'inline' && this.usernameAvailable.textContent === 'found';
 
-    const amount = this.amountInput.value;
+    const amount = this.amountInput.value.trim();
+
+    if (amount == '' || parseFloat(amount) == 0) {
+      this.balanceWarning.textContent = '';
+      this.balanceWarning.style.display = 'none';
+      this.submitButton.disabled = true;
+      return;
+    }
+
     const assetIndex = this.assetSelectDropdown.value;
 
     // Check if amount is in USD and convert to LIB for validation
     const isUSD = this.balanceSymbol.textContent === 'USD';
     let amountForValidation = amount;
-
     if (isUSD && amount) {
       await getNetworkParams();
       const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
@@ -8893,7 +9038,7 @@ class SendAssetFormModal {
     // convert amount to bigint
     const amountBigInt = bigxnum2big(wei, amountForValidation.toString());
 
-    // validateBalance returns false if the amount/balance is invalid.
+    // returns false if the amount/balance is invalid.
     const isAmountAndBalanceValid = await validateBalance(amountBigInt, assetIndex, this.balanceWarning);
 
     let isAmountAndTollValid = true;
