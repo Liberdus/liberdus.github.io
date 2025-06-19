@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'
+const version = 'r'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -7646,9 +7646,9 @@ class ChatModal {
     console.log(`currentTime: ${currentTime}`);
     console.log(`networkTollTimeoutInMs: ${networkTollTimeoutInMs}`);
     console.log(`timeSinceNewestSentMessage: ${timeSinceNewestSentMessage}`);
-    if (!this.newestSentMessage || timeSinceNewestSentMessage > networkTollTimeoutInMs) {
+    if (!this.newestSentMessage || timeSinceNewestSentMessage < networkTollTimeoutInMs) {
       console.log(
-        `[sendReclaimTollTransaction] timeSinceNewestSentMessage ${timeSinceNewestSentMessage}ms is greater than earliestTimeToSendReclaimToll ${networkTollTimeoutInMs}ms, skipping reclaim toll transaction`
+        `[sendReclaimTollTransaction] timeSinceNewestSentMessage ${timeSinceNewestSentMessage}ms is less than networkTollTimeoutInMs ${networkTollTimeoutInMs}ms, skipping reclaim toll transaction`
       );
       return;
     }
