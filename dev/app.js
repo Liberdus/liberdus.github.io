@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -9474,6 +9474,23 @@ getNetworkParams.timestamp = 0;
 
 async function getSystemNotice() {
   try {
+    // First, do a HEAD request to check if the file exists and get its timestamp
+    const headResponse = await fetch(`./notice.html?${Math.random()}`, { method: 'HEAD' });
+    if (!headResponse.ok) {
+      return;
+    }
+
+    // Get the Last-Modified header timestamp
+    const lastModified = headResponse.headers.get('Last-Modified');
+    const fileTimestamp = lastModified ? new Date(lastModified).getTime() : null;
+    
+    // Check if we need to show the notice based on file modification time
+    // If no Last-Modified header, we'll check the content timestamp instead
+    if (fileTimestamp && myData.settings.noticets && myData.settings.noticets >= fileTimestamp) {
+      return; // File hasn't changed, no need to download
+    }
+
+    // Download the file content
     const response = await fetch(`./notice.html?${Math.random()}`);
     if (!response.ok) {
       return;
