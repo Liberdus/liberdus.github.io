@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'm'
+const version = 'n'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -7638,7 +7638,7 @@ class ChatModal {
    */
   async sendReclaimTollTransaction(contactAddress) {
     console.log(`[sendReclaimTollTransaction] entering function`);
-    const sevenDaysAgo = getCorrectedTimestamp() - 7 * 24 * 60 * 60 * 1000;
+    const sevenDaysAgo = getCorrectedTimestamp() - /* 7 * 24 * 60 *  */60 * 1000;
     console.log(`this.newestSentMessage: ${!!this.newestSentMessage}`);
     console.log(`this.newestSentMessage?.timestamp: ${this.newestSentMessage?.timestamp}`);
     console.log(`sevenDaysAgo: ${sevenDaysAgo}`);
@@ -7647,7 +7647,7 @@ class ChatModal {
     );
     if (!this.newestSentMessage || this.newestSentMessage?.timestamp > sevenDaysAgo) {
       console.log(
-        `[sendReclaimTollTransaction] newestSentMessage is null or timestamp is less than 7 days ago, skipping reclaim toll transaction`
+        `[sendReclaimTollTransaction] newestSentMessage is null or timestamp is less than 1 minute ago, skipping reclaim toll transaction`
       );
       return;
     }
