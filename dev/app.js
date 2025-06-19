@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'p'
+const version = 'q'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -7639,17 +7639,16 @@ class ChatModal {
   async sendReclaimTollTransaction(contactAddress) {
     console.log(`[sendReclaimTollTransaction] entering function`);
     await getNetworkParams();
+    const currentTime = getCorrectedTimestamp();
     // use network param instead of hardcoded 7 days
     const networkTollTimeoutInMs = parameters.current.tollTimeout; 
-    console.log(`this.newestSentMessage: ${!!this.newestSentMessage}`);
-    console.log(`this.newestSentMessage?.timestamp: ${this.newestSentMessage?.timestamp}`);
+    const timeSinceNewestSentMessage = currentTime - this.newestSentMessage?.timestamp;
+    console.log(`currentTime: ${currentTime}`);
     console.log(`networkTollTimeoutInMs: ${networkTollTimeoutInMs}`);
-    console.log(
-      `this.newestSentMessage?.timestamp > networkTollTimeoutInMs: ${this.newestSentMessage?.timestamp < networkTollTimeoutInMs}`
-    );
-    if (!this.newestSentMessage || this.newestSentMessage?.timestamp > networkTollTimeoutInMs) {
+    console.log(`timeSinceNewestSentMessage: ${timeSinceNewestSentMessage}`);
+    if (!this.newestSentMessage || timeSinceNewestSentMessage > networkTollTimeoutInMs) {
       console.log(
-        `[sendReclaimTollTransaction] newestSentMessage is null or timestamp is less than networkTollTimeoutInMs ${networkTollTimeoutInMs}ms, skipping reclaim toll transaction`
+        `[sendReclaimTollTransaction] timeSinceNewestSentMessage ${timeSinceNewestSentMessage}ms is greater than earliestTimeToSendReclaimToll ${networkTollTimeoutInMs}ms, skipping reclaim toll transaction`
       );
       return;
     }
