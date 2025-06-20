@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'v'
+const version = 'x'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -244,7 +244,8 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
   const usernameHash = hashBytes(usernameBytes);
   try {
     const response = await fetch(
-      `${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}/address/${usernameHash}`
+//      `${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}/address/${usernameHash}`
+      `${randomGateway.web}/address/${usernameHash}`
     );
     const data = await response.json();
     if (data && data.address) {
@@ -272,118 +273,6 @@ function getAvailableUsernames() {
   const netidAccounts = accounts.netids[netid];
   if (!netidAccounts || !netidAccounts.usernames) return [];
   return Object.keys(netidAccounts.usernames);
-}
-
-// This is for the sign in button on the welcome page
-function openSignInModal() {
-  // Get existing accounts
-  const { netid } = network;
-  const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-  const netidAccounts = existingAccounts.netids[netid];
-  const usernames = netidAccounts?.usernames ? Object.keys(netidAccounts.usernames) : [];
-
-  // First show the modal so we can properly close it if needed
-  document.getElementById('signInModal').classList.add('active');
-
-  // If no accounts exist, close modal and open Create Account modal
-  if (usernames.length === 0) {
-    closeSignInModal();
-    openCreateAccountModal();
-    return;
-  }
-
-  const usernameSelect = document.getElementById('username');
-  // Populate select with usernames
-  usernameSelect.innerHTML = `
-        <option value="" disabled selected hidden>Select an account</option>
-        ${usernames.map((username) => `<option value="${username}">${username}</option>`).join('')}
-    `;
-
-  // If only one account exists, select it and trigger change event
-  if (usernames.length === 1) {
-    usernameSelect.value = usernames[0];
-    usernameSelect.dispatchEvent(new Event('change'));
-    return;
-  }
-
-  // Multiple accounts exist, show modal with select dropdown
-  const submitButton = document.querySelector('#signInForm button[type="submit"]');
-  const removeButton = document.getElementById('removeAccountButton');
-  const notFoundMessage = document.getElementById('usernameNotFound');
-
-  submitButton.disabled = true; // Keep button disabled until an account is selected
-  submitButton.textContent = 'Sign In';
-  submitButton.style.display = 'inline';
-  removeButton.style.display = 'none';
-  notFoundMessage.style.display = 'none';
-
-  const signInModalLastItem = document.getElementById('signInModalLastItem');
-  // set timeout to focus on the last item so shift+tab and tab prevention works
-  setTimeout(() => {
-    signInModalLastItem.focus();
-  }, 100);
-}
-
-async function handleRemoveAccountButton() {
-  removeAccountModal.confirmSubmit();
-}
-
-async function handleUsernameOnSignInModal() {
-  console.log('in handleUsernameOnSignInModal');
-  // Get existing accounts
-  const { netid } = network;
-  const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-  const netidAccounts = existingAccounts.netids[netid];
-  const usernames = netidAccounts?.usernames ? Object.keys(netidAccounts.usernames) : [];
-  const usernameSelect = document.getElementById('username');
-  const submitButton = document.querySelector('#signInForm button[type="submit"]');
-  // Enable submit button when an account is selected
-  const username = usernameSelect.value;
-  const notFoundMessage = document.getElementById('usernameNotFound');
-  if (!username) {
-    submitButton.disabled = true;
-    notFoundMessage.style.display = 'none';
-    return;
-  }
-  //        const address = netidAccounts.usernames[username].keys.address;
-  const address = netidAccounts.usernames[username].address;
-  const availability = await checkUsernameAvailability(username, address);
-  //console.log('usernames.length', usernames.length);
-  //console.log('availability', availability);
-  const removeButton = document.getElementById('removeAccountButton');
-  if (usernames.length === 1 && availability === 'mine') {
-    handleSignIn();
-    return;
-  } else if (availability === 'mine') {
-    submitButton.disabled = false;
-    submitButton.textContent = 'Sign In';
-    submitButton.style.display = 'inline';
-    removeButton.style.display = 'none';
-    notFoundMessage.style.display = 'none';
-  } else if (availability === 'taken') {
-    submitButton.style.display = 'none';
-    removeButton.style.display = 'inline';
-    notFoundMessage.textContent = 'taken';
-    notFoundMessage.style.display = 'inline';
-  } else if (availability === 'available') {
-    submitButton.disabled = false;
-    submitButton.textContent = 'Recreate';
-    submitButton.style.display = 'inline';
-    removeButton.style.display = 'inline';
-    notFoundMessage.textContent = 'not found';
-    notFoundMessage.style.display = 'inline';
-  } else {
-    submitButton.disabled = true;
-    submitButton.textContent = 'Sign In';
-    submitButton.style.display = 'none';
-    removeButton.style.display = 'none';
-    notFoundMessage.textContent = 'network error';
-    notFoundMessage.style.display = 'inline';
-  }
-}
-
-function closeSignInModal() {
-  document.getElementById('signInModal').classList.remove('active');
 }
 
 function openCreateAccountModal() {
@@ -713,66 +602,6 @@ async function handleCreateAccount(event) {
   }
 }
 
-// This is for the sign in button after selecting an account
-async function handleSignIn(event) {
-  if (event) {
-    event.preventDefault();
-  }
-  const username = document.getElementById('username').value;
-  const submitButton = document.querySelector('#signInForm button[type="submit"]');
-
-  // Get network ID from network.js
-  const { netid } = network;
-
-  // Get existing accounts
-  const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-
-  // Check if username exists
-  if (!existingAccounts.netids[netid]?.usernames?.[username]) {
-    console.error('Account not found');
-    return;
-  }
-
-  // Check if the button text is 'Recreate'
-  if (submitButton.textContent === 'Recreate') {
-    const myData = parse(localStorage.getItem(`${username}_${netid}`));
-    const privateKey = myData.account.keys.secret;
-    const newUsernameInput = document.getElementById('newUsername');
-    newUsernameInput.value = username;
-
-    document.getElementById('newPrivateKey').value = privateKey;
-    closeSignInModal();
-    openCreateAccountModal();
-    // Dispatch a change event to trigger the availability check
-    newUsernameInput.dispatchEvent(new Event('input'));
-    return;
-  }
-
-  myData = parse(localStorage.getItem(`${username}_${netid}`));
-  if (!myData) {
-    console.log('Account data not found');
-    return;
-  }
-  myAccount = myData.account;
-
-  /* requestNotificationPermission(); */
-
-  // Start intervals now that user is signed in
-  if (!updateWebSocketIndicatorIntervalId) {
-    updateWebSocketIndicatorIntervalId = setInterval(updateWebSocketIndicator, 5000);
-  }
-  if (!checkPendingTransactionsIntervalId) {
-    checkPendingTransactionsIntervalId = setInterval(checkPendingTransactions, 5000);
-  }
-  if (!getSystemNoticeIntervalId) {
-    getSystemNoticeIntervalId = setInterval(getSystemNotice, 15000);
-  }
-  // Close modal and proceed to app
-  closeSignInModal();
-  document.getElementById('welcomeScreen').style.display = 'none';
-  await switchView('chats'); // Default view
-}
-
 function newDataRecord(myAccount) {
   // Process network gateways first
   const networkGateways =
@@ -781,6 +610,8 @@ function newDataRecord(myAccount) {
           protocol: gateway.protocol,
           host: gateway.host,
           port: gateway.port,
+          web: gateway.web,
+          ws:gateway.ws,
           name: `${gateway.host} (System)`,
           isSystem: true,
           isDefault: false,
@@ -912,9 +743,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   contactModal.load();
 
   // Sign In Modal
-  signInBtn.addEventListener('click', openSignInModal);
-  document.getElementById('closeSignInModal').addEventListener('click', closeSignInModal);
-  document.getElementById('signInForm').addEventListener('submit', handleSignIn);
+  signInBtn.addEventListener('click', () => signInModal.open());
 
   // Create Account Modal
   createAccountBtn.addEventListener('click', () => {
@@ -1158,12 +987,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Toggle the visual state class on the button
     this.classList.toggle('toggled-visible');
   });
-
-  // add listener for username select change on sign in modal
-  document.getElementById('username').addEventListener('change', handleUsernameOnSignInModal);
-
-  // Add event listener for remove account button
-  document.getElementById('removeAccountButton').addEventListener('click', handleRemoveAccountButton);
 
   // create account button listener to clear message input on create account
   document.getElementById('newUsername').addEventListener('input', handleCreateAccountInput);
@@ -2633,6 +2456,196 @@ async function handleSendAsset(event) {
 }
 handleSendAsset.timestamp = getCorrectedTimestamp();
 
+// Sign In Modal Management
+class SignInModal {
+  constructor() {
+    this.modal = document.getElementById('signInModal');
+    this.usernameSelect = document.getElementById('username');
+    this.submitButton = document.querySelector('#signInForm button[type="submit"]');
+    this.removeButton = document.getElementById('removeAccountButton');
+    this.notFoundMessage = document.getElementById('usernameNotFound');
+    this.signInModalLastItem = document.getElementById('signInModalLastItem');
+    this.backButton = document.getElementById('closeSignInModal');
+    this.setupEventListeners();
+  }
+
+  setupEventListeners() {
+    // Sign in form submission
+    document.getElementById('signInForm').addEventListener('submit', (event) => this.handleSignIn(event));
+    
+    // Username selection change
+    this.usernameSelect.addEventListener('change', () => this.handleUsernameChange());
+    
+    // Remove account button
+    this.removeButton.addEventListener('click', () => this.handleRemoveAccount());
+
+    // Back button
+    this.backButton.addEventListener('click', () => this.close());
+  }
+
+  open() {
+    // Get existing accounts
+    const { netid } = network;
+    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    const netidAccounts = existingAccounts.netids[netid];
+    const usernames = netidAccounts?.usernames ? Object.keys(netidAccounts.usernames) : [];
+
+    // First show the modal so we can properly close it if needed
+    this.modal.classList.add('active');
+
+    // If no accounts exist, close modal and open Create Account modal
+    if (usernames.length === 0) {
+      this.close();
+      openCreateAccountModal();
+      return;
+    }
+
+    // Populate select with usernames
+    this.usernameSelect.innerHTML = `
+      <option value="" disabled selected hidden>Select an account</option>
+      ${usernames.map((username) => `<option value="${username}">${username}</option>`).join('')}
+    `;
+
+    // If only one account exists, select it and trigger change event
+    if (usernames.length === 1) {
+      this.usernameSelect.value = usernames[0];
+      this.usernameSelect.dispatchEvent(new Event('change'));
+      return;
+    }
+
+    // Multiple accounts exist, show modal with select dropdown
+    this.submitButton.disabled = true; // Keep button disabled until an account is selected
+    this.submitButton.textContent = 'Sign In';
+    this.submitButton.style.display = 'inline';
+    this.removeButton.style.display = 'none';
+    this.notFoundMessage.style.display = 'none';
+
+    // set timeout to focus on the last item so shift+tab and tab prevention works
+    setTimeout(() => {
+      this.signInModalLastItem.focus();
+    }, 100);
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  async handleSignIn(event) {
+    if (event) {
+      event.preventDefault();
+    }
+    const username = this.usernameSelect.value;
+
+    // Get network ID from network.js
+    const { netid } = network;
+
+    // Get existing accounts
+    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+
+    // Check if username exists
+    if (!existingAccounts.netids[netid]?.usernames?.[username]) {
+      console.error('Account not found');
+      return;
+    }
+
+    // Check if the button text is 'Recreate'
+    if (this.submitButton.textContent === 'Recreate') {
+      const myData = parse(localStorage.getItem(`${username}_${netid}`));
+      const privateKey = myData.account.keys.secret;
+      const newUsernameInput = document.getElementById('newUsername');
+      newUsernameInput.value = username;
+
+      document.getElementById('newPrivateKey').value = privateKey;
+      this.close();
+      openCreateAccountModal();
+      // Dispatch a change event to trigger the availability check
+      newUsernameInput.dispatchEvent(new Event('input'));
+      return;
+    }
+
+    myData = parse(localStorage.getItem(`${username}_${netid}`));
+    if (!myData) {
+      console.log('Account data not found');
+      return;
+    }
+    myAccount = myData.account;
+
+    /* requestNotificationPermission(); */
+
+    // Start intervals now that user is signed in
+    if (!updateWebSocketIndicatorIntervalId) {
+      updateWebSocketIndicatorIntervalId = setInterval(updateWebSocketIndicator, 5000);
+    }
+    if (!checkPendingTransactionsIntervalId) {
+      checkPendingTransactionsIntervalId = setInterval(checkPendingTransactions, 5000);
+    }
+    if (!getSystemNoticeIntervalId) {
+      getSystemNoticeIntervalId = setInterval(getSystemNotice, 15000);
+    }
+    // Close modal and proceed to app
+    this.close();
+    document.getElementById('welcomeScreen').style.display = 'none';
+    await switchView('chats'); // Default view
+  }
+
+  async handleUsernameChange() {
+    console.log('in handleUsernameChange');
+    // Get existing accounts
+    const { netid } = network;
+    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    const netidAccounts = existingAccounts.netids[netid];
+    const usernames = netidAccounts?.usernames ? Object.keys(netidAccounts.usernames) : [];
+    // Enable submit button when an account is selected
+    const username = this.usernameSelect.value;
+    if (!username) {
+      this.submitButton.disabled = true;
+      this.notFoundMessage.style.display = 'none';
+      return;
+    }
+    //        const address = netidAccounts.usernames[username].keys.address;
+    const address = netidAccounts.usernames[username].address;
+    const availability = await checkUsernameAvailability(username, address);
+    //console.log('usernames.length', usernames.length);
+    //console.log('availability', availability);
+    if (usernames.length === 1 && availability === 'mine') {
+      this.handleSignIn();
+      return;
+    } else if (availability === 'mine') {
+      this.submitButton.disabled = false;
+      this.submitButton.textContent = 'Sign In';
+      this.submitButton.style.display = 'inline';
+      this.removeButton.style.display = 'none';
+      this.notFoundMessage.style.display = 'none';
+    } else if (availability === 'taken') {
+      this.submitButton.style.display = 'none';
+      this.removeButton.style.display = 'inline';
+      this.notFoundMessage.textContent = 'taken';
+      this.notFoundMessage.style.display = 'inline';
+    } else if (availability === 'available') {
+      this.submitButton.disabled = false;
+      this.submitButton.textContent = 'Recreate';
+      this.submitButton.style.display = 'inline';
+      this.removeButton.style.display = 'inline';
+      this.notFoundMessage.textContent = 'not found';
+      this.notFoundMessage.style.display = 'inline';
+    } else {
+      this.submitButton.disabled = true;
+      this.submitButton.textContent = 'Sign In';
+      this.submitButton.style.display = 'none';
+      this.removeButton.style.display = 'none';
+      this.notFoundMessage.textContent = 'network error';
+      this.notFoundMessage.style.display = 'inline';
+    }
+  }
+
+  async handleRemoveAccount() {
+    removeAccountModal.confirmSubmit();
+  }
+}
+
+// create a singleton instance of the SignInModal
+const signInModal = new SignInModal();
+
 // Contact Info Modal Management
 class ContactInfoModal {
   constructor() {
@@ -3437,8 +3450,8 @@ async function queryNetwork(url) {
   }
 
   try {
-    const response = await fetch(`${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}${url}`);
-    console.log('query', `${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}${url}`);
+    const response = await fetch(`${randomGateway.web}${url}`);
+    console.log('query', `${randomGateway.web}${url}`);
     const data = parse(await response.text());
     console.log('response', data);
     return data;
@@ -4905,11 +4918,21 @@ function initializeGatewayConfig() {
     myData.network.gateways = [];
   }
 
-  // Ensure defaultGatewayIndex property exists and set to -1 (random selection)
-  if (myData.network.defaultGatewayIndex === undefined) {
-    myData.network.defaultGatewayIndex = -1; // -1 means use random selection
+  if (network && network.gateways && network.gateways.length > 0){
+    myData.network = parse(stringify(network))
+  }
+  else if (myData.network.gateway.length <= 0){
+    showToast("No gateway server available; edit network.js file", 0, "error")
+    return;
   }
 
+  // Ensure defaultGatewayIndex property exists and set to -1 (random selection)
+  if (myData.network.defaultGatewayIndex === undefined) {
+    // TODO ping the gateway servers and pick one that is working
+    myData.network.defaultGatewayIndex = 0; // -1 means use random selection
+  }
+  
+  /*
   // If no gateways, initialize with system gateways
   if (myData.network.gateways.length === 0) {
     // Add system gateways from the global network object
@@ -4919,6 +4942,8 @@ function initializeGatewayConfig() {
           protocol: gateway.protocol,
           host: gateway.host,
           port: gateway.port,
+          web: gateway.web,
+          ws: gateway.ws,
           name: `${gateway.host} (System)`,
           isSystem: true,
           isDefault: false,
@@ -4926,6 +4951,7 @@ function initializeGatewayConfig() {
       });
     }
   }
+  */
 }
 
 // Function to get the gateway to use for a request
@@ -6015,6 +6041,8 @@ class RestoreAccountModal {
 }
 const restoreAccountModal = new RestoreAccountModal();
 
+// TODO - we are not going to allow users to change the gateway
+//        so we don't need this class anymore
 class GatewayModal {
   constructor() {}
 
