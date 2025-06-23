@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'z'
+const version = 'a'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -167,6 +167,8 @@ let myData = null;
 let myAccount = null; // this is set to myData.account for convience
 let isInstalledPWA = false;
 let timeSkew = 0;
+let useLongPolling = true;
+let wsManager = null;
 
 let updateWebSocketIndicatorIntervalId = null;
 let checkPendingTransactionsIntervalId = null;
@@ -566,7 +568,7 @@ async function handleCreateAccount(event) {
     console.error(`DEBUG: handleCreateAccount error in else`, JSON.stringify(res, null, 2));
 
     // Clear intervals
-    if (updateWebSocketIndicatorIntervalId) {
+    if (updateWebSocketIndicatorIntervalId && wsManager) {
       clearInterval(updateWebSocketIndicatorIntervalId);
       updateWebSocketIndicatorIntervalId = null;
     }
@@ -1236,6 +1238,10 @@ function saveState() {
   }
 } */
 
+/**
+ * Update the chat list by fetching the latest chats from the server
+ * @returns {Promise<number>} The number of chats fetched
+ */
 async function updateChatData() {
   let gotChats = 0;
   if (myAccount && myAccount.keys) {
@@ -1422,7 +1428,9 @@ async function switchView(view) {
   const previousButton = document.querySelector('.nav-button.active');
 
   // Initialize WebSocket connection regardless of view
-  wsManager.initializeWebSocketManager();
+  if (wsManager) {
+    wsManager.initializeWebSocketManager();
+  }
 
   try {
     // Direct references to view elements
@@ -2319,9 +2327,11 @@ class SignInModal {
     myAccount = myData.account;
 
     /* requestNotificationPermission(); */
-
+    if (useLongPolling) {
+      setTimeout(longPoll(), 10);
+    }
     // Start intervals now that user is signed in
-    if (!updateWebSocketIndicatorIntervalId) {
+    if (!updateWebSocketIndicatorIntervalId && wsManager) {
       updateWebSocketIndicatorIntervalId = setInterval(updateWebSocketIndicator, 5000);
     }
     if (!checkPendingTransactionsIntervalId) {
@@ -2784,7 +2794,7 @@ const contactInfoModal = new ContactInfoModal();
 
 function handleSignOut() {
   // Clear intervals
-  if (updateWebSocketIndicatorIntervalId) {
+  if (updateWebSocketIndicatorIntervalId && wsManager) {
     clearInterval(updateWebSocketIndicatorIntervalId);
     updateWebSocketIndicatorIntervalId = null;
   }
@@ -5436,7 +5446,9 @@ class WSManager {
   }
 }
 
-let wsManager = new WSManager(); // this is set to new WSManager() for convience
+if (!useLongPolling) {
+  wsManager = new WSManager();
+}
 
 function closeSendAssetConfirmModal() {
   document.getElementById('sendAssetConfirmModal').classList.remove('active');
@@ -5557,6 +5569,7 @@ function updateWebSocketIndicator() {
   }
   const indicator = document.getElementById('wsStatusIndicator');
   if (!indicator) return;
+  indicator.style.display = 'block';
   if (!wsManager || !wsManager.isConnected()) {
     indicator.textContent = 'Not Connected';
     indicator.className = 'ws-status-indicator ws-red';
@@ -9097,8 +9110,10 @@ async function checkPendingTransactions() {
       }
     }
   }
-  // update wallet balances
-  updateWalletBalances();
+  // if createAccountModal is open, skip balance change
+  if (!document.getElementById('createAccountModal').classList.contains('active')) {
+    updateWalletBalances();
+  }
 }
 
 /**
@@ -9333,4 +9348,57 @@ function normalizeEmail(s) {
   // Keep only valid email characters
   s = s.replace(/[^a-z0-9._%+-@]/g, '');  
   return s;
+}
+
+function longPoll() {
+  console.log('invoking longPoll');
+  const myAccount = myData?.account;
+  // Skip if no valid account
+  if (!myAccount?.keys?.address) {
+    console.log('Poll skipped: No valid account');
+    return;
+  }
+
+  try {
+    longPoll.start = getCorrectedTimestamp();
+    const timestamp = myAccount.chatTimestamp || 0;
+    const random = Math.floor(Math.random()*1000000);
+    // call this with a promise that'll resolve with callback longPollResult function with the data
+    const longPollPromise = queryNetwork(`/account/${longAddress(myAccount.keys.address)}/chats/${timestamp}?random=${random}`);
+    // if there's an issue, reject the promise
+    longPollPromise.catch(error => {
+      console.error('Chat polling error:', error);
+      // reject the promise
+      longPollPromise.reject(error);
+    });
+
+    // if the promise is resolved, call the longPollResult function with the data
+    longPollPromise.then(data => longPollResult(data));
+  } catch (error) {
+    console.error('Chat polling error:', error);
+  }
+}
+longPoll.start = 0;
+
+async function longPollResult(data) {
+  // calculate the time since the last poll
+  let nextPoll = 4000 - (getCorrectedTimestamp() - longPoll.start)
+  if (nextPoll < 0) {
+    nextPoll = 0;
+  }
+
+  // schedule the next poll
+  setTimeout(longPoll, nextPoll + 1000);
+  
+  let chatCount = data.chats ? Object.keys(data.chats).length : 0; // Handle null/undefined data.chats
+  if (data.chats && chatCount > 0) {
+    try {
+      const gotChats = await updateChatData();
+      if (gotChats > 0) {
+        await updateChatList();
+      }
+    } catch (error) {
+      console.error('Chat polling error:', error);
+    }
+  }
 }
