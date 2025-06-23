@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -234,8 +234,8 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
   }
 
   // Online flow - existing implementation
-  const randomGateway = getGatewayForRequest();
-  if (!randomGateway) {
+  const selectedGateway = getGatewayForRequest();
+  if (!selectedGateway) {
     console.error('No gateway available for username check');
     return 'error';
   }
@@ -244,8 +244,8 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
   const usernameHash = hashBytes(usernameBytes);
   try {
     const response = await fetch(
-//      `${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}/address/${usernameHash}`
-      `${randomGateway.web}/address/${usernameHash}`
+//      `${selectedGateway.protocol}://${selectedGateway.host}:${selectedGateway.port}/address/${usernameHash}`
+      `${selectedGateway.web}/address/${usernameHash}`
     );
     const data = await response.json();
     if (data && data.address) {
@@ -511,15 +511,9 @@ async function handleCreateAccount(event) {
     const txid = res.txid;
 
     try {
-      // Start intervals since trying to create account and tx should be in pending
-      if (!updateWebSocketIndicatorIntervalId) {
-        updateWebSocketIndicatorIntervalId = setInterval(updateWebSocketIndicator, 5000);
-      }
+      // Start interval since trying to create account and tx should be in pending
       if (!checkPendingTransactionsIntervalId) {
         checkPendingTransactionsIntervalId = setInterval(checkPendingTransactions, 5000);
-      }
-      if (!getSystemNoticeIntervalId) {
-        getSystemNoticeIntervalId = setInterval(getSystemNotice, 15000);
       }
 
       // Wait for the transaction confirmation
@@ -530,7 +524,7 @@ async function handleCreateAccount(event) {
       ) {
         throw new Error('Confirmation details mismatch.');
       }
-
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       if (waitingToastId) hideToast(waitingToastId);
       showToast('Account created successfully!', 3000, 'success');
       submitButton.disabled = false;
@@ -540,13 +534,14 @@ async function handleCreateAccount(event) {
       backButton.disabled = false;
       closeCreateAccountModal();
       document.getElementById('welcomeScreen').style.display = 'none';
-      getChats.lastCall = getCorrectedTimestamp();
+      // TODO: may not need to get set since gets set in `getChats`. Need to check signin flow.
+      //getChats.lastCall = getCorrectedTimestamp();
       // Store updated accounts back in localStorage
       existingAccounts.netids[netid].usernames[username] = { address: myAccount.keys.address };
       localStorage.setItem('accounts', stringify(existingAccounts));
       saveState();
 
-      await switchView('chats');
+      signInModal.open(username);
     } catch (error) {
       if (waitingToastId) hideToast(waitingToastId);
       console.log(`DEBUG: handleCreateAccount error`, JSON.stringify(error, null, 2));
@@ -557,18 +552,10 @@ async function handleCreateAccount(event) {
       privateKeyInput.disabled = false;
       backButton.disabled = false;
 
-      // Clear intervals
-      if (updateWebSocketIndicatorIntervalId) {
-        clearInterval(updateWebSocketIndicatorIntervalId);
-        updateWebSocketIndicatorIntervalId = null;
-      }
+      // Clear interval
       if (checkPendingTransactionsIntervalId) {
         clearInterval(checkPendingTransactionsIntervalId);
         checkPendingTransactionsIntervalId = null;
-      }
-      if (getSystemNoticeIntervalId) {
-        clearInterval(getSystemNoticeIntervalId);
-        getSystemNoticeIntervalId = null;
       }
 
       // Note: `checkPendingTransactions` will also remove the item from `myData.pending` if it's rejected by the service.
@@ -786,9 +773,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Remove Account Modal
   removeAccountModal.load();
-
-  // Gateway Menu
-  gatewayModal.load();
 
   // Invite Modal
   inviteModal.load();
@@ -2233,8 +2217,8 @@ async function handleSendAsset(event) {
     const usernameBytes = utf82bin(username);
     const usernameHash = hashBytes(usernameBytes);
     /*
-        const randomGateway = network.gateways[Math.floor(Math.random() * network.gateways.length)];
-        const response = await fetch(`${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}/address/${usernameHash}`);
+        const selectedGateway = network.gateways[Math.floor(Math.random() * network.gateways.length)];
+        const response = await fetch(`${selectedGateway.protocol}://${selectedGateway.host}:${selectedGateway.port}/address/${usernameHash}`);
         const data = await response.json();
 */
     const data = await queryNetwork(`/address/${usernameHash}`);
@@ -2467,6 +2451,7 @@ class SignInModal {
     this.signInModalLastItem = document.getElementById('signInModalLastItem');
     this.backButton = document.getElementById('closeSignInModal');
     this.setupEventListeners();
+    this.preselectedUsername = null;
   }
 
   setupEventListeners() {
@@ -2483,12 +2468,13 @@ class SignInModal {
     this.backButton.addEventListener('click', () => this.close());
   }
 
-  open() {
+  open(preselectedUsername_) {
     // Get existing accounts
     const { netid } = network;
     const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
     const netidAccounts = existingAccounts.netids[netid];
     const usernames = netidAccounts?.usernames ? Object.keys(netidAccounts.usernames) : [];
+    this.preselectedUsername = preselectedUsername_;
 
     // First show the modal so we can properly close it if needed
     this.modal.classList.add('active');
@@ -2513,6 +2499,14 @@ class SignInModal {
       return;
     }
 
+    // If a username should be auto-selected (either preselect or only one account), do it
+    const autoSelect = preselectedUsername_ && usernames.includes(preselectedUsername_) ? preselectedUsername_ : null;
+    if (autoSelect) {
+      this.usernameSelect.value = autoSelect;
+      this.usernameSelect.dispatchEvent(new Event('change'));
+      return;
+    }
+
     // Multiple accounts exist, show modal with select dropdown
     this.submitButton.disabled = true; // Keep button disabled until an account is selected
     this.submitButton.textContent = 'Sign In';
@@ -2528,6 +2522,7 @@ class SignInModal {
 
   close() {
     this.modal.classList.remove('active');
+    this.preselectedUsername = null;
   }
 
   async handleSignIn(event) {
@@ -2607,6 +2602,13 @@ class SignInModal {
     const availability = await checkUsernameAvailability(username, address);
     //console.log('usernames.length', usernames.length);
     //console.log('availability', availability);
+
+    // If this username was pre-selected and is available, auto-sign-in
+    if (this.preselectedUsername && username === this.preselectedUsername && availability === 'mine') {
+      this.handleSignIn();
+      this.preselectedUsername = null;
+      return;
+    }
     if (usernames.length === 1 && availability === 'mine') {
       this.handleSignIn();
       return;
@@ -3443,15 +3445,15 @@ async function queryNetwork(url) {
     //alert('not online')
     return null;
   }
-  const randomGateway = getGatewayForRequest();
-  if (!randomGateway) {
+  const selectedGateway = getGatewayForRequest();
+  if (!selectedGateway) {
     console.error('No gateway available for network query');
     return null;
   }
 
   try {
-    const response = await fetch(`${randomGateway.web}${url}`);
-    console.log('query', `${randomGateway.web}${url}`);
+    const response = await fetch(`${selectedGateway.web}${url}`);
+    console.log('query', `${selectedGateway.web}${url}`);
     const data = parse(await response.text());
     console.log('response', data);
     return data;
@@ -3514,9 +3516,8 @@ async function pollChats() {
 // Helper function to check WebSocket status and log diagnostics if needed
 async function checkWebSocketStatus() {
   if (!wsManager) return 'not initialized';
-
   const status = wsManager.isConnected() ? 'connected' : 'disconnected';
-
+  const selectedGateway = getGatewayForRequest();
   // Log diagnostic info if disconnected
   if (status === 'disconnected' && wsManager.connectionState === 'disconnected') {
     const diagnosticInfo = {
@@ -3527,13 +3528,18 @@ async function checkWebSocketStatus() {
         webSocketSupport: typeof WebSocket !== 'undefined',
       },
       websocketConfig: {
-        urlValid: network?.websocket?.url
-          ? network.websocket.url.startsWith('ws://') || network.websocket.url.startsWith('wss://')
-          : false,
-        url: network?.websocket?.url || 'Not configured',
+        urlValid: (() => {
+          return selectedGateway?.ws
+            ? selectedGateway.ws.startsWith('ws://') || selectedGateway.ws.startsWith('wss://')
+            : false;
+        })(),
+        url: (() => {
+          const selectedGateway = getGatewayForRequest();
+          return selectedGateway?.ws || 'Not configured';
+        })(),
       },
     };
-    console.log('WebSocket Diagnostic Information:', diagnosticInfo);
+    console.warn('WebSocket Diagnostic Information:', diagnosticInfo);
   }
 
   return status;
@@ -3941,14 +3947,14 @@ async function processChats(chats, keys) {
 async function getUsernameAddress(username) {
   const usernameBytes = utf82bin(normalizeUsername(username));
   const usernameHash = hashBytes(usernameBytes);
-  const randomGateway = getGatewayForRequest();
-  if (!randomGateway) {
+  const selectedGateway = getGatewayForRequest();
+  if (!selectedGateway) {
     console.error('No gateway available for username check');
     return null;
   }
   try {
     const response = await fetch(
-      `${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}/address/${usernameHash}`
+      `${selectedGateway.web}/address/${usernameHash}`
     );
     const data = await response.json();
     // if address is not present, return null
@@ -4055,8 +4061,8 @@ async function injectTx(tx, txid) {
   if (!isOnline) {
     return null;
   }
-  const randomGateway = getGatewayForRequest();
-  if (!randomGateway) {
+  const selectedGateway = getGatewayForRequest();
+  if (!selectedGateway) {
     console.error('No gateway available for transaction injection');
     return null;
   }
@@ -4076,7 +4082,7 @@ async function injectTx(tx, txid) {
       body: stringify({ tx: stringify(tx) }),
     };
     const response = await fetch(
-      `${randomGateway.protocol}://${randomGateway.host}:${randomGateway.port}/inject`,
+      `${selectedGateway.web}/inject`,
       options
     );
     console.log('DEBUG: injectTx response', response);
@@ -5279,11 +5285,12 @@ class WSManager {
     }
 
     this.connectionState = 'connecting';
+    const selectedGateway = getGatewayForRequest();
     console.log(
       'WebSocket Connection:',
       JSON.stringify(
         {
-          url: network.websocket.url,
+          url: selectedGateway.ws,
           protocol: window.location.protocol,
           userAgent: navigator.userAgent,
         },
@@ -5294,7 +5301,7 @@ class WSManager {
 
     try {
       console.log('Creating new WebSocket instance');
-      this.ws = new WebSocket(network.websocket.url);
+      this.ws = new WebSocket(selectedGateway.ws);
       this.setupEventHandlers();
     } catch (error) {
       console.error('WebSocket connection creation error:', error);
@@ -5496,10 +5503,11 @@ class WSManager {
 
     // Add Firefox-specific diagnostics
     if (navigator.userAgent.includes('Firefox')) {
+      const selectedGateway = getGatewayForRequest();
       diagnosticInfo.firefox = {
         securityPolicy: 'Different security policies for WebSockets',
         mixedContent: 'Check if HTTPS site with WS instead of WSS',
-        websocketUrl: network.websocket.url,
+        websocketUrl: selectedGateway?.ws || 'No gateway available',
         pageProtocol: window.location.protocol,
       };
     }
@@ -5562,33 +5570,42 @@ class WSManager {
       },
     };
 
+    // Get selected gateway for WebSocket URL
+    const selectedGateway = getGatewayForRequest();
+
     // Add iOS standalone info
     const isIOSStandalone =
       /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream && window.navigator.standalone === true;
     if (isIOSStandalone) {
       supportInfo.ios = {
         mode: 'standalone_pwa',
-        restrictions: network.websocket.url.startsWith('wss://'),
+        restrictions: selectedGateway?.ws ? selectedGateway.ws.startsWith('wss://') : false,
       };
     }
 
     // Add Firefox-specific info
     if (navigator.userAgent.includes('Firefox')) {
       supportInfo.firefox = {
-        mixedContentBlocked: window.location.protocol === 'https:' && network.websocket.url.startsWith('ws://'),
-        usingSecureWebSocket: network.websocket.url.startsWith('wss://'),
-        port: network.websocket.url.split(':')[2]?.split('/')[0] || 'default',
+        mixedContentBlocked: window.location.protocol === 'https:' && selectedGateway?.ws ? selectedGateway.ws.startsWith('ws://') : false,
+        usingSecureWebSocket: selectedGateway?.ws ? selectedGateway.ws.startsWith('wss://') : false,
+        port: selectedGateway?.ws ? selectedGateway.ws.split(':')[2]?.split('/')[0] || 'default' : 'No gateway',
       };
     }
 
     // Add WebSocket URL details
-    const wsUrl = new URL(network.websocket.url);
-    supportInfo.websocket = {
+    const wsUrl = new URL(selectedGateway?.ws);
+    supportInfo.websocket = wsUrl ? {
       protocol: wsUrl.protocol,
       hostname: wsUrl.hostname,
       port: wsUrl.port || (wsUrl.protocol === 'wss:' ? '443' : '80'),
       pathname: wsUrl.pathname,
       requiresSecureContext: wsUrl.protocol === 'wss:' && !supportInfo.environment.isLocalhost,
+    } : {
+      protocol: 'No gateway',
+      hostname: 'No gateway',
+      port: 'No gateway',
+      pathname: 'No gateway',
+      requiresSecureContext: false,
     };
 
     console.log('WebSocket Support Analysis:', JSON.stringify(supportInfo, null, 2));
@@ -5630,10 +5647,11 @@ class WSManager {
     }
 
     try {
+      const selectedGateway = getGatewayForRequest();
       const initInfo = {
         status: 'starting',
         config: {
-          url: network.websocket.url,
+          url: selectedGateway?.ws || 'No gateway available',
         },
         account: {
           available: !!myAccount?.keys?.address,
@@ -6040,283 +6058,6 @@ class RestoreAccountModal {
   }
 }
 const restoreAccountModal = new RestoreAccountModal();
-
-// TODO - we are not going to allow users to change the gateway
-//        so we don't need this class anymore
-class GatewayModal {
-  constructor() {}
-
-  load() {
-    this.modal = document.getElementById('gatewayModal');
-    this.addEditModal = document.getElementById('addEditGatewayModal');
-    this.gatewayList = document.getElementById('gatewayList');
-    this.gatewayForm = document.getElementById('gatewayForm');
-
-    // Setup event listeners when DOM is loaded
-    document.getElementById('openNetwork').addEventListener('click', () => this.open());
-    document.getElementById('closeGatewayForm').addEventListener('click', () => this.close());
-    document.getElementById('addGatewayButton').addEventListener('click', () => this.openAddForm());
-    document.getElementById('closeAddEditGatewayForm').addEventListener('click', () => this.closeAddEditForm());
-    this.gatewayForm.addEventListener('submit', (e) => this.handleFormSubmit(e));
-  }
-
-  open() {
-    // Initialize gateway configuration if needed
-    initializeGatewayConfig();
-    this.modal.classList.add('active');
-    this.updateList();
-  }
-
-  close() {
-    this.modal.classList.remove('active');
-  }
-
-  openAddForm() {
-    this.modal.classList.remove('active');
-    this.gatewayForm.reset();
-    document.getElementById('gatewayEditIndex').value = -1;
-    document.getElementById('addEditGatewayTitle').textContent = 'Add Gateway';
-    this.addEditModal.classList.add('active');
-  }
-
-  closeAddEditForm() {
-    this.addEditModal.classList.remove('active');
-    this.modal.classList.add('active');
-    this.updateList();
-  }
-
-  updateList() {
-    // Clear existing list
-    this.gatewayList.innerHTML = '';
-
-    // If no gateways, show empty state
-    if (myData.network.gateways.length === 0) {
-      this.gatewayList.innerHTML = `
-                <div class="empty-state">
-                    <div style="font-weight: bold; margin-bottom: 0.5rem">No Gateways</div>
-                    <div>Add a gateway to get started</div>
-                </div>`;
-      return;
-    }
-
-    // Add "Use Random Selection" option
-    const randomOption = document.createElement('div');
-    randomOption.className = 'gateway-item random-option';
-    randomOption.innerHTML = `
-            <div class="gateway-info">
-                <div class="gateway-name">Random Selection</div>
-                <div class="gateway-url">Selects random gateway from list</div>
-            </div>
-            <div class="gateway-actions">
-                <label class="default-toggle">
-                    <input type="radio" name="defaultGateway" ${myData.network.defaultGatewayIndex === -1 ? 'checked' : ''}>
-                    <span>Default</span>
-                </label>
-            </div>
-        `;
-
-    const randomToggle = randomOption.querySelector('input[type="radio"]');
-    randomToggle.addEventListener('change', () => {
-      if (randomToggle.checked) {
-        this.setDefaultGateway(-1);
-      }
-    });
-
-    this.gatewayList.appendChild(randomOption);
-
-    // Add each gateway to the list
-    myData.network.gateways.forEach((gateway, index) => {
-      const isDefault = index === myData.network.defaultGatewayIndex;
-      const canRemove = !gateway.isSystem;
-
-      const gatewayItem = document.createElement('div');
-      gatewayItem.className = 'gateway-item';
-      gatewayItem.innerHTML = `
-                <div class="gateway-info">
-                    <div class="gateway-name">${escapeHtml(gateway.name)}</div>
-                    <div class="gateway-url">${gateway.protocol}://${escapeHtml(gateway.host)}:${gateway.port}</div>
-                    ${gateway.isSystem ? '<span class="system-badge">System</span>' : ''}
-                </div>
-                <div class="gateway-actions">
-                    <label class="default-toggle">
-                        <input type="radio" name="defaultGateway" ${isDefault ? 'checked' : ''}>
-                        <span>Default</span>
-                    </label>
-                    <button class="icon-button edit-button" title="Edit">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                        </svg>
-                    </button>
-                    ${
-                      canRemove
-                        ? `
-                        <button class="icon-button remove-button" title="Remove">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M3 6h18"></path>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
-                                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                            </svg>
-                        </button>
-                    `
-                        : ''
-                    }
-                </div>
-            `;
-
-      // Add event listeners
-      const defaultToggle = gatewayItem.querySelector('input[type="radio"]');
-      defaultToggle.addEventListener('change', () => {
-        if (defaultToggle.checked) {
-          this.setDefaultGateway(index);
-        }
-      });
-
-      const editButton = gatewayItem.querySelector('.edit-button');
-      editButton.addEventListener('click', () => {
-        this.openEditForm(index);
-      });
-
-      if (canRemove) {
-        const removeButton = gatewayItem.querySelector('.remove-button');
-        removeButton.addEventListener('click', () => {
-          this.confirmRemove(index);
-        });
-      }
-
-      this.gatewayList.appendChild(gatewayItem);
-    });
-  }
-
-  openEditForm(index) {
-    this.modal.classList.remove('active');
-    const gateway = myData.network.gateways[index];
-    document.getElementById('gatewayName').value = gateway.name;
-    document.getElementById('gatewayProtocol').value = gateway.protocol;
-    document.getElementById('gatewayHost').value = gateway.host;
-    document.getElementById('gatewayPort').value = gateway.port;
-    document.getElementById('gatewayEditIndex').value = index;
-    document.getElementById('addEditGatewayTitle').textContent = 'Edit Gateway';
-    this.addEditModal.classList.add('active');
-  }
-
-  async handleFormSubmit(event) {
-    event.preventDefault();
-
-    const formData = {
-      protocol: document.getElementById('gatewayProtocol').value,
-      host: document.getElementById('gatewayHost').value,
-      port: parseInt(document.getElementById('gatewayPort').value),
-      name: document.getElementById('gatewayName').value,
-    };
-
-    const editIndex = parseInt(document.getElementById('gatewayEditIndex').value);
-
-    if (editIndex >= 0) {
-      this.updateGateway(editIndex, formData.protocol, formData.host, formData.port, formData.name);
-    } else {
-      this.addGateway(formData.protocol, formData.host, formData.port, formData.name);
-    }
-
-    this.closeAddEditForm();
-  }
-
-  confirmRemove(index) {
-    if (confirm('Are you sure you want to remove this gateway?')) {
-      this.removeGateway(index);
-    }
-  }
-
-  addGateway(protocol, host, port, name) {
-    // Initialize if needed
-    initializeGatewayConfig();
-
-    // Add the new gateway
-    myData.network.gateways.push({
-      protocol,
-      host,
-      port,
-      name,
-      isSystem: false,
-      isDefault: false,
-    });
-
-    // Update the UI
-    this.updateList();
-
-    // Show success message
-    showToast('Gateway added successfully');
-  }
-
-  updateGateway(index, protocol, host, port, name) {
-    // Check if index is valid
-    if (index >= 0 && index < myData.network.gateways.length) {
-      const gateway = myData.network.gateways[index];
-
-      // Update gateway properties
-      gateway.protocol = protocol;
-      gateway.host = host;
-      gateway.port = port;
-      gateway.name = name;
-
-      // Update the UI
-      this.updateList();
-
-      // Show success message
-      showToast('Gateway updated successfully');
-    }
-  }
-
-  removeGateway(index) {
-    // Check if index is valid
-    if (index >= 0 && index < myData.network.gateways.length) {
-      const gateway = myData.network.gateways[index];
-
-      // Only allow removing non-system gateways
-      if (!gateway.isSystem) {
-        // If this was the default gateway, reset to random selection
-        if (myData.network.defaultGatewayIndex === index) {
-          myData.network.defaultGatewayIndex = -1;
-        } else if (myData.network.defaultGatewayIndex > index) {
-          // Adjust default gateway index if needed
-          myData.network.defaultGatewayIndex--;
-        }
-
-        // Remove the gateway
-        myData.network.gateways.splice(index, 1);
-
-        // Update the UI
-        this.updateList();
-
-        // Show success message
-        showToast('Gateway removed successfully');
-      }
-    }
-  }
-
-  setDefaultGateway(index) {
-    // Reset all gateways to non-default
-    myData.network.gateways.forEach((gateway) => {
-      gateway.isDefault = false;
-    });
-
-    // Set the new default gateway index
-    myData.network.defaultGatewayIndex = index;
-
-    // If setting a specific gateway as default, mark it
-    if (index >= 0 && index < myData.network.gateways.length) {
-      myData.network.gateways[index].isDefault = true;
-    }
-
-    // Update the UI
-    this.updateList();
-
-    // Show success message
-    const message = index === -1 ? 'Using random gateway selection for better reliability' : 'Default gateway set';
-    showToast(message);
-  }
-}
-const gatewayModal = new GatewayModal();
 
 class TollModal {
   constructor() {
