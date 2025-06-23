@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -590,26 +590,12 @@ async function handleCreateAccount(event) {
 }
 
 function newDataRecord(myAccount) {
-  // Process network gateways first
-  const networkGateways =
-    typeof network !== 'undefined' && network?.gateways?.length
-      ? network.gateways.map((gateway) => ({
-          protocol: gateway.protocol,
-          host: gateway.host,
-          port: gateway.port,
-          web: gateway.web,
-          ws:gateway.ws,
-          name: `${gateway.host} (System)`,
-          isSystem: true,
-          isDefault: false,
-        }))
-      : [];
 
   const myData = {
     timestamp: getCorrectedTimestamp(),
     account: myAccount,
     network: {
-      gateways: networkGateways,
+      gateways: [],
       defaultGatewayIndex: -1, // -1 means use random selection
     },
     contacts: {},
@@ -789,24 +775,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Send Asset Modal
   sendAssetFormModal.load();
 
+  // Receive Modal
+  receiveModal.load();
+
   // Add event listeners for send asset confirmation modal
   document.getElementById('closeSendAssetConfirmModal').addEventListener('click', closeSendAssetConfirmModal);
   document.getElementById('confirmSendButton').addEventListener('click', handleSendAsset);
   document.getElementById('cancelSendButton').addEventListener('click', closeSendAssetConfirmModal);
 
-  document.getElementById('openReceiveModal').addEventListener('click', openReceiveModal);
-  document.getElementById('closeReceiveModal').addEventListener('click', closeReceiveModal);
-  document.getElementById('copyAddress').addEventListener('click', copyAddress);
-
   document.getElementById('openHistoryModal').addEventListener('click', openHistoryModal);
   document.getElementById('closeHistoryModal').addEventListener('click', closeHistoryModal);
   document.getElementById('historyAsset').addEventListener('change', updateHistoryAddresses);
   document.getElementById('transactionList').addEventListener('click', handleHistoryItemClick);
-
-  // Receive Modal input listeners
-  document.getElementById('receiveAsset').addEventListener('change', updateQRCode);
-  document.getElementById('receiveAmount').addEventListener('input', debounce(updateQRCode, 300));
-  document.getElementById('receiveMemo').addEventListener('input', debounce(updateQRCode, 300));
 
   document.getElementById('switchToChats').addEventListener('click', () => switchView('chats'));
   document.getElementById('switchToContacts').addEventListener('click', () => switchView('contacts'));
@@ -1813,233 +1793,6 @@ async function updateTollValue(address) {
     console.log(`Returning early since queried toll value is the same as the toll field in localStorage`);
     // return early
     return;
-  }
-}
-
-function openReceiveModal() {
-  const modal = document.getElementById('receiveModal');
-  modal.classList.add('active');
-
-  // Get wallet data
-  const walletData = myData.wallet;
-
-  // Get references to elements
-  const assetSelect = document.getElementById('receiveAsset');
-  const amountInput = document.getElementById('receiveAmount');
-  const memoInput = document.getElementById('receiveMemo');
-
-  // Populate assets dropdown
-  // Clear existing options
-  assetSelect.innerHTML = '';
-
-  // Check if wallet assets exist
-  if (walletData && walletData.assets && walletData.assets.length > 0) {
-    // Add options for each asset
-    walletData.assets.forEach((asset, index) => {
-      const option = document.createElement('option');
-      option.value = index;
-      option.textContent = `${asset.name} (${asset.symbol})`;
-      assetSelect.appendChild(option);
-    });
-    console.log(`Populated ${walletData.assets.length} assets in dropdown`);
-  } else {
-    // Add a default option if no assets
-    const option = document.createElement('option');
-    option.value = 0;
-    option.textContent = 'Liberdus (LIB)';
-    assetSelect.appendChild(option);
-    console.log('No wallet assets found, using default');
-  }
-
-  // Clear input fields
-  amountInput.value = '';
-  memoInput.value = '';
-
-  // Initial update for addresses based on the first asset
-  updateReceiveAddresses();
-}
-
-function closeReceiveModal() {
-  const modal = document.getElementById('receiveModal');
-  // Hide the modal
-  modal.classList.remove('active');
-}
-
-function updateReceiveAddresses() {
-  // Update display address
-  updateDisplayAddress();
-}
-
-function updateDisplayAddress() {
-  const displayAddress = document.getElementById('displayAddress');
-  const qrcodeContainer = document.getElementById('qrcode');
-
-  // Clear previous QR code
-  qrcodeContainer.innerHTML = '';
-
-  const address = myAccount.keys.address;
-  displayAddress.textContent = '0x' + address;
-
-  // Generate QR code with payment data
-  try {
-    updateQRCode();
-    console.log('QR code updated with payment data');
-  } catch (error) {
-    console.error('Error updating QR code:', error);
-
-    // Fallback to basic address QR code if there's an error
-    new QRCode(qrcodeContainer, {
-      text: '0x' + address,
-      width: 200,
-      height: 200,
-    });
-    console.log('Fallback to basic address QR code');
-  }
-}
-
-// Create QR payment data object based on form values
-function createQRPaymentData() {
-  // Get selected asset
-  const assetSelect = document.getElementById('receiveAsset');
-  const assetIndex = parseInt(assetSelect.value, 10) || 0;
-
-  // Default asset info in case we can't find the selected asset
-  let assetId = 'liberdus';
-  let symbol = 'LIB';
-
-  // Try to get the selected asset
-  try {
-    if (myData && myData.wallet && myData.wallet.assets && myData.wallet.assets.length > 0) {
-      const asset = myData.wallet.assets[assetIndex];
-      if (asset) {
-        assetId = asset.id || 'liberdus';
-        symbol = asset.symbol || 'LIB';
-        console.log(`Selected asset: ${asset.name} (${symbol})`);
-      } else {
-        console.log(`Asset not found at index ${assetIndex}, using defaults`);
-      }
-    } else {
-      console.warn('Wallet assets not available, using default asset');
-    }
-  } catch (error) {
-    console.error('Error accessing asset data:', error);
-  }
-
-  // Build payment data object
-  const paymentData = {
-    u: myAccount.username, // username
-    i: assetId, // assetId
-    s: symbol, // symbol
-  };
-
-  // Add optional fields if they have values
-  const amount = document.getElementById('receiveAmount').value.trim();
-  if (amount) {
-    paymentData.a = amount;
-  }
-
-  const memo = document.getElementById('receiveMemo').value.trim();
-  if (memo) {
-    paymentData.m = memo;
-  }
-
-  return paymentData;
-}
-
-// Update QR code with current payment data
-function updateQRCode() {
-  const qrcodeContainer = document.getElementById('qrcode');
-  const previewElement = document.getElementById('qrDataPreview'); // Get preview element
-  qrcodeContainer.innerHTML = '';
-  previewElement.style.display = 'none'; // Hide preview/error area initially
-  previewElement.innerHTML = ''; // Clear any previous error message
-
-  try {
-    // Get payment data
-    const paymentData = createQRPaymentData();
-    console.log('Created payment data:', JSON.stringify(paymentData, null, 2));
-
-    // Convert to JSON and encode as base64
-    const jsonData = JSON.stringify(paymentData);
-    const base64Data = btoa(jsonData);
-
-    // Create URI with liberdus:// prefix
-    const qrText = `liberdus://${base64Data}`;
-    console.log('QR code text length:', qrText.length);
-    console.log('QR code text (first 100 chars):', qrText.substring(0, 100) + (qrText.length > 100 ? '...' : ''));
-
-    const gifBytes = qr.encodeQR(qrText, 'gif', { scale: 4 });
-    // Convert the raw bytes to a base64 data URL
-    const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
-    const dataUrl = 'data:image/gif;base64,' + base64;
-    // Create an image element and set its source to the data URL
-    const img = document.createElement('img');
-    img.src = dataUrl;
-    img.width = 200;
-    img.height = 200;
-    // Add the image to the container
-    qrcodeContainer.appendChild(img);
-
-    return qrText;
-  } catch (error) {
-    console.error('Error in updateQRCode:', error);
-
-    qrcodeContainer.innerHTML = ''; // Clear the container before adding fallback QR
-
-    // Fallback to basic username QR code in liberdus:// format
-    try {
-      // Use short key 'u' for username
-      const fallbackData = { u: myAccount.username };
-      const fallbackJsonData = JSON.stringify(fallbackData);
-      const fallbackBase64Data = btoa(fallbackJsonData);
-      const fallbackQrText = `liberdus://${fallbackBase64Data}`;
-
-      const gifBytes = qr.encodeQR(fallbackQrText, 'gif', { scale: 4 });
-      // Convert the raw bytes to a base64 data URL
-      const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
-      const dataUrl = 'data:image/gif;base64,' + base64;
-      // Create an image element and set its source to the data URL
-      const img = document.createElement('img');
-      img.src = dataUrl;
-      img.width = 200;
-      img.height = 200;
-      // Add the image to the container
-      qrcodeContainer.appendChild(img);
-
-      console.log('Fallback QR code generated with username URI');
-      console.error('Error generating full QR', error);
-
-      // Show error directly in the preview element
-      if (previewElement) {
-        previewElement.innerHTML = `<span style="color: red;">Error generating full QR</span><br> Generating QR with only username. <br> Username: ${myAccount.username}`;
-        previewElement.style.display = 'block'; // Make the error visible
-      }
-
-      return fallbackQrText; // Return the generated fallback URI
-    } catch (fallbackError) {
-      // If even the fallback fails (e.g., username missing), show a simple error
-      console.error('Error generating fallback QR code:', fallbackError);
-      qrcodeContainer.innerHTML = '<p style="color: red; text-align: center;">Failed to generate QR code.</p>';
-      if (previewElement) {
-        previewElement.innerHTML = '<p style="color: red;">Error generating QR code.</p>';
-        previewElement.style.display = 'block'; // Make the error visible
-      }
-      return null; // Indicate complete failure
-    }
-  }
-}
-
-async function copyAddress() {
-  const address = document.getElementById('displayAddress').textContent;
-  try {
-    await navigator.clipboard.writeText(address);
-    const button = document.getElementById('copyAddress');
-    button.classList.add('success');
-    setTimeout(() => {
-      button.classList.remove('success');
-    }, 2000);
-  } catch (err) {
-    console.error('Failed to copy:', err);
   }
 }
 
@@ -8919,6 +8672,244 @@ class SendAssetFormModal {
 }
 
 const sendAssetFormModal = new SendAssetFormModal();
+
+class ReceiveModal {
+  constructor() {
+  }
+
+  load() {
+    this.modal = document.getElementById('receiveModal');
+    this.assetSelect = document.getElementById('receiveAsset');
+    this.amountInput = document.getElementById('receiveAmount');
+    this.memoInput = document.getElementById('receiveMemo');
+    this.displayAddress = document.getElementById('displayAddress');
+    this.qrcodeContainer = document.getElementById('qrcode');
+    this.previewElement = document.getElementById('qrDataPreview');
+    this.copyButton = document.getElementById('copyAddress');
+
+    // Create debounced function
+    this.debouncedUpdateQRCode = debounce(() => this.updateQRCode(), 300);
+
+    // Modal open/close
+    document.getElementById('openReceiveModal').addEventListener('click', () => this.open());
+    document.getElementById('closeReceiveModal').addEventListener('click', () => this.close());
+    
+    // Copy address
+    this.copyButton.addEventListener('click', () => this.copyAddress());
+    
+    // QR code updates
+    this.assetSelect.addEventListener('change', () => this.updateQRCode());
+    this.amountInput.addEventListener('input', this.debouncedUpdateQRCode);
+    this.memoInput.addEventListener('input', this.debouncedUpdateQRCode);
+  }
+
+  open() {
+    this.modal.classList.add('active');
+
+    // Get wallet data
+    const walletData = myData.wallet;
+
+    // Populate assets dropdown
+    // Clear existing options
+    this.assetSelect.innerHTML = '';
+
+    // Check if wallet assets exist
+    if (walletData && walletData.assets && walletData.assets.length > 0) {
+      // Add options for each asset
+      walletData.assets.forEach((asset, index) => {
+        const option = document.createElement('option');
+        option.value = index;
+        option.textContent = `${asset.name} (${asset.symbol})`;
+        this.assetSelect.appendChild(option);
+      });
+      console.log(`Populated ${walletData.assets.length} assets in dropdown`);
+    } else {
+      // Add a default option if no assets
+      const option = document.createElement('option');
+      option.value = 0;
+      option.textContent = 'Liberdus (LIB)';
+      this.assetSelect.appendChild(option);
+      console.log('No wallet assets found, using default');
+    }
+
+    // Clear input fields
+    this.amountInput.value = '';
+    this.memoInput.value = '';
+
+    // Initial update for addresses based on the first asset
+    this.updateReceiveAddresses();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  updateReceiveAddresses() {
+    // Update display address
+    this.updateDisplayAddress();
+  }
+
+  updateDisplayAddress() {
+    // Clear previous QR code
+    this.qrcodeContainer.innerHTML = '';
+
+    const address = myAccount.keys.address;
+    this.displayAddress.textContent = '0x' + address;
+
+    // Generate QR code with payment data
+    try {
+      this.updateQRCode();
+      console.log('QR code updated with payment data');
+    } catch (error) {
+      console.error('Error updating QR code:', error);
+
+      // Fallback to basic address QR code if there's an error
+      new QRCode(this.qrcodeContainer, {
+        text: '0x' + address,
+        width: 200,
+        height: 200,
+      });
+      console.log('Fallback to basic address QR code');
+    }
+  }
+
+  // Create QR payment data object based on form values
+  createQRPaymentData() {
+    // Get selected asset
+    const assetIndex = parseInt(this.assetSelect.value, 10) || 0;
+
+    // Default asset info in case we can't find the selected asset
+    let assetId = 'liberdus';
+    let symbol = 'LIB';
+
+    // Try to get the selected asset
+    try {
+      if (myData && myData.wallet && myData.wallet.assets && myData.wallet.assets.length > 0) {
+        const asset = myData.wallet.assets[assetIndex];
+        if (asset) {
+          assetId = asset.id || 'liberdus';
+          symbol = asset.symbol || 'LIB';
+          console.log(`Selected asset: ${asset.name} (${symbol})`);
+        } else {
+          console.log(`Asset not found at index ${assetIndex}, using defaults`);
+        }
+      } else {
+        console.warn('Wallet assets not available, using default asset');
+      }
+    } catch (error) {
+      console.error('Error accessing asset data:', error);
+    }
+
+    // Build payment data object
+    const paymentData = {
+      u: myAccount.username, // username
+      i: assetId, // assetId
+      s: symbol, // symbol
+    };
+
+    // Add optional fields if they have values
+    const amount = this.amountInput.value.trim();
+    if (amount) {
+      paymentData.a = amount;
+    }
+
+    const memo = this.memoInput.value.trim();
+    if (memo) {
+      paymentData.m = memo;
+    }
+
+    return paymentData;
+  }
+
+  // Update QR code with current payment data
+  updateQRCode() {
+    this.qrcodeContainer.innerHTML = '';
+    this.previewElement.style.display = 'none'; // Hide preview/error area initially
+    this.previewElement.innerHTML = ''; // Clear any previous error message
+
+    try {
+      // Get payment data
+      const paymentData = this.createQRPaymentData();
+      console.log('Created payment data:', JSON.stringify(paymentData, null, 2));
+
+      // Convert to JSON and encode as base64
+      const jsonData = JSON.stringify(paymentData);
+      const base64Data = btoa(jsonData);
+
+      // Create URI with liberdus:// prefix
+      const qrText = `liberdus://${base64Data}`;
+      console.log('QR code text length:', qrText.length);
+      console.log('QR code text (first 100 chars):', qrText.substring(0, 100) + (qrText.length > 100 ? '...' : ''));
+
+      const gifBytes = qr.encodeQR(qrText, 'gif', { scale: 4 });
+      // Convert the raw bytes to a base64 data URL
+      const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
+      const dataUrl = 'data:image/gif;base64,' + base64;
+      // Create an image element and set its source to the data URL
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.width = 200;
+      img.height = 200;
+      // Add the image to the container
+      this.qrcodeContainer.appendChild(img);
+
+      return qrText;
+    } catch (error) {
+      console.error('Error in updateQRCode:', error);
+
+      this.qrcodeContainer.innerHTML = ''; // Clear the container before adding fallback QR
+
+      // Fallback to basic username QR code in liberdus:// format
+      try {
+        // Use short key 'u' for username
+        const fallbackData = { u: myAccount.username };
+        const fallbackJsonData = JSON.stringify(fallbackData);
+        const fallbackBase64Data = btoa(fallbackJsonData);
+        const fallbackQrText = `liberdus://${fallbackBase64Data}`;
+
+        const gifBytes = qr.encodeQR(fallbackQrText, 'gif', { scale: 4 });
+        // Convert the raw bytes to a base64 data URL
+        const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
+        const dataUrl = 'data:image/gif;base64,' + base64;
+        // Create an image element and set its source to the data URL
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        img.width = 200;
+        img.height = 200;
+        // Add the image to the container
+        this.qrcodeContainer.appendChild(img);
+
+        console.log('Fallback QR code generated with username URI');
+        console.error('Error generating full QR', error);
+
+        // Show error directly in the preview element
+        if (this.previewElement) {
+          this.previewElement.innerHTML = `<span style="color: red;">Error generating full QR</span><br> Generating QR with only username. <br> Username: ${myAccount.username}`;
+          this.previewElement.style.display = 'block'; // Make the error visible
+        }
+      } catch (fallbackError) {
+        console.error('Error generating fallback QR code:', fallbackError);
+        this.qrcodeContainer.innerHTML = '<p style="color: red; text-align: center;">Failed to generate QR code.</p>';
+      }
+    }
+  }
+
+  async copyAddress() {
+    const address = this.displayAddress.textContent;
+    try {
+      await navigator.clipboard.writeText(address);
+      this.copyButton.classList.add('success');
+      setTimeout(() => {
+        this.copyButton.classList.remove('success');
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  }
+}
+
+// initialize the receive modal
+const receiveModal = new ReceiveModal();
 
 /**
  * Remove failed transaction from the contacts messages, pending, and wallet history
