@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'a'
+const version = 'b'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -25,7 +25,7 @@ async function checkVersion() {
   console.log(parseInt(myVersion.replace(/\D/g, '')), parseInt(newVersion.replace(/\D/g, '')));
   if (parseInt(myVersion.replace(/\D/g, '')) != parseInt(newVersion.replace(/\D/g, ''))) {
     if (parseInt(myVersion.replace(/\D/g, '')) > 0) {
-      showToast('Updating to new version: ' + newVersion + ' ' + version, 3000, 'info');
+      alert('Updating to new version: ' + newVersion + ' ' + version);
     }
     localStorage.setItem('version', newVersion); // Save new version
     forceReload([
@@ -1021,6 +1021,11 @@ async function handleVisibilityChange() {
 
   if (document.visibilityState === 'hidden') {
     saveState();
+    // if chatModal was opened, save the last message count
+    if (chatModal.modal.classList.contains('active') && chatModal.address) {
+      const contact = myData.contacts[chatModal.address];
+      chatModal.lastMessageCount = contact?.messages?.length || 0;
+    }
     if (handleSignOut.exit) {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       return;
@@ -1030,10 +1035,14 @@ async function handleVisibilityChange() {
     if (wsManager && !wsManager.isConnected() && myAccount) {
       wsManager.connect();
     }
-    setTimeout(async () => {
-      await updateChatData();
-      await updateChatList();
-    }, 1000);
+    // if chatModal was opened, check if message count changed while hidden
+    if (chatModal.modal.classList.contains('active') && chatModal.address) {
+      const contact = myData.contacts[chatModal.address];
+      const currentCount = contact?.messages?.length || 0;
+      if (currentCount !== chatModal.lastMessageCount) {
+        chatModal.appendChatModal(true);
+      }
+    }
   }
 }
 
@@ -2229,7 +2238,7 @@ class SignInModal {
     this.backButton.addEventListener('click', () => this.close());
   }
 
-  open(preselectedUsername_) {
+  async open(preselectedUsername_) {
     // Get existing accounts
     const { netid } = network;
     const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
@@ -2253,17 +2262,27 @@ class SignInModal {
       ${usernames.map((username) => `<option value="${username}">${username}</option>`).join('')}
     `;
 
-    // If only one account exists, select it and trigger change event
-    if (usernames.length === 1) {
-      this.usernameSelect.value = usernames[0];
-      this.usernameSelect.dispatchEvent(new Event('change'));
-      return;
-    }
-
     // If a username should be auto-selected (either preselect or only one account), do it
     const autoSelect = preselectedUsername_ && usernames.includes(preselectedUsername_) ? preselectedUsername_ : null;
     if (autoSelect) {
       this.usernameSelect.value = autoSelect;
+      await this.handleUsernameChange();
+      if (this.notFoundMessage.textContent === 'not found') {
+        // remove not found and make button available
+        this.notFoundMessage.textContent = '';
+        this.notFoundMessage.style.display = 'none';
+        this.submitButton.style.display = 'inline';
+        this.submitButton.disabled = false;
+        this.submitButton.textContent = 'Sign In';
+        this.removeButton.style.display = 'none';
+        this.handleSignIn();
+      }
+      return;
+    }
+
+    // If only one account exists, select it and trigger change event
+    if (usernames.length === 1) {
+      this.usernameSelect.value = usernames[0];
       this.usernameSelect.dispatchEvent(new Event('change'));
       return;
     }
@@ -2282,6 +2301,14 @@ class SignInModal {
   }
 
   close() {
+    // clear signInModal input fields
+    this.usernameSelect.value = '';
+    this.submitButton.disabled = true;
+    this.submitButton.textContent = 'Sign In';
+    this.submitButton.style.display = 'inline';
+    this.removeButton.style.display = 'none';
+    this.notFoundMessage.style.display = 'none';
+    
     this.modal.classList.remove('active');
     this.preselectedUsername = null;
   }
@@ -3367,16 +3394,7 @@ async function getChats(keys, retry = 1) {
     // TODO check if above is working
     await processChats(senders.chats, keys);
   } else {
-    if (retry > 0) {
-      const getChatsRetryLimit = 3;
-      if (retry <= getChatsRetryLimit) {
-        await new Promise((resolve) => setTimeout(resolve, 1000 * retry));
-        // call getChats recursively
-        chatCount = await getChats(keys, retry + 1);
-      } else {
-        console.error('Failed to get chats after', getChatsRetryLimit, 'retries');
-      }
-    }
+    console.error('getChats: no senders found')
   }
   if (chatModal.address) {
     // clear the unread count of address for open chat modal
@@ -3509,8 +3527,8 @@ async function processChats(chats, keys) {
           payload.my = false;
           payload.timestamp = payload.sent_timestamp;
           insertSorted(contact.messages, payload, 'timestamp');
-          // if we are not in the chatModal of who sent it, playChatSound
-          if (!inActiveChatWithSender) {
+          // if we are not in the chatModal of who sent it, playChatSound or if device visibility is hidden play sound
+          if (!inActiveChatWithSender || document.visibilityState === 'hidden') {
             playChatSound(true);
           }
           added += 1;
@@ -3627,7 +3645,7 @@ async function processChats(chats, keys) {
           // Always play transfer sound for new transfers
           playTransferSound(true);
           // is chatModal of sender address is active
-          if (inActiveChatWithSender) {
+          if (inActiveChatWithSender && document.visibilityState === 'visible') {
             // add the transfer tx to the chatModal
             chatModal.appendChatModal(true);
           }
@@ -3650,7 +3668,9 @@ async function processChats(chats, keys) {
         } else {
           // If chat modal is active, explicitly call appendChatModal to update it
           // and trigger highlight/scroll for the new message.
-          chatModal.appendChatModal(true); // Pass true for highlightNewMessage flag
+          if (document.visibilityState === 'visible') {
+            chatModal.appendChatModal(true); // Pass true for highlightNewMessage flag
+          }
         }
 
         // Remove existing chat for this contact if it exists
@@ -6956,6 +6976,7 @@ class ChatModal {
     this.messageInput = document.querySelector('.message-input');
     this.newestReceivedMessage = null;
     this.newestSentMessage = null;
+    this.lastMessageCount = 0;
 
     // used by updateTollValue and updateTollRequired
     this.toll = null;
@@ -7621,9 +7642,19 @@ class ChatModal {
         );
 
         if (newestReceivedElementDOM) {
-          // Found the element, scroll to and highlight it
-          newestReceivedElementDOM.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
+          // Focus the modal first
+          this.modal.focus();
+          
+          if (messageContainer) {
+            // Calculate the scroll position manually
+            const elementTop = newestReceivedElementDOM.offsetTop;
+            const containerHeight = messageContainer.clientHeight;
+            const scrollTop = elementTop - (containerHeight / 2); // Center the element
+            
+            // Scroll to the calculated position
+            messageContainer.scrollTop = scrollTop;
+          }
+          
           // Apply highlight immediately
           newestReceivedElementDOM.classList.add('highlighted');
 
@@ -9351,7 +9382,6 @@ function normalizeEmail(s) {
 }
 
 function longPoll() {
-  console.log('invoking longPoll');
   const myAccount = myData?.account;
   // Skip if no valid account
   if (!myAccount?.keys?.address) {
@@ -9364,7 +9394,8 @@ function longPoll() {
     const timestamp = myAccount.chatTimestamp || 0;
     const random = Math.floor(Math.random()*1000000);
     // call this with a promise that'll resolve with callback longPollResult function with the data
-    const longPollPromise = queryNetwork(`/account/${longAddress(myAccount.keys.address)}/chats/${timestamp}?random=${random}`);
+    const longPollPromise = queryNetwork(`/collector/api/poll?account=${longAddress(myAccount.keys.address)}&chatTimestamp=${timestamp}`);
+    console.log(`longPoll started with account=${longAddress(myAccount.keys.address)} chatTimestamp=${timestamp}`);
     // if there's an issue, reject the promise
     longPollPromise.catch(error => {
       console.error('Chat polling error:', error);
@@ -9381,17 +9412,15 @@ function longPoll() {
 longPoll.start = 0;
 
 async function longPollResult(data) {
+  console.log('longpoll data', data)
   // calculate the time since the last poll
   let nextPoll = 4000 - (getCorrectedTimestamp() - longPoll.start)
   if (nextPoll < 0) {
     nextPoll = 0;
   }
-
   // schedule the next poll
   setTimeout(longPoll, nextPoll + 1000);
-  
-  let chatCount = data.chats ? Object.keys(data.chats).length : 0; // Handle null/undefined data.chats
-  if (data.chats && chatCount > 0) {
+  if (data.success){
     try {
       const gotChats = await updateChatData();
       if (gotChats > 0) {
