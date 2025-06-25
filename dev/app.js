@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'e'
+const version = 'f'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -4373,7 +4373,7 @@ function createDisplayInfo(contact) {
       contact.username ||
       contact.address.slice(0, 8) + '...' + contact.address.slice(-6),
     name: contact.name || 'Not provided',
-    providedName: contact.senderInfo?.name || 'Not provided',
+    providedname: contact.senderInfo?.name || 'Not provided',
     email: contact.senderInfo?.email || 'Not provided',
     phone: contact.senderInfo?.phone || 'Not provided',
     linkedin: contact.senderInfo?.linkedin || 'Not provided',
