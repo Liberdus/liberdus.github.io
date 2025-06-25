@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'f'
+const version = 'g'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -2452,6 +2452,7 @@ class ContactInfoModal {
     });
 
     document.getElementById('nameEditButton').addEventListener('click', openEditContactModal);
+    document.getElementById('editContactProvidedNameContainer').addEventListener('click', handleProvidedNameClick);
 
     // Add close button handler for edit contact modal
     document.getElementById('closeEditContactModal').addEventListener('click', () => {
@@ -2482,7 +2483,7 @@ class ContactInfoModal {
 
     // Update the avatar section
     avatarDiv.innerHTML = identicon;
-    nameDiv.textContent = displayInfo.name !== 'Not provided' ? displayInfo.name : displayInfo.username;
+    nameDiv.textContent = displayInfo.name !== 'Not Entered' ? displayInfo.name : displayInfo.username;
     subtitleDiv.textContent = displayInfo.address;
 
     const fields = {
@@ -2500,6 +2501,7 @@ class ContactInfoModal {
       if (element) {
         const value = displayInfo[field.toLowerCase()] || 'Not provided';
         element.textContent = value;
+        element.parentElement.style.display = value === 'Not provided' ? 'none' : 'block';
       }
     });
   }
@@ -2664,6 +2666,9 @@ class FriendModal {
     this.updateFriendButton(contact, 'addFriendButtonContactInfo');
     this.updateFriendButton(contact, 'addFriendButtonChat');
 
+    // Update the contact list
+    await updateContactsList();
+
     // Close the friend modal
     this.closeFriendModal();
   }
@@ -2702,13 +2707,27 @@ async function openEditContactModal() {
 
   // Update the avatar section
   avatarDiv.innerHTML = identicon;
-  nameDiv.textContent = document.getElementById('contactInfoName').textContent;
-  subtitleDiv.textContent = document.getElementById('contactInfoUsername').textContent;
+  // update the name and subtitle
+  nameDiv.textContent = document.getElementById('contactInfoUsername').textContent;
+  subtitleDiv.textContent = document.getElementById('contactInfoModal').querySelector('.subtitle').textContent;
+
+  // update the provided name
+  const providedNameContainer = document.getElementById('editContactProvidedNameContainer');
+  const providedNameDiv = providedNameContainer.querySelector('.contact-info-value');
+
+  // if the textContent is 'Not provided', set it to an empty string
+  const providedName = document.getElementById('contactInfoProvidedName').textContent;
+  if (providedName === 'Not provided') {
+    providedNameContainer.style.display = 'none';
+  } else {
+    providedNameDiv.textContent = providedName;
+    providedNameContainer.style.display = 'block';
+  }
 
   // Get the original name from the contact info display
   const contactNameDisplay = document.getElementById('contactInfoName');
   let originalName = contactNameDisplay.textContent;
-  if (originalName === 'Not provided') {
+  if (originalName === 'Not Entered') {
     originalName = '';
   }
 
@@ -2734,7 +2753,12 @@ async function openEditContactModal() {
 
   // Create a handler function to focus the input after the modal transition
   const editContactFocusHandler = () => {
-    nameInput.focus();
+    // add slight delay and focus on the the very right of the input
+    setTimeout(() => {
+      nameInput.focus();
+      // Set cursor position to the end of the input content
+      nameInput.setSelectionRange(nameInput.value.length, nameInput.value.length);
+    }, 200);
     editContactModal.removeEventListener('transitionend', editContactFocusHandler);
   };
 
@@ -2744,22 +2768,41 @@ async function openEditContactModal() {
 
 openEditContactModal.originalName = '';
 
-// Creates a handler for input changes
+/**
+ * Handles the click event for the provided name
+ * @returns {void}
+ */
+function handleProvidedNameClick() {
+  const providedNameContainer = document.getElementById('editContactProvidedNameContainer');
+  const providedNameValue = providedNameContainer.querySelector('.contact-info-value').textContent;
+  const nameInput = document.getElementById('editContactNameInput');
+  
+  // Fill the input with the provided name
+  nameInput.value = providedNameValue;
+  
+  // Focus on the input and set cursor to end
+  nameInput.focus();
+  nameInput.setSelectionRange(nameInput.value.length, nameInput.value.length);
+
+  // Invoke input event
+  nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+/**
+ * Handles the input changes for the edit contact modal by updating the action button
+ * @returns {void}
+ */
 function handleEditNameInput() {
   const nameInput = document.getElementById('editContactNameInput');
   const nameActionButton = nameInput.parentElement.querySelector('.field-action-button');
-  const originalNameValue = openEditContactModal.originalName;
 
-  const currentValue = nameInput.value.trim();
-  const valueChanged = currentValue !== originalNameValue;
-
-  if (valueChanged) {
-    nameActionButton.className = 'field-action-button add';
-    nameActionButton.setAttribute('aria-label', 'Save');
-  } else {
-    nameActionButton.className = 'field-action-button clear';
-    nameActionButton.setAttribute('aria-label', 'Clear');
+  // if already 'add' class, return early
+  if (nameActionButton.classList.contains('add')) {
+    return;
   }
+
+  nameActionButton.className = 'field-action-button add';
+  nameActionButton.setAttribute('aria-label', 'Save');
 }
 
 // Creates a handler for action button clicks
@@ -2805,9 +2848,9 @@ function handleSaveEditContact() {
     editModal.classList.remove('active');
   }
 
-  // update title if chatModal is open
+  // update title if chatModal is open and if contact.name is '' fallback to contact.username
   if (chatModal.isOpen() && chatModal.address === currentContactAddress) {
-    chatModal.modalTitle.textContent = contact.name;
+    chatModal.modalTitle.textContent = getContactDisplayName(contact);
   }
 
   // Safely update the contact info modal if it exists and is open
@@ -4368,11 +4411,8 @@ function displayContactResults(results, searchText) {
 // Create a display info object from a contact object
 function createDisplayInfo(contact) {
   return {
-    username:
-      contact.senderInfo?.username ||
-      contact.username ||
-      contact.address.slice(0, 8) + '...' + contact.address.slice(-6),
-    name: contact.name || 'Not provided',
+    username: contact.username || contact.address.slice(0, 8) + '...' + contact.address.slice(-6),
+    name: contact.name || 'Not Entered',
     providedname: contact.senderInfo?.name || 'Not provided',
     email: contact.senderInfo?.email || 'Not provided',
     phone: contact.senderInfo?.phone || 'Not provided',
@@ -5869,6 +5909,7 @@ class TollModal {
     document.getElementById('closeTollModal').addEventListener('click', () => this.close());
     this.toggleTollCurrencyElement.addEventListener('click', (event) => this.handleToggleTollCurrency(event));
     document.getElementById('tollForm').addEventListener('submit', (event) => this.saveAndPostNewToll(event));
+    this.newTollAmountInputElement.addEventListener('input', () => this.newTollAmountInputElement.value = normalizeUnsignedFloat(this.newTollAmountInputElement.value));
     this.newTollAmountInputElement.addEventListener('input', () => this.updateSaveButtonState());
   }
 
@@ -5883,7 +5924,7 @@ class TollModal {
 
     this.updateTollDisplay(toll, tollUnit);
 
-    this.currentCurrency = 'LIB'; // Reset currency state
+    this.currentCurrency = tollUnit;
     document.getElementById('tollCurrencySymbol').textContent = this.currentCurrency;
     this.newTollAmountInputElement.value = ''; // Clear input field
     this.warningMessageElement.textContent = '';
@@ -5927,6 +5968,7 @@ class TollModal {
     } else {
       this.minTollDisplay.textContent = `Minimum toll: ${parseFloat(big2str(this.minToll, 18)).toFixed(6)} LIB`; // Show 6 decimal places for LIB
     }
+    this.updateSaveButtonState();
   }
 
   /**
@@ -6114,6 +6156,22 @@ class TollModal {
     // Update save button state
     this.saveButton.disabled = !isValid;
 
+    // Additional check: disable if the new toll is the same as the current toll
+    if (isValid) {
+      const newTollValue = parseFloat(this.newTollAmountInputElement.value);
+      const newTollBigInt = bigxnum2big(wei, this.newTollAmountInputElement.value);
+      const currentToll = myData.settings.toll;
+      const currentTollUnit = myData.settings.tollUnit;
+
+      if (!isNaN(newTollValue)) {
+        if (currentTollUnit === this.currentCurrency) {
+          if (newTollBigInt === currentToll) {
+            this.saveButton.disabled = true;
+          }
+        } 
+      }
+    }
+
     // Update warning message
     if (warningMessage) {
       this.warningMessageElement.textContent = warningMessage;
@@ -6143,7 +6201,9 @@ class InviteModal {
     document.getElementById('inviteForm').addEventListener('submit', (event) => this.handleSubmit(event));
 
     // Add input event listeners for email and phone fields
+    this.inviteEmailInput.addEventListener('input', () => this.inviteEmailInput.value = normalizeEmail(this.inviteEmailInput.value));
     this.inviteEmailInput.addEventListener('input', () => this.validateInputs());
+    this.invitePhoneInput.addEventListener('input', () => this.invitePhoneInput.value = normalizePhone(this.invitePhoneInput.value));
     this.invitePhoneInput.addEventListener('input', () => this.validateInputs());
   }
 
@@ -6283,7 +6343,9 @@ class MyProfileModal {
     this.phone.addEventListener('input', (e) => this.handlePhoneInput(e));
     this.email.addEventListener('input', (e) => this.handleEmailInput(e));
     this.linkedin.addEventListener('input', (e) => this.handleLinkedInInput(e));
-    this.x.addEventListener('input', (e) => this.handleXInput(e));
+    this.linkedin.addEventListener('blur', (e) => this.handleLinkedInBlur(e));
+    this.x.addEventListener('input', (e) => this.handleXTwitterInput(e));
+    this.x.addEventListener('blur', (e) => this.handleXTwitterBlur(e));
   }
 
   // Input sanitization and validation methods
@@ -6309,14 +6371,28 @@ class MyProfileModal {
   handleLinkedInInput(e) {
     // Allow letters, numbers, dashes, and underscores
 //    const normalized = e.target.value.replace(/[^a-zA-Z0-9\-_]/g, '');
-    const normalized = normalizeUsername(e.target.value);
+    const normalized = normalizeLinkedinUsername(e.target.value);
     e.target.value = normalized;
   }
 
-  handleXInput(e) {
+  handleLinkedInBlur(e) {
+    // Allow letters, numbers, dashes, and underscores
+//    const normalized = e.target.value.replace(/[^a-zA-Z0-9\-_]/g, '');
+    const normalized = normalizeLinkedinUsername(e.target.value, true);
+    e.target.value = normalized;
+  }
+
+  handleXTwitterInput(e) {
     // Allow letters, numbers, and underscores
 //    const normalized = e.target.value.replace(/[^a-zA-Z0-9_]/g, '');
-    const normalized = normalizeUsername(e.target.value);
+    const normalized = normalizeXTwitterUsername(e.target.value);
+    e.target.value = normalized;
+  }
+
+  handleXTwitterBlur(e) {
+    // Allow letters, numbers, and underscores
+//    const normalized = e.target.value.replace(/[^a-zA-Z0-9_]/g, '');
+    const normalized = normalizeXTwitterUsername(e.target.value, true);
     e.target.value = normalized;
   }
 
@@ -6757,6 +6833,7 @@ class StakeValidatorModal {
     this.debouncedValidateStakeInputs = debounce(() => this.validateStakeInputs(), 300);
 
     this.nodeAddressInput.addEventListener('input', this.debouncedValidateStakeInputs);
+    this.amountInput.addEventListener('input', () => this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value));
     this.amountInput.addEventListener('input', this.debouncedValidateStakeInputs);
 
     // Add listener for opening the modal
@@ -8225,6 +8302,8 @@ class SendAssetFormModal {
       // updateSendAddresses();
       this.updateAvailableBalance();
     });
+    // amount input listener for normalizing
+    this.amountInput.addEventListener('input', () => this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value));
     // amount input listener for real-time balance validation
     this.amountInput.addEventListener('input', this.updateAvailableBalance.bind(this));
     // Add custom validation message for minimum amount
@@ -8752,6 +8831,7 @@ class ReceiveModal {
     
     // QR code updates
     this.assetSelect.addEventListener('change', () => this.updateQRCode());
+    this.amountInput.addEventListener('input', () => this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value));
     this.amountInput.addEventListener('input', this.debouncedUpdateQRCode);
     this.memoInput.addEventListener('input', this.debouncedUpdateQRCode);
   }
@@ -9388,6 +9468,83 @@ function normalizeEmail(s) {
   // Keep only valid email characters
   s = s.replace(/[^a-z0-9._%+-@]/g, '');  
   return s;
+}
+
+function normalizeLinkedinUsername(username, final = false) {
+  if (!username) return '';
+  let normalized = username;
+  if (normalized.includes('/')) {
+    // Remove trailing slashes
+    normalized = normalized.replace(/\/+$/, '');        
+    // Keep only the username from the URL
+    normalized = normalized.substring(normalized.lastIndexOf('/') + 1);
+  }
+  // Step 1: Remove all characters that are not letters, numbers, or hyphens
+  normalized = normalized.replace(/[^a-zA-Z0-9-]/g, '');  
+  // Step 2: Replace consecutive hyphens with a single hyphen
+  normalized = normalized.replace(/-+/g, '-');  
+  // Remove leading hyphens
+  normalized = normalized.replace(/^-+/, '');    
+  // Step 3: Truncate to maximum length (30 characters)
+  normalized = normalized.substring(0, 30);  
+  // Step 4: If final is true, apply strict validation rules
+  if (final) {
+    // Remove trailing hyphens
+    normalized = normalized.replace(/-+$/, '');        
+    // If still empty or too short after cleanup, return empty string
+    if (normalized.length < 3) {
+      normalized = '';
+    }
+  }  
+  return normalized;
+}
+
+function normalizeXTwitterUsername(username, final = false) {
+  if (!username) return '';
+  let normalized = username;
+  if (normalized.includes('/')) {
+    // Remove trailing slashes
+    normalized = normalized.replace(/\/+$/, '');        
+    // Keep only the username from the URL
+    normalized = normalized.substring(normalized.lastIndexOf('/') + 1);
+  }
+  // Step 3: Remove all characters that are not letters, numbers, or underscores
+  normalized = normalized.replace(/[^a-zA-Z0-9_]/g, '');  
+  // Step 4: Truncate to maximum length (15 characters)
+  normalized = normalized.substring(0, 15);  
+  // Step 5: If final is true, apply strict validation rules
+  if (final) {
+    // Ensure it's not only numbers
+    if (normalized && /^\d+$/.test(normalized)) {
+      normalized = ''
+    }   
+  }
+  // Ensure minimum length of 1 character
+  if (normalized.length < 1) {
+    normalized = '';
+  } 
+  return normalized;
+}
+
+/** * Normalizes a string .
+ * @param {string} value - The float as a string to normalize.
+ * @returns {string} - The normalized float as a string.
+ * */
+function normalizeUnsignedFloat(value) {
+  if (!value) return '';
+
+  // keep only digits or dots
+  let normalized = value.replace(/[^0-9.]/g, '');
+
+  // keep only the first dot
+  const firstDot = normalized.indexOf('.');
+  if (firstDot !== -1) {
+    normalized =
+      normalized.slice(0, firstDot + 1) +
+      normalized.slice(firstDot + 1).replace(/\./g, '');
+  }
+
+  return normalized;
 }
 
 function longPoll() {

@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.06.25.13.02" />
+    <link rel="stylesheet" href="./styles.css?v=2025.06.25.18.01" />
     <link rel="manifest" href="./manifest.json" />
   </head>
   <body>
-    <script src="./app.js?v=2025.06.25.13.02" type="module"></script>
+    <script src="./app.js?v=2025.06.25.18.01" type="module"></script>
     <div class="container">
       <header class="header" id="header">
         <div id="logo">
@@ -399,7 +399,7 @@
               <input type="text" id="linkedin" class="form-control" />
             </div>
             <div class="form-group">
-              <label for="x">X</label>
+              <label for="x">X-Twitter</label>
               <input type="text" id="x" class="form-control" />
             </div>
             <button type="submit" class="update-button">Update Profile</button>
@@ -503,7 +503,7 @@
               </div>
             </template>
             <!-- Contact info fields -->
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Username</div>
               <div class="contact-info-value" id="contactInfoUsername"></div>
             </div>
@@ -514,24 +514,24 @@
                 <button class="icon-button edit-icon" id="nameEditButton" aria-label="Edit name"></button>
               </div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Provided Name</div>
               <div class="contact-info-value" id="contactInfoProvidedName"></div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Email</div>
               <div class="contact-info-value" id="contactInfoEmail"></div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Phone</div>
               <div class="contact-info-value" id="contactInfoPhone"></div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">LinkedIn</div>
               <div class="contact-info-value" id="contactInfoLinkedin"></div>
             </div>
-            <div class="contact-info-item">
-              <div class="contact-info-label">X</div>
+            <div class="contact-info-item" style="display: none">
+              <div class="contact-info-label">X-Twitter</div>
               <div class="contact-info-value" id="contactInfoX"></div>
             </div>
           </div>
@@ -630,7 +630,7 @@
           <div class="form-group">
             <label for="receiveAmount">Amount (Optional)</label>
             <input
-              type="number"
+              type="text"
               id="receiveAmount"
               class="form-control"
               placeholder="Enter amount"
@@ -730,11 +730,9 @@
               <label for="sendAmount">Amount</label>
               <div class="amount-container">
                 <input
-                  type="number"
+                  type="text"
                   id="sendAmount"
                   class="form-control"
-                  step="any"
-                  min="0.000000000000000001"
                   required
                 />
                 <!-- add button to toggle between LIB and USD -->
@@ -912,7 +910,7 @@
               <div class="name"></div>
               <div class="subtitle"></div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Username</div>
               <div class="contact-info-value" id="editContactUsername"></div>
             </div>
@@ -930,20 +928,24 @@
                 </div>
               </div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" id="editContactProvidedNameContainer" style="display: none">
+              <div class="contact-info-label">Provided Name</div>
+              <div class="contact-info-value" id="editContactProvidedName"></div>
+            </div>
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Email</div>
               <div class="contact-info-value" id="editContactEmail"></div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Phone</div>
               <div class="contact-info-value" id="editContactPhone"></div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">LinkedIn</div>
               <div class="contact-info-value" id="editContactLinkedin"></div>
             </div>
-            <div class="contact-info-item">
-              <div class="contact-info-label">X</div>
+            <div class="contact-info-item" style="display: none">
+              <div class="contact-info-label">X-Twitter</div>
               <div class="contact-info-value" id="editContactX"></div>
             </div>
           </div>
@@ -1088,12 +1090,10 @@
               </div>
               <div class="amount-container">
                 <input
-                  type="number"
+                  type="text"
                   id="newTollAmountInput"
                   class="form-control"
                   placeholder="Enter new amount"
-                  step="any"
-                  min="0"
                   required
                 />
                 <button type="button" id="toggleTollCurrency" class="toggle-balance">
@@ -1169,13 +1169,11 @@
               <label for="stakeAmount">Stake Amount</label>
               <div id="stakeAvailableBalanceDisplay" class="available-balance-display"></div>
               <input
-                type="number"
+                type="text"
                 id="stakeAmount"
                 class="form-control"
                 required
                 placeholder="Enter amount to stake"
-                min="0.000000000000000001"
-                step="any"
               />
               <div id="stakeAmountWarning" class="validation-warning" style="display: none"></div>
             </div>
