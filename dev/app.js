@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'g'
+const version = 'h'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -162,6 +162,8 @@ const pollIntervalNormal = 30000; // in millisconds
 const pollIntervalChatting = 5000; // in millseconds
 //network.monitor.url = "http://test.liberdus.com:3000"    // URL of the monitor server
 //network.explorer.url = "http://test.liberdus.com:6001"   // URL of the chain explorer
+const MAX_MEMO_BYTES = 50; // 50 bytes for memos
+const MAX_CHAT_MESSAGE_BYTES = 100; // 100 bytes for chat messages
 
 let myData = null;
 let myAccount = null; // this is set to myData.account for convience
@@ -812,6 +814,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Add refresh balance button handler
   document.getElementById('refreshBalance').addEventListener('click', async () => {
+    const button = document.getElementById('refreshBalance');
+    
+    // Add active class for animation
+    button.classList.add('active');
+    
+    // Remove active class after animation completes
+    setTimeout(() => {
+      button.classList.remove('active');
+      // Force blur to remove focus
+      button.blur();
+    }, 300);
+
     // await updateWalletBalances();
     updateWalletView();
   });
@@ -2633,9 +2647,9 @@ class FriendModal {
 
     // send transaction to update chat toll
     const res = await this.postUpdateTollRequired(this.currentContactAddress, Number(selectedStatus));
-    if (res?.transaction?.success === false) {
+    if (res?.result?.success === false) {
       console.log(
-        `[handleFriendSubmit] update_toll_required transaction failed: ${res?.transaction?.reason}. Did not update contact status.`
+        `[handleFriendSubmit] update_toll_required transaction failed: ${res?.result?.reason}. Did not update contact status.`
       );
       return;
     }
@@ -3945,6 +3959,11 @@ async function injectTx(tx, txid) {
     } else {
       showToast('Error injecting transaction: ' + data?.result?.reason, 0, 'error');
       console.error('Error injecting transaction:', data?.result?.reason);
+      if (data?.result?.reason?.includes('timestamp out of range')) {
+        console.error('Timestamp out of range, updating timestamp');
+        timeDifference()
+        showToast('Try again.', 0, 'error');
+      }
     }
 
     return data;
@@ -4624,7 +4643,7 @@ function markConnectivityDependentElements() {
       element.setAttribute('data-requires-connection', 'true');
 
       // Add tooltip for disabled state
-      element.title = 'This feature requires an internet connection';
+      // element.title = 'This feature requires an internet connection';
 
       // Add aria label for accessibility
       element.setAttribute('aria-disabled', !isOnline);
@@ -6243,7 +6262,7 @@ class InviteModal {
     }
 
     try {
-      const response = await fetch('http://arimaa.com:5050/api/invite', {
+        const response = await fetch('https://inv.liberdus.com:2053/api/invite', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -7059,6 +7078,7 @@ class ChatModal {
     this.newestReceivedMessage = null;
     this.newestSentMessage = null;
     this.lastMessageCount = 0;
+    this.messageByteCounter = document.querySelector('.message-byte-counter');
 
     // used by updateTollValue and updateTollRequired
     this.toll = null;
@@ -7087,6 +7107,10 @@ class ChatModal {
       this.messageInput.style.height = '48px';
       this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
 
+      const messageText = e.target.value;
+      const messageValidation = this.validateMessageSize(messageText);
+      this.updateMessageByteCounter(messageValidation);
+
       // Save draft (text is already limited to 2000 chars by maxlength attribute)
       this.debouncedSaveDraft(e.target.value);
     });
@@ -7114,6 +7138,11 @@ class ChatModal {
    * @returns {Promise<void>}
    */
   async open(address) {
+    // clear message input
+    this.messageInput.value = '';
+    this.messageInput.style.height = '48px';
+    this.messageByteCounter.style.display = 'none';
+
     friendModal.setAddress(address);
     document.getElementById('newChatButton').classList.remove('visible');
     const contact = myData.contacts[address];
@@ -7910,6 +7939,8 @@ class ChatModal {
       this.messageInput.value = contact.draft;
       // Trigger resize
       this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
+      // trigger input event to update the byte counter
+      this.messageInput.dispatchEvent(new Event('input'));
     }
   }
 
@@ -7917,6 +7948,48 @@ class ChatModal {
     const tempAddress = this.address;
     this.close();
     await this.open(tempAddress);
+  }
+
+  /**
+   * Validates the size of a message
+   * @param {string} text - The message text to validate
+   * @returns {Object} - An object containing the validation result
+   */
+  validateMessageSize(text) {
+    const maxBytes = MAX_CHAT_MESSAGE_BYTES;
+    const byteSize = new Blob([text]).size;
+    return {
+      isValid: byteSize <= maxBytes,
+      currentBytes: byteSize,
+      remainingBytes: maxBytes - byteSize,
+      percentage: (byteSize / maxBytes) * 100,
+      maxBytes: maxBytes
+    };
+  }
+  
+  /**
+   * Updates the message byte counter
+   * @param {Object} validation - The validation result
+   * @returns {void}
+   */
+  updateMessageByteCounter(validation) {
+    // Only show counter when at 90% or higher
+    if (validation.percentage >= 90) {
+      if (validation.percentage > 100) {
+        this.messageByteCounter.style.color = '#dc3545';
+        this.messageByteCounter.textContent = `${validation.currentBytes - validation.maxBytes} bytes - over limit`;
+        // disable send button
+        this.sendButton.disabled = true;
+      } else if (validation.percentage >= 90) {
+        this.messageByteCounter.style.color = '#ffa726';
+        this.messageByteCounter.textContent = `${validation.remainingBytes} bytes - left`;
+        this.sendButton.disabled = false;
+      }
+      this.messageByteCounter.style.display = 'block';
+    } else {
+      this.messageByteCounter.style.display = 'none';
+      this.sendButton.disabled = false;
+    }
   }
 }
 
@@ -8281,6 +8354,9 @@ class SendAssetFormModal {
     this.balanceAmount = document.getElementById('balanceAmount');
     this.transactionFee = document.getElementById('transactionFee');
     this.balanceWarning = document.getElementById('balanceWarning');
+    this.memoLabel = document.querySelector('label[for="sendMemo"]');
+    this.memoByteCounter = document.querySelector('.memo-byte-counter');
+    this.memoValidation = {}
   }
 
   /**
@@ -8327,6 +8403,7 @@ class SendAssetFormModal {
    */
   async open() {
     this.modal.classList.add('active');
+    this.memoValidation = {};
 
     // Clear fields when opening the modal
     this.usernameInput.value = '';
@@ -8452,6 +8529,12 @@ class SendAssetFormModal {
       };
       this.needTollInfo = false;
     }
+
+    // memo byte size validation
+    const memoText = this.memoInput.value;
+    this.memoValidation = this.validateMemoSize(memoText);
+    this.updateMemoByteCounter(this.memoValidation);
+
     if (this.tollInfo.required !== undefined && this.tollInfo.toll !== undefined) {
       // build string to display under memo input. with lib amoutn and (usd amount)
       /* const tollInfoString = `Toll:  */
@@ -8460,6 +8543,39 @@ class SendAssetFormModal {
     }
   }
 
+  /**
+   * validateMemoSize
+   * @param {string} text - The text to validate
+   * @returns {object} - The validation object
+   */
+  validateMemoSize(text) {
+    const maxBytes = MAX_MEMO_BYTES;
+    const byteSize = new Blob([text]).size;
+    return {
+      isValid: byteSize <= maxBytes,
+      currentBytes: byteSize,
+      remainingBytes: maxBytes - byteSize,
+      percentage: (byteSize / maxBytes) * 100,
+      maxBytes: maxBytes
+    };
+  }
+
+  updateMemoByteCounter(validation) {
+    // Only show counter when at 90% or higher
+    if (validation.percentage >= 90) {
+      
+      if (validation.percentage > 100) {
+        this.memoByteCounter.style.color = '#dc3545';
+        this.memoByteCounter.textContent = `${validation.currentBytes - validation.maxBytes} bytes - over limit`;
+      } else if (validation.percentage >= 90) {
+        this.memoByteCounter.style.color = '#ffa726';
+        this.memoByteCounter.textContent = `${validation.remainingBytes} bytes - left`;
+      }
+      this.memoByteCounter.style.display = 'inline';
+    } else {
+      this.memoByteCounter.style.display = 'none';
+    }
+  }
   /**
    * updateTollAmountUI
    */
@@ -8701,7 +8817,7 @@ class SendAssetFormModal {
       }
     }
     // Enable button only if both conditions are met.
-    if (isAddressConsideredValid && isAmountAndBalanceValid && isAmountAndTollValid) {
+    if (isAddressConsideredValid && isAmountAndBalanceValid && isAmountAndTollValid && this.memoValidation.isValid) {
       this.submitButton.disabled = false;
     } else {
       this.submitButton.disabled = true;
