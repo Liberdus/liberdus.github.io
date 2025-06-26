@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -279,320 +279,6 @@ function getAvailableUsernames() {
   return Object.keys(netidAccounts.usernames);
 }
 
-function openCreateAccountModal() {
-  document.getElementById('createAccountModal').classList.add('active');
-}
-
-// Check availability on input changes
-let createAccountCheckTimeout;
-function handleCreateAccountInput(e) {
-  const username = normalizeUsername(e.target.value);
-  e.target.value = username;
-  const usernameAvailable = document.getElementById('newUsernameAvailable');
-  const submitButton = document.querySelector('#createAccountForm button[type="submit"]');
-
-  // Clear previous timeout
-  if (createAccountCheckTimeout) {
-    clearTimeout(createAccountCheckTimeout);
-  }
-
-  // Reset display
-  usernameAvailable.style.display = 'none';
-  // username available test: change to false to test pending register tx
-  submitButton.disabled = true;
-
-  // Check if username is too short
-  if (username.length < 3) {
-    usernameAvailable.textContent = 'too short';
-    usernameAvailable.style.color = '#dc3545';
-    usernameAvailable.style.display = 'inline';
-    return;
-  }
-
-  // Check network availability
-  createAccountCheckTimeout = setTimeout(async () => {
-    const taken = await checkUsernameAvailability(username);
-    if (taken == 'taken') {
-      usernameAvailable.textContent = 'taken';
-      usernameAvailable.style.color = '#dc3545';
-      usernameAvailable.style.display = 'inline';
-      // username available test: comment out to test pending register tx
-      submitButton.disabled = true;
-    } else if (taken == 'available') {
-      usernameAvailable.textContent = 'available';
-      usernameAvailable.style.color = '#28a745';
-      usernameAvailable.style.display = 'inline';
-      submitButton.disabled = false;
-    } else {
-      usernameAvailable.textContent = 'network error';
-      usernameAvailable.style.color = '#dc3545';
-      usernameAvailable.style.display = 'inline';
-      submitButton.disabled = true;
-    }
-  }, 1000);
-}
-
-function closeCreateAccountModal() {
-  document.getElementById('createAccountModal').classList.remove('active');
-}
-
-async function handleCreateAccount(event) {
-  // disable submit button
-  const submitButton = document.querySelector('#createAccountForm button[type="submit"]');
-  submitButton.disabled = true;
-  // disable input fields, back button, and toggle button
-  const toggleButton = document.getElementById('togglePrivateKeyInput');
-  const usernameInput = document.getElementById('newUsername');
-  const privateKeyInput = document.getElementById('newPrivateKey');
-  const backButton = document.getElementById('closeCreateAccountModal');
-
-  toggleButton.disabled = true;
-  usernameInput.disabled = true;
-  privateKeyInput.disabled = true;
-  backButton.disabled = true;
-
-  event.preventDefault();
-  const username = normalizeUsername(document.getElementById('newUsername').value);
-
-  // Get network ID from network.js
-  const { netid } = network;
-
-  // Get existing accounts or create new structure
-  const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-
-  // Ensure netid and usernames objects exist
-  if (!existingAccounts.netids[netid]) {
-    existingAccounts.netids[netid] = { usernames: {} };
-  }
-
-  // Get private key from input or generate new one
-  const providedPrivateKey = document.getElementById('newPrivateKey').value;
-  const privateKeyError = document.getElementById('newPrivateKeyError');
-  let privateKey, privateKeyHex;
-
-  if (providedPrivateKey) {
-    // Validate and normalize private key
-    const validation = validatePrivateKey(providedPrivateKey);
-    if (!validation.valid) {
-      privateKeyError.textContent = validation.message;
-      privateKeyError.style.color = '#dc3545';
-      privateKeyError.style.display = 'inline';
-      // Re-enable controls on validation failure
-      submitButton.disabled = false;
-      toggleButton.disabled = false;
-      usernameInput.disabled = false;
-      privateKeyInput.disabled = false;
-      backButton.disabled = false;
-      return;
-    }
-
-    privateKey = hex2bin(validation.key);
-    privateKeyHex = validation.key;
-    privateKeyError.style.display = 'none';
-  } else {
-    privateKey = generateRandomPrivateKey();
-    privateKeyHex = bin2hex(privateKey);
-    privateKeyError.style.display = 'none'; // Ensure hidden if generated
-  }
-
-  function validatePrivateKey(key) {
-    // Trim whitespace
-    key = key.trim();
-
-    // Remove 0x prefix if present
-    if (key.startsWith('0x')) {
-      key = key.slice(2);
-    }
-
-    // Convert to lowercase
-    key = key.toLowerCase();
-
-    // Validate hex characters
-    const hexRegex = /^[0-9a-f]*$/;
-    if (!hexRegex.test(key)) {
-      return {
-        valid: false,
-        message: 'Invalid characters - only 0-9 and a-f allowed',
-      };
-    }
-
-    // Validate length (64 chars for 32 bytes)
-    if (key.length !== 64) {
-      return {
-        valid: false,
-        message: 'Invalid length - must be 64 hex characters',
-      };
-    }
-
-    return {
-      valid: true,
-      key: key,
-    };
-  }
-
-  // Generate uncompressed public key
-  const publicKey = getPublicKey(privateKey);
-  const publicKeyHex = bin2hex(publicKey);
-  const pqSeed = bin2hex(generateRandomBytes(64));
-
-  // Generate address from public key
-  const address = generateAddress(publicKey);
-  const addressHex = bin2hex(address);
-
-  // If a private key was provided, check if the derived address already exists on the network
-  if (providedPrivateKey) {
-    try {
-      const accountCheckAddress = longAddress(addressHex);
-      console.log(`Checking network for existing account at address: ${accountCheckAddress}`);
-      const accountInfo = await queryNetwork(`/account/${accountCheckAddress}`);
-
-      // Check if the query returned data indicating an account exists.
-      // This assumes a non-null `accountInfo` with an `account` property means it exists.
-      if (accountInfo && accountInfo.account) {
-        console.log('Account already exists for this private key:', accountInfo);
-        privateKeyError.textContent = 'An account already exists for this private key.';
-        privateKeyError.style.color = '#dc3545';
-        privateKeyError.style.display = 'inline';
-        // Re-enable controls when account already exists
-        submitButton.disabled = false;
-        toggleButton.disabled = false;
-        usernameInput.disabled = false;
-        privateKeyInput.disabled = false;
-        backButton.disabled = false;
-        return; // Stop the account creation process
-      } else {
-        console.log('No existing account found for this private key.');
-        privateKeyError.style.display = 'none';
-      }
-    } catch (error) {
-      console.error('Error checking for existing account:', error);
-      privateKeyError.textContent = 'Network error checking key. Please try again.';
-      privateKeyError.style.color = '#dc3545';
-      privateKeyError.style.display = 'inline';
-      // Re-enable controls on network error
-      submitButton.disabled = false;
-      toggleButton.disabled = false;
-      usernameInput.disabled = false;
-      privateKeyInput.disabled = false;
-      backButton.disabled = false;
-      return; // Stop process on error
-    }
-  }
-
-  // Create new account entry
-  myAccount = {
-    netid,
-    username,
-    chatTimestamp: 0,
-    keys: {
-      address: addressHex,
-      public: publicKeyHex,
-      secret: privateKeyHex,
-      type: 'secp256k1',
-      pqSeed: pqSeed, // store only the 64 byte seed instead of 32,000 byte public and secret keys
-    },
-  };
-  let waitingToastId = showToast('Creating account...', 0, 'loading');
-  let res;
-  // Create new data entry
-  try {
-    await getNetworkParams();
-    myData = newDataRecord(myAccount);
-    res = await postRegisterAlias(username, myAccount.keys);
-  } catch (error) {
-    submitButton.disabled = false;
-    toggleButton.disabled = false;
-    usernameInput.disabled = false;
-    privateKeyInput.disabled = false;
-    backButton.disabled = false;
-    if (waitingToastId) hideToast(waitingToastId);
-    showToast(`Failed to fetch network parameters, try again later.`, 0, 'error');
-    console.error('Failed to fetch network parameters, using defaults:', error);
-    return;
-  }
-
-  if (res && res.result && res.result.success && res.txid) {
-    const txid = res.txid;
-
-    try {
-      // Start interval since trying to create account and tx should be in pending
-      if (!checkPendingTransactionsIntervalId) {
-        checkPendingTransactionsIntervalId = setInterval(checkPendingTransactions, 5000);
-      }
-
-      // Wait for the transaction confirmation
-      const confirmationDetails = await pendingPromiseService.register(txid);
-      if (
-        confirmationDetails.username !== username ||
-        confirmationDetails.address !== longAddress(myAccount.keys.address)
-      ) {
-        throw new Error('Confirmation details mismatch.');
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      if (waitingToastId) hideToast(waitingToastId);
-      showToast('Account created successfully!', 3000, 'success');
-      submitButton.disabled = false;
-      toggleButton.disabled = false;
-      usernameInput.disabled = false;
-      privateKeyInput.disabled = false;
-      backButton.disabled = false;
-      closeCreateAccountModal();
-      document.getElementById('welcomeScreen').style.display = 'none';
-      // TODO: may not need to get set since gets set in `getChats`. Need to check signin flow.
-      //getChats.lastCall = getCorrectedTimestamp();
-      // Store updated accounts back in localStorage
-      existingAccounts.netids[netid].usernames[username] = { address: myAccount.keys.address };
-      localStorage.setItem('accounts', stringify(existingAccounts));
-      saveState();
-
-      signInModal.open(username);
-    } catch (error) {
-      if (waitingToastId) hideToast(waitingToastId);
-      console.log(`DEBUG: handleCreateAccount error`, JSON.stringify(error, null, 2));
-      showToast(`account creation failed: ${error}`, 0, 'error');
-      submitButton.disabled = false;
-      toggleButton.disabled = false;
-      usernameInput.disabled = false;
-      privateKeyInput.disabled = false;
-      backButton.disabled = false;
-
-      // Clear interval
-      if (checkPendingTransactionsIntervalId) {
-        clearInterval(checkPendingTransactionsIntervalId);
-        checkPendingTransactionsIntervalId = null;
-      }
-
-      // Note: `checkPendingTransactions` will also remove the item from `myData.pending` if it's rejected by the service.
-      return;
-    }
-  } else {
-    if (waitingToastId) hideToast(waitingToastId);
-    console.error(`DEBUG: handleCreateAccount error in else`, JSON.stringify(res, null, 2));
-
-    // Clear intervals
-    if (updateWebSocketIndicatorIntervalId && wsManager) {
-      clearInterval(updateWebSocketIndicatorIntervalId);
-      updateWebSocketIndicatorIntervalId = null;
-    }
-    if (checkPendingTransactionsIntervalId) {
-      clearInterval(checkPendingTransactionsIntervalId);
-      checkPendingTransactionsIntervalId = null;
-    }
-    if (getSystemNoticeIntervalId) {
-      clearInterval(getSystemNoticeIntervalId);
-      getSystemNoticeIntervalId = null;
-    }
-
-    // no toast here since injectTx will show it
-    submitButton.disabled = false;
-    toggleButton.disabled = false;
-    usernameInput.disabled = false;
-    privateKeyInput.disabled = false;
-    backButton.disabled = false;
-    return;
-  }
-}
-
 function newDataRecord(myAccount) {
 
   const myData = {
@@ -723,19 +409,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   signInBtn.addEventListener('click', () => signInModal.open());
 
   // Create Account Modal
-  createAccountBtn.addEventListener('click', () => {
-    document.getElementById('newUsername').value = '';
-    document.getElementById('newPrivateKey').value = '';
-    document.getElementById('newUsernameAvailable').style.display = 'none';
-    document.getElementById('newPrivateKeyError').style.display = 'none';
-    openCreateAccountModal();
-  });
-  document.getElementById('closeCreateAccountModal').addEventListener('click', closeCreateAccountModal);
-  document.getElementById('createAccountForm').addEventListener('submit', handleCreateAccount);
-
-  // Event listener for the private key toggle checkbox
-  const togglePrivateKeyInput = document.getElementById('togglePrivateKeyInput');
-  togglePrivateKeyInput.addEventListener('change', handleTogglePrivateKeyInput);
+  createAccountBtn.addEventListener('click', () => createAccountModal.openWithReset());
+  createAccountModal.load();
 
   // Account Form Modal
   myProfileModal.load();
@@ -781,6 +456,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Receive Modal
   receiveModal.load();
+
+  // Edit Contact Modal
+  editContactModal.load();
 
   // Add event listeners for send asset confirmation modal
   document.getElementById('closeSendAssetConfirmModal').addEventListener('click', closeSendAssetConfirmModal);
@@ -933,13 +611,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     .getElementById('stakeQrFileInput')
     .addEventListener('change', (event) => handleQRFileSelect(event, fillStakeAddressFromQR));
 
-  const nameInput = document.getElementById('editContactNameInput');
-  const nameActionButton = nameInput.parentElement.querySelector('.field-action-button');
-
-  nameInput.addEventListener('input', handleEditNameInput);
-  nameInput.addEventListener('keydown', handleEditNameKeydown);
-  nameActionButton.addEventListener('click', handleEditNameButton);
-
   // Add send money button handler
   document.getElementById('contactInfoSendButton').addEventListener('click', () => {
     const contactUsername = document.getElementById('contactInfoUsername');
@@ -967,9 +638,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Toggle the visual state class on the button
     this.classList.toggle('toggled-visible');
   });
-
-  // create account button listener to clear message input on create account
-  document.getElementById('newUsername').addEventListener('input', handleCreateAccountInput);
 
   // Event Listerns for FailedPaymentModal
   const failedPaymentModal = document.getElementById('failedPaymentModal');
@@ -2263,7 +1931,7 @@ class SignInModal {
     // If no accounts exist, close modal and open Create Account modal
     if (usernames.length === 0) {
       this.close();
-      openCreateAccountModal();
+      createAccountModal.open();
       return;
     }
 
@@ -2351,7 +2019,7 @@ class SignInModal {
 
       document.getElementById('newPrivateKey').value = privateKey;
       this.close();
-      openCreateAccountModal();
+      createAccountModal.open();
       // Dispatch a change event to trigger the availability check
       newUsernameInput.dispatchEvent(new Event('input'));
       return;
@@ -2465,13 +2133,7 @@ class ContactInfoModal {
       this.close();
     });
 
-    document.getElementById('nameEditButton').addEventListener('click', openEditContactModal);
-    document.getElementById('editContactProvidedNameContainer').addEventListener('click', handleProvidedNameClick);
-
-    // Add close button handler for edit contact modal
-    document.getElementById('closeEditContactModal').addEventListener('click', () => {
-      document.getElementById('editContactModal').classList.remove('active');
-    });
+    document.getElementById('nameEditButton').addEventListener('click', () => editContactModal.open());
 
     // Add chat button handler for contact info modal
     document.getElementById('contactInfoChatButton').addEventListener('click', () => {
@@ -2558,6 +2220,9 @@ class ContactInfoModal {
     }
   }
 }
+
+// Create a singleton instance
+const contactInfoModal = new ContactInfoModal();
 
 class FriendModal {
   constructor() {
@@ -2709,175 +2374,179 @@ class FriendModal {
 
 const friendModal = new FriendModal();
 
-async function openEditContactModal() {
-  const editContactModal = document.getElementById('editContactModal');
-
-  // Get the avatar section elements
-  const avatarSection = document.querySelector('#editContactModal .contact-avatar-section');
-  const avatarDiv = avatarSection.querySelector('.avatar');
-  const nameDiv = avatarSection.querySelector('.name');
-  const subtitleDiv = avatarSection.querySelector('.subtitle');
-  const identicon = document.getElementById('contactInfoAvatar').innerHTML;
-
-  // Update the avatar section
-  avatarDiv.innerHTML = identicon;
-  // update the name and subtitle
-  nameDiv.textContent = document.getElementById('contactInfoUsername').textContent;
-  subtitleDiv.textContent = document.getElementById('contactInfoModal').querySelector('.subtitle').textContent;
-
-  // update the provided name
-  const providedNameContainer = document.getElementById('editContactProvidedNameContainer');
-  const providedNameDiv = providedNameContainer.querySelector('.contact-info-value');
-
-  // if the textContent is 'Not provided', set it to an empty string
-  const providedName = document.getElementById('contactInfoProvidedName').textContent;
-  if (providedName === 'Not provided') {
-    providedNameContainer.style.display = 'none';
-  } else {
-    providedNameDiv.textContent = providedName;
-    providedNameContainer.style.display = 'block';
+class EditContactModal {
+  constructor() {
+    this.currentContactAddress = null;
   }
 
-  // Get the original name from the contact info display
-  const contactNameDisplay = document.getElementById('contactInfoName');
-  let originalName = contactNameDisplay.textContent;
-  if (originalName === 'Not Entered') {
-    originalName = '';
+  load() {
+    this.modal = document.getElementById('editContactModal');
+    this.nameInput = document.getElementById('editContactNameInput');
+    this.nameActionButton = this.nameInput.parentElement.querySelector('.field-action-button');
+    this.providedNameContainer = document.getElementById('editContactProvidedNameContainer');
+    this.backButton = document.getElementById('closeEditContactModal');
+
+    // Setup event listeners
+    this.nameInput.addEventListener('input', (e) => this.handleNameInput(e));
+    this.nameInput.addEventListener('blur', () => this.handleNameBlur());
+    this.nameInput.addEventListener('keydown', (e) => this.handleNameKeydown(e));
+    this.nameActionButton.addEventListener('click', () => this.handleNameButton());
+    this.providedNameContainer.addEventListener('click', () => this.handleProvidedNameClick());
+    this.backButton.addEventListener('click', () => this.close());
   }
 
-  // Store the original name
-  openEditContactModal.originalName = originalName;
+  open() {
+    // Get the avatar section elements
+    const avatarSection = document.querySelector('#editContactModal .contact-avatar-section');
+    const avatarDiv = avatarSection.querySelector('.avatar');
+    const nameDiv = avatarSection.querySelector('.name');
+    const subtitleDiv = avatarSection.querySelector('.subtitle');
+    const identicon = document.getElementById('contactInfoAvatar').innerHTML;
 
-  // Set up the input field with the original name
-  const nameInput = document.getElementById('editContactNameInput');
-  nameInput.value = originalName;
+    // Update the avatar section
+    avatarDiv.innerHTML = identicon;
+    // update the name and subtitle
+    nameDiv.textContent = document.getElementById('contactInfoUsername').textContent;
+    subtitleDiv.textContent = document.getElementById('contactInfoModal').querySelector('.subtitle').textContent;
 
-  // field-action-button should be clear
-  nameInput.parentElement.querySelector('.field-action-button').className = 'field-action-button clear';
+    // update the provided name
+    const providedNameDiv = this.providedNameContainer.querySelector('.contact-info-value');
 
-  // Show the edit contact modal
-  editContactModal.classList.add('active');
+    // if the textContent is 'Not provided', set it to an empty string
+    const providedName = document.getElementById('contactInfoProvidedName').textContent;
+    if (providedName === 'Not provided') {
+      this.providedNameContainer.style.display = 'none';
+    } else {
+      providedNameDiv.textContent = providedName;
+      this.providedNameContainer.style.display = 'block';
+    }
 
-  // Get the current contact info from the contact info modal
-  const currentContactAddress = contactInfoModal.currentContactAddress;
-  if (!currentContactAddress || !myData.contacts[currentContactAddress]) {
-    console.error('No current contact found');
-    return;
+    // Get the original name from the contact info display
+    const contactNameDisplay = document.getElementById('contactInfoName');
+    let originalName = contactNameDisplay.textContent;
+    if (originalName === 'Not Entered') {
+      originalName = '';
+    }
+
+    // Set up the input field with the original name
+    this.nameInput.value = originalName;
+
+    // field-action-button should be clear
+    this.nameActionButton.className = 'field-action-button clear';
+
+    // Get the current contact info from the contact info modal
+    this.currentContactAddress = contactInfoModal.currentContactAddress;
+    if (!this.currentContactAddress || !myData.contacts[this.currentContactAddress]) {
+      console.error('No current contact found');
+      return;
+    }
+
+    // Show the edit contact modal
+    this.modal.classList.add('active');
+
+    // Create a handler function to focus the input after the modal transition
+    const editContactFocusHandler = () => {
+      // add slight delay and focus on the the very right of the input
+      setTimeout(() => {
+        this.nameInput.focus();
+        // Set cursor position to the end of the input content
+        this.nameInput.setSelectionRange(this.nameInput.value.length, this.nameInput.value.length);
+      }, 200);
+      this.modal.removeEventListener('transitionend', editContactFocusHandler);
+    };
+
+    // Add the event listener
+    this.modal.addEventListener('transitionend', editContactFocusHandler);
   }
 
-  // Create a handler function to focus the input after the modal transition
-  const editContactFocusHandler = () => {
-    // add slight delay and focus on the the very right of the input
-    setTimeout(() => {
-      nameInput.focus();
-      // Set cursor position to the end of the input content
-      nameInput.setSelectionRange(nameInput.value.length, nameInput.value.length);
-    }, 200);
-    editContactModal.removeEventListener('transitionend', editContactFocusHandler);
-  };
-
-  // Add the event listener
-  editContactModal.addEventListener('transitionend', editContactFocusHandler);
-}
-
-openEditContactModal.originalName = '';
-
-/**
- * Handles the click event for the provided name
- * @returns {void}
- */
-function handleProvidedNameClick() {
-  const providedNameContainer = document.getElementById('editContactProvidedNameContainer');
-  const providedNameValue = providedNameContainer.querySelector('.contact-info-value').textContent;
-  const nameInput = document.getElementById('editContactNameInput');
-  
-  // Fill the input with the provided name
-  nameInput.value = providedNameValue;
-  
-  // Focus on the input and set cursor to end
-  nameInput.focus();
-  nameInput.setSelectionRange(nameInput.value.length, nameInput.value.length);
-
-  // Invoke input event
-  nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-/**
- * Handles the input changes for the edit contact modal by updating the action button
- * @returns {void}
- */
-function handleEditNameInput() {
-  const nameInput = document.getElementById('editContactNameInput');
-  const nameActionButton = nameInput.parentElement.querySelector('.field-action-button');
-
-  // if already 'add' class, return early
-  if (nameActionButton.classList.contains('add')) {
-    return;
+  close() {
+    this.modal.classList.remove('active');
+    this.currentContactAddress = null;
   }
 
-  nameActionButton.className = 'field-action-button add';
-  nameActionButton.setAttribute('aria-label', 'Save');
-}
+  handleProvidedNameClick() {
+    const providedNameValue = this.providedNameContainer.querySelector('.contact-info-value').textContent;
+    
+    // Fill the input with the provided name
+    this.nameInput.value = providedNameValue;
+    
+    // Focus on the input and set cursor to end
+    this.nameInput.focus();
+    this.nameInput.setSelectionRange(this.nameInput.value.length, this.nameInput.value.length);
 
-// Creates a handler for action button clicks
-function handleEditNameButton() {
-  const nameInput = document.getElementById('editContactNameInput');
-  const nameActionButton = nameInput.parentElement.querySelector('.field-action-button');
-
-  if (nameActionButton.classList.contains('clear')) {
-    nameInput.value = '';
-    // Always show save button after clearing
-    nameActionButton.className = 'field-action-button add';
-    nameActionButton.setAttribute('aria-label', 'Save');
-    nameInput.focus();
-  } else {
-    handleSaveEditContact();
-  }
-}
-
-// Creates a handler for keydown events
-function handleEditNameKeydown(e) {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    handleSaveEditContact();
-  }
-}
-
-// Handles saving contact changes
-function handleSaveEditContact() {
-  const nameInput = document.getElementById('editContactNameInput');
-  const currentContactAddress = contactInfoModal.currentContactAddress;
-
-  // Save changes - if input is empty/spaces, it will become undefined
-  const newName = nameInput.value.trim() || null;
-  const contact = myData.contacts[currentContactAddress];
-  if (contact) {
-    contact.name = newName;
-    contactInfoModal.needsContactListUpdate = true;
+    // Invoke input event
+    this.nameInput.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
-  // Safely close the edit modal
-  const editModal = document.getElementById('editContactModal');
-  if (editModal) {
-    editModal.classList.remove('active');
+  handleNameInput() {
+    // normalize the input using normalizeName
+    const normalizedName = normalizeName(this.nameInput.value);
+    this.nameInput.value = normalizedName;
+
+    // if already 'add' class, return early
+    if (this.nameActionButton.classList.contains('add')) {
+      return;
+    }
+
+    this.nameActionButton.className = 'field-action-button add';
+    this.nameActionButton.setAttribute('aria-label', 'Save');
   }
 
-  // update title if chatModal is open and if contact.name is '' fallback to contact.username
-  if (chatModal.isOpen() && chatModal.address === currentContactAddress) {
-    chatModal.modalTitle.textContent = getContactDisplayName(contact);
+  handleNameBlur() {
+    // normalize the input using normalizeName
+    const normalizedName = normalizeName(this.nameInput.value, true);
+    this.nameInput.value = normalizedName;
   }
 
-  // Safely update the contact info modal if it exists and is open
-  if (contactInfoModal.currentContactAddress) {
-    const contactInfoModalElement = document.getElementById('contactInfoModal');
-    if (contactInfoModalElement && contactInfoModalElement.classList.contains('active')) {
-      contactInfoModal.updateContactInfo(createDisplayInfo(myData.contacts[currentContactAddress]));
+  handleNameButton() {
+    if (this.nameActionButton.classList.contains('clear')) {
+      this.nameInput.value = '';
+      // Always show save button after clearing
+      this.nameActionButton.className = 'field-action-button add';
+      this.nameActionButton.setAttribute('aria-label', 'Save');
+      this.nameInput.focus();
+    } else {
+      this.handleSave();
     }
   }
+
+  handleNameKeydown(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      this.handleSave();
+    }
+  }
+
+  handleSave() {
+    // Save changes - if input is empty/spaces, it will become undefined
+    const newName = this.nameInput.value.trim() || null;
+    const contact = myData.contacts[this.currentContactAddress];
+    if (contact) {
+      contact.name = newName;
+      contactInfoModal.needsContactListUpdate = true;
+    }
+
+    // update title if chatModal is open and if contact.name is '' fallback to contact.username
+    if (chatModal.isOpen() && chatModal.address === this.currentContactAddress) {
+      chatModal.modalTitle.textContent = getContactDisplayName(contact);
+    }
+
+    // Safely update the contact info modal if it exists and is open
+    if (contactInfoModal.currentContactAddress) {
+      const contactInfoModalElement = document.getElementById('contactInfoModal');
+      if (contactInfoModalElement && contactInfoModalElement.classList.contains('active')) {
+        contactInfoModal.updateContactInfo(createDisplayInfo(myData.contacts[this.currentContactAddress]));
+      }
+    }
+
+    // Safely close the edit modal
+    this.close();
+  }
 }
 
-// Create a singleton instance
-const contactInfoModal = new ContactInfoModal();
+// make singleton instance
+const editContactModal = new EditContactModal();
+
 
 function handleSignOut() {
   // Clear intervals
@@ -8327,6 +7996,341 @@ class NewChatModal {
 
 const newChatModal = new NewChatModal();
 
+// Create Account Modal
+class CreateAccountModal {
+  constructor() {
+    this.checkTimeout = null;
+  }
+
+  load() {
+    this.modal = document.getElementById('createAccountModal');
+    this.form = document.getElementById('createAccountForm');
+    this.usernameInput = document.getElementById('newUsername');
+    this.privateKeyInput = document.getElementById('newPrivateKey');
+    this.privateKeySection = document.getElementById('privateKeySection');
+    this.toggleButton = document.getElementById('togglePrivateKeyInput');
+    this.backButton = document.getElementById('closeCreateAccountModal');
+    this.submitButton = this.form.querySelector('button[type="submit"]');
+    this.usernameAvailable = document.getElementById('newUsernameAvailable');
+    this.privateKeyError = document.getElementById('newPrivateKeyError');
+
+    // Setup event listeners
+    this.form.addEventListener('submit', (e) => this.handleSubmit(e));
+    this.usernameInput.addEventListener('input', (e) => this.handleUsernameInput(e));
+    this.toggleButton.addEventListener('change', () => this.handleTogglePrivateKeyInput());
+    this.backButton.addEventListener('click', () => this.close());
+  }
+
+  open() {
+    this.modal.classList.add('active');
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  openWithReset() {
+    // Clear form fields
+    this.usernameInput.value = '';
+    this.privateKeyInput.value = '';
+    this.usernameAvailable.style.display = 'none';
+    this.privateKeyError.style.display = 'none';
+    
+    // Open the modal
+    this.open();
+  }
+
+  isOpen() {
+    return this.modal.classList.contains('active');
+  }
+
+  handleUsernameInput(e) {
+    const username = normalizeUsername(e.target.value);
+    e.target.value = username;
+
+    // Clear previous timeout
+    if (this.checkTimeout) {
+      clearTimeout(this.checkTimeout);
+    }
+
+    // Reset display
+    this.usernameAvailable.style.display = 'none';
+    this.submitButton.disabled = true;
+
+    // Check if username is too short
+    if (username.length < 3) {
+      this.usernameAvailable.textContent = 'too short';
+      this.usernameAvailable.style.color = '#dc3545';
+      this.usernameAvailable.style.display = 'inline';
+      return;
+    }
+
+    // Check network availability
+    this.checkTimeout = setTimeout(async () => {
+      const taken = await checkUsernameAvailability(username);
+      if (taken == 'taken') {
+        this.usernameAvailable.textContent = 'taken';
+        this.usernameAvailable.style.color = '#dc3545';
+        this.usernameAvailable.style.display = 'inline';
+        this.submitButton.disabled = true;
+      } else if (taken == 'available') {
+        this.usernameAvailable.textContent = 'available';
+        this.usernameAvailable.style.color = '#28a745';
+        this.usernameAvailable.style.display = 'inline';
+        this.submitButton.disabled = false;
+      } else {
+        this.usernameAvailable.textContent = 'network error';
+        this.usernameAvailable.style.color = '#dc3545';
+        this.usernameAvailable.style.display = 'inline';
+        this.submitButton.disabled = true;
+      }
+    }, 1000);
+  }
+
+  handleTogglePrivateKeyInput() {
+    const isChecked = this.toggleButton.checked;
+    this.privateKeySection.style.display = isChecked ? 'block' : 'none';
+    this.privateKeyInput.value = '';
+    
+    if (!isChecked) {
+      this.privateKeyError.style.display = 'none';
+    }
+  }
+
+  validatePrivateKey(key) {
+    // Trim whitespace
+    key = key.trim();
+
+    // Remove 0x prefix if present
+    if (key.startsWith('0x')) {
+      key = key.slice(2);
+    }
+
+    // Convert to lowercase
+    key = key.toLowerCase();
+
+    // Validate hex characters
+    const hexRegex = /^[0-9a-f]*$/;
+    if (!hexRegex.test(key)) {
+      return {
+        valid: false,
+        message: 'Invalid characters - only 0-9 and a-f allowed',
+      };
+    }
+
+    // Validate length (64 chars for 32 bytes)
+    if (key.length !== 64) {
+      return {
+        valid: false,
+        message: 'Invalid length - must be 64 hex characters',
+      };
+    }
+
+    return {
+      valid: true,
+      key: key,
+    };
+  }
+
+  async handleSubmit(event) {
+    // Disable submit button
+    this.submitButton.disabled = true;
+    // Disable input fields, back button, and toggle button
+    this.toggleButton.disabled = true;
+    this.usernameInput.disabled = true;
+    this.privateKeyInput.disabled = true;
+    this.backButton.disabled = true;
+
+    event.preventDefault();
+    const username = normalizeUsername(this.usernameInput.value);
+
+    // Get network ID from network.js
+    const { netid } = network;
+
+    // Get existing accounts or create new structure
+    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+
+    // Ensure netid and usernames objects exist
+    if (!existingAccounts.netids[netid]) {
+      existingAccounts.netids[netid] = { usernames: {} };
+    }
+
+    // Get private key from input or generate new one
+    const providedPrivateKey = this.privateKeyInput.value;
+    let privateKey, privateKeyHex;
+
+    if (providedPrivateKey) {
+      // Validate and normalize private key
+      const validation = this.validatePrivateKey(providedPrivateKey);
+      if (!validation.valid) {
+        this.privateKeyError.textContent = validation.message;
+        this.privateKeyError.style.color = '#dc3545';
+        this.privateKeyError.style.display = 'inline';
+        // Re-enable controls on validation failure
+        this.reEnableControls();
+        return;
+      }
+
+      privateKey = hex2bin(validation.key);
+      privateKeyHex = validation.key;
+      this.privateKeyError.style.display = 'none';
+    } else {
+      privateKey = generateRandomPrivateKey();
+      privateKeyHex = bin2hex(privateKey);
+      this.privateKeyError.style.display = 'none'; // Ensure hidden if generated
+    }
+
+    // Generate uncompressed public key
+    const publicKey = getPublicKey(privateKey);
+    const publicKeyHex = bin2hex(publicKey);
+    const pqSeed = bin2hex(generateRandomBytes(64));
+
+    // Generate address from public key
+    const address = generateAddress(publicKey);
+    const addressHex = bin2hex(address);
+
+    // If a private key was provided, check if the derived address already exists on the network
+    if (providedPrivateKey) {
+      try {
+        const accountCheckAddress = longAddress(addressHex);
+        console.log(`Checking network for existing account at address: ${accountCheckAddress}`);
+        const accountInfo = await queryNetwork(`/account/${accountCheckAddress}`);
+
+        // Check if the query returned data indicating an account exists.
+        // This assumes a non-null `accountInfo` with an `account` property means it exists.
+        if (accountInfo && accountInfo.account) {
+          console.log('Account already exists for this private key:', accountInfo);
+          this.privateKeyError.textContent = 'An account already exists for this private key.';
+          this.privateKeyError.style.color = '#dc3545';
+          this.privateKeyError.style.display = 'inline';
+          // Re-enable controls when account already exists
+          this.reEnableControls();
+          return; // Stop the account creation process
+        } else {
+          console.log('No existing account found for this private key.');
+          this.privateKeyError.style.display = 'none';
+        }
+      } catch (error) {
+        console.error('Error checking for existing account:', error);
+        this.privateKeyError.textContent = 'Network error checking key. Please try again.';
+        this.privateKeyError.style.color = '#dc3545';
+        this.privateKeyError.style.display = 'inline';
+        // Re-enable controls on network error
+        this.reEnableControls();
+        return; // Stop process on error
+      }
+    }
+
+    // Create new account entry
+    myAccount = {
+      netid,
+      username,
+      chatTimestamp: 0,
+      keys: {
+        address: addressHex,
+        public: publicKeyHex,
+        secret: privateKeyHex,
+        type: 'secp256k1',
+        pqSeed: pqSeed, // store only the 64 byte seed instead of 32,000 byte public and secret keys
+      },
+    };
+    let waitingToastId = showToast('Creating account...', 0, 'loading');
+    let res;
+    // Create new data entry
+    try {
+      await getNetworkParams();
+      myData = newDataRecord(myAccount);
+      res = await postRegisterAlias(username, myAccount.keys);
+    } catch (error) {
+      this.reEnableControls();
+      if (waitingToastId) hideToast(waitingToastId);
+      showToast(`Failed to fetch network parameters, try again later.`, 0, 'error');
+      console.error('Failed to fetch network parameters, using defaults:', error);
+      return;
+    }
+
+    if (res && res.result && res.result.success && res.txid) {
+      const txid = res.txid;
+
+      try {
+        // Start interval since trying to create account and tx should be in pending
+        if (!checkPendingTransactionsIntervalId) {
+          checkPendingTransactionsIntervalId = setInterval(checkPendingTransactions, 5000);
+        }
+
+        // Wait for the transaction confirmation
+        const confirmationDetails = await pendingPromiseService.register(txid);
+        if (
+          confirmationDetails.username !== username ||
+          confirmationDetails.address !== longAddress(myAccount.keys.address)
+        ) {
+          throw new Error('Confirmation details mismatch.');
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        if (waitingToastId) hideToast(waitingToastId);
+        showToast('Account created successfully!', 3000, 'success');
+        this.reEnableControls();
+        this.close();
+        document.getElementById('welcomeScreen').style.display = 'none';
+        // TODO: may not need to get set since gets set in `getChats`. Need to check signin flow.
+        //getChats.lastCall = getCorrectedTimestamp();
+        // Store updated accounts back in localStorage
+        existingAccounts.netids[netid].usernames[username] = { address: myAccount.keys.address };
+        localStorage.setItem('accounts', stringify(existingAccounts));
+        saveState();
+
+        signInModal.open(username);
+      } catch (error) {
+        if (waitingToastId) hideToast(waitingToastId);
+        console.log(`DEBUG: handleCreateAccount error`, JSON.stringify(error, null, 2));
+        showToast(`account creation failed: ${error}`, 0, 'error');
+        this.reEnableControls();
+
+        // Clear interval
+        if (checkPendingTransactionsIntervalId) {
+          clearInterval(checkPendingTransactionsIntervalId);
+          checkPendingTransactionsIntervalId = null;
+        }
+
+        // Note: `checkPendingTransactions` will also remove the item from `myData.pending` if it's rejected by the service.
+        return;
+      }
+    } else {
+      if (waitingToastId) hideToast(waitingToastId);
+      console.error(`DEBUG: handleCreateAccount error in else`, JSON.stringify(res, null, 2));
+
+      // Clear intervals
+      if (updateWebSocketIndicatorIntervalId && wsManager) {
+        clearInterval(updateWebSocketIndicatorIntervalId);
+        updateWebSocketIndicatorIntervalId = null;
+      }
+      if (checkPendingTransactionsIntervalId) {
+        clearInterval(checkPendingTransactionsIntervalId);
+        checkPendingTransactionsIntervalId = null;
+      }
+      if (getSystemNoticeIntervalId) {
+        clearInterval(getSystemNoticeIntervalId);
+        getSystemNoticeIntervalId = null;
+      }
+
+      // no toast here since injectTx will show it
+      this.reEnableControls();
+      return;
+    }
+  }
+
+  reEnableControls() {
+    this.submitButton.disabled = false;
+    this.toggleButton.disabled = false;
+    this.usernameInput.disabled = false;
+    this.privateKeyInput.disabled = false;
+    this.backButton.disabled = false;
+  }
+}
+
+// Initialize the create account modal
+const createAccountModal = new CreateAccountModal();
+
 // Send Asset Form Modal
 class SendAssetFormModal {
   constructor() {
@@ -9347,7 +9351,7 @@ async function checkPendingTransactions() {
     }
   }
   // if createAccountModal is open, skip balance change
-  if (!document.getElementById('createAccountModal').classList.contains('active')) {
+  if (!createAccountModal.isOpen()) {
     updateWalletBalances();
   }
 }
@@ -9408,21 +9412,6 @@ const pendingPromiseService = (() => {
 
   return { register, resolve, reject };
 })();
-
-function handleTogglePrivateKeyInput() {
-  const privateKeySection = document.getElementById('privateKeySection');
-  const newPrivateKeyInput = document.getElementById('newPrivateKey');
-  const togglePrivateKeyInput = document.getElementById('togglePrivateKeyInput');
-
-  // clear the newPrivateKeyInput
-  newPrivateKeyInput.value = '';
-
-  if (togglePrivateKeyInput.checked) {
-    privateKeySection.style.display = 'block';
-  } else {
-    privateKeySection.style.display = 'none';
-  }
-}
 
 /*
  * Used to prevent tab from working.
@@ -9559,13 +9548,25 @@ function cleanSenderInfo(si) {
   return csi;
 }
 
-// keep only alphabet and space characters; lowercase all letters; capitalize the first letter of each word
-function normalizeName(s) {
+/**
+ * Normalizes a string to a name. Keeps only alphabet and space characters; lowercase all letters; capitalize the first letter of each word.
+ * @param {string} s - The string to normalize.
+ * @param {boolean} final - Whether to apply strict validation rules.
+ * @returns {string} - The normalized string.
+ */
+function normalizeName(s, final = false) {
   if (!s) return '';
-  return s
+  let normalized = s
     .replace(/[^a-zA-Z\s]/g, '') // keep only alphabet and space characters
     .toLowerCase() // lowercase all letters
-    .replace(/\b\w/g, c => c.toUpperCase()); // capitalize first letter of each word
+    .replace(/\b\w/g, c => c.toUpperCase()) // capitalize first letter of each word
+    .substring(0, 20); // limit to 20 characters
+  
+  if (final) {
+    normalized = normalized.trim();
+    normalized = normalized.replace(/\s+/g, ' ');
+  }
+  return normalized;
 }
 
 // this function noralizes and returns phone number; allowing for country codes
@@ -9642,7 +9643,7 @@ function normalizeXTwitterUsername(username, final = false) {
   return normalized;
 }
 
-/** * Normalizes a string .
+/** Normalizes a string to a float and limits the number of decimals to 18 and the number of digits before the decimal point to 9.
  * @param {string} value - The float as a string to normalize.
  * @returns {string} - The normalized float as a string.
  * */
@@ -9659,7 +9660,30 @@ function normalizeUnsignedFloat(value) {
       normalized.slice(0, firstDot + 1) +
       normalized.slice(firstDot + 1).replace(/\./g, '');
   }
+  // if the first character is a dot, add a 0 in front
+  if (normalized.startsWith('.')) {
+    normalized = '0' + normalized;
+  }
+  // only allow up to 18 decimals after and up to 9 before the decimal point
+  normalized = normalized.replace(/^0+/, '');
 
+  // Handle numbers that exceed the 9-digit limit before decimal
+  if (normalized.includes('.')) {
+    const [wholePart, decimalPart] = normalized.split('.');
+    if (wholePart.length > 9) {
+      // Slice to exactly 9 digits before decimal
+      normalized = wholePart.slice(0, 9) + '.' + decimalPart;
+    }
+    // Limit decimal places to 18
+    if (decimalPart && decimalPart.length > 18) {
+      normalized = wholePart + '.' + decimalPart.slice(0, 18);
+    }
+  } else {
+    // No decimal point - limit to 9 digits
+    if (normalized.length > 9) {
+      normalized = normalized.slice(0, 9);
+    }
+  }
   return normalized;
 }
 
@@ -9702,7 +9726,7 @@ async function longPollResult(data) {
   }
   // schedule the next poll
   setTimeout(longPoll, nextPoll + 1000);
-  if (data.success){
+  if (data?.success){
     try {
       const gotChats = await updateChatData();
       if (gotChats > 0) {
