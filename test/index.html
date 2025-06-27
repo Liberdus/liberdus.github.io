@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.06.13.13.07" />
+    <link rel="stylesheet" href="./styles.css" />
     <link rel="manifest" href="./manifest.json" />
   </head>
   <body>
-    <script src="./app.js?v=2025.06.13.13.07" type="module"></script>
+    <script src="./app.js" type="module"></script>
     <div class="container">
       <header class="header" id="header">
         <div id="logo">
@@ -70,7 +70,7 @@
         <div class="app-name">Liberdus</div>
         <div class="header-icons">
           <div class="offline-indicator" id="offlineIndicator">Offline</div>
-          <div id="wsStatusIndicator" class="ws-status-indicator">WebSocket</div>
+          <div id="wsStatusIndicator" class="ws-status-indicator" style="display: none">WebSocket</div>
           <button class="icon-button" id="toggleMenu"></button>
         </div>
       </header>
@@ -87,7 +87,7 @@
           <button id="signInButton" class="secondary-button hidden">Sign In</button>
           <button id="createAccountButton" class="secondary-button hidden">Create Account</button>
           <button id="importAccountButton" class="secondary-button hidden">Restore Account</button>
-          <button id="addToHomeScreenButton" class="secondary-button hidden">Install</button>
+          <!-- <button id="addToHomeScreenButton" class="secondary-button hidden">Install</button> -->
         </div>
         <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
           Version <span id="versionDisplay"></span>
@@ -210,20 +210,19 @@
           <div class="modal-title">Menu</div>
         </div>
         <ul class="menu-list">
-          <li class="menu-item" id="openAccountForm">Profile</li>
-          <li class="menu-item" id="openToll">Toll</li>
-          <li class="menu-item" id="openExportForm">Backup</li>
-          <li class="menu-item" id="openNetwork">Gateway</li>
-          <li class="menu-item" id="openValidator">Validator</li>
-          <li class="menu-item" id="openInvite">Invite</li>
+          <li class="menu-item" id="openAccountForm" data-icon="user">Profile</li>
+          <li class="menu-item" id="openToll" data-icon="dollar-sign">Toll</li>
+          <li class="menu-item" id="openExportForm" data-icon="download">Backup</li>
+          <li class="menu-item" id="openValidator" data-icon="shield">Validator</li>
+          <li class="menu-item" id="openInvite" data-icon="mail">Invite</li>
           <!--                <li class="menu-item" id="openSettings">Settings</li> -->
-          <li class="menu-item" id="openExplorer">Explorer</li>
-          <li class="menu-item" id="openMonitor">Network</li>
+          <li class="menu-item" id="openExplorer" data-icon="search">Explorer</li>
+          <li class="menu-item" id="openMonitor" data-icon="globe">Network</li>
           <!--<li class="menu-item" id="openImportFormMenu">Import</li>-->
-          <li class="menu-item" id="openRemoveAccount">Remove</li>
-          <li class="menu-item" id="openContact">Contact Us</li>
-          <li class="menu-item" id="openAbout">About</li>
-          <li class="menu-item" id="handleSignOut">Sign Out</li>
+          <li class="menu-item" id="openRemoveAccount" data-icon="trash-2">Remove</li>
+          <li class="menu-item" id="openContact" data-icon="phone">Contact Us</li>
+          <li class="menu-item" id="openAbout" data-icon="info">About</li>
+          <li class="menu-item" id="handleSignOut" data-icon="log-out">Sign Out</li>
         </ul>
         <a class="last-item" href="#"> </a>
       </div>
@@ -250,51 +249,43 @@
           <div class="modal-title">About Liberdus</div>
         </div>
         <div class="form-container">
-          <div style="padding: 1rem">
-            <img
-              src="./media/liberdus_logo_250.png"
-              alt="Liberdus Logo"
-              style="margin-bottom: 20px; width: 100%; max-width: 200px"
-            />
-            <p>Liberdus is a decentralized messaging and wallet application.</p>
-            <br /><br />
-            <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
-              Version <span id="versionDisplayAbout"></span>
+          <div class="about-content">
+            <img class="about-logo" src="./media/liberdus_logo_250.png" alt="Liberdus Logo" />
+            <p class="about-description">Liberdus is a decentralized messaging and wallet application.</p>
+
+            <div class="about-info-section">
+              <div class="about-info-item">Version <span id="versionDisplayAbout"></span></div>
+              <div class="about-info-item">Network Name: <span id="networkNameAbout"></span></div>
+              <div class="about-info-item">
+                Net ID:<br />
+                <span class="about-net-id" id="netIdAbout"></span>
+              </div>
             </div>
-            <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
-              Network Name: <span id="networkNameAbout"></span>
+
+            <div class="about-links-section">
+              <a class="about-link" href="https://liberdus.com" target="_blank">Liberdus.com</a>
+              <a class="about-link" href="https://github.com/liberdus" target="_blank">Source Code</a>
             </div>
-            <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
-              Net ID:<br />
-              <span style="font-size: 0.7rem" id="netIdAbout"></span>
+
+            <div class="about-source-links">
+              <a class="about-link" href="index.html.txt" target="_blank">index.html</a>
+              <a class="about-link" href="styles.css" target="_blank">styles.css</a>
+              <a class="about-link" href="app.js" target="_blank">app.js</a>
+              <a class="about-link" href="crypto.js" target="_blank">crypto.js</a>
+              <a class="about-link" href="lib.js" target="_blank">lib.js</a>
+              <a class="about-link" href="network.js" target="_blank">network.js</a>
+              <a class="about-link" href="service-worker.js" target="_blank">service-worker.js</a>
             </div>
-            <br /><br />
-            <div>
-              <a href="https://liberdus.com" target="_blank">Liberdus.com</a>
+
+            <div class="about-external-links">
+              <a class="about-link" href="./external/noble-post-quantum.js" target="_blank">noble-post-quantum.js</a>
+              <a class="about-link" href="./external/noble-secp256k1.js" target="_blank">noble-secp256k1.js</a>
+              <a class="about-link" href="./external/noble-ciphers.js" target="_blank">noble-ciphers.js</a>
+              <a class="about-link" href="./external/blake2b.js" target="_blank">blake2b.js</a>
+              <a class="about-link" href="./external/keccak256.js" target="_blank">keccak256.js</a>
+              <a class="about-link" href="./external/stringify-shardus.js" target="_blank">stringify-shardus.js</a>
+              <a class="about-link" href="./external/qr.js" target="_blank">qr.js</a>
             </div>
-            <p>
-              <a href="https://github.com/liberdus" target="_blank">Source Code</a>
-            </p>
-            <br />
-            <p>
-              <a href="index.html.txt" target="_blank">index.html</a>
-              <a href="styles.css" target="_blank">styles.css</a>
-              <a href="app.js" target="_blank">app.js</a>
-            </p>
-            <br />
-            <a href="network.js" target="_blank">network.js</a>
-            <a href="lib.js" target="_blank">lib.js</a>
-            <a href="service-worker.js" target="_blank">service-worker.js</a>
-            <br />
-            <p>
-              <a href="./external/noble-post-quantum.js" target="_blank">noble-post-quantum.js</a>
-              <a href="./external/noble-secp256k1.js" target="_blank">noble-secp256k1.js</a>
-              <a href="./external/noble-ciphers.js" target="_blank">noble-ciphers.js</a>
-              <a href="./external/blake2b.js" target="_blank">blake2b.js</a>
-              <a href="./external/keccak256.js" target="_blank">keccak256.js</a>
-              <a href="./external/stringify-shardus.js" target="_blank">stringify-shardus.js</a>
-              <a href="./external/qrcode.js" target="_blank">qrcode.js</a>
-            </p>
           </div>
         </div>
         <a class="last-item" href="#"> </a>
@@ -408,7 +399,7 @@
               <input type="text" id="linkedin" class="form-control" />
             </div>
             <div class="form-group">
-              <label for="x">X</label>
+              <label for="x">X-Twitter</label>
               <input type="text" id="x" class="form-control" />
             </div>
             <button type="submit" class="update-button">Update Profile</button>
@@ -464,19 +455,22 @@
           <div class="messages-list"></div>
         </div>
         <div class="message-input-container">
-          <div class="message-input-wrapper">
-            <textarea class="message-input" placeholder="Type a message..." maxlength="2000"></textarea>
-            <div class="toll-container">
-              <span class="toll-label">Toll:</span>
-              <span class="toll-value" id="tollValue"></span>
+          <div class="message-byte-counter"></div>
+          <div class="message-input-row">
+            <div class="message-input-wrapper">
+              <textarea class="message-input" placeholder="Type a message..."></textarea>
+              <div class="toll-container">
+                <span class="toll-label">Toll:</span>
+                <span class="toll-value" id="tollValue"></span>
+              </div>
             </div>
+            <input type="hidden" id="retryOfTxId" />
+            <button class="send-button" id="handleSendMessage">
+              <svg viewBox="0 0 24 24">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+              </svg>
+            </button>
           </div>
-          <input type="hidden" id="retryOfTxId" />
-          <button class="send-button" id="handleSendMessage">
-            <svg viewBox="0 0 24 24">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-            </svg>
-          </button>
         </div>
         <a class="last-item" href="#"> </a>
       </div>
@@ -512,7 +506,7 @@
               </div>
             </template>
             <!-- Contact info fields -->
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Username</div>
               <div class="contact-info-value" id="contactInfoUsername"></div>
             </div>
@@ -523,20 +517,24 @@
                 <button class="icon-button edit-icon" id="nameEditButton" aria-label="Edit name"></button>
               </div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
+              <div class="contact-info-label">Provided Name</div>
+              <div class="contact-info-value" id="contactInfoProvidedName"></div>
+            </div>
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Email</div>
               <div class="contact-info-value" id="contactInfoEmail"></div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Phone</div>
               <div class="contact-info-value" id="contactInfoPhone"></div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">LinkedIn</div>
               <div class="contact-info-value" id="contactInfoLinkedin"></div>
             </div>
-            <div class="contact-info-item">
-              <div class="contact-info-label">X</div>
+            <div class="contact-info-item" style="display: none">
+              <div class="contact-info-label">X-Twitter</div>
               <div class="contact-info-value" id="contactInfoX"></div>
             </div>
           </div>
@@ -635,7 +633,7 @@
           <div class="form-group">
             <label for="receiveAmount">Amount (Optional)</label>
             <input
-              type="number"
+              type="text"
               id="receiveAmount"
               class="form-control"
               placeholder="Enter amount"
@@ -735,11 +733,9 @@
               <label for="sendAmount">Amount</label>
               <div class="amount-container">
                 <input
-                  type="number"
+                  type="text"
                   id="sendAmount"
                   class="form-control"
-                  step="any"
-                  min="0.000000000000000001"
                   required
                 />
                 <!-- add button to toggle between LIB and USD -->
@@ -756,8 +752,11 @@
               </div>
             </div>
             <div class="form-group">
-              <label for="sendMemo">Memo (Optional)</label>
-              <textarea id="sendMemo" class="form-control" maxlength="2000"></textarea>
+              <label for="sendMemo">
+                Memo (Optional)
+                <span class="memo-byte-counter" style="font-size: 12px; margin-left: 8px; font-weight: normal; display: none;"></span>
+              </label>
+              <textarea id="sendMemo" class="form-control"></textarea>
               <div class="toll-container" id="memoTollContainer">
                 <span class="toll-memo" id="tollMemo"></span>
               </div>
@@ -830,55 +829,6 @@
               />
             </div>
             <button type="submit" class="update-button">Download Data</button>
-          </form>
-          <a class="last-item" href="#"> </a>
-        </div>
-      </div>
-
-      <!-- Gateway Form Modal -->
-      <div class="modal" id="gatewayModal">
-        <div class="modal-header">
-          <button class="back-button" id="closeGatewayForm"></button>
-          <div class="modal-title">Gateway Settings</div>
-        </div>
-        <div class="form-container">
-          <div id="gatewayList" class="gateway-list">
-            <!-- Gateway items will be populated here -->
-          </div>
-          <button id="addGatewayButton" class="update-button">Add Gateway</button>
-          <a class="last-item" href="#"> </a>
-        </div>
-      </div>
-
-      <!-- Add/Edit Gateway Modal -->
-      <div class="modal" id="addEditGatewayModal">
-        <div class="modal-header">
-          <button class="back-button" id="closeAddEditGatewayForm"></button>
-          <div class="modal-title" id="addEditGatewayTitle">Add Gateway</div>
-        </div>
-        <div class="form-container">
-          <form id="gatewayForm">
-            <input type="hidden" id="gatewayEditIndex" value="-1" />
-            <div class="form-group">
-              <label for="gatewayName">Name</label>
-              <input type="text" id="gatewayName" class="form-control" placeholder="My Gateway" required />
-            </div>
-            <div class="form-group">
-              <label for="gatewayProtocol">Protocol</label>
-              <select id="gatewayProtocol" class="form-control" required>
-                <option value="https">HTTPS</option>
-                <option value="http">HTTP</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="gatewayHost">Host</label>
-              <input type="text" id="gatewayHost" class="form-control" placeholder="example.com" required />
-            </div>
-            <div class="form-group">
-              <label for="gatewayPort">Port</label>
-              <input type="number" id="gatewayPort" class="form-control" placeholder="3030" required />
-            </div>
-            <button type="submit" class="update-button">Save</button>
           </form>
           <a class="last-item" href="#"> </a>
         </div>
@@ -966,7 +916,7 @@
               <div class="name"></div>
               <div class="subtitle"></div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Username</div>
               <div class="contact-info-value" id="editContactUsername"></div>
             </div>
@@ -984,20 +934,24 @@
                 </div>
               </div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" id="editContactProvidedNameContainer" style="display: none">
+              <div class="contact-info-label">Provided Name</div>
+              <div class="contact-info-value" id="editContactProvidedName"></div>
+            </div>
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Email</div>
               <div class="contact-info-value" id="editContactEmail"></div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Phone</div>
               <div class="contact-info-value" id="editContactPhone"></div>
             </div>
-            <div class="contact-info-item">
+            <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">LinkedIn</div>
               <div class="contact-info-value" id="editContactLinkedin"></div>
             </div>
-            <div class="contact-info-item">
-              <div class="contact-info-label">X</div>
+            <div class="contact-info-item" style="display: none">
+              <div class="contact-info-label">X-Twitter</div>
               <div class="contact-info-value" id="editContactX"></div>
             </div>
           </div>
@@ -1087,11 +1041,11 @@
                 <span class="info-label">Stability Factor (USD/LIB):</span>
                 <span class="info-value" id="validator-stability-factor"></span>
               </div>
-              <div class="info-item">
+              <div class="info-item" style="display: none">
                 <span class="info-label">Market Price (USD/LIB):</span>
                 <span class="info-value" id="validator-market-price"></span>
               </div>
-              <div class="info-item">
+              <div class="info-item" style="display: none">
                 <span class="info-label">Min Stake at Market (USD):</span>
                 <span class="info-value" id="validator-market-stake-usd"></span>
               </div>
@@ -1142,12 +1096,10 @@
               </div>
               <div class="amount-container">
                 <input
-                  type="number"
+                  type="text"
                   id="newTollAmountInput"
                   class="form-control"
                   placeholder="Enter new amount"
-                  step="any"
-                  min="0"
                   required
                 />
                 <button type="button" id="toggleTollCurrency" class="toggle-balance">
@@ -1155,6 +1107,7 @@
                 </button>
               </div>
               <div id="minTollDisplay" class="form-text help-text">Minimum toll: Loading...</div>
+              <div id="tollWarningMessage" class="form-text warning-text" style="display: none"></div>
             </div>
             <button type="submit" id="saveNewTollButton" class="update-button">Save Changes</button>
           </form>
@@ -1222,13 +1175,11 @@
               <label for="stakeAmount">Stake Amount</label>
               <div id="stakeAvailableBalanceDisplay" class="available-balance-display"></div>
               <input
-                type="number"
+                type="text"
                 id="stakeAmount"
                 class="form-control"
                 required
                 placeholder="Enter amount to stake"
-                min="0.000000000000000001"
-                step="any"
               />
               <div id="stakeAmountWarning" class="validation-warning" style="display: none"></div>
             </div>
