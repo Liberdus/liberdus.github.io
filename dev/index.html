@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.06.27.12.49" />
+    <link rel="stylesheet" href="./styles.css?v=2025.07.01.08.15" />
     <link rel="manifest" href="./manifest.json" />
   </head>
   <body>
-    <script src="./app.js?v=2025.06.27.12.49" type="module"></script>
+    <script src="./app.js?v=2025.07.01.08.15" type="module"></script>
     <div class="container">
       <header class="header" id="header">
         <div id="logo">
@@ -271,8 +271,8 @@
               <a class="about-link" href="index.html.txt" target="_blank">index.html</a>
               <a class="about-link" href="styles.css" target="_blank">styles.css</a>
               <a class="about-link" href="app.js" target="_blank">app.js</a>
-              <a class="about-link" href="crypto.js?v=2025.06.27.12.49" target="_blank">crypto.js</a>
-              <a class="about-link" href="lib.js?v=2025.06.27.12.49" target="_blank">lib.js</a>
+              <a class="about-link" href="crypto.js?v=2025.07.01.08.15" target="_blank">crypto.js</a>
+              <a class="about-link" href="lib.js?v=2025.07.01.08.15" target="_blank">lib.js</a>
               <a class="about-link" href="network.js" target="_blank">network.js</a>
               <a class="about-link" href="service-worker.js" target="_blank">service-worker.js</a>
             </div>
@@ -523,7 +523,9 @@
             </div>
             <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Email</div>
-              <div class="contact-info-value" id="contactInfoEmail"></div>
+              <div class="contact-info-value">
+                <a href="#" id="contactInfoEmail" class="contact-info-link" target="_blank" rel="noopener noreferrer"></a>
+              </div>
             </div>
             <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">Phone</div>
@@ -531,11 +533,15 @@
             </div>
             <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">LinkedIn</div>
-              <div class="contact-info-value" id="contactInfoLinkedin"></div>
+              <div class="contact-info-value">
+                <a href="#" id="contactInfoLinkedin" class="contact-info-link" target="_blank" rel="noopener noreferrer"></a>
+              </div>
             </div>
             <div class="contact-info-item" style="display: none">
               <div class="contact-info-label">X-Twitter</div>
-              <div class="contact-info-value" id="contactInfoX"></div>
+              <div class="contact-info-value">
+                <a href="#" id="contactInfoX" class="contact-info-link" target="_blank" rel="noopener noreferrer"></a>
+              </div>
             </div>
           </div>
         </div>
@@ -870,6 +876,7 @@
               placeholder="Search messages..."
               autocomplete="off"
               autofocus
+              maxlength="30"
             />
           </div>
           <div id="searchResults" class="chat-list">
@@ -895,6 +902,7 @@
               placeholder="Search contacts..."
               autocomplete="off"
               autofocus
+              maxlength="30"
             />
           </div>
           <div id="contactSearchResults" class="chat-list">
@@ -1247,14 +1255,14 @@
         </div>
         <div class="form-container">
           <p class="modal-summary">
-            Enter an email, phone number, or both. If both are provided, an invitation will be sent to each.
+            Enter an email. An invitation with your account username will be sent to the email address.
           </p>
           <form id="inviteForm">
             <div class="form-group">
               <label for="inviteEmail">Email</label>
               <input type="email" id="inviteEmail" class="form-control" placeholder="Enter email address" />
             </div>
-            <div class="form-group">
+            <div class="form-group" style="display: none">
               <label for="invitePhone">Phone Number</label>
               <input type="tel" id="invitePhone" class="form-control" placeholder="Enter phone number" />
             </div>
