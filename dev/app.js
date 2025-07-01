@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'n'
+const version = 'o'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1842,16 +1842,19 @@ async function handleSendAsset(event) {
     const feeStr = big2str(txFeeInLIB, 18).slice(0, -16);
     const balanceStr = big2str(balance, 18).slice(0, -16);
     showToast(`Insufficient balance: ${amountStr} + ${feeStr} (fee) > ${balanceStr} LIB`, 0, 'error');
+    cancelButton.disabled = false;
     return;
   }
 
   // Validate username - must be username; address not supported
   if (username.startsWith('0x')) {
     showToast('Address not supported; enter username instead.', 0, 'error');
+    cancelButton.disabled = false;
     return;
   }
   if (username.length < 3) {
     showToast('Username too short', 0, 'error');
+    cancelButton.disabled = false;
     return;
   }
   try {
@@ -1866,12 +1869,14 @@ async function handleSendAsset(event) {
     const data = await queryNetwork(`/address/${usernameHash}`);
     if (!data || !data.address) {
       showToast('Username not found', 0, 'error');
+      cancelButton.disabled = false;
       return;
     }
     toAddress = normalizeAddress(data.address);
   } catch (error) {
     console.error('Error looking up username:', error);
     showToast('Error looking up username', 0, 'error');
+    cancelButton.disabled = false;
     return;
   }
 
@@ -1887,6 +1892,7 @@ async function handleSendAsset(event) {
     const recipientInfo = await queryNetwork(`/account/${longAddress(toAddress)}`);
     if (!recipientInfo?.account?.publicKey) {
       console.log(`no public key found for recipient ${toAddress}`);
+      cancelButton.disabled = false;
       return;
     }
     if (recipientInfo.account.publicKey) {
@@ -2078,6 +2084,7 @@ async function handleSendAsset(event) {
   } catch (error) {
     console.error('Transaction error:', error);
     //showToast('Transaction failed. Please try again.', 0, 'error');
+    cancelButton.disabled = false;
   }
 }
 handleSendAsset.timestamp = getCorrectedTimestamp();
@@ -2367,29 +2374,37 @@ class ContactInfoModal {
 
     Object.entries(fields).forEach(([field, elementId]) => {
       const element = document.getElementById(elementId);
-      if (element) {
-        const value = displayInfo[field.toLowerCase()] || 'Not provided';
-        
-        if (field === 'Email' && value !== 'Not provided') {
-          // Handle email link
-          element.textContent = value;
-          element.href = `mailto:${value}`;
-          element.parentElement.parentElement.style.display = 'block';
-        } else if (field === 'LinkedIn' && value !== 'Not provided') {
-          // Handle LinkedIn link
-          element.textContent = value;
-          element.href = `https://linkedin.com/in/${value}`;
-          element.parentElement.parentElement.style.display = 'block';
-        } else if (field === 'X' && value !== 'Not provided') {
-          // Handle X-Twitter link
-          element.textContent = value;
-          element.href = `https://x.com/${value}`;
-          element.parentElement.parentElement.style.display = 'block';
-        } else {
-          // Handle other fields as before
-          element.textContent = value;
-          element.parentElement.style.display = value === 'Not provided' ? 'none' : 'block';
-        }
+      if (!element) return;
+
+      const rawValue = displayInfo[field.toLowerCase()];
+      const value = (rawValue === null || rawValue === undefined || rawValue === '') ? 'Not provided' : rawValue;
+      const isEmpty = value === 'Not provided' || value === '';
+      
+      // Get the container to show/hide (contact-info-item div)
+      const container = field === 'Email' || field === 'LinkedIn' || field === 'X' 
+        ? element.parentElement.parentElement 
+        : element.parentElement;
+
+      if (isEmpty) {
+        // Hide the entire field container (including label)
+        container.style.display = 'none';
+        return;
+      }
+
+      // Show the container and set the value
+      container.style.display = 'block';
+      
+      if (field === 'Email') {
+        element.textContent = value;
+        element.href = `mailto:${value}`;
+      } else if (field === 'LinkedIn') {
+        element.textContent = value;
+        element.href = `https://linkedin.com/in/${value}`;
+      } else if (field === 'X') {
+        element.textContent = value;
+        element.href = `https://x.com/${value}`;
+      } else {
+        element.textContent = value;
       }
     });
   }
@@ -7315,6 +7330,9 @@ class ChatModal {
       this.messageInput.value = '';
       this.messageInput.style.height = '48px'; // original height
 
+      // Hide byte counter
+      this.messageByteCounter.style.display = 'none'; 
+
       // Call debounced save directly with empty string
       this.debouncedSaveDraft('');
       contact.draft = '';
@@ -8530,6 +8548,8 @@ class SendAssetFormModal {
    * @returns {void}
    */
   async handleSendToAddressInput(e) {
+    this.submitButton.disabled = true;
+
     // Check availability on input changes
     const username = normalizeUsername(e.target.value);
     e.target.value = username;
