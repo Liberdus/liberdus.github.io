@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'v'
+const version = 'w'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -465,15 +465,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Edit Contact Modal
   editContactModal.load();
 
+  // Scan QR Modal
+  scanQRModal.load();
+
   // Add event listeners for send asset confirmation modal
   document.getElementById('closeSendAssetConfirmModal').addEventListener('click', closeSendAssetConfirmModal);
   document.getElementById('confirmSendButton').addEventListener('click', handleSendAsset);
   document.getElementById('cancelSendButton').addEventListener('click', closeSendAssetConfirmModal);
 
-  document.getElementById('openHistoryModal').addEventListener('click', openHistoryModal);
-  document.getElementById('closeHistoryModal').addEventListener('click', closeHistoryModal);
-  document.getElementById('historyAsset').addEventListener('change', updateHistoryAddresses);
-  document.getElementById('transactionList').addEventListener('click', handleHistoryItemClick);
+  // History Modal
+  historyModal.load();
 
   document.getElementById('switchToChats').addEventListener('click', () => switchView('chats'));
   document.getElementById('switchToContacts').addEventListener('click', () => switchView('contacts'));
@@ -596,10 +597,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   ); // Dynamic wait time
 
   // Omar added
-  document.getElementById('scanQRButton').addEventListener('click', openQRScanModal);
-  document.getElementById('scanStakeQRButton').addEventListener('click', openQRScanModal);
-  document.getElementById('closeQRScanModal').addEventListener('click', closeQRScanModal);
-
+  document.getElementById('scanQRButton').addEventListener('click', () => scanQRModal.open());
+  document.getElementById('scanStakeQRButton').addEventListener('click', () => scanQRModal.open());
+  
   // File upload handlers
   document.getElementById('uploadQRButton').addEventListener('click', () => {
     document.getElementById('qrFileInput').click();
@@ -709,7 +709,7 @@ async function handleVisibilityChange() {
   if (document.visibilityState === 'hidden') {
     saveState();
     // if chatModal was opened, save the last message count
-    if (chatModal.modal.classList.contains('active') && chatModal.address) {
+    if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
       chatModal.lastMessageCount = contact?.messages?.length || 0;
     }
@@ -723,7 +723,7 @@ async function handleVisibilityChange() {
       wsManager.connect();
     }
     // if chatModal was opened, check if message count changed while hidden
-    if (chatModal.modal.classList.contains('active') && chatModal.address) {
+    if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
       const currentCount = contact?.messages?.length || 0;
       if (currentCount !== chatModal.lastMessageCount) {
@@ -1040,8 +1040,8 @@ async function updateChatList() {
                     <div class="chat-time">${timeDisplay} <span class="chat-time-chevron"></span></div>
                 </div>
                 <div class="chat-message">
-                    ${previewHTML}
                     ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : ''}
+                    ${previewHTML}
                 </div>
             </div>
         `;
@@ -1459,7 +1459,7 @@ async function updateTollRequired(address) {
     localContact.tollRequiredToSend = contactAccountData.toll.required[toIndex];
     localContact.tollRequiredToReceive = contactAccountData.toll.required[myIndex];
 
-    if (chatModal.modal.classList.contains('active') && chatModal.address === address) {
+    if (chatModal.isActive() && chatModal.address === address) {
       updateTollAmountUI(address);
     }
 
@@ -1487,7 +1487,7 @@ async function updateTollValue(address) {
     myData.contacts[address].toll = queriedToll;
     myData.contacts[address].tollUnit = queriedTollUnit;
     // if correct modal is open for this address, update the toll value
-    if (chatModal.modal.classList.contains('active') && chatModal.address === address) {
+    if (chatModal.isActive() && chatModal.address === address) {
       updateTollAmountUI(address);
     }
   } else {
@@ -1497,18 +1497,206 @@ async function updateTollValue(address) {
   }
 }
 
-// Function to handle QR code scanning Omar
-function openQRScanModal() {
-  const modal = document.getElementById('qrScanModal');
-  modal.classList.add('active');
-  startCamera(openQRScanModal.fill);
-}
-openQRScanModal.fill = null;
 
-function closeQRScanModal() {
-  document.getElementById('qrScanModal').classList.remove('active');
-  stopCamera();
+class ScanQRModal {
+  constructor() {
+    this.fillFunction = null;
+    this.camera = {
+      stream: null,
+      scanning: false,
+      scanInterval: null
+    };
+  }
+
+  load() {
+    this.modal = document.getElementById('qrScanModal');
+    this.closeButton = document.getElementById('closeQRScanModal');
+    this.video = document.getElementById('video');
+    this.canvasElement = document.getElementById('canvas');
+    this.canvas = this.canvasElement.getContext('2d');
+
+    this.closeButton.addEventListener('click', () => { this.close(); });
+  }
+
+  open() {
+    this.modal.classList.add('active');
+    this.startCamera();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    this.stopCamera();
+  }
+
+  async startCamera() {
+    try {
+      // First check if camera API is supported
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera API is not supported in this browser');
+      }
+
+      // Stop any existing stream
+      if (this.camera.stream) {
+        this.stopCamera();
+      }
+
+      // Hide previous results
+      // resultContainer.classList.add('hidden');
+
+      // statusMessage.textContent = 'Accessing camera...';
+      // Request camera access with specific error handling
+      try {
+        this.camera.stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'environment', // Use back camera
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+      } catch (mediaError) {
+        // Handle specific getUserMedia errors
+        switch (mediaError.name) {
+          case 'NotAllowedError':
+            throw new Error(
+              'Camera access was denied. Please check your browser settings and grant permission to use the camera.'
+            );
+          case 'NotFoundError':
+            throw new Error('No camera device was found on your system.');
+          case 'NotReadableError':
+            throw new Error('Camera is already in use by another application or encountered a hardware error.');
+          case 'SecurityError':
+            throw new Error("Camera access was blocked by your browser's security policy.");
+          case 'AbortError':
+            throw new Error('Camera access was cancelled.');
+          default:
+            throw new Error(`Camera error: ${mediaError.message}`);
+        }
+      }
+
+      // Connect the camera stream to the video element
+      this.video.srcObject = this.camera.stream;
+      this.video.setAttribute('playsinline', true); // required for iOS Safari
+
+      // When video is ready to play
+      this.video.onloadedmetadata = () => {
+        this.video.play();
+
+        // Enable scanning and update button
+        this.camera.scanning = true;
+        // toggleButton.textContent = 'Stop Camera';
+
+        // Start scanning for QR codes
+        // Use interval instead of requestAnimationFrame for better control over scan frequency
+        this.camera.scanInterval = setInterval(() => this.readQRCode(), 100); // scan every 100ms (10 times per second)
+
+        // statusMessage.textContent = 'Camera active. Point at a QR code.';
+      };
+
+      // Add error handler for video element
+      this.video.onerror = function (error) {
+        console.error('Video element error:', error);
+        this.stopCamera();
+        throw new Error('Failed to start video stream');
+      };
+    } catch (error) {
+      console.error('Error accessing camera:', error);
+      this.stopCamera(); // Ensure we clean up any partial setup
+
+      // Show user-friendly error message
+      showToast(error.message || 'Failed to access camera. Please check your permissions and try again.', 5000, 'error');
+
+      // Re-throw the error if you need to handle it further up
+      throw error;
+    }
+  }
+
+  stopCamera() {
+    if (this.camera.scanInterval) {
+      clearInterval(this.camera.scanInterval);
+      this.camera.scanInterval = null;
+    }
+
+    if (this.camera.stream) {
+      this.camera.stream.getTracks().forEach((track) => track.stop());
+      this.camera.stream = null;
+      this.video.srcObject = null;
+      this.camera.scanning = false;
+    }
+  }
+
+  readQRCode() {
+    if (this.camera.scanning && this.video.readyState === this.video.HAVE_ENOUGH_DATA) {
+      // Set canvas size to match video dimensions
+      this.canvasElement.height = this.video.videoHeight;
+      this.canvasElement.width = this.video.videoWidth;
+
+      // Draw video frame onto canvas
+      this.canvas.drawImage(this.video, 0, 0, this.canvasElement.width, this.canvasElement.height);
+
+      // Get image data for QR processing
+      const imageData = this.canvas.getImageData(0, 0, this.canvasElement.width, this.canvasElement.height);
+
+      try {
+        // Process image with qr.js library
+        // qr.decodeQR expects an object { data, height, width }
+        const decodedText = qr.decodeQR({
+          data: imageData.data,
+          width: imageData.width,
+          height: imageData.height,
+        });
+
+        // If QR code found and decoded
+        if (decodedText) {
+          console.log('QR Code detected:', decodedText);
+          this.handleSuccessfulScan(decodedText);
+        }
+      } catch (error) {
+        // qr.decodeQR throws error if not found or on error
+        //console.log('QR scanning error or not found:', error); // Optional: Log if needed
+      }
+    }
+  }
+
+  handleSuccessfulScan(data) {
+    // const scanHighlight = document.getElementById('scan-highlight');
+    // Stop scanning
+    if (this.camera.scanInterval) {
+      clearInterval(this.camera.scanInterval);
+      this.camera.scanInterval = null;
+    }
+
+    this.camera.scanning = false;
+
+    // Stop the camera
+    this.stopCamera();
+
+    /*
+      // Show highlight effect
+      scanHighlight.classList.add('active');
+      setTimeout(() => {
+          scanHighlight.classList.remove('active');
+      }, 500);
+  */
+
+    // Display the result
+    //    qrResult.textContent = data;
+    //    resultContainer.classList.remove('hidden');
+    console.log('Raw QR Data Scanned:', data);
+    if (this.fillFunction) {
+      // Call the assigned fill function (e.g., fillPaymentFromQR or fillStakeAddressFromQR)
+      this.fillFunction(data);
+    }
+
+    this.close();
+
+    // Update status
+    //    statusMessage.textContent = 'QR code detected! Camera stopped.';
+  }
+
 }
+
+const scanQRModal = new ScanQRModal();
 
 function fillPaymentFromQR(data) {
   console.log('Attempting to fill payment form from QR:', data);
@@ -1654,16 +1842,19 @@ async function handleSendAsset(event) {
     const feeStr = big2str(txFeeInLIB, 18).slice(0, -16);
     const balanceStr = big2str(balance, 18).slice(0, -16);
     showToast(`Insufficient balance: ${amountStr} + ${feeStr} (fee) > ${balanceStr} LIB`, 0, 'error');
+    cancelButton.disabled = false;
     return;
   }
 
   // Validate username - must be username; address not supported
   if (username.startsWith('0x')) {
     showToast('Address not supported; enter username instead.', 0, 'error');
+    cancelButton.disabled = false;
     return;
   }
   if (username.length < 3) {
     showToast('Username too short', 0, 'error');
+    cancelButton.disabled = false;
     return;
   }
   try {
@@ -1678,12 +1869,14 @@ async function handleSendAsset(event) {
     const data = await queryNetwork(`/address/${usernameHash}`);
     if (!data || !data.address) {
       showToast('Username not found', 0, 'error');
+      cancelButton.disabled = false;
       return;
     }
     toAddress = normalizeAddress(data.address);
   } catch (error) {
     console.error('Error looking up username:', error);
     showToast('Error looking up username', 0, 'error');
+    cancelButton.disabled = false;
     return;
   }
 
@@ -1699,6 +1892,7 @@ async function handleSendAsset(event) {
     const recipientInfo = await queryNetwork(`/account/${longAddress(toAddress)}`);
     if (!recipientInfo?.account?.publicKey) {
       console.log(`no public key found for recipient ${toAddress}`);
+      cancelButton.disabled = false;
       return;
     }
     if (recipientInfo.account.publicKey) {
@@ -1867,7 +2061,7 @@ async function handleSendAsset(event) {
 
     // Update the chat modal to show the newly sent transfer message
     // Check if the chat modal for this recipient is currently active
-    const inActiveChatWithRecipient = chatModal.address === toAddress && chatModal.modal.classList.contains('active');
+    const inActiveChatWithRecipient = chatModal.address === toAddress && chatModal.isActive();
 
     if (inActiveChatWithRecipient) {
       chatModal.appendChatModal(); // Re-render the chat modal and highlight the new item
@@ -1880,7 +2074,7 @@ async function handleSendAsset(event) {
     document.getElementById('sendMemo').value = '';
     document.getElementById('sendToAddressError').style.display = 'none';
     // Show history modal after successful transaction
-    openHistoryModal();
+    historyModal.open();
     /*
         const sendToAddressError = document.getElementById('sendToAddressError');
         if (sendToAddressError) {
@@ -1890,6 +2084,7 @@ async function handleSendAsset(event) {
   } catch (error) {
     console.error('Transaction error:', error);
     //showToast('Transaction failed. Please try again.', 0, 'error');
+    cancelButton.disabled = false;
   }
 }
 handleSendAsset.timestamp = getCorrectedTimestamp();
@@ -2179,10 +2374,37 @@ class ContactInfoModal {
 
     Object.entries(fields).forEach(([field, elementId]) => {
       const element = document.getElementById(elementId);
-      if (element) {
-        const value = displayInfo[field.toLowerCase()] || 'Not provided';
+      if (!element) return;
+
+      const rawValue = displayInfo[field.toLowerCase()];
+      const value = (rawValue === null || rawValue === undefined || rawValue === '') ? 'Not provided' : rawValue;
+      const isEmpty = value === 'Not provided' || value === '';
+      
+      // Get the container to show/hide (contact-info-item div)
+      const container = field === 'Email' || field === 'LinkedIn' || field === 'X' 
+        ? element.parentElement.parentElement 
+        : element.parentElement;
+
+      if (isEmpty) {
+        // Hide the entire field container (including label)
+        container.style.display = 'none';
+        return;
+      }
+
+      // Show the container and set the value
+      container.style.display = 'block';
+      
+      if (field === 'Email') {
         element.textContent = value;
-        element.parentElement.style.display = value === 'Not provided' ? 'none' : 'block';
+        element.href = `mailto:${value}`;
+      } else if (field === 'LinkedIn') {
+        element.textContent = value;
+        element.href = `https://linkedin.com/in/${value}`;
+      } else if (field === 'X') {
+        element.textContent = value;
+        element.href = `https://x.com/${value}`;
+      } else {
+        element.textContent = value;
       }
     });
   }
@@ -2224,11 +2446,27 @@ class ContactInfoModal {
       this.needsContactListUpdate = false;
     }
   }
+
+  /**
+   * Check if the contact info modal is active
+   * @returns {boolean}
+   */
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
+  }
 }
 
 // Create a singleton instance
 const contactInfoModal = new ContactInfoModal();
 
+/**
+ * Friend Modal
+ * Frontend: 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+ * Backend: 1 = toll required, 0 = toll not required, 2 = blocked
+ * 
+ * @description Modal for setting the friend status for a contact
+ * @class FriendModal
+ */
 class FriendModal {
   constructor() {
     this.modal = document.getElementById('friendModal');
@@ -2532,14 +2770,13 @@ class EditContactModal {
     }
 
     // update title if chatModal is open and if contact.name is '' fallback to contact.username
-    if (chatModal.isOpen() && chatModal.address === this.currentContactAddress) {
+    if (chatModal.isActive() && chatModal.address === this.currentContactAddress) {
       chatModal.modalTitle.textContent = getContactDisplayName(contact);
     }
 
     // Safely update the contact info modal if it exists and is open
     if (contactInfoModal.currentContactAddress) {
-      const contactInfoModalElement = document.getElementById('contactInfoModal');
-      if (contactInfoModalElement && contactInfoModalElement.classList.contains('active')) {
+      if (contactInfoModal.isActive()) {
         contactInfoModal.updateContactInfo(createDisplayInfo(myData.contacts[this.currentContactAddress]));
       }
     }
@@ -2552,6 +2789,161 @@ class EditContactModal {
 // make singleton instance
 const editContactModal = new EditContactModal();
 
+class HistoryModal {
+  constructor() {
+    // No DOM dependencies in constructor
+  }
+
+  load() {
+    // DOM elements - only accessed when DOM is ready
+    this.modal = document.getElementById('historyModal');
+    this.assetSelect = document.getElementById('historyAsset');
+    this.transactionList = document.getElementById('transactionList');
+    this.openButton = document.getElementById('openHistoryModal');
+    this.closeButton = document.getElementById('closeHistoryModal');
+
+    // Cache the form container for scrollToTop
+    this.formContainer = this.modal.querySelector('.form-container');
+
+    // Setup event listeners
+    this.openButton.addEventListener('click', () => this.open());
+    this.closeButton.addEventListener('click', () => this.close());
+    this.assetSelect.addEventListener('change', () => this.handleAssetChange());
+    this.transactionList.addEventListener('click', (event) => this.handleItemClick(event));
+  }
+
+  open() {
+    this.modal.classList.add('active');
+    this.populateAssets();
+    this.updateTransactionHistory();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    this.openButton.classList.remove('has-notification');
+    document.getElementById('switchToWallet').classList.remove('has-notification');
+  }
+
+  populateAssets() {
+    const walletData = myData.wallet;
+    
+    if (!walletData.assets || walletData.assets.length === 0) {
+      this.assetSelect.innerHTML = '<option value="">No assets available</option>';
+      return;
+    }
+    
+    this.assetSelect.innerHTML = walletData.assets
+      .map((asset, index) => `<option value="${index}">${asset.name} (${asset.symbol})</option>`)
+      .join('');
+  }
+
+  async updateTransactionHistory() {
+    const walletData = myData.wallet;
+    const assetIndex = this.assetSelect.value;
+    
+    if (!walletData.history || walletData.history.length === 0) {
+      this.showEmptyState();
+      return;
+    }
+    
+    const asset = walletData.assets[assetIndex];
+    const contacts = myData.contacts;
+    
+    this.transactionList.innerHTML = walletData.history
+      .map((tx) => {
+        const txidAttr = tx?.txid ? `data-txid="${tx.txid}"` : '';
+        const statusAttr = tx?.status ? `data-status="${tx.status}"` : '';
+        const contactName = getContactDisplayName(contacts[tx.address]);
+        
+        return `
+          <div class="transaction-item" data-address="${tx.address}" ${txidAttr} ${statusAttr}>
+            <div class="transaction-info">
+              <div class="transaction-type ${tx.sign === -1 ? 'send' : 'receive'}">
+                ${tx.sign === -1 ? '↑ Sent' : '↓ Received'}
+              </div>
+              <div class="transaction-amount">
+                ${tx.sign === -1 ? '-' : '+'} ${(Number(tx.amount) / Number(wei)).toFixed(6)} ${asset.symbol}
+              </div>
+            </div>
+            <div class="transaction-details">
+              <div class="transaction-address">
+                ${tx.sign === -1 ? 'To:' : 'From:'} ${tx.nominee || contactName}
+              </div>
+              <div class="transaction-time">${formatTime(tx.timestamp)}</div>
+            </div>
+            ${tx.memo ? `<div class="transaction-memo">${linkifyUrls(tx.memo)}</div>` : ''}
+          </div>
+        `;
+      })
+      .join('');
+    
+    // Scroll the form container to top after rendering
+    requestAnimationFrame(() => (this.formContainer.scrollTop = 0));
+  }
+
+  showEmptyState() {
+    this.transactionList.innerHTML = `
+      <div class="empty-state">
+        <div style="font-size: 2rem; margin-bottom: 1rem"></div>
+        <div style="font-weight: bold; margin-bottom: 0.5rem">No Transactions</div>
+        <div>Your transaction history will appear here</div>
+      </div>`;
+  }
+
+  async handleAssetChange() {
+    await this.updateTransactionHistory();
+  }
+
+  handleItemClick(event) {
+    const item = event.target.closest('.transaction-item');
+    
+    if (!item) return;
+    
+    if (item.dataset.status === 'failed') {
+      console.log(`Not opening chatModal for failed transaction`);
+      
+      if (event.target.closest('.transaction-item')) {
+        handleFailedPaymentClick(item.dataset.txid, item);
+      }
+      return;
+    }
+    
+    const memo = item.querySelector('.transaction-memo')?.textContent;
+    if (memo === 'stake' || memo === 'unstake') {
+      validatorStakingModal.open();
+      return;
+    }
+    
+    const address = item.dataset.address;
+    if (address && myData.contacts[address]) {
+      // Close contact info modal if open
+      if (contactInfoModal.isActive()) {
+        contactInfoModal.close();
+      }
+      
+      this.close();
+      chatModal.open(address);
+    }
+  }
+
+  // Public method for external updates
+  async refresh() {
+    if (this.isActive()) {
+      await this.updateTransactionHistory();
+    }
+  }
+
+  /**
+   * Check if the history modal is active
+   * @returns {boolean}
+   */
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
+  }
+}
+
+// Create singleton instance
+const historyModal = new HistoryModal();
 
 function handleSignOut() {
   // Clear intervals
@@ -2568,8 +2960,8 @@ function handleSignOut() {
     getSystemNoticeIntervalId = null;
   }
   // Stop camera if it's running
-  if (typeof startCamera !== 'undefined' && startCamera.scanInterval) {
-    stopCamera();
+  if (typeof scanQRModal !== 'undefined' && scanQRModal.camera.scanInterval) {
+    scanQRModal.stopCamera();
   }
 
   //    const shouldLeave = confirm('Do you want to leave this page?');
@@ -2816,152 +3208,6 @@ async function updateAssetPricesIfNeeded() {
   }
 }
 
-function openHistoryModal() {
-  const modal = document.getElementById('historyModal');
-  modal.classList.add('active');
-
-  // Get wallet data
-  const walletData = myData.wallet;
-
-  const assetSelect = document.getElementById('historyAsset');
-
-  // Check if we have any assets
-  if (!walletData.assets || walletData.assets.length === 0) {
-    assetSelect.innerHTML = '<option value="">No assets available</option>';
-    return;
-  }
-  // Populate assets dropdown
-  assetSelect.innerHTML = walletData.assets
-    .map((asset, index) => `<option value="${index}">${asset.name} (${asset.symbol})</option>`)
-    .join('');
-
-  // Update addresses for first asset
-  updateHistoryAddresses();
-}
-
-function closeHistoryModal() {
-  document.getElementById('historyModal').classList.remove('active');
-  document.getElementById('openHistoryModal').classList.remove('has-notification');
-  document.getElementById('switchToWallet').classList.remove('has-notification');
-}
-
-function updateHistoryAddresses() {
-  // TODO get rid of this function after changing all refrences
-  // Update transaction history
-  updateTransactionHistory();
-}
-
-async function updateTransactionHistory() {
-  await updateChatList();
-
-  const walletData = myData.wallet;
-
-  const assetIndex = document.getElementById('historyAsset').value;
-  const transactionList = document.getElementById('transactionList');
-
-  // Check if we have any assets
-  if (!walletData.assets || walletData.assets.length === 0) {
-    transactionList.innerHTML = `
-            <div class="empty-state">
-                <div style="font-size: 2rem; margin-bottom: 1rem"></div>
-                <div style="font-weight: bold; margin-bottom: 0.5rem">No Transactions</div>
-                <div>Your transaction history will appear here</div>
-            </div>`;
-    return;
-  }
-
-  const asset = walletData.assets[assetIndex];
-  const contacts = myData.contacts;
-
-  transactionList.innerHTML = walletData.history
-    .map((tx) => {
-      const txidAttr = tx?.txid ? `data-txid="${tx.txid}"` : '';
-      const statusAttr = tx?.status ? `data-status="${tx.status}"` : '';
-      const contactName = getContactDisplayName(contacts[tx.address]);
-      return `
-        <div class="transaction-item" data-address="${tx.address}" ${txidAttr} ${statusAttr}>
-            <div class="transaction-info">
-                <div class="transaction-type ${tx.sign === -1 ? 'send' : 'receive'}">
-                    ${tx.sign === -1 ? '↑ Sent' : '↓ Received'}
-                </div>
-                <div class="transaction-amount">
-                    ${tx.sign === -1 ? '-' : '+'} ${(Number(tx.amount) / Number(wei)).toFixed(6)} ${asset.symbol}
-                </div>
-            </div>
-            <div class="transaction-details">
-                <div class="transaction-address">
-                    ${tx.sign === -1 ? 'To:' : 'From:'} ${tx.nominee || contactName}
-                </div>
-                <div class="transaction-time">${formatTime(tx.timestamp)}</div>
-            </div>
-            ${tx.memo ? `<div class="transaction-memo">${linkifyUrls(tx.memo)}</div>` : ''}
-        </div>
-    `;
-    })
-    .join('');
-
-  // Scroll the form container to top after rendering
-  requestAnimationFrame(() => {
-    const modal = document.getElementById('historyModal');
-    const formContainer = modal?.querySelector('.form-container'); // Find the form container within the modal
-    if (formContainer) {
-      formContainer.scrollTop = 0;
-    }
-  });
-}
-
-// Handle clicks on transaction history items
-function handleHistoryItemClick(event) {
-  // Find the closest ancestor element with the class 'transaction-item'
-  const item = event.target.closest('.transaction-item');
-
-  if (item.dataset.status === 'failed') {
-    console.log(`Not opening chatModal for failed transaction`);
-
-    // if not data-address then we can assume it's a stake or unstake transaction so when clicking on it it should lead to the validator modal
-    // TODO: remove this maybe since it should be removed from history receipt when we know it has failed when checking receipt right?
-    /* if (!item.dataset.address) {
-            openValidatorModal();
-            return;
-        } */
-
-    if (event.target.closest('.transaction-item')) {
-      handleFailedPaymentClick(item.dataset.txid, item);
-    }
-
-    return;
-  }
-
-  // if not data-address then we can assume it's a stake or unstake transaction so when clicking on it it should lead to the validator modal
-  /* if (!item.dataset.address) {
-        openValidatorModal();
-        return;
-    } */
-
-  if (item) {
-    // Check if this is a stake/unstake transaction by looking at the memo
-    const memo = item.querySelector('.transaction-memo')?.textContent;
-    if (memo === 'stake' || memo === 'unstake') {
-      validatorStakingModal.open();
-      return;
-    }
-
-    // Get the address from the data-address attribute
-    const address = item.dataset.address;
-    if (address && myData.contacts[address]) {
-      // close contactInfoModal if it is open
-      if (document.getElementById('contactInfoModal').classList.contains('active')) {
-        document.getElementById('contactInfoModal').classList.remove('active');
-      }
-
-      // Close the history modal
-      closeHistoryModal();
-      // Open the chat modal for the corresponding address
-      chatModal.open(address);
-    }
-  }
-}
-
 async function queryNetwork(url) {
   //console.log('queryNetwork', url)
   if (!(await checkOnlineStatus())) {
@@ -3185,7 +3431,7 @@ async function processChats(chats, keys) {
       // This check determines if we're currently chatting with the sender
       // We ONLY want to avoid notifications if we're actively viewing this exact chat
       const inActiveChatWithSender =
-        chatModal.address === from && document.getElementById('chatModal')?.classList.contains('active'); // Added null check for safety
+        chatModal.address === from && chatModal.isActive();
 
       for (let i in res.messages) {
         const tx = res.messages[i]; // the messages are actually the whole tx
@@ -3368,15 +3614,13 @@ async function processChats(chats, keys) {
           added += 1;
 
           const walletScreenActive = document.getElementById('walletScreen')?.classList.contains('active');
-          const historyModalActive = document.getElementById('historyModal')?.classList.contains('active');
           // Update wallet view if it's active
           if (walletScreenActive) {
             updateWalletView();
           }
           // update history modal if it's active
-          if (historyModalActive) {
-            updateTransactionHistory();
-          }
+          historyModal.refresh();
+
           // Always play transfer sound for new transfers
           playTransferSound(true);
           // is chatModal of sender address is active
@@ -3862,9 +4106,10 @@ function searchMessages(searchText) {
         // Highlight matching text
         const messageText = escapeHtml(message.message);
         const highlightedText = messageText.replace(new RegExp(searchText, 'gi'), (match) => `<mark>${match}</mark>`);
+        const displayedName = getContactDisplayName(contact);
         results.push({
           contactAddress: address,
-          username: contact.username || address,
+          username: displayedName,
           messageId: index,
           message: message, // Pass the entire message object
           timestamp: message.timestamp,
@@ -4071,6 +4316,7 @@ function displayContactResults(results, searchText) {
           (match) => `<mark>${match}</mark>`
         )}`
       : '';
+    const displayedName = getContactDisplayName(contact);
 
     contactElement.innerHTML = `
             <div class="chat-avatar">
@@ -4078,7 +4324,7 @@ function displayContactResults(results, searchText) {
             </div>
             <div class="chat-content">
                 <div class="chat-header">
-                    <span class="chat-name">${contact.username || 'Unknown'}</span>
+                    <span class="chat-name">${displayedName}</span>
                 </div>
                 <div class="chat-message">
                     <span class="match-label">${matchPreview}</span>
@@ -4506,182 +4752,7 @@ function getGatewayForRequest() {
   return myData.network.gateways[Math.floor(Math.random() * myData.network.gateways.length)];
 }
 
-async function startCamera() {
-  const video = document.getElementById('video');
-  try {
-    // First check if camera API is supported
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error('Camera API is not supported in this browser');
-    }
 
-    // Stop any existing stream
-    if (startCamera.stream) {
-      stopCamera();
-    }
-
-    // Hide previous results
-    // resultContainer.classList.add('hidden');
-
-    // statusMessage.textContent = 'Accessing camera...';
-    // Request camera access with specific error handling
-    try {
-      startCamera.stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment', // Use back camera
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      });
-    } catch (mediaError) {
-      // Handle specific getUserMedia errors
-      switch (mediaError.name) {
-        case 'NotAllowedError':
-          throw new Error(
-            'Camera access was denied. Please check your browser settings and grant permission to use the camera.'
-          );
-        case 'NotFoundError':
-          throw new Error('No camera device was found on your system.');
-        case 'NotReadableError':
-          throw new Error('Camera is already in use by another application or encountered a hardware error.');
-        case 'SecurityError':
-          throw new Error("Camera access was blocked by your browser's security policy.");
-        case 'AbortError':
-          throw new Error('Camera access was cancelled.');
-        default:
-          throw new Error(`Camera error: ${mediaError.message}`);
-      }
-    }
-
-    // Connect the camera stream to the video element
-    video.srcObject = startCamera.stream;
-    video.setAttribute('playsinline', true); // required for iOS Safari
-
-    // When video is ready to play
-    video.onloadedmetadata = function () {
-      video.play();
-
-      // Enable scanning and update button
-      startCamera.scanning = true;
-      // toggleButton.textContent = 'Stop Camera';
-
-      // Start scanning for QR codes
-      // Use interval instead of requestAnimationFrame for better control over scan frequency
-      startCamera.scanInterval = setInterval(readQRCode, 100); // scan every 100ms (10 times per second)
-
-      // statusMessage.textContent = 'Camera active. Point at a QR code.';
-    };
-
-    // Add error handler for video element
-    video.onerror = function (error) {
-      console.error('Video element error:', error);
-      stopCamera();
-      throw new Error('Failed to start video stream');
-    };
-  } catch (error) {
-    console.error('Error accessing camera:', error);
-    stopCamera(); // Ensure we clean up any partial setup
-
-    // Show user-friendly error message
-    showToast(error.message || 'Failed to access camera. Please check your permissions and try again.', 5000, 'error');
-
-    // Re-throw the error if you need to handle it further up
-    throw error;
-  }
-}
-
-// changed to use qr.js library instead of jsQR.js
-function readQRCode() {
-  const video = document.getElementById('video');
-  const canvasElement = document.getElementById('canvas');
-  const canvas = canvasElement.getContext('2d');
-
-  if (startCamera.scanning && video.readyState === video.HAVE_ENOUGH_DATA) {
-    // Set canvas size to match video dimensions
-    canvasElement.height = video.videoHeight;
-    canvasElement.width = video.videoWidth;
-
-    // Draw video frame onto canvas
-    canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
-
-    // Get image data for QR processing
-    const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
-
-    try {
-      // Process image with qr.js library
-      // qr.decodeQR expects an object { data, height, width }
-      const decodedText = qr.decodeQR({
-        data: imageData.data,
-        width: imageData.width,
-        height: imageData.height,
-      });
-
-      // If QR code found and decoded
-      if (decodedText) {
-        console.log('QR Code detected:', decodedText);
-        handleSuccessfulScan(decodedText);
-      }
-    } catch (error) {
-      // qr.decodeQR throws error if not found or on error
-      //console.log('QR scanning error or not found:', error); // Optional: Log if needed
-    }
-  }
-}
-
-// Handle successful scan
-function handleSuccessfulScan(data) {
-  // const scanHighlight = document.getElementById('scan-highlight');
-  // Stop scanning
-  if (startCamera.scanInterval) {
-    clearInterval(startCamera.scanInterval);
-    startCamera.scanInterval = null;
-  }
-
-  startCamera.scanning = false;
-
-  // Stop the camera
-  stopCamera();
-
-  /*
-    // Show highlight effect
-    scanHighlight.classList.add('active');
-    setTimeout(() => {
-        scanHighlight.classList.remove('active');
-    }, 500);
-*/
-
-  // Display the result
-  //    qrResult.textContent = data;
-  //    resultContainer.classList.remove('hidden');
-  console.log('Raw QR Data Scanned:', data);
-  if (openQRScanModal.fill) {
-    // Call the assigned fill function (e.g., fillPaymentFromQR or fillStakeAddressFromQR)
-    openQRScanModal.fill(data);
-  }
-
-  closeQRScanModal();
-
-  // Update status
-  //    statusMessage.textContent = 'QR code detected! Camera stopped.';
-}
-
-// Stop camera
-function stopCamera() {
-  const video = document.getElementById('video');
-  if (startCamera.scanInterval) {
-    clearInterval(startCamera.scanInterval);
-    startCamera.scanInterval = null;
-  }
-
-  if (startCamera.stream) {
-    startCamera.stream.getTracks().forEach((track) => track.stop());
-    startCamera.stream = null;
-    video.srcObject = null;
-    startCamera.scanning = false;
-    //        toggleButton.textContent = 'Start Camera';
-    //        statusMessage.textContent = 'Camera stopped.';
-  }
-}
 
 // Changed to use qr.js library instead of jsQR.js
 async function handleQRFileSelect(event, fillFunction) {
@@ -5210,7 +5281,6 @@ if (!useLongPolling) {
 
 function closeSendAssetConfirmModal() {
   document.getElementById('sendAssetConfirmModal').classList.remove('active');
-  document.getElementById('sendAssetFormModal').classList.add('active');
 }
 
 /**
@@ -6504,6 +6574,14 @@ class ValidatorStakingModal {
       return { isActive: false, error: 'Network error fetching validator status' };
     }
   }
+
+  /**
+   * Check if the validator staking modal is active
+   * @returns {boolean}
+   */
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
+  }
 }
 const validatorStakingModal = new ValidatorStakingModal();
 
@@ -6544,7 +6622,7 @@ class StakeValidatorModal {
     this.modal.classList.add('active');
 
     // Set the correct fill function for the staking context
-    openQRScanModal.fill = fillStakeAddressFromQR;
+    scanQRModal.fillFunction = fillStakeAddressFromQR;
 
     // Display Available Balance
     const libAsset = myData.wallet.assets.find((asset) => asset.symbol === 'LIB');
@@ -6903,11 +6981,11 @@ class ChatModal {
   }
 
   /**
-   * Check if chatModal is open
+   * Check if chatModal is active
    * @returns {boolean} - True if modal is open, false otherwise
    */
-  isOpen() {
-    return this.modal.classList.contains('active');
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
   }
 
   /**
@@ -7252,6 +7330,9 @@ class ChatModal {
       this.messageInput.value = '';
       this.messageInput.style.height = '48px'; // original height
 
+      // Hide byte counter
+      this.messageByteCounter.style.display = 'none'; 
+
       // Call debounced save directly with empty string
       this.debouncedSaveDraft('');
       contact.draft = '';
@@ -7562,16 +7643,15 @@ class ChatModal {
   refreshCurrentView(txid) {
     // contactAddress is kept for potential future use but not needed for this txid-based logic
     const chatsScreen = document.getElementById('chatsScreen');
-    const historyModal = document.getElementById('historyModal');
     const messagesList = this.modal ? this.messagesList : null;
 
     // 1. Refresh History Modal if active
-    if (historyModal && historyModal.classList.contains('active')) {
+    if (historyModal.isActive()) {
       console.log('DEBUG: Refreshing transaction history modal due to transaction failure.');
-      updateTransactionHistory();
+      historyModal.refresh();
     }
     // 2. Refresh Chat Modal if active AND the failed txid's message is currently rendered
-    if (this.modal && this.modal.classList.contains('active') && txid && messagesList) {
+    if (this.isActive() && txid && messagesList) {
       // Check if an element with the specific data-txid exists within the message list
       const messageElement = messagesList.querySelector(`[data-txid="${txid}"]`);
 
@@ -7740,19 +7820,11 @@ class FailedMessageModal {
       chatModal.messageInput.value = messageToRetry;
       chatModal.retryOfTxId.value = originalTxid;
 
-      if (this.modal) {
-        this.modal.classList.remove('active');
-      }
+      this.closeFailedMessageModalAndClearState();
       chatModal.messageInput.focus();
-
-      // Clear the stored values after use
-      this.handleFailedMessageData.handleFailedMessage = '';
-      this.handleFailedMessageData.txid = '';
     } else {
       console.error('Error preparing message retry: Necessary elements or data missing.');
-      if (this.modal) {
-        this.modal.classList.remove('active');
-      }
+      this.closeFailedMessageModalAndClearState();
     }
   }
 
@@ -7768,20 +7840,13 @@ class FailedMessageModal {
       const currentAddress = chatModal.address;
       removeFailedTx(originalTxid, currentAddress);
 
-      if (this.modal) {
-        this.modal.classList.remove('active');
-      }
+      this.closeFailedMessageModalAndClearState();
 
-      // Clear the stored values
-      this.handleFailedMessageData.handleFailedMessage = '';
-      this.handleFailedMessageData.txid = '';
       // refresh current chatModal
       chatModal.appendChatModal();
     } else {
       console.error('Error deleting message: TXID not found.');
-      if (this.modal) {
-        this.modal.classList.remove('active');
-      }
+      this.closeFailedMessageModalAndClearState();
     }
   }
 
@@ -7791,9 +7856,7 @@ class FailedMessageModal {
    * @returns {void}
    */
   closeFailedMessageModalAndClearState() {
-    if (this.modal) {
-      this.modal.classList.remove('active');
-    }
+    this.modal.classList.remove('active');
     // Clear the stored values when modal is closed
     this.handleFailedMessageData.handleFailedMessage = '';
     this.handleFailedMessageData.txid = '';
@@ -8052,8 +8115,12 @@ class CreateAccountModal {
     this.open();
   }
 
-  isOpen() {
-    return this.modal.classList.contains('active');
+  /**
+   * Check if the create account modal is active
+   * @returns {boolean}
+   */
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
   }
 
   handleUsernameInput(e) {
@@ -8441,7 +8508,7 @@ class SendAssetFormModal {
 
     this.usernameAvailable.style.display = 'none';
     this.submitButton.disabled = true;
-    openQRScanModal.fill = fillPaymentFromQR; // set function to handle filling the payment form from QR data
+    scanQRModal.fillFunction = fillPaymentFromQR; // set function to handle filling the payment form from QR data
 
     if (this.username) {
       this.usernameInput.value = this.username;
@@ -8481,6 +8548,8 @@ class SendAssetFormModal {
    * @returns {void}
    */
   async handleSendToAddressInput(e) {
+    this.submitButton.disabled = true;
+
     // Check availability on input changes
     const username = normalizeUsername(e.target.value);
     e.target.value = username;
@@ -8703,9 +8772,6 @@ class SendAssetFormModal {
     } else {
       memoGroup.style.display = 'none';
     }
-
-    // Hide send asset modal and show confirmation modal
-    this.modal.classList.remove('active');
 
     confirmButton.disabled = false;
     cancelButton.disabled = false;
@@ -8949,6 +9015,14 @@ class SendAssetFormModal {
     await this.open();
     this.amountInput.value = tempAmount;
     this.memoInput.value = tempMemo || '';
+  }
+
+  /**
+   * Check if the send asset form modal is active
+   * @returns {boolean}
+   */
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
   }
 }
 
@@ -9283,7 +9357,7 @@ async function checkPendingTransactions() {
           // show toast notification with the success message
           showToast(`${type === 'deposit_stake' ? 'Stake' : 'Unstake'} transaction successful`, 5000, 'success');
           // refresh only if validator modal is open
-          if (document.getElementById('validatorModal').classList.contains('active')) {
+          if (validatorStakingModal.isActive()) {
             validatorStakingModal.close();
             validatorStakingModal.open();
           }
@@ -9319,11 +9393,11 @@ async function checkPendingTransactions() {
           } else if (type === 'deposit_stake') {
             showToast(`Stake failed: ${failureReason}`, 0, 'error');
           } else if (type === 'message') {
-            if (chatModal.modal.classList.contains('active')) {
+            if (chatModal.isActive()) {
               await chatModal.reopen();
             }
           } else if (type === 'transfer') {
-            if (sendAssetFormModal.modal.classList.contains('active')) {
+            if (sendAssetFormModal.isActive()) {
               await sendAssetFormModal.reopen();
             }
           }
@@ -9336,7 +9410,7 @@ async function checkPendingTransactions() {
             // revert the local myData.settings.toll to the old value
             tollModal.editMyDataToll(tollModal.oldToll);
             // check if the toll modal is open
-            if (tollModal.modal.classList.contains('active')) {
+            if (tollModal.isActive()) {
               // change the tollAmountLIB and tollAmountUSD to the old value
               tollModal.tollAmountLIB = tollModal.oldToll;
               tollModal.tollAmountUSD = tollModal.oldToll;
@@ -9368,7 +9442,7 @@ async function checkPendingTransactions() {
           // remove from wallet history
           myData.wallet.history = myData.wallet.history.filter((tx) => tx.txid !== txid);
 
-          if (document.getElementById('validatorModal').classList.contains('active')) {
+          if (validatorStakingModal.isActive()) {
             // refresh the validator modal
             validatorStakingModal.close();
             validatorStakingModal.open();
@@ -9380,7 +9454,7 @@ async function checkPendingTransactions() {
     }
   }
   // if createAccountModal is open, skip balance change
-  if (!createAccountModal.isOpen()) {
+  if (!createAccountModal.isActive()) {
     updateWalletBalances();
   }
 }
@@ -9557,22 +9631,22 @@ async function getSystemNotice() {
 function cleanSenderInfo(si) {
   const csi = {};
   if (si.username) {
-    csi.username = normalizeUsername(si.username).slice(0,40)
+    csi.username = normalizeUsername(si.username)
   }
   if (si.name) {
-    csi.name = normalizeName(si.name).trim().slice(0,80);
+    csi.name = normalizeName(si.name)
   }
   if (si.phone) {
-    csi.phone = normalizePhone(si.phone).trim().slice(0,20)
+    csi.phone = normalizePhone(si.phone)
   }
   if (si.email) {
-    csi.email = normalizeEmail(si.email).slice(0,80)
+    csi.email = normalizeEmail(si.email)
   }
   if (si.linkedin) {
-    csi.linkedin = normalizeUsername(si.linkedin).slice(0,40)
+    csi.linkedin = normalizeLinkedinUsername(si.linkedin)
   }
   if (si.x) {
-    csi.x = normalizeUsername(si.x).slice(0,40)
+    csi.x = normalizeXTwitterUsername(si.x)
   }
   return csi;
 }

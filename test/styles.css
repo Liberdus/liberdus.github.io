@@ -356,6 +356,10 @@ body {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
   color: var(--text-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: calc(100% - 140px);
 }
 
 .header-icons {
@@ -527,7 +531,7 @@ body {
   font-family: var(--font-primary);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  padding: 2px 8px;
+  padding: 1px 8px;
   border-radius: 12px;
   margin-left: 8px;
 }
@@ -830,13 +834,27 @@ button:disabled {
   height: 100%;
   background-color: white;
   transition: transform 0.3s ease-in-out;
+  opacity: 0;
+  pointer-events: none;
   display: flex;
   flex-direction: column;
   /* z-index: 1001; */
   overflow-y: auto;
 }
 
+.modal.fixed-header {
+  overflow: hidden;
+  flex-direction: column;
+}
+.modal.fixed-header .form-container {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .modal.active {
+  opacity: 1;
+  pointer-events: auto;
   transform: translateX(-100%);
 }
 
@@ -876,7 +894,24 @@ button:disabled {
   display: flex;
   align-items: center;
   margin-left: 48px;
+  margin-right: 140px; /* Reserve space for header actions */
   gap: 12px;
+  cursor: pointer;
+  flex: 1;
+  min-width: 180px; /* Minimum width for the container */
+  max-width: calc(100vw - 200px); /* Responsive max width */
+}
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 480px) {
+  .chat-user-info {
+    min-width: 120px; /* Smaller minimum on mobile */
+    margin-right: 100px; /* Less margin on smaller screens */
+  }
+}
+
+.chat-user-info:hover {
+  opacity: 0.8;
 }
 
 .modal-avatar {
@@ -903,6 +938,11 @@ button:disabled {
   font-weight: var(--font-weight-semibold);
   color: var(--text-color);
   margin: 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0; /* Allow flex item to shrink below content size */
+  max-width: 100%; /* Allow full width when possible */
 }
 
 .menu-list {
@@ -1241,14 +1281,6 @@ input[type='file'].form-control::file-selector-button {
   word-wrap: break-word;
   word-break: break-word;
   hyphens: auto;
-}
-
-.chat-user-info {
-  cursor: pointer;
-}
-
-.chat-user-info:hover {
-  opacity: 0.8;
 }
 
 /* Wrapper for the send button and the toll information */
@@ -1972,6 +2004,30 @@ input[type='file'].form-control {
 /* Contact Info Modal Styles */
 .contact-info-list {
   padding: 1rem;
+  overflow-y: auto;
+  max-height: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Contact Info Link Styles */
+.contact-info-link {
+  display: inline-block;
+  color: var(--primary-color);
+  text-decoration: none;
+  font-family: var(--font-primary);
+  font-size: var(--font-size-base);
+  transition: opacity 0.2s ease;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+}
+
+.contact-info-link:hover {
+  opacity: 0.7;
+}
+
+.contact-info-link:visited {
+  color: var(--primary-color);
 }
 
 /* Contact Avatar Section */
@@ -2003,6 +2059,9 @@ input[type='file'].form-control {
   font-weight: var(--font-weight-semibold);
   color: var(--text-color);
   margin-bottom: 0.25rem;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
 }
 
 .contact-avatar-section .subtitle {
@@ -2035,14 +2094,9 @@ input[type='file'].form-control {
   font-family: var(--font-primary);
   font-size: var(--font-size-base);
   color: var(--text-color);
-}
-
-.chat-user-info {
-  cursor: pointer;
-}
-
-.chat-user-info:hover {
-  opacity: 0.8;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
 }
 
 /* Logs Modal Styles */
@@ -3314,17 +3368,6 @@ mark {
   }
 }
 /* end of scanner stuff added by DB */
-
-.modal.fixed-header {
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-.modal.fixed-header .form-container {
-  flex: 1;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
 
 /* Remove spinner buttons from number inputs */
 input[type='number']::-webkit-inner-spin-button,
