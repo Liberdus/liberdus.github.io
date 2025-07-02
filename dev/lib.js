@@ -581,6 +581,50 @@ export function bin2hex(bin){
     return Array.from(bin).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Normalizes a string to a float and limits the number of decimals to 18 and the number of digits before the decimal point to 9.
+ * @param {string} value - The float as a string to normalize.
+ * @returns {string} - The normalized float as a string.
+ */
+export function normalizeUnsignedFloat(value) {
+  if (!value) return '';
+
+  // keep only digits or dots
+  let normalized = value.replace(/[^0-9.]/g, '');
+
+  // keep only the first dot
+  const firstDot = normalized.indexOf('.');
+  if (firstDot !== -1) {
+    normalized =
+      normalized.slice(0, firstDot + 1) +
+      normalized.slice(firstDot + 1).replace(/\./g, '');
+  }
+  // if the first character is a dot, add a 0 in front
+  if (normalized.startsWith('.')) {
+    normalized = '0' + normalized;
+  }
+  // only allow up to 18 decimals after and up to 9 before the decimal point
+  normalized = normalized.replace(/^0+/, '');
+
+  // Handle numbers that exceed the 9-digit limit before decimal
+  if (normalized.includes('.')) {
+    const [wholePart, decimalPart] = normalized.split('.');
+    if (wholePart.length > 9) {
+      // Slice to exactly 9 digits before decimal
+      normalized = wholePart.slice(0, 9) + '.' + decimalPart;
+    }
+    // Limit decimal places to 18
+    if (decimalPart && decimalPart.length > 18) {
+      normalized = wholePart + '.' + decimalPart.slice(0, 18);
+    }
+  } else {
+    // No decimal point - limit to 9 digits
+    if (normalized.length > 9) {
+      normalized = normalized.slice(0, 9);
+    }
+  }
+  return normalized;
+}
 
 function getColorFromHash(hash, index) {
     const hue = parseInt(hash.slice(index * 2, (index * 2) + 2), 16) % 360;
