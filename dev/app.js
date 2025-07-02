@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'
+const version = 's'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -9395,7 +9395,6 @@ async function getSystemNotice() {
 
     const timestamp = parseInt(lines[0]);
     if (isNaN(timestamp)) {
-      console.warn('Invalid timestamp in notice file');
       return;
     }
 
