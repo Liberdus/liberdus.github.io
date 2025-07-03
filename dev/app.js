@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'
+const version = 'u'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -328,9 +328,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   setupConnectivityDetection();
 
-  document.getElementById('versionDisplay').textContent = myVersion + ' ' + version;
-  document.getElementById('networkNameDisplay').textContent = network.name;
-
   // Add unload handler to save myData
   window.addEventListener('unload', handleUnload);
   window.addEventListener('beforeunload', handleBeforeUnload);
@@ -387,6 +384,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Chat Modal
   chatModal.load();
 
+  // Contact Info Modal
+  contactInfoModal.load();
+
   // Failed Message Modal
   failedMessageModal.load();
 
@@ -420,7 +420,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Menu Modal
   menuModal.load();
 
-  document.getElementById('closeContactInfoModal').addEventListener('click', () => contactInfoModal.close());
+  // Failed Transaction Modal
+  failedTransactionModal.load();
 
   // add event listener for back-button presses to prevent shift+tab
   document.querySelectorAll('.back-button').forEach((button) => {
@@ -431,98 +432,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     item.addEventListener('keydown', ignoreTabKey);
   });
 
-  // Add refresh balance button handler
-  document.getElementById('refreshBalance').addEventListener('click', async () => {
-    const button = document.getElementById('refreshBalance');
-    
-    // Add active class for animation
-    button.classList.add('active');
-    
-    // Remove active class after animation completes
-    setTimeout(() => {
-      button.classList.remove('active');
-      // Force blur to remove focus
-      button.blur();
-    }, 300);
-
-    // await updateWalletBalances();
-    walletScreen.updateWalletView();
-  });
-
-  // Add new search functionality
-  const messageSearch = document.getElementById('messageSearch');
-  const searchModal = document.getElementById('searchModal');
-
-  // Close search modal
-  document.getElementById('closeSearchModal').addEventListener('click', () => {
-    searchModal.classList.remove('active');
-    messageSearch.value = '';
-    document.getElementById('searchResults').innerHTML = '';
-  });
-
-  // Omar added
-  document.getElementById('scanQRButton').addEventListener('click', () => scanQRModal.open());
-  document.getElementById('scanStakeQRButton').addEventListener('click', () => scanQRModal.open());
-  
-  // File upload handlers
-  document.getElementById('uploadQRButton').addEventListener('click', () => {
-    document.getElementById('qrFileInput').click();
-  });
-
-  document.getElementById('uploadStakeQRButton').addEventListener('click', () => {
-    document.getElementById('stakeQrFileInput').click();
-  });
-
-  document
-    .getElementById('qrFileInput')
-    .addEventListener('change', (event) => handleQRFileSelect(event, fillPaymentFromQR));
-  document
-    .getElementById('stakeQrFileInput')
-    .addEventListener('change', (event) => handleQRFileSelect(event, fillStakeAddressFromQR));
-
-  // Add send money button handler
-  document.getElementById('contactInfoSendButton').addEventListener('click', () => {
-    const contactUsername = document.getElementById('contactInfoUsername');
-    if (contactUsername) {
-      sendAssetFormModal.username = contactUsername.textContent;
-    }
-    sendAssetFormModal.open();
-  });
-
-  document.getElementById('chatSendMoneyButton').addEventListener('click', (event) => {
-    const button = event.currentTarget;
-    sendAssetFormModal.username = button.dataset.username;
-    sendAssetFormModal.open();
-  });
-
-  // Add listener for the password visibility toggle
-  const togglePasswordButton = document.getElementById('togglePrivateKeyVisibility');
-  const passwordInput = document.getElementById('newPrivateKey');
-
-  togglePasswordButton.addEventListener('click', function () {
-    // Toggle the type attribute
-    const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
-    passwordInput.setAttribute('type', type);
-
-    // Toggle the visual state class on the button
-    this.classList.toggle('toggled-visible');
-  });
-
-  // Event Listerns for FailedPaymentModal
-  const failedPaymentModal = document.getElementById('failedPaymentModal');
-  const failedPaymentRetryButton = failedPaymentModal.querySelector('.retry-button');
-  const failedPaymentDeleteButton = failedPaymentModal.querySelector('.delete-button');
-  const failedPaymentHeaderCloseButton = document.getElementById('closeFailedPaymentModal');
-
-  failedPaymentRetryButton.addEventListener('click', handleFailedPaymentRetry);
-  failedPaymentDeleteButton.addEventListener('click', handleFailedPaymentDelete);
-  failedPaymentHeaderCloseButton.addEventListener('click', closeFailedPaymentModalAndClearState);
-  failedPaymentModal.addEventListener('click', handleFailedPaymentBackdropClick);
-
   getNetworkParams();
 
-  const welcomeScreenLastItem = document.getElementById('welcomeScreenLastItem');
-  welcomeScreenLastItem.focus();
+  welcomeScreen.lastItem.focus();
 
   // Deprecated - do not want to encourage or confuse users with this feature since on IOS uses seperate local storage
   //setupAddToHomeScreen();
@@ -616,12 +528,20 @@ class WelcomeScreen {
     this.welcomeButtons = document.querySelector('.welcome-buttons');
     this.logoLink = this.screen.querySelector('.logo-link');
     this.logoLink.addEventListener('keydown', ignoreShiftTabKey);  // add event listener for first-item to prevent shift+tab
+    this.versionDisplay = document.getElementById('versionDisplay');
+    this.networkNameDisplay = document.getElementById('networkNameDisplay');
+    this.lastItem = document.getElementById('welcomeScreenLastItem');
+    
+    
+    this.versionDisplay.textContent = myVersion + ' ' + version;
+    this.networkNameDisplay.textContent = network.name;
     
     this.signInButton.addEventListener('click', () => signInModal.open());
     this.createAccountButton.addEventListener('click', () => createAccountModal.openWithReset());
     this.importAccountButton.addEventListener('click', () => restoreAccountModal.open());
 
     this.orderButtons();
+    
   }
 
   open() {
@@ -1277,8 +1197,21 @@ class WalletScreen {
     this.openHistoryModalButton.addEventListener('click', () => {
       historyModal.open();
     });
-    // handle refresh balance button click
-    this.refreshBalanceButton.addEventListener('click', () => {
+
+    // Add refresh balance button handler
+    this.refreshBalanceButton.addEventListener('click', async () => {
+      
+      // Add active class for animation
+      this.refreshBalanceButton.classList.add('active');
+      
+      // Remove active class after animation completes
+      setTimeout(() => {
+        this.refreshBalanceButton.classList.remove('active');
+        // Force blur to remove focus
+        this.refreshBalanceButton.blur();
+      }, 300);
+
+      // await updateWalletBalances();
       this.updateWalletView();
     });
   }
@@ -1781,20 +1714,6 @@ function fillPaymentFromQR(data) {
   }
 }
 
-function fillStakeAddressFromQR(data) {
-  console.log('Filling stake address from QR data:', data);
-
-  // Directly set the value of the stakeNodeAddress input field
-  const stakeNodeAddressInput = document.getElementById('stakeNodeAddress');
-  if (stakeNodeAddressInput) {
-    stakeNodeAddressInput.value = data;
-    stakeNodeAddressInput.dispatchEvent(new Event('input'));
-  } else {
-    console.error('Stake node address input field not found!');
-    showToast('Could not find stake address field.', 3000, 'error');
-  }
-}
-
 /**
  * Validate the balance of the user
  * @param {BigInt} amount - The amount to validate
@@ -1955,14 +1874,13 @@ class SignInModal {
     if (this.submitButton.textContent === 'Recreate') {
       const myData = parse(localStorage.getItem(`${username}_${netid}`));
       const privateKey = myData.account.keys.secret;
-      const newUsernameInput = document.getElementById('newUsername');
-      newUsernameInput.value = username;
+      createAccountModal.usernameInput.value = username;
 
-      document.getElementById('newPrivateKey').value = privateKey;
+      createAccountModal.privateKeyInput.value = privateKey;
       this.close();
       createAccountModal.open();
       // Dispatch a change event to trigger the availability check
-      newUsernameInput.dispatchEvent(new Event('input'));
+      createAccountModal.usernameInput.dispatchEvent(new Event('input'));
       return;
     }
 
@@ -2061,23 +1979,31 @@ const signInModal = new SignInModal();
 // Contact Info Modal Management
 class ContactInfoModal {
   constructor() {
-    this.modal = document.getElementById('contactInfoModal');
     this.currentContactAddress = null;
     this.needsContactListUpdate = false; // track if we need to update the contact list
-    this.setupEventListeners();
   }
 
   // Initialize event listeners that only need to be set up once
-  setupEventListeners() {
-    // Back button
-    this.modal.querySelector('.back-button').addEventListener('click', () => {
-      this.close();
-    });
+  load() {
+    this.modal = document.getElementById('contactInfoModal');
+    this.backButton = document.getElementById('closeContactInfoModal');
+    this.nameEditButton = document.getElementById('nameEditButton');
+    this.chatButton = document.getElementById('contactInfoChatButton');
+    this.sendButton = document.getElementById('contactInfoSendButton');
+    this.addFriendButton = document.getElementById('addFriendButtonContactInfo');
+    this.avatarSection = this.modal.querySelector('.contact-avatar-section');
+    this.avatarDiv = this.avatarSection.querySelector('.avatar');
+    this.nameDiv = this.avatarSection.querySelector('.name');
+    this.subtitleDiv = this.avatarSection.querySelector('.subtitle');
+    this.usernameDiv = document.getElementById('contactInfoUsername');
 
-    document.getElementById('nameEditButton').addEventListener('click', () => editContactModal.open());
+    // Back button
+    this.backButton.addEventListener('click', () => this.close());
+
+    this.nameEditButton.addEventListener('click', () => editContactModal.open());
 
     // Add chat button handler for contact info modal
-    document.getElementById('contactInfoChatButton').addEventListener('click', () => {
+    this.chatButton.addEventListener('click', () => {
       const addressToOpen = this.currentContactAddress;
       if (addressToOpen) {
         // Ensure we have an address before proceeding
@@ -2085,23 +2011,29 @@ class ContactInfoModal {
         chatModal.open(addressToOpen);
       }
     });
+
+    // Add send money button handler
+    this.sendButton.addEventListener('click', () => {
+      sendAssetFormModal.username = this.usernameDiv.textContent;
+      sendAssetFormModal.open();
+    });
+
+    // Add add friend button handler
+    this.addFriendButton.addEventListener('click', () => {
+      if (!this.currentContactAddress) return;
+      friendModal.openFriendModal();
+    });
   }
 
   // Update contact info values
   async updateContactInfo(displayInfo) {
-    // Update avatar section
-    const avatarSection = this.modal.querySelector('.contact-avatar-section');
-    const avatarDiv = avatarSection.querySelector('.avatar');
-    const nameDiv = avatarSection.querySelector('.name');
-    const subtitleDiv = avatarSection.querySelector('.subtitle');
-
     // Generate identicon for the contact
     const identicon = await generateIdenticon(displayInfo.address, 96);
 
     // Update the avatar section
-    avatarDiv.innerHTML = identicon;
-    nameDiv.textContent = displayInfo.name !== 'Not Entered' ? displayInfo.name : displayInfo.username;
-    subtitleDiv.textContent = displayInfo.address;
+    this.avatarDiv.innerHTML = identicon;
+    this.nameDiv.textContent = displayInfo.name !== 'Not Entered' ? displayInfo.name : displayInfo.username;
+    this.subtitleDiv.textContent = displayInfo.address;
 
     const fields = {
       Username: 'contactInfoUsername',
@@ -2152,11 +2084,10 @@ class ContactInfoModal {
 
   // Set up chat button functionality
   setupChatButton(displayInfo) {
-    const chatButton = document.getElementById('contactInfoChatButton');
     if (displayInfo.address) {
-      chatButton.style.display = 'block';
+      this.chatButton.style.display = 'block';
     } else {
-      chatButton.style.display = 'none';
+      this.chatButton.style.display = 'none';
     }
   }
 
@@ -2218,12 +2149,6 @@ class FriendModal {
   }
 
   setupEventListeners() {
-    // Add friend button
-    document.getElementById('addFriendButtonContactInfo').addEventListener('click', () => {
-      if (!this.currentContactAddress) return;
-      this.openFriendModal();
-    });
-
     document.getElementById('addFriendButtonChat').addEventListener('click', () => {
       if (!this.currentContactAddress) return;
       this.openFriendModal();
@@ -2390,8 +2315,8 @@ class EditContactModal {
     // Update the avatar section
     avatarDiv.innerHTML = identicon;
     // update the name and subtitle
-    nameDiv.textContent = document.getElementById('contactInfoUsername').textContent;
-    subtitleDiv.textContent = document.getElementById('contactInfoModal').querySelector('.subtitle').textContent;
+    nameDiv.textContent = contactInfoModal.usernameDiv.textContent;
+    subtitleDiv.textContent = contactInfoModal.subtitleDiv.textContent;
 
     // update the provided name
     const providedNameDiv = this.providedNameContainer.querySelector('.contact-info-value');
@@ -2642,7 +2567,7 @@ class HistoryModal {
       console.log(`Not opening chatModal for failed transaction`);
       
       if (event.target.closest('.transaction-item')) {
-        handleFailedPaymentClick(item.dataset.txid, item);
+        failedTransactionModal.open(item.dataset.txid, item);
       }
       return;
     }
@@ -2683,120 +2608,6 @@ class HistoryModal {
 
 // Create singleton instance
 const historyModal = new HistoryModal();
-
-function handleFailedPaymentClick(txid, element) {
-  console.log('handleFailedPaymentClick', txid);
-  const modal = document.getElementById('failedPaymentModal');
-
-  // Get the address and memo from the original failed transfer element
-  const address = element?.dataset?.address || chatModal.address;
-  const memo =
-    element?.querySelector('.transaction-memo')?.textContent || element?.querySelector('.payment-memo')?.textContent;
-  //const assetID = element?.dataset?.assetID || ''; // TODO: need to add assetID to `myData.wallet.history` for when we have multiple assets
-
-  // Store the address and memo in properties of handleFailedPaymentClick
-  handleFailedPaymentClick.address = address;
-  handleFailedPaymentClick.memo = memo;
-  handleFailedPaymentClick.txid = txid;
-  //handleFailedPaymentClick.assetID = assetID;
-
-  console.log(`handleFailedPaymentClick.address: ${handleFailedPaymentClick.address}`);
-  console.log(`handleFailedPaymentClick.memo: ${handleFailedPaymentClick.memo}`);
-  console.log(`handleFailedPaymentClick.txid: ${handleFailedPaymentClick.txid}`);
-  //console.log(`handleFailedPaymentClick.assetID: ${handleFailedPaymentClick.assetID}`)
-  if (modal) {
-    modal.classList.add('active');
-  }
-}
-handleFailedPaymentClick.txid = '';
-handleFailedPaymentClick.address = '';
-handleFailedPaymentClick.memo = '';
-//handleFailedPaymentClick.assetID = '';
-
-/**
- * Invoked when the user clicks the retry button in the failed payment modal
- * It will fill the sendAssetFormModal with the payment content and txid of the failed payment in a hidden input field in the sendAssetFormModal
- */
-function handleFailedPaymentRetry() {
-  const retryOfPaymentTxId = sendAssetFormModal.retryTxIdInput;
-
-  // close the failed payment modal
-  const failedPaymentModal = document.getElementById('failedPaymentModal');
-  if (failedPaymentModal) {
-    failedPaymentModal.classList.remove('active');
-  }
-
-  if (sendAssetFormModal.modal && retryOfPaymentTxId) {
-    sendAssetFormModal.open();
-
-    // 1. fill in hidden retryOfPaymentTxId input
-    retryOfPaymentTxId.value = handleFailedPaymentClick.txid;
-
-    // 2. fill in the memo input
-    sendAssetFormModal.memoInput.value = handleFailedPaymentClick?.memo || '';
-
-    // 3. fill in the to address input
-    // find username in myData.contacts[handleFailedPaymentClick.address].senderInfo.username
-    // enter as an input to invoke the oninput event
-    sendAssetFormModal.usernameInput.value =
-      myData.contacts[handleFailedPaymentClick.address]?.senderInfo?.username || handleFailedPaymentClick.address || '';
-    sendAssetFormModal.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
-
-    // 4. fill in the amount input
-    // get the amount from myData.wallet.history since we need to the bigint value
-    const amount = myData.wallet.history.find((tx) => tx.txid === handleFailedPaymentClick.txid)?.amount;
-    // convert bigint to string
-    const amountStr = big2str(amount, 18);
-    sendAssetFormModal.amountInput.value = amountStr;
-  }
-}
-
-function handleFailedPaymentDelete() {
-  const failedPaymentModal = document.getElementById('failedPaymentModal');
-  const originalTxid = handleFailedPaymentClick.txid;
-
-  if (typeof originalTxid === 'string' && originalTxid) {
-    const currentAddress = handleFailedPaymentClick.address;
-    removeFailedTx(originalTxid, currentAddress);
-
-    if (failedPaymentModal) {
-      failedPaymentModal.classList.remove('active');
-    }
-
-    // refresh current view
-    chatModal.refreshCurrentView(handleFailedPaymentClick.txid);
-
-    // Clear the stored values
-    handleFailedPaymentClick.txid = '';
-    handleFailedPaymentClick.address = '';
-    handleFailedPaymentClick.memo = '';
-    //handleFailedPaymentClick.assetID = '';
-  } else {
-    console.error('Error deleting message: TXID not found.');
-    if (failedPaymentModal) {
-      failedPaymentModal.classList.remove('active');
-    }
-  }
-}
-
-function closeFailedPaymentModalAndClearState() {
-  const failedPaymentModal = document.getElementById('failedPaymentModal');
-  if (failedPaymentModal) {
-    failedPaymentModal.classList.remove('active');
-  }
-  // Clear the stored values when modal is closed
-  handleFailedPaymentClick.txid = '';
-  handleFailedPaymentClick.address = '';
-  handleFailedPaymentClick.memo = '';
-  //handleFailedPaymentClick.assetID = '';
-}
-
-function handleFailedPaymentBackdropClick(event) {
-  const failedPaymentModal = document.getElementById('failedPaymentModal');
-  if (event.target === failedPaymentModal) {
-    closeFailedPaymentModalAndClearState();
-  }
-}
 
 async function updateAssetPricesIfNeeded() {
   if (!myData || !myData.wallet || !myData.wallet.assets) {
@@ -4236,94 +4047,6 @@ function getGatewayForRequest() {
 
   // Otherwise use random selection
   return myData.network.gateways[Math.floor(Math.random() * myData.network.gateways.length)];
-}
-
-
-
-// Changed to use qr.js library instead of jsQR.js
-async function handleQRFileSelect(event, fillFunction) {
-  // Added fillFunction parameter
-  const file = event.target.files[0];
-  if (!file) {
-    return; // No file selected
-  }
-
-  const reader = new FileReader();
-
-  reader.onload = function (e) {
-    const img = new Image();
-    img.onload = async function () {
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      if (!context) {
-        console.error('Could not get 2d context from canvas');
-        showToast('Error processing image', 3000, 'error');
-        event.target.value = ''; // Reset file input
-        return;
-      }
-      canvas.width = img.width;
-      canvas.height = img.height;
-      context.drawImage(img, 0, 0, img.width, img.height);
-      const imageData = context.getImageData(0, 0, img.width, img.height);
-
-      try {
-        // Use qr.js library for decoding
-        const decodedData = qr.decodeQR({
-          data: imageData.data,
-          width: imageData.width,
-          height: imageData.height,
-        });
-
-        if (decodedData) {
-          // handleSuccessfulScan(decodedData); // Original call
-          if (typeof fillFunction === 'function') {
-            fillFunction(decodedData); // Call the provided fill function
-          } else {
-            console.error('No valid fill function provided for QR file select');
-            // Fallback or default behavior if needed, e.g., show generic error
-            showToast('Internal error handling QR data', 3000, 'error');
-          }
-        } else {
-          // qr.decodeQR might throw an error instead of returning null/undefined
-          // This else block might not be reached if errors are always thrown
-          console.error('No QR code found in image (qr.js)');
-          showToast('No QR code found in image', 3000, 'error');
-          // Clear the form fields in case of failure to find QR code
-          document.getElementById('sendForm')?.reset();
-          document.getElementById('sendToAddressError').textContent = '';
-          document.getElementById('balanceWarning').textContent = '';
-        }
-      } catch (error) {
-        console.error('Error processing QR code image with qr.js:', error);
-        // Assume error means no QR code found or decoding failed
-        showToast('Could not read QR code from image', 3000, 'error');
-        // Clear the form fields in case of error
-        document.getElementById('sendForm')?.reset();
-        document.getElementById('sendToAddressError').textContent = '';
-        document.getElementById('balanceWarning').textContent = '';
-      } finally {
-        event.target.value = ''; // Reset the file input value regardless of outcome
-      }
-    };
-    img.onerror = function () {
-      console.error('Error loading image');
-      showToast('Error loading image file', 3000, 'error');
-      event.target.value = ''; // Reset the file input value
-      // Clear the form fields in case of image loading error
-      document.getElementById('sendForm')?.reset();
-      document.getElementById('sendToAddressError').textContent = '';
-      document.getElementById('balanceWarning').textContent = '';
-    };
-    img.src = e.target.result;
-  };
-
-  reader.onerror = function () {
-    console.error('Error reading file');
-    showToast('Error reading file', 3000, 'error');
-    event.target.value = ''; // Reset the file input value
-  };
-
-  reader.readAsDataURL(file);
 }
 
 // WebSocket Manager Class
@@ -6049,6 +5772,12 @@ const validatorStakingModal = new ValidatorStakingModal();
 
 class StakeValidatorModal {
   constructor() {
+    this.stakedAmount = 0n;
+    this.lastValidationTimestamp = 0;
+    this.hasNominee = false;
+  }
+
+  load() {
     this.modal = document.getElementById('stakeModal');
     this.form = document.getElementById('stakeForm');
     this.nodeAddressInput = document.getElementById('stakeNodeAddress');
@@ -6059,13 +5788,10 @@ class StakeValidatorModal {
     this.balanceDisplay = document.getElementById('stakeAvailableBalanceDisplay');
     this.amountWarning = document.getElementById('stakeAmountWarning');
     this.nodeAddressWarning = document.getElementById('stakeNodeAddressWarning');
+    this.scanStakeQRButton = document.getElementById('scanStakeQRButton');
+    this.uploadStakeQRButton = document.getElementById('uploadStakeQRButton');
+    this.stakeQRFileInput = document.getElementById('stakeQrFileInput');
 
-    this.stakedAmount = 0n;
-    this.lastValidationTimestamp = 0;
-    this.hasNominee = false;
-  }
-
-  load() {
     // Setup event listeners
     this.form.addEventListener('submit', (event) => this.handleSubmit(event));
     this.backButton.addEventListener('click', () => this.close());
@@ -6075,6 +5801,9 @@ class StakeValidatorModal {
     this.nodeAddressInput.addEventListener('input', this.debouncedValidateStakeInputs);
     this.amountInput.addEventListener('input', () => this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value));
     this.amountInput.addEventListener('input', this.debouncedValidateStakeInputs);
+    this.scanStakeQRButton.addEventListener('click', () => scanQRModal.open());
+    this.uploadStakeQRButton.addEventListener('click', () => this.stakeQRFileInput.click());
+    this.stakeQRFileInput.addEventListener('change', (event) => sendAssetFormModal.handleQRFileSelect(event, this));
 
     // Add listener for opening the modal
     document.getElementById('openStakeModal').addEventListener('click', () => this.open());
@@ -6084,7 +5813,7 @@ class StakeValidatorModal {
     this.modal.classList.add('active');
 
     // Set the correct fill function for the staking context
-    scanQRModal.fillFunction = fillStakeAddressFromQR;
+    scanQRModal.fillFunction = stakeValidatorModal.fillFromQR;
 
     // Display Available Balance
     const libAsset = myData.wallet.assets.find((asset) => asset.symbol === 'LIB');
@@ -6281,25 +6010,46 @@ class StakeValidatorModal {
     this.amountWarning.style.display = 'none';
     this.nodeAddressWarning.style.display = 'none';
   }
+
+  /**
+   * Fills the stake address input field from QR data
+   * @param {string} data - The QR data to fill the stake address input field
+   * @returns {void}
+   * */
+  fillFromQR(data) {
+    console.log('Filling stake address from QR data:', data);
+
+    // Directly set the value of the stakeNodeAddress input field
+    if (this.nodeAddressInput) {
+      this.nodeAddressInput.value = data;
+      this.nodeAddressInput.dispatchEvent(new Event('input'));
+    } else {
+      console.error('Stake node address input field not found!');
+      showToast('Could not find stake address field.', 3000, 'error');
+    }
+  }
+
+  /**
+   * Resets the form to its default state
+   * @returns {void}
+   * */
+  resetForm() {
+    // Default state: button disabled, warnings hidden
+    this.nodeAddressInput.value = '';    
+    this.submitButton.disabled = true;
+    this.amountWarning.style.display = 'none';
+    this.amountWarning.textContent = '';
+    this.nodeAddressWarning.style.display = 'none';
+    this.nodeAddressWarning.textContent = '';
+  }
 }
 const stakeValidatorModal = new StakeValidatorModal();
 
 class ChatModal {
   constructor() {
-    this.modal = document.getElementById('chatModal');
-    this.closeButton = document.getElementById('closeChatModal');
-    this.messagesList = document.querySelector('.messages-list');
-    this.sendButton = document.getElementById('handleSendMessage');
-    this.modalAvatar = this.modal.querySelector('.modal-avatar');
-    this.modalTitle = this.modal.querySelector('.modal-title');
-    this.editButton = document.getElementById('chatEditButton');
-    this.sendMoneyButton = document.getElementById('chatSendMoneyButton');
-    this.retryOfTxId = document.getElementById('retryOfTxId');
-    this.messageInput = document.querySelector('.message-input');
     this.newestReceivedMessage = null;
     this.newestSentMessage = null;
     this.lastMessageCount = 0;
-    this.messageByteCounter = document.querySelector('.message-byte-counter');
 
     // used by updateTollValue and updateTollRequired
     this.toll = null;
@@ -6312,6 +6062,20 @@ class ChatModal {
    * @returns {void}
    */
   load() {
+    this.modal = document.getElementById('chatModal');
+    this.closeButton = document.getElementById('closeChatModal');
+    this.messagesList = document.querySelector('.messages-list');
+    this.sendButton = document.getElementById('handleSendMessage');
+    this.modalAvatar = this.modal.querySelector('.modal-avatar');
+    this.modalTitle = this.modal.querySelector('.modal-title');
+    this.editButton = document.getElementById('chatEditButton');
+    this.sendMoneyButton = document.getElementById('chatSendMoneyButton');
+    this.retryOfTxId = document.getElementById('retryOfTxId');
+    this.messageInput = document.querySelector('.message-input');
+    this.chatSendMoneyButton = document.getElementById('chatSendMoneyButton');
+    this.messageByteCounter = document.querySelector('.message-byte-counter');
+    this.messagesContainer = document.querySelector('.messages-container');
+
     // Add message click-to-copy handler
     this.messagesList.addEventListener('click', this.handleClickToCopy.bind(this));
     this.sendButton.addEventListener('click', this.handleSendMessage.bind(this));
@@ -6338,18 +6102,22 @@ class ChatModal {
 
     // Add focus event listener for message input to handle scrolling
     this.messageInput.addEventListener('focus', function () {
-      const messagesContainer = document.querySelector('.messages-container');
-      if (messagesContainer) {
+      if (this.messagesContainer) {
         // Check if we're already at the bottom (within 50px threshold)
         const isAtBottom =
-          messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight <= 50;
+          this.messagesContainer.scrollHeight - this.messagesContainer.scrollTop - this.messagesContainer.clientHeight <= 50;
         if (isAtBottom) {
           // Wait for keyboard to appear and viewport to adjust
           setTimeout(() => {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
           }, 300); // Increased delay to ensure keyboard is fully shown
         }
       }
+    });
+
+    this.chatSendMoneyButton.addEventListener('click', () => {
+      sendAssetFormModal.username = this.chatSendMoneyButton.dataset.username;
+      sendAssetFormModal.open();
     });
   }
 
@@ -7045,7 +6813,7 @@ class ChatModal {
 
       // If the message is a payment message, show the failed history item modal
       if (messageEl.classList.contains('payment-info')) {
-        handleFailedPaymentClick(messageEl.dataset.txid, messageEl);
+        failedTransactionModal.open(messageEl.dataset.txid, messageEl);
       }
 
       // TODO: if message is a payment open sendAssetFormModal and fill with information in the payment message?
@@ -7104,7 +6872,6 @@ class ChatModal {
    */
   refreshCurrentView(txid) {
     // contactAddress is kept for potential future use but not needed for this txid-based logic
-    const chatsScreen = document.getElementById('chatsScreen');
     const messagesList = this.modal ? this.messagesList : null;
 
     // 1. Refresh History Modal if active
@@ -7391,7 +7158,7 @@ class NewChatModal {
   closeNewChatModal() {
     this.modal.classList.remove('active');
     this.newChatForm.reset();
-    if (document.getElementById('chatsScreen').classList.contains('active')) {
+    if (chatsScreen.isActive()) {
       footer.newChatButton.classList.add('visible');
     }
     if (contactsScreen.isActive()) {
@@ -7548,12 +7315,22 @@ class CreateAccountModal {
     this.submitButton = this.form.querySelector('button[type="submit"]');
     this.usernameAvailable = document.getElementById('newUsernameAvailable');
     this.privateKeyError = document.getElementById('newPrivateKeyError');
+    this.togglePrivateKeyVisibility = document.getElementById('togglePrivateKeyVisibility');
 
     // Setup event listeners
     this.form.addEventListener('submit', (e) => this.handleSubmit(e));
     this.usernameInput.addEventListener('input', (e) => this.handleUsernameInput(e));
     this.toggleButton.addEventListener('change', () => this.handleTogglePrivateKeyInput());
     this.backButton.addEventListener('click', () => this.close());
+
+    // Add listener for the password visibility toggle
+    this.togglePrivateKeyVisibility.addEventListener('click', () => {
+      // Toggle the type attribute
+      const type = this.privateKeyInput.getAttribute('type') === 'password' ? 'text' : 'password';
+      this.privateKeyInput.setAttribute('type', type);
+      // Toggle the visual state class on the button
+      this.togglePrivateKeyVisibility.classList.toggle('toggled-visible');
+    });
   }
 
   open() {
@@ -7944,6 +7721,14 @@ class SendAssetFormModal {
     // event listener for toggle LIB/USD button
     this.toggleBalanceButton.addEventListener('click', this.handleToggleBalance.bind(this));
     this.memoInput.addEventListener('input', this.handleMemoInputChange.bind(this));
+
+    //QR scanning
+    this.scanQRButton = document.getElementById('scanQRButton');
+    this.uploadQRButton = document.getElementById('uploadQRButton');
+    this.qrFileInput = document.getElementById('qrFileInput');
+    this.scanQRButton.addEventListener('click', () => scanQRModal.open());
+    this.uploadQRButton.addEventListener('click', () => {this.qrFileInput.click();});
+    this.qrFileInput.addEventListener('change', (event) => this.handleQRFileSelect(event, this));
   }
 
   /**
@@ -7966,7 +7751,7 @@ class SendAssetFormModal {
 
     this.usernameAvailable.style.display = 'none';
     this.submitButton.disabled = true;
-    scanQRModal.fillFunction = fillPaymentFromQR; // set function to handle filling the payment form from QR data
+    scanQRModal.fillFunction = sendAssetFormModal.fillFromQR; // set function to handle filling the payment form from QR data
 
     if (this.username) {
       this.usernameInput.value = this.username;
@@ -8482,6 +8267,154 @@ class SendAssetFormModal {
   isActive() {
     return this.modal?.classList.contains('active') || false;
   }
+
+  /**
+   * Resets the form fields to empty values
+   * @returns {void}
+   */
+  resetForm(){
+    this.sendForm?.reset();
+    this.usernameAvailable.textContent = '';
+    this.balanceWarning.textContent = '';
+  }
+
+  /**   * Handles QR file selection and decoding
+   * @param {Event} event - The file input change event
+   * @param {Object} targetModal - The modal instance to fill with QR data
+   * @returns {Promise<void>}
+   * */
+  async handleQRFileSelect(event, targetModal) {
+    const file = event.target.files[0];
+    if (!file) {
+      return; // No file selected
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = function (e) {
+      const img = new Image();
+      img.onload = async function () {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        if (!context) {
+          console.error('Could not get 2d context from canvas');
+          showToast('Error processing image', 3000, 'error');
+          event.target.value = ''; // Reset file input
+          return;
+        }
+        canvas.width = img.width;
+        canvas.height = img.height;
+        context.drawImage(img, 0, 0, img.width, img.height);
+        const imageData = context.getImageData(0, 0, img.width, img.height);
+
+        try {
+          // Use qr.js library for decoding
+          const decodedData = qr.decodeQR({
+            data: imageData.data,
+            width: imageData.width,
+            height: imageData.height,
+          });
+
+          if (decodedData) {
+            if (typeof targetModal.fillFromQR === 'function') {
+              targetModal.fillFromQR(decodedData); // Call the provided fill function
+            } else {
+              console.error('No valid fill function provided for QR file select');
+              // Fallback or default behavior if needed, e.g., show generic error
+              showToast('Internal error handling QR data', 3000, 'error');
+            }
+          } else {
+            // qr.decodeQR might throw an error instead of returning null/undefined
+            // This else block might not be reached if errors are always thrown
+            console.error('No QR code found in image (qr.js)');
+            showToast('No QR code found in image', 3000, 'error');
+            // Clear the form fields in case of failure to find QR code
+            targetModal.resetForm();
+          }
+        } catch (error) {
+          console.error('Error processing QR code image with qr.js:', error);
+          // Assume error means no QR code found or decoding failed
+          showToast('Could not read QR code from image', 3000, 'error');
+          // Clear the form fields in case of error
+          targetModal.resetForm();
+
+        } finally {
+          event.target.value = ''; // Reset the file input value regardless of outcome
+        }
+      };
+      img.onerror = function () {
+        console.error('Error loading image');
+        showToast('Error loading image file', 3000, 'error');
+        event.target.value = ''; // Reset the file input value
+        // Clear the form fields in case of image loading error
+        targetModal.resetForm();
+      };
+      img.src = e.target.result;
+    };
+
+    reader.onerror = function () {
+      console.error('Error reading file');
+      showToast('Error reading file', 3000, 'error');
+      event.target.value = ''; // Reset the file input value
+    };
+
+    reader.readAsDataURL(file);
+  }
+
+  /**
+   * Fills the payment form from QR code data
+   * @param {string} data - The QR code data to fill the form with
+   * @returns {void}
+   * */
+  fillFromQR(data) {
+    console.log('Attempting to fill payment form from QR:', data);
+
+    // Explicitly check for the required prefix
+    if (!data || !data.startsWith('liberdus://')) {
+      console.error("Invalid payment QR code format. Missing 'liberdus://' prefix.", data);
+      showToast('Invalid payment QR code format.', 3000, 'error');
+      // Optionally clear fields or leave them as they were
+      this.usernameInput.value = '';
+      this.amountInput.value = '';
+      this.memoInput.value = '';
+      return; // Stop processing if the format is wrong
+    }
+
+    // Clear existing fields first
+    this.usernameInput.value = '';
+    this.amountInput.value = '';
+    this.memoInput.value = '';
+
+    try {
+      // Remove the prefix and process the base64 data
+      const base64Data = data.substring('liberdus://'.length);
+      const jsonData = atob(base64Data);
+      const paymentData = JSON.parse(jsonData);
+
+      console.log('Read payment data:', JSON.stringify(paymentData, null, 2));
+
+      if (paymentData.u) {
+        this.usernameInput.value = paymentData.u;
+      }
+      if (paymentData.a) {
+        this.amountInput.value = paymentData.a;
+      }
+      if (paymentData.m) {
+        this.memoInput.value = paymentData.m;
+      }
+
+      // Trigger username validation and amount validation
+      this.usernameInput.dispatchEvent(new Event('input'));
+      this.amountInput.dispatchEvent(new Event('input'));
+    } catch (error) {
+      console.error('Error parsing payment QR data:', error, data);
+      showToast('Failed to parse payment QR data.', 3000, 'error');
+      // Clear fields on error
+      this.usernameInput.value = '';
+      this.amountInput.value = '';
+      this.memoInput.value = '';
+    }
+  }  
 }
 
 const sendAssetFormModal = new SendAssetFormModal();
@@ -8657,9 +8590,9 @@ class SendAssetConfirmModal {
       removeFailedTx(sendAssetFormModal.retryTxIdInput.value, toAddress);
 
       // clear the field
-      handleFailedPaymentClick.txid = '';
-      handleFailedPaymentClick.address = '';
-      handleFailedPaymentClick.memo = '';
+      failedTransactionModal.txid = '';
+      failedTransactionModal.address = '';
+      failedTransactionModal.memo = '';
       sendAssetFormModal.retryTxIdInput.value = '';
     }
 
@@ -9054,6 +8987,160 @@ class ReceiveModal {
 const receiveModal = new ReceiveModal();
 
 /**
+ * Failed Transaction Modal
+ * @class
+ * @description A modal for displaying failed transactions and handling the retry and delete actions
+ */
+class FailedTransactionModal {
+  /**
+   * Initialize the failed transaction modal
+   * @returns {void}
+   */
+  constructor() {
+    this.txid = '';
+    this.address = '';
+    this.memo = '';
+  }
+
+  /**
+   * Load the failed transaction modal
+   * Add event listeners to the modal
+   * @returns {void}
+   */
+  load() {
+    this.modal = document.getElementById('failedTransactionModal');
+    this.retryButton = this.modal.querySelector('.retry-button');
+    this.deleteButton = this.modal.querySelector('.delete-button');
+    this.headerCloseButton = document.getElementById('closeFailedTransactionModal');
+
+    this.retryButton.addEventListener('click', this.handleRetry.bind(this));
+    this.deleteButton.addEventListener('click', this.handleDelete.bind(this));
+    this.headerCloseButton.addEventListener('click', this.closeAndClearState.bind(this));
+    this.modal.addEventListener('click', this.handleBackDropClick.bind(this));
+  }
+
+  /**
+   * Open the failed transaction modal
+   * @param {string} txid - The transaction ID
+   * @param {Element} element - The element that triggered the failed transaction
+   * @returns {void}
+   */
+  open(txid, element) {
+    console.log('open', txid);
+  
+    // Get the address and memo from the original failed transfer element
+    const address = element?.dataset?.address || chatModal.address;
+    const memo =
+      element?.querySelector('.transaction-memo')?.textContent || element?.querySelector('.payment-memo')?.textContent;
+    //const assetID = element?.dataset?.assetID || ''; // TODO: need to add assetID to `myData.wallet.history` for when we have multiple assets
+  
+    // Store the address and memo in properties of open
+    this.address = address;
+    this.memo = memo;
+    this.txid = txid;
+    //open.assetID = assetID;
+  
+    console.log(`this.address: ${this.address}`);
+    console.log(`this.memo: ${this.memo}`);
+    console.log(`this.txid: ${this.txid}`);
+    //console.log(`open.assetID: ${open.assetID}`)
+    this.modal.classList.add('active');
+  }
+
+  /**
+   * Close the failed transaction modal
+   * @returns {void}
+   */
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  /**
+   * Close the failed transaction modal and clear the state
+   * @returns {void}
+   */
+  closeAndClearState() {
+    this.close();
+    // Clear the stored values when modal is closed
+    this.txid = '';
+    this.address = '';
+    this.memo = '';
+    //this.assetID = '';
+  }
+  
+  /**
+   * Invoked when the user clicks the retry button in the failed payment modal
+   * It will fill the sendAssetFormModal with the payment content and txid of the failed payment in a hidden input field in the sendAssetFormModal
+   * @returns {void}
+   */
+  handleRetry() {
+    const retryOfPaymentTxId = sendAssetFormModal.retryTxIdInput;
+  
+    // close the failed payment modal
+    this.close();
+  
+    if (sendAssetFormModal.modal && retryOfPaymentTxId) {
+      sendAssetFormModal.open();
+  
+      // 1. fill in hidden retryOfPaymentTxId input
+      retryOfPaymentTxId.value = this.txid;
+  
+      // 2. fill in the memo input
+      sendAssetFormModal.memoInput.value = this.memo || '';
+  
+      // 3. fill in the to address input
+      // find username in myData.contacts[this.address].senderInfo.username
+      // enter as an input to invoke the oninput event
+      sendAssetFormModal.usernameInput.value =
+        myData.contacts[this.address]?.senderInfo?.username || this.address || '';
+      sendAssetFormModal.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+  
+      // 4. fill in the amount input
+      // get the amount from myData.wallet.history since we need to the bigint value
+      const amount = myData.wallet.history.find((tx) => tx.txid === this.txid)?.amount;
+      // convert bigint to string
+      const amountStr = big2str(amount, 18);
+      sendAssetFormModal.amountInput.value = amountStr;
+    }
+  }
+  
+  /**
+   * Handle the delete button click
+   * @returns {void}
+   */
+  handleDelete() {
+    const originalTxid = this.txid;
+  
+    if (typeof originalTxid === 'string' && originalTxid) {
+      const currentAddress = this.address;
+      removeFailedTx(originalTxid, currentAddress);
+  
+      // refresh current view
+      chatModal.refreshCurrentView(this.txid);
+  
+      this.closeAndClearState();
+      //this.assetID = '';
+    } else {
+      console.error('Error deleting message: TXID not found.');
+      this.close();
+    }
+  }
+  
+  /**
+   * Handle the backdrop click
+   * @param {Event} event - The event object
+   * @returns {void}
+   */
+  handleBackDropClick(event) {
+    if (event.target === this.modal) {
+      this.closeAndClearState();
+    }
+  }
+}
+
+const failedTransactionModal = new FailedTransactionModal();
+
+/**
  * Remove failed transaction from the contacts messages, pending, and wallet history
  * @param {string} txid - The transaction ID to remove
  * @param {string} currentAddress - The address of the current contact
@@ -9394,6 +9481,7 @@ async function getSystemNotice() {
 
     const timestamp = parseInt(lines[0]);
     if (isNaN(timestamp)) {
+      console.warn('Invalid timestamp in notice file');
       return;
     }
 
