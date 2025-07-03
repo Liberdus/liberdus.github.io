@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -333,6 +333,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('beforeunload', handleBeforeUnload);
   document.addEventListener('visibilitychange', handleVisibilityChange); // Keep as document
 
+  // Sign In Modal
+  signInModal.load();
+
   // Welcome Screen
   welcomeScreen.load()
 
@@ -422,6 +425,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Failed Transaction Modal
   failedTransactionModal.load();
+  
+  // Friend Modal
+  friendModal.load();
 
   // add event listener for back-button presses to prevent shift+tab
   document.querySelectorAll('.back-button').forEach((button) => {
@@ -1320,7 +1326,6 @@ class WalletScreen {
 
 const walletScreen = new WalletScreen();
 
-// create new contact
 /**
  * createNewContact
  * @param {string} addr - the address of the contact
@@ -1664,56 +1669,6 @@ class ScanQRModal {
 
 const scanQRModal = new ScanQRModal();
 
-function fillPaymentFromQR(data) {
-  console.log('Attempting to fill payment form from QR:', data);
-
-  // Explicitly check for the required prefix
-  if (!data || !data.startsWith('liberdus://')) {
-    console.error("Invalid payment QR code format. Missing 'liberdus://' prefix.", data);
-    showToast('Invalid payment QR code format.', 3000, 'error');
-    // Optionally clear fields or leave them as they were
-    document.getElementById('sendToAddress').value = '';
-    document.getElementById('sendAmount').value = '';
-    document.getElementById('sendMemo').value = '';
-    return; // Stop processing if the format is wrong
-  }
-
-  // Clear existing fields first
-  document.getElementById('sendToAddress').value = '';
-  document.getElementById('sendAmount').value = '';
-  document.getElementById('sendMemo').value = '';
-
-  try {
-    // Remove the prefix and process the base64 data
-    const base64Data = data.substring('liberdus://'.length);
-    const jsonData = atob(base64Data);
-    const paymentData = JSON.parse(jsonData);
-
-    console.log('Read payment data:', JSON.stringify(paymentData, null, 2));
-
-    if (paymentData.u) {
-      document.getElementById('sendToAddress').value = paymentData.u;
-    }
-    if (paymentData.a) {
-      document.getElementById('sendAmount').value = paymentData.a;
-    }
-    if (paymentData.m) {
-      document.getElementById('sendMemo').value = paymentData.m;
-    }
-
-    // Trigger username validation and amount validation
-    document.getElementById('sendToAddress').dispatchEvent(new Event('input'));
-    document.getElementById('sendAmount').dispatchEvent(new Event('input'));
-  } catch (error) {
-    console.error('Error parsing payment QR data:', error, data);
-    showToast('Failed to parse payment QR data.', 3000, 'error');
-    // Clear fields on error
-    document.getElementById('sendToAddress').value = '';
-    document.getElementById('sendAmount').value = '';
-    document.getElementById('sendMemo').value = '';
-  }
-}
-
 /**
  * Validate the balance of the user
  * @param {BigInt} amount - The amount to validate
@@ -1752,6 +1707,10 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
 // Sign In Modal Management
 class SignInModal {
   constructor() {
+    this.preselectedUsername = null;
+  }
+
+  load () {
     this.modal = document.getElementById('signInModal');
     this.usernameSelect = document.getElementById('username');
     this.submitButton = document.querySelector('#signInForm button[type="submit"]');
@@ -1759,11 +1718,7 @@ class SignInModal {
     this.notFoundMessage = document.getElementById('usernameNotFound');
     this.signInModalLastItem = document.getElementById('signInModalLastItem');
     this.backButton = document.getElementById('closeSignInModal');
-    this.setupEventListeners();
-    this.preselectedUsername = null;
-  }
 
-  setupEventListeners() {
     // Sign in form submission
     document.getElementById('signInForm').addEventListener('submit', (event) => this.handleSignIn(event));
     
@@ -2021,7 +1976,7 @@ class ContactInfoModal {
     // Add add friend button handler
     this.addFriendButton.addEventListener('click', () => {
       if (!this.currentContactAddress) return;
-      friendModal.openFriendModal();
+      friendModal.open();
     });
   }
 
@@ -2141,18 +2096,13 @@ const contactInfoModal = new ContactInfoModal();
  */
 class FriendModal {
   constructor() {
-    this.modal = document.getElementById('friendModal');
-    this.friendForm = document.getElementById('friendForm');
     this.currentContactAddress = null;
     this.needsContactListUpdate = false; // track if we need to update the contact list
-    this.setupEventListeners();
   }
 
-  setupEventListeners() {
-    document.getElementById('addFriendButtonChat').addEventListener('click', () => {
-      if (!this.currentContactAddress) return;
-      this.openFriendModal();
-    });
+  load() {
+    this.modal = document.getElementById('friendModal');
+    this.friendForm = document.getElementById('friendForm');
 
     // Friend modal form submission
     this.friendForm.addEventListener('submit', (event) => this.handleFriendSubmit(event));
@@ -2162,7 +2112,7 @@ class FriendModal {
   }
 
   // Open the friend modal
-  openFriendModal() {
+  open() {
     const contact = myData.contacts[this.currentContactAddress];
     if (!contact) return;
 
@@ -2278,6 +2228,11 @@ class FriendModal {
     button.classList.remove('status-0', 'status-1', 'status-2', 'status-3');
     // Add the current status class
     button.classList.add(`status-${contact.friend}`);
+  }
+
+  // get the current contact address
+  getCurrentContactAddress() {
+    return this.currentContactAddress || false;
   }
 }
 
@@ -2948,6 +2903,7 @@ async function processChats(chats, keys) {
           //console.log('contact.message', contact.messages)
           payload.my = false;
           payload.timestamp = payload.sent_timestamp;
+          payload.txid = getTxid(tx);
           insertSorted(contact.messages, payload, 'timestamp');
           // if we are not in the chatModal of who sent it, playChatSound or if device visibility is hidden play sound
           if (!inActiveChatWithSender || document.visibilityState === 'hidden') {
@@ -3003,10 +2959,13 @@ async function processChats(chats, keys) {
             }
           }
           // compute the transaction id (txid)
+          /*
           delete tx.sign;
           const jstr = stringify(tx);
           const jstrBytes = utf82bin(jstr);
           const txidHex = hashBytes(jstrBytes);
+          */
+          const txidHex = getTxid(tx);
 
           // skip if this tx was processed before and is already in the history array;
           //    txs are the same if the history[x].txid is the same as txidHex
@@ -3047,6 +3006,7 @@ async function processChats(chats, keys) {
             message: payload.message, // Use the memo as the message content
             amount: parse(stringify(tx.amount)), // Ensure amount is stored as BigInt
             symbol: 'LIB', // TODO: get the symbol from the asset
+            txid: txidHex,
           };
           // Insert the transfer message into the contact's message list, maintaining sort order
           insertSorted(contact.messages, transferMessage, 'timestamp');
@@ -3355,6 +3315,18 @@ async function signObj(tx, keys) {
     owner: longAddress(keys.address),
     sig: flatSignature,
   };
+  return txidHex;
+}
+
+function getTxid(tx){
+  let txo = tx;
+  if (typeof(tx) === "string"){
+    txo = parse(tx)
+  }
+  delete txo.sign;
+  const jstr = stringify(txo);
+  const jstrBytes = utf82bin(jstr);
+  const txidHex = hashBytes(jstrBytes);
   return txidHex;
 }
 
@@ -4847,21 +4819,25 @@ const restoreAccountModal = new RestoreAccountModal();
 
 class TollModal {
   constructor() {
-    this.modal = document.getElementById('tollModal');
     this.currentCurrency = 'LIB'; // Initialize currency state
     this.oldToll = null;
     this.minToll = null; // Will be set from network account
+  }
+
+  load() {
+    this.modal = document.getElementById('tollModal');
     this.minTollDisplay = document.getElementById('minTollDisplay');
     this.newTollAmountInputElement = document.getElementById('newTollAmountInput');
     this.toggleTollCurrencyElement = document.getElementById('toggleTollCurrency');
     this.warningMessageElement = document.getElementById('tollWarningMessage');
     this.saveButton = document.getElementById('saveNewTollButton');
-  }
+    this.closeButton = document.getElementById('closeTollModal');
+    this.tollForm = document.getElementById('tollForm');
+    this.tollCurrencySymbol = document.getElementById('tollCurrencySymbol');
 
-  load() {
-    document.getElementById('closeTollModal').addEventListener('click', () => this.close());
+    this.tollForm.addEventListener('submit', (event) => this.saveAndPostNewToll(event));
+    this.closeButton.addEventListener('click', () => this.close());
     this.toggleTollCurrencyElement.addEventListener('click', (event) => this.handleToggleTollCurrency(event));
-    document.getElementById('tollForm').addEventListener('submit', (event) => this.saveAndPostNewToll(event));
     this.newTollAmountInputElement.addEventListener('input', () => this.newTollAmountInputElement.value = normalizeUnsignedFloat(this.newTollAmountInputElement.value));
     this.newTollAmountInputElement.addEventListener('input', () => this.updateSaveButtonState());
   }
@@ -4878,7 +4854,7 @@ class TollModal {
     this.updateTollDisplay(toll, tollUnit);
 
     this.currentCurrency = tollUnit;
-    document.getElementById('tollCurrencySymbol').textContent = this.currentCurrency;
+    this.tollCurrencySymbol.textContent = this.currentCurrency;
     this.newTollAmountInputElement.value = ''; // Clear input field
     this.warningMessageElement.textContent = '';
     this.warningMessageElement.style.display = 'none';
@@ -4900,18 +4876,16 @@ class TollModal {
    */
   async handleToggleTollCurrency(event) {
     event.preventDefault();
-    const newTollAmountInput = document.getElementById('newTollAmountInput');
-    const tollCurrencySymbol = document.getElementById('tollCurrencySymbol');
 
     this.currentCurrency = this.currentCurrency === 'LIB' ? 'USD' : 'LIB';
-    tollCurrencySymbol.textContent = this.currentCurrency;
+    this.tollCurrencySymbol.textContent = this.currentCurrency;
 
     const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
-    if (newTollAmountInput.value !== '') {
-      const currentValue = parseFloat(newTollAmountInput.value);
+    if (this.newTollAmountInputElement.value !== '') {
+      const currentValue = parseFloat(this.newTollAmountInputElement.value);
       const convertedValue =
         this.currentCurrency === 'USD' ? currentValue * scalabilityFactor : currentValue / scalabilityFactor;
-      newTollAmountInput.value = convertedValue.toString();
+      this.newTollAmountInputElement.value = convertedValue.toString();
     }
 
     // Update min toll display with converted value
@@ -4931,8 +4905,7 @@ class TollModal {
    */
   async saveAndPostNewToll(event) {
     event.preventDefault();
-    const newTollAmountInput = document.getElementById('newTollAmountInput');
-    let newTollValue = parseFloat(newTollAmountInput.value);
+    let newTollValue = parseFloat(this.newTollAmountInputElement.value);
 
     // disable submit button
     this.saveButton.disabled = true;
@@ -4942,7 +4915,7 @@ class TollModal {
       return;
     }
 
-    const newToll = bigxnum2big(wei, newTollAmountInput.value);
+    const newToll = bigxnum2big(wei, this.newTollAmountInputElement.value);
 
     // Check if the toll is non-zero but less than minimum
     if (newToll > 0n) {
@@ -5140,19 +5113,20 @@ const tollModal = new TollModal();
 
 // Invite Modal
 class InviteModal {
-  constructor() {
+  constructor() {}
+
+  load() {
     this.modal = document.getElementById('inviteModal');
     this.inviteEmailInput = document.getElementById('inviteEmail');
     this.invitePhoneInput = document.getElementById('invitePhone');
     this.submitButton = document.querySelector('#inviteForm button[type="submit"]');
-  }
+    this.closeButton = document.getElementById('closeInviteModal');
+    this.inviteForm = document.getElementById('inviteForm');
 
-  load() {
-    // Set up event listeners
-    document.getElementById('closeInviteModal').addEventListener('click', () => this.close());
-    document.getElementById('inviteForm').addEventListener('submit', (event) => this.handleSubmit(event));
+    this.closeButton.addEventListener('click', () => this.close());
+    this.inviteForm.addEventListener('submit', (event) => this.handleSubmit(event));
 
-    // Add input event listeners for email and phone fields
+    // input event listeners for email and phone fields
     this.inviteEmailInput.addEventListener('input', () => this.inviteEmailInput.value = normalizeEmail(this.inviteEmailInput.value));
     this.inviteEmailInput.addEventListener('input', () => this.validateInputs());
     this.invitePhoneInput.addEventListener('input', () => this.invitePhoneInput.value = normalizePhone(this.invitePhoneInput.value));
@@ -5224,18 +5198,22 @@ class InviteModal {
 const inviteModal = new InviteModal();
 
 class AboutModal {
-  constructor() {
-    this.modal = document.getElementById('aboutModal');
-  }
+  constructor() {}
 
   load() {
+    this.modal = document.getElementById('aboutModal');
+    this.closeButton = document.getElementById('closeAboutModal');
+    this.versionDisplay = document.getElementById('versionDisplayAbout');
+    this.networkName = document.getElementById('networkNameAbout');
+    this.netId = document.getElementById('netIdAbout');
+
     // Set up event listeners
-    document.getElementById('closeAboutModal').addEventListener('click', () => this.close());
+    this.closeButton.addEventListener('click', () => this.close());
 
     // Set version and network information once during initialization
-    document.getElementById('versionDisplayAbout').textContent = myVersion + ' ' + version;
-    document.getElementById('networkNameAbout').textContent = network.name;
-    document.getElementById('netIdAbout').textContent = network.netid;
+    this.versionDisplay.textContent = myVersion + ' ' + version;
+    this.networkName.textContent = network.name;
+    this.netId.textContent = network.netid;
   }
 
   open() {
@@ -5250,13 +5228,15 @@ class AboutModal {
 const aboutModal = new AboutModal();
 
 class ContactModal {
-  constructor() {
-    this.modal = document.getElementById('contactModal');
-  }
+  constructor() {}
 
   load() {
-    document.getElementById('closeContactModal').addEventListener('click', () => this.close());
-    document.getElementById('submitFeedback').addEventListener('click', () => {
+    this.modal = document.getElementById('contactModal');
+    this.closeButton = document.getElementById('closeContactModal');
+    this.submitFeedbackButton = document.getElementById('submitFeedback');
+
+    this.closeButton.addEventListener('click', () => this.close());
+    this.submitFeedbackButton.addEventListener('click', () => {
       window.open('https://github.com/liberdus/web-client-v2/issues', '_blank');
     });
   }
@@ -5272,21 +5252,23 @@ class ContactModal {
 const contactModal = new ContactModal();
 
 class MyProfileModal {
-  constructor() {
-    this.name = document.getElementById('name');
-    this.email = document.getElementById('email');
-    this.phone = document.getElementById('phone');
-    this.linkedin = document.getElementById('linkedin');
-    this.x = document.getElementById('x');
-  }
+  constructor() {}
 
   load() {
     // called when the DOM is loaded; can setup event handlers here
     this.modal = document.getElementById('accountModal');
     this.closeButton = document.getElementById('closeAccountForm');
-    this.closeButton.addEventListener('click', () => this.close());
-    document.getElementById('accountForm').addEventListener('submit', (event) => this.handleSubmit(event));
+    this.name = document.getElementById('name');
+    this.email = document.getElementById('email');
+    this.phone = document.getElementById('phone');
+    this.linkedin = document.getElementById('linkedin');
+    this.x = document.getElementById('x');
+    this.accountForm = document.getElementById('accountForm');
     this.submitButton = document.querySelector('#accountForm .update-button');
+
+    this.closeButton.addEventListener('click', () => this.close());
+    this.accountForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    
 
     // Add input event listeners for validation
     this.name.addEventListener('input', (e) => this.handleNameInput(e));
@@ -5401,7 +5383,9 @@ class MyProfileModal {
 const myProfileModal = new MyProfileModal();
 
 class ValidatorStakingModal {
-  constructor() {
+  constructor() {}
+
+  load() {
     // Modal and main buttons
     this.modal = document.getElementById('validatorModal');
     this.stakeButton = document.getElementById('openStakeModal');
@@ -5432,14 +5416,9 @@ class ValidatorStakingModal {
     this.marketPriceValue = document.getElementById('validator-market-price');
     this.marketStakeUsdValue = document.getElementById('validator-market-stake-usd');
     this.stakeForm = document.getElementById('stakeForm');
-  }
 
-  load() {
-    // Setup event listeners when DOM is loaded
-    // stakeButton handling is in the StakeValidatorModal
+
     this.unstakeButton.addEventListener('click', () => this.handleUnstake());
-
-    // Add listeners for opening and closing the modal
     this.backButton.addEventListener('click', () => this.close());
   }
 
@@ -6075,6 +6054,7 @@ class ChatModal {
     this.chatSendMoneyButton = document.getElementById('chatSendMoneyButton');
     this.messageByteCounter = document.querySelector('.message-byte-counter');
     this.messagesContainer = document.querySelector('.messages-container');
+    this.addFriendButtonChat = document.getElementById('addFriendButtonChat');
 
     // Add message click-to-copy handler
     this.messagesList.addEventListener('click', this.handleClickToCopy.bind(this));
@@ -6118,6 +6098,11 @@ class ChatModal {
     this.chatSendMoneyButton.addEventListener('click', () => {
       sendAssetFormModal.username = this.chatSendMoneyButton.dataset.username;
       sendAssetFormModal.open();
+    });
+
+    this.addFriendButtonChat.addEventListener('click', () => {
+      if (!friendModal.getCurrentContactAddress()) return;
+      friendModal.open();
     });
   }
 
@@ -6985,13 +6970,14 @@ class ChatModal {
 
 const chatModal = new ChatModal();
 
+/**
+ * Failed Message Modal Class
+ * @class
+ * @description Handles the failed message modal
+ * @returns {void}
+ */
 class FailedMessageModal {
   constructor() {
-    this.modal = document.getElementById('failedMessageModal');
-    this.retryButton = this.modal.querySelector('.retry-button');
-    this.deleteButton = this.modal.querySelector('.delete-button');
-    this.closeButton = document.getElementById('closeFailedMessageModal');
-    // used by handleFailedMessageClick
     this.handleFailedMessageData = {
       handleFailedMessage: '',
       txid: '',
@@ -7003,6 +6989,11 @@ class FailedMessageModal {
    * @returns {void}
    */
   load() {
+    this.modal = document.getElementById('failedMessageModal');
+    this.retryButton = this.modal.querySelector('.retry-button');
+    this.deleteButton = this.modal.querySelector('.delete-button');
+    this.closeButton = document.getElementById('closeFailedMessageModal');
+
     this.retryButton.addEventListener('click', this.handleFailedMessageRetry.bind(this));
     this.deleteButton.addEventListener('click', this.handleFailedMessageDelete.bind(this));
     this.closeButton.addEventListener('click', this.closeFailedMessageModalAndClearState.bind(this));
@@ -7106,15 +7097,14 @@ class FailedMessageModal {
 
 const failedMessageModal = new FailedMessageModal();
 
-// new chat modal
+/**
+ * New Chat Modal Class
+ * @class
+ * @description Handles the new chat modal
+ * @returns {void}
+ */
 class NewChatModal {
   constructor() {
-    this.modal = document.getElementById('newChatModal');
-    this.closeNewChatModalButton = document.getElementById('closeNewChatModal');
-    this.newChatForm = document.getElementById('newChatForm');
-    this.usernameAvailable = document.getElementById('chatRecipientError');
-    this.recipientInput = document.getElementById('chatRecipient');
-    this.submitButton = document.querySelector('#newChatForm button[type="submit"]');
     this.usernameInputCheckTimeout = null;
   }
 
@@ -7123,6 +7113,13 @@ class NewChatModal {
    * @returns {void}
    */
   load() {
+    this.modal = document.getElementById('newChatModal');
+    this.closeNewChatModalButton = document.getElementById('closeNewChatModal');
+    this.newChatForm = document.getElementById('newChatForm');
+    this.usernameAvailable = document.getElementById('chatRecipientError');
+    this.recipientInput = document.getElementById('chatRecipient');
+    this.submitButton = document.querySelector('#newChatForm button[type="submit"]');
+
     this.closeNewChatModalButton.addEventListener('click', this.closeNewChatModal.bind(this));
     this.newChatForm.addEventListener('submit', this.handleNewChat.bind(this));
     this.recipientInput.addEventListener('input', debounce(this.handleUsernameInput.bind(this), 300));
@@ -7655,34 +7652,19 @@ class CreateAccountModal {
 // Initialize the create account modal
 const createAccountModal = new CreateAccountModal();
 
-// Send Asset Form Modal
+/**
+ * Send Asset Form Modal Class
+ * @class
+ * @description Handles the send asset form modal
+ * @returns {void}
+ */
 class SendAssetFormModal {
   constructor() {
-    this.modal = document.getElementById('sendAssetFormModal');
-    this.closeSendAssetFormModalButton = document.getElementById('closeSendAssetFormModal');
-    this.sendForm = document.getElementById('sendForm');
     this.username = null;
-    this.usernameInput = document.getElementById('sendToAddress');
-    this.amountInput = document.getElementById('sendAmount');
-    this.memoInput = document.getElementById('sendMemo');
-    this.retryTxIdInput = document.getElementById('retryOfPaymentTxId');
-    this.usernameAvailable = document.getElementById('sendToAddressError');
-    this.submitButton = document.querySelector('#sendForm button[type="submit"]');
-    this.assetSelectDropdown = document.getElementById('sendAsset');
     this.sendAssetFormModalCheckTimeout = null;
-    this.balanceSymbol = document.getElementById('balanceSymbol');
-    this.availableBalance = document.getElementById('availableBalance');
-    this.toggleBalanceButton = document.getElementById('toggleBalance');
     this.foundAddressObject = { address: null };
     this.needTollInfo = false;
     this.tollInfo = {};
-    this.tollMemoSpan = document.getElementById('tollMemo');
-    // Add balance element references
-    this.balanceAmount = document.getElementById('balanceAmount');
-    this.transactionFee = document.getElementById('transactionFee');
-    this.balanceWarning = document.getElementById('balanceWarning');
-    this.memoLabel = document.querySelector('label[for="sendMemo"]');
-    this.memoByteCounter = document.querySelector('.memo-byte-counter');
     this.memoValidation = {}
   }
 
@@ -7691,6 +7673,27 @@ class SendAssetFormModal {
    * @returns {void}
    */
   load() {
+    this.modal = document.getElementById('sendAssetFormModal');
+    this.closeSendAssetFormModalButton = document.getElementById('closeSendAssetFormModal');
+    this.sendForm = document.getElementById('sendForm');
+    this.usernameInput = document.getElementById('sendToAddress');
+    this.amountInput = document.getElementById('sendAmount');
+    this.memoInput = document.getElementById('sendMemo');
+    this.retryTxIdInput = document.getElementById('retryOfPaymentTxId');
+    this.usernameAvailable = document.getElementById('sendToAddressError');
+    this.submitButton = document.querySelector('#sendForm button[type="submit"]');
+    this.assetSelectDropdown = document.getElementById('sendAsset');
+    this.balanceSymbol = document.getElementById('balanceSymbol');
+    this.availableBalance = document.getElementById('availableBalance');
+    this.toggleBalanceButton = document.getElementById('toggleBalance');
+    this.tollMemoSpan = document.getElementById('tollMemo');
+    // Add balance element references
+    this.balanceAmount = document.getElementById('balanceAmount');
+    this.transactionFee = document.getElementById('transactionFee');
+    this.balanceWarning = document.getElementById('balanceWarning');
+    this.memoLabel = document.querySelector('label[for="sendMemo"]');
+    this.memoByteCounter = document.querySelector('.memo-byte-counter');
+
     // TODO add comment about which send form this is for chat or assets
     this.closeSendAssetFormModalButton.addEventListener('click', this.close.bind(this));
     this.sendForm.addEventListener('submit', this.handleSendFormSubmit.bind(this));
