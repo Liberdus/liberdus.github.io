@@ -1280,7 +1280,9 @@ input[type='file'].form-control::file-selector-button {
   overflow-wrap: break-word;
   word-wrap: break-word;
   word-break: break-word;
-  hyphens: auto;
+  /* hyphens: auto; */
+  font-family: var(--font-primary);
+  font-size: var(--font-size-base);
 }
 
 /* Wrapper for the send button and the toll information */
