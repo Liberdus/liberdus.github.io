@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -352,7 +352,15 @@ async function handleNativeAppSubscription() {
         addresses: addresses
       };
       
-      const SUBSCRIPTION_API = "https://dev.liberdus.com:3030/notifier/subscribe";
+      // Get the appropriate gateway for this request
+      const selectedGateway = getGatewayForRequest();
+      if (!selectedGateway) {
+        console.error('No gateway available for subscription request');
+        showToast('No gateway available', 3000, 'error');
+        return;
+      }
+      
+      const SUBSCRIPTION_API = `${selectedGateway.web}/notifier/subscribe`;
 
       console.log('payload', payload);
       console.log('SUBSCRIPTION_API', SUBSCRIPTION_API);
@@ -368,14 +376,14 @@ async function handleNativeAppSubscription() {
       if (response.ok) {
         const result = await response.json();
         console.log('Subscription successful:', result);
-        showToast('Push notifications enabled', 3000, 'success');
+        /* showToast('Push notifications enabled', 3000, 'success'); */
       } else {
         console.error('Subscription failed:', response.status, response.statusText);
-        showToast('Failed to enable push notifications', 3000, 'error');
+        /* showToast('Failed to enable push notifications', 3000, 'error'); */
       }
     } catch (error) {
       console.error('Error subscribing to push notifications:', error);
-      showToast('Error enabling push notifications', 3000, 'error');
+      /* showToast('Error enabling push notifications', 3000, 'error'); */
     }
   }
 }
@@ -507,8 +515,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Deprecated - do not want to encourage or confuse users with this feature since on IOS uses seperate local storage
   //setupAddToHomeScreen();
 });
-
-
 
 function handleUnload() {
   console.log('in handleUnload');
@@ -1158,11 +1164,12 @@ class MenuModal {
 
   open() {
     this.modal.classList.add('active');
+    enterFullscreen();
   }
 
   close() {
-    
-    this.modal.classList.remove('active');  
+    this.modal.classList.remove('active');
+    enterFullscreen();
   }
 
   isActive() {
@@ -1875,6 +1882,9 @@ class SignInModal {
     if (event) {
       event.preventDefault();
     }
+
+    enterFullscreen();
+    
     const username = this.usernameSelect.value;
 
     // Get network ID from network.js
@@ -2968,6 +2978,7 @@ async function processChats(chats, keys) {
           payload.my = false;
           payload.timestamp = payload.sent_timestamp;
           payload.txid = getTxid(tx);
+          delete payload.pqEncSharedKey; 
           insertSorted(contact.messages, payload, 'timestamp');
           // if we are not in the chatModal of who sent it, playChatSound or if device visibility is hidden play sound
           if (!inActiveChatWithSender || document.visibilityState === 'hidden') {
@@ -2999,6 +3010,7 @@ async function processChats(chats, keys) {
           }
           //console.log("payload", payload)
           decryptMessage(payload, keys); // modifies the payload object
+          delete payload.pqEncSharedKey;
           if (payload.senderInfo) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
@@ -5336,6 +5348,7 @@ class MyProfileModal {
 
     // Add input event listeners for validation
     this.name.addEventListener('input', (e) => this.handleNameInput(e));
+    this.name.addEventListener('blur', (e) => this.handleNameBlur(e));
     this.phone.addEventListener('input', (e) => this.handlePhoneInput(e));
     this.phone.addEventListener('blur', (e) => this.handlePhoneBlur(e));
     this.email.addEventListener('input', (e) => this.handleEmailInput(e));
@@ -5350,6 +5363,11 @@ class MyProfileModal {
     // Allow letters, spaces, and basic punctuation
 //    const normalized = e.target.value.replace(/[^a-zA-Z\s\-'.]/g, '');
     const normalized = normalizeName(e.target.value)
+    e.target.value = normalized;
+  }
+
+  handleNameBlur(e) {
+    const normalized = normalizeName(e.target.value, true)
     e.target.value = normalized;
   }
 
@@ -7396,6 +7414,7 @@ class CreateAccountModal {
 
   open() {
     this.modal.classList.add('active');
+    enterFullscreen();
   }
 
   close() {
@@ -9645,4 +9664,17 @@ function getContactDisplayName(contact) {
   return contact?.name || 
          contact?.username || 
          `${contact?.address?.slice(0, 8)}...${contact?.address?.slice(-6)}`;
+}
+
+function isMobile() {
+  return /Android|webOS|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+function enterFullscreen() {
+  if (isMobile()) {
+  console.log('in enterFullscreen');
+    if (document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen();
+    } 
+  }
 }

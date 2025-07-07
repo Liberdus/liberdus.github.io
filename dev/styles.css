@@ -222,7 +222,6 @@ body {
   flex-direction: column;
   position: relative;
   overflow: hidden;
-  padding: 0;
   /* for firefox */
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.3) rgba(0, 0, 0, 0.05);
@@ -305,7 +304,8 @@ body {
   display: none;
   align-items: center;
   width: 100%;
-  padding: 16px;
+  /* padding only on the sides */
+  padding: 0 16px;
   background-color: var(--background-color);
   color: var(--text-color);
   position: sticky;
@@ -345,10 +345,13 @@ body {
 }
 
 .header.active {
+  /* only want margin-top on desktop */
+  @media (min-width: 769px) {
+    margin-top: 16px;
+  }
   display: flex;
   justify-content: space-between;
   align-items: center;
-  position: relative; /* Add position relative to contain the absolute positioned indicator */
 }
 
 .app-name {
@@ -861,7 +864,12 @@ button:disabled {
 .modal-header {
   display: flex;
   align-items: center;
-  padding: 16px;
+  padding-top: calc(env(safe-area-inset-top));
+  margin-bottom: 8px;
+  /* only want + 16px on desktop */
+  @media (min-width: 769px) {
+    padding-top: calc(env(safe-area-inset-top) + 16px);
+  }
   background-color: var(--background-color);
   /* z-index: 1002; */
   position: relative;
@@ -923,6 +931,8 @@ button:disabled {
   border-radius: 50%;
   overflow: hidden;
   background-color: #f6f6f6;
+  /* shift slight to the right */
+  margin-left: 4px;
 }
 
 .modal-avatar svg {
@@ -1280,7 +1290,6 @@ input[type='file'].form-control::file-selector-button {
   overflow-wrap: break-word;
   word-wrap: break-word;
   word-break: break-word;
-  hyphens: auto;
 }
 
 /* Wrapper for the send button and the toll information */
@@ -1918,13 +1927,6 @@ input[type='file'].form-control {
 }
 
 /* About Modal Content Styles */
-#aboutModal .modal-header {
-  /* Inherited from .modal-header */
-  padding-top: calc(16px + env(safe-area-inset-top, 0px));
-  position: sticky;
-  top: 0;
-}
-
 #aboutModal #netIdAbout {
   word-wrap: break-word;
 }
@@ -2511,7 +2513,7 @@ mark {
   gap: 3px;
   position: absolute;
   right: 16px;
-  top: 50%;
+  top: calc(50% + env(safe-area-inset-top) / 2);  /* ← Account for the padding */
   transform: translateY(-50%);
 }
 
@@ -4130,13 +4132,13 @@ small {
 }
 
 /* Ensure the base .modal.active for .modal-dialog still provides the backdrop */
-.modal.modal-dialog.active {
+/* .modal.modal-dialog.active { */
   /* display: flex; /* This is usually on .modal.active already */
   /* justify-content: center; /* This is usually on .modal.active already */
   /* align-items: center; /* This is usually on .modal.active already */
   /* The above are likely inherited. If not, uncomment them. */
   /* The backdrop color comes from .modal's background-color */
-}
+/* } */
 
 .modal-dialog #failedMessageContent {
   min-height: 60px; /* Give it some initial height */
@@ -4323,9 +4325,6 @@ small {
 }
 
 /* Toll Modal Specific Styles */
-#tollModal .modal-header {
-  padding: 0.75rem 1rem;
-}
 
 #tollModal .form-container {
   padding: 16px 0; /* Vertical padding for container, horizontal handled by children */
