@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'w'
+const version = 'x'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -321,8 +321,11 @@ function newDataRecord(myAccount) {
   return myData;
 }
 
-// Add this function before the DOMContentLoaded event listener
-// Add this function before the DOMContentLoaded event listener
+/**
+ * Handle native app subscription tokens and handle subscription
+ * This is used to subscribe to push notifications for the native app
+ * @returns {Promise<void>}
+ */
 async function handleNativeAppSubscription() {
   const urlParams = new URLSearchParams(window.location.search);
   const deviceToken = urlParams.get('device_token');
@@ -339,8 +342,8 @@ async function handleNativeAppSubscription() {
       
       let addresses = [];
       if (netidAccounts?.usernames) {
-        // Get addresses from all stored accounts
-        addresses = Object.values(netidAccounts.usernames).map(account => account.address);
+        // Get addresses from all stored accounts and convert to long format
+        addresses = Object.values(netidAccounts.usernames).map(account => longAddress(account.address));
       }
       
       const payload = {
@@ -350,6 +353,9 @@ async function handleNativeAppSubscription() {
       };
       
       const SUBSCRIPTION_API = "https://dev.liberdus.com:3030/notifier/subscribe";
+
+      console.log('payload', payload);
+      console.log('SUBSCRIPTION_API', SUBSCRIPTION_API);
       
       const response = await fetch(SUBSCRIPTION_API, {
         method: 'POST',
