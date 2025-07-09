@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -135,9 +135,11 @@ import {
   normalizeAddress,
   longAddress,
   utf82bin,
+  bin2utf8,
   bigxnum2big,
   big2str,
   bin2base64,
+  base642bin,
   hex2bin,
   bin2hex,
   linkifyUrls,
@@ -607,6 +609,7 @@ class WelcomeScreen {
     this.versionDisplay = document.getElementById('versionDisplay');
     this.networkNameDisplay = document.getElementById('networkNameDisplay');
     this.lastItem = document.getElementById('welcomeScreenLastItem');
+    this.openBackupModalButton = document.getElementById('openBackupModalButton');
     
     
     this.versionDisplay.textContent = myVersion + ' ' + version;
@@ -647,6 +650,8 @@ class WelcomeScreen {
       this.welcomeButtons.appendChild(this.importAccountButton);
       this.signInButton.classList.add('primary-button');
       this.signInButton.classList.remove('secondary-button');
+      this.openBackupModalButton.classList.remove('hidden');
+      this.welcomeButtons.appendChild(this.openBackupModalButton);
     } else {
       this.welcomeButtons.innerHTML = ''; // Clear existing order
       this.createAccountButton.classList.remove('hidden');
@@ -655,6 +660,8 @@ class WelcomeScreen {
       this.welcomeButtons.appendChild(this.importAccountButton);
       this.createAccountButton.classList.add('primary-button');
       this.createAccountButton.classList.remove('secondary-button');
+      this.openBackupModalButton.classList.remove('hidden');
+      this.welcomeButtons.appendChild(this.openBackupModalButton);
     }
   }
 }
@@ -1077,8 +1084,8 @@ class ContactsScreen {
     // Group metadata for rendering
     const groupMeta = [
       { key: 'friends', label: 'Friends', itemClass: 'chat-item' },
-      { key: 'acquaintances', label: 'Acquaintances', itemClass: 'chat-item' },
-      { key: 'others', label: 'Others', itemClass: 'chat-item' },
+      { key: 'acquaintances', label: 'Connections', itemClass: 'chat-item' },
+      { key: 'others', label: 'Tolled', itemClass: 'chat-item' },
       { key: 'blocked', label: 'Blocked', itemClass: 'chat-item blocked' },
     ];
 
@@ -1160,6 +1167,8 @@ class MenuModal {
     this.aboutButton.addEventListener('click', () => aboutModal.open());
     this.signOutButton = document.getElementById('handleSignOut');
     this.signOutButton.addEventListener('click', () => this.handleSignOut());
+    this.backupButton = document.getElementById('openBackupModalButton');
+    this.backupButton.addEventListener('click', () => backupAccountModal.open());
   }
 
   open() {
@@ -2220,6 +2229,7 @@ class FriendModal {
       type: 'update_toll_required',
       timestamp: getCorrectedTimestamp(),
       friend: friend,
+      networkId: network.netid,
     };
     const txid = await signObj(tx, myAccount.keys);
     const res = await injectTx(tx, txid);
@@ -2260,9 +2270,9 @@ class FriendModal {
       contact.friend === 0
         ? 'Blocked'
         : contact.friend === 1
-          ? 'Added as Other'
+          ? 'Added as Tolled'
           : contact.friend === 2
-            ? 'Added as Acquaintance'
+            ? 'Added as Connection'
             : contact.friend === 3
               ? 'Added as Friend'
               : 'Error updating friend status'
@@ -3258,6 +3268,7 @@ async function postAssetTransfer(to, amount, memo, keys) {
     timestamp: getCorrectedTimestamp(),
     network: NETWORK_ACCOUNT_ID,
     fee: parameters.current.transactionFee || 1n * wei, // This is not used by the backend
+    networkId: network.netid,
   };
 
   const txid = await signObj(tx, keys);
@@ -3279,6 +3290,7 @@ async function postRegisterAlias(alias, keys) {
     publicKey: keys.public,
     pqPublicKey: pqPublicKey,
     timestamp: getCorrectedTimestamp(),
+    networkId: network.netid,
   };
   const txid = await signObj(tx, keys);
   const res = await injectTx(tx, txid);
@@ -4760,7 +4772,13 @@ class BackupAccountModal {
     // called when the DOM is loaded; can setup event handlers here
     this.modal = document.getElementById('exportModal');
     document.getElementById('closeExportForm').addEventListener('click', () => this.close());
-    document.getElementById('exportForm').addEventListener('submit', (event) => this.handleSubmit(event));
+    document.getElementById('exportForm').addEventListener('submit', (event) => {
+      if (myData) {
+        this.handleSubmitOne(event);
+      } else {
+        this.handleSubmitAll(event);
+      }
+    });
   }
 
   open() {
@@ -4773,7 +4791,7 @@ class BackupAccountModal {
     this.modal.classList.remove('active');
   }
 
-  async handleSubmit(event) {
+  async handleSubmitOne(event) {
     event.preventDefault();
 
     const password = document.getElementById('exportPassword').value;
@@ -4788,7 +4806,7 @@ class BackupAccountModal {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${myAccount.username}-liberdus-${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `liberdus-${myAccount.username}-${new Date().toISOString().split('T')[0]}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -4801,6 +4819,46 @@ class BackupAccountModal {
       showToast('Failed to encrypt data. Please try again.', 0, 'error');
     }
   }
+
+  async handleSubmitAll(event) {
+    event.preventDefault();
+
+    const password = document.getElementById('exportPassword').value;
+    const myLocalStore = this.copyLocalStorageToObject();
+//    console.log(myLocalStore);
+    const jsonData = stringify(myLocalStore, null, 2);
+
+    try {
+      // Encrypt data if password is provided
+      const finalData = password ? await encryptData(jsonData, password) : jsonData;
+
+      // Create and trigger download
+      const blob = new Blob([finalData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `liberdus-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      // Close export modal
+      this.close();
+    } catch (error) {
+      console.error('Encryption failed:', error);
+      showToast('Failed to encrypt data. Please try again.', 0, 'error');
+    }
+  }
+
+  copyLocalStorageToObject() {
+    const myLocalStore = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      myLocalStore[key] = localStorage.getItem(key);
+    }
+    return myLocalStore;
+  }  
 }
 const backupAccountModal = new BackupAccountModal();
 
@@ -4849,32 +4907,39 @@ class RestoreAccountModal {
 
       // We first parse to jsonData so that if the parse does not work we don't destroy myData
       myData = parse(fileContent);
-      // also need to set myAccount
-      const acc = myData.account; // this could have other things which are not needed
-      myAccount = {
-        netid: acc.netid,
-        username: acc.username,
-        keys: {
-          address: acc.keys.address,
-          public: acc.keys.public,
-          secret: acc.keys.secret,
-          type: acc.keys.type,
-        },
-      };
-      // Get existing accounts or create new structure
-      const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-      // Ensure netid exists
-      if (!existingAccounts.netids[myAccount.netid]) {
-        existingAccounts.netids[myAccount.netid] = { usernames: {} };
-      }
-      // Store updated accounts back in localStorage
-      existingAccounts.netids[myAccount.netid].usernames[myAccount.username] = {
-        address: myAccount.keys.address,
-      };
-      localStorage.setItem('accounts', stringify(existingAccounts));
 
-      // Store the localStore entry for username_netid
-      localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
+      if (myData.version) {
+        localStorage.clear();
+        this.copyObjectToLocalStorage(myData);
+      }
+      else {
+        // also need to set myAccount
+        const acc = myData.account; // this could have other things which are not needed
+        myAccount = {
+          netid: acc.netid,
+          username: acc.username,
+          keys: {
+            address: acc.keys.address,
+            public: acc.keys.public,
+            secret: acc.keys.secret,
+            type: acc.keys.type,
+          },
+        };
+        // Get existing accounts or create new structure
+        const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+        // Ensure netid exists
+        if (!existingAccounts.netids[myAccount.netid]) {
+          existingAccounts.netids[myAccount.netid] = { usernames: {} };
+        }
+        // Store updated accounts back in localStorage
+        existingAccounts.netids[myAccount.netid].usernames[myAccount.username] = {
+          address: myAccount.keys.address,
+        };
+        localStorage.setItem('accounts', stringify(existingAccounts));
+
+        // Store the localStore entry for username_netid
+        localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
+      }
 
       // Show success message using toast
       showToast('Account restored successfully!', 2000, 'success');
@@ -4890,6 +4955,14 @@ class RestoreAccountModal {
       showToast(error.message || 'Import failed. Please check file and password.', 3000, 'error');
     }
   }
+
+  copyObjectToLocalStorage(obj) {
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        localStorage.setItem(key, obj[key]);
+      }
+    }
+  }  
 }
 const restoreAccountModal = new RestoreAccountModal();
 
@@ -5093,6 +5166,7 @@ class TollModal {
       type: 'toll',
       timestamp: getCorrectedTimestamp(),
       tollUnit: tollUnit,
+      networkId: network.netid,
     };
 
     const txid = await signObj(tollTx, myAccount.keys);
@@ -5788,6 +5862,7 @@ class ValidatorStakingModal {
       nominee: nodeAddress,
       force: false,
       timestamp: getCorrectedTimestamp(),
+      networkId: network.netid,
     };
 
     const txid = await signObj(unstakeTx, myAccount.keys);
@@ -5874,7 +5949,7 @@ class StakeValidatorModal {
     this.modal.classList.add('active');
 
     // Set the correct fill function for the staking context
-    scanQRModal.fillFunction = stakeValidatorModal.fillFromQR;
+    scanQRModal.fillFunction = this.fillFromQR.bind(this);
 
     // Display Available Balance
     const libAsset = myData.wallet.assets.find((asset) => asset.symbol === 'LIB');
@@ -5973,6 +6048,7 @@ class StakeValidatorModal {
       nominee: nodeAddress,
       stake: amount,
       timestamp: getCorrectedTimestamp(),
+      networkId: network.netid,
     };
 
     const txid = await signObj(stakeTx, keys);
@@ -6390,6 +6466,7 @@ class ChatModal {
       to: longAddress(contactAddress),
       chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join``),
       timestamp: getCorrectedTimestamp(),
+      networkId: network.netid,
     };
     const txid = await signObj(tx, myAccount.keys);
     const response = await injectTx(tx, txid);
@@ -6461,6 +6538,7 @@ class ChatModal {
       chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join``),
       timestamp: getCorrectedTimestamp(),
       oldContactTimestamp: myData.contacts[contactAddress].timestamp,
+      networkId: network.netid,
     };
     return readTransaction;
   }
@@ -6708,6 +6786,7 @@ class ChatModal {
       timestamp: getCorrectedTimestamp(),
       network: NETWORK_ACCOUNT_ID,
       fee: parameters.current.transactionFee || 1n * wei, // This is not used by the backend
+      networkId: network.netid,
     };
     return tx;
   }
@@ -6866,6 +6945,11 @@ class ChatModal {
    * @returns {void}
    */
   async handleClickToCopy(e) {
+    // Check if the click was on a link - if so, don't copy
+    if (e.target.tagName === 'A' || e.target.closest('a')) {
+      return;
+    }
+    
     const messageEl = e.target.closest('.message');
     if (!messageEl) return;
 
@@ -7837,7 +7921,7 @@ class SendAssetFormModal {
 
     this.usernameAvailable.style.display = 'none';
     this.submitButton.disabled = true;
-    scanQRModal.fillFunction = sendAssetFormModal.fillFromQR; // set function to handle filling the payment form from QR data
+    scanQRModal.fillFunction = this.fillFromQR.bind(this); // set function to handle filling the payment form from QR data
 
     if (this.username) {
       this.usernameInput.value = this.username;
@@ -8474,7 +8558,7 @@ class SendAssetFormModal {
     try {
       // Remove the prefix and process the base64 data
       const base64Data = data.substring('liberdus://'.length);
-      const jsonData = atob(base64Data);
+      const jsonData = bin2utf8(base642bin(base64Data));
       const paymentData = JSON.parse(jsonData);
 
       console.log('Read payment data:', JSON.stringify(paymentData, null, 2));
@@ -8995,7 +9079,7 @@ class ReceiveModal {
 
       // Convert to JSON and encode as base64
       const jsonData = JSON.stringify(paymentData);
-      const base64Data = btoa(jsonData);
+      const base64Data = bin2base64(utf82bin(jsonData));
 
       // Create URI with liberdus:// prefix
       const qrText = `liberdus://${base64Data}`;

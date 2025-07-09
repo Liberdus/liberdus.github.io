@@ -1072,7 +1072,10 @@ select.form-control {
 /* Specific overrides can go here if needed */
 textarea.form-control {
   min-height: 100px;
-  resize: vertical;
+  resize: none;
+  overflow-y: auto; /* Allow scrolling when needed */
+  scrollbar-width: none; /* Hide scrollbar for Firefox */
+  -ms-overflow-style: none; /* Hide scrollbar for IE/Edge (older versions) */
 }
 
 /* File input specific styles */
@@ -1747,21 +1750,9 @@ input[type='file'].form-control {
   padding-right: 45px;
 }
 
-#sendMemo,
-#receiveMemo {
-  overflow-y: auto; /* Allow scrolling when needed */
-  scrollbar-width: none; /* Hide scrollbar for Firefox */
-  -ms-overflow-style: none; /* Hide scrollbar for IE/Edge (older versions) */
-}
-
 #sendMemo::-webkit-scrollbar,
 #receiveMemo::-webkit-scrollbar {
   display: none; /* Hide scrollbar for WebKit browsers */
-}
-
-#sendAssetFormModal textarea.form-control {
-  min-height: 100px;
-  resize: vertical;
 }
 
 #availableBalance {
@@ -1858,6 +1849,19 @@ input[type='file'].form-control {
 
 #exportModal .update-button:hover {
   opacity: 0.9;
+}
+
+#exportModal p {
+  font-family: var(--font-primary);
+  font-size: var(--font-size-base);
+  color: var(--text-color);
+  margin-bottom: 1rem;
+  line-height: 1.5;
+  text-align: left;
+}
+
+#exportModal p:last-of-type {
+  margin-bottom: 1.5rem;
 }
 
 /* Remove Account Modal Styles */
@@ -3177,12 +3181,6 @@ mark {
   margin-right: 0;
 }
 
-#receiveModal textarea.form-control {
-  resize: vertical;
-  min-height: 60px;
-  max-height: 120px;
-}
-
 #receiveModal input[type='number'] {
   -moz-appearance: textfield;
   appearance: textfield;
@@ -3696,13 +3694,6 @@ small {
 /* Style adjustments for focus or hover if desired */
 .password-toggle-btn:hover {
   color: #343a40;
-}
-
-#sendMemo,
-#receiveMemo {
-  overflow-y: auto; /* Allow scrolling when needed */
-  scrollbar-width: none; /* Hide scrollbar for Firefox */
-  -ms-overflow-style: none; /* Hide scrollbar for IE/Edge (older versions) */
 }
 
 #sendMemo::-webkit-scrollbar,
@@ -4534,7 +4525,6 @@ small {
   position: relative;
   top: 0;
   left: 0;
-  margin-top: 8px;
   margin-bottom: 1.5rem;
   font-size: 0.8rem;
   line-height: 1.3;
