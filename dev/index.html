@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.07.09.11.02" />
+    <link rel="stylesheet" href="./styles.css?v=2025.07.09.19.03" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.07.09.11.02" type="module"></script>
+    <script src="./app.js?v=2025.07.09.19.03" type="module"></script>
     <div class="container">
       <header class="header" id="header">
         <div id="logo">
@@ -217,9 +217,11 @@
           <li class="menu-item" id="openExportForm" data-icon="download">Backup</li>
           <li class="menu-item" id="openValidator" data-icon="shield">Validator</li>
           <li class="menu-item" id="openInvite" data-icon="mail">Invite</li>
+          <li class="menu-item" id="openBridge" data-icon="arrow-right-arrow-left">Bridge</li>
           <!--                <li class="menu-item" id="openSettings">Settings</li> -->
           <li class="menu-item" id="openExplorer" data-icon="search">Explorer</li>
           <li class="menu-item" id="openMonitor" data-icon="globe">Network</li>
+          <li class="menu-item" id="openLockModal" data-icon="lock">Lock</li>
           <!--<li class="menu-item" id="openImportFormMenu">Import</li>-->
           <li class="menu-item" id="openRemoveAccount" data-icon="trash-2">Remove</li>
           <li class="menu-item" id="openContact" data-icon="phone">Contact Us</li>
@@ -273,9 +275,9 @@
               <a class="about-link" href="index.html.txt" target="_blank">index.html</a>
               <a class="about-link" href="styles.css" target="_blank">styles.css</a>
               <a class="about-link" href="app.js" target="_blank">app.js</a>
-              <a class="about-link" href="crypto.js?v=2025.07.09.11.02" target="_blank">crypto.js</a>
-              <a class="about-link" href="lib.js?v=2025.07.09.11.02" target="_blank">lib.js</a>
-              <a class="about-link" href="network.js?v=2025.07.09.11.02" target="_blank">network.js</a>
+              <a class="about-link" href="crypto.js?v=2025.07.09.19.03" target="_blank">crypto.js</a>
+              <a class="about-link" href="lib.js?v=2025.07.09.19.03" target="_blank">lib.js</a>
+              <a class="about-link" href="network.js" target="_blank">network.js</a>
             </div>
 
             <div class="about-external-links">
@@ -288,6 +290,56 @@
               <a class="about-link" href="./external/qr.js" target="_blank">qr.js</a>
             </div>
           </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Lock Modal -->
+      <div class="modal" id="lockModal">
+      <div class="modal-header">
+        <button class="back-button" id="closeLockModal"></button>
+        <div class="modal-title">Lock</div>
+      </div>
+      <!-- description and warning to let user know if passworrd is lost they will not be able to access their account -->
+      <div class="form-container">
+        <p>Setting a password will lock all of your accounts when you sign out. You will need to enter the password to unlock.</p>
+        <p>If you lose your password, you will not be able to access your accounts.</p>
+        <p>If you are sure you want to lock your app, please enter your password below.</p>
+      </div>
+      <div class="form-container">
+        <form id="lockForm">
+          <div class="form-group">
+            <!-- old password input default to hidden -->
+            <label for="oldPassword" id="oldPasswordLabel" style="display: none;">Current Password</label>
+            <input type="password" id="oldPassword" class="form-control" style="display: none;" />
+            <!-- new password input -->
+            <label for="newPassword">Password</label>
+            <small id="passwordWarning" style="display: none;"></small>
+            <input type="password" id="newPassword" class="form-control" />
+            <!-- confirm new password input -->
+            <label for="confirmNewPassword">Confirm Password</label>
+            <input type="password" id="confirmNewPassword" class="form-control" />
+          </div>
+          <button type="submit" class="update-button" disabled>Save Password</button>
+        </form>
+      </div>
+      <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Unlock Modal -->
+      <div class="modal" id="unlockModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeUnlockModal"></button>
+          <div class="modal-title">Unlock</div>
+        </div>
+        <div class="form-container">
+          <form id="unlockForm">
+            <div class="form-group">
+              <label for="password">Password</label>
+              <input type="password" id="password" class="form-control" required />
+            </div>
+            <button type="submit" class="update-button" disabled>Unlock</button>
+          </form>
         </div>
         <a class="last-item" href="#"> </a>
       </div>
@@ -1275,6 +1327,19 @@
             </div>
             <button type="submit" class="update-button">Send Invitation</button>
           </form>
+          <a class="last-item" href="#"></a>
+        </div>
+      </div>
+
+      <!-- Bridge Modal -->
+      <div class="modal" id="bridgeModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeBridgeModal"></button>
+          <div class="modal-title">Bridge</div>
+        </div>
+        <div class="form-container" style="padding: 1rem">
+          <button id="bridgeToPolygon" class="update-button" style="margin-bottom: 1rem">To Polygon Network</button>
+          <button id="bridgeFromPolygon" class="update-button">From Polygon Network</button>
           <a class="last-item" href="#"></a>
         </div>
       </div>
