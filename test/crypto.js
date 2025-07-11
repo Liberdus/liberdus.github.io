@@ -68,33 +68,65 @@ export function decryptChacha(key, encrypted) {
 
 // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
 // Encrypt data using ChaCha20-Poly1305
-export async function encryptData(data, password) {
+export function encryptData(data, password, nostretch) {
     if (!password) return data;
 
-    // Derive key using 100,000 iterations of blake2b
     let key = utf82bin(password);
-    for (let i = 0; i < 100000; i++) {
-        key = blake.blake2b(key, null, 32);
+    key = blake.blake2b(key, null, 32)
+    const iterations = 100000;
+    const batchSize = 1000;
+
+    if (!nostretch){
+        for (let i = 0; i < iterations; i++) {
+            key = blake.blake2b(key, null, 32);
+/*
+            // Yield every batch to avoid blocking Safari
+            if (i % batchSize === 0) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+*/
+        }
     }
 
-    // Encrypt the data using ChaCha20-Poly1305
     const encrypted = encryptChacha(key, data);
     return encrypted;
 }
 
 // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
 // Decrypt data using ChaCha20-Poly1305
-export async function decryptData(encryptedData, password) {
+export function decryptData(encryptedData, password, nostretch) {
     if (!password) return encryptedData;
 
     // Generate key using 100,000 iterations of blake2b
     let key = utf82bin(password);
-    for (let i = 0; i < 100000; i++) {
-        key = blake.blake2b(key, null, 32);
+    key = blake.blake2b(key, null, 32);
+    if (!nostretch) {
+        for (let i = 0; i < 100000; i++) {
+            key = blake.blake2b(key, null, 32);
+        }
     }
 
     // Decrypt the data using ChaCha20-Poly1305
     return decryptChacha(key, encryptedData);
+}
+
+export async function passwordToKey(password) {
+    if (!password) return null;
+
+    let key = utf82bin(password);
+    const iterations = 100000;
+    const batchSize = 1000;
+
+    for (let i = 0; i < iterations; i++) {
+        key = blake.blake2b(key, null, 32);
+
+        // Yield every batch to avoid blocking Safari
+        if (i % batchSize === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+    }
+
+    return bin2hex(key);
 }
 
 // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable

@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'z'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -119,6 +119,7 @@ import {
   generatePQKeys,
   generateRandomBytes,
   generateAddress,
+  passwordToKey,
 } from './crypto.js';
 
 // Put standalone conversion function in lib.js
@@ -135,9 +136,11 @@ import {
   normalizeAddress,
   longAddress,
   utf82bin,
+  bin2utf8,
   bigxnum2big,
   big2str,
   bin2base64,
+  base642bin,
   hex2bin,
   bin2hex,
   linkifyUrls,
@@ -155,6 +158,7 @@ const pollIntervalChatting = 5000; // in millseconds
 //network.explorer.url = "http://test.liberdus.com:6001"   // URL of the chain explorer
 const MAX_MEMO_BYTES = 1000; // 1000 bytes for memos
 const MAX_CHAT_MESSAGE_BYTES = 1000; // 1000 bytes for chat messages
+const BRIDGE_USERNAME = 'liberdusbridge';
 
 let myData = null;
 let myAccount = null; // this is set to myData.account for convience
@@ -321,6 +325,73 @@ function newDataRecord(myAccount) {
   return myData;
 }
 
+/**
+ * Handle native app subscription tokens and handle subscription
+ * This is used to subscribe to push notifications for the native app
+ * @returns {Promise<void>}
+ */
+async function handleNativeAppSubscription() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const deviceToken = urlParams.get('device_token');
+  const pushToken = urlParams.get('push_token');
+  
+  if (deviceToken && pushToken) {
+    console.log('Native app subscription tokens detected:', { deviceToken, pushToken });
+    
+    try {
+      // Get the user's address from localStorage if available
+      const { netid } = network;
+      const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+      const netidAccounts = existingAccounts.netids[netid];
+      
+      let addresses = [];
+      if (netidAccounts?.usernames) {
+        // Get addresses from all stored accounts and convert to long format
+        addresses = Object.values(netidAccounts.usernames).map(account => longAddress(account.address));
+      }
+      
+      const payload = {
+        deviceToken,
+        expoPushToken: pushToken,
+        addresses: addresses
+      };
+      
+      // Get the appropriate gateway for this request
+      const selectedGateway = getGatewayForRequest();
+      if (!selectedGateway) {
+        console.error('No gateway available for subscription request');
+        showToast('No gateway available', 3000, 'error');
+        return;
+      }
+      
+      const SUBSCRIPTION_API = `${selectedGateway.web}/notifier/subscribe`;
+
+      console.log('payload', payload);
+      console.log('SUBSCRIPTION_API', SUBSCRIPTION_API);
+      
+      const response = await fetch(SUBSCRIPTION_API, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Subscription successful:', result);
+        /* showToast('Push notifications enabled', 3000, 'success'); */
+      } else {
+        console.error('Subscription failed:', response.status, response.statusText);
+        /* showToast('Failed to enable push notifications', 3000, 'error'); */
+      }
+    } catch (error) {
+      console.error('Error subscribing to push notifications:', error);
+      /* showToast('Error enabling push notifications', 3000, 'error'); */
+    }
+  }
+}
+
 // Load saved account data and update chat list on page load
 document.addEventListener('DOMContentLoaded', async () => {
   await checkVersion(); // version needs to be checked before anything else happens
@@ -328,10 +399,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   setupConnectivityDetection();
 
-  // Add unload handler to save myData
-  window.addEventListener('unload', handleUnload);
+  // Add beforeunload handler to save myData; don't use unload event, it is getting depricated
   window.addEventListener('beforeunload', handleBeforeUnload);
-  document.addEventListener('visibilitychange', handleVisibilityChange); // Keep as document
+  document.addEventListener('visibilitychange', async () => await handleVisibilityChange()); // Keep as document
+
+  // Check for native app subscription tokens and handle subscription
+  handleNativeAppSubscription();
+
+  // Unlock Modal
+  unlockModal.load();
 
   // Sign In Modal
   signInModal.load();
@@ -356,7 +432,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // About and Contact Modals
   aboutModal.load();
-  contactModal.load();
+  helpModal.load();
 
   // Create Account Modal
   createAccountModal.load();
@@ -429,6 +505,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Friend Modal
   friendModal.load();
 
+  // Bridge Modal
+  bridgeModal.load();
+
+  // Lock Modal
+  lockModal.load();
+
   // add event listener for back-button presses to prevent shift+tab
   document.querySelectorAll('.back-button').forEach((button) => {
     button.addEventListener('keydown', ignoreShiftTabKey);
@@ -446,6 +528,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   //setupAddToHomeScreen();
 });
 
+/* this is no longer used; using handleBeforeUnload instead
 function handleUnload() {
   console.log('in handleUnload');
   if (menuModal.isSignoutExit) {
@@ -457,28 +540,29 @@ function handleUnload() {
       wsManager.disconnect();
       wsManager = null;
     }
-
-    saveState();
   }
 }
+*/
 
 // Add unload handler to save myData
 function handleBeforeUnload(e) {
+  if (menuModal.isSignoutExit){
+    window.removeEventListener('beforeunload', handleBeforeUnload);
+    if (wsManager) {
+      wsManager.disconnect();
+      wsManager = null;
+    }
+    return;
+  }
+  e.preventDefault();
+  saveState();    // This save might not work if the amount of data to save is large and user quickly clicks on Leave button
   console.log('in handleBeforeUnload', e);
   // Clean up WebSocket connection
-  if (wsManager) {
-    wsManager.disconnect();
-    wsManager = null;
-  }
 
-  saveState();
-  if (menuModal.isSignoutExit) {
-    window.removeEventListener('beforeunload', handleBeforeUnload);
-    return;
-  } // user selected to Signout; state was already saved
+
   console.log('stop back button');
-  e.preventDefault();
-  history.pushState(null, '', window.location.href);
+//  history.pushState(null, '', window.location.href);
+//  console.log('already called history.pushState')
 }
 
 // This is for installed apps where we can't stop the back button; just save the state
@@ -489,7 +573,6 @@ async function handleVisibilityChange() {
   }
 
   if (document.visibilityState === 'hidden') {
-    saveState();
     // if chatModal was opened, save the last message count
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
@@ -515,13 +598,86 @@ async function handleVisibilityChange() {
   }
 }
 
+async function encryptAllAccounts(oldPassword, newPassword) {
+  const oldEncKey = !oldPassword ? null : await passwordToKey(oldPassword+'liberdusData');
+  const newEncKey = !newPassword ? null : await passwordToKey(newPassword+'liberdusData');
+  // Get all accounts from localStorage
+  const accountsObj = parse(localStorage.getItem('accounts') || 'null');
+  if (!accountsObj.netids) return;
+
+  console.log('looping through all netids')
+  for (const netid in accountsObj.netids) {
+    const usernamesObj = accountsObj.netids[netid]?.usernames;
+    if (!usernamesObj) continue;
+    console.log('looping through all accounts for '+netid)
+    for (const username in usernamesObj) {
+      const key = `${username}_${netid}`;
+      let data = localStorage.getItem(key);
+      if (!data) continue;
+      console.log('about to reencrypt '+key)
+
+      // If oldEncKey is set, decrypt; otherwise, treat as plaintext
+      if (oldEncKey) {
+        try {
+          data = decryptData(data, oldEncKey, true);
+        } catch (e) {
+          console.error(`Failed to decrypt data for ${key}:`, e);
+          continue;
+        }
+      }
+
+      /*
+      // If data is still not an object, parse it
+      let parsedData;
+      try {
+        parsedData = typeof data === 'string' ? parse(data) : data;
+      } catch (e) {
+        console.error(`Failed to parse data for ${key}:`, e);
+        continue;
+      }
+
+      // Stringify for storage
+      let newData = stringify(parsedData);
+      */
+      let newData = data;
+
+      // If newEncKey is set, encrypt; otherwise, store as plaintext
+      if (newEncKey) {
+        try {
+          newData = encryptData(newData, newEncKey, true);
+        } catch (e) {
+          console.error(`Failed to encrypt data for ${key}:`, e);
+          continue;
+        }
+      }
+
+      // Save to localStorage (encrypted version uses _ suffix)
+      localStorage.setItem(`${key}`, newData);
+    }
+  }
+}
+
 function saveState() {
   console.log('in saveState');
   if (myData && myAccount && myAccount.username && myAccount.netid) {
     console.log('saving state');
-    localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
+    let data = stringify(myData)
+    if (localStorage.lock && lockModal.encKey){  // Consider what happens if localStorage.lock was manually deleted
+      data = encryptData(data, lockModal.encKey, true)
+    }
+    localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, data);
   }
 }
+
+function loadState(account){
+  let data = localStorage.getItem(account);
+  if (!data) { return null; }
+  if (localStorage.lock && lockModal.encKey) {
+    data = decryptData(data, lockModal.encKey, true)
+  }
+  return parse(data);
+}
+
 
 class WelcomeScreen {
   constructor() {}
@@ -537,17 +693,31 @@ class WelcomeScreen {
     this.versionDisplay = document.getElementById('versionDisplay');
     this.networkNameDisplay = document.getElementById('networkNameDisplay');
     this.lastItem = document.getElementById('welcomeScreenLastItem');
+    this.openBackupModalButton = document.getElementById('openBackupModalButton');
     
     
     this.versionDisplay.textContent = myVersion + ' ' + version;
     this.networkNameDisplay.textContent = network.name;
     
-    this.signInButton.addEventListener('click', () => signInModal.open());
-    this.createAccountButton.addEventListener('click', () => createAccountModal.openWithReset());
+    this.signInButton.addEventListener('click', () => {
+      if (localStorage.lock && unlockModal.isLocked()) {
+        unlockModal.openButtonElementUsed = this.signInButton;
+        unlockModal.open();
+      } else {
+        signInModal.open();
+      }
+    });
+    this.createAccountButton.addEventListener('click', () => {
+      if (localStorage.lock && unlockModal.isLocked()) {
+        unlockModal.openButtonElementUsed = this.createAccountButton;
+        unlockModal.open();
+      } else {
+        createAccountModal.openWithReset();
+      }
+    });
     this.importAccountButton.addEventListener('click', () => restoreAccountModal.open());
 
     this.orderButtons();
-    
   }
 
   open() {
@@ -577,6 +747,8 @@ class WelcomeScreen {
       this.welcomeButtons.appendChild(this.importAccountButton);
       this.signInButton.classList.add('primary-button');
       this.signInButton.classList.remove('secondary-button');
+      this.openBackupModalButton.classList.remove('hidden');
+      this.welcomeButtons.appendChild(this.openBackupModalButton);
     } else {
       this.welcomeButtons.innerHTML = ''; // Clear existing order
       this.createAccountButton.classList.remove('hidden');
@@ -585,6 +757,8 @@ class WelcomeScreen {
       this.welcomeButtons.appendChild(this.importAccountButton);
       this.createAccountButton.classList.add('primary-button');
       this.createAccountButton.classList.remove('secondary-button');
+      this.openBackupModalButton.classList.remove('hidden');
+      this.welcomeButtons.appendChild(this.openBackupModalButton);
     }
   }
 }
@@ -1007,8 +1181,8 @@ class ContactsScreen {
     // Group metadata for rendering
     const groupMeta = [
       { key: 'friends', label: 'Friends', itemClass: 'chat-item' },
-      { key: 'acquaintances', label: 'Acquaintances', itemClass: 'chat-item' },
-      { key: 'others', label: 'Others', itemClass: 'chat-item' },
+      { key: 'acquaintances', label: 'Connections', itemClass: 'chat-item' },
+      { key: 'others', label: 'Tolled', itemClass: 'chat-item' },
       { key: 'blocked', label: 'Blocked', itemClass: 'chat-item blocked' },
     ];
 
@@ -1084,28 +1258,33 @@ class MenuModal {
     this.networkButton.addEventListener('click', () => {window.open('./network', '_blank');});
     this.removeButton = document.getElementById('openRemoveAccount');
     this.removeButton.addEventListener('click', () => removeAccountModal.open());
-    this.contactUsButton = document.getElementById('openContact');
-    this.contactUsButton.addEventListener('click', () => contactModal.open());
+    this.helpButton = document.getElementById('openHelp');
+    this.helpButton.addEventListener('click', () => helpModal.open());
     this.aboutButton = document.getElementById('openAbout');
     this.aboutButton.addEventListener('click', () => aboutModal.open());
     this.signOutButton = document.getElementById('handleSignOut');
-    this.signOutButton.addEventListener('click', () => this.handleSignOut());
+    this.signOutButton.addEventListener('click', async () => await this.handleSignOut());
+    this.backupButton = document.getElementById('openBackupModalButton');
+    this.backupButton.addEventListener('click', () => backupAccountModal.open());
+    this.bridgeButton = document.getElementById('openBridge');
+    this.bridgeButton.addEventListener('click', () => bridgeModal.open());
   }
 
   open() {
     this.modal.classList.add('active');
+    enterFullscreen();
   }
 
   close() {
-    
-    this.modal.classList.remove('active');  
+    this.modal.classList.remove('active');
+    enterFullscreen();
   }
 
   isActive() {
     return this.modal.classList.contains('active');
   }
   
-  handleSignOut() {
+  async handleSignOut() {
     // Clear intervals
     if (updateWebSocketIndicatorIntervalId && wsManager) {
       clearInterval(updateWebSocketIndicatorIntervalId);
@@ -1132,6 +1311,9 @@ class MenuModal {
       wsManager.disconnect();
       wsManager = null;
     }
+
+    // Lock the app
+    unlockModal.lock();
 
     // Save myData to localStorage if it exists
     saveState();
@@ -1354,7 +1536,7 @@ function createNewContact(addr, username, friendStatus = 1) {
 
 /**
  * updateTollAmountUI updates the toll amount UI for a given contact
- * sets contactModal.toll and contactModal.tollUnit to the bigint toll and string tollUnit of the contact
+ * sets chatModal.toll and chatModal.tollUnit to the bigint toll and string tollUnit of the contact
  * @param {string} address - the address of the contact
  * @returns {void}
  */
@@ -1811,6 +1993,9 @@ class SignInModal {
     if (event) {
       event.preventDefault();
     }
+
+    enterFullscreen();
+    
     const username = this.usernameSelect.value;
 
     // Get network ID from network.js
@@ -1827,7 +2012,8 @@ class SignInModal {
 
     // Check if the button text is 'Recreate'
     if (this.submitButton.textContent === 'Recreate') {
-      const myData = parse(localStorage.getItem(`${username}_${netid}`));
+//      const myData = parse(localStorage.getItem(`${username}_${netid}`));
+      const myData = loadState(`${username}_${netid}`);
       const privateKey = myData.account.keys.secret;
       createAccountModal.usernameInput.value = username;
 
@@ -1839,7 +2025,7 @@ class SignInModal {
       return;
     }
 
-    myData = parse(localStorage.getItem(`${username}_${netid}`));
+    myData = loadState(`${username}_${netid}`)
     if (!myData) {
       console.log('Account data not found');
       return;
@@ -2146,6 +2332,7 @@ class FriendModal {
       type: 'update_toll_required',
       timestamp: getCorrectedTimestamp(),
       friend: friend,
+      networkId: network.netid,
     };
     const txid = await signObj(tx, myAccount.keys);
     const res = await injectTx(tx, txid);
@@ -2186,9 +2373,9 @@ class FriendModal {
       contact.friend === 0
         ? 'Blocked'
         : contact.friend === 1
-          ? 'Added as Other'
+          ? 'Added as Tolled'
           : contact.friend === 2
-            ? 'Added as Acquaintance'
+            ? 'Added as Connection'
             : contact.friend === 3
               ? 'Added as Friend'
               : 'Error updating friend status'
@@ -2197,8 +2384,9 @@ class FriendModal {
     // Mark that we need to update the contact list
     this.needsContactListUpdate = true;
 
+    // TODO - do we really need to saveState here
     // Save state
-    saveState();
+//    saveState();
 
     // Update the friend button
     this.updateFriendButton(contact, 'addFriendButtonContactInfo');
@@ -2904,6 +3092,7 @@ async function processChats(chats, keys) {
           payload.my = false;
           payload.timestamp = payload.sent_timestamp;
           payload.txid = getTxid(tx);
+          delete payload.pqEncSharedKey; 
           insertSorted(contact.messages, payload, 'timestamp');
           // if we are not in the chatModal of who sent it, playChatSound or if device visibility is hidden play sound
           if (!inActiveChatWithSender || document.visibilityState === 'hidden') {
@@ -2935,6 +3124,7 @@ async function processChats(chats, keys) {
           }
           //console.log("payload", payload)
           decryptMessage(payload, keys); // modifies the payload object
+          delete payload.pqEncSharedKey;
           if (payload.senderInfo) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
@@ -3182,6 +3372,7 @@ async function postAssetTransfer(to, amount, memo, keys) {
     timestamp: getCorrectedTimestamp(),
     network: NETWORK_ACCOUNT_ID,
     fee: parameters.current.transactionFee || 1n * wei, // This is not used by the backend
+    networkId: network.netid,
   };
 
   const txid = await signObj(tx, keys);
@@ -3203,6 +3394,7 @@ async function postRegisterAlias(alias, keys) {
     publicKey: keys.public,
     pqPublicKey: pqPublicKey,
     timestamp: getCorrectedTimestamp(),
+    networkId: network.netid,
   };
   const txid = await signObj(tx, keys);
   const res = await injectTx(tx, txid);
@@ -4684,7 +4876,13 @@ class BackupAccountModal {
     // called when the DOM is loaded; can setup event handlers here
     this.modal = document.getElementById('exportModal');
     document.getElementById('closeExportForm').addEventListener('click', () => this.close());
-    document.getElementById('exportForm').addEventListener('submit', (event) => this.handleSubmit(event));
+    document.getElementById('exportForm').addEventListener('submit', (event) => {
+      if (myData) {
+        this.handleSubmitOne(event);
+      } else {
+        this.handleSubmitAll(event);
+      }
+    });
   }
 
   open() {
@@ -4697,7 +4895,7 @@ class BackupAccountModal {
     this.modal.classList.remove('active');
   }
 
-  async handleSubmit(event) {
+  async handleSubmitOne(event) {
     event.preventDefault();
 
     const password = document.getElementById('exportPassword').value;
@@ -4705,14 +4903,14 @@ class BackupAccountModal {
 
     try {
       // Encrypt data if password is provided
-      const finalData = password ? await encryptData(jsonData, password) : jsonData;
+      const finalData = password ? encryptData(jsonData, password) : jsonData;
 
       // Create and trigger download
       const blob = new Blob([finalData], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${myAccount.username}-liberdus-${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `liberdus-${myAccount.username}-${new Date().toISOString().split('T')[0]}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -4725,20 +4923,103 @@ class BackupAccountModal {
       showToast('Failed to encrypt data. Please try again.', 0, 'error');
     }
   }
+
+  async handleSubmitAll(event) {
+    event.preventDefault();
+
+    const password = document.getElementById('exportPassword').value;
+    const myLocalStore = this.copyLocalStorageToObject();
+//    console.log(myLocalStore);
+    const jsonData = stringify(myLocalStore, null, 2);
+
+    try {
+      // Encrypt data if password is provided
+      const finalData = password ? encryptData(jsonData, password) : jsonData;
+
+      // Create and trigger download
+      const blob = new Blob([finalData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `liberdus-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      // Close export modal
+      this.close();
+    } catch (error) {
+      console.error('Encryption failed:', error);
+      showToast('Failed to encrypt data. Please try again.', 0, 'error');
+    }
+  }
+
+  copyLocalStorageToObject() {
+    const myLocalStore = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      myLocalStore[key] = localStorage.getItem(key);
+    }
+    return myLocalStore;
+  }  
 }
 const backupAccountModal = new BackupAccountModal();
 
 class RestoreAccountModal {
-  constructor() {}
+  constructor() {
+    this.developerOptionsEnabled = false;
+    this.netids = []; // Will be populated from network.js
+  }
 
   load() {
     // called when the DOM is loaded; can setup event handlers here
     this.modal = document.getElementById('importModal');
-    document.getElementById('closeImportForm').addEventListener('click', () => this.close());
-    document.getElementById('importForm').addEventListener('submit', (event) => this.handleSubmit(event));
+    this.developerOptionsToggle = document.getElementById('developerOptionsToggle');
+    this.oldStringSelect = document.getElementById('oldStringSelect');
+    this.oldStringCustom = document.getElementById('oldStringCustom');
+    this.newStringSelect = document.getElementById('newStringSelect');
+    this.newStringCustom = document.getElementById('newStringCustom');
+    this.closeImportForm = document.getElementById('closeImportForm');
+    this.importForm = document.getElementById('importForm');
+    this.fileInput = document.getElementById('importFile');
+    this.passwordInput = document.getElementById('importPassword');
+    this.developerOptionsSection = document.getElementById('developerOptionsSection');
+
+    this.closeImportForm.addEventListener('click', () => this.close());
+    this.importForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    
+    // Add new event listeners for developer options
+    this.developerOptionsToggle.addEventListener('change', (e) => this.toggleDeveloperOptions(e));
+    // setup mutual exclusion for the developer options
+    this.setupMutualExclusion(this.oldStringSelect, this.oldStringCustom);
+    this.setupMutualExclusion(this.newStringSelect, this.newStringCustom);
+    
+    // Populate netid dropdowns
+    this.populateNetidDropdowns();
+  }
+
+  setupMutualExclusion(selectElement, inputElement) {
+    selectElement.addEventListener('change', (e) => {
+      if (e.target.value) {
+        inputElement.disabled = true;
+        inputElement.value = '';
+      } else {
+        inputElement.disabled = false;
+      }
+    });
+  
+    inputElement.addEventListener('change', (e) => {
+      if (e.target.value.trim()) {
+        selectElement.value = '';
+      }
+    });
   }
 
   open() {
+    // have developer options toggle unchecked and clear any previous inputs
+    this.clearForm();
+
     // called when the modal needs to be opened
     this.modal.classList.add('active');
   }
@@ -4746,59 +5027,130 @@ class RestoreAccountModal {
   close() {
     // called when the modal needs to be closed
     this.modal.classList.remove('active');
+    this.clearForm();
+  }
+
+  // toggle the developer options section
+  toggleDeveloperOptions(event) {
+    this.developerOptionsEnabled = event.target.checked;
+    this.developerOptionsSection.style.display = this.developerOptionsEnabled ? 'block' : 'none';
+  }
+
+  // populate the netid dropdowns
+  populateNetidDropdowns() {
+    // get all netids from network.js
+    const allNetids = [...new Set([network.netid, ...(network?.netids || [])])]; // Remove duplicates with Set
+    // remove any null or undefined netids
+    allNetids.filter(Boolean).forEach(netid => {
+      this.oldStringSelect.add(new Option(netid, netid));
+      this.newStringSelect.add(new Option(netid, netid));
+    });
+  }
+
+  // get the string substitution
+  getStringSubstitution() {
+    if (!this.developerOptionsEnabled) return null;
+    
+    const oldString = this.oldStringSelect.value || 
+                     this.oldStringCustom.value.trim();
+    const newString = this.newStringSelect.value || 
+                     this.newStringCustom.value.trim();
+    
+    if (oldString && newString && oldString !== newString) {
+      return { oldString, newString };
+    }
+    
+    return null;
+  }
+
+  // perform the string substitution
+  performStringSubstitution(fileContent, substitution) {
+    if (!substitution) return fileContent;
+
+    // Count occurrences before replacement
+    const regex = new RegExp(substitution.oldString, 'g');
+    const matches = fileContent.match(regex);
+    const matchCount = matches ? matches.length : 0;
+    
+    // Global string replacement (like sed -i 's/old/new/g')
+    const modifiedContent = fileContent.replace(regex, substitution.newString);
+    
+    // Provide feedback about the substitution
+    if (matchCount > 1) {
+      console.log(`✅ Applied substitution: ${substitution.oldString} → ${substitution.newString} (${matchCount} occurrences)`);
+    } else {
+      const reason = matchCount === 1 ? 'Only 1 match found' : 'No matches found';
+      console.log(`⚠️ ${reason} for: ${substitution.oldString}`);
+      this.clearForm();
+      throw new Error(`${reason} - import cancelled for data integrity`);
+    }
+    
+    return modifiedContent;
   }
 
   async handleSubmit(event) {
     event.preventDefault();
-    const fileInput = document.getElementById('importFile');
-    const passwordInput = document.getElementById('importPassword');
 
     try {
       // Read the file
-      const file = fileInput.files[0];
+      const file = this.fileInput.files[0];
       let fileContent = await file.text();
       const isNotEncryptedData = fileContent.match('{');
 
       // Check if data is encrypted and decrypt if necessary
       if (!isNotEncryptedData) {
-        if (!passwordInput.value.trim()) {
+        if (!this.passwordInput.value.trim()) {
           showToast('Password required for encrypted data', 3000, 'error');
           return;
         }
-        fileContent = await decryptData(fileContent, passwordInput.value.trim());
+        fileContent = decryptData(fileContent, this.passwordInput.value.trim());
         if (fileContent == null) {
           throw '';
         }
       }
 
+      // Apply string substitution if developer options are enabled
+      const substitution = this.getStringSubstitution();
+      if (substitution) {
+        fileContent = this.performStringSubstitution(fileContent, substitution);
+        console.log(`Applied substitution: ${substitution.oldString} → ${substitution.newString}`);
+      }
+
       // We first parse to jsonData so that if the parse does not work we don't destroy myData
       myData = parse(fileContent);
-      // also need to set myAccount
-      const acc = myData.account; // this could have other things which are not needed
-      myAccount = {
-        netid: acc.netid,
-        username: acc.username,
-        keys: {
-          address: acc.keys.address,
-          public: acc.keys.public,
-          secret: acc.keys.secret,
-          type: acc.keys.type,
-        },
-      };
-      // Get existing accounts or create new structure
-      const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-      // Ensure netid exists
-      if (!existingAccounts.netids[myAccount.netid]) {
-        existingAccounts.netids[myAccount.netid] = { usernames: {} };
-      }
-      // Store updated accounts back in localStorage
-      existingAccounts.netids[myAccount.netid].usernames[myAccount.username] = {
-        address: myAccount.keys.address,
-      };
-      localStorage.setItem('accounts', stringify(existingAccounts));
 
-      // Store the localStore entry for username_netid
-      localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
+      if (myData.version) {
+        localStorage.clear();
+        this.copyObjectToLocalStorage(myData);
+      }
+      else {
+        // also need to set myAccount
+        const acc = myData.account; // this could have other things which are not needed
+        myAccount = {
+          netid: acc.netid,
+          username: acc.username,
+          keys: {
+            address: acc.keys.address,
+            public: acc.keys.public,
+            secret: acc.keys.secret,
+            type: acc.keys.type,
+          },
+        };
+        // Get existing accounts or create new structure
+        const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+        // Ensure netid exists
+        if (!existingAccounts.netids[myAccount.netid]) {
+          existingAccounts.netids[myAccount.netid] = { usernames: {} };
+        }
+        // Store updated accounts back in localStorage
+        existingAccounts.netids[myAccount.netid].usernames[myAccount.username] = {
+          address: myAccount.keys.address,
+        };
+        localStorage.setItem('accounts', stringify(existingAccounts));
+
+        // Store the localStore entry for username_netid
+        localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
+      }
 
       // Show success message using toast
       showToast('Account restored successfully!', 2000, 'success');
@@ -4807,13 +5159,32 @@ class RestoreAccountModal {
       setTimeout(() => {
         this.close();
         window.location.reload(); // need to go through Sign In to make sure imported account exists on network
-        fileInput.value = '';
-        passwordInput.value = '';
+        this.clearForm();
       }, 2000);
     } catch (error) {
       showToast(error.message || 'Import failed. Please check file and password.', 3000, 'error');
     }
   }
+
+  clearForm() {
+    this.fileInput.value = '';
+    this.passwordInput.value = '';
+    this.developerOptionsToggle.checked = false;
+    this.oldStringCustom.value = '';
+    this.newStringCustom.value = '';
+    this.oldStringSelect.value = '';
+    this.newStringSelect.value = '';
+    // hide the developer options section
+    this.developerOptionsSection.style.display = 'none';
+  }
+
+  copyObjectToLocalStorage(obj) {
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        localStorage.setItem(key, obj[key]);
+      }
+    }
+  }  
 }
 const restoreAccountModal = new RestoreAccountModal();
 
@@ -5017,6 +5388,7 @@ class TollModal {
       type: 'toll',
       timestamp: getCorrectedTimestamp(),
       tollUnit: tollUnit,
+      networkId: network.netid,
     };
 
     const txid = await signObj(tollTx, myAccount.keys);
@@ -5227,12 +5599,12 @@ class AboutModal {
 }
 const aboutModal = new AboutModal();
 
-class ContactModal {
+class HelpModal {
   constructor() {}
 
   load() {
-    this.modal = document.getElementById('contactModal');
-    this.closeButton = document.getElementById('closeContactModal');
+    this.modal = document.getElementById('helpModal');
+    this.closeButton = document.getElementById('closeHelpModal');
     this.submitFeedbackButton = document.getElementById('submitFeedback');
 
     this.closeButton.addEventListener('click', () => this.close());
@@ -5249,7 +5621,7 @@ class ContactModal {
     this.modal.classList.remove('active');
   }
 }
-const contactModal = new ContactModal();
+const helpModal = new HelpModal();
 
 class MyProfileModal {
   constructor() {}
@@ -5272,6 +5644,7 @@ class MyProfileModal {
 
     // Add input event listeners for validation
     this.name.addEventListener('input', (e) => this.handleNameInput(e));
+    this.name.addEventListener('blur', (e) => this.handleNameBlur(e));
     this.phone.addEventListener('input', (e) => this.handlePhoneInput(e));
     this.phone.addEventListener('blur', (e) => this.handlePhoneBlur(e));
     this.email.addEventListener('input', (e) => this.handleEmailInput(e));
@@ -5286,6 +5659,11 @@ class MyProfileModal {
     // Allow letters, spaces, and basic punctuation
 //    const normalized = e.target.value.replace(/[^a-zA-Z\s\-'.]/g, '');
     const normalized = normalizeName(e.target.value)
+    e.target.value = normalized;
+  }
+
+  handleNameBlur(e) {
+    const normalized = normalizeName(e.target.value, true)
     e.target.value = normalized;
   }
 
@@ -5706,6 +6084,7 @@ class ValidatorStakingModal {
       nominee: nodeAddress,
       force: false,
       timestamp: getCorrectedTimestamp(),
+      networkId: network.netid,
     };
 
     const txid = await signObj(unstakeTx, myAccount.keys);
@@ -5792,7 +6171,7 @@ class StakeValidatorModal {
     this.modal.classList.add('active');
 
     // Set the correct fill function for the staking context
-    scanQRModal.fillFunction = stakeValidatorModal.fillFromQR;
+    scanQRModal.fillFunction = this.fillFromQR.bind(this);
 
     // Display Available Balance
     const libAsset = myData.wallet.assets.find((asset) => asset.symbol === 'LIB');
@@ -5891,6 +6270,7 @@ class StakeValidatorModal {
       nominee: nodeAddress,
       stake: amount,
       timestamp: getCorrectedTimestamp(),
+      networkId: network.netid,
     };
 
     const txid = await signObj(stakeTx, keys);
@@ -6308,6 +6688,7 @@ class ChatModal {
       to: longAddress(contactAddress),
       chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join``),
       timestamp: getCorrectedTimestamp(),
+      networkId: network.netid,
     };
     const txid = await signObj(tx, myAccount.keys);
     const response = await injectTx(tx, txid);
@@ -6379,6 +6760,7 @@ class ChatModal {
       chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join``),
       timestamp: getCorrectedTimestamp(),
       oldContactTimestamp: myData.contacts[contactAddress].timestamp,
+      networkId: network.netid,
     };
     return readTransaction;
   }
@@ -6626,6 +7008,7 @@ class ChatModal {
       timestamp: getCorrectedTimestamp(),
       network: NETWORK_ACCOUNT_ID,
       fee: parameters.current.transactionFee || 1n * wei, // This is not used by the backend
+      networkId: network.netid,
     };
     return tx;
   }
@@ -6784,6 +7167,11 @@ class ChatModal {
    * @returns {void}
    */
   async handleClickToCopy(e) {
+    // Check if the click was on a link - if so, don't copy
+    if (e.target.tagName === 'A' || e.target.closest('a')) {
+      return;
+    }
+    
     const messageEl = e.target.closest('.message');
     if (!messageEl) return;
 
@@ -7332,6 +7720,7 @@ class CreateAccountModal {
 
   open() {
     this.modal.classList.add('active');
+    enterFullscreen();
   }
 
   close() {
@@ -7553,9 +7942,8 @@ class CreateAccountModal {
     try {
       await getNetworkParams();
       const storedKey = `${username}_${netid}`;
-      const storedData = localStorage.getItem(storedKey);
-      if (storedData) {
-        myData = JSON.parse(storedData);
+      myData = loadState(storedKey)
+      if (myData) {
         myAccount = myData.account;
       } else {
         // create new data record if it doesn't exist
@@ -7589,7 +7977,7 @@ class CreateAccountModal {
         }
         await new Promise((resolve) => setTimeout(resolve, 1000));
         if (waitingToastId) hideToast(waitingToastId);
-        showToast('Account created successfully!', 3000, 'success');
+//        showToast('Account created successfully!', 3000, 'success');
         this.reEnableControls();
         this.close();
         welcomeScreen.close();
@@ -7754,7 +8142,7 @@ class SendAssetFormModal {
 
     this.usernameAvailable.style.display = 'none';
     this.submitButton.disabled = true;
-    scanQRModal.fillFunction = sendAssetFormModal.fillFromQR; // set function to handle filling the payment form from QR data
+    scanQRModal.fillFunction = this.fillFromQR.bind(this); // set function to handle filling the payment form from QR data
 
     if (this.username) {
       this.usernameInput.value = this.username;
@@ -8391,7 +8779,7 @@ class SendAssetFormModal {
     try {
       // Remove the prefix and process the base64 data
       const base64Data = data.substring('liberdus://'.length);
-      const jsonData = atob(base64Data);
+      const jsonData = bin2utf8(base642bin(base64Data));
       const paymentData = JSON.parse(jsonData);
 
       console.log('Read payment data:', JSON.stringify(paymentData, null, 2));
@@ -8912,7 +9300,7 @@ class ReceiveModal {
 
       // Convert to JSON and encode as base64
       const jsonData = JSON.stringify(paymentData);
-      const base64Data = btoa(jsonData);
+      const base64Data = bin2base64(utf82bin(jsonData));
 
       // Create URI with liberdus:// prefix
       const qrText = `liberdus://${base64Data}`;
@@ -9142,6 +9530,359 @@ class FailedTransactionModal {
 }
 
 const failedTransactionModal = new FailedTransactionModal();
+
+class BridgeModal {
+  constructor() {}
+
+  load() {
+    this.modal = document.getElementById('bridgeModal');
+    this.closeButton = document.getElementById('closeBridgeModal');
+    this.bridgeToPolygonButton = document.getElementById('bridgeToPolygon');
+    this.bridgeFromPolygonButton = document.getElementById('bridgeFromPolygon');
+
+    this.closeButton.addEventListener('click', () => this.close());
+    this.bridgeFromPolygonButton.addEventListener('click', () => {window.open('./bridge', '_blank');});
+    this.bridgeToPolygonButton.addEventListener('click', () => this.openSendAssetModalToBridge());
+  }
+
+  open() {
+    this.modal.classList.add('active');
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  openSendAssetModalToBridge() {
+    this.close();
+    sendAssetFormModal.open();
+    sendAssetFormModal.usernameInput.value = BRIDGE_USERNAME;
+    sendAssetFormModal.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  
+}
+
+const bridgeModal = new BridgeModal();
+
+/**
+ * Lock Modal
+ * @class
+ * @description A modal for locking the app
+ */
+class LockModal {
+  constructor() {
+    this.encKey = null;
+  }
+
+  load() {
+    this.modal = document.getElementById('lockModal');
+    this.openButton = document.getElementById('openLockModal');
+    this.headerCloseButton = document.getElementById('closeLockModal');
+    this.lockForm = document.getElementById('lockForm');
+    this.oldPasswordInput = this.modal.querySelector('#oldPassword');
+    this.oldPasswordLabel = this.modal.querySelector('#oldPasswordLabel');
+    this.newPasswordInput = this.modal.querySelector('#newPassword');
+    this.confirmNewPasswordInput = this.modal.querySelector('#confirmNewPassword');
+    this.lockButton = this.modal.querySelector('.update-button');
+
+    this.openButton.addEventListener('click', () => this.open());
+    this.headerCloseButton.addEventListener('click', () => this.close());
+    this.lockForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    // dynamic button state
+    this.newPasswordInput.addEventListener('input', () => debounce(this.updateButtonState(), 250));
+    this.confirmNewPasswordInput.addEventListener('input', () => debounce(this.updateButtonState(), 250));
+    this.oldPasswordInput.addEventListener('input', () => debounce(this.updateButtonState(), 250));
+    this.passwordWarning = this.modal.querySelector('#passwordWarning');
+  }
+
+  open() {
+    // if localStorage.lock exists, then show the old password input
+    if (localStorage?.lock) {
+      this.oldPasswordInput.style.display = 'block';
+      this.oldPasswordLabel.style.display = 'block';
+      this.newPasswordInput.placeholder = 'Leave blank to remove password';
+    } else {
+      this.oldPasswordInput.style.display = 'none';
+      this.oldPasswordLabel.style.display = 'none';
+      this.newPasswordInput.placeholder = '';
+      this.lockButton.textContent = 'Save Password';
+    }
+
+    // disable the button
+    this.lockButton.disabled = true;
+
+    this.clearInputs();
+
+    // show the modal
+    this.modal.classList.add('active');
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  async handleSubmit(event) {
+    // disable the button
+    this.lockButton.disabled = true;
+
+    // loading toast
+    let waitingToastId = showToast('Updating password...', 0, 'loading');
+    
+    event.preventDefault();
+    
+    const newPassword = this.newPasswordInput.value;
+    const confirmNewPassword = this.confirmNewPasswordInput.value;
+    const oldPassword = this.oldPasswordInput.value;
+
+    // if old password is visible, check if it is correct
+    if (this.oldPasswordInput.style.display !== 'none') {
+      // check if old password is empty
+      if (oldPassword.length === 0) {
+        showToast('Please enter your old password.', 0, 'error');
+        return;
+      }
+
+      // decrypt the old password
+      const key = await passwordToKey(oldPassword);
+      if (!key) {
+        // remove the loading toast
+        if (waitingToastId) hideToast(waitingToastId);
+        showToast('Invalid password. Please try again.', 0, 'error');
+        return;
+      }
+      if (key !== localStorage.lock) {
+        // remove the loading toast
+        if (waitingToastId) hideToast(waitingToastId);
+        // clear the old password input
+        this.oldPasswordInput.value = '';
+        showToast('Invalid password. Please try again.', 0, 'error');
+        return;
+      }
+    }
+
+    // if new password is empty, remove the password from localStorage
+    // once we are here we know the old password is correct
+    if (newPassword.length === 0) {
+      await encryptAllAccounts(oldPassword, newPassword)
+      delete localStorage.lock;
+      this.encKey = null;
+      // remove the loading toast
+      if (waitingToastId) hideToast(waitingToastId);
+      showToast('Password removed', 2000, 'success');
+      this.close();
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      showToast('Passwords do not match. Please try again.', 0, 'error');
+      return;
+    }
+    
+    try {
+      // encryptData will handle the password hashing internally
+      const key = await passwordToKey(newPassword);
+      if (!key) {
+        // remove the loading toast
+        if (waitingToastId) hideToast(waitingToastId);
+        showToast('Invalid password. Please try again.', 0, 'error');
+        return;
+      }
+
+
+      
+      // Save the key in localStorage with a key of "lock"
+      localStorage.lock = key;
+      this.encKey = await passwordToKey(newPassword+"liberdusData")
+      await encryptAllAccounts(oldPassword, newPassword)
+
+      // remove the loading toast
+      if (waitingToastId) hideToast(waitingToastId);
+      showToast('Password updated', 2000, 'success');
+
+      // clear the inputs
+      this.clearInputs();
+      
+      // Close the modal
+      this.close();
+    } catch (error) {
+      console.error('Encryption failed:', error);
+      showToast('Failed to encrypt password. Please try again.', 0, 'error');
+      // remove the loading toast
+      if (waitingToastId) hideToast(waitingToastId);
+    }
+  }
+
+  async updateButtonState() {
+    const newPassword = this.newPasswordInput.value;
+    const confirmPassword = this.confirmNewPasswordInput.value;
+    const oldPassword = this.oldPasswordInput.value;
+    
+    // Check if old password is filled and new password is empty - "Clear password" mode
+    const isOldPasswordVisible = this.oldPasswordInput.style.display !== 'none';
+    const isClearPasswordMode = isOldPasswordVisible && oldPassword.length > 0 && newPassword.length === 0;
+    
+    let isValid = false;
+    
+    if (isClearPasswordMode) {
+      // In clear password mode, only old password needs to be filled
+      isValid = true;
+      this.lockButton.textContent = 'Remove Password';
+      
+      // Set placeholder based on confirm password state
+      if (confirmPassword.length > 0) {
+        this.newPasswordInput.placeholder = '';
+      } else {
+        this.newPasswordInput.placeholder = 'Leave blank to remove password';
+      }
+    } else {
+      // Regular password set/update mode
+      isValid = newPassword.length > 0 && confirmPassword.length > 0;
+      
+      // If old password field is visible, it must be filled
+      if (isOldPasswordVisible) {
+        isValid = isValid && oldPassword.length > 0;
+      }
+      this.lockButton.textContent = 'Save Password';
+      this.newPasswordInput.placeholder = '';
+    }
+    
+    // Validate password requirements and set appropriate warnings
+    let warningMessage = '';
+    
+    if (!isClearPasswordMode) {
+      // Check if password is at least 4 characters
+      if (newPassword.length > 0 && newPassword.length < 4) {
+        isValid = false;
+        warningMessage = 'Password must be at least 4 characters.';
+      }
+      // Check if passwords match
+      else if (newPassword && confirmPassword && newPassword !== confirmPassword) {
+        isValid = false;
+        warningMessage = 'Password confirmation does not match.';
+      }
+      // Check if new password is same as old password
+      else if (newPassword && oldPassword && newPassword === oldPassword) {
+        isValid = false;
+        warningMessage = 'New password cannot be the same as the old password.';
+      }
+    }
+    
+    // Update button state and warnings
+    this.lockButton.disabled = !isValid;
+    
+    if (warningMessage) {
+      this.passwordWarning.textContent = warningMessage;
+      this.passwordWarning.style.display = 'block';
+    } else {
+      this.passwordWarning.style.display = 'none';
+    }
+  }
+
+  clearInputs() {
+    this.oldPasswordInput.value = '';
+    this.newPasswordInput.value = '';
+    this.confirmNewPasswordInput.value = '';
+  }
+}
+const lockModal = new LockModal();
+
+/**
+ * Unlock Modal
+ * @class
+ * @description A modal for unlocking the app
+ */
+class UnlockModal {
+  constructor() {
+    this.locked = true;
+    // keep track of what button was pressed to open the unlock modal
+    this.openButtonElementUsed = null;
+  }
+
+  load() {
+    this.modal = document.getElementById('unlockModal');
+    this.closeButton = document.getElementById('closeUnlockModal');
+    this.unlockForm = document.getElementById('unlockForm');
+    this.passwordInput = this.modal.querySelector('#password');
+    this.unlockButton = this.modal.querySelector('.update-button');
+
+    this.closeButton.addEventListener('click', () => this.close());
+    this.unlockForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.passwordInput.addEventListener('input', () => this.updateButtonState());
+  }
+
+  open() {
+    this.modal.classList.add('active');
+  }
+
+  close() {
+    this.passwordInput.value = '';
+    this.modal.classList.remove('active');
+  }
+
+  async handleSubmit(event) {
+    // disable the button
+    this.unlockButton.disabled = true;
+
+    // loading toast
+    let waitingToastId = showToast('Checking password...', 0, 'loading');
+
+    event.preventDefault();
+    const password = this.passwordInput.value;
+    const key = await passwordToKey(password);
+    if (!key) {
+      // remove the loading toast
+      if (waitingToastId) hideToast(waitingToastId);
+      showToast('Invalid password. Please try again.', 0, 'error');
+      return;
+    }
+    if (key === localStorage.lock) {
+      // remove the loading toast
+      if (waitingToastId) hideToast(waitingToastId);
+//      showToast('Unlock successful', 2000, 'success');
+      lockModal.encKey = await passwordToKey(password+"liberdusData")
+      this.unlock();
+      this.close();
+      if (this.openButtonElementUsed === welcomeScreen.createAccountButton) {
+        createAccountModal.openWithReset();
+      } else {
+        signInModal.open();
+      }
+    } else {
+      if (waitingToastId) hideToast(waitingToastId);
+      showToast('Invalid password. Please try again.', 0, 'error');
+    }
+
+    // remove the loading toast
+    if (waitingToastId) hideToast(waitingToastId);
+  }
+
+  updateButtonState() {
+    const password = this.passwordInput.value;
+    this.unlockButton.disabled = password.length === 0;
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  isLocked() {
+    return this.locked;
+  }
+
+  lock() {
+    this.locked = true;
+  }
+
+  unlock() {
+    this.locked = false;
+  }
+}
+const unlockModal = new UnlockModal();
 
 /**
  * Remove failed transaction from the contacts messages, pending, and wallet history
@@ -9435,6 +10176,13 @@ async function getNetworkParams() {
     if (fetchedData !== undefined && fetchedData !== null) {
       parameters = fetchedData.account;
       getNetworkParams.timestamp = now;
+      // if network id from network.js is not the same as the parameters.current.networkId
+      if (network.netid !== parameters.networkId) {
+        console.error(`getNetworkParams: Network ID mismatch. Network ID from network.js: ${network.netid}, Network ID from parameters: ${parameters.networkId}`);
+        console.log(parameters)
+        // show toast notification with the error message
+        showToast(`Network ID mismatch. Check network configuration in network.js.`, 0, 'error');
+      }
       return;
     } else {
       console.warn(
@@ -9581,4 +10329,17 @@ function getContactDisplayName(contact) {
   return contact?.name || 
          contact?.username || 
          `${contact?.address?.slice(0, 8)}...${contact?.address?.slice(-6)}`;
+}
+
+function isMobile() {
+  return /Android|webOS|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+function enterFullscreen() {
+  if (isMobile()) {
+  console.log('in enterFullscreen');
+    if (document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen();
+    } 
+  }
 }

@@ -1,11 +1,14 @@
 const network = {
-  "netid": "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b",
+  "netid": "d76b585f8da6d28555c734144d9c965e6d5cb2d4c7248b92265a926408bfece6",
   "name": "Testnet",
   "gateways": [
     {
       "web": "http://localhost:3030",
       "ws": "ws://localhost:3031"
     },
+  ],
+  "netids": [
+    "2f4b9f72089bbfce9f89d3d8e76086daab6ae6f416887c809aab26abb6e5703b", // previous
   ],
 }
 
