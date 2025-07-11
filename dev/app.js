@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'f'
+const version = 'g'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -399,10 +399,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   setupConnectivityDetection();
 
-  // Add unload handler to save myData
-  window.addEventListener('unload', handleUnload);
+  // Add beforeunload handler to save myData; don't use unload event, it is getting depricated
   window.addEventListener('beforeunload', handleBeforeUnload);
-  document.addEventListener('visibilitychange', handleVisibilityChange); // Keep as document
+  document.addEventListener('visibilitychange', async () => await handleVisibilityChange()); // Keep as document
 
   // Check for native app subscription tokens and handle subscription
   handleNativeAppSubscription();
@@ -529,6 +528,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   //setupAddToHomeScreen();
 });
 
+/* this is no longer used; using handleBeforeUnload instead
 function handleUnload() {
   console.log('in handleUnload');
   if (menuModal.isSignoutExit) {
@@ -540,28 +540,29 @@ function handleUnload() {
       wsManager.disconnect();
       wsManager = null;
     }
-
-    saveState();
   }
 }
+*/
 
 // Add unload handler to save myData
 function handleBeforeUnload(e) {
+  if (menuModal.isSignoutExit){
+    window.removeEventListener('beforeunload', handleBeforeUnload);
+    if (wsManager) {
+      wsManager.disconnect();
+      wsManager = null;
+    }
+    return;
+  }
+  e.preventDefault();
+  saveState();    // This save might not work if the amount of data to save is large and user quickly clicks on Leave button
   console.log('in handleBeforeUnload', e);
   // Clean up WebSocket connection
-  if (wsManager) {
-    wsManager.disconnect();
-    wsManager = null;
-  }
 
-  saveState();
-  if (menuModal.isSignoutExit) {
-    window.removeEventListener('beforeunload', handleBeforeUnload);
-    return;
-  } // user selected to Signout; state was already saved
+
   console.log('stop back button');
-  e.preventDefault();
-  history.pushState(null, '', window.location.href);
+//  history.pushState(null, '', window.location.href);
+//  console.log('already called history.pushState')
 }
 
 // This is for installed apps where we can't stop the back button; just save the state
@@ -572,7 +573,6 @@ async function handleVisibilityChange() {
   }
 
   if (document.visibilityState === 'hidden') {
-    saveState();
     // if chatModal was opened, save the last message count
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
@@ -598,13 +598,86 @@ async function handleVisibilityChange() {
   }
 }
 
+async function encryptAllAccounts(oldPassword, newPassword) {
+  const oldEncKey = !oldPassword ? null : await passwordToKey(oldPassword+'liberdusData');
+  const newEncKey = !newPassword ? null : await passwordToKey(newPassword+'liberdusData');
+  // Get all accounts from localStorage
+  const accountsObj = parse(localStorage.getItem('accounts') || 'null');
+  if (!accountsObj.netids) return;
+
+  console.log('looping through all netids')
+  for (const netid in accountsObj.netids) {
+    const usernamesObj = accountsObj.netids[netid]?.usernames;
+    if (!usernamesObj) continue;
+    console.log('looping through all accounts for '+netid)
+    for (const username in usernamesObj) {
+      const key = `${username}_${netid}`;
+      let data = localStorage.getItem(key);
+      if (!data) continue;
+      console.log('about to reencrypt '+key)
+
+      // If oldEncKey is set, decrypt; otherwise, treat as plaintext
+      if (oldEncKey) {
+        try {
+          data = decryptData(data, oldEncKey, true);
+        } catch (e) {
+          console.error(`Failed to decrypt data for ${key}:`, e);
+          continue;
+        }
+      }
+
+      /*
+      // If data is still not an object, parse it
+      let parsedData;
+      try {
+        parsedData = typeof data === 'string' ? parse(data) : data;
+      } catch (e) {
+        console.error(`Failed to parse data for ${key}:`, e);
+        continue;
+      }
+
+      // Stringify for storage
+      let newData = stringify(parsedData);
+      */
+      let newData = data;
+
+      // If newEncKey is set, encrypt; otherwise, store as plaintext
+      if (newEncKey) {
+        try {
+          newData = encryptData(newData, newEncKey, true);
+        } catch (e) {
+          console.error(`Failed to encrypt data for ${key}:`, e);
+          continue;
+        }
+      }
+
+      // Save to localStorage (encrypted version uses _ suffix)
+      localStorage.setItem(`${key}`, newData);
+    }
+  }
+}
+
 function saveState() {
   console.log('in saveState');
   if (myData && myAccount && myAccount.username && myAccount.netid) {
     console.log('saving state');
-    localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
+    let data = stringify(myData)
+    if (localStorage.lock && lockModal.encKey){  // Consider what happens if localStorage.lock was manually deleted
+      data = encryptData(data, lockModal.encKey, true)
+    }
+    localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, data);
   }
 }
+
+function loadState(account){
+  let data = localStorage.getItem(account);
+  if (!data) { return null; }
+  if (localStorage.lock && lockModal.encKey) {
+    data = decryptData(data, lockModal.encKey, true)
+  }
+  return parse(data);
+}
+
 
 class WelcomeScreen {
   constructor() {}
@@ -1190,7 +1263,7 @@ class MenuModal {
     this.aboutButton = document.getElementById('openAbout');
     this.aboutButton.addEventListener('click', () => aboutModal.open());
     this.signOutButton = document.getElementById('handleSignOut');
-    this.signOutButton.addEventListener('click', () => this.handleSignOut());
+    this.signOutButton.addEventListener('click', async () => await this.handleSignOut());
     this.backupButton = document.getElementById('openBackupModalButton');
     this.backupButton.addEventListener('click', () => backupAccountModal.open());
     this.bridgeButton = document.getElementById('openBridge');
@@ -1211,7 +1284,7 @@ class MenuModal {
     return this.modal.classList.contains('active');
   }
   
-  handleSignOut() {
+  async handleSignOut() {
     // Clear intervals
     if (updateWebSocketIndicatorIntervalId && wsManager) {
       clearInterval(updateWebSocketIndicatorIntervalId);
@@ -1939,7 +2012,8 @@ class SignInModal {
 
     // Check if the button text is 'Recreate'
     if (this.submitButton.textContent === 'Recreate') {
-      const myData = parse(localStorage.getItem(`${username}_${netid}`));
+//      const myData = parse(localStorage.getItem(`${username}_${netid}`));
+      const myData = loadState(`${username}_${netid}`);
       const privateKey = myData.account.keys.secret;
       createAccountModal.usernameInput.value = username;
 
@@ -1951,7 +2025,7 @@ class SignInModal {
       return;
     }
 
-    myData = parse(localStorage.getItem(`${username}_${netid}`));
+    myData = loadState(`${username}_${netid}`)
     if (!myData) {
       console.log('Account data not found');
       return;
@@ -2310,8 +2384,9 @@ class FriendModal {
     // Mark that we need to update the contact list
     this.needsContactListUpdate = true;
 
+    // TODO - do we really need to saveState here
     // Save state
-    saveState();
+//    saveState();
 
     // Update the friend button
     this.updateFriendButton(contact, 'addFriendButtonContactInfo');
@@ -4828,7 +4903,7 @@ class BackupAccountModal {
 
     try {
       // Encrypt data if password is provided
-      const finalData = password ? await encryptData(jsonData, password) : jsonData;
+      const finalData = password ? encryptData(jsonData, password) : jsonData;
 
       // Create and trigger download
       const blob = new Blob([finalData], { type: 'application/json' });
@@ -4859,7 +4934,7 @@ class BackupAccountModal {
 
     try {
       // Encrypt data if password is provided
-      const finalData = password ? await encryptData(jsonData, password) : jsonData;
+      const finalData = password ? encryptData(jsonData, password) : jsonData;
 
       // Create and trigger download
       const blob = new Blob([finalData], { type: 'application/json' });
@@ -4928,7 +5003,7 @@ class RestoreAccountModal {
           showToast('Password required for encrypted data', 3000, 'error');
           return;
         }
-        fileContent = await decryptData(fileContent, passwordInput.value.trim());
+        fileContent = decryptData(fileContent, passwordInput.value.trim());
         if (fileContent == null) {
           throw '';
         }
@@ -7749,9 +7824,8 @@ class CreateAccountModal {
     try {
       await getNetworkParams();
       const storedKey = `${username}_${netid}`;
-      const storedData = localStorage.getItem(storedKey);
-      if (storedData) {
-        myData = JSON.parse(storedData);
+      myData = loadState(storedKey)
+      if (myData) {
         myAccount = myData.account;
       } else {
         // create new data record if it doesn't exist
@@ -7785,7 +7859,7 @@ class CreateAccountModal {
         }
         await new Promise((resolve) => setTimeout(resolve, 1000));
         if (waitingToastId) hideToast(waitingToastId);
-        showToast('Account created successfully!', 3000, 'success');
+//        showToast('Account created successfully!', 3000, 'success');
         this.reEnableControls();
         this.close();
         welcomeScreen.close();
@@ -9384,7 +9458,7 @@ const bridgeModal = new BridgeModal();
  */
 class LockModal {
   constructor() {
-    
+    this.encKey = null;
   }
 
   load() {
@@ -9476,7 +9550,9 @@ class LockModal {
     // if new password is empty, remove the password from localStorage
     // once we are here we know the old password is correct
     if (newPassword.length === 0) {
+      await encryptAllAccounts(oldPassword, newPassword)
       delete localStorage.lock;
+      this.encKey = null;
       // remove the loading toast
       if (waitingToastId) hideToast(waitingToastId);
       showToast('Password removed', 2000, 'success');
@@ -9499,13 +9575,16 @@ class LockModal {
         return;
       }
 
-      // remove the loading toast
-      if (waitingToastId) hideToast(waitingToastId);
 
-      showToast('Password updated', 2000, 'success');
       
       // Save the key in localStorage with a key of "lock"
       localStorage.lock = key;
+      this.encKey = await passwordToKey(newPassword+"liberdusData")
+      await encryptAllAccounts(oldPassword, newPassword)
+
+      // remove the loading toast
+      if (waitingToastId) hideToast(waitingToastId);
+      showToast('Password updated', 2000, 'success');
 
       // clear the inputs
       this.clearInputs();
@@ -9646,7 +9725,8 @@ class UnlockModal {
     if (key === localStorage.lock) {
       // remove the loading toast
       if (waitingToastId) hideToast(waitingToastId);
-      showToast('Unlock successful', 2000, 'success');
+//      showToast('Unlock successful', 2000, 'success');
+      lockModal.encKey = await passwordToKey(password+"liberdusData")
       this.unlock();
       this.close();
       if (this.openButtonElementUsed === welcomeScreen.createAccountButton) {
