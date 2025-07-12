@@ -628,6 +628,11 @@ button:not(:disabled):hover {
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-bold);
   cursor: pointer;
+  width: 100%;
+  width: calc(100% - 32px);
+  padding: 12px 20px;
+  border-radius: 24px;
+  height: 48px;
 }
 
 /* Icon buttons */
@@ -643,8 +648,7 @@ button:disabled {
 }
 
 /* Button sizing and shape for primary/secondary buttons */
-.primary-button,
-.secondary-button {
+.primary-button {
   width: 240px;
   padding: 12px 20px;
   border-radius: 5px;
@@ -1961,6 +1965,46 @@ input[type='file'].form-control {
 #signInModal .update-button:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+/* Migrate Accounts Modal styles */
+#migrateAccountsModal .account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 1.5rem;
+}
+
+#migrateAccountsModal .account-list label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  font-family: var(--font-primary);
+  font-size: var(--font-size-base);
+  color: var(--text-color);
+  cursor: pointer;
+}
+
+#migrateAccountsModal .account-list label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary-color, #007bff);
+  margin: 0;
+}
+
+#migrateAccountsModal .update-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+#migrateAccountsModal .modal-summary {
+  font-family: var(--font-primary);
+  font-size: var(--font-size-base);
+  color: var(--text-color);
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+  text-align: left;
 }
 
 /* Common label styles */

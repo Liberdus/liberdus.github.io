@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.07.11.13.28" />
+    <link rel="stylesheet" href="./styles.css?v=2025.07.12.16.21" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.07.11.13.28" type="module"></script>
+    <script src="./app.js?v=2025.07.12.16.21" type="module"></script>
     <div class="container">
       <header class="header" id="header">
         <div id="logo">
@@ -275,8 +275,8 @@
               <a class="about-link" href="index.html.txt" target="_blank">index.html</a>
               <a class="about-link" href="styles.css" target="_blank">styles.css</a>
               <a class="about-link" href="app.js" target="_blank">app.js</a>
-              <a class="about-link" href="crypto.js?v=2025.07.11.13.28" target="_blank">crypto.js</a>
-              <a class="about-link" href="lib.js?v=2025.07.11.13.28" target="_blank">lib.js</a>
+              <a class="about-link" href="crypto.js?v=2025.07.12.16.21" target="_blank">crypto.js</a>
+              <a class="about-link" href="lib.js?v=2025.07.12.16.21" target="_blank">lib.js</a>
               <a class="about-link" href="network.js" target="_blank">network.js</a>
             </div>
 
@@ -422,6 +422,12 @@
             </div>
             <button type="submit" class="update-button" disabled>Create Account</button>
           </form>
+          <div class="form-group" id="migrateAccountsSection" style="display: none; margin-top: 50px; padding: 0 16px">
+            <label for="migrateAccountsButton">Check if you have accounts that can be migrated to this network</label>
+            <button type="button" id="migrateAccountsButton" class="secondary-button" style="margin-top: 10px;">
+              Migrate Accounts
+            </button>
+          </div>
           <a class="last-item" href="#"> </a>
         </div>
       </div>
@@ -1367,6 +1373,28 @@
         <div class="form-container" style="padding: 1rem">
           <button id="bridgeToPolygon" class="update-button" style="margin-bottom: 1rem">To Polygon Network</button>
           <button id="bridgeFromPolygon" class="update-button">From Polygon Network</button>
+          <a class="last-item" href="#"></a>
+        </div>
+      </div>
+
+      <!-- Migrate Accounts Modal -->
+      <div class="modal" id="migrateAccountsModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeMigrateAccountsModal"></button>
+          <div class="modal-title">Migrate Accounts</div>
+        </div>
+        <div class="form-container">
+          <p class="modal-summary">
+            Checkmark accounts that you want to migrate.
+          </p>
+          <form id="migrateAccountsForm">
+            <div class="form-group">
+              <div class="account-list" id="migrateAccountList">
+                <!-- javascript will fill this with checkboxes and labels -->
+              </div>
+            </div>
+            <button type="submit" class="update-button">Migrate Accounts</button>
+          </form>
           <a class="last-item" href="#"></a>
         </div>
       </div>
