@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'i'
+const version = 'j'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -195,6 +195,13 @@ async function checkOnlineStatus() {
   }
 }
 
+/**
+ * Check if a username is available or taken
+ * @param {*} username 
+ * @param {*} address 
+ * @param {*} foundAddressObject 
+ * @returns 'mine' if the username is available and the address matches, 'taken' if the username is taken, 'available' if the username is available but the address does not match, 'error' if there is an error
+ */
 async function checkUsernameAvailability(username, address, foundAddressObject) {
   if (foundAddressObject) {
     foundAddressObject.address = null;
@@ -507,6 +514,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Bridge Modal
   bridgeModal.load();
+
+  // Migrate Accounts Modal
+  migrateAccountsModal.load();
 
   // Lock Modal
   lockModal.load();
@@ -4055,7 +4065,7 @@ function updateUIForConnectivity() {
   }
 
   networkDependentElements.forEach((element) => {
-    if (!isOnline) {
+    if (!isOnline || netIdMismatch) {
       // Disable element
       element.disabled = true;
       element.classList.add('offline-disabled');
@@ -4090,6 +4100,7 @@ function preventOfflineSubmit(event) {
 
 // Add global isOnline variable at the top with other globals
 let isOnline = true; // Will be updated by connectivity checks
+let netIdMismatch = false; // Will be updated by checkConnectivity
 
 // Add checkConnectivity function before setupConnectivityDetection
 async function checkConnectivity() {
@@ -5114,27 +5125,21 @@ class RestoreAccountModal {
     } catch { /* Ignore file/parse errors */ }
   }
 
-  // perform the string substitution
+  /**
+   * Performs a string substitution on the given file content.
+   * @param {string} fileContent - The file content to perform the substitution on.
+   * @param {Object} substitution - The substitution object to perform.
+   * @returns {string} - The modified file content.
+   */
   performStringSubstitution(fileContent, substitution) {
     if (!substitution) return fileContent;
 
     // Count occurrences before replacement
     const regex = new RegExp(substitution.oldString, 'g');
-    const matches = fileContent.match(regex);
-    const matchCount = matches ? matches.length : 0;
     
     // Global string replacement (like sed -i 's/old/new/g')
     const modifiedContent = fileContent.replace(regex, substitution.newString);
-    
-    // Provide feedback about the substitution
-    if (matchCount > 1) {
-      console.log(`✅ Applied substitution: ${substitution.oldString} → ${substitution.newString} (${matchCount} occurrences)`);
-    } else {
-      const reason = matchCount === 1 ? 'Only 1 match found' : 'No matches found';
-      console.log(`⚠️ ${reason} for: ${substitution.oldString}`);
-      this.clearForm();
-      throw new Error(`${reason} - import cancelled for data integrity`);
-    }
+
     
     return modifiedContent;
   }
@@ -7756,6 +7761,8 @@ class CreateAccountModal {
     this.usernameAvailable = document.getElementById('newUsernameAvailable');
     this.privateKeyError = document.getElementById('newPrivateKeyError');
     this.togglePrivateKeyVisibility = document.getElementById('togglePrivateKeyVisibility');
+    this.migrateAccountsSection = document.getElementById('migrateAccountsSection');
+    this.migrateAccountsButton = document.getElementById('migrateAccountsButton');
 
     // Setup event listeners
     this.form.addEventListener('submit', (e) => this.handleSubmit(e));
@@ -7771,9 +7778,27 @@ class CreateAccountModal {
       // Toggle the visual state class on the button
       this.togglePrivateKeyVisibility.classList.toggle('toggled-visible');
     });
+
+    this.migrateAccountsButton.addEventListener('click', async () => await migrateAccountsModal.open());
   }
 
   open() {
+    const accounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    const networkId = parameters.networkId; // Use consistent casing
+
+    // Add safety check for usernames existence
+    const mismatchedNetids = Object.keys(accounts.netids).filter(netid => 
+      netid !== networkId && 
+      accounts.netids[netid].usernames && 
+      Object.keys(accounts.netids[netid].usernames).length > 0
+    );
+
+    if (mismatchedNetids.length > 0) {
+      this.migrateAccountsSection.style.display = 'block';
+    } else {
+      this.migrateAccountsSection.style.display = 'none';
+    }
+
     this.modal.classList.add('active');
     enterFullscreen();
   }
@@ -9625,6 +9650,216 @@ class BridgeModal {
 const bridgeModal = new BridgeModal();
 
 /**
+ * Migrate Accounts Modal
+ * @class
+ * @description A modal for migrating accounts from different networks
+ */
+class MigrateAccountsModal {
+  constructor() { }
+
+  load() {
+    this.modal = document.getElementById('migrateAccountsModal');
+    this.closeButton = document.getElementById('closeMigrateAccountsModal');
+    this.form = document.getElementById('migrateAccountsForm');
+    this.accountList = document.getElementById('migrateAccountList');
+    this.submitButton = this.form.querySelector('button[type="submit"]');
+
+    this.closeButton.addEventListener('click', () => this.close());
+    this.form.addEventListener('submit', (event) => this.handleSubmit(event));
+
+    // if no check boxes are checked, disable the submit button
+    this.form.addEventListener('change', () => {
+      this.submitButton.disabled = this.form.querySelectorAll('input[type="checkbox"]:checked').length === 0;
+    });
+  }
+
+  async open() {
+    console.log('open migrate accounts modal');
+    await this.populateAccounts();
+    this.modal.classList.add('active');
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    this.clearForm();
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  /**
+   * Populate the account select with checkboxes for each account in accounts.netids[mismatchedNetid].usernames
+   * @returns {void}
+   */
+  async populateAccounts() {
+    console.log('populate accounts');
+    // an array of objects with { username, netid }
+    const mismatchedAccounts = await this.migratableAccounts();
+
+    // Clear existing options
+    this.accountList.innerHTML = '';
+
+    if (mismatchedAccounts.length === 0) {
+      this.accountList.innerHTML = '<p>No accounts need migration</p>';
+      return;
+    }
+
+    // For each in the array, create a checkbox and label with username_netid
+    mismatchedAccounts.forEach(account => {
+      console.log('account', account);
+      const label = document.createElement('label');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = true;
+      checkbox.value = account.username;
+      checkbox.netid = account.netid;
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(account.username + '_' + account.netid.slice(0, 6)));
+      this.accountList.appendChild(label);
+    });
+  }
+
+  /**
+   * Returns an array of migratable accounts from localStorage.
+   * Each object has { username, netid } for accounts that can be migrated to the current network.
+   * Rules:
+   *  - Only accounts from netids different from the current network (parameters.networkId or network.netid)
+   *  - If the username+address is already present on this network, skip
+   *  - If the username is not available to us on this network (checkUsernameAvailability !== 'mine'), skip
+   */
+  async migratableAccounts() {
+    // Get all accounts from localStorage
+    const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    // Determine the current network id (prefer parameters.networkId, fallback to network.netid)
+    const currentNetId = parameters?.networkId;
+    if (!accountsObj.netids || !currentNetId) return [];
+
+    const migratable = [];
+    const currentNetUsernames = (accountsObj.netids[currentNetId] && accountsObj.netids[currentNetId].usernames) || {};
+
+    // Loop through all netids except the current one
+    for (const netid in accountsObj.netids) {
+      if (netid === currentNetId) continue;
+      const usernamesObj = accountsObj.netids[netid]?.usernames;
+      if (!usernamesObj) continue;
+      for (const username in usernamesObj) {
+        const address = usernamesObj[username].address;
+        // If username+address is already present on this network, skip
+        if (
+          currentNetUsernames[username] &&
+          normalizeAddress(currentNetUsernames[username].address) === normalizeAddress(address)
+        ) {
+          continue;
+        }
+        // Check if the username is available to us on this network
+        // (If not, skip)
+        // Note: checkUsernameAvailability returns 'mine' if available to us
+        // We must await this as it may be async
+        const result = await checkUsernameAvailability(username, address);
+        if (result !== 'mine') continue;
+        migratable.push({ username, netid });
+      }
+    }
+    return migratable;
+  }
+
+  async handleSubmit(event) {
+    event.preventDefault();
+    console.log('handleSubmit');
+    const selectedAccounts = this.accountList.querySelectorAll('input[type="checkbox"]:checked');
+    console.log('selectedAccounts', selectedAccounts);
+    // remove from accounts.netids[netid].usernames[username]
+    selectedAccounts.forEach(account => {
+      const netid = account.netid;
+      const username = account.value;
+
+      // then perform netid substitution in all files in the app
+      // get the file content
+      let fileContent = localStorage.getItem(username + '_' + netid);
+      if (fileContent) {
+        // if fileContent doesnt include { then we need to decrypt it
+        if (lockModal?.encKey) {
+          console.log('decrypting fileContent');
+          fileContent = decryptData(fileContent, lockModal.encKey, true);
+        }
+
+        if (!fileContent) {
+          console.log('fileContent is empty, skipping');
+          return;
+        }
+
+        // perform netid substitution in the file content
+        let substitutionResult = restoreAccountModal.performStringSubstitution(fileContent, {
+          oldString: netid,
+          newString: parameters.networkId
+        });
+        // if lockModal.encKey is set, encrypt the substitutionResult
+        if (lockModal?.encKey) {
+          substitutionResult = encryptData(substitutionResult, lockModal.encKey, true);
+        }
+        // save the file content to localStorage
+        localStorage.setItem(username + '_' + parameters.networkId, substitutionResult);
+        // remove the file from localStorage
+        localStorage.removeItem(username + '_' + netid);
+
+        // update the accounts registry
+        this.updateAccountsRegistry(username, netid, parameters.networkId);
+      }
+    });
+
+    // show toast for success 2 seconds
+    showToast('Accounts migrated successfully', 2000, 'success');
+
+    // sleep for 2 seconds
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // reload the page
+    window.location.reload();
+  }
+
+  /**
+ * Updates the accounts registry with the given username and netid.
+ * @param {Object} accountsObj - The accounts object to update.
+ * @param {string} newNetid - The new netid to add the username to.
+ * @param {string} username - The username to add to the accounts registry.
+ * @param {string} oldNetid - The old netid to remove the username from.
+ */
+  updateAccountsRegistry(username, oldNetid, newNetid) {
+    const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+
+    // Ensure new netid exists in registry
+    if (!accountsObj.netids[newNetid]) {
+      accountsObj.netids[newNetid] = { usernames: {} };
+    }
+
+    const accountAddress = accountsObj.netids[oldNetid].usernames[username]?.address;
+
+    if (accountAddress) {
+      accountsObj.netids[newNetid].usernames[username] = {
+        address: accountAddress
+      };
+    }
+    // Finally remove old account_netid from accountsObj
+    if (accountsObj.netids[oldNetid] && accountsObj.netids[oldNetid].usernames) {
+      delete accountsObj.netids[oldNetid].usernames[username];
+    }
+
+    // Save updated accounts registry
+    localStorage.setItem('accounts', stringify(accountsObj));
+    console.log(`Updated accounts registry for ${username}: removed from ${oldNetid}, added to ${newNetid}`);
+  }
+
+  clearForm() {
+    const checkboxes = this.accountList.querySelectorAll('input[type="checkbox"]');
+    checkboxes.forEach(checkbox => checkbox.checked = false);
+    this.submitButton.disabled = true;
+  }
+}
+
+const migrateAccountsModal = new MigrateAccountsModal();
+
+/**
  * Lock Modal
  * @class
  * @description A modal for locking the app
@@ -10233,6 +10468,9 @@ async function getNetworkParams() {
       getNetworkParams.timestamp = now;
       // if network id from network.js is not the same as the parameters.current.networkId
       if (network.netid !== parameters.networkId) {
+        // treat as offline
+        netIdMismatch = true;
+        updateUIForConnectivity();
         console.error(`getNetworkParams: Network ID mismatch. Network ID from network.js: ${network.netid}, Network ID from parameters: ${parameters.networkId}`);
         console.log(parameters)
         // show toast notification with the error message
