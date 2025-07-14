@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'j'
+const version = 'k'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -406,10 +406,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   setupConnectivityDetection();
 
-  // Add beforeunload handler to save myData; don't use unload event, it is getting depricated
-  window.addEventListener('beforeunload', handleBeforeUnload);
-  document.addEventListener('visibilitychange', async () => await handleVisibilityChange()); // Keep as document
-
   // Check for native app subscription tokens and handle subscription
   handleNativeAppSubscription();
 
@@ -557,22 +553,16 @@ function handleUnload() {
 // Add unload handler to save myData
 function handleBeforeUnload(e) {
   if (menuModal.isSignoutExit){
-    window.removeEventListener('beforeunload', handleBeforeUnload);
     if (wsManager) {
       wsManager.disconnect();
       wsManager = null;
     }
     return;
   }
-  e.preventDefault();
-  saveState();    // This save might not work if the amount of data to save is large and user quickly clicks on Leave button
-  console.log('in handleBeforeUnload', e);
-  // Clean up WebSocket connection
-
-
-  console.log('stop back button');
-//  history.pushState(null, '', window.location.href);
-//  console.log('already called history.pushState')
+  if (myData){
+    e.preventDefault();
+    saveState();    // This save might not work if the amount of data to save is large and user quickly clicks on Leave button
+  }
 }
 
 // This is for installed apps where we can't stop the back button; just save the state
@@ -587,10 +577,6 @@ async function handleVisibilityChange() {
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
       chatModal.lastMessageCount = contact?.messages?.length || 0;
-    }
-    if (menuModal.isSignoutExit) {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      return;
     }
   } else if (document.visibilityState === 'visible') {
     // Reconnect WebSocket if needed
@@ -1295,6 +1281,8 @@ class MenuModal {
   }
   
   async handleSignOut() {
+    this.isSignoutExit = true;
+
     // Clear intervals
     if (updateWebSocketIndicatorIntervalId && wsManager) {
       clearInterval(updateWebSocketIndicatorIntervalId);
@@ -1313,8 +1301,9 @@ class MenuModal {
       scanQRModal.stopCamera();
     }
 
-    //    const shouldLeave = confirm('Do you want to leave this page?');
-    //    if (shouldLeave == false) { return }
+    // Remove event listeners for beforeunload and visibilitychange
+    window.removeEventListener('beforeunload', handleBeforeUnload);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
 
     // Clean up WebSocket connection
     if (wsManager) {
@@ -1324,14 +1313,6 @@ class MenuModal {
 
     // Lock the app
     unlockModal.lock();
-
-    // Save myData to localStorage if it exists
-    saveState();
-    /*
-      if (myData && myAccount) {
-          localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
-      }
-  */
 
     // Close all modals
     menuModal.close();
@@ -1353,7 +1334,10 @@ class MenuModal {
     // Show welcome screen
     welcomeScreen.open();
 
-    this.isSignoutExit = true;
+
+    // Save myData to localStorage if it exists
+    saveState();
+
 
     // Add offline fallback
     if (!navigator.onLine) {
@@ -2056,6 +2040,12 @@ class SignInModal {
     if (!getSystemNoticeIntervalId) {
       getSystemNoticeIntervalId = setInterval(getSystemNotice, 15000);
     }
+
+    // Register events that will saveState if the browser is closed without proper signOut
+    // Add beforeunload handler to save myData; don't use unload event, it is getting depricated
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', async () => await handleVisibilityChange()); // Keep as document
+    
     // Close modal and proceed to app
     this.close();
     welcomeScreen.close();
@@ -5175,10 +5165,12 @@ class RestoreAccountModal {
       // We first parse to jsonData so that if the parse does not work we don't destroy myData
       myData = parse(fileContent);
 
+      // if myData has a version key then we assume all accounts were backed up and being restored
       if (myData.version) {
         localStorage.clear();
         this.copyObjectToLocalStorage(myData);
       }
+      // we are restoring only one account
       else {
         // also need to set myAccount
         const acc = myData.account; // this could have other things which are not needed
@@ -5214,6 +5206,7 @@ class RestoreAccountModal {
       // Reset form and close modal after delay
       setTimeout(() => {
         this.close();
+        myData = null // since we already saved to localStore, we want to make sure beforeunload calling saveState does not also save
         window.location.reload(); // need to go through Sign In to make sure imported account exists on network
         this.clearForm();
       }, 2000);
