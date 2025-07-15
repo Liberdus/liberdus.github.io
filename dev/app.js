@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'o'
+const version = 'p'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -120,7 +120,7 @@ import {
   generateRandomBytes,
   generateAddress,
   passwordToKey,
-} from './crypto.js';
+} from './crypto.js?';
 
 // Put standalone conversion function in lib.js
 import {
@@ -148,7 +148,7 @@ import {
   debounce,
   truncateMessage,
   normalizeUnsignedFloat,
-} from './lib.js';
+} from './lib.js?';
 
 const weiDigits = 18;
 const wei = 10n ** BigInt(weiDigits);
@@ -683,7 +683,15 @@ class WelcomeScreen {
         createAccountModal.openWithReset();
       }
     });
-    this.importAccountButton.addEventListener('click', () => restoreAccountModal.open());
+
+    this.importAccountButton.addEventListener('click', () => {
+      if (localStorage.lock && unlockModal.isLocked()) {
+        unlockModal.openButtonElementUsed = this.importAccountButton;
+        unlockModal.open();
+      } else {
+        restoreAccountModal.open();
+      }
+    });
 
     this.orderButtons();
   }
@@ -4690,8 +4698,11 @@ class RestoreAccountModal {
         };
         localStorage.setItem('accounts', stringify(existingAccounts));
 
+        // if lock enckey exist we need to encrypt the myData
+        const updatedMyData = lockModal?.encKey ? encryptData(stringify(myData), lockModal?.encKey, true) : stringify(myData);
+
         // Store the localStore entry for username_netid
-        localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
+        localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, updatedMyData);
       }
 
       // Show success message using toast
@@ -9610,6 +9621,8 @@ class UnlockModal {
       this.close();
       if (this.openButtonElementUsed === welcomeScreen.createAccountButton) {
         createAccountModal.openWithReset();
+      } else if (this.openButtonElementUsed === welcomeScreen.importAccountButton) {
+        restoreAccountModal.open();
       } else {
         signInModal.open();
       }
