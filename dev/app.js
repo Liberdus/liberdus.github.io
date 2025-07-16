@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'
+const version = 'r'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -120,6 +120,7 @@ import {
   generateRandomBytes,
   generateAddress,
   passwordToKey,
+  dhkeyCombined,
 } from './crypto.js?';
 
 // Put standalone conversion function in lib.js
@@ -537,7 +538,8 @@ function handleBeforeUnload(e) {
   }
   if (myData){
     e.preventDefault();
-    saveState();    // This save might not work if the amount of data to save is large and user quickly clicks on Leave button
+// TODO - uncomment this after testing
+//    saveState();    // This save might not work if the amount of data to save is large and user quickly clicks on Leave button
   }
 }
 
@@ -2862,8 +2864,10 @@ async function getChats(keys, retry = 1) {
   //console.log('messages', myData.contacts[keys.address].messages)
   //console.log('last messages', myData.contacts[keys.address].messages.at(-1))
   //console.log('timestamp', myData.contacts[keys.address].messages.at(-1).timestamp)
-  const timestamp = myAccount.chatTimestamp || 0;
+  let timestamp = myAccount.chatTimestamp || 0;
   //    const timestamp = myData.contacts[keys.address]?.messages?.at(-1).timestamp || 0
+
+  if (timestamp > longPollResult.timestamp){ timestamp = longPollResult.timestamp }
 
   const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/${timestamp}`); // TODO get this working
   //    const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/0`) // TODO stop using this
@@ -2879,6 +2883,7 @@ async function getChats(keys, retry = 1) {
     await processChats(senders.chats, keys);
   } else {
     console.error('getChats: no senders found')
+    myAccount.chatTimestamp = timestamp;
   }
   if (chatModal.address) {
     // clear the unread count of address for open chat modal
@@ -2889,25 +2894,21 @@ async function getChats(keys, retry = 1) {
 getChats.lastCall = 0;
 
 // play sound if true or false parameter
-function playChatSound(shouldPlay) {
-  if (shouldPlay) {
-    const notificationAudio = document.getElementById('notificationSound');
-    if (notificationAudio) {
-      notificationAudio.play().catch((error) => {
-        console.warn('Notification sound playback failed:', error);
-      });
-    }
+function playChatSound() {
+  const notificationAudio = document.getElementById('notificationSound');
+  if (notificationAudio) {
+    notificationAudio.play().catch((error) => {
+      console.warn('Notification sound playback failed:', error);
+    });
   }
 }
 
-function playTransferSound(shouldPlay) {
-  if (shouldPlay) {
-    const notificationAudio = document.getElementById('transferSound');
-    if (notificationAudio) {
-      notificationAudio.play().catch((error) => {
-        console.warn('Notification sound playback failed:', error);
-      });
-    }
+function playTransferSound() {
+  const notificationAudio = document.getElementById('transferSound');
+  if (notificationAudio) {
+    notificationAudio.play().catch((error) => {
+      console.warn('Notification sound playback failed:', error);
+    });
   }
 }
 
@@ -2916,6 +2917,7 @@ async function processChats(chats, keys) {
   let newTimestamp = 0;
   const timestamp = myAccount.chatTimestamp || 0;
   const messageQueryTimestamp = Math.max(0, timestamp);
+  let hasAnyTransfer = false;
 
   for (let sender in chats) {
     // Fetch messages using the adjusted timestamp
@@ -2930,6 +2932,7 @@ async function processChats(chats, keys) {
       //            contact.address = from        // not needed since createNewContact does this
       let added = 0;
       let hasNewTransfer = false;
+      let mine = false;
 
       // This check determines if we're currently chatting with the sender
       // We ONLY want to avoid notifications if we're actively viewing this exact chat
@@ -2938,15 +2941,18 @@ async function processChats(chats, keys) {
 
       for (let i in res.messages) {
         const tx = res.messages[i]; // the messages are actually the whole tx
-        //console.log('message tx is')
-        //console.log(JSON.stringify(message, null, 4))
+        // compute the transaction id (txid)
+        const txidHex = getTxid(tx);
+
         newTimestamp = tx.timestamp > newTimestamp ? tx.timestamp : newTimestamp;
+        mine = tx.from == longAddress(keys.address) ? true : false;
+if (mine) console.warn('txid in processChats is', txidHex)
         if (tx.type == 'message') {
-          if (tx.from == longAddress(keys.address)) {
-            continue;
-          } // skip if the message is from us
           const payload = tx.xmessage; // changed to use .message
-          if (payload.encrypted) {
+          if (mine){
+            console.warn('my message tx', tx)
+          }
+          else if (payload.encrypted) {
             let senderPublic = myData.contacts[from]?.public;
             if (!senderPublic) {
               const senderInfo = await queryNetwork(`/account/${longAddress(from)}`);
@@ -2964,8 +2970,8 @@ async function processChats(chats, keys) {
             payload.public = senderPublic;
           }
           //console.log("payload", payload)
-          decryptMessage(payload, keys); // modifies the payload object
-          if (payload.senderInfo) {
+          decryptMessage(payload, keys, mine); // modifies the payload object
+          if (payload.senderInfo && !mine){
             contact.senderInfo = cleanSenderInfo(payload.senderInfo)
             delete payload.senderInfo;
             if (!contact.username && contact.senderInfo.username) {
@@ -2992,12 +2998,8 @@ async function processChats(chats, keys) {
           //    messages are the same if the messages[x].sent_timestamp is the same as the tx.timestamp,
           //    and messages[x].my is false and messages[x].message == payload.message
           let alreadyExists = false;
-          for (const existingMessage of contact.messages) {
-            if (
-              existingMessage.sent_timestamp === payload.sent_timestamp &&
-              existingMessage.message === payload.message &&
-              existingMessage.my === false
-            ) {
+          for (const messageTx of contact.messages) {
+            if (messageTx.txid === txidHex) {
               alreadyExists = true;
               break;
             }
@@ -3008,24 +3010,28 @@ async function processChats(chats, keys) {
           }
 
           //console.log('contact.message', contact.messages)
-          payload.my = false;
+          payload.my = mine;
           payload.timestamp = payload.sent_timestamp;
-          payload.txid = getTxid(tx);
+          payload.txid = txidHex;
           delete payload.pqEncSharedKey; 
           insertSorted(contact.messages, payload, 'timestamp');
           // if we are not in the chatModal of who sent it, playChatSound or if device visibility is hidden play sound
           if (!inActiveChatWithSender || document.visibilityState === 'hidden') {
-            playChatSound(true);
+            playChatSound();
           }
-          added += 1;
-        } else if (tx.type == 'transfer') {
-          //console.log('transfer tx is')
-          //console.log(JSON.stringify(message, null, 4))
-          if (tx.from == longAddress(keys.address)) {
-            continue;
-          } // skip if the message is from us
+          if (!mine){
+            added += 1;
+          }
+        }
+
+        //   Process transfer messages; this is a payment with an optional memo 
+        else if (tx.type == 'transfer') {
           const payload = tx.xmemo;
-          if (payload.encrypted) {
+          if (mine) {
+            const txx = parse(stringify(tx))
+            console.warn('my transfer tx', txx)
+          }
+          else if (payload.encrypted) {
             let senderPublic = myData.contacts[from]?.public;
             if (!senderPublic) {
               const senderInfo = await queryNetwork(`/account/${longAddress(from)}`);
@@ -3042,9 +3048,8 @@ async function processChats(chats, keys) {
             payload.public = senderPublic;
           }
           //console.log("payload", payload)
-          decryptMessage(payload, keys); // modifies the payload object
-          delete payload.pqEncSharedKey;
-          if (payload.senderInfo) {
+          decryptMessage(payload, keys, mine); // modifies the payload object
+          if (payload.senderInfo && !mine) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
             if (!contact.username && contact.senderInfo.username) {
@@ -3067,14 +3072,6 @@ async function processChats(chats, keys) {
               }
             }
           }
-          // compute the transaction id (txid)
-          /*
-          delete tx.sign;
-          const jstr = stringify(tx);
-          const jstrBytes = utf82bin(jstr);
-          const txidHex = hashBytes(jstrBytes);
-          */
-          const txidHex = getTxid(tx);
 
           // skip if this tx was processed before and is already in the history array;
           //    txs are the same if the history[x].txid is the same as txidHex
@@ -3094,7 +3091,8 @@ async function processChats(chats, keys) {
           const newPayment = {
             txid: txidHex,
             amount: parse(stringify(tx.amount)), // need to make a copy
-            sign: 1,
+//            sign: 1,
+            sign: mine ? -1 : 1,
             timestamp: payload.sent_timestamp,
             address: from,
             memo: payload.message,
@@ -3104,14 +3102,11 @@ async function processChats(chats, keys) {
           //  sort history array based on timestamp field in descending order
           //history.sort((a, b) => b.timestamp - a.timestamp);
 
-          // Mark that we have a new transfer for toast notification
-          hasNewTransfer = true;
-
           // --- Create and Insert Transfer Message into contact.messages ---
           const transferMessage = {
             timestamp: payload.sent_timestamp,
             sent_timestamp: payload.sent_timestamp,
-            my: false, // Received transfer
+            my: mine,
             message: payload.message, // Use the memo as the message content
             amount: parse(stringify(tx.amount)), // Ensure amount is stored as BigInt
             symbol: 'LIB', // TODO: get the symbol from the asset
@@ -3121,35 +3116,19 @@ async function processChats(chats, keys) {
           insertSorted(contact.messages, transferMessage, 'timestamp');
           // --------------------------------------------------------------
 
-          added += 1;
-
-          // Update wallet view if it's active
-          if (walletScreen.isActive()) {
-            walletScreen.updateWalletView();
+          if (!mine){
+            added += 1;
           }
-          // update history modal if it's active
-          historyModal.refresh();
 
-          // Always play transfer sound for new transfers
-          playTransferSound(true);
-          // is chatModal of sender address is active
-          if (inActiveChatWithSender && document.visibilityState === 'visible') {
-            // add the transfer tx to the chatModal
-            chatModal.appendChatModal(true);
+          // Mark that we have a new transfer for toast notification
+          if (!mine){
+            hasNewTransfer = true;
           }
         }
       }
+      if (hasNewTransfer){ hasAnyTransfer = true; }
       // If messages were added to contact.messages, update myData.chats
       if (added > 0) {
-        // Get the most recent message (index 0 because it's sorted descending)
-        const latestMessage = contact.messages[0];
-
-        // Create chat object with only guaranteed fields
-        const chatUpdate = {
-          address: from,
-          timestamp: latestMessage.timestamp,
-        };
-
         // Update unread count ONLY if the chat modal for this sender is NOT active
         if (!inActiveChatWithSender) {
           contact.unread = (contact.unread || 0) + added; // Ensure unread is initialized
@@ -3161,15 +3140,21 @@ async function processChats(chats, keys) {
           }
         }
 
+        // Add sender to the top of the chats tab
         // Remove existing chat for this contact if it exists
         const existingChatIndex = myData.chats.findIndex((chat) => chat.address === from);
         if (existingChatIndex !== -1) {
           myData.chats.splice(existingChatIndex, 1);
         }
-
+        // Get the most recent message (index 0 because it's sorted descending)
+        const latestMessage = contact.messages[0];
+        // Create chat object with only guaranteed fields
+        const chatUpdate = {
+          address: from,
+          timestamp: latestMessage.timestamp,
+        };
         // Find insertion point to maintain timestamp order (newest first)
         const insertIndex = myData.chats.findIndex((chat) => chat.timestamp < chatUpdate.timestamp);
-
         if (insertIndex === -1) {
           // If no earlier timestamp found, append to end
           myData.chats.push(chatUpdate);
@@ -3178,8 +3163,9 @@ async function processChats(chats, keys) {
           myData.chats.splice(insertIndex, 0, chatUpdate);
         }
 
+        // Add bubble to chats tab if we are not on it
         // Only suppress notification if we're ACTIVELY viewing this chat and if not a transfer
-        if (!inActiveChatWithSender && !hasNewTransfer) {
+        if (!inActiveChatWithSender) {
           if (!chatsScreen.isActive()) {
             footer.chatButton.classList.add('has-notification');
           }
@@ -3188,14 +3174,21 @@ async function processChats(chats, keys) {
 
       // Show transfer notification even if no messages were added
       if (hasNewTransfer) {
-        // Add notification indicator to Wallet tab if we're not on it
+        // Add bubble to Wallet tab if we're not on it
         if (!walletScreen.isActive()) {
           footer.walletButton.classList.add('has-notification');
         }
-        // Add notification to openHistoryModal wallet-action-button
+        // Add bubble to the wallet history button
         walletScreen.openHistoryModalButton.classList.add('has-notification');
       }
     }
+  }
+  if (hasAnyTransfer){
+    playTransferSound()
+    // update history modal if it's active
+    if (historyModal.isActive()) historyModal.refresh();
+    // Update wallet view if it's active
+    if (walletScreen.isActive()) walletScreen.updateWalletView();
   }
 
   // Update the global timestamp AFTER processing all senders
@@ -3392,7 +3385,12 @@ async function injectTx(tx, txid) {
 
     return data;
   } catch (error) {
-    showToast('Error injecting transaction: ' + error, 0, 'error');
+    // if error contains 'timestamp out of range' 
+    if (error.includes('timestamp out of range')) {
+      showToast('Error injecting transaction (Please try again): ' + error, 0, 'error');
+    } else {
+      showToast('Error injecting transaction: ' + error, 0, 'error');
+    }
     console.error('Error injecting transaction:', error);
     return null;
   }
@@ -3429,10 +3427,12 @@ async function signObj(tx, keys) {
 }
 
 function getTxid(tx){
-  let txo = tx;
-  if (typeof(tx) === "string"){
-    txo = parse(tx)
+  let txo = '';
+  if (typeof(tx) !== "string"){
+    txo = stringify(tx)
   }
+console.warn('tx is', txo)
+  txo = parse(txo)
   delete txo.sign;
   const jstr = stringify(txo);
   const jstrBytes = utf82bin(jstr);
@@ -4340,6 +4340,10 @@ class BackupAccountModal {
   load() {
     // called when the DOM is loaded; can setup event handlers here
     this.modal = document.getElementById('exportModal');
+    this.passwordInput = document.getElementById('exportPassword');
+    this.passwordWarning = document.getElementById('exportPasswordWarning');
+    this.submitButton = document.getElementById('exportForm').querySelector('button[type="submit"]');
+    
     document.getElementById('closeExportForm').addEventListener('click', () => this.close());
     document.getElementById('exportForm').addEventListener('submit', (event) => {
       if (myData) {
@@ -4348,16 +4352,23 @@ class BackupAccountModal {
         this.handleSubmitAll(event);
       }
     });
+    
+    // Add password validation on input with debounce
+    this.debouncedUpdateButtonState = debounce(() => this.updateButtonState(), 250);
+    this.passwordInput.addEventListener('input', this.debouncedUpdateButtonState);
   }
 
   open() {
     // called when the modal needs to be opened
     this.modal.classList.add('active');
+    this.updateButtonState();
   }
 
   close() {
     // called when the modal needs to be closed
     this.modal.classList.remove('active');
+    // Clear password for security
+    this.passwordInput.value = '';
   }
 
   /**
@@ -4389,6 +4400,9 @@ class BackupAccountModal {
   async handleSubmitOne(event) {
     event.preventDefault();
 
+    // Disable button to prevent multiple submissions
+    this.submitButton.disabled = true;
+
     const password = document.getElementById('exportPassword').value;
     const jsonData = stringify(myData, null, 2);
 
@@ -4412,6 +4426,8 @@ class BackupAccountModal {
     } catch (error) {
       console.error('Encryption failed:', error);
       showToast('Failed to encrypt data. Please try again.', 0, 'error');
+      // Re-enable button so user can try again
+      this.updateButtonState();
     }
   }
 
@@ -4421,6 +4437,9 @@ class BackupAccountModal {
    */
   async handleSubmitAll(event) {
     event.preventDefault();
+
+    // Disable button to prevent multiple submissions
+    this.submitButton.disabled = true;
 
     const password = document.getElementById('exportPassword').value;
     const myLocalStore = this.copyLocalStorageToObject();
@@ -4447,6 +4466,8 @@ class BackupAccountModal {
     } catch (error) {
       console.error('Encryption failed:', error);
       showToast('Failed to encrypt data. Please try again.', 0, 'error');
+      // Re-enable button so user can try again
+      this.updateButtonState();
     }
   }
 
@@ -4457,7 +4478,30 @@ class BackupAccountModal {
       myLocalStore[key] = localStorage.getItem(key);
     }
     return myLocalStore;
-  }  
+  }
+
+  updateButtonState() {
+    const password = this.passwordInput.value;
+    
+    // Password is optional, but if provided, it must be at least 4 characters
+    let isValid = true;
+    let warningMessage = '';
+    
+    if (password.length > 0 && password.length < 4) {
+      isValid = false;
+      warningMessage = 'Password must be at least 4 characters.';
+    }
+    
+    // Update button state and warnings
+    this.submitButton.disabled = !isValid;
+    
+    if (warningMessage) {
+      this.passwordWarning.textContent = warningMessage;
+      this.passwordWarning.style.display = 'block';
+    } else {
+      this.passwordWarning.style.display = 'none';
+    }
+  }
 }
 const backupAccountModal = new BackupAccountModal();
 
@@ -6384,6 +6428,7 @@ class ChatModal {
         myData.contacts[currentAddress].pqPublic = pqRecPubKey;
       }
 
+      /*
       // Generate shared secret using ECDH and take first 32 bytes
       let dhkey = ecSharedKey(keys.secret, recipientPubKey);
       const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey);
@@ -6391,6 +6436,9 @@ class ChatModal {
       combined.set(dhkey);
       combined.set(sharedSecret, dhkey.length);
       dhkey = deriveDhKey(combined);
+      */
+      const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey)
+      const selfKey = encryptData(bin2hex(dhkey), keys.secret+keys.pqSeed, true)  // used to decrypt our own message
 
       // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
       // Encrypt message using shared secret
@@ -6402,6 +6450,7 @@ class ChatModal {
         encrypted: true,
         encryptionMethod: 'xchacha20poly1305',
         pqEncSharedKey: bin2base64(cipherText),
+        selfKey: selfKey,
         sent_timestamp: getCorrectedTimestamp(),
       };
 
@@ -6432,7 +6481,9 @@ class ChatModal {
         myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : this.toll
 
       const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
-      const txid = await signObj(chatMessageObj, keys);
+      const txid1 = await signObj(chatMessageObj, keys);
+      const txid = getTxid(chatMessageObj)
+console.warn('in send message', txid)
 
       // if there a hidden txid input, get the value to be used to delete that txid from relevant data stores
       const retryTxId = this.retryOfTxId.value;
@@ -7403,6 +7454,8 @@ class CreateAccountModal {
   async handleSubmit(event) {
     // Disable submit button
     this.submitButton.disabled = true;
+    // disable migrate accounts button
+    this.migrateAccountsButton.disabled = true;
     // Disable input fields, back button, and toggle button
     this.toggleButton.disabled = true;
     this.usernameInput.disabled = true;
@@ -7596,6 +7649,7 @@ class CreateAccountModal {
     this.usernameInput.disabled = false;
     this.privateKeyInput.disabled = false;
     this.backButton.disabled = false;
+    this.migrateAccountsButton.disabled = false;
   }
 }
 
@@ -8419,6 +8473,18 @@ class SendAssetConfirmModal {
     const cancelButton = this.cancelButton;
     const username = normalizeUsername(sendAssetFormModal.usernameInput.value);
 
+    // hidden input field retryOfTxId value is not an empty string
+    if (sendAssetFormModal.retryTxIdInput.value) {
+      // remove from myData use txid from hidden field retryOfPaymentTxId
+      removeFailedTx(sendAssetFormModal.retryTxIdInput.value, toAddress);
+
+      // clear the field
+      failedTransactionModal.txid = '';
+      failedTransactionModal.address = '';
+      failedTransactionModal.memo = '';
+      sendAssetFormModal.retryTxIdInput.value = '';
+    }
+
     // if it's your own username disable the send button
     if (username == myAccount.username) {
       confirmButton.disabled = true;
@@ -8493,6 +8559,12 @@ class SendAssetConfirmModal {
       createNewContact(toAddress, username, 2);
     }
 
+    /* Support sending payments to addresses that do not have
+      any EC publicKey or PQ publicKey. If any key is missing then we do not
+      include a memo or senderInfo. Thus we should be able to send a 
+      payment to any address. We might not ever use this feature though.
+    */
+
     // Get recipient's public key from contacts
     let recipientPubKey = myData.contacts[toAddress]?.public;
     let pqRecPubKey = myData.contacts[toAddress]?.pqPublic;
@@ -8501,33 +8573,42 @@ class SendAssetConfirmModal {
       const recipientInfo = await queryNetwork(`/account/${longAddress(toAddress)}`);
       if (!recipientInfo?.account?.publicKey) {
         console.log(`no public key found for recipient ${toAddress}`);
-        cancelButton.disabled = false;
-        return;
+//        cancelButton.disabled = false;
+//        return;
       }
-      if (recipientInfo.account.publicKey) {
+      else{
         recipientPubKey = recipientInfo.account.publicKey;
         myData.contacts[toAddress].public = recipientPubKey;
       }
-      if (recipientInfo.account.pqPublicKey) {
+      if (!recipientInfo?.account?.pqPublicKey) {
+        console.log(`no PQ public key found for recipient ${toAddress}`);
+//        cancelButton.disabled = false;
+//        return;
+      }
+      else {
         pqRecPubKey = recipientInfo.account.pqPublicKey;
         myData.contacts[toAddress].pqPublic = pqRecPubKey;
       }
     }
     let dhkey = '';
-    let sharedKeyMethod = 'none';
-    if (recipientPubKey) {
-      dhkey = ecSharedKey(keys.secret, recipientPubKey);
-      sharedKeyMethod = 'ec';
-      if (pqRecPubKey) {
-        // Generate shared secret using ECDH and take first 32 bytes
-        const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey);
-        const combined = new Uint8Array(dhkey.length + sharedSecret.length);
-        combined.set(dhkey);
-        combined.set(sharedSecret, dhkey.length);
-        dhkey = deriveDhKey(combined);
-        pqEncSharedKey = bin2base64(cipherText);
-        sharedKeyMethod = 'pq';
-      }
+    let selfKey = '';
+    let sharedKeyMethod = 'none';  // to support sending just payment to any address
+    if (recipientPubKey && pqRecPubKey) {
+      /*
+      // Generate shared secret using ECDH and take first 32 bytes
+      let dhkey = ecSharedKey(keys.secret, recipientPubKey);
+      const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey);
+      const combined = new Uint8Array(dhkey.length + sharedSecret.length);
+      combined.set(dhkey);
+      combined.set(sharedSecret, dhkey.length);
+      dhkey = deriveDhKey(combined);
+      */
+      const x = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey)
+      dhkey = x.dhkey;
+      const cipherText = x.cipherText;
+      pqEncSharedKey = bin2base64(cipherText);
+      sharedKeyMethod = 'pq';
+      selfKey = encryptData(bin2hex(dhkey), keys.secret+keys.pqSeed, true)  // used to decrypt our own message
     }
 
     let encMemo = '';
@@ -8537,41 +8618,28 @@ class SendAssetConfirmModal {
       encMemo = encryptChacha(dhkey, memo);
     }
 
-    // hidden input field retryOfTxId value is not an empty string
-    if (sendAssetFormModal.retryTxIdInput.value) {
-      // remove from myData use txid from hidden field retryOfPaymentTxId
-      removeFailedTx(sendAssetFormModal.retryTxIdInput.value, toAddress);
-
-      // clear the field
-      failedTransactionModal.txid = '';
-      failedTransactionModal.address = '';
-      failedTransactionModal.memo = '';
-      sendAssetFormModal.retryTxIdInput.value = '';
-    }
-
     // only include the sender info if the recipient is is a friend and has a pqKey
     let encSenderInfo = '';
     let senderInfo = '';
-    if (pqRecPubKey && myData.contacts[toAddress]?.friend === 3) {
-      // Create sender info object
-      senderInfo = {
-        username: myAccount.username,
-        name: myData.account.name,
-        email: myData.account.email,
-        phone: myData.account.phone,
-        linkedin: myData.account.linkedin,
-        x: myData.account.x,
-      };
-    } else if (recipientPubKey) {
-      senderInfo = {
-        username: myAccount.username,
-      };
-    } else {
-      senderInfo = { username: myAccount.address };
-    }
-    if (sharedKeyMethod !== 'none') {
+    if (sharedKeyMethod != 'none'){
+      if (myData.contacts[toAddress]?.friend === 3) {
+        // Create sender info object
+        senderInfo = {
+          username: myAccount.username,
+          name: myData.account.name,
+          email: myData.account.email,
+          phone: myData.account.phone,
+          linkedin: myData.account.linkedin,
+          x: myData.account.x,
+        };
+      } else {
+        senderInfo = {
+          username: myAccount.username,
+        };
+      }
       encSenderInfo = encryptChacha(dhkey, stringify(senderInfo));
     } else {
+      senderInfo = { username: myAccount.address };
       encSenderInfo = stringify(senderInfo);
     }
     // Create message payload
@@ -8581,6 +8649,7 @@ class SendAssetConfirmModal {
       encrypted: true,
       encryptionMethod: 'xchacha20poly1305',
       pqEncSharedKey: pqEncSharedKey,
+      selfKey: selfKey,
       sharedKeyMethod: sharedKeyMethod,
       sent_timestamp: getCorrectedTimestamp(),
     };
@@ -10101,6 +10170,7 @@ async function longPollResult(data) {
   // schedule the next poll
   setTimeout(longPoll, nextPoll + 1000);
   if (data?.success){
+    longPollResult.timestamp = data.chatTimestamp;
     try {
       const gotChats = await chatsScreen.updateChatData();
       if (gotChats > 0) {
@@ -10111,6 +10181,7 @@ async function longPollResult(data) {
     }
   }
 }
+longPollResult.timestamp = 0
 
 function getContactDisplayName(contact) {
   return contact?.name || 

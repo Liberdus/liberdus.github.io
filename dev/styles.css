@@ -4755,7 +4755,8 @@ small {
   margin-bottom: 1.5rem;
 }
 
-#lockModal small {
+#lockModal small,
+#exportModal small {
   padding: 0;
   font-size: 0.8rem;
   color: var(--danger-color);
