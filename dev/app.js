@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'r'
+const version = 's'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -344,6 +344,8 @@ async function handleNativeAppSubscription() {
         // Get addresses from all stored accounts and convert to long format
         addresses = Object.values(netidAccounts.usernames).map(account => longAddress(account.address));
       }
+
+      if (addresses.length < 1) return;
       
       const payload = {
         deviceToken,
@@ -538,8 +540,7 @@ function handleBeforeUnload(e) {
   }
   if (myData){
     e.preventDefault();
-// TODO - uncomment this after testing
-//    saveState();    // This save might not work if the amount of data to save is large and user quickly clicks on Leave button
+    saveState();    // This save might not work if the amount of data to save is large and user quickly clicks on Leave button
   }
 }
 
@@ -639,12 +640,13 @@ function saveState() {
   }
 }
 
-function loadState(account){
+function loadState(account, noparse=false){
   let data = localStorage.getItem(account);
   if (!data) { return null; }
   if (localStorage.lock && lockModal.encKey) {
     data = decryptData(data, lockModal.encKey, true)
   }
+  if (noparse) return data;
   return parse(data);
 }
 
@@ -3382,11 +3384,10 @@ async function injectTx(tx, txid) {
         showToast('Try again.', 0, 'error');
       }
     }
-
     return data;
   } catch (error) {
-    // if error contains 'timestamp out of range' 
-    if (error.includes('timestamp out of range')) {
+    // if error is a string and contains 'timestamp out of range' 
+    if (typeof error === 'string' && error.includes('timestamp out of range')) {
       showToast('Error injecting transaction (Please try again): ' + error, 0, 'error');
     } else {
       showToast('Error injecting transaction: ' + error, 0, 'error');
@@ -4413,13 +4414,30 @@ class BackupAccountModal {
       // Create and trigger download
       const blob = new Blob([finalData], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = this.generateBackupFilename(myAccount.username);
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const filename = this.generateBackupFilename(myAccount.username);
+      // Detect if running inside React Native WebView
+      if (window.ReactNativeWebView?.postMessage) {
+        // ✅ React Native WebView: Send base64 via postMessage
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64DataUrl = reader.result;
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'EXPORT_BACKUP',
+            filename,
+            dataUrl: base64DataUrl,
+          }));
+        };
+        reader.readAsDataURL(blob);
+      } else {
+        // Regular browser download
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
 
       // Close export modal
       this.close();
@@ -4453,13 +4471,30 @@ class BackupAccountModal {
       // Create and trigger download
       const blob = new Blob([finalData], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = this.generateBackupFilename();
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const filename = this.generateBackupFilename(myAccount.username);
+      // Detect if running inside React Native WebView
+      if (window.ReactNativeWebView?.postMessage) {
+        // ✅ React Native WebView: Send base64 via postMessage
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64DataUrl = reader.result;
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'EXPORT_BACKUP',
+            filename,
+            dataUrl: base64DataUrl,
+          }));
+        };
+        reader.readAsDataURL(blob);
+      } else {
+        // Regular browser download
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
 
       // Close export modal
       this.close();
@@ -4485,22 +4520,16 @@ class BackupAccountModal {
     
     // Password is optional, but if provided, it must be at least 4 characters
     let isValid = true;
-    let warningMessage = '';
     
     if (password.length > 0 && password.length < 4) {
       isValid = false;
-      warningMessage = 'Password must be at least 4 characters.';
-    }
-    
-    // Update button state and warnings
-    this.submitButton.disabled = !isValid;
-    
-    if (warningMessage) {
-      this.passwordWarning.textContent = warningMessage;
-      this.passwordWarning.style.display = 'block';
+      this.passwordWarning.style.display = 'inline';
     } else {
       this.passwordWarning.style.display = 'none';
     }
+    
+    // Update button state
+    this.submitButton.disabled = !isValid;
   }
 }
 const backupAccountModal = new BackupAccountModal();
@@ -4751,6 +4780,7 @@ class RestoreAccountModal {
 
       // Show success message using toast
       showToast('Account restored successfully!', 2000, 'success');
+      handleNativeAppSubscription()
 
       // Reset form and close modal after delay
       setTimeout(() => {
@@ -7320,17 +7350,7 @@ class CreateAccountModal {
   }
 
   open() {
-    const accounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-    const networkId = parameters.networkId; // Use consistent casing
-
-    // Add safety check for usernames existence
-    const mismatchedNetids = Object.keys(accounts.netids).filter(netid => 
-      netid !== networkId && 
-      accounts.netids[netid].usernames && 
-      Object.keys(accounts.netids[netid].usernames).length > 0
-    );
-
-    if (mismatchedNetids.length > 0) {
+    if (migrateAccountsModal.hasMigratableAccounts()) {
       this.migrateAccountsSection.style.display = 'block';
     } else {
       this.migrateAccountsSection.style.display = 'none';
@@ -7606,6 +7626,7 @@ class CreateAccountModal {
         existingAccounts.netids[netid].usernames[username] = { address: myAccount.keys.address };
         localStorage.setItem('accounts', stringify(existingAccounts));
         saveState();
+        handleNativeAppSubscription();
 
         signInModal.open(username);
       } catch (error) {
@@ -9213,14 +9234,14 @@ class MigrateAccountsModal {
     this.closeButton = document.getElementById('closeMigrateAccountsModal');
     this.form = document.getElementById('migrateAccountsForm');
     this.accountList = document.getElementById('migrateAccountList');
-    this.submitButton = this.form.querySelector('button[type="submit"]');
+    this.submitButton = document.getElementById('submitMigrateAccounts');
 
     this.closeButton.addEventListener('click', () => this.close());
-    this.form.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.submitButton.addEventListener('click', (event) => this.handleSubmit(event));
 
     // if no check boxes are checked, disable the submit button
-    this.form.addEventListener('change', () => {
-      this.submitButton.disabled = this.form.querySelectorAll('input[type="checkbox"]:checked').length === 0;
+    this.accountList.addEventListener('change', () => {
+      this.submitButton.disabled = this.accountList.querySelectorAll('input[type="checkbox"]:checked').length === 0;
     });
   }
 
@@ -9240,134 +9261,224 @@ class MigrateAccountsModal {
   }
 
   /**
-   * Populate the account select with checkboxes for each account in accounts.netids[mismatchedNetid].usernames
+   * Populate the accounts list with the accounts that can be migrated
    * @returns {void}
    */
   async populateAccounts() {
-    console.log('populate accounts');
-    // an array of objects with { username, netid }
-    const mismatchedAccounts = await this.migratableAccounts();
-
-    // Clear existing options
+    const categories = await this.categorizeAccounts();
     this.accountList.innerHTML = '';
 
-    if (mismatchedAccounts.length === 0) {
-      this.accountList.innerHTML = '<p>No accounts need migration</p>';
-      return;
-    }
+    // Render Mine section
+    this.renderSection('mine', 'Your Registered Accounts', categories.mine,
+      'Accounts already registered to this network');
 
-    // For each in the array, create a checkbox and label with username_netid
-    mismatchedAccounts.forEach(account => {
-      console.log('account', account);
-      const label = document.createElement('label');
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.checked = true;
-      checkbox.value = account.username;
-      checkbox.netid = account.netid;
-      label.appendChild(checkbox);
-      label.appendChild(document.createTextNode(account.username + '_' + account.netid.slice(0, 6)));
-      this.accountList.appendChild(label);
-    });
+    // Render Available section  
+    this.renderSection('available', 'Unregistered Accounts', categories.available,
+      'Accounts available to register');
+
+    // Render Taken section
+    this.renderSection('taken', 'Taken', categories.taken,
+      'Accounts already taken');
   }
 
   /**
-   * Returns an array of migratable accounts from localStorage.
-   * Each object has { username, netid } for accounts that can be migrated to the current network.
-   * Rules:
-   *  - Only accounts from netids different from the current network (parameters.networkId or network.netid)
-   *  - If the username+address is already present on this network, skip
-   *  - If the username is not available to us on this network (checkUsernameAvailability !== 'mine'), skip
+   * Render a section of the accounts list
+   * @param {string} sectionId - The id of the section
+   * @param {string} title - The title of the section
+   * @param {Array} accounts - The accounts to render
+   * @param {string} description - The description of the section
    */
-  async migratableAccounts() {
-    // Get all accounts from localStorage
+  renderSection(sectionId, title, accounts, description) {
+    if (accounts.length === 0) return;
+
+    const section = document.createElement('div');
+    section.className = 'migrate-section';
+    section.innerHTML = `
+      <h3>${title} (${accounts.length})</h3>
+      <p class="section-description">${description}</p>
+      <div class="account-checkboxes" id="${sectionId}-accounts">
+        ${accounts.map(account => `
+          <label>
+            <input type="checkbox" value="${account.username}" 
+                   data-netid="${account.netid}" 
+                   data-section="${sectionId}"
+                   ${sectionId === 'taken' ? 'disabled' : ''}>
+            ${account.username}_${account.netid.slice(0, 6)}
+          </label>
+        `).join('')}
+      </div>
+    `;
+
+    this.accountList.appendChild(section);
+  }
+
+  /**
+   * Check if there are any accounts that could potentially be migrated
+   * @returns {boolean}
+   */
+  hasMigratableAccounts() {
     const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-    // Determine the current network id (prefer parameters.networkId, fallback to network.netid)
     const currentNetId = parameters?.networkId;
-    if (!accountsObj.netids || !currentNetId) return [];
+    if (!accountsObj.netids || !currentNetId) return false;
 
-    const migratable = [];
-    const currentNetUsernames = (accountsObj.netids[currentNetId] && accountsObj.netids[currentNetId].usernames) || {};
-
-    // Loop through all netids except the current one
+    // Loop through all netids except current
     for (const netid in accountsObj.netids) {
-      if (netid === currentNetId) continue;
+      // if netid is the current-netid or not in network.netids, skip
+      if (netid === currentNetId || !network.netids.includes(netid)) continue;
+
       const usernamesObj = accountsObj.netids[netid]?.usernames;
       if (!usernamesObj) continue;
-      for (const username in usernamesObj) {
-        const address = usernamesObj[username].address;
-        // If username+address is already present on this network, skip
-        if (
-          currentNetUsernames[username] &&
-          normalizeAddress(currentNetUsernames[username].address) === normalizeAddress(address)
-        ) {
-          continue;
-        }
-        // Check if the username is available to us on this network
-        // (If not, skip)
-        // Note: checkUsernameAvailability returns 'mine' if available to us
-        // We must await this as it may be async
-        const result = await checkUsernameAvailability(username, address);
-        if (result !== 'mine') continue;
-        migratable.push({ username, netid });
+
+      // if there are any usernames, return true
+      if (Object.keys(usernamesObj).length > 0) {
+        return true;
       }
     }
-    return migratable;
+
+    return false;
+  }
+
+  /**
+   * Categorize the accounts into three sections:
+   *  - Mine: Accounts where the username maps to our address
+   *  - Available: Accounts where the username is available to claim
+   *  - Taken: Accounts where the username is already taken
+   * @returns {Object}
+   */
+  async categorizeAccounts() {
+    const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    const currentNetId = parameters?.networkId;
+
+    const categories = {
+      mine: [],      // username maps to our address
+      available: [], // username is available
+      taken: []      // username is taken
+    };
+
+    // Loop through all netids except current
+    for (const netid in accountsObj.netids) {
+      // if netid is the current netid or not in network.netids, skip
+      if (netid === currentNetId || !network.netids.includes(netid)) continue;
+
+      const usernamesObj = accountsObj.netids[netid]?.usernames;
+      if (!usernamesObj) continue;
+
+      for (const username in usernamesObj) {
+        const address = usernamesObj[username].address;
+
+        // Check availability status
+        const availability = await checkUsernameAvailability(username, address);
+
+        const account = { username, netid, address };
+
+        if (availability === 'mine') {
+          categories.mine.push(account);
+        } else if (availability === 'available') {
+          categories.available.push(account);
+        } else {
+          categories.taken.push(account);
+        }
+      }
+    }
+
+    return categories;
   }
 
   async handleSubmit(event) {
     event.preventDefault();
     console.log('handleSubmit');
+      
     const selectedAccounts = this.accountList.querySelectorAll('input[type="checkbox"]:checked');
-    console.log('selectedAccounts', selectedAccounts);
-    // remove from accounts.netids[netid].usernames[username]
-    selectedAccounts.forEach(account => {
-      const netid = account.netid;
-      const username = account.value;
-
-      // then perform netid substitution in all files in the app
-      // get the file content
-      let fileContent = localStorage.getItem(username + '_' + netid);
-      if (fileContent) {
-        // if fileContent doesnt include { then we need to decrypt it
-        if (lockModal?.encKey) {
-          console.log('decrypting fileContent');
-          fileContent = decryptData(fileContent, lockModal.encKey, true);
+  
+    const results = {}
+    // Start each account processing with 2-second delays between starts
+    for (let i = 0; i < selectedAccounts.length; i++) {
+      const checkbox = selectedAccounts[i];
+      const section = checkbox.dataset.section;
+      const username = checkbox.value;
+      const netid = checkbox.dataset.netid;
+  
+      const loadingToastId = showToast('Migrating '+username, 0, 'loading');
+      console.log('processing account: ', username, netid, section);  
+      // Start processing this account
+      if (section === 'mine') {
+        this.migrateAccountData(username, netid, parameters.networkId)
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } else if (section === 'available') {
+        myData = loadState(username+'_'+netid)
+        if (myData){ 
+          const res = await postRegisterAlias(username, myData.account.keys)
+          if (res !== null){
+            res.submittedts = getCorrectedTimestamp()
+            res.netid = netid
+            results[username] = res;
+          }
         }
-
-        if (!fileContent) {
-          console.log('fileContent is empty, skipping');
-          return;
-        }
-
-        // perform netid substitution in the file content
-        let substitutionResult = restoreAccountModal.performStringSubstitution(fileContent, {
-          oldString: netid,
-          newString: parameters.networkId
-        });
-        // if lockModal.encKey is set, encrypt the substitutionResult
-        if (lockModal?.encKey) {
-          substitutionResult = encryptData(substitutionResult, lockModal.encKey, true);
-        }
-        // save the file content to localStorage
-        localStorage.setItem(username + '_' + parameters.networkId, substitutionResult);
-        // remove the file from localStorage
-        localStorage.removeItem(username + '_' + netid);
-
-        // update the accounts registry
-        this.updateAccountsRegistry(username, netid, parameters.networkId);
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
-    });
+      hideToast(loadingToastId);
+    }
 
-    // show toast for success 2 seconds
-    showToast('Accounts migrated successfully', 2000, 'success');
-
-    // sleep for 2 seconds
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // reload the page
-    window.location.reload();
+    // loop through the results array and check the status of the pending txid which is in results[username].txid
+    // See checkPendingTransactions function for how to check the status of a pending txid
+    // update the result element based on the check; if the txid is successfully processed set it to true
+    // if the txid check does not give a result in time, set it to false
+    // when all results array elements have been resolved exit the loop
+    let done = false;
+    for(;!done;){
+      done = true;
+      for (const username in results) {
+        if (! results[username]?.txid){ continue; }
+        const loadingToastId = showToast('Migrating '+username, 0, 'loading');
+        const txid = results[username].txid;
+        const submittedts = results[username].submittedts
+console.log('migrating ',username,'checking txid', txid)
+        const result = await checkPendingTransaction(txid, submittedts); // return true, false or null
+console.log('    result is',result)
+        if (result !== null){
+          if (result == true){
+            this.migrateAccountData(username, results[username].netid, parameters.networkId)
+          }
+          results[username] = result;
+        }
+        else{ done = false; }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        hideToast(loadingToastId);
+      }
+    }
+    this.populateAccounts();
   }
+  
+  /**
+   * Migrate the account data from one netid to another
+   * @param {string} username - The username to migrate
+   * @param {string} netid - The netid to migrate from
+   * @returns {Promise<void>}
+   */
+  migrateAccountData(username, netid, newNetId) {
+    let fileContent = loadState(username+'_'+netid, true)
+  
+    // Perform netid substitution
+    let substitutionResult = restoreAccountModal.performStringSubstitution(fileContent, {
+      oldString: netid,
+      newString: newNetId
+    });
+  
+    // Encrypt if needed
+    if (lockModal?.encKey) {
+      substitutionResult = encryptData(substitutionResult, lockModal.encKey, true);
+    }
+  
+    // Save to new location
+    localStorage.setItem(username + '_' + newNetId, substitutionResult);
+    
+    // Remove old file
+    localStorage.removeItem(username + '_' + netid);
+  
+    // Update accounts registry
+    this.updateAccountsRegistry(username, netid, newNetId);
+  }
+
 
   /**
  * Updates the accounts registry with the given username and netid.
@@ -9434,10 +9545,11 @@ class LockModal {
     this.openButton.addEventListener('click', () => this.open());
     this.headerCloseButton.addEventListener('click', () => this.close());
     this.lockForm.addEventListener('submit', (event) => this.handleSubmit(event));
-    // dynamic button state
-    this.newPasswordInput.addEventListener('input', () => debounce(this.updateButtonState(), 250));
-    this.confirmNewPasswordInput.addEventListener('input', () => debounce(this.updateButtonState(), 250));
-    this.oldPasswordInput.addEventListener('input', () => debounce(this.updateButtonState(), 250));
+    // dynamic button state with debounce
+    this.debouncedUpdateButtonState = debounce(() => this.updateButtonState(), 250);
+    this.newPasswordInput.addEventListener('input', this.debouncedUpdateButtonState);
+    this.confirmNewPasswordInput.addEventListener('input', this.debouncedUpdateButtonState);
+    this.oldPasswordInput.addEventListener('input', this.debouncedUpdateButtonState);
     this.passwordWarning = this.modal.querySelector('#passwordWarning');
   }
 
@@ -9599,17 +9711,17 @@ class LockModal {
       // Check if password is at least 4 characters
       if (newPassword.length > 0 && newPassword.length < 4) {
         isValid = false;
-        warningMessage = 'Password must be at least 4 characters.';
+        warningMessage = 'too short';
       }
       // Check if passwords match
       else if (newPassword && confirmPassword && newPassword !== confirmPassword) {
         isValid = false;
-        warningMessage = 'Password confirmation does not match.';
+        warningMessage = 'does not match';
       }
       // Check if new password is same as old password
       else if (newPassword && oldPassword && newPassword === oldPassword) {
         isValid = false;
-        warningMessage = 'New password cannot be the same as the old password.';
+        warningMessage = 'same as current';
       }
     }
     
@@ -9618,7 +9730,7 @@ class LockModal {
     
     if (warningMessage) {
       this.passwordWarning.textContent = warningMessage;
-      this.passwordWarning.style.display = 'block';
+      this.passwordWarning.style.display = 'inline';
     } else {
       this.passwordWarning.style.display = 'none';
     }
@@ -9747,6 +9859,26 @@ function removeFailedTx(txid, currentAddress) {
   }
   myData.wallet.history = myData?.wallet?.history?.filter((item) => item.txid !== txid);
 }
+
+async function checkPendingTransaction(txid, submittedts){
+  const now = getCorrectedTimestamp();
+  const duration = (now - submittedts) / 1000   // to make it in seconds
+console.log('timestamp is', submittedts, 'duration is', duration)
+  let endpointPath = `/transaction/${txid}`;
+  if (duration > 20){
+    endpointPath = `/collector/api/transaction?appReceiptId=${txid}`;
+  }
+  //console.log(`DEBUG: txid ${txid} endpointPath: ${endpointPath}`);
+  const res = await queryNetwork(endpointPath);
+  //console.log(`DEBUG: txid ${txid} res: ${JSON.stringify(res)}`);  
+  if (duration > 30 && (res.transaction === null || Object.keys(res.transaction).length === 0)) {
+    return false;
+  }
+  if (res?.transaction?.success === true) { return true; }
+  if (res?.transaction?.success === false) { return false }
+  return null;
+}
+
 
 /**
  * Check pending transactions that are at least 5 seconds old
