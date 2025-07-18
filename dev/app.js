@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 's'
+const version = 't'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1820,7 +1820,7 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
   if (balanceWarning) balanceWarning.style.display = 'none';
   // not checking for 0 since we allow 0 amount for messages when toll is not required
   if (amount < 0n) {
-    if (balanceWarning) balanceWarning.style.display = 'block';
+    if (balanceWarning) balanceWarning.style.display = 'inline';
     balanceWarning.textContent = 'Amount cannot be negative';
     return false;
   }
@@ -1834,7 +1834,7 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
   if (balanceWarning) {
     if (hasInsufficientBalance) {
       balanceWarning.textContent = `Insufficient balance (including ${big2str(feeInWei, 18).slice(0, -16)} LIB fee)`;
-      balanceWarning.style.display = 'block';
+      balanceWarning.style.display = 'inline';
     } else {
       balanceWarning.style.display = 'none';
     }
@@ -2604,7 +2604,7 @@ class HistoryModal {
       .join('');
   }
 
-  async updateTransactionHistory() {
+  updateTransactionHistory() {
     const walletData = myData.wallet;
     const assetIndex = this.assetSelect.value;
     
@@ -2657,8 +2657,8 @@ class HistoryModal {
       </div>`;
   }
 
-  async handleAssetChange() {
-    await this.updateTransactionHistory();
+  handleAssetChange() {
+    this.updateTransactionHistory();
   }
 
   handleItemClick(event) {
@@ -2694,9 +2694,9 @@ class HistoryModal {
   }
 
   // Public method for external updates
-  async refresh() {
+  refresh() {
     if (this.isActive()) {
-      await this.updateTransactionHistory();
+      this.updateTransactionHistory();
     }
   }
 
@@ -7641,6 +7641,9 @@ class CreateAccountModal {
           checkPendingTransactionsIntervalId = null;
         }
 
+        myAccount = null;
+        myData = null;
+
         // Note: `checkPendingTransactions` will also remove the item from `myData.pending` if it's rejected by the service.
         return;
       }
@@ -7657,6 +7660,9 @@ class CreateAccountModal {
         clearInterval(getSystemNoticeIntervalId);
         getSystemNoticeIntervalId = null;
       }
+
+      myAccount = null;
+      myData = null;
 
       // no toast here since injectTx will show it
       this.reEnableControls();
@@ -8211,8 +8217,8 @@ class SendAssetFormModal {
           `toll > amount  ${big2str(tollInLIB, 8)} > ${big2str(amountInLIB, 8)} : ${tollInLIB > amountInLIB}`
         );
         if (tollInLIB > amountInLIB) {
-          this.balanceWarning.textContent = 'Amount is less than toll for memo.';
-          this.balanceWarning.style.display = 'block';
+          this.balanceWarning.textContent = 'less than toll for memo';
+          this.balanceWarning.style.display = 'inline';
           return false;
         }
       }
@@ -9262,7 +9268,7 @@ class MigrateAccountsModal {
 
   /**
    * Populate the accounts list with the accounts that can be migrated
-   * @returns {void}
+   * @returns {Promise<void>}
    */
   async populateAccounts() {
     const categories = await this.categorizeAccounts();
@@ -9387,6 +9393,9 @@ class MigrateAccountsModal {
   async handleSubmit(event) {
     event.preventDefault();
     console.log('handleSubmit');
+
+    this.submitButton.disabled = true;
+    this.closeButton.disabled = true;
       
     const selectedAccounts = this.accountList.querySelectorAll('input[type="checkbox"]:checked');
   
@@ -9419,6 +9428,9 @@ class MigrateAccountsModal {
       hideToast(loadingToastId);
     }
 
+    // clearing myData, not being used anymore
+    myData = null;
+
     // loop through the results array and check the status of the pending txid which is in results[username].txid
     // See checkPendingTransactions function for how to check the status of a pending txid
     // update the result element based on the check; if the txid is successfully processed set it to true
@@ -9447,6 +9459,8 @@ console.log('    result is',result)
       }
     }
     this.populateAccounts();
+    this.submitButton.disabled = false;
+    this.closeButton.disabled = false;
   }
   
   /**

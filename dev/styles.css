@@ -1851,7 +1851,12 @@ input[type='file'].form-control {
   color: var(--secondary-text-color);
 }
 
-.balance-warning,
+.balance-warning {
+  font-size: 0.8em;
+  color: var(--danger-color);
+  display: none;
+}
+
 #stakeAmountWarning,
 #stakeNodeAddressWarning {
   /* Added new ID */
@@ -4674,7 +4679,6 @@ small {
   font-weight: 500;
   color: var(--secondary-text-color);
   display: inline-block; /* Ensure consistent layout */
-  min-height: 1.3em; /* Match parent's line-height */
 }
 
 .last-item {

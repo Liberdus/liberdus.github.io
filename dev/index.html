@@ -826,7 +826,9 @@
               </div>
             </div>
             <div class="form-group">
-              <label for="sendAmount">Amount</label>
+              <label for="sendAmount">
+                Amount <span id="balanceWarning" class="balance-warning"></span>
+              </label>
               <div class="amount-container">
                 <input
                   type="text"
@@ -839,7 +841,6 @@
                   <span id="balanceSymbol">LIB</span>
                 </button>
               </div>
-              <div id="balanceWarning" class="balance-warning"></div>
               <div id="availableBalance" class="available-balance">
                 <div class="balance-info">
                   <span>Available: <span id="balanceAmount">0.00 LIB</span></span>
