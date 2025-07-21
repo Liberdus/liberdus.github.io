@@ -2,12 +2,13 @@
   name: Simple
   desc: >
     A clean and simple messaging interface with a built in wallet; human friendly usernames instead of addresses; no registration
-    with email or phone number; replacemtn for native texting and email apps
+    with email or phone number; replacement for native texting and email apps; spam free
   icon: car
 -
-  name: Privacy
+  name: Secure
   desc: >
-    End to end encrypted messages can be sent along with payments; quantum resistant encryption; can create multiple anonymous accounts
+    End to end encrypted messages can be sent along with payments; quantum resistant encryption; can create multiple anonymous accounts;
+    see the exact code running on your device; 
   icon: business-and-finance
 -
   name: Decentralized
