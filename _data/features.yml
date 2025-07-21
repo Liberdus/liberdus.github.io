@@ -1,19 +1,18 @@
 -
   name: Simple
   desc: >
-    A clean and simple messaging interface with a built in wallet; human friendly usernames can be used instead of addresses; no download or 
-    installation required; no spam messages; users can set a message toll
+    A clean and simple messaging interface with a built in wallet; human friendly usernames instead of addresses; no registration
+    with email or phone number; replacemtn for native texting and email apps
   icon: car
 -
   name: Privacy
   desc: >
-    Encrypted messages can be sent directly or along with payments; multiple encryption algorithms available; 
-    quantum resistant encryption; conceal sender and receiver
+    End to end encrypted messages can be sent along with payments; quantum resistant encryption; can create multiple anonymous accounts
   icon: business-and-finance
 -
   name: Decentralized
   desc: >
-    The Liberdus network is operated by thousands of community run validator nodes; validators can be run on standard computers; 
+    The Liberdus network is operated by thousands of community run nodes; nodes can be run on standard computers; 
     no ASICs or GPUs required; host the user interface on your own website; no dependency on liberdus.com
   icon: ecology
 -
