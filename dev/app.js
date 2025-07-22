@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'
+const version = 'v'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -389,6 +389,49 @@ async function handleNativeAppSubscription() {
   }
 }
 
+/**
+ * Unsubscribe the native app from push notifications.
+ * Sends /subscribe with no expoPushToken and a dummy address.
+ */
+async function handleNativeAppUnsubscribe() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const deviceToken = urlParams.get('device_token');      // still in the URL
+  if (!deviceToken) return;
+
+  // dummy 64‑char shardus address (all zeros)
+  const DUMMY_ADDRESS = '0'.repeat(64);
+
+  const payload = {
+    deviceToken,
+    addresses: [DUMMY_ADDRESS]        // must be non‑empty
+    // expoPushToken omitted → undefined on the server
+  };
+
+  const selectedGateway = getGatewayForRequest();
+  if (!selectedGateway) {
+    console.error('No gateway available for unsubscribe request');
+    return;
+  }
+  const SUBSCRIPTION_API = `${selectedGateway.web}/notifier/subscribe`;
+
+  try {
+    const res = await fetch(SUBSCRIPTION_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      const result = await res.json();
+      console.log('Unsubscribe (silent stub) successful:', result);
+    } else {
+      console.error('Unsubscribe failed:', res.status, res.statusText);
+    }
+  } catch (err) {
+    console.error('Error during unsubscribe:', err);
+  }
+}
+
 // Load saved account data and update chat list on page load
 document.addEventListener('DOMContentLoaded', async () => {
   await checkVersion(); // version needs to be checked before anything else happens
@@ -397,7 +440,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupConnectivityDetection();
 
   // Check for native app subscription tokens and handle subscription
-  handleNativeAppSubscription();
+  // handleNativeAppSubscription();
+  handleNativeAppUnsubscribe();
 
   // Unlock Modal
   unlockModal.load();
@@ -535,6 +579,7 @@ function handleUnload() {
 
 // Add unload handler to save myData
 function handleBeforeUnload(e) {
+  handleNativeAppSubscription();
   if (menuModal.isSignoutExit){
     return;
   }
@@ -552,12 +597,14 @@ async function handleVisibilityChange() {
   }
 
   if (document.visibilityState === 'hidden') {
+    handleNativeAppSubscription();
     // if chatModal was opened, save the last message count
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
       chatModal.lastMessageCount = contact?.messages?.length || 0;
     }
   } else if (document.visibilityState === 'visible') {
+    handleNativeAppUnsubscribe();
     // if chatModal was opened, check if message count changed while hidden
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
@@ -4471,7 +4518,7 @@ class BackupAccountModal {
       // Create and trigger download
       const blob = new Blob([finalData], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const filename = this.generateBackupFilename(myAccount.username);
+      const filename = this.generateBackupFilename();
       // Detect if running inside React Native WebView
       if (window.ReactNativeWebView?.postMessage) {
         // ✅ React Native WebView: Send base64 via postMessage
@@ -4780,7 +4827,7 @@ class RestoreAccountModal {
 
       // Show success message using toast
       showToast('Account restored successfully!', 2000, 'success');
-      handleNativeAppSubscription()
+      // handleNativeAppSubscription()
 
       // Reset form and close modal after delay
       setTimeout(() => {
@@ -6046,6 +6093,9 @@ class ChatModal {
     this.toll = null;
     this.tollUnit = null;
     this.address = null;
+
+    // file attachments
+    this.fileAttachments = [];
   }
 
   /**
@@ -6067,6 +6117,8 @@ class ChatModal {
     this.messageByteCounter = document.querySelector('.message-byte-counter');
     this.messagesContainer = document.querySelector('.messages-container');
     this.addFriendButtonChat = document.getElementById('addFriendButtonChat');
+    this.addAttachmentButton = document.getElementById('addAttachmentButton');
+    this.chatFileInput = document.getElementById('chatFileInput');
 
     // Add message click-to-copy handler
     this.messagesList.addEventListener('click', this.handleClickToCopy.bind(this));
@@ -6116,6 +6168,18 @@ class ChatModal {
       if (!friendModal.getCurrentContactAddress()) return;
       friendModal.open();
     });
+
+    if (this.addAttachmentButton) {
+      this.addAttachmentButton.addEventListener('click', () => {
+        this.triggerFileSelection();
+      });
+    }
+
+    if (this.chatFileInput) {
+      this.chatFileInput.addEventListener('change', (e) => {
+        this.handleFileAttachment(e);
+      });
+    }
   }
 
   /**
@@ -6196,6 +6260,10 @@ class ChatModal {
       chatsScreen.updateChatList();
     }
 
+    // clear file attachments
+    this.fileAttachments = [];
+    this.showAttachmentPreview(); // Hide preview
+
     // Setup state for appendChatModal and perform initial render
     this.address = address;
     this.appendChatModal(false); // Call appendChatModal to render messages, ensure highlight=false
@@ -6225,6 +6293,10 @@ class ChatModal {
 
     // Save any unsaved draft before closing
     this.debouncedSaveDraft(this.messageInput.value);
+
+    // clear file attachments
+    this.fileAttachments = [];
+    this.showAttachmentPreview(); // clear listeners
 
     this.modal.classList.remove('active');
     if (chatsScreen.isActive()) {
@@ -6405,7 +6477,7 @@ class ChatModal {
       this.messageInput.focus(); // Add focus back to keep keyboard open
 
       const message = this.messageInput.value.trim();
-      if (!message) {
+      if (!message && !this.fileAttachments?.length) {
         this.sendButton.disabled = false;
         return;
       }
@@ -6470,6 +6542,22 @@ class ChatModal {
       const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey)
       const selfKey = encryptData(bin2hex(dhkey), keys.secret+keys.pqSeed, true)  // used to decrypt our own message
 
+      // encrypt the file attachments
+      let encXattach = null;
+      let attachmentData = null;
+      if (this.fileAttachments && this.fileAttachments.length > 0) {
+        // Extract only URL, name, and size from fileAttachments
+        attachmentData = this.fileAttachments.map(attachment => ({
+          url: attachment.url,
+          name: attachment.name,
+          size: attachment.size,
+          type: attachment.type
+        }));
+        
+        // Encrypt attachment data similar to memo encryption
+        encXattach = encryptChacha(dhkey, stringify(attachmentData));
+      }
+
       // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
       // Encrypt message using shared secret
       const encMessage = encryptChacha(dhkey, message);
@@ -6482,6 +6570,7 @@ class ChatModal {
         pqEncSharedKey: bin2base64(cipherText),
         selfKey: selfKey,
         sent_timestamp: getCorrectedTimestamp(),
+        ...(encXattach && { xattach: encXattach }), // Only include if there are attachments
       };
 
       // Always include username, but only include other info if recipient is a friend
@@ -6511,7 +6600,7 @@ class ChatModal {
         myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : this.toll
 
       const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
-      const txid1 = await signObj(chatMessageObj, keys);
+      await signObj(chatMessageObj, keys);
       const txid = getTxid(chatMessageObj)
 console.warn('in send message', txid)
 
@@ -6533,8 +6622,16 @@ console.warn('in send message', txid)
         my: true,
         txid: txid,
         status: 'sent',
+        ...(attachmentData && { xattach: attachmentData }), // Only include if there are attachments
       };
       insertSorted(chatsData.contacts[currentAddress].messages, newMessage, 'timestamp');
+
+      // clear file attachments and remove preview
+      if (attachmentData) {
+        attachmentData = null;
+        this.fileAttachments = [];
+        this.showAttachmentPreview();
+      }
 
       // Update or add to chats list, maintaining chronological order
       const chatUpdate = {
@@ -6715,9 +6812,36 @@ console.warn('in send message', txid)
       } else {
         // --- Render Chat Message ---
         const messageClass = item.my ? 'sent' : 'received'; // Use item.my directly
+        
+        // --- Render Attachments if present ---
+        let attachmentsHTML = '';
+        if (item.xattach && Array.isArray(item.xattach) && item.xattach.length > 0) {
+          attachmentsHTML = item.xattach.map(att => {
+            const emoji = this.getFileEmoji(att.type || '', att.name || '');
+            const fileUrl = att.url || '#';
+            const fileName = att.name || 'Attachment';
+            const fileSize = att.size ? this.formatFileSize(att.size) : '';
+            const fileType = att.type ? att.type.split('/').pop().toUpperCase() : '';
+            return `
+              <div class="attachment-row" style="display: flex; align-items: center; background: #f5f5f7; border-radius: 12px; padding: 10px 12px; margin-bottom: 6px;">
+                <span style="font-size: 2.2em; margin-right: 14px;">${emoji}</span>
+                <div style="min-width:0;">
+                  <a href="${fileUrl}" target="_blank" style="font-weight: 500; color: #222; text-decoration: underline; word-break: break-all;">${fileName}</a><br>
+                  <span style="font-size: 0.93em; color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
+                </div>
+              </div>
+            `;
+          }).join('');
+        }
+        
+        // --- Render message text (if any) ---
+        const messageTextHTML = item.message && item.message.trim() ?
+          `<div class="message-content" style="white-space: pre-wrap; margin-top: ${attachmentsHTML ? '2px' : '0'};">${linkifyUrls(item.message)}</div>` : '';
+        
         messageHTML = `
                     <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
-                        <div class="message-content" style="white-space: pre-wrap">${linkifyUrls(item.message)}</div>
+                        ${attachmentsHTML}
+                        ${messageTextHTML}
                         <div class="message-time">${timeString}</div>
                     </div>
                 `;
@@ -6980,6 +7104,242 @@ console.warn('in send message', txid)
       this.messageByteCounter.style.display = 'none';
       this.sendButton.disabled = false;
     }
+  }
+
+  /**
+   * Handles file selection for chat attachments
+   * @param {Event} event - The file input change event
+   * @returns {Promise<void>}
+   */
+  async handleFileAttachment(event) {
+    const file = event.target.files[0];
+    if (!file) {
+      return; // No file selected
+    }
+
+    // limit to 5 files
+    if (this.fileAttachments.length >= 5) {
+      showToast('You can only attach up to 5 files.', 3000, 'error');
+      event.target.value = ''; // Reset file input
+      return;
+    }
+
+    // File size limit (e.g., 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB in bytes
+    if (file.size > maxSize) {
+      showToast('File size too large. Maximum size is 10MB.', 3000, 'error');
+      event.target.value = ''; // Reset file input
+      return;
+    }
+
+    // Validate file type
+    const allowedTypePrefixes = ['image/', 'audio/', 'video/'];
+    const allowedExplicitTypes = [
+      'application/pdf', // PDF
+      'text/plain',      // TXT
+      'application/msword', // DOC
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // DOCX
+    ];
+    if (!(allowedTypePrefixes.some(prefix => file.type.startsWith(prefix)) || allowedExplicitTypes.includes(file.type))) {
+      showToast('File type not supported.', 3000, 'error');
+      event.target.value = ''; // Reset file input
+      return;
+    }
+
+    try {
+      this.isEncrypting = true;
+      this.sendButton.disabled = true; // Disable send button during encryption
+      const loadingToastId = showToast(`Encrypting file...`, 0, 'loading');
+      const { dhkey, cipherText: pqEncSharedKey } = await this.getRecipientDhKey(this.address);
+
+      const worker = new Worker('encryption.worker.js', { type: 'module' });
+      worker.onmessage = async (e) => {
+        hideToast(loadingToastId);
+        this.isEncrypting = false;
+        if (e.data.error) {
+          showToast(e.data.error, 3000, 'error');
+          this.sendButton.disabled = false; // Re-enable send button
+        } else {
+          // Encryption successful
+          // upload to get url here 
+
+          const bytes = new Uint8Array(e.data.cipherBin);
+          const blob = new Blob([bytes], { type: 'application/octet-stream' });
+
+          const form = new FormData();
+          form.append('file', blob, file.name);
+
+          // TODO: move to network.js
+          const uploadUrl = 'https://inv.liberdus.com:2083';
+
+          const response = await fetch(`${uploadUrl}/post`, {
+            method: 'POST',
+            body: form
+          });
+          if (!response.ok) throw new Error(`upload failed ${response.status}`);
+
+          const { id } = await response.json();
+          if (!id) throw new Error('No file ID returned from upload');
+
+          this.fileAttachments.push({
+            url: `${uploadUrl}/get/${id}`,
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            pqEncSharedKey
+          });
+          this.showAttachmentPreview(file);
+          this.sendButton.disabled = false; // Re-enable send button
+          showToast(`File "${file.name}" attached successfully`, 2000, 'success');
+        }
+        worker.terminate();
+      };
+
+      worker.onerror = (err) => {
+        hideToast(loadingToastId);
+        showToast(`File encryption failed: ${err.message}`, 3000, 'error');
+        this.isEncrypting = false;
+        this.submitButton.disabled = false; // Re-enable send button
+        worker.terminate();
+      };
+      
+      // read the file and send it to the worker for encryption
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        worker.postMessage({ fileBuffer: e.target.result, dhkey }, [e.target.result]);
+      };
+      reader.readAsArrayBuffer(file);
+      
+    } catch (error) {
+      console.error('Error handling file attachment:', error);
+      showToast('Error processing file attachment', 3000, 'error');
+    } finally {
+      event.target.value = ''; // Reset the file input value
+    }
+  }
+
+  /**
+   * Shows a preview of the attached file just above the textarea
+   * @returns {void}
+   */
+  showAttachmentPreview() {
+    const preview = document.getElementById('attachmentPreview');
+    
+    if (!this.fileAttachments || this.fileAttachments.length === 0) {
+      preview.innerHTML = '';
+      preview.style.display = 'none';
+      return;
+    }
+  
+    const attachmentItems = this.fileAttachments.map((attachment, index) => `
+      <div class="attachment-item">
+        <span class="attachment-icon">📎</span>
+        <span class="attachment-name">${attachment.name}</span>
+        <button class="remove-attachment" data-index="${index}">×</button>
+      </div>
+    `).join('');
+  
+    preview.innerHTML = attachmentItems;
+    
+    // Add event listeners to remove buttons
+    const removeButtons = preview.querySelectorAll('.remove-attachment');
+    removeButtons.forEach(button => {
+      button.addEventListener('click', (e) => {
+        const index = parseInt(e.target.dataset.index);
+        this.removeAttachment(index);
+      });
+    });
+
+    preview.style.display = 'block';
+    
+    // Check if user was at the bottom before showing preview
+    const messageContainer = this.messagesContainer;
+    const wasAtBottom = messageContainer ? 
+      messageContainer.scrollHeight - messageContainer.scrollTop - messageContainer.clientHeight <= 50 : false;
+    
+    // Only auto-scroll if user was already at the bottom
+    if (wasAtBottom) {
+      setTimeout(() => {
+        if (messageContainer) {
+          messageContainer.scrollTop = messageContainer.scrollHeight;
+        }
+      }, 100); // Small delay to ensure the DOM has updated
+    }
+  }
+
+  /**
+   * Removes a specific attached file
+   * @param {number} index - Index of file to remove
+   * @returns {void}
+   */
+  removeAttachment(index) {
+    if (this.fileAttachments && index >= 0 && index < this.fileAttachments.length) {
+      const removedFile = this.fileAttachments.splice(index, 1)[0];
+      this.showAttachmentPreview(); // Refresh the preview
+      showToast(`"${removedFile.name}" removed`, 2000, 'info');
+    }
+  }
+
+  /**
+   * Triggers file selection using the existing hidden input
+   * @returns {void}
+   */
+  triggerFileSelection() {
+    if (this.chatFileInput) {
+      this.chatFileInput.click();
+    }
+  }
+
+  /**
+   * Helper function to get the shared DH key for a recipient.
+   * @param {string} recipientAddress - The recipient's address.
+   * @returns {Promise<{dhkey: Uint8Array, cipherText: Uint8Array}>}
+   */
+  async getRecipientDhKey(recipientAddress) {
+    let recipientPubKey = myData.contacts[recipientAddress]?.public;
+    let pqRecPubKey = myData.contacts[recipientAddress]?.pqPublic;
+
+    if (!recipientPubKey || !pqRecPubKey) {
+      const recipientInfo = await queryNetwork(`/account/${longAddress(recipientAddress)}`);
+      recipientPubKey = recipientInfo?.account?.publicKey;
+      pqRecPubKey = recipientInfo?.account?.pqPublicKey;
+      
+      if (!recipientPubKey || !pqRecPubKey) {
+        throw new Error("Could not retrieve recipient's public keys.");
+      }
+      
+      myData.contacts[recipientAddress].public = recipientPubKey;
+      myData.contacts[recipientAddress].pqPublic = pqRecPubKey;
+    }
+    
+    return dhkeyCombined(myAccount.keys.secret, recipientPubKey, pqRecPubKey);
+  }
+
+  /**
+   * Returns an appropriate emoji based on file type and name
+   * @param {string} type - MIME type of the file
+   * @param {string} name - Name of the file
+   * @returns {string} Emoji representing the file type
+   */
+  getFileEmoji(type, name) {
+    if (type && type.startsWith('image/')) return '🖼️';
+    if (type && type.startsWith('audio/')) return '🎵';
+    if (type && type.startsWith('video/')) return '🎬';
+    if ((type === 'application/pdf') || (name && name.toLowerCase().endsWith('.pdf'))) return '📄';
+    if (type && type.startsWith('text/')) return '📄';
+    return '📎';
+  }
+
+  /**
+   * Formats file size in bytes to human-readable format
+   * @param {number} bytes - File size in bytes
+   * @returns {string} Formatted file size string
+   */
+  formatFileSize(bytes) {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 }
 
@@ -7626,7 +7986,7 @@ class CreateAccountModal {
         existingAccounts.netids[netid].usernames[username] = { address: myAccount.keys.address };
         localStorage.setItem('accounts', stringify(existingAccounts));
         saveState();
-        handleNativeAppSubscription();
+        // handleNativeAppSubscription();
 
         signInModal.open(username);
       } catch (error) {

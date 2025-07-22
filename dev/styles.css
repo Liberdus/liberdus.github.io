@@ -1222,7 +1222,7 @@ input[type='file'].form-control::file-selector-button {
 
 .messages-container {
   overflow-y: auto;
-  padding: 1rem;
+  padding: 1rem 1rem 0;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -1230,19 +1230,18 @@ input[type='file'].form-control::file-selector-button {
 
 .message-input-container {
   min-height: 80px;
-  padding: 16px;
+  padding: 8px 14px;
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
   background: white;
   display: flex;
   flex-direction: column; /* Change to column layout */
-  gap: 4px; /* Reduce gap for vertical layout */
   width: 100%;
   pointer-events: none; /* Make the container itself non-interactive */
 }
 
 .message-input-row {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   align-items: center;
   width: 100%;
 }
@@ -3125,6 +3124,32 @@ mark {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='green' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='8' r='4'/%3E%3Cpath d='M4 20v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2'/%3E%3C/svg%3E");
 }
 
+/* Add attachment button */
+.icon-button.add-attachment-button {
+  width: 20px;
+  height: 48px;
+  padding: 0;
+  border-radius: 50%;
+  background-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+
+.icon-button.add-attachment-button::before {
+  content: '';
+  width: 24px;
+  height: 24px;
+  display: block;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 24px 24px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='12' y1='5' x2='12' y2='19'%3E%3C/line%3E%3Cline x1='5' y1='12' x2='19' y2='12'%3E%3C/line%3E%3C/svg%3E");
+}
+
+
 .icon-button.chat-icon:hover {
   background-color: var(--hover-background);
   opacity: 1;
@@ -4775,4 +4800,48 @@ small {
 
 #lockModal p:last-of-type {
   margin-bottom: 1.5rem;
+}
+
+/* File attachment preview */
+.attachment-preview {
+  padding: 0px 16px 0;
+}
+
+.attachment-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgba(25, 118, 210, 0.186);
+  border-radius: 6px;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.attachment-icon {
+  font-size: 16px;
+}
+
+.attachment-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #333;
+}
+
+.remove-attachment {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: #999;
+  padding: 2px 4px;
+  border-radius: 3px;
+  pointer-events: auto;
+}
+
+.remove-attachment:hover {
+  color: #f44336;
+  background: rgba(244, 67, 54, 0.1);
 }
