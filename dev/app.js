@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'w'
+const version = 'x'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -538,7 +538,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   contactInfoModal.load();
 
   // Failed Message Modal
-  failedMessageModal.load();
+  failedMessageMenu.load();
 
   // New Chat Modal
   newChatModal.load();
@@ -1916,7 +1916,14 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
 
   if (balanceWarning) {
     if (hasInsufficientBalance) {
-      balanceWarning.textContent = `Insufficient balance (including ${big2str(feeInWei, 18).slice(0, -16)} LIB fee)`;
+      // Check if the fee makes the difference
+      const insufficientForAmount = BigInt(asset.balance) < amount;
+      
+      if (insufficientForAmount) {
+        balanceWarning.textContent = 'Insufficient balance';
+      } else {
+        balanceWarning.textContent = 'Insufficient balance (including fee)';
+      }
       balanceWarning.style.display = 'inline';
     } else {
       balanceWarning.style.display = 'none';
@@ -5875,6 +5882,8 @@ class StakeValidatorModal {
     this.backButton = document.getElementById('closeStakeModal');
     this.nodeAddressGroup = document.getElementById('stakeNodeAddressGroup');
     this.balanceDisplay = document.getElementById('stakeAvailableBalanceDisplay');
+    this.balanceAmount = document.getElementById('stakeBalanceAmount');
+    this.transactionFee = document.getElementById('stakeTransactionFee');
     this.amountWarning = document.getElementById('stakeAmountWarning');
     this.nodeAddressWarning = document.getElementById('stakeNodeAddressWarning');
     this.scanStakeQRButton = document.getElementById('scanStakeQRButton');
@@ -5904,14 +5913,8 @@ class StakeValidatorModal {
     // Set the correct fill function for the staking context
     scanQRModal.fillFunction = this.fillFromQR.bind(this);
 
-    // Display Available Balance
-    const libAsset = myData.wallet.assets.find((asset) => asset.symbol === 'LIB');
-    if (this.balanceDisplay && libAsset) {
-      const formattedBalance = big2str(BigInt(libAsset.balance), 18).slice(0, -12);
-      this.balanceDisplay.textContent = `Available: ${formattedBalance} ${libAsset.symbol}`;
-    } else if (this.balanceDisplay) {
-      this.balanceDisplay.textContent = 'Available: 0.000000 LIB';
-    }
+    // Display Available Balance and Fee
+    this.updateStakeBalanceDisplay();
 
     // Check for nominee address from validator modal
     const nominee = document.getElementById('validator-nominee')?.textContent?.trim();
@@ -6009,6 +6012,25 @@ class StakeValidatorModal {
     return response;
   }
 
+  async updateStakeBalanceDisplay() {
+    const libAsset = myData.wallet.assets.find((asset) => asset.symbol === 'LIB');
+    
+    if (!libAsset) {
+      this.balanceAmount.textContent = '0.000000 LIB';
+      this.transactionFee.textContent = '0.00 LIB';
+      return;
+    }
+
+    await getNetworkParams();
+    const txFeeInLIB = parameters.current.transactionFee || 1n * wei;
+    
+    const balanceInLIB = big2str(BigInt(libAsset.balance), 18).slice(0, -12);
+    const feeInLIB = big2str(txFeeInLIB, 18).slice(0, -16);
+
+    this.balanceAmount.textContent = balanceInLIB + ' LIB';
+    this.transactionFee.textContent = feeInLIB + ' LIB';
+  }
+
   async validateStakeInputs() {
     const nodeAddress = this.nodeAddressInput.value.trim();
     const amountStr = this.amountInput.value.trim();
@@ -6029,8 +6051,8 @@ class StakeValidatorModal {
     // Check 1.5: Node Address Format (64 hex chars)
     const addressRegex = /^[0-9a-fA-F]{64}$/;
     if (!addressRegex.test(nodeAddress)) {
-      this.nodeAddressWarning.textContent = 'Invalid node address format (must be 64 hex characters).';
-      this.nodeAddressWarning.style.display = 'block';
+      this.nodeAddressWarning.textContent = 'Invalid (need 64 hex chars)';
+      this.nodeAddressWarning.style.display = 'inline';
       this.amountWarning.style.display = 'none';
       this.amountWarning.textContent = '';
       return;
@@ -6084,8 +6106,8 @@ class StakeValidatorModal {
     // Check 2: Minimum Stake Amount
     if (amountWei < minStakeWei) {
       const minStakeFormatted = big2str(minStakeWei, 18).slice(0, -16);
-      this.amountWarning.textContent = `Amount must be at least ${minStakeFormatted} LIB.`;
-      this.amountWarning.style.display = 'block';
+      this.amountWarning.textContent = `must be at least ${minStakeFormatted} LIB`;
+      this.amountWarning.style.display = 'inline';
       return;
     }
 
@@ -6148,6 +6170,8 @@ class ChatModal {
 
     // file attachments
     this.fileAttachments = [];
+    // context menu properties
+    this.currentContextMessage = null;
   }
 
   /**
@@ -6172,8 +6196,26 @@ class ChatModal {
     this.addAttachmentButton = document.getElementById('addAttachmentButton');
     this.chatFileInput = document.getElementById('chatFileInput');
 
-    // Add message click-to-copy handler
-    this.messagesList.addEventListener('click', this.handleClickToCopy.bind(this));
+    // Initialize context menu
+    this.contextMenu = document.getElementById('messageContextMenu');
+    
+    // Add event delegation for message clicks (since messages are created dynamically)
+    this.messagesList.addEventListener('click', this.handleMessageClick.bind(this));
+    
+    // Add context menu option listeners
+    this.contextMenu.addEventListener('click', (e) => {
+      if (e.target.closest('.context-menu-option')) {
+        const action = e.target.closest('.context-menu-option').dataset.action;
+        this.handleContextMenuAction(action);
+      }
+    });
+    
+    // Close context menu when clicking outside
+    document.addEventListener('click', (e) => {
+      if (this.contextMenu && !this.contextMenu.contains(e.target)) {
+        this.closeContextMenu();
+      }
+    });
     this.sendButton.addEventListener('click', this.handleSendMessage.bind(this));
     this.closeButton.addEventListener('click', this.close.bind(this));
     this.sendButton.addEventListener('keydown', ignoreTabKey);
@@ -6232,6 +6274,19 @@ class ChatModal {
         this.handleFileAttachment(e);
       });
     }
+
+    this.messagesList.addEventListener('click', (e) => {
+      const link = e.target.closest('.attachment-link');
+      if (!link) return;
+      e.preventDefault();
+
+      const idx  = Number(link.dataset.msgIdx);
+      const item = myData.contacts[this.address].messages[idx];
+      this.handleAttachmentDownload(item, link)
+          .catch(err => console.error('Attachment download failed:', err));
+    });
+
+
   }
 
   /**
@@ -6596,18 +6651,8 @@ class ChatModal {
 
       // encrypt the file attachments
       let encXattach = null;
-      let attachmentData = null;
       if (this.fileAttachments && this.fileAttachments.length > 0) {
-        // Extract only URL, name, and size from fileAttachments
-        attachmentData = this.fileAttachments.map(attachment => ({
-          url: attachment.url,
-          name: attachment.name,
-          size: attachment.size,
-          type: attachment.type
-        }));
-        
-        // Encrypt attachment data similar to memo encryption
-        encXattach = encryptChacha(dhkey, stringify(attachmentData));
+        encXattach = encryptChacha(dhkey, stringify(this.fileAttachments));
       }
 
       // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
@@ -6661,8 +6706,6 @@ console.warn('in send message', txid)
       if (retryTxId) {
         removeFailedTx(retryTxId, currentAddress);
         this.retryOfTxId.value = '';
-        failedMessageModal.handleFailedMessageData.txid = '';
-        failedMessageModal.handleFailedMessageData.handleFailedMessage = '';
       }
 
       // --- Optimistic UI Update ---
@@ -6674,13 +6717,12 @@ console.warn('in send message', txid)
         my: true,
         txid: txid,
         status: 'sent',
-        ...(attachmentData && { xattach: attachmentData }), // Only include if there are attachments
+        ...(this.fileAttachments && this.fileAttachments.length > 0 && { xattach: this.fileAttachments }), // Only include if there are attachments
       };
       insertSorted(chatsData.contacts[currentAddress].messages, newMessage, 'timestamp');
 
       // clear file attachments and remove preview
-      if (attachmentData) {
-        attachmentData = null;
+      if (this.fileAttachments && this.fileAttachments.length > 0) {
         this.fileAttachments = [];
         this.showAttachmentPreview();
       }
@@ -6865,38 +6907,59 @@ console.warn('in send message', txid)
         // --- Render Chat Message ---
         const messageClass = item.my ? 'sent' : 'received'; // Use item.my directly
         
-        // --- Render Attachments if present ---
-        let attachmentsHTML = '';
-        if (item.xattach && Array.isArray(item.xattach) && item.xattach.length > 0) {
-          attachmentsHTML = item.xattach.map(att => {
-            const emoji = this.getFileEmoji(att.type || '', att.name || '');
-            const fileUrl = att.url || '#';
-            const fileName = att.name || 'Attachment';
-            const fileSize = att.size ? this.formatFileSize(att.size) : '';
-            const fileType = att.type ? att.type.split('/').pop().toUpperCase() : '';
-            return `
-              <div class="attachment-row" style="display: flex; align-items: center; background: #f5f5f7; border-radius: 12px; padding: 10px 12px; margin-bottom: 6px;">
-                <span style="font-size: 2.2em; margin-right: 14px;">${emoji}</span>
-                <div style="min-width:0;">
-                  <a href="${fileUrl}" target="_blank" style="font-weight: 500; color: #222; text-decoration: underline; word-break: break-all;">${fileName}</a><br>
-                  <span style="font-size: 0.93em; color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
-                </div>
-              </div>
-            `;
-          }).join('');
-        }
-        
-        // --- Render message text (if any) ---
-        const messageTextHTML = item.message && item.message.trim() ?
-          `<div class="message-content" style="white-space: pre-wrap; margin-top: ${attachmentsHTML ? '2px' : '0'};">${linkifyUrls(item.message)}</div>` : '';
-        
-        messageHTML = `
-                    <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
-                        ${attachmentsHTML}
-                        ${messageTextHTML}
+        // Check if message was deleted
+        if (item?.deleted > 0) {
+          // Render deleted message with special styling
+          messageHTML = `
+                    <div class="message ${messageClass} deleted-message" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
+                        <div class="message-content deleted-content">${item.message}</div>
                         <div class="message-time">${timeString}</div>
                     </div>
                 `;
+        } else {
+          // --- Render Attachments if present ---
+          let attachmentsHTML = '';
+          if (item.xattach && Array.isArray(item.xattach) && item.xattach.length > 0) {
+            attachmentsHTML = item.xattach.map(att => {
+              const emoji = this.getFileEmoji(att.type || '', att.name || '');
+              const fileUrl = att.url || '#';
+              const fileName = att.name || 'Attachment';
+              const fileSize = att.size ? this.formatFileSize(att.size) : '';
+              const fileType = att.type ? att.type.split('/').pop().toUpperCase() : '';
+              return `
+                <div class="attachment-row" style="display: flex; align-items: center; background: #f5f5f7; border-radius: 12px; padding: 10px 12px; margin-bottom: 6px;">
+                  <span style="font-size: 2.2em; margin-right: 14px;">${emoji}</span>
+                  <div style="min-width:0;">
+                    <a  href="#"
+                      class="attachment-link"
+                      data-url="${fileUrl}"
+                      data-name="${encodeURIComponent(fileName)}"
+                      data-type="${att.type || ''}"
+                      data-pqEncSharedKey="${att.pqEncSharedKey || ''}"
+                      data-selfKey="${att.selfKey || ''}"
+                      data-msg-idx="${i}"
+                      style="font-weight:500;color:#222;text-decoration:underline;word-break:break-all;">
+                    ${fileName}
+                  </a><br>
+                    <span style="font-size: 0.93em; color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
+                  </div>
+                </div>
+              `;
+            }).join('');
+          }
+          
+          // --- Render message text (if any) ---
+          const messageTextHTML = item.message && item.message.trim() ?
+            `<div class="message-content" style="white-space: pre-wrap; margin-top: ${attachmentsHTML ? '2px' : '0'};">${linkifyUrls(item.message)}</div>` : '';
+          
+          messageHTML = `
+                      <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
+                          ${attachmentsHTML}
+                          ${messageTextHTML}
+                          <div class="message-time">${timeString}</div>
+                      </div>
+                  `;
+        }
       }
 
       // 4. Append the constructed HTML
@@ -6963,82 +7026,7 @@ console.warn('in send message', txid)
     }, 300); // <<< Delay of 300 milliseconds for rendering
   }
 
-  /**
-   * Invoked when the user clicks on a message to copy the content
-   * It will copy the content to the clipboard
-   * @param {Event} e - The event object
-   * @returns {void}
-   */
-  async handleClickToCopy(e) {
-    // Check if the click was on a link - if so, don't copy
-    if (e.target.tagName === 'A' || e.target.closest('a')) {
-      return;
-    }
-    
-    const messageEl = e.target.closest('.message');
-    if (!messageEl) return;
 
-    // Prevent copying if the message has failed and not `payment-info`
-    if (messageEl.dataset.status === 'failed') {
-      console.log('Copy prevented for failed message.');
-
-      // If the message is not a payment message, show the failed message modal
-      if (!messageEl.classList.contains('payment-info')) {
-        failedMessageModal.handleFailedMessageClick(messageEl);
-      }
-
-      // If the message is a payment message, show the failed history item modal
-      if (messageEl.classList.contains('payment-info')) {
-        failedTransactionModal.open(messageEl.dataset.txid, messageEl);
-      }
-
-      // TODO: if message is a payment open sendAssetFormModal and fill with information in the payment message?
-
-      return;
-    }
-
-    let textToCopy = null;
-    let contentType = 'Text'; // Default content type for toast
-
-    // Check if it's a payment message
-    if (messageEl.classList.contains('payment-info')) {
-      const paymentMemoEl = messageEl.querySelector('.payment-memo');
-      if (paymentMemoEl) {
-        textToCopy = paymentMemoEl.textContent;
-        contentType = 'Memo'; // Update type for toast
-      } else {
-        // No memo element found in this payment block
-        showToast('No memo to copy', 2000, 'info');
-        return;
-      }
-    } else {
-      // It's a regular chat message
-      const messageContentEl = messageEl.querySelector('.message-content');
-      if (messageContentEl) {
-        textToCopy = messageContentEl.textContent;
-        contentType = 'Message'; // Update type for toast
-      } else {
-        // Should not happen for regular messages, but handle gracefully
-        showToast('No content to copy', 2000, 'info');
-        return;
-      }
-    }
-
-    // Proceed with copying if text was found
-    if (textToCopy && textToCopy.trim()) {
-      try {
-        await navigator.clipboard.writeText(textToCopy.trim());
-        showToast(`${contentType} copied to clipboard`, 2000, 'success');
-      } catch (err) {
-        console.error('Failed to copy:', err);
-        showToast(`Failed to copy ${contentType.toLowerCase()}`, 2000, 'error');
-      }
-    } else if (contentType === 'Memo') {
-      // Explicitly handle the case where memo exists but is empty/whitespace
-      showToast('Memo is empty', 2000, 'info');
-    }
-    // No need for an else here, cases with no element are handled above
-  }
 
   /**
    * Refresh the current view based on which screen the user is viewing.
@@ -7203,6 +7191,8 @@ console.warn('in send message', txid)
       this.sendButton.disabled = true; // Disable send button during encryption
       const loadingToastId = showToast(`Encrypting file...`, 0, 'loading');
       const { dhkey, cipherText: pqEncSharedKey } = await this.getRecipientDhKey(this.address);
+      const password = myAccount.keys.secret + myAccount.keys.pqSeed;
+      const selfKey = encryptData(bin2hex(dhkey), password, true)
 
       const worker = new Worker('encryption.worker.js', { type: 'module' });
       worker.onmessage = async (e) => {
@@ -7238,7 +7228,8 @@ console.warn('in send message', txid)
             name: file.name,
             size: file.size,
             type: file.type,
-            pqEncSharedKey
+            pqEncSharedKey: bin2base64(pqEncSharedKey),
+            selfKey
           });
           this.showAttachmentPreview(file);
           this.sendButton.disabled = false; // Re-enable send button
@@ -7343,11 +7334,12 @@ console.warn('in send message', txid)
   }
 
   /**
-   * Helper function to get the shared DH key for a recipient.
-   * @param {string} recipientAddress - The recipient's address.
-   * @returns {Promise<{dhkey: Uint8Array, cipherText: Uint8Array}>}
-   */
-  async getRecipientDhKey(recipientAddress) {
+   * Retrieves the recipient's public keys, caching them if not already available.
+   * @param {string} recipientAddress - The address of the recipient.
+   * @returns {Promise<{publicKey: string, pqPublicKey: string}>}
+   * @throws {Error} If recipient's public keys cannot be retrieved.
+   * */
+  async getRecipientKeys(recipientAddress) {
     let recipientPubKey = myData.contacts[recipientAddress]?.public;
     let pqRecPubKey = myData.contacts[recipientAddress]?.pqPublic;
 
@@ -7355,16 +7347,31 @@ console.warn('in send message', txid)
       const recipientInfo = await queryNetwork(`/account/${longAddress(recipientAddress)}`);
       recipientPubKey = recipientInfo?.account?.publicKey;
       pqRecPubKey = recipientInfo?.account?.pqPublicKey;
-      
+
       if (!recipientPubKey || !pqRecPubKey) {
         throw new Error("Could not retrieve recipient's public keys.");
       }
-      
+
       myData.contacts[recipientAddress].public = recipientPubKey;
       myData.contacts[recipientAddress].pqPublic = pqRecPubKey;
-    }
-    
-    return dhkeyCombined(myAccount.keys.secret, recipientPubKey, pqRecPubKey);
+    } 
+
+    return {
+      publicKey: recipientPubKey,
+      pqPublicKey: pqRecPubKey
+    };
+  }
+
+  /**
+   * Helper function to get the shared DH key for a recipient.
+   * @param {string} recipientAddress - The recipient's address.
+   * @returns {Promise<{dhkey: Uint8Array, cipherText: Uint8Array}>}
+   */
+  async getRecipientDhKey(recipientAddress) {
+
+    const keys = await this.getRecipientKeys(recipientAddress);
+
+    return dhkeyCombined(myAccount.keys.secret, keys.publicKey, keys.pqPublicKey);
   }
 
   /**
@@ -7393,136 +7400,351 @@ console.warn('in send message', txid)
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
+
+  async handleAttachmentDownload(item, linkEl) {
+    try {
+      // 1. Derive a fresh 32‑byte dhkey
+      let dhkey;
+      if (item.my) {
+        // you were the sender ⇒ run encapsulation side again
+        const selfKey = linkEl.dataset.selfkey;
+        const password = myAccount.keys.secret + myAccount.keys.pqSeed;
+        dhkey = hex2bin(decryptData(selfKey, password, true));
+      } else {
+        // you are the receiver ⇒ use fields stashed on the item
+        const recipientKeys = await this.getRecipientKeys(this.address);
+        const pqEncSharedKey = linkEl.dataset.pqencsharedkey;
+        dhkey = dhkeyCombined(
+          myAccount.keys.secret,
+          recipientKeys.publicKey,
+          myAccount.keys.pqSeed,
+          pqEncSharedKey
+        ).dhkey;
+      }
+
+      // 2. Download encrypted bytes
+      const res = await fetch(linkEl.dataset.url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const cipherBin = new Uint8Array(await res.arrayBuffer());
+
+      // 3. bin → base64 → decrypt → clear Uint8Array
+      const cipherB64 = bin2base64(cipherBin);
+      const plainB64  = decryptChacha(dhkey, cipherB64);
+      if (!plainB64) throw new Error('decryptChacha returned null');
+      const clearBin  = base642bin(plainB64);
+
+      // 4. Blob + download
+      const blob    = new Blob([clearBin], { type: linkEl.dataset.type || 'application/octet-stream' });
+      const blobUrl = URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = decodeURIComponent(linkEl.dataset.name || 'download');
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error('Attachment decrypt failed:', err);
+      showToast(`Decryption failed.`, 3000, 'error');
+    }
+  }
+
+  /**
+   * Handles message click events
+   * @param {Event} e - Click event
+   */
+  handleMessageClick(e) {
+    if (e.target.tagName === 'A' || e.target.closest('a')) return;
+    
+    const messageEl = e.target.closest('.message');
+    if (!messageEl) return;
+
+    if (messageEl.classList.contains('deleted-message')) return;
+
+    if (messageEl.dataset.status === 'failed') {
+      const isPayment = messageEl.classList.contains('payment-info');
+      return isPayment 
+        ? failedTransactionModal.open(messageEl.dataset.txid, messageEl)
+        : failedMessageMenu.open(e, messageEl);
+    }
+
+    this.showMessageContextMenu(e, messageEl);
+  }
+
+  /**
+   * Shows context menu for a message
+   * @param {Event} e - Click event
+   * @param {HTMLElement} messageEl - The message element clicked
+   */
+  showMessageContextMenu(e, messageEl) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    this.currentContextMessage = messageEl;
+    this.positionContextMenu(this.contextMenu, messageEl);
+    this.contextMenu.style.display = 'block';
+  }
+
+  /**
+   * Utility function to position context menus based on available space
+   * @param {HTMLElement} menu - The context menu element
+   * @param {HTMLElement} messageEl - The message element to position relative to
+   */
+  positionContextMenu(menu, messageEl) {
+    const rect = messageEl.getBoundingClientRect();
+    const menuWidth = 200; // match CSS
+    const menuHeight = 100;
+
+    let left = rect.left + (rect.width / 2) - (menuWidth / 2);
+    // If menu would overflow right, push left
+    if (left + menuWidth > window.innerWidth - 10) {
+      left = window.innerWidth - menuWidth - 10;
+    }
+    // If menu would overflow left, push right
+    if (left < 10) {
+      left = 10;
+    }
+
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const top = (spaceBelow >= menuHeight || spaceBelow > spaceAbove)
+      ? rect.bottom + 10
+      : rect.top - menuHeight - 10;
+
+    Object.assign(menu.style, {
+      left: `${left}px`,
+      top: `${top}px`
+    });
+  }
+
+  /**
+   * Closes the context menu
+   */
+  closeContextMenu() {
+    if (!this.contextMenu) return;
+    this.contextMenu.style.display = 'none';
+    this.currentContextMessage = null;
+  }
+
+  /**
+   * Handles context menu option selection
+   * @param {string} action - The action to perform
+   */
+  handleContextMenuAction(action) {
+    const messageEl = this.currentContextMessage;
+    if (!messageEl) return;
+    
+    switch (action) {
+      case 'copy':
+        this.copyMessageContent(messageEl);
+        break;
+      case 'delete':
+        this.deleteMessage(messageEl);
+        break;
+    }
+    
+    this.closeContextMenu();
+  }
+
+  /**
+   * Copies message content to clipboard
+   * @param {HTMLElement} messageEl - The message element
+   */
+  async copyMessageContent(messageEl) {
+    if (messageEl.classList.contains('deleted-message')) {
+      return showToast('Cannot copy deleted message', 2000, 'info');
+    }
+
+    const isPayment = messageEl.classList.contains('payment-info');
+    const selector = isPayment ? '.payment-memo' : '.message-content';
+    const contentType = isPayment ? 'Memo' : 'Message';
+    const contentEl = messageEl.querySelector(selector);
+
+    if (!contentEl) {
+      return showToast(`No ${contentType.toLowerCase()} to copy`, 2000, 'info');
+    }
+
+    const textToCopy = contentEl.textContent?.trim();
+    if (!textToCopy) {
+      return showToast(`${contentType} is empty`, 2000, 'info');
+    }
+
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      showToast(`${contentType} copied to clipboard`, 2000, 'success');
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      showToast(`Failed to copy ${contentType.toLowerCase()}`, 2000, 'error');
+    }
+  }
+
+  /**
+   * Deletes a message locally (and potentially from network if it's a sent message)
+   * @param {HTMLElement} messageEl - The message element to delete
+   */
+  async deleteMessage(messageEl) {
+    const { txid, messageTimestamp: timestamp } = messageEl.dataset;
+    
+    if (!timestamp || !confirm('Delete this message?')) return;
+    
+    try {
+      const contact = myData.contacts[this.address];
+      const messageIndex = contact?.messages?.findIndex(msg => 
+        msg.timestamp == timestamp || msg.txid === txid
+      );
+      
+      if (messageIndex === -1) return;
+      
+      const message = contact.messages[messageIndex];
+      
+      if (message.deleted) {
+        return showToast('Message already deleted', 2000, 'info');
+      }
+      
+      // Mark as deleted and clear attachments
+      Object.assign(message, {
+        deleted: 1,
+        message: "Deleted by me"
+      });
+      delete message.xattach;
+      
+      this.appendChatModal();
+      showToast('Message deleted', 2000, 'success');
+      setTimeout(() => {
+        const selector = `[data-message-timestamp="${timestamp}"]`;
+        const deletedEl = this.messagesList.querySelector(selector);
+        if (deletedEl) {
+          deletedEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 300);
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      showToast('Failed to delete message', 2000, 'error');
+    }
+  }
 }
 
 const chatModal = new ChatModal();
 
 /**
- * Failed Message Modal Class
+ * Failed Message Context Menu Class
  * @class
- * @description Handles the failed message modal
+ * @description Handles the failed message context menu
  * @returns {void}
  */
-class FailedMessageModal {
+class FailedMessageMenu {
   constructor() {
-    this.handleFailedMessageData = {
-      handleFailedMessage: '',
-      txid: '',
-    };
+    this.menu = document.getElementById('failedMessageContextMenu');
+    this.currentMessageEl = null;
   }
 
   /**
-   * Loads the failed message modal event listeners
+   * Loads the failed message context menu event listeners
    * @returns {void}
    */
   load() {
-    this.modal = document.getElementById('failedMessageModal');
-    this.retryButton = this.modal.querySelector('.retry-button');
-    this.deleteButton = this.modal.querySelector('.delete-button');
-    this.closeButton = document.getElementById('closeFailedMessageModal');
+    if (!this.menu) return;
 
-    this.retryButton.addEventListener('click', this.handleFailedMessageRetry.bind(this));
-    this.deleteButton.addEventListener('click', this.handleFailedMessageDelete.bind(this));
-    this.closeButton.addEventListener('click', this.closeFailedMessageModalAndClearState.bind(this));
-    this.modal.addEventListener('click', this.handleFailedMessageBackdropClick.bind(this));
+    // Menu option click handler
+    this.menu.addEventListener('click', (e) => this.handleMenuAction(e));
+
+    // Hide menu on outside click
+    document.addEventListener('click', (e) => {
+      if (this.menu.style.display === 'block' && !this.menu.contains(e.target)) {
+        this.hide();
+      }
+    });
   }
 
   /**
-   * When user clicks on a failed message this will show the failed message modal with retry, delete (delete from all data stores), and close buttons
-   * It will also store the message content and txid in the handleSendMessage object containing the handleFailedMessage and txid properties
-   * @param {Element} messageEl - The message element that failed
-   * @returns {void}
+   * Shows the context menu for a failed message
+   * @param {Event} event - Click event
+   * @param {HTMLElement} messageEl - The message element clicked
    */
-  handleFailedMessageClick(messageEl) {
-    // Get the message content and txid from the original failed message element
-    const messageContent = messageEl.querySelector('.message-content').textContent;
-    const originalTxid = messageEl.dataset.txid;
+  open(event, messageEl) {
+    if (!this.menu) return;
+    
+    event.preventDefault();
+    event.stopPropagation();
+    this.currentMessageEl = messageEl;
 
-    // Store content and txid in properties of handleSendMessage
-    this.handleFailedMessageData.handleFailedMessage = messageContent;
-    this.handleFailedMessageData.txid = originalTxid;
+    // Use shared positioning utility
+    chatModal.positionContextMenu(this.menu, messageEl);
+    this.menu.style.display = 'block';
+  }
 
-    // Show the modal
-    if (this.modal) {
-      this.modal.classList.add('active');
+  /**
+   * Hides the context menu
+   */
+  hide() {
+    if (this.menu) {
+      this.menu.style.display = 'none';
+    }
+    this.currentMessageEl = null;
+  }
+
+  /**
+   * Handles context menu option clicks
+   * @param {Event} e - Click event
+   */
+  handleMenuAction(e) {
+    const option = e.target.closest('.context-menu-option');
+    if (!option || !this.currentMessageEl) return;
+    
+    const action = option.dataset.action;
+    const messageEl = this.currentMessageEl;
+    this.hide();
+
+    switch (action) {
+      case 'retry':
+        this.handleFailedMessageRetry(messageEl);
+        break;
+      case 'delete':
+        this.handleFailedMessageDelete(messageEl);
+        break;
     }
   }
 
   /**
-   * When the user clicks the retry button in the failed message modal
+   * When the user clicks the retry option in the context menu
    * It will fill the chat modal with the message content and txid of the failed message and focus the message input
+   * @param {HTMLElement} messageEl - The message element that failed
    * @returns {void}
    */
-  handleFailedMessageRetry() {
-    // Use the values stored when handleFailedMessage was called
-    const messageToRetry = this.handleFailedMessageData.handleFailedMessage;
-    const originalTxid = this.handleFailedMessageData.txid;
+  handleFailedMessageRetry(messageEl) {
+    const messageContent = messageEl.querySelector('.message-content')?.textContent;
+    const txid = messageEl.dataset.txid;
 
-    if (
-      chatModal.messageInput &&
-      chatModal.retryOfTxId &&
-      typeof messageToRetry === 'string' &&
-      typeof originalTxid === 'string'
-    ) {
-      chatModal.messageInput.value = messageToRetry;
-      chatModal.retryOfTxId.value = originalTxid;
-
-      this.closeFailedMessageModalAndClearState();
+    if (chatModal.messageInput && chatModal.retryOfTxId && messageContent && txid) {
+      chatModal.messageInput.value = messageContent;
+      chatModal.retryOfTxId.value = txid;
       chatModal.messageInput.focus();
     } else {
       console.error('Error preparing message retry: Necessary elements or data missing.');
-      this.closeFailedMessageModalAndClearState();
     }
   }
 
   /**
-   * When the user clicks the delete button in the failed message modal
+   * When the user clicks the delete option in the context menu
    * It will delete the message from all data stores using removeFailedTx and remove pending tx if exists
+   * @param {HTMLElement} messageEl - The message element that failed
    * @returns {void}
    */
-  handleFailedMessageDelete() {
-    const originalTxid = this.handleFailedMessageData.txid;
+  handleFailedMessageDelete(messageEl) {
+    const txid = messageEl.dataset.txid;
 
-    if (typeof originalTxid === 'string' && originalTxid) {
+    if (txid) {
       const currentAddress = chatModal.address;
-      removeFailedTx(originalTxid, currentAddress);
-
-      this.closeFailedMessageModalAndClearState();
-
-      // refresh current chatModal
+      removeFailedTx(txid, currentAddress);
       chatModal.appendChatModal();
     } else {
       console.error('Error deleting message: TXID not found.');
-      this.closeFailedMessageModalAndClearState();
-    }
-  }
-
-  /**
-   * Invoked when the user clicks the close button in the failed message modal
-   * It will close the modal and clear the stored values
-   * @returns {void}
-   */
-  closeFailedMessageModalAndClearState() {
-    this.modal.classList.remove('active');
-    // Clear the stored values when modal is closed
-    this.handleFailedMessageData.handleFailedMessage = '';
-    this.handleFailedMessageData.txid = '';
-  }
-
-  /**
-   * Invoked when the user clicks the backdrop in the failed message modal
-   * It will close the modal and clear the stored values
-   * @param {Event} event - The event object
-   * @returns {void}
-   */
-  handleFailedMessageBackdropClick(event) {
-    if (event.target === this.modal) {
-      this.closeFailedMessageModalAndClearState();
     }
   }
 }
 
-const failedMessageModal = new FailedMessageModal();
+const failedMessageMenu = new FailedMessageMenu();
 
 /**
  * New Chat Modal Class
