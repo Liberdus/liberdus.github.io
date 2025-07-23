@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'z'
+const version = 'a'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -480,6 +480,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Sign In Modal
   signInModal.load();
+  
+  // My Info Modal
+  myInfoModal.load();
 
   // Welcome Screen
   welcomeScreen.load()
@@ -838,6 +841,13 @@ class Header {
 
     this.logoLink.addEventListener('keydown', ignoreShiftTabKey); // add event listener for first-item to prevent shift+tab
     this.menuButton.addEventListener('click', () => menuModal.open());
+    
+    // Add click event for username display to open myInfoModal
+    this.text.addEventListener('click', () => {
+      if (myData && myData.account) {
+        myInfoModal.open();
+      }
+    });
   }
 
   open() {
@@ -2176,6 +2186,80 @@ class SignInModal {
 const signInModal = new SignInModal();
 
 // Contact Info Modal Management
+class MyInfoModal {
+  constructor() {}
+
+  load() {
+    this.modal = document.getElementById('myInfoModal');
+    this.backButton = document.getElementById('closeMyInfoModal');
+    this.avatarSection = this.modal.querySelector('.contact-avatar-section');
+    this.avatarDiv = this.avatarSection.querySelector('.avatar');
+    this.nameDiv = this.avatarSection.querySelector('.name');
+    this.subtitleDiv = this.avatarSection.querySelector('.subtitle');
+
+    this.backButton.addEventListener('click', () => this.close());
+  }
+
+  async updateMyInfo() {
+    if (!myAccount) return;
+
+    const identicon = await generateIdenticon(myAccount.keys.address, 96);
+
+    this.avatarDiv.innerHTML = identicon;
+    this.nameDiv.textContent = myAccount.username;
+    this.subtitleDiv.textContent = myAccount.keys.address;
+
+    const { account = {} } = myData ?? {};
+    const fields = {
+      name:      { id: 'myInfoName',      label: 'Name' },
+      email:     { id: 'myInfoEmail',     label: 'Email',    href: v => `mailto:${v}` },
+      phone:     { id: 'myInfoPhone',     label: 'Phone' },
+      linkedin:  { id: 'myInfoLinkedin',  label: 'LinkedIn', href: v => `https://linkedin.com/in/${v}` },
+      x:         { id: 'myInfoX',         label: 'X',        href: v => `https://x.com/${v}` },
+    };
+
+    // Cache DOM elements once
+    const elements = Object.fromEntries(
+      Object.values(fields).map(({ id }) => [id, document.getElementById(id)])
+    );
+
+    for (const [key, cfg] of Object.entries(fields)) {
+      const el = elements[cfg.id];
+      if (!el) continue; // skip if element not found
+      const container =
+        key === 'email' || key === 'linkedin' || key === 'x'
+          ? el.parentElement.parentElement // label + anchor live two levels up
+          : el.parentElement;
+
+      const val = account[key] ?? ''; // empty string if undefined / null
+      const empty = !val;
+
+      // Show / hide container with inline style (per your constraint)
+      container.style.display = empty ? 'none' : 'block';
+      if (empty) continue;
+
+      el.textContent = val;
+      if (cfg.href) el.href = cfg.href(val);
+    }
+  }
+
+  async open() {
+    await this.updateMyInfo();
+    this.modal.classList.add('active');
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+}
+
+// Create a singleton instance
+const myInfoModal = new MyInfoModal();
+
 class ContactInfoModal {
   constructor() {
     this.currentContactAddress = null;
@@ -7430,6 +7514,44 @@ console.warn('in send message', txid)
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
+  /**
+   * Determines if a file type can be viewed in a browser
+   * @param {string} mimeType - The MIME type of the file
+   * @returns {boolean} True if the file type can be viewed in a browser, false otherwise
+   */
+  isViewableInBrowser(mimeType) {
+    if (!mimeType) return false;
+    
+    const viewableTypes = [
+      'image/',           // All images
+      'text/',            // Text files
+      'application/pdf',  // PDFs
+      'video/',           // Videos
+      'audio/',           // Audio files
+      'application/json', // JSON
+      'application/xml',  // XML
+      'text/xml'          // XML (alternative)
+    ];
+    
+    return viewableTypes.some(type => mimeType.startsWith(type));
+  }
+
+  /**
+   * Triggers a file download
+   * @param {string} blobUrl - The URL of the file to download
+   * @param {string} filename - The name of the file to download
+   * @returns {void}
+   */
+  triggerFileDownload(blobUrl, filename) {
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast(`${filename} downloaded`, 3000, 'success');
+  }
+
   async handleAttachmentDownload(item, linkEl) {
     try {
       // 1. Derive a fresh 32‑byte dhkey
@@ -7481,14 +7603,28 @@ console.warn('in send message', txid)
         };
         reader.readAsDataURL(blob);
       } else {
-        // Fallback for web browsers
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(blobUrl);
+        // Web browser handling
+        const isViewable = this.isViewableInBrowser(blob.type);
+        
+        try {
+          if (isViewable) {
+            // Open in new tab and download
+            const newTab = window.open(blobUrl, '_blank');
+            this.triggerFileDownload(blobUrl, filename);
+            
+            if (newTab) {
+              console.log('opened in new tab');
+            } else {
+              showToast('Popup blocked. File downloaded instead.', 3000, 'warning');
+            }
+          } else {
+            // Non-viewable files: download only
+            this.triggerFileDownload(blobUrl, filename);
+          }
+        } finally {
+          // Clean up blob URL after enough time for downloads/tabs to initialize
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+        }
       }
 
     } catch (err) {
@@ -10572,6 +10708,8 @@ class LaunchModal {
 
   open() {
     this.modal.classList.add('active');
+    this.urlInput.value = window.location.href.split('?')[0];
+    this.updateButtonState();
   }
 
   close() {
@@ -10586,9 +10724,32 @@ class LaunchModal {
       showToast('Please enter a URL', 0, 'error');
       return;
     }
-    // open the url in the app
-    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'launch', url }));
-    this.close();
+    
+    // Disable button and show loading state
+    this.launchButton.disabled = true;
+    this.launchButton.textContent = 'Checking URL...';
+    
+    // Validate URL by fetching it
+    fetch(url, { 
+      method: 'HEAD', 
+      mode: 'no-cors',
+      signal: AbortSignal.timeout(10000) // 10 second timeout
+    })
+      .then(() => {
+        // URL is reachable, proceed with launching
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'launch', url }));
+        this.close();
+      })
+      .catch((error) => {
+        // URL is not reachable or timed out
+        showToast('URL is not reachable. Please check the address and try again.', 0, 'error');
+        console.error('URL validation failed:', error);
+      })
+      .finally(() => {
+        // Reset button state
+        this.launchButton.disabled = false;
+        this.launchButton.textContent = 'Launch';
+      });
   }
 
   updateButtonState() {
