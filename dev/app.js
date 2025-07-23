@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -426,11 +426,9 @@ async function handleNativeAppUnsubscribe() {
 
   if (remainingAddresses.length === 0) {
     // This is the only account. Unsubscribe the device completely.
-    const DUMMY_ADDRESS = '0'.repeat(64);
     payload = {
       deviceToken,
-      addresses: [DUMMY_ADDRESS],
-      // no expoPushToken
+      addresses: [],
     };
   } else {
     // Other accounts remain. Update the subscription to only include them.
@@ -615,8 +613,8 @@ function handleUnload() {
 */
 
 // Add unload handler to save myData
-async function handleBeforeUnload(e) {
-  await handleNativeAppSubscription();
+function handleBeforeUnload(e) {
+  handleNativeAppSubscription();
   if (menuModal.isSignoutExit){
     return;
   }
@@ -627,7 +625,7 @@ async function handleBeforeUnload(e) {
 }
 
 // This is for installed apps where we can't stop the back button; just save the state
-async function handleVisibilityChange() {
+function handleVisibilityChange() {
   console.log('in handleVisibilityChange', document.visibilityState);
   if (!myAccount) {
     return;
@@ -2101,8 +2099,8 @@ class SignInModal {
 
     // Register events that will saveState if the browser is closed without proper signOut
     // Add beforeunload handler to save myData; don't use unload event, it is getting depricated
-    window.addEventListener('beforeunload', async () => await handleBeforeUnload());
-    document.addEventListener('visibilitychange', async () => await handleVisibilityChange()); // Keep as document
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange); // Keep as document
 
     handleNativeAppUnsubscribe();
 
@@ -2720,6 +2718,24 @@ class HistoryModal {
       .map((tx) => {
         const txidAttr = tx?.txid ? `data-txid="${tx.txid}"` : '';
         const statusAttr = tx?.status ? `data-status="${tx.status}"` : '';
+        
+        // Check if transaction was deleted
+        if (tx?.deleted > 0) {
+          return `
+            <div class="transaction-item deleted-transaction" ${txidAttr} ${statusAttr}>
+              <div class="transaction-info">
+                <div class="transaction-type deleted">
+                  <span class="delete-icon"></span>
+                  Deleted
+                </div>
+                <div class="transaction-amount">-- --</div>
+              </div>
+              <div class="transaction-memo">${tx.memo || "Deleted by me"}</div>
+            </div>
+          `;
+        }
+        
+        // Render normal transaction
         const contactName = getContactDisplayName(contacts[tx.address]);
         
         return `
@@ -2765,6 +2781,11 @@ class HistoryModal {
     const item = event.target.closest('.transaction-item');
     
     if (!item) return;
+    
+    // Prevent clicking on deleted transactions
+    if (item.classList.contains('deleted-transaction')) {
+      return;
+    }
     
     if (item.dataset.status === 'failed') {
       console.log(`Not opening chatModal for failed transaction`);
@@ -7444,14 +7465,32 @@ console.warn('in send message', txid)
       // 4. Blob + download
       const blob    = new Blob([clearBin], { type: linkEl.dataset.type || 'application/octet-stream' });
       const blobUrl = URL.createObjectURL(blob);
+      const filename = decodeURIComponent(linkEl.dataset.name || 'download');
 
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = decodeURIComponent(linkEl.dataset.name || 'download');
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(blobUrl);
+      if (window.ReactNativeWebView?.postMessage) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          window.ReactNativeWebView.postMessage(
+            JSON.stringify({
+              type: "DOWNLOAD_ATTACHMENT",
+              filename: filename,
+              mime: blob.type,
+              dataUrl: reader.result,
+            })
+          );
+        };
+        reader.readAsDataURL(blob);
+      } else {
+        // Fallback for web browsers
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(blobUrl);
+      }
+
     } catch (err) {
       console.error('Attachment decrypt failed:', err);
       showToast(`Decryption failed.`, 3000, 'error');
@@ -7591,7 +7630,7 @@ console.warn('in send message', txid)
    * Deletes a message locally (and potentially from network if it's a sent message)
    * @param {HTMLElement} messageEl - The message element to delete
    */
-  async deleteMessage(messageEl) {
+  deleteMessage(messageEl) {
     const { txid, messageTimestamp: timestamp } = messageEl.dataset;
     
     if (!timestamp || !confirm('Delete this message?')) return;
@@ -7610,11 +7649,30 @@ console.warn('in send message', txid)
         return showToast('Message already deleted', 2000, 'info');
       }
       
-      // Mark as deleted and clear attachments
+      // Mark as deleted and clear payment info if present
       Object.assign(message, {
         deleted: 1,
         message: "Deleted by me"
       });
+      // Remove payment-specific fields if present
+      if (message?.amount) {
+        if (message.payment) delete message.payment;
+        if (message.memo) message.memo = "Deleted by me";
+        if (message.amount) delete message.amount;
+        if (message.symbol) delete message.symbol;
+        
+        // Update corresponding transaction in wallet history
+        const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === message.txid);
+        if (txIndex !== -1) {
+          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted by me' });
+          delete myData.wallet.history[txIndex].amount;
+          delete myData.wallet.history[txIndex].symbol;
+          delete myData.wallet.history[txIndex].payment;
+          delete myData.wallet.history[txIndex].sign;
+          delete myData.wallet.history[txIndex].address;
+        }
+      }
+      // Remove attachments if any
       delete message.xattach;
       
       this.appendChatModal();
