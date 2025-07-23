@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -584,6 +584,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Lock Modal
   lockModal.load();
+
+  // Launch Modal
+  launchModal.load();
 
   // add event listener for back-button presses to prevent shift+tab
   document.querySelectorAll('.back-button').forEach((button) => {
@@ -1319,9 +1322,14 @@ class MenuModal {
     this.backupButton.addEventListener('click', () => backupAccountModal.open());
     this.bridgeButton = document.getElementById('openBridge');
     this.bridgeButton.addEventListener('click', () => bridgeModal.open());
+    this.launchButton = document.getElementById('openLaunchUrl');
+    this.launchButton.addEventListener('click', () => launchModal.open());
   }
 
   open() {
+    if (window?.ReactNativeWebView) {
+      this.launchButton.style.display = 'block';
+    }
     this.modal.classList.add('active');
     enterFullscreen();
   }
@@ -10060,6 +10068,7 @@ class MigrateAccountsModal {
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
       hideToast(loadingToastId);
+      welcomeScreen.orderButtons();
     }
 
     // clearing myData, not being used anymore
@@ -10486,6 +10495,51 @@ class UnlockModal {
   }
 }
 const unlockModal = new UnlockModal();
+
+class LaunchModal {
+  constructor() {
+
+  }
+
+  load() {
+    this.modal = document.getElementById('launchModal');
+    this.closeButton = document.getElementById('closeLaunchModal');
+    this.launchForm = document.getElementById('launchForm');
+    this.urlInput = this.modal.querySelector('#url');
+    this.launchButton = this.modal.querySelector('button[type="submit"]');
+    this.closeButton.addEventListener('click', () => this.close());
+    this.launchForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.urlInput.addEventListener('input', () => this.updateButtonState());
+  }
+
+  open() {
+    this.modal.classList.add('active');
+  }
+
+  close() {
+    this.urlInput.value = '';
+    this.modal.classList.remove('active');
+  }
+
+  handleSubmit(event) {
+    event.preventDefault();
+    const url = this.urlInput.value;
+    if (!url) {
+      showToast('Please enter a URL', 0, 'error');
+      return;
+    }
+    // open the url in the app
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'launch', url }));
+    this.close();
+  }
+
+  updateButtonState() {
+    const url = this.urlInput.value;
+    this.launchButton.disabled = url.length === 0;
+  }
+}
+
+const launchModal = new LaunchModal();
 
 /**
  * Remove failed transaction from the contacts messages, pending, and wallet history
