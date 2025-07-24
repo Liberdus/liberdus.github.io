@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -358,7 +358,7 @@ async function handleNativeAppSubscription() {
       const selectedGateway = getGatewayForRequest();
       if (!selectedGateway) {
         console.error('No gateway available for subscription request');
-        showToast('No gateway available', 3000, 'error');
+        showToast('No gateway available', 0, 'error');
         return;
       }
       
@@ -997,7 +997,7 @@ class Footer {
         }
   
         // Display error toast to user
-        showToast(`Failed to switch to ${view} view`, 3000, 'error');
+        showToast(`Failed to switch to ${view} view`, 0, 'error');
       }
     }
   }
@@ -1814,7 +1814,7 @@ class ScanQRModal {
       this.stopCamera(); // Ensure we clean up any partial setup
 
       // Show user-friendly error message
-      showToast(error.message || 'Failed to access camera. Please check your permissions and try again.', 5000, 'error');
+      showToast(error.message || 'Failed to access camera. Please check your permissions and try again.', 0, 'error');
 
       // Re-throw the error if you need to handle it further up
       throw error;
@@ -2608,7 +2608,7 @@ class EditContactModal {
 
     // if the textContent is 'Not provided', set it to an empty string
     const providedName = document.getElementById('contactInfoProvidedName').textContent;
-    if (providedName === 'Not provided') {
+    if (providedName === 'Not provided' || !providedName || providedName.trim() === '') {
       this.providedNameContainer.style.display = 'none';
     } else {
       providedNameDiv.textContent = providedName;
@@ -4219,7 +4219,7 @@ function updateUIForConnectivity() {
 function preventOfflineSubmit(event) {
   if (!isOnline) {
     event.preventDefault();
-    showToast('This action requires an internet connection', 3000, 'error');
+    showToast('This action requires an internet connection', 0, 'error');
   }
 }
 
@@ -4932,7 +4932,7 @@ class RestoreAccountModal {
       // Check if data is encrypted and decrypt if necessary
       if (!isNotEncryptedData) {
         if (!this.passwordInput.value.trim()) {
-          showToast('Password required for encrypted data', 3000, 'error');
+          showToast('Password required for encrypted data', 0, 'error');
           return;
         }
         fileContent = decryptData(fileContent, this.passwordInput.value.trim());
@@ -5009,7 +5009,7 @@ class RestoreAccountModal {
         this.clearForm();
       }, 2000);
     } catch (error) {
-      showToast(error.message || 'Import failed. Please check file and password.', 3000, 'error');
+      showToast(error.message || 'Import failed. Please check file and password.', 0, 'error');
     }
   }
 
@@ -5079,7 +5079,7 @@ class TollModal {
     this.tollCurrencySymbol.textContent = this.currentCurrency;
     this.newTollAmountInputElement.value = ''; // Clear input field
     this.warningMessageElement.textContent = '';
-    this.warningMessageElement.style.display = 'none';
+    this.warningMessageElement.classList.remove('show');
     this.saveButton.disabled = true;
 
     // Update min toll display under input
@@ -5324,10 +5324,10 @@ class TollModal {
     // Update warning message
     if (warningMessage) {
       this.warningMessageElement.textContent = warningMessage;
-      this.warningMessageElement.style.display = 'block';
+      this.warningMessageElement.classList.add('show');
     } else {
       this.warningMessageElement.textContent = '';
-      this.warningMessageElement.style.display = 'none';
+      this.warningMessageElement.classList.remove('show');
     }
   }
 }
@@ -5336,7 +5336,9 @@ const tollModal = new TollModal();
 
 // Invite Modal
 class InviteModal {
-  constructor() {}
+  constructor() {
+    this.invitedContacts = new Set(); // Track invited emails/phones
+  }
 
   load() {
     this.modal = document.getElementById('inviteModal');
@@ -5381,14 +5383,37 @@ class InviteModal {
 
   async handleSubmit(event) {
     event.preventDefault();
+    this.submitButton.disabled = true;
 
     const email = this.inviteEmailInput.value.trim();
     const phone = this.invitePhoneInput.value.trim();
 
     if (!email && !phone) {
-      showToast('Please enter either an email or phone number', 3000, 'error');
+      showToast('Please enter either an email or phone number', 0, 'error');
       // Ensure button is disabled again if somehow submitted while empty
       this.submitButton.disabled = true;
+      return;
+    }
+
+    // Check if we've already invited this email or phone
+    const emailAlreadyInvited = email && this.invitedContacts.has(email);
+    const phoneAlreadyInvited = phone && this.invitedContacts.has(phone);
+    
+    if (emailAlreadyInvited || phoneAlreadyInvited) {
+      let message = '';
+      if (emailAlreadyInvited && phoneAlreadyInvited) {
+        message = "You've already sent invites to both this email and phone number";
+      } else if (emailAlreadyInvited) {
+        message = "You've already sent an invite to this email";
+      } else {
+        message = "You've already sent an invite to this phone number";
+      }
+      
+      showToast(message, 0, 'error');
+      // Clear the input and re-enable button so they can enter different contacts
+      this.inviteEmailInput.value = '';
+      this.invitePhoneInput.value = '';
+      this.validateInputs(); // will disable the button since inputs are now empty
       return;
     }
 
@@ -5408,13 +5433,17 @@ class InviteModal {
       const data = await response.json();
 
       if (response.ok) {
+        // Add the successfully invited contacts to our tracking set
+        if (email) this.invitedContacts.add(email);
+        if (phone) this.invitedContacts.add(phone);
+        
         showToast('Invitation sent successfully!', 3000, 'success');
         this.close();
       } else {
-        showToast(data.error || 'Failed to send invitation', 3000, 'error');
+        showToast(data.error || 'Failed to send invitation', 0, 'error');
       }
     } catch (error) {
-      showToast('Failed to send invitation. Please try again.', 3000, 'error');
+      showToast('Failed to send invitation. Please try again.', 0, 'error');
     }
   }
 }
@@ -5429,9 +5458,18 @@ class AboutModal {
     this.versionDisplay = document.getElementById('versionDisplayAbout');
     this.networkName = document.getElementById('networkNameAbout');
     this.netId = document.getElementById('netIdAbout');
+    this.checkForUpdatesBtn = document.getElementById('checkForUpdatesBtn');
 
     // Set up event listeners
     this.closeButton.addEventListener('click', () => this.close());
+
+    // Only show "Check for Updates" button if user is in React Native app
+    if (window.ReactNativeWebView) {
+      this.checkForUpdatesBtn.style.display = 'inline-block';
+      this.checkForUpdatesBtn.addEventListener('click', () => this.openStore());
+    } else {
+      this.checkForUpdatesBtn.style.display = 'none';
+    }
 
     // Set version and network information once during initialization
     this.versionDisplay.textContent = myVersion + ' ' + version;
@@ -5446,6 +5484,23 @@ class AboutModal {
 
   close() {
     this.modal.classList.remove('active');
+  }
+
+  openStore() {
+    // This method only runs when user is in React Native app
+    const userAgent = navigator.userAgent.toLowerCase();
+    let storeUrl;
+
+    if (userAgent.includes('android')) {
+      storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
+    } else if (userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ios')) {
+      storeUrl = 'https://testflight.apple.com/join/zSRCWyxy';
+    } else {
+      storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
+    }
+
+    // Open store URL in new tab (same as explorer/network buttons)
+    window.open(storeUrl, '_blank');
   }
 }
 const aboutModal = new AboutModal();
@@ -5865,7 +5920,7 @@ class ValidatorStakingModal {
     // Check if we successfully retrieved a nominee address from the DOM
     if (!nominee || nominee.length < 10) {
       // Add a basic sanity check for length
-      showToast('Could not find nominated validator.', 4000, 'error');
+      showToast('Could not find nominated validator.', 0, 'error');
       console.warn('ValidatorStakingModal: Nominee not found or invalid in DOM element #validator-nominee.');
       return;
     }
@@ -5873,11 +5928,11 @@ class ValidatorStakingModal {
     // Check if the validator is active
     const activityCheck = await this.checkValidatorActivity(nominee);
     if (activityCheck.isActive) {
-      showToast('Cannot unstake from an active validator.', 5000, 'error');
+      showToast('Cannot unstake from an active validator.', 0, 'error');
       console.warn(`ValidatorStakingModal: Validator ${nominee} is active.`);
       return;
     } else if (activityCheck.error) {
-      showToast(`Error checking validator status: ${activityCheck.error}`, 5000, 'error');
+      showToast(`Error checking validator status: ${activityCheck.error}`, 0, 'error');
       return;
     }
 
@@ -5919,7 +5974,7 @@ class ValidatorStakingModal {
     } catch (error) {
       console.error('Error submitting unstake transaction:', error);
       // Provide a user-friendly error message
-      showToast('Unstake transaction failed. Network or server error.', 5000, 'error');
+      showToast('Unstake transaction failed. Network or server error.', 0, 'error');
     } finally {
       this.unstakeButton.disabled = false;
       this.backButton.disabled = false;
@@ -6062,7 +6117,7 @@ class StakeValidatorModal {
 
     // Basic Validation
     if (!nodeAddress || !amountStr) {
-      showToast('Please fill in all fields.', 3000, 'error');
+      showToast('Please fill in all fields.', 0, 'error');
       this.submitButton.disabled = false;
       return;
     }
@@ -6071,7 +6126,7 @@ class StakeValidatorModal {
     try {
       amount_in_wei = bigxnum2big(wei, amountStr);
     } catch (error) {
-      showToast('Invalid amount entered.', 3000, 'error');
+      showToast('Invalid amount entered.', 0, 'error');
       this.submitButton.disabled = false;
       return;
     }
@@ -6103,7 +6158,7 @@ class StakeValidatorModal {
       }
     } catch (error) {
       console.error('Stake transaction error:', error);
-      showToast('Stake transaction failed. See console for details.', 5000, 'error');
+      showToast('Stake transaction failed. See console for details.', 0, 'error');
     } finally {
       this.submitButton.disabled = false;
       this.backButton.disabled = false;
@@ -6250,7 +6305,7 @@ class StakeValidatorModal {
       this.nodeAddressInput.dispatchEvent(new Event('input'));
     } else {
       console.error('Stake node address input field not found!');
-      showToast('Could not find stake address field.', 3000, 'error');
+      showToast('Could not find stake address field.', 0, 'error');
     }
   }
 
@@ -6285,6 +6340,9 @@ class ChatModal {
     this.fileAttachments = [];
     // context menu properties
     this.currentContextMessage = null;
+
+    // Flag to prevent multiple downloads
+    this.attachmentDownloadInProgress = false; 
   }
 
   /**
@@ -6388,15 +6446,24 @@ class ChatModal {
       });
     }
 
-    this.messagesList.addEventListener('click', (e) => {
-      const link = e.target.closest('.attachment-link');
-      if (!link) return;
+    this.messagesList.addEventListener('click', async (e) => {
+      const row = e.target.closest('.attachment-row');
+      if (!row) return;
       e.preventDefault();
 
-      const idx  = Number(link.dataset.msgIdx);
+      // Concurent download prevention
+      if (this.attachmentDownloadInProgress) return;
+
+      this.attachmentDownloadInProgress = true;
+
+      const idx  = Number(row.dataset.msgIdx);
       const item = myData.contacts[this.address].messages[idx];
-      this.handleAttachmentDownload(item, link)
-          .catch(err => console.error('Attachment download failed:', err));
+
+      try {
+        await this.handleAttachmentDownload(item, row);
+      } finally {
+        this.attachmentDownloadInProgress = false;
+      }
     });
 
 
@@ -7040,20 +7107,19 @@ console.warn('in send message', txid)
               const fileSize = att.size ? this.formatFileSize(att.size) : '';
               const fileType = att.type ? att.type.split('/').pop().toUpperCase() : '';
               return `
-                <div class="attachment-row" style="display: flex; align-items: center; background: #f5f5f7; border-radius: 12px; padding: 10px 12px; margin-bottom: 6px;">
+                <div class="attachment-row" style="display: flex; align-items: center; background: #f5f5f7; border-radius: 12px; padding: 10px 12px; margin-bottom: 6px;"
+                  data-url="${fileUrl}"
+                  data-name="${encodeURIComponent(fileName)}"
+                  data-type="${att.type || ''}"
+                  data-pqEncSharedKey="${att.pqEncSharedKey || ''}"
+                  data-selfKey="${att.selfKey || ''}"
+                  data-msg-idx="${i}"
+                >
                   <span style="font-size: 2.2em; margin-right: 14px;">${emoji}</span>
                   <div style="min-width:0;">
-                    <a  href="#"
-                      class="attachment-link"
-                      data-url="${fileUrl}"
-                      data-name="${encodeURIComponent(fileName)}"
-                      data-type="${att.type || ''}"
-                      data-pqEncSharedKey="${att.pqEncSharedKey || ''}"
-                      data-selfKey="${att.selfKey || ''}"
-                      data-msg-idx="${i}"
-                      style="font-weight:500;color:#222;text-decoration:underline;word-break:break-all;">
-                    ${fileName}
-                  </a><br>
+                    <span class="attachment-label" style="font-weight:500;color:#222;word-break:break-all;">
+                      ${fileName}
+                    </span><br>
                     <span style="font-size: 0.93em; color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
                   </div>
                 </div>
@@ -7272,7 +7338,7 @@ console.warn('in send message', txid)
 
     // limit to 5 files
     if (this.fileAttachments.length >= 5) {
-      showToast('You can only attach up to 5 files.', 3000, 'error');
+      showToast('You can only attach up to 5 files.', 0, 'error');
       event.target.value = ''; // Reset file input
       return;
     }
@@ -7280,7 +7346,7 @@ console.warn('in send message', txid)
     // File size limit (e.g., 10MB)
     const maxSize = 10 * 1024 * 1024; // 10MB in bytes
     if (file.size > maxSize) {
-      showToast('File size too large. Maximum size is 10MB.', 3000, 'error');
+      showToast('File size too large. Maximum size is 10MB.', 0, 'error');
       event.target.value = ''; // Reset file input
       return;
     }
@@ -7294,7 +7360,7 @@ console.warn('in send message', txid)
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // DOCX
     ];
     if (!(allowedTypePrefixes.some(prefix => file.type.startsWith(prefix)) || allowedExplicitTypes.includes(file.type))) {
-      showToast('File type not supported.', 3000, 'error');
+      showToast('File type not supported.', 0, 'error');
       event.target.value = ''; // Reset file input
       return;
     }
@@ -7302,18 +7368,20 @@ console.warn('in send message', txid)
     try {
       this.isEncrypting = true;
       this.sendButton.disabled = true; // Disable send button during encryption
-      const loadingToastId = showToast(`Encrypting file...`, 0, 'loading');
+      this.addAttachmentButton.disabled = true;
+      const loadingToastId = showToast(`Attaching file...`, 0, 'loading');
       const { dhkey, cipherText: pqEncSharedKey } = await this.getRecipientDhKey(this.address);
       const password = myAccount.keys.secret + myAccount.keys.pqSeed;
       const selfKey = encryptData(bin2hex(dhkey), password, true)
 
       const worker = new Worker('encryption.worker.js', { type: 'module' });
       worker.onmessage = async (e) => {
-        hideToast(loadingToastId);
         this.isEncrypting = false;
         if (e.data.error) {
-          showToast(e.data.error, 3000, 'error');
+          hideToast(loadingToastId);
+          showToast(e.data.error, 0, 'error');
           this.sendButton.disabled = false; // Re-enable send button
+          this.addAttachmentButton.disabled = false;
         } else {
           // Encryption successful
           // upload to get url here 
@@ -7344,8 +7412,10 @@ console.warn('in send message', txid)
             pqEncSharedKey: bin2base64(pqEncSharedKey),
             selfKey
           });
+          hideToast(loadingToastId);
           this.showAttachmentPreview(file);
           this.sendButton.disabled = false; // Re-enable send button
+          this.addAttachmentButton.disabled = false;
           showToast(`File "${file.name}" attached successfully`, 2000, 'success');
         }
         worker.terminate();
@@ -7353,9 +7423,10 @@ console.warn('in send message', txid)
 
       worker.onerror = (err) => {
         hideToast(loadingToastId);
-        showToast(`File encryption failed: ${err.message}`, 3000, 'error');
+        showToast(`File encryption failed: ${err.message}`, 0, 'error');
         this.isEncrypting = false;
-        this.submitButton.disabled = false; // Re-enable send button
+        this.sendButton.disabled = false; // Re-enable send button
+        this.addAttachmentButton.disabled = false;
         worker.terminate();
       };
       
@@ -7368,7 +7439,7 @@ console.warn('in send message', txid)
       
     } catch (error) {
       console.error('Error handling file attachment:', error);
-      showToast('Error processing file attachment', 3000, 'error');
+      showToast('Error processing file attachment', 0, 'error');
     } finally {
       event.target.value = ''; // Reset the file input value
     }
@@ -7554,6 +7625,7 @@ console.warn('in send message', txid)
 
   async handleAttachmentDownload(item, linkEl) {
     try {
+      const loadingToastId = showToast(`Decrypting attachment...`, 0, 'loading');
       // 1. Derive a fresh 32‑byte dhkey
       let dhkey;
       if (item.my) {
@@ -7589,6 +7661,7 @@ console.warn('in send message', txid)
       const blobUrl = URL.createObjectURL(blob);
       const filename = decodeURIComponent(linkEl.dataset.name || 'download');
 
+      hideToast(loadingToastId);
       if (window.ReactNativeWebView?.postMessage) {
         const reader = new FileReader();
         reader.onloadend = () => {
@@ -7615,7 +7688,7 @@ console.warn('in send message', txid)
             if (newTab) {
               console.log('opened in new tab');
             } else {
-              showToast('Popup blocked. File downloaded instead.', 3000, 'warning');
+              console.log('failed to open in new tab');
             }
           } else {
             // Non-viewable files: download only
@@ -7629,7 +7702,7 @@ console.warn('in send message', txid)
 
     } catch (err) {
       console.error('Attachment decrypt failed:', err);
-      showToast(`Decryption failed.`, 3000, 'error');
+      showToast(`Decryption failed.`, 0, 'error');
     }
   }
 
@@ -7638,6 +7711,8 @@ console.warn('in send message', txid)
    * @param {Event} e - Click event
    */
   handleMessageClick(e) {
+    if (e.target.closest('.attachment-row')) return;
+
     if (e.target.tagName === 'A' || e.target.closest('a')) return;
     
     const messageEl = e.target.closest('.message');
@@ -7758,7 +7833,7 @@ console.warn('in send message', txid)
       showToast(`${contentType} copied to clipboard`, 2000, 'success');
     } catch (err) {
       console.error('Failed to copy:', err);
-      showToast(`Failed to copy ${contentType.toLowerCase()}`, 2000, 'error');
+      showToast(`Failed to copy ${contentType.toLowerCase()}`, 0, 'error');
     }
   }
 
@@ -7822,7 +7897,7 @@ console.warn('in send message', txid)
       }, 300);
     } catch (error) {
       console.error('Error deleting message:', error);
-      showToast('Failed to delete message', 2000, 'error');
+      showToast('Failed to delete message', 0, 'error');
     }
   }
 }
@@ -9168,7 +9243,7 @@ class SendAssetFormModal {
         const context = canvas.getContext('2d');
         if (!context) {
           console.error('Could not get 2d context from canvas');
-          showToast('Error processing image', 3000, 'error');
+          showToast('Error processing image', 0, 'error');
           event.target.value = ''; // Reset file input
           return;
         }
@@ -9191,20 +9266,20 @@ class SendAssetFormModal {
             } else {
               console.error('No valid fill function provided for QR file select');
               // Fallback or default behavior if needed, e.g., show generic error
-              showToast('Internal error handling QR data', 3000, 'error');
+              showToast('Internal error handling QR data', 0, 'error');
             }
           } else {
             // qr.decodeQR might throw an error instead of returning null/undefined
             // This else block might not be reached if errors are always thrown
             console.error('No QR code found in image (qr.js)');
-            showToast('No QR code found in image', 3000, 'error');
+            showToast('No QR code found in image', 0, 'error');
             // Clear the form fields in case of failure to find QR code
             targetModal.resetForm();
           }
         } catch (error) {
           console.error('Error processing QR code image with qr.js:', error);
           // Assume error means no QR code found or decoding failed
-          showToast('Could not read QR code from image', 3000, 'error');
+          showToast('Could not read QR code from image', 0, 'error');
           // Clear the form fields in case of error
           targetModal.resetForm();
 
@@ -9214,7 +9289,7 @@ class SendAssetFormModal {
       };
       img.onerror = function () {
         console.error('Error loading image');
-        showToast('Error loading image file', 3000, 'error');
+        showToast('Error loading image file', 0, 'error');
         event.target.value = ''; // Reset the file input value
         // Clear the form fields in case of image loading error
         targetModal.resetForm();
@@ -9224,7 +9299,7 @@ class SendAssetFormModal {
 
     reader.onerror = function () {
       console.error('Error reading file');
-      showToast('Error reading file', 3000, 'error');
+      showToast('Error reading file', 0, 'error');
       event.target.value = ''; // Reset the file input value
     };
 
@@ -9242,7 +9317,7 @@ class SendAssetFormModal {
     // Explicitly check for the required prefix
     if (!data || !data.startsWith('liberdus://')) {
       console.error("Invalid payment QR code format. Missing 'liberdus://' prefix.", data);
-      showToast('Invalid payment QR code format.', 3000, 'error');
+      showToast('Invalid payment QR code format.', 0, 'error');
       // Optionally clear fields or leave them as they were
       this.usernameInput.value = '';
       this.amountInput.value = '';
@@ -9278,7 +9353,7 @@ class SendAssetFormModal {
       this.amountInput.dispatchEvent(new Event('input'));
     } catch (error) {
       console.error('Error parsing payment QR data:', error, data);
-      showToast('Failed to parse payment QR data.', 3000, 'error');
+      showToast('Failed to parse payment QR data.', 0, 'error');
       // Clear fields on error
       this.usernameInput.value = '';
       this.amountInput.value = '';
@@ -9351,7 +9426,7 @@ class SendAssetConfirmModal {
     // if it's your own username disable the send button
     if (username == myAccount.username) {
       confirmButton.disabled = true;
-      showToast('You cannot send assets to yourself', 3000, 'error');
+      showToast('You cannot send assets to yourself', 0, 'error');
       return;
     }
 
@@ -10380,6 +10455,7 @@ const migrateAccountsModal = new MigrateAccountsModal();
 class LockModal {
   constructor() {
     this.encKey = null;
+    this.mode = 'set'; // set, change, or remove
   }
 
   load() {
@@ -10390,8 +10466,14 @@ class LockModal {
     this.oldPasswordInput = this.modal.querySelector('#oldPassword');
     this.oldPasswordLabel = this.modal.querySelector('#oldPasswordLabel');
     this.newPasswordInput = this.modal.querySelector('#newPassword');
+    this.newPasswordLabel = this.modal.querySelector('#newPasswordLabel');
     this.confirmNewPasswordInput = this.modal.querySelector('#confirmNewPassword');
-    this.lockButton = this.modal.querySelector('.update-button');
+    this.confirmNewPasswordLabel = this.modal.querySelector('#confirmNewPasswordLabel');
+    this.lockButton = this.modal.querySelector('#lockForm button[type="submit"]');
+    this.optionsBox = document.getElementById('lockOptions');
+    this.changeButton = document.getElementById('changePasswordButton');
+    this.removeButton = document.getElementById('removeLockButton');
+    this.formBox = document.getElementById('lockFormContainer');
 
     this.openButton.addEventListener('click', () => this.open());
     this.headerCloseButton.addEventListener('click', () => this.close());
@@ -10402,20 +10484,19 @@ class LockModal {
     this.confirmNewPasswordInput.addEventListener('input', this.debouncedUpdateButtonState);
     this.oldPasswordInput.addEventListener('input', this.debouncedUpdateButtonState);
     this.passwordWarning = this.modal.querySelector('#passwordWarning');
+    this.changeButton.addEventListener('click', () => this.pickMode('change'));
+    this.removeButton.addEventListener('click', () => this.pickMode('remove'));
   }
 
   open() {
-    // if localStorage.lock exists, then show the old password input
-    if (localStorage?.lock) {
-      this.oldPasswordInput.style.display = 'block';
-      this.oldPasswordLabel.style.display = 'block';
-      this.newPasswordInput.placeholder = 'Leave blank to remove password';
-    } else {
-      this.oldPasswordInput.style.display = 'none';
-      this.oldPasswordLabel.style.display = 'none';
-      this.newPasswordInput.placeholder = '';
-      this.lockButton.textContent = 'Save Password';
-    }
+    const alreadyLocked = Boolean(localStorage?.lock);
+
+    // show or hide the option picker
+    this.optionsBox.style.display = alreadyLocked ? 'block' : 'none';
+    this.formBox.style.display = alreadyLocked ? 'none' : 'block';
+
+    this.mode = alreadyLocked ? null : 'set';
+    this.prepareForm(); 
 
     // disable the button
     this.lockButton.disabled = true;
@@ -10428,6 +10509,51 @@ class LockModal {
 
   close() {
     this.modal.classList.remove('active');
+  }
+
+  pickMode(mode) {
+    this.mode = mode; // 'change' | 'remove'
+    this.optionsBox.style.display = 'none';
+    this.formBox.style.display = 'block';
+    this.prepareForm();
+    this.updateButtonState();
+  }
+
+  // adjust which fields are visible based on selected mode
+  prepareForm() {
+    // hide all the fields
+    this.oldPasswordInput.style.display        = 'none';
+    this.oldPasswordLabel.style.display        = 'none';
+    this.newPasswordInput.style.display        = 'none';
+    this.newPasswordLabel.style.display        = 'none';
+    this.confirmNewPasswordInput.style.display = 'none';
+    this.confirmNewPasswordLabel.style.display = 'none';
+
+    // reveal fields based on mode
+    if (this.mode === 'remove') {
+      // only the current‑password field
+      this.oldPasswordInput.style.display = 'block';
+      this.oldPasswordLabel.style.display = 'block';
+      this.lockButton.textContent = 'Remove Lock';
+
+    } else if (this.mode === 'change') {
+      // current + new + confirm
+      this.oldPasswordInput.style.display        = 'block';
+      this.oldPasswordLabel.style.display        = 'block';
+      this.newPasswordInput.style.display        = 'block';
+      this.newPasswordLabel.style.display        = 'block';
+      this.confirmNewPasswordInput.style.display = 'block';
+      this.confirmNewPasswordLabel.style.display = 'block';
+      this.lockButton.textContent = 'Save Password';
+
+    } else { // 'set' (no existing lock)
+      // new + confirm only
+      this.newPasswordInput.style.display        = 'block';
+      this.newPasswordLabel.style.display        = 'block';
+      this.confirmNewPasswordInput.style.display = 'block';
+      this.confirmNewPasswordLabel.style.display = 'block';
+      this.lockButton.textContent = 'Save Password';
+    }
   }
 
   async handleSubmit(event) {
@@ -10471,7 +10597,7 @@ class LockModal {
 
     // if new password is empty, remove the password from localStorage
     // once we are here we know the old password is correct
-    if (newPassword.length === 0) {
+    if (this.mode === 'remove') {
       await encryptAllAccounts(oldPassword, newPassword)
       delete localStorage.lock;
       this.encKey = null;
@@ -10527,54 +10653,30 @@ class LockModal {
     const oldPassword = this.oldPasswordInput.value;
     
     // Check if old password is filled and new password is empty - "Clear password" mode
-    const isOldPasswordVisible = this.oldPasswordInput.style.display !== 'none';
-    const isClearPasswordMode = isOldPasswordVisible && oldPassword.length > 0 && newPassword.length === 0;
+    // const isOldPasswordVisible = this.oldPasswordInput.style.display !== 'none';
+    // const isClearPasswordMode = isOldPasswordVisible && oldPassword.length > 0 && newPassword.length === 0;
     
     let isValid = false;
-    
-    if (isClearPasswordMode) {
-      // In clear password mode, only old password needs to be filled
-      isValid = true;
-      this.lockButton.textContent = 'Remove Password';
-      
-      // Set placeholder based on confirm password state
-      if (confirmPassword.length > 0) {
-        this.newPasswordInput.placeholder = '';
-      } else {
-        this.newPasswordInput.placeholder = 'Leave blank to remove password';
-      }
-    } else {
-      // Regular password set/update mode
-      isValid = newPassword.length > 0 && confirmPassword.length > 0;
-      
-      // If old password field is visible, it must be filled
-      if (isOldPasswordVisible) {
-        isValid = isValid && oldPassword.length > 0;
-      }
-      this.lockButton.textContent = 'Save Password';
-      this.newPasswordInput.placeholder = '';
-    }
-    
-    // Validate password requirements and set appropriate warnings
     let warningMessage = '';
-    
-    if (!isClearPasswordMode) {
-      // Check if password is at least 4 characters
+
+    if (this.mode === 'remove') {
+      isValid = oldPassword.length > 0;
+    } else { // set or change mode
+      // too short
       if (newPassword.length > 0 && newPassword.length < 4) {
-        isValid = false;
         warningMessage = 'too short';
-      }
-      // Check if passwords match
-      else if (newPassword && confirmPassword && newPassword !== confirmPassword) {
-        isValid = false;
+      } else if (newPassword && confirmPassword && newPassword !== confirmPassword) {
         warningMessage = 'does not match';
-      }
-      // Check if new password is same as old password
-      else if (newPassword && oldPassword && newPassword === oldPassword) {
-        isValid = false;
+      } else if (this.mode === 'change' && newPassword && oldPassword && newPassword === oldPassword) {
         warningMessage = 'same as current';
       }
+      isValid = !warningMessage && newPassword.length >= 4 && newPassword === confirmPassword;
+      if (this.mode === 'change') {
+        isValid = isValid && oldPassword.length > 0;
+      }
     }
+    
+    this.passwordWarning.style.display = 'none';
     
     // Update button state and warnings
     this.lockButton.disabled = !isValid;
@@ -10937,7 +11039,9 @@ async function checkPendingTransactions() {
             // revert the local myData.contacts[toAddress].timestamp to the old value
             myData.contacts[pendingTxInfo.to].timestamp = pendingTxInfo.oldContactTimestamp;
           } else if (type === 'reclaim_toll') {
-            showToast(`Reclaim toll failed: ${failureReason}`, 0, 'error');
+            if (failureReason !== 'user is trying to reclaim toll but the toll pool is empty') {
+              showToast(`Reclaim toll failed: ${failureReason}`, 0, 'error');
+            }
           } else {
             // for messages, transfer etc.
             showToast(failureReason, 0, 'error');
