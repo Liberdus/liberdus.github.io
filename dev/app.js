@@ -1,12 +1,15 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'c'
+const version = 'd'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
   let newVersion;
   try {
-    const response = await fetch(`version.html?${getCorrectedTimestamp()}`);
+    const response = await fetch(`version.html`, {cache: 'reload', headers: {
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    }});
     if (!response.ok) throw new Error('Version check failed');
     newVersion = await response.text();
   } catch (error) {
@@ -24,66 +27,34 @@ async function checkVersion() {
   //console.log('myVersion < newVersion then reload', myVersion, newVersion)
   console.log(parseInt(myVersion.replace(/\D/g, '')), parseInt(newVersion.replace(/\D/g, '')));
   if (parseInt(myVersion.replace(/\D/g, '')) != parseInt(newVersion.replace(/\D/g, ''))) {
-    if (parseInt(myVersion.replace(/\D/g, '')) > 0) {
-      alert('Updating to new version: ' + newVersion + ' ' + version);
-    }
+    alert('Updating to new version: ' + newVersion + ' ' + version);
     localStorage.setItem('version', newVersion); // Save new version
-    forceReload([
-      './',
-      'index.html',
+    const newUrl = window.location.href.split('?')[0];
+/* probably don't need to forece reload these since we are reloading newUrl now
+    './',
+    'index.html',
+*/
+    await forceReload([
+      newUrl,
       'styles.css',
       'app.js',
       'lib.js',
       'network.js',
+      'crypto.js',
+      'encryption.worker.js',
       'offline.html',
     ]);
-    const newUrl = window.location.href;
-    //console.log('reloading', newUrl)
     window.location.replace(newUrl);
   }
 }
 
-// Usage examples:
-/*
-// These will all work:
-forceReload([
-    'images/logo.png',           // Relative to current path
-    '/styles/main.css',          // Relative to domain root
-    '../scripts/app.js',         // Parent directory
-    './data/config.json',        // Same directory
-    'https://api.example.com/data'  // Absolute URL
-]);
-*/
 async function forceReload(urls) {
   try {
-    // Convert relative URLs to absolute
-    const absoluteUrls = urls.map((url) => {
-      if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//')) {
-        return url;
-      }
-      // If it starts with /, it's relative to domain root
-      if (url.startsWith('/')) {
-        return `${window.location.origin}${url}`;
-      }
-      // Otherwise, it's relative to current path
-      const base = `${window.location.origin}${window.location.pathname}`;
-      return new URL(url, base).href;
-    });
-    // Remove from all browser caches
-    if (window.caches) {
-      const cacheKeys = await caches.keys();
-      for (const cacheKey of cacheKeys) {
-        const cache = await caches.open(cacheKey);
-        for (const url of absoluteUrls) {
-          await cache.delete(url);
-        }
-      }
-    }
     // Fetch with cache-busting headers
-    const fetchPromises = absoluteUrls.map((url) =>
+    const fetchPromises = urls.map((url) =>
       fetch(url, {
-        cache: 'reload',
-        headers: {
+        cache: 'reload',  // this bypasses the cache to get from the server and updates the cache
+        headers: {        // this bypasses the cache of any proxies between the client and the server
           'Cache-Control': 'no-cache',
           Pragma: 'no-cache',
         },
@@ -326,7 +297,7 @@ function newDataRecord(myAccount) {
  * This is used to subscribe to push notifications for the native app
  * @returns {Promise<void>}
  */
-async function handleNativeAppSubscription() {
+async function handleNativeAppSubscribe() {
   const urlParams = new URLSearchParams(window.location.search);
   const deviceToken = urlParams.get('device_token');
   const pushToken = urlParams.get('push_token');
@@ -473,7 +444,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupConnectivityDetection();
 
   // Check for native app subscription tokens and handle subscription
-  handleNativeAppSubscription();
+  handleNativeAppSubscribe();
 
   // Unlock Modal
   unlockModal.load();
@@ -617,7 +588,7 @@ function handleUnload() {
 
 // Add unload handler to save myData
 function handleBeforeUnload(e) {
-  handleNativeAppSubscription();
+  handleNativeAppSubscribe();
   if (menuModal.isSignoutExit){
     return;
   }
@@ -635,7 +606,7 @@ function handleVisibilityChange() {
   }
 
   if (document.visibilityState === 'hidden') {
-    handleNativeAppSubscription();
+    handleNativeAppSubscribe();
     // if chatModal was opened, save the last message count
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
@@ -1406,10 +1377,15 @@ class MenuModal {
       return;
     }
 
-    await handleNativeAppSubscription();
+    await handleNativeAppSubscribe();
 
     // Only reload if online
-    window.location.reload();
+//    window.location.reload();
+    await checkVersion();
+
+    const newUrl = window.location.href.split('?')[0];
+    window.location.replace(newUrl);
+
   }
 }
 
@@ -4846,7 +4822,6 @@ class RestoreAccountModal {
                      this.oldStringCustom.value.trim();
     const newString = this.newStringSelect.value || 
                      this.newStringCustom.value.trim();
-    
     if (oldString && newString && oldString !== newString) {
       return { oldString, newString };
     }
