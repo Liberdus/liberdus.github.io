@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'; // Also increment this when you increment version.html
+const version = 'u'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -29,9 +29,13 @@ async function checkVersion() {
   if (parseInt(myVersion.replace(/\D/g, '')) != parseInt(newVersion.replace(/\D/g, ''))) {
     alert('Updating to new version: ' + newVersion + ' ' + version);
     localStorage.setItem('version', newVersion); // Save new version
+    const newUrl = window.location.href.split('?')[0];
+/* probably don't need to forece reload these since we are reloading newUrl now
+    './',
+    'index.html',
+*/
     await forceReload([
-      './',
-      'index.html',
+      newUrl,
       'styles.css',
       'app.js',
       'lib.js',
@@ -40,8 +44,6 @@ async function checkVersion() {
       'encryption.worker.js',
       'offline.html',
     ]);
-    const newUrl = window.location.href;
-    //console.log('reloading', newUrl)
     window.location.replace(newUrl);
   }
 }
@@ -295,7 +297,7 @@ function newDataRecord(myAccount) {
  * This is used to subscribe to push notifications for the native app
  * @returns {Promise<void>}
  */
-async function handleNativeAppSubscription() {
+async function handleNativeAppSubscribe() {
   const urlParams = new URLSearchParams(window.location.search);
   const deviceToken = urlParams.get('device_token');
   const pushToken = urlParams.get('push_token');
@@ -442,7 +444,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupConnectivityDetection();
 
   // Check for native app subscription tokens and handle subscription
-  handleNativeAppSubscription();
+  handleNativeAppSubscribe();
 
   // Unlock Modal
   unlockModal.load();
@@ -586,7 +588,7 @@ function handleUnload() {
 
 // Add unload handler to save myData
 function handleBeforeUnload(e) {
-  handleNativeAppSubscription();
+  handleNativeAppSubscribe();
   if (menuModal.isSignoutExit){
     return;
   }
@@ -604,7 +606,7 @@ function handleVisibilityChange() {
   }
 
   if (document.visibilityState === 'hidden') {
-    handleNativeAppSubscription();
+    handleNativeAppSubscribe();
     // if chatModal was opened, save the last message count
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
@@ -1375,11 +1377,15 @@ class MenuModal {
       return;
     }
 
-    await handleNativeAppSubscription();
+    await handleNativeAppSubscribe();
 
     // Only reload if online
 //    window.location.reload();
     await checkVersion();
+
+    const newUrl = window.location.href.split('?')[0];
+    window.location.replace(newUrl);
+
   }
 }
 
@@ -4816,7 +4822,6 @@ class RestoreAccountModal {
                      this.oldStringCustom.value.trim();
     const newString = this.newStringSelect.value || 
                      this.newStringCustom.value.trim();
-    
     if (oldString && newString && oldString !== newString) {
       return { oldString, newString };
     }
