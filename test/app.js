@@ -1,12 +1,15 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 't'; // Also increment this when you increment version.html
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
   let newVersion;
   try {
-    const response = await fetch(`version.html?${getCorrectedTimestamp()}`);
+    const response = await fetch(`version.html`, {cache: 'reload', headers: {
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    }});
     if (!response.ok) throw new Error('Version check failed');
     newVersion = await response.text();
   } catch (error) {
@@ -24,17 +27,17 @@ async function checkVersion() {
   //console.log('myVersion < newVersion then reload', myVersion, newVersion)
   console.log(parseInt(myVersion.replace(/\D/g, '')), parseInt(newVersion.replace(/\D/g, '')));
   if (parseInt(myVersion.replace(/\D/g, '')) != parseInt(newVersion.replace(/\D/g, ''))) {
-    if (parseInt(myVersion.replace(/\D/g, '')) > 0) {
-      alert('Updating to new version: ' + newVersion + ' ' + version);
-    }
+    alert('Updating to new version: ' + newVersion + ' ' + version);
     localStorage.setItem('version', newVersion); // Save new version
-    forceReload([
+    await forceReload([
       './',
       'index.html',
       'styles.css',
       'app.js',
       'lib.js',
       'network.js',
+      'crypto.js',
+      'encryption.worker.js',
       'offline.html',
     ]);
     const newUrl = window.location.href;
@@ -43,47 +46,13 @@ async function checkVersion() {
   }
 }
 
-// Usage examples:
-/*
-// These will all work:
-forceReload([
-    'images/logo.png',           // Relative to current path
-    '/styles/main.css',          // Relative to domain root
-    '../scripts/app.js',         // Parent directory
-    './data/config.json',        // Same directory
-    'https://api.example.com/data'  // Absolute URL
-]);
-*/
 async function forceReload(urls) {
   try {
-    // Convert relative URLs to absolute
-    const absoluteUrls = urls.map((url) => {
-      if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//')) {
-        return url;
-      }
-      // If it starts with /, it's relative to domain root
-      if (url.startsWith('/')) {
-        return `${window.location.origin}${url}`;
-      }
-      // Otherwise, it's relative to current path
-      const base = `${window.location.origin}${window.location.pathname}`;
-      return new URL(url, base).href;
-    });
-    // Remove from all browser caches
-    if (window.caches) {
-      const cacheKeys = await caches.keys();
-      for (const cacheKey of cacheKeys) {
-        const cache = await caches.open(cacheKey);
-        for (const url of absoluteUrls) {
-          await cache.delete(url);
-        }
-      }
-    }
     // Fetch with cache-busting headers
-    const fetchPromises = absoluteUrls.map((url) =>
+    const fetchPromises = urls.map((url) =>
       fetch(url, {
-        cache: 'reload',
-        headers: {
+        cache: 'reload',  // this bypasses the cache to get from the server and updates the cache
+        headers: {        // this bypasses the cache of any proxies between the client and the server
           'Cache-Control': 'no-cache',
           Pragma: 'no-cache',
         },
@@ -120,7 +89,9 @@ import {
   generateRandomBytes,
   generateAddress,
   passwordToKey,
-} from './crypto.js';
+  dhkeyCombined,
+  decryptChacha,
+} from './crypto.js?';
 
 // Put standalone conversion function in lib.js
 import {
@@ -148,7 +119,7 @@ import {
   debounce,
   truncateMessage,
   normalizeUnsignedFloat,
-} from './lib.js';
+} from './lib.js?';
 
 const weiDigits = 18;
 const wei = 10n ** BigInt(weiDigits);
@@ -164,9 +135,7 @@ let myData = null;
 let myAccount = null; // this is set to myData.account for convience
 let timeSkew = 0;
 let useLongPolling = true;
-let wsManager = null;
 
-let updateWebSocketIndicatorIntervalId = null;
 let checkPendingTransactionsIntervalId = null;
 let getSystemNoticeIntervalId = null;
 //let checkConnectivityIntervalId = null;
@@ -183,17 +152,6 @@ let parameters = {
     transactionFee: 1n * wei,
   },
 };
-
-async function checkOnlineStatus() {
-  try {
-    const url = new URL(window.location.origin);
-    url.searchParams.set('rand', Math.random());
-    const response = await fetch(url.toString(), { method: 'HEAD' });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Check if a username is available or taken
@@ -356,6 +314,8 @@ async function handleNativeAppSubscription() {
         // Get addresses from all stored accounts and convert to long format
         addresses = Object.values(netidAccounts.usernames).map(account => longAddress(account.address));
       }
+
+      if (addresses.length < 1) return;
       
       const payload = {
         deviceToken,
@@ -367,7 +327,7 @@ async function handleNativeAppSubscription() {
       const selectedGateway = getGatewayForRequest();
       if (!selectedGateway) {
         console.error('No gateway available for subscription request');
-        showToast('No gateway available', 3000, 'error');
+        showToast('No gateway available', 0, 'error');
         return;
       }
       
@@ -399,16 +359,87 @@ async function handleNativeAppSubscription() {
   }
 }
 
+/**
+ * Unsubscribe the native app from push notifications for the current account.
+ * If other accounts are on the device, it updates the subscription to only include them.
+ * If this is the last account, it fully unsubscribes the device.
+ */
+async function handleNativeAppUnsubscribe() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const deviceToken = urlParams.get('device_token');
+  const pushToken = urlParams.get('push_token');
+
+  // cannot unsubscribe if no device token is provided
+  if (!deviceToken) return;
+
+  if (!myAccount || !myAccount.keys || !myAccount.keys.address) {
+    console.warn('handleNativeAppUnsubscribe called without an active account. Aborting.');
+    return;
+  }
+
+  const currentUserAddress = longAddress(myAccount.keys.address);
+
+  // Get all other stored addresses on this device for the current network.
+  const { netid } = network;
+  const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+  const netidAccounts = existingAccounts.netids[netid];
+  let allStoredAddresses = [];
+  if (netidAccounts?.usernames) {
+    allStoredAddresses = Object.values(netidAccounts.usernames).map(account => longAddress(account.address));
+  }
+
+  // Create a list of addresses to keep subscribed, excluding the current user.
+  const remainingAddresses = allStoredAddresses.filter(addr => addr !== currentUserAddress);
+
+  let payload;
+
+  if (remainingAddresses.length === 0) {
+    // This is the only account. Unsubscribe the device completely.
+    payload = {
+      deviceToken,
+      addresses: [],
+    };
+  } else {
+    // Other accounts remain. Update the subscription to only include them.
+    if (!pushToken) {
+      console.warn('Cannot update subscription for remaining accounts without a pushToken.');
+      return;
+    }
+    payload = {
+      deviceToken,
+      expoPushToken: pushToken,
+      addresses: remainingAddresses,
+    };
+  }
+
+  const selectedGateway = getGatewayForRequest();
+  if (!selectedGateway) {
+    console.error('No gateway available for unsubscribe request');
+    return;
+  }
+  const SUBSCRIPTION_API = `${selectedGateway.web}/notifier/subscribe`;
+
+  try {
+    const res = await fetch(SUBSCRIPTION_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      console.error('Unsubscribe failed:', res.status, res.statusText);
+    }
+  } catch (err) {
+    console.error('Error during unsubscribe:', err);
+  }
+}
+
 // Load saved account data and update chat list on page load
 document.addEventListener('DOMContentLoaded', async () => {
   await checkVersion(); // version needs to be checked before anything else happens
   timeDifference(); // Calculate and log time difference early
 
   setupConnectivityDetection();
-
-  // Add beforeunload handler to save myData; don't use unload event, it is getting depricated
-  window.addEventListener('beforeunload', handleBeforeUnload);
-  document.addEventListener('visibilitychange', async () => await handleVisibilityChange()); // Keep as document
 
   // Check for native app subscription tokens and handle subscription
   handleNativeAppSubscription();
@@ -418,6 +449,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Sign In Modal
   signInModal.load();
+  
+  // My Info Modal
+  myInfoModal.load();
 
   // Welcome Screen
   welcomeScreen.load()
@@ -474,7 +508,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   contactInfoModal.load();
 
   // Failed Message Modal
-  failedMessageModal.load();
+  failedMessageMenu.load();
 
   // New Chat Modal
   newChatModal.load();
@@ -521,6 +555,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Lock Modal
   lockModal.load();
 
+  // Launch Modal
+  launchModal.load();
+
   // add event listener for back-button presses to prevent shift+tab
   document.querySelectorAll('.back-button').forEach((button) => {
     button.addEventListener('keydown', ignoreShiftTabKey);
@@ -544,59 +581,37 @@ function handleUnload() {
   if (menuModal.isSignoutExit) {
     return;
   } // User selected to Signout; state was already saved
-  else {
-    // Clean up WebSocket connection
-    if (wsManager) {
-      wsManager.disconnect();
-      wsManager = null;
-    }
-  }
 }
 */
 
 // Add unload handler to save myData
 function handleBeforeUnload(e) {
+  handleNativeAppSubscription();
   if (menuModal.isSignoutExit){
-    window.removeEventListener('beforeunload', handleBeforeUnload);
-    if (wsManager) {
-      wsManager.disconnect();
-      wsManager = null;
-    }
     return;
   }
-  e.preventDefault();
-  saveState();    // This save might not work if the amount of data to save is large and user quickly clicks on Leave button
-  console.log('in handleBeforeUnload', e);
-  // Clean up WebSocket connection
-
-
-  console.log('stop back button');
-//  history.pushState(null, '', window.location.href);
-//  console.log('already called history.pushState')
+  if (myData){
+    e.preventDefault();
+    saveState();    // This save might not work if the amount of data to save is large and user quickly clicks on Leave button
+  }
 }
 
 // This is for installed apps where we can't stop the back button; just save the state
-async function handleVisibilityChange() {
+function handleVisibilityChange() {
   console.log('in handleVisibilityChange', document.visibilityState);
   if (!myAccount) {
     return;
   }
 
   if (document.visibilityState === 'hidden') {
+    handleNativeAppSubscription();
     // if chatModal was opened, save the last message count
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
       chatModal.lastMessageCount = contact?.messages?.length || 0;
     }
-    if (menuModal.isSignoutExit) {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      return;
-    }
   } else if (document.visibilityState === 'visible') {
-    // Reconnect WebSocket if needed
-    if (wsManager && !wsManager.isConnected() && myAccount) {
-      wsManager.connect();
-    }
+    handleNativeAppUnsubscribe();
     // if chatModal was opened, check if message count changed while hidden
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
@@ -679,12 +694,13 @@ function saveState() {
   }
 }
 
-function loadState(account){
+function loadState(account, noparse=false){
   let data = localStorage.getItem(account);
   if (!data) { return null; }
   if (localStorage.lock && lockModal.encKey) {
     data = decryptData(data, lockModal.encKey, true)
   }
+  if (noparse) return data;
   return parse(data);
 }
 
@@ -725,7 +741,15 @@ class WelcomeScreen {
         createAccountModal.openWithReset();
       }
     });
-    this.importAccountButton.addEventListener('click', () => restoreAccountModal.open());
+
+    this.importAccountButton.addEventListener('click', () => {
+      if (localStorage.lock && unlockModal.isLocked()) {
+        unlockModal.openButtonElementUsed = this.importAccountButton;
+        unlockModal.open();
+      } else {
+        restoreAccountModal.open();
+      }
+    });
 
     this.orderButtons();
   }
@@ -786,6 +810,13 @@ class Header {
 
     this.logoLink.addEventListener('keydown', ignoreShiftTabKey); // add event listener for first-item to prevent shift+tab
     this.menuButton.addEventListener('click', () => menuModal.open());
+    
+    // Add click event for username display to open myInfoModal
+    this.text.addEventListener('click', () => {
+      if (myData && myData.account) {
+        myInfoModal.open();
+      }
+    });
   }
 
   open() {
@@ -841,11 +872,6 @@ class Footer {
     const previousView = document.querySelector('.app-screen.active')?.id?.replace('Screen', '') || 'chats';
     const previousButton = document.querySelector('.nav-button.active');
   
-    // Initialize WebSocket connection regardless of view
-    if (wsManager) {
-      wsManager.initializeWebSocketManager();
-    }
-  
     try {
       // Hide all screens
       chatsScreen.close();
@@ -893,11 +919,6 @@ class Footer {
         this.chatButton.classList.remove('has-notification');
         // TODO: maybe need to invoke updateChatData here?
         await chatsScreen.updateChatList();
-        if (isOnline) {
-          if (wsManager && !wsManager.isSubscribed()) {
-            pollChatInterval(pollIntervalNormal);
-          }
-        }
   
         // focus onto last-item in the footer
         if (footer.lastItem) {
@@ -945,7 +966,7 @@ class Footer {
         }
   
         // Display error toast to user
-        showToast(`Failed to switch to ${view} view`, 3000, 'error');
+        showToast(`Failed to switch to ${view} view`, 0, 'error');
       }
     }
   }
@@ -1278,9 +1299,14 @@ class MenuModal {
     this.backupButton.addEventListener('click', () => backupAccountModal.open());
     this.bridgeButton = document.getElementById('openBridge');
     this.bridgeButton.addEventListener('click', () => bridgeModal.open());
+    this.launchButton = document.getElementById('openLaunchUrl');
+    this.launchButton.addEventListener('click', () => launchModal.open());
   }
 
   open() {
+    if (window?.ReactNativeWebView) {
+      this.launchButton.style.display = 'block';
+    }
     this.modal.classList.add('active');
     enterFullscreen();
   }
@@ -1295,11 +1321,9 @@ class MenuModal {
   }
   
   async handleSignOut() {
+    this.isSignoutExit = true;
+
     // Clear intervals
-    if (updateWebSocketIndicatorIntervalId && wsManager) {
-      clearInterval(updateWebSocketIndicatorIntervalId);
-      updateWebSocketIndicatorIntervalId = null;
-    }
     if (checkPendingTransactionsIntervalId) {
       clearInterval(checkPendingTransactionsIntervalId);
       checkPendingTransactionsIntervalId = null;
@@ -1313,25 +1337,12 @@ class MenuModal {
       scanQRModal.stopCamera();
     }
 
-    //    const shouldLeave = confirm('Do you want to leave this page?');
-    //    if (shouldLeave == false) { return }
-
-    // Clean up WebSocket connection
-    if (wsManager) {
-      wsManager.disconnect();
-      wsManager = null;
-    }
+    // Remove event listeners for beforeunload and visibilitychange
+    window.removeEventListener('beforeunload', handleBeforeUnload);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
 
     // Lock the app
     unlockModal.lock();
-
-    // Save myData to localStorage if it exists
-    saveState();
-    /*
-      if (myData && myAccount) {
-          localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
-      }
-  */
 
     // Close all modals
     menuModal.close();
@@ -1353,7 +1364,10 @@ class MenuModal {
     // Show welcome screen
     welcomeScreen.open();
 
-    this.isSignoutExit = true;
+
+    // Save myData to localStorage if it exists
+    saveState();
+
 
     // Add offline fallback
     if (!navigator.onLine) {
@@ -1361,8 +1375,11 @@ class MenuModal {
       return;
     }
 
+    await handleNativeAppSubscription();
+
     // Only reload if online
-    window.location.reload();
+//    window.location.reload();
+    await checkVersion();
   }
 }
 
@@ -1468,7 +1485,7 @@ class WalletScreen {
       console.error('No wallet data available');
       return;
     } else if (!isOnline) {
-      console.error('Not online. Not updating wallet balances');
+      console.warn('Not online. Not updating wallet balances');
       return;
     }
     await updateAssetPricesIfNeeded();
@@ -1767,7 +1784,7 @@ class ScanQRModal {
       this.stopCamera(); // Ensure we clean up any partial setup
 
       // Show user-friendly error message
-      showToast(error.message || 'Failed to access camera. Please check your permissions and try again.', 5000, 'error');
+      showToast(error.message || 'Failed to access camera. Please check your permissions and try again.', 0, 'error');
 
       // Re-throw the error if you need to handle it further up
       throw error;
@@ -1872,7 +1889,7 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
   if (balanceWarning) balanceWarning.style.display = 'none';
   // not checking for 0 since we allow 0 amount for messages when toll is not required
   if (amount < 0n) {
-    if (balanceWarning) balanceWarning.style.display = 'block';
+    if (balanceWarning) balanceWarning.style.display = 'inline';
     balanceWarning.textContent = 'Amount cannot be negative';
     return false;
   }
@@ -1885,8 +1902,15 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
 
   if (balanceWarning) {
     if (hasInsufficientBalance) {
-      balanceWarning.textContent = `Insufficient balance (including ${big2str(feeInWei, 18).slice(0, -16)} LIB fee)`;
-      balanceWarning.style.display = 'block';
+      // Check if the fee makes the difference
+      const insufficientForAmount = BigInt(asset.balance) < amount;
+      
+      if (insufficientForAmount) {
+        balanceWarning.textContent = 'Insufficient balance';
+      } else {
+        balanceWarning.textContent = 'Insufficient balance (including fee)';
+      }
+      balanceWarning.style.display = 'inline';
     } else {
       balanceWarning.style.display = 'none';
     }
@@ -2046,16 +2070,20 @@ class SignInModal {
     if (useLongPolling) {
       setTimeout(longPoll(), 10);
     }
-    // Start intervals now that user is signed in
-    if (!updateWebSocketIndicatorIntervalId && wsManager) {
-      updateWebSocketIndicatorIntervalId = setInterval(updateWebSocketIndicator, 5000);
-    }
     if (!checkPendingTransactionsIntervalId) {
       checkPendingTransactionsIntervalId = setInterval(checkPendingTransactions, 5000);
     }
     if (!getSystemNoticeIntervalId) {
       getSystemNoticeIntervalId = setInterval(getSystemNotice, 15000);
     }
+
+    // Register events that will saveState if the browser is closed without proper signOut
+    // Add beforeunload handler to save myData; don't use unload event, it is getting depricated
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange); // Keep as document
+
+    handleNativeAppUnsubscribe();
+
     // Close modal and proceed to app
     this.close();
     welcomeScreen.close();
@@ -2128,6 +2156,80 @@ class SignInModal {
 const signInModal = new SignInModal();
 
 // Contact Info Modal Management
+class MyInfoModal {
+  constructor() {}
+
+  load() {
+    this.modal = document.getElementById('myInfoModal');
+    this.backButton = document.getElementById('closeMyInfoModal');
+    this.avatarSection = this.modal.querySelector('.contact-avatar-section');
+    this.avatarDiv = this.avatarSection.querySelector('.avatar');
+    this.nameDiv = this.avatarSection.querySelector('.name');
+    this.subtitleDiv = this.avatarSection.querySelector('.subtitle');
+
+    this.backButton.addEventListener('click', () => this.close());
+  }
+
+  async updateMyInfo() {
+    if (!myAccount) return;
+
+    const identicon = await generateIdenticon(myAccount.keys.address, 96);
+
+    this.avatarDiv.innerHTML = identicon;
+    this.nameDiv.textContent = myAccount.username;
+    this.subtitleDiv.textContent = myAccount.keys.address;
+
+    const { account = {} } = myData ?? {};
+    const fields = {
+      name:      { id: 'myInfoName',      label: 'Name' },
+      email:     { id: 'myInfoEmail',     label: 'Email',    href: v => `mailto:${v}` },
+      phone:     { id: 'myInfoPhone',     label: 'Phone' },
+      linkedin:  { id: 'myInfoLinkedin',  label: 'LinkedIn', href: v => `https://linkedin.com/in/${v}` },
+      x:         { id: 'myInfoX',         label: 'X',        href: v => `https://x.com/${v}` },
+    };
+
+    // Cache DOM elements once
+    const elements = Object.fromEntries(
+      Object.values(fields).map(({ id }) => [id, document.getElementById(id)])
+    );
+
+    for (const [key, cfg] of Object.entries(fields)) {
+      const el = elements[cfg.id];
+      if (!el) continue; // skip if element not found
+      const container =
+        key === 'email' || key === 'linkedin' || key === 'x'
+          ? el.parentElement.parentElement // label + anchor live two levels up
+          : el.parentElement;
+
+      const val = account[key] ?? ''; // empty string if undefined / null
+      const empty = !val;
+
+      // Show / hide container with inline style (per your constraint)
+      container.style.display = empty ? 'none' : 'block';
+      if (empty) continue;
+
+      el.textContent = val;
+      if (cfg.href) el.href = cfg.href(val);
+    }
+  }
+
+  async open() {
+    await this.updateMyInfo();
+    this.modal.classList.add('active');
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+}
+
+// Create a singleton instance
+const myInfoModal = new MyInfoModal();
+
 class ContactInfoModal {
   constructor() {
     this.currentContactAddress = null;
@@ -2476,7 +2578,7 @@ class EditContactModal {
 
     // if the textContent is 'Not provided', set it to an empty string
     const providedName = document.getElementById('contactInfoProvidedName').textContent;
-    if (providedName === 'Not provided') {
+    if (providedName === 'Not provided' || !providedName || providedName.trim() === '') {
       this.providedNameContainer.style.display = 'none';
     } else {
       providedNameDiv.textContent = providedName;
@@ -2654,7 +2756,7 @@ class HistoryModal {
       .join('');
   }
 
-  async updateTransactionHistory() {
+  updateTransactionHistory() {
     const walletData = myData.wallet;
     const assetIndex = this.assetSelect.value;
     
@@ -2670,6 +2772,24 @@ class HistoryModal {
       .map((tx) => {
         const txidAttr = tx?.txid ? `data-txid="${tx.txid}"` : '';
         const statusAttr = tx?.status ? `data-status="${tx.status}"` : '';
+        
+        // Check if transaction was deleted
+        if (tx?.deleted > 0) {
+          return `
+            <div class="transaction-item deleted-transaction" ${txidAttr} ${statusAttr}>
+              <div class="transaction-info">
+                <div class="transaction-type deleted">
+                  <span class="delete-icon"></span>
+                  Deleted
+                </div>
+                <div class="transaction-amount">-- --</div>
+              </div>
+              <div class="transaction-memo">${tx.memo || "Deleted by me"}</div>
+            </div>
+          `;
+        }
+        
+        // Render normal transaction
         const contactName = getContactDisplayName(contacts[tx.address]);
         
         return `
@@ -2707,14 +2827,19 @@ class HistoryModal {
       </div>`;
   }
 
-  async handleAssetChange() {
-    await this.updateTransactionHistory();
+  handleAssetChange() {
+    this.updateTransactionHistory();
   }
 
   handleItemClick(event) {
     const item = event.target.closest('.transaction-item');
     
     if (!item) return;
+    
+    // Prevent clicking on deleted transactions
+    if (item.classList.contains('deleted-transaction')) {
+      return;
+    }
     
     if (item.dataset.status === 'failed') {
       console.log(`Not opening chatModal for failed transaction`);
@@ -2744,9 +2869,9 @@ class HistoryModal {
   }
 
   // Public method for external updates
-  async refresh() {
+  refresh() {
     if (this.isActive()) {
-      await this.updateTransactionHistory();
+      this.updateTransactionHistory();
     }
   }
 
@@ -2804,7 +2929,7 @@ async function updateAssetPricesIfNeeded() {
 
 async function queryNetwork(url) {
   //console.log('queryNetwork', url)
-  if (!(await checkOnlineStatus())) {
+  if (!isOnline) {
     //TODO: show user we are not online
     console.warn('not online');
     //alert('not online')
@@ -2835,11 +2960,8 @@ async function pollChatInterval(milliseconds) {
 
 // Called every 30 seconds if we are online and not subscribed to WebSocket
 async function pollChats() {
-  // Step 2: variable to check if we are subscribed to WebSocket
-  const isSubscribed = wsManager && wsManager.subscribed && wsManager.isSubscribed();
-
   // Step 3: Poll if we are not subscribed to WebSocket
-  if (!isSubscribed) {
+  if (!useLongPolling) {
     // Skip if no valid account
     if (!myAccount?.keys?.address) {
       console.log('Poll skipped: No valid account');
@@ -2864,50 +2986,16 @@ async function pollChats() {
     // Clear polling if WebSocket is subscribed
     clearTimeout(window.chatUpdateTimer);
     window.chatUpdateTimer = null;
-    console.log('Poll status: Stopped - WebSocket subscribed');
+    console.log('Poll status: Stopped - using long polling');
   }
 
-  const wsStatus = await checkWebSocketStatus();
   // Step 4: Log final status
   const pollStatus = {
-    wsStatus,
+    useLongPolling: useLongPolling,
     accountValid: Boolean(myAccount?.keys?.address),
-    subscriptionStatus: isSubscribed ? 'subscribed' : 'not subscribed',
     pollingStatus: window.chatUpdateTimer ? 'polling' : 'not polling',
   };
   console.log('Poll Status:', JSON.stringify(pollStatus, null, 2));
-}
-
-// Helper function to check WebSocket status and log diagnostics if needed
-async function checkWebSocketStatus() {
-  if (!wsManager) return 'not initialized';
-  const status = wsManager.isConnected() ? 'connected' : 'disconnected';
-  const selectedGateway = getGatewayForRequest();
-  // Log diagnostic info if disconnected
-  if (status === 'disconnected' && wsManager.connectionState === 'disconnected') {
-    const diagnosticInfo = {
-      browserState: {
-        isPrivateMode: !window.localStorage,
-        networkProtocol: window.location.protocol === 'https:' ? 'Secure (HTTPS)' : 'Insecure (HTTP)',
-        isOnline: navigator.onLine,
-        webSocketSupport: typeof WebSocket !== 'undefined',
-      },
-      websocketConfig: {
-        urlValid: (() => {
-          return selectedGateway?.ws
-            ? selectedGateway.ws.startsWith('ws://') || selectedGateway.ws.startsWith('wss://')
-            : false;
-        })(),
-        url: (() => {
-          const selectedGateway = getGatewayForRequest();
-          return selectedGateway?.ws || 'Not configured';
-        })(),
-      },
-    };
-    console.warn('WebSocket Diagnostic Information:', diagnosticInfo);
-  }
-
-  return status;
 }
 
 // Helper function to schedule next poll
@@ -2953,8 +3041,10 @@ async function getChats(keys, retry = 1) {
   //console.log('messages', myData.contacts[keys.address].messages)
   //console.log('last messages', myData.contacts[keys.address].messages.at(-1))
   //console.log('timestamp', myData.contacts[keys.address].messages.at(-1).timestamp)
-  const timestamp = myAccount.chatTimestamp || 0;
+  let timestamp = myAccount.chatTimestamp || 0;
   //    const timestamp = myData.contacts[keys.address]?.messages?.at(-1).timestamp || 0
+
+  if (timestamp > longPollResult.timestamp){ timestamp = longPollResult.timestamp }
 
   const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/${timestamp}`); // TODO get this working
   //    const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/0`) // TODO stop using this
@@ -2970,6 +3060,7 @@ async function getChats(keys, retry = 1) {
     await processChats(senders.chats, keys);
   } else {
     console.error('getChats: no senders found')
+    myAccount.chatTimestamp = timestamp;
   }
   if (chatModal.address) {
     // clear the unread count of address for open chat modal
@@ -2980,25 +3071,21 @@ async function getChats(keys, retry = 1) {
 getChats.lastCall = 0;
 
 // play sound if true or false parameter
-function playChatSound(shouldPlay) {
-  if (shouldPlay) {
-    const notificationAudio = document.getElementById('notificationSound');
-    if (notificationAudio) {
-      notificationAudio.play().catch((error) => {
-        console.warn('Notification sound playback failed:', error);
-      });
-    }
+function playChatSound() {
+  const notificationAudio = document.getElementById('notificationSound');
+  if (notificationAudio) {
+    notificationAudio.play().catch((error) => {
+      console.warn('Notification sound playback failed:', error);
+    });
   }
 }
 
-function playTransferSound(shouldPlay) {
-  if (shouldPlay) {
-    const notificationAudio = document.getElementById('transferSound');
-    if (notificationAudio) {
-      notificationAudio.play().catch((error) => {
-        console.warn('Notification sound playback failed:', error);
-      });
-    }
+function playTransferSound() {
+  const notificationAudio = document.getElementById('transferSound');
+  if (notificationAudio) {
+    notificationAudio.play().catch((error) => {
+      console.warn('Notification sound playback failed:', error);
+    });
   }
 }
 
@@ -3007,6 +3094,7 @@ async function processChats(chats, keys) {
   let newTimestamp = 0;
   const timestamp = myAccount.chatTimestamp || 0;
   const messageQueryTimestamp = Math.max(0, timestamp);
+  let hasAnyTransfer = false;
 
   for (let sender in chats) {
     // Fetch messages using the adjusted timestamp
@@ -3021,6 +3109,7 @@ async function processChats(chats, keys) {
       //            contact.address = from        // not needed since createNewContact does this
       let added = 0;
       let hasNewTransfer = false;
+      let mine = false;
 
       // This check determines if we're currently chatting with the sender
       // We ONLY want to avoid notifications if we're actively viewing this exact chat
@@ -3029,15 +3118,18 @@ async function processChats(chats, keys) {
 
       for (let i in res.messages) {
         const tx = res.messages[i]; // the messages are actually the whole tx
-        //console.log('message tx is')
-        //console.log(JSON.stringify(message, null, 4))
+        // compute the transaction id (txid)
+        const txidHex = getTxid(tx);
+
         newTimestamp = tx.timestamp > newTimestamp ? tx.timestamp : newTimestamp;
+        mine = tx.from == longAddress(keys.address) ? true : false;
+if (mine) console.warn('txid in processChats is', txidHex)
         if (tx.type == 'message') {
-          if (tx.from == longAddress(keys.address)) {
-            continue;
-          } // skip if the message is from us
           const payload = tx.xmessage; // changed to use .message
-          if (payload.encrypted) {
+          if (mine){
+            console.warn('my message tx', tx)
+          }
+          else if (payload.encrypted) {
             let senderPublic = myData.contacts[from]?.public;
             if (!senderPublic) {
               const senderInfo = await queryNetwork(`/account/${longAddress(from)}`);
@@ -3054,9 +3146,23 @@ async function processChats(chats, keys) {
             }
             payload.public = senderPublic;
           }
+          if (payload.xattach && typeof payload.xattach === 'string') {
+            try {
+              // if mine, use selfKey to get dhkey
+              // if not mine, use public key and pqEncSharedKey to get dhkey
+              const dhkey = mine 
+                ? hex2bin(decryptData(payload.selfKey, keys.secret + keys.pqSeed, true))
+                : dhkeyCombined(keys.secret, payload.public, keys.pqSeed, payload.pqEncSharedKey).dhkey;
+              const decryptedAttachData = decryptChacha(dhkey, payload.xattach);
+              payload.xattach = parse(decryptedAttachData);
+            } catch (error) {
+              console.error('Failed to decrypt xattach:', error);
+              delete payload.xattach;
+            }
+          }
           //console.log("payload", payload)
-          decryptMessage(payload, keys); // modifies the payload object
-          if (payload.senderInfo) {
+          decryptMessage(payload, keys, mine); // modifies the payload object
+          if (payload.senderInfo && !mine){
             contact.senderInfo = cleanSenderInfo(payload.senderInfo)
             delete payload.senderInfo;
             if (!contact.username && contact.senderInfo.username) {
@@ -3083,12 +3189,8 @@ async function processChats(chats, keys) {
           //    messages are the same if the messages[x].sent_timestamp is the same as the tx.timestamp,
           //    and messages[x].my is false and messages[x].message == payload.message
           let alreadyExists = false;
-          for (const existingMessage of contact.messages) {
-            if (
-              existingMessage.sent_timestamp === payload.sent_timestamp &&
-              existingMessage.message === payload.message &&
-              existingMessage.my === false
-            ) {
+          for (const messageTx of contact.messages) {
+            if (messageTx.txid === txidHex) {
               alreadyExists = true;
               break;
             }
@@ -3099,24 +3201,28 @@ async function processChats(chats, keys) {
           }
 
           //console.log('contact.message', contact.messages)
-          payload.my = false;
+          payload.my = mine;
           payload.timestamp = payload.sent_timestamp;
-          payload.txid = getTxid(tx);
+          payload.txid = txidHex;
           delete payload.pqEncSharedKey; 
           insertSorted(contact.messages, payload, 'timestamp');
           // if we are not in the chatModal of who sent it, playChatSound or if device visibility is hidden play sound
           if (!inActiveChatWithSender || document.visibilityState === 'hidden') {
-            playChatSound(true);
+            playChatSound();
           }
-          added += 1;
-        } else if (tx.type == 'transfer') {
-          //console.log('transfer tx is')
-          //console.log(JSON.stringify(message, null, 4))
-          if (tx.from == longAddress(keys.address)) {
-            continue;
-          } // skip if the message is from us
+          if (!mine){
+            added += 1;
+          }
+        }
+
+        //   Process transfer messages; this is a payment with an optional memo 
+        else if (tx.type == 'transfer') {
           const payload = tx.xmemo;
-          if (payload.encrypted) {
+          if (mine) {
+            const txx = parse(stringify(tx))
+            console.warn('my transfer tx', txx)
+          }
+          else if (payload.encrypted) {
             let senderPublic = myData.contacts[from]?.public;
             if (!senderPublic) {
               const senderInfo = await queryNetwork(`/account/${longAddress(from)}`);
@@ -3133,9 +3239,8 @@ async function processChats(chats, keys) {
             payload.public = senderPublic;
           }
           //console.log("payload", payload)
-          decryptMessage(payload, keys); // modifies the payload object
-          delete payload.pqEncSharedKey;
-          if (payload.senderInfo) {
+          decryptMessage(payload, keys, mine); // modifies the payload object
+          if (payload.senderInfo && !mine) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
             if (!contact.username && contact.senderInfo.username) {
@@ -3158,14 +3263,6 @@ async function processChats(chats, keys) {
               }
             }
           }
-          // compute the transaction id (txid)
-          /*
-          delete tx.sign;
-          const jstr = stringify(tx);
-          const jstrBytes = utf82bin(jstr);
-          const txidHex = hashBytes(jstrBytes);
-          */
-          const txidHex = getTxid(tx);
 
           // skip if this tx was processed before and is already in the history array;
           //    txs are the same if the history[x].txid is the same as txidHex
@@ -3185,7 +3282,8 @@ async function processChats(chats, keys) {
           const newPayment = {
             txid: txidHex,
             amount: parse(stringify(tx.amount)), // need to make a copy
-            sign: 1,
+//            sign: 1,
+            sign: mine ? -1 : 1,
             timestamp: payload.sent_timestamp,
             address: from,
             memo: payload.message,
@@ -3195,14 +3293,11 @@ async function processChats(chats, keys) {
           //  sort history array based on timestamp field in descending order
           //history.sort((a, b) => b.timestamp - a.timestamp);
 
-          // Mark that we have a new transfer for toast notification
-          hasNewTransfer = true;
-
           // --- Create and Insert Transfer Message into contact.messages ---
           const transferMessage = {
             timestamp: payload.sent_timestamp,
             sent_timestamp: payload.sent_timestamp,
-            my: false, // Received transfer
+            my: mine,
             message: payload.message, // Use the memo as the message content
             amount: parse(stringify(tx.amount)), // Ensure amount is stored as BigInt
             symbol: 'LIB', // TODO: get the symbol from the asset
@@ -3212,35 +3307,19 @@ async function processChats(chats, keys) {
           insertSorted(contact.messages, transferMessage, 'timestamp');
           // --------------------------------------------------------------
 
-          added += 1;
-
-          // Update wallet view if it's active
-          if (walletScreen.isActive()) {
-            walletScreen.updateWalletView();
+          if (!mine){
+            added += 1;
           }
-          // update history modal if it's active
-          historyModal.refresh();
 
-          // Always play transfer sound for new transfers
-          playTransferSound(true);
-          // is chatModal of sender address is active
-          if (inActiveChatWithSender && document.visibilityState === 'visible') {
-            // add the transfer tx to the chatModal
-            chatModal.appendChatModal(true);
+          // Mark that we have a new transfer for toast notification
+          if (!mine){
+            hasNewTransfer = true;
           }
         }
       }
+      if (hasNewTransfer){ hasAnyTransfer = true; }
       // If messages were added to contact.messages, update myData.chats
       if (added > 0) {
-        // Get the most recent message (index 0 because it's sorted descending)
-        const latestMessage = contact.messages[0];
-
-        // Create chat object with only guaranteed fields
-        const chatUpdate = {
-          address: from,
-          timestamp: latestMessage.timestamp,
-        };
-
         // Update unread count ONLY if the chat modal for this sender is NOT active
         if (!inActiveChatWithSender) {
           contact.unread = (contact.unread || 0) + added; // Ensure unread is initialized
@@ -3252,15 +3331,21 @@ async function processChats(chats, keys) {
           }
         }
 
+        // Add sender to the top of the chats tab
         // Remove existing chat for this contact if it exists
         const existingChatIndex = myData.chats.findIndex((chat) => chat.address === from);
         if (existingChatIndex !== -1) {
           myData.chats.splice(existingChatIndex, 1);
         }
-
+        // Get the most recent message (index 0 because it's sorted descending)
+        const latestMessage = contact.messages[0];
+        // Create chat object with only guaranteed fields
+        const chatUpdate = {
+          address: from,
+          timestamp: latestMessage.timestamp,
+        };
         // Find insertion point to maintain timestamp order (newest first)
         const insertIndex = myData.chats.findIndex((chat) => chat.timestamp < chatUpdate.timestamp);
-
         if (insertIndex === -1) {
           // If no earlier timestamp found, append to end
           myData.chats.push(chatUpdate);
@@ -3269,8 +3354,9 @@ async function processChats(chats, keys) {
           myData.chats.splice(insertIndex, 0, chatUpdate);
         }
 
+        // Add bubble to chats tab if we are not on it
         // Only suppress notification if we're ACTIVELY viewing this chat and if not a transfer
-        if (!inActiveChatWithSender && !hasNewTransfer) {
+        if (!inActiveChatWithSender) {
           if (!chatsScreen.isActive()) {
             footer.chatButton.classList.add('has-notification');
           }
@@ -3279,14 +3365,21 @@ async function processChats(chats, keys) {
 
       // Show transfer notification even if no messages were added
       if (hasNewTransfer) {
-        // Add notification indicator to Wallet tab if we're not on it
+        // Add bubble to Wallet tab if we're not on it
         if (!walletScreen.isActive()) {
           footer.walletButton.classList.add('has-notification');
         }
-        // Add notification to openHistoryModal wallet-action-button
+        // Add bubble to the wallet history button
         walletScreen.openHistoryModalButton.classList.add('has-notification');
       }
     }
+  }
+  if (hasAnyTransfer){
+    playTransferSound()
+    // update history modal if it's active
+    if (historyModal.isActive()) historyModal.refresh();
+    // Update wallet view if it's active
+    if (walletScreen.isActive()) walletScreen.updateWalletView();
   }
 
   // Update the global timestamp AFTER processing all senders
@@ -3380,7 +3473,6 @@ async function postAssetTransfer(to, amount, memo, keys) {
     // memo: stringify(memo),
     xmemo: memo,
     timestamp: getCorrectedTimestamp(),
-    network: NETWORK_ACCOUNT_ID,
     fee: parameters.current.transactionFee || 1n * wei, // This is not used by the backend
     networkId: network.netid,
   };
@@ -3481,10 +3573,14 @@ async function injectTx(tx, txid) {
         showToast('Try again.', 0, 'error');
       }
     }
-
     return data;
   } catch (error) {
-    showToast('Error injecting transaction: ' + error, 0, 'error');
+    // if error is a string and contains 'timestamp out of range' 
+    if (typeof error === 'string' && error.includes('timestamp out of range')) {
+      showToast('Error injecting transaction (Please try again): ' + error, 0, 'error');
+    } else {
+      showToast('Error injecting transaction: ' + error, 0, 'error');
+    }
     console.error('Error injecting transaction:', error);
     return null;
   }
@@ -3521,10 +3617,12 @@ async function signObj(tx, keys) {
 }
 
 function getTxid(tx){
-  let txo = tx;
-  if (typeof(tx) === "string"){
-    txo = parse(tx)
+  let txo = '';
+  if (typeof(tx) !== "string"){
+    txo = stringify(tx)
   }
+console.warn('tx is', txo)
+  txo = parse(txo)
   delete txo.sign;
   const jstr = stringify(txo);
   const jstrBytes = utf82bin(jstr);
@@ -3934,19 +4032,11 @@ function hideToast(toastId) {
 
 // Handle online/offline events
 async function handleConnectivityChange() {
-  const wasOffline = !isOnline;
-  isOnline = navigator.onLine;
-
-  if (isOnline && wasOffline) {
+  if (isOnline) {
     console.log('Just came back online.');
     // We just came back online
     updateUIForConnectivity();
     showToast("You're back online!", 3000, 'online');
-
-    // Verify username is still valid on the network
-    /* await verifyUsernameOnReconnect(); */
-    // Initialize WebSocket connection regardless of view
-    wsManager.initializeWebSocketManager();
     // Force update data with reconnection handling
     if (myAccount && myAccount.keys) {
       try {
@@ -3976,8 +4066,8 @@ async function handleConnectivityChange() {
 // Setup connectivity detection
 function setupConnectivityDetection() {
   // Listen for browser online/offline events
-  window.addEventListener('online', handleConnectivityChange);
-  window.addEventListener('offline', handleConnectivityChange);
+  window.addEventListener('online', checkConnectivity);
+  window.addEventListener('offline', checkConnectivity);
 
   // Mark elements that depend on connectivity
   markConnectivityDependentElements();
@@ -3985,8 +4075,8 @@ function setupConnectivityDetection() {
   // Check initial status (don't trust the browser's initial state)
   checkConnectivity();
 
-  // Periodically check connectivity (every 30 seconds)
-  setInterval(checkConnectivity, 30000);
+  // Periodically check connectivity (every 5 seconds)
+  setInterval(checkConnectivity, 5000);
 }
 
 // Mark elements that should be disabled when offline
@@ -3995,14 +4085,16 @@ function markConnectivityDependentElements() {
   const networkDependentElements = [
     // Chat related
     '#handleSendMessage',
-    '.message-input',
-    '#newChatButton',
-    '#chatSendMoneyButton',
 
     // Wallet related
-    '#openSendAssetFormModal',
     '#refreshBalance',
     '#sendForm button[type="submit"]',
+
+    // Send asset related
+    '#sendAssetForm button[type="submit"]',
+
+    // Add friend related
+    '#friendForm button[type="submit"]',
 
     // Contact related
     '#chatRecipient',
@@ -4013,18 +4105,21 @@ function markConnectivityDependentElements() {
     '#accountForm button[type="submit"]',
     '#createAccountForm button[type="submit"]',
     '#importForm button[type="submit"]',
-    '#contactInfoSendButton',
-
-    // menu list buttons
-    '.menu-item[id="openAccountForm"]',
-    '.menu-item[id="openNetwork"]',
-    '.menu-item[id="openExplorer"]',
-    '.menu-item[id="openMonitor"]',
-    '.menu-item[id="openAbout"]',
-    '.menu-item[id="openRemoveAccount"]',
 
     // submitFeedback button
     '#submitFeedback',
+
+    // stakeModal
+    '#submitStake',
+
+    // tollModal
+    '#saveNewTollButton',
+
+    //inviteModal
+    '#inviteForm button[type="submit"]',
+
+    //unstakeModal
+    '#submitUnstake',
   ];
 
   // Add data attribute to all network-dependent elements
@@ -4094,22 +4189,22 @@ function updateUIForConnectivity() {
 function preventOfflineSubmit(event) {
   if (!isOnline) {
     event.preventDefault();
-    showToast('This action requires an internet connection', 3000, 'error');
+    showToast('This action requires an internet connection', 0, 'error');
   }
 }
 
 // Add global isOnline variable at the top with other globals
-let isOnline = true; // Will be updated by connectivity checks
+let isOnline = navigator.onLine; // Will be updated by connectivity checks
 let netIdMismatch = false; // Will be updated by checkConnectivity
 
 // Add checkConnectivity function before setupConnectivityDetection
 async function checkConnectivity() {
-  const wasOffline = !isOnline;
-  isOnline = await checkOnlineStatus();
+  const wasOnline = isOnline;
+  isOnline = navigator.onLine;
 
-  if (isOnline !== wasOffline) {
+  if (isOnline !== wasOnline) {
     // Only trigger change handler if state actually changed
-    await handleConnectivityChange({ type: isOnline ? 'online' : 'offline' });
+    await handleConnectivityChange();
   }
 }
 
@@ -4224,435 +4319,6 @@ function getGatewayForRequest() {
   return myData.network.gateways[Math.floor(Math.random() * myData.network.gateways.length)];
 }
 
-// WebSocket Manager Class
-/**
- * WebSocket Manager Class
- * Handles WebSocket connections, reconnection logic, and message processing for chat events.
- * Maintains connection state and provides methods for subscribing to and processing chat notifications.
- */
-class WSManager {
-  /**
-   * Initialize the WebSocket Manager with default configuration
-   */
-  constructor() {
-    this.ws = null;
-    this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
-    this.connectionState = 'disconnected';
-    this.subscribed = false;
-  }
-
-  /**
-   * Connect to WebSocket server
-   */
-  connect() {
-    updateWebSocketIndicator();
-    // Check if ws is not null and readyState is either CONNECTING or OPEN
-    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
-      console.log('WebSocket connection already established');
-      return;
-    }
-
-    // Check if WebSockets are supported before attempting to connect
-    if (!this.checkWebSocketSupport()) {
-      console.error('WebSockets not supported, falling back to polling');
-      this.connectionState = 'disconnected';
-      return;
-    }
-
-    this.connectionState = 'connecting';
-    const selectedGateway = getGatewayForRequest();
-    console.log(
-      'WebSocket Connection:',
-      JSON.stringify(
-        {
-          url: selectedGateway.ws,
-          protocol: window.location.protocol,
-          userAgent: navigator.userAgent,
-        },
-        null,
-        2
-      )
-    );
-
-    try {
-      console.log('Creating new WebSocket instance');
-      this.ws = new WebSocket(selectedGateway.ws);
-      this.setupEventHandlers();
-    } catch (error) {
-      console.error('WebSocket connection creation error:', error);
-      this.handleConnectionFailure();
-    }
-  }
-
-  /**
-   * Set up WebSocket event handlers
-   */
-  setupEventHandlers() {
-    if (!this.ws) {
-      console.error('Cannot setup event handlers: WebSocket is null');
-      return;
-    }
-
-    // console.log('Setting up WebSocket event handlers');
-
-    this.ws.onopen = () => {
-      updateWebSocketIndicator();
-      console.log('WebSocket connection established');
-      this.connectionState = 'connected';
-      this.reconnectAttempts = 0;
-
-      // Auto-subscribe if account is available
-      if (myAccount && myAccount.keys && myAccount.keys.address) {
-        console.log('Auto-subscribing to WebSocket events');
-        this.subscribe();
-      } else {
-        console.warn('Cannot auto-subscribe: No account information available');
-      }
-    };
-
-    this.ws.onclose = (event) => {
-      updateWebSocketIndicator();
-      console.log('WebSocket connection closed', event.code, event.reason);
-      this.connectionState = 'disconnected';
-      this.subscribed = false;
-
-      if (event.code !== 1000) {
-        // Not a normal closure, try to reconnect
-        console.log('Abnormal closure, attempting to reconnect');
-        this.handleConnectionFailure();
-      }
-    };
-
-    this.ws.onmessage = async (event) => {
-      updateWebSocketIndicator();
-      try {
-        console.log('WebSocket message received:', event.data);
-        const data = JSON.parse(event.data);
-
-        // Check if this is a subscription response
-        if (data.id !== null && data.result !== undefined) {
-          if (data.result.subscription_status === true) {
-            console.log('Server confirmed subscription successful');
-            this.subscribed = true;
-          } else if (data.error) {
-            console.error('Server rejected subscription:', data.error);
-            this.subscribed = false;
-          }
-        } else if (!data.id && data.result.account_id && data.result.timestamp) {
-          console.log('Received new chat notification in ws');
-          const gotChats = await chatsScreen.updateChatData();
-          console.log('gotChats inside of ws.onmessage', gotChats);
-          if (gotChats > 0) {
-            console.log('inside of ws.onmessage, gotChats > 0, updating chat list');
-            await chatsScreen.updateChatList();
-          }
-        } else {
-          // Handle any other unexpected message formats
-          console.warn('Received unrecognized websocket message format:', data);
-        }
-      } catch (error) {
-        console.error('Error processing WebSocket message:', error);
-      }
-    };
-
-    // Add error event handler before setupEventHandlers
-    this.ws.onerror = (error) => {
-      updateWebSocketIndicator();
-      console.error('WebSocket error occurred:', error);
-      console.log('WebSocket readyState at error:', this.ws ? this.ws.readyState : 'ws is null');
-      this.handleConnectionFailure();
-    };
-  }
-
-  /**
-   * Subscribe to chat events for the current account
-   */
-  subscribe() {
-    // don't call updateWebSocketIndicator here since that function calls this function
-    //  updateWebSocketIndicator();
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.error('Cannot subscribe: WebSocket not connected');
-      return false;
-    }
-
-    if (!myAccount || !myAccount.keys || !myAccount.keys.address) {
-      console.error('Cannot subscribe: No account information');
-      return false;
-    }
-
-    try {
-      console.log('Subscribing to chat events for address:', myAccount.keys.address);
-
-      // Create subscription message directly with the required format
-      const subscribeMessage = {
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'ChatEvent',
-        params: ['subscribe', longAddress(myAccount.keys.address)],
-      };
-
-      console.log('Sending subscription message:', JSON.stringify(subscribeMessage));
-      this.ws.send(JSON.stringify(subscribeMessage));
-      console.log('Subscription message sent');
-      return true;
-    } catch (error) {
-      console.error('Error subscribing to chat events:', error);
-      this.subscribed = false;
-      return false;
-    }
-  }
-
-  /**
-   * Unsubscribe from chat events
-   */
-  unsubscribe() {
-    updateWebSocketIndicator();
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn('Cannot unsubscribe: WebSocket not connected');
-      return;
-    }
-
-    if (!this.subscribed) {
-      console.log('Not subscribed, no need to unsubscribe');
-      return;
-    }
-
-    try {
-      console.log('Unsubscribing from chat events');
-
-      const unsubscribeMessage = {
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'ChatEvent',
-        params: ['unsubscribe', longAddress(myAccount.keys.address)],
-      };
-
-      this.ws.send(JSON.stringify(unsubscribeMessage));
-      this.subscribed = false;
-      console.log('Attempted to unsubscribe');
-    } catch (error) {
-      console.error('Error unsubscribing from chat events:', error);
-    }
-  }
-
-  /**
-   * Disconnect from WebSocket server
-   */
-  disconnect() {
-    updateWebSocketIndicator();
-    console.log('Disconnecting WebSocket');
-    if (this.subscribed) {
-      this.unsubscribe();
-    }
-
-    if (this.ws) {
-      try {
-        if (this.ws.readyState === WebSocket.OPEN) {
-          this.ws.close(1000, 'Normal closure');
-        }
-        this.ws = null;
-        this.connectionState = 'disconnected';
-        console.log('WebSocket disconnected successfully');
-      } catch (error) {
-        console.error('Error disconnecting WebSocket:', error);
-      }
-    }
-  }
-
-  /**
-   * Handle connection failures with exponential backoff retry logic
-   */
-  handleConnectionFailure() {
-    updateWebSocketIndicator();
-    const diagnosticInfo = {
-      connectionState: this.connectionState,
-      browser: {
-        userAgent: navigator.userAgent,
-        protocol: window.location.protocol,
-      },
-      reconnection: {
-        attempts: this.reconnectAttempts,
-        maxAttempts: this.maxReconnectAttempts,
-      },
-    };
-
-    // Add Firefox-specific diagnostics
-    if (navigator.userAgent.includes('Firefox')) {
-      const selectedGateway = getGatewayForRequest();
-      diagnosticInfo.firefox = {
-        securityPolicy: 'Different security policies for WebSockets',
-        mixedContent: 'Check if HTTPS site with WS instead of WSS',
-        websocketUrl: selectedGateway?.ws || 'No gateway available',
-        pageProtocol: window.location.protocol,
-      };
-    }
-
-    console.error('WebSocket Connection Failure:', JSON.stringify(diagnosticInfo, null, 2));
-
-    this.connectionState = 'disconnected';
-
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('Reconnection Status: Maximum attempts reached, falling back to polling');
-      return;
-    }
-
-    this.reconnectAttempts++;
-
-    // Exponential backoff
-    const delay = Math.min(30000, Math.pow(2, this.reconnectAttempts) * 1000 + Math.random() * 1000);
-
-    const reconnectInfo = {
-      attempt: this.reconnectAttempts,
-      maxAttempts: this.maxReconnectAttempts,
-      delaySeconds: Math.round(delay / 1000),
-    };
-    console.log('Reconnection Schedule:', JSON.stringify(reconnectInfo, null, 2));
-
-    setTimeout(() => {
-      console.log('Reconnecting to WebSocket');
-      this.connect();
-    }, delay);
-  }
-
-  /**
-   * Check if WebSocket is connected
-   */
-  isConnected() {
-    return !!(this.ws && this.ws.readyState === WebSocket.OPEN);
-  }
-
-  /**
-   * Check if WebSocket is subscribed
-   */
-  isSubscribed() {
-    return this.subscribed;
-  }
-
-  /**
-   * Check if WebSockets are supported in the current browser
-   */
-  checkWebSocketSupport() {
-    const supportInfo = {
-      webSocketAvailable: typeof WebSocket !== 'undefined',
-      browser: {
-        userAgent: navigator.userAgent,
-        language: navigator.language,
-      },
-      environment: {
-        protocol: window.location.protocol,
-        hostname: window.location.hostname,
-        isLocalhost: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1',
-      },
-    };
-
-    // Get selected gateway for WebSocket URL
-    const selectedGateway = getGatewayForRequest();
-
-    // Add Firefox-specific info
-    if (navigator.userAgent.includes('Firefox')) {
-      supportInfo.firefox = {
-        mixedContentBlocked: window.location.protocol === 'https:' && selectedGateway?.ws ? selectedGateway.ws.startsWith('ws://') : false,
-        usingSecureWebSocket: selectedGateway?.ws ? selectedGateway.ws.startsWith('wss://') : false,
-        port: selectedGateway?.ws ? selectedGateway.ws.split(':')[2]?.split('/')[0] || 'default' : 'No gateway',
-      };
-    }
-
-    // Add WebSocket URL details
-    const wsUrl = new URL(selectedGateway?.ws);
-    supportInfo.websocket = wsUrl ? {
-      protocol: wsUrl.protocol,
-      hostname: wsUrl.hostname,
-      port: wsUrl.port || (wsUrl.protocol === 'wss:' ? '443' : '80'),
-      pathname: wsUrl.pathname,
-      requiresSecureContext: wsUrl.protocol === 'wss:' && !supportInfo.environment.isLocalhost,
-    } : {
-      protocol: 'No gateway',
-      hostname: 'No gateway',
-      port: 'No gateway',
-      pathname: 'No gateway',
-      requiresSecureContext: false,
-    };
-
-    console.log('WebSocket Support Analysis:', JSON.stringify(supportInfo, null, 2));
-
-    // Return false for known unsupported conditions
-    if (!supportInfo.webSocketAvailable) {
-      console.error('WebSocket Support: Not available in browser');
-      return false;
-    }
-
-    if (supportInfo.firefox?.mixedContentBlocked) {
-      console.error('WebSocket Support: Mixed content blocked in Firefox');
-      return false;
-    }
-
-    // Allow WSS connections on localhost even with HTTP protocol
-    if (
-      supportInfo.websocket.requiresSecureContext &&
-      supportInfo.environment.protocol !== 'https:' &&
-      !supportInfo.environment.isLocalhost
-    ) {
-      console.error('WebSocket Support: Secure context required for WSS');
-      return false;
-    }
-
-    return true;
-  }
-
-  // Initialize WebSocket manager if not already created
-  initializeWebSocketManager() {
-    if (this.isConnected()) {
-      if (!this.isSubscribed()) {
-        console.log('WebSocket is already connected but not subscribed, subscribing');
-        this.subscribe();
-        return;
-      }
-      console.log('WebSocket is already connected and subscribed');
-      return;
-    }
-
-    try {
-      const selectedGateway = getGatewayForRequest();
-      const initInfo = {
-        status: 'starting',
-        config: {
-          url: selectedGateway?.ws || 'No gateway available',
-        },
-        account: {
-          available: !!myAccount?.keys?.address,
-        },
-      };
-
-      console.log('WebSocket Manager Initialization:', JSON.stringify(initInfo, null, 2));
-
-      initInfo.status = 'created';
-
-      if (initInfo.account.available) {
-        this.connect();
-        initInfo.status = 'connecting';
-      }
-      console.log('WebSocket Manager Status:', JSON.stringify(initInfo, null, 2));
-    } catch (error) {
-      console.error(
-        'WebSocket Manager Initialization Error:',
-        JSON.stringify(
-          {
-            error: error.message,
-            stack: error.stack,
-          },
-          null,
-          2
-        )
-      );
-    }
-  }
-}
-
-if (!useLongPolling) {
-  wsManager = new WSManager();
-}
-
 /**
  * Inserts an item into an array while maintaining descending order based on a timestamp field.
  * Assumes the array is already sorted in descending order.
@@ -4759,28 +4425,6 @@ function getCorrectedTimestamp() {
   return correctedTime;
 }
 
-function updateWebSocketIndicator() {
-  // added this so that we don't miss messages on phones, since phones drop the ws if not used periodically
-  if (getCorrectedTimestamp() - updateWebSocketIndicator.lastSubscribed > 31000) {
-    wsManager.subscribe();
-    updateWebSocketIndicator.lastSubscribed = getCorrectedTimestamp();
-  }
-  const indicator = document.getElementById('wsStatusIndicator');
-  if (!indicator) return;
-  indicator.style.display = 'block';
-  if (!wsManager || !wsManager.isConnected()) {
-    indicator.textContent = 'Not Connected';
-    indicator.className = 'ws-status-indicator ws-red';
-  } else if (wsManager.isConnected() && !wsManager.isSubscribed()) {
-    indicator.textContent = 'Connected (No Sub)';
-    indicator.className = 'ws-status-indicator ws-yellow';
-  } else if (wsManager.isConnected() && wsManager.isSubscribed()) {
-    indicator.textContent = 'Connected';
-    indicator.className = 'ws-status-indicator ws-green';
-  }
-}
-updateWebSocketIndicator.lastSubscribed = 0;
-
 // Validator Modals
 
 // fetching market price by invoking `updateAssetPricesIfNeeded` and extracting from myData.assetPrices
@@ -4886,6 +4530,10 @@ class BackupAccountModal {
   load() {
     // called when the DOM is loaded; can setup event handlers here
     this.modal = document.getElementById('exportModal');
+    this.passwordInput = document.getElementById('exportPassword');
+    this.passwordWarning = document.getElementById('exportPasswordWarning');
+    this.submitButton = document.getElementById('exportForm').querySelector('button[type="submit"]');
+    
     document.getElementById('closeExportForm').addEventListener('click', () => this.close());
     document.getElementById('exportForm').addEventListener('submit', (event) => {
       if (myData) {
@@ -4894,20 +4542,56 @@ class BackupAccountModal {
         this.handleSubmitAll(event);
       }
     });
+    
+    // Add password validation on input with debounce
+    this.debouncedUpdateButtonState = debounce(() => this.updateButtonState(), 250);
+    this.passwordInput.addEventListener('input', this.debouncedUpdateButtonState);
   }
 
   open() {
     // called when the modal needs to be opened
     this.modal.classList.add('active');
+    this.updateButtonState();
   }
 
   close() {
     // called when the modal needs to be closed
     this.modal.classList.remove('active');
+    // Clear password for security
+    this.passwordInput.value = '';
   }
 
+  /**
+   * Generate a backup filename based on the current date and time.
+   * @param {string} username - The username to include in the filename.
+   * @returns {string} The generated filename.
+   */
+  generateBackupFilename(username = null) {
+    // Generate timestamp with hour and minute
+    const now = new Date()
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = `${now.getHours().toString().padStart(2, '0')}-${now.getMinutes().toString().padStart(2, '0')}`;
+    
+    // Get first 6 characters from network ID
+    const networkIdPrefix = network.netid.substring(0, 6);
+    
+    // Generate filename based on whether username is provided
+    if (username) {
+      return `liberdus-${username}-${dateStr}-${timeStr}-${networkIdPrefix}.json`;
+    } else {
+      return `liberdus-${dateStr}-${timeStr}-${networkIdPrefix}.json`;
+    }
+  }
+
+  /**
+   * Handle the submission of a single account backup.
+   * @param {Event} event - The event object.
+   */
   async handleSubmitOne(event) {
     event.preventDefault();
+
+    // Disable button to prevent multiple submissions
+    this.submitButton.disabled = true;
 
     const password = document.getElementById('exportPassword').value;
     const jsonData = stringify(myData, null, 2);
@@ -4919,24 +4603,50 @@ class BackupAccountModal {
       // Create and trigger download
       const blob = new Blob([finalData], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `liberdus-${myAccount.username}-${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const filename = this.generateBackupFilename(myAccount.username);
+      // Detect if running inside React Native WebView
+      if (window.ReactNativeWebView?.postMessage) {
+        // ✅ React Native WebView: Send base64 via postMessage
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64DataUrl = reader.result;
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'EXPORT_BACKUP',
+            filename,
+            dataUrl: base64DataUrl,
+          }));
+        };
+        reader.readAsDataURL(blob);
+      } else {
+        // Regular browser download
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
 
       // Close export modal
       this.close();
     } catch (error) {
       console.error('Encryption failed:', error);
       showToast('Failed to encrypt data. Please try again.', 0, 'error');
+      // Re-enable button so user can try again
+      this.updateButtonState();
     }
   }
 
+  /**
+   * Handle the submission of a backup for all accounts.
+   * @param {Event} event - The event object.
+   */
   async handleSubmitAll(event) {
     event.preventDefault();
+
+    // Disable button to prevent multiple submissions
+    this.submitButton.disabled = true;
 
     const password = document.getElementById('exportPassword').value;
     const myLocalStore = this.copyLocalStorageToObject();
@@ -4950,19 +4660,38 @@ class BackupAccountModal {
       // Create and trigger download
       const blob = new Blob([finalData], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `liberdus-${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const filename = this.generateBackupFilename();
+      // Detect if running inside React Native WebView
+      if (window.ReactNativeWebView?.postMessage) {
+        // ✅ React Native WebView: Send base64 via postMessage
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64DataUrl = reader.result;
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'EXPORT_BACKUP',
+            filename,
+            dataUrl: base64DataUrl,
+          }));
+        };
+        reader.readAsDataURL(blob);
+      } else {
+        // Regular browser download
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
 
       // Close export modal
       this.close();
     } catch (error) {
       console.error('Encryption failed:', error);
       showToast('Failed to encrypt data. Please try again.', 0, 'error');
+      // Re-enable button so user can try again
+      this.updateButtonState();
     }
   }
 
@@ -4973,7 +4702,24 @@ class BackupAccountModal {
       myLocalStore[key] = localStorage.getItem(key);
     }
     return myLocalStore;
-  }  
+  }
+
+  updateButtonState() {
+    const password = this.passwordInput.value;
+    
+    // Password is optional, but if provided, it must be at least 4 characters
+    let isValid = true;
+    
+    if (password.length > 0 && password.length < 4) {
+      isValid = false;
+      this.passwordWarning.style.display = 'inline';
+    } else {
+      this.passwordWarning.style.display = 'none';
+    }
+    
+    // Update button state
+    this.submitButton.disabled = !isValid;
+  }
 }
 const backupAccountModal = new BackupAccountModal();
 
@@ -5156,7 +4902,7 @@ class RestoreAccountModal {
       // Check if data is encrypted and decrypt if necessary
       if (!isNotEncryptedData) {
         if (!this.passwordInput.value.trim()) {
-          showToast('Password required for encrypted data', 3000, 'error');
+          showToast('Password required for encrypted data', 0, 'error');
           return;
         }
         fileContent = decryptData(fileContent, this.passwordInput.value.trim());
@@ -5175,10 +4921,20 @@ class RestoreAccountModal {
       // We first parse to jsonData so that if the parse does not work we don't destroy myData
       myData = parse(fileContent);
 
+      // if myData has a version key then we assume all accounts were backed up and being restored
       if (myData.version) {
+        // Warn user about global restore and ask for confirmation
+        const confirmed = confirm('⚠️ WARNING: This will restore all accounts and clear existing data.\n\nIt is recommended to backup your current data before proceeding.\n\nDo you want to continue with the restore?');
+        
+        if (!confirmed) {
+          showToast('Restore cancelled by user', 2000, 'info');
+          return;
+        }
+        
         localStorage.clear();
         this.copyObjectToLocalStorage(myData);
       }
+      // we are restoring only one account
       else {
         // also need to set myAccount
         const acc = myData.account; // this could have other things which are not needed
@@ -5204,21 +4960,26 @@ class RestoreAccountModal {
         };
         localStorage.setItem('accounts', stringify(existingAccounts));
 
+        // if lock enckey exist we need to encrypt the myData
+        const updatedMyData = lockModal?.encKey ? encryptData(stringify(myData), lockModal?.encKey, true) : stringify(myData);
+
         // Store the localStore entry for username_netid
-        localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, stringify(myData));
+        localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, updatedMyData);
       }
 
       // Show success message using toast
       showToast('Account restored successfully!', 2000, 'success');
+      // handleNativeAppSubscription()
 
       // Reset form and close modal after delay
       setTimeout(() => {
         this.close();
+        myData = null // since we already saved to localStore, we want to make sure beforeunload calling saveState does not also save
         window.location.reload(); // need to go through Sign In to make sure imported account exists on network
         this.clearForm();
       }, 2000);
     } catch (error) {
-      showToast(error.message || 'Import failed. Please check file and password.', 3000, 'error');
+      showToast(error.message || 'Import failed. Please check file and password.', 0, 'error');
     }
   }
 
@@ -5288,7 +5049,7 @@ class TollModal {
     this.tollCurrencySymbol.textContent = this.currentCurrency;
     this.newTollAmountInputElement.value = ''; // Clear input field
     this.warningMessageElement.textContent = '';
-    this.warningMessageElement.style.display = 'none';
+    this.warningMessageElement.classList.remove('show');
     this.saveButton.disabled = true;
 
     // Update min toll display under input
@@ -5533,10 +5294,10 @@ class TollModal {
     // Update warning message
     if (warningMessage) {
       this.warningMessageElement.textContent = warningMessage;
-      this.warningMessageElement.style.display = 'block';
+      this.warningMessageElement.classList.add('show');
     } else {
       this.warningMessageElement.textContent = '';
-      this.warningMessageElement.style.display = 'none';
+      this.warningMessageElement.classList.remove('show');
     }
   }
 }
@@ -5545,7 +5306,9 @@ const tollModal = new TollModal();
 
 // Invite Modal
 class InviteModal {
-  constructor() {}
+  constructor() {
+    this.invitedContacts = new Set(); // Track invited emails/phones
+  }
 
   load() {
     this.modal = document.getElementById('inviteModal');
@@ -5590,14 +5353,37 @@ class InviteModal {
 
   async handleSubmit(event) {
     event.preventDefault();
+    this.submitButton.disabled = true;
 
     const email = this.inviteEmailInput.value.trim();
     const phone = this.invitePhoneInput.value.trim();
 
     if (!email && !phone) {
-      showToast('Please enter either an email or phone number', 3000, 'error');
+      showToast('Please enter either an email or phone number', 0, 'error');
       // Ensure button is disabled again if somehow submitted while empty
       this.submitButton.disabled = true;
+      return;
+    }
+
+    // Check if we've already invited this email or phone
+    const emailAlreadyInvited = email && this.invitedContacts.has(email);
+    const phoneAlreadyInvited = phone && this.invitedContacts.has(phone);
+    
+    if (emailAlreadyInvited || phoneAlreadyInvited) {
+      let message = '';
+      if (emailAlreadyInvited && phoneAlreadyInvited) {
+        message = "You've already sent invites to both this email and phone number";
+      } else if (emailAlreadyInvited) {
+        message = "You've already sent an invite to this email";
+      } else {
+        message = "You've already sent an invite to this phone number";
+      }
+      
+      showToast(message, 0, 'error');
+      // Clear the input and re-enable button so they can enter different contacts
+      this.inviteEmailInput.value = '';
+      this.invitePhoneInput.value = '';
+      this.validateInputs(); // will disable the button since inputs are now empty
       return;
     }
 
@@ -5617,13 +5403,17 @@ class InviteModal {
       const data = await response.json();
 
       if (response.ok) {
+        // Add the successfully invited contacts to our tracking set
+        if (email) this.invitedContacts.add(email);
+        if (phone) this.invitedContacts.add(phone);
+        
         showToast('Invitation sent successfully!', 3000, 'success');
         this.close();
       } else {
-        showToast(data.error || 'Failed to send invitation', 3000, 'error');
+        showToast(data.error || 'Failed to send invitation', 0, 'error');
       }
     } catch (error) {
-      showToast('Failed to send invitation. Please try again.', 3000, 'error');
+      showToast('Failed to send invitation. Please try again.', 0, 'error');
     }
   }
 }
@@ -5638,9 +5428,18 @@ class AboutModal {
     this.versionDisplay = document.getElementById('versionDisplayAbout');
     this.networkName = document.getElementById('networkNameAbout');
     this.netId = document.getElementById('netIdAbout');
+    this.checkForUpdatesBtn = document.getElementById('checkForUpdatesBtn');
 
     // Set up event listeners
     this.closeButton.addEventListener('click', () => this.close());
+
+    // Only show "Check for Updates" button if user is in React Native app
+    if (window.ReactNativeWebView) {
+      this.checkForUpdatesBtn.style.display = 'inline-block';
+      this.checkForUpdatesBtn.addEventListener('click', () => this.openStore());
+    } else {
+      this.checkForUpdatesBtn.style.display = 'none';
+    }
 
     // Set version and network information once during initialization
     this.versionDisplay.textContent = myVersion + ' ' + version;
@@ -5655,6 +5454,23 @@ class AboutModal {
 
   close() {
     this.modal.classList.remove('active');
+  }
+
+  openStore() {
+    // This method only runs when user is in React Native app
+    const userAgent = navigator.userAgent.toLowerCase();
+    let storeUrl;
+
+    if (userAgent.includes('android')) {
+      storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
+    } else if (userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ios')) {
+      storeUrl = 'https://testflight.apple.com/join/zSRCWyxy';
+    } else {
+      storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
+    }
+
+    // Open store URL in new tab (same as explorer/network buttons)
+    window.open(storeUrl, '_blank');
   }
 }
 const aboutModal = new AboutModal();
@@ -6074,7 +5890,7 @@ class ValidatorStakingModal {
     // Check if we successfully retrieved a nominee address from the DOM
     if (!nominee || nominee.length < 10) {
       // Add a basic sanity check for length
-      showToast('Could not find nominated validator.', 4000, 'error');
+      showToast('Could not find nominated validator.', 0, 'error');
       console.warn('ValidatorStakingModal: Nominee not found or invalid in DOM element #validator-nominee.');
       return;
     }
@@ -6082,11 +5898,11 @@ class ValidatorStakingModal {
     // Check if the validator is active
     const activityCheck = await this.checkValidatorActivity(nominee);
     if (activityCheck.isActive) {
-      showToast('Cannot unstake from an active validator.', 5000, 'error');
+      showToast('Cannot unstake from an active validator.', 0, 'error');
       console.warn(`ValidatorStakingModal: Validator ${nominee} is active.`);
       return;
     } else if (activityCheck.error) {
-      showToast(`Error checking validator status: ${activityCheck.error}`, 5000, 'error');
+      showToast(`Error checking validator status: ${activityCheck.error}`, 0, 'error');
       return;
     }
 
@@ -6128,7 +5944,7 @@ class ValidatorStakingModal {
     } catch (error) {
       console.error('Error submitting unstake transaction:', error);
       // Provide a user-friendly error message
-      showToast('Unstake transaction failed. Network or server error.', 5000, 'error');
+      showToast('Unstake transaction failed. Network or server error.', 0, 'error');
     } finally {
       this.unstakeButton.disabled = false;
       this.backButton.disabled = false;
@@ -6204,6 +6020,8 @@ class StakeValidatorModal {
     this.backButton = document.getElementById('closeStakeModal');
     this.nodeAddressGroup = document.getElementById('stakeNodeAddressGroup');
     this.balanceDisplay = document.getElementById('stakeAvailableBalanceDisplay');
+    this.balanceAmount = document.getElementById('stakeBalanceAmount');
+    this.transactionFee = document.getElementById('stakeTransactionFee');
     this.amountWarning = document.getElementById('stakeAmountWarning');
     this.nodeAddressWarning = document.getElementById('stakeNodeAddressWarning');
     this.scanStakeQRButton = document.getElementById('scanStakeQRButton');
@@ -6233,14 +6051,8 @@ class StakeValidatorModal {
     // Set the correct fill function for the staking context
     scanQRModal.fillFunction = this.fillFromQR.bind(this);
 
-    // Display Available Balance
-    const libAsset = myData.wallet.assets.find((asset) => asset.symbol === 'LIB');
-    if (this.balanceDisplay && libAsset) {
-      const formattedBalance = big2str(BigInt(libAsset.balance), 18).slice(0, -12);
-      this.balanceDisplay.textContent = `Available: ${formattedBalance} ${libAsset.symbol}`;
-    } else if (this.balanceDisplay) {
-      this.balanceDisplay.textContent = 'Available: 0.000000 LIB';
-    }
+    // Display Available Balance and Fee
+    this.updateStakeBalanceDisplay();
 
     // Check for nominee address from validator modal
     const nominee = document.getElementById('validator-nominee')?.textContent?.trim();
@@ -6275,7 +6087,7 @@ class StakeValidatorModal {
 
     // Basic Validation
     if (!nodeAddress || !amountStr) {
-      showToast('Please fill in all fields.', 3000, 'error');
+      showToast('Please fill in all fields.', 0, 'error');
       this.submitButton.disabled = false;
       return;
     }
@@ -6284,7 +6096,7 @@ class StakeValidatorModal {
     try {
       amount_in_wei = bigxnum2big(wei, amountStr);
     } catch (error) {
-      showToast('Invalid amount entered.', 3000, 'error');
+      showToast('Invalid amount entered.', 0, 'error');
       this.submitButton.disabled = false;
       return;
     }
@@ -6316,7 +6128,7 @@ class StakeValidatorModal {
       }
     } catch (error) {
       console.error('Stake transaction error:', error);
-      showToast('Stake transaction failed. See console for details.', 5000, 'error');
+      showToast('Stake transaction failed. See console for details.', 0, 'error');
     } finally {
       this.submitButton.disabled = false;
       this.backButton.disabled = false;
@@ -6336,6 +6148,25 @@ class StakeValidatorModal {
     const txid = await signObj(stakeTx, keys);
     const response = await injectTx(stakeTx, txid);
     return response;
+  }
+
+  async updateStakeBalanceDisplay() {
+    const libAsset = myData.wallet.assets.find((asset) => asset.symbol === 'LIB');
+    
+    if (!libAsset) {
+      this.balanceAmount.textContent = '0.000000 LIB';
+      this.transactionFee.textContent = '0.00 LIB';
+      return;
+    }
+
+    await getNetworkParams();
+    const txFeeInLIB = parameters.current.transactionFee || 1n * wei;
+    
+    const balanceInLIB = big2str(BigInt(libAsset.balance), 18).slice(0, -12);
+    const feeInLIB = big2str(txFeeInLIB, 18).slice(0, -16);
+
+    this.balanceAmount.textContent = balanceInLIB + ' LIB';
+    this.transactionFee.textContent = feeInLIB + ' LIB';
   }
 
   async validateStakeInputs() {
@@ -6358,8 +6189,8 @@ class StakeValidatorModal {
     // Check 1.5: Node Address Format (64 hex chars)
     const addressRegex = /^[0-9a-fA-F]{64}$/;
     if (!addressRegex.test(nodeAddress)) {
-      this.nodeAddressWarning.textContent = 'Invalid node address format (must be 64 hex characters).';
-      this.nodeAddressWarning.style.display = 'block';
+      this.nodeAddressWarning.textContent = 'Invalid (need 64 hex chars)';
+      this.nodeAddressWarning.style.display = 'inline';
       this.amountWarning.style.display = 'none';
       this.amountWarning.textContent = '';
       return;
@@ -6413,8 +6244,8 @@ class StakeValidatorModal {
     // Check 2: Minimum Stake Amount
     if (amountWei < minStakeWei) {
       const minStakeFormatted = big2str(minStakeWei, 18).slice(0, -16);
-      this.amountWarning.textContent = `Amount must be at least ${minStakeFormatted} LIB.`;
-      this.amountWarning.style.display = 'block';
+      this.amountWarning.textContent = `must be at least ${minStakeFormatted} LIB`;
+      this.amountWarning.style.display = 'inline';
       return;
     }
 
@@ -6444,7 +6275,7 @@ class StakeValidatorModal {
       this.nodeAddressInput.dispatchEvent(new Event('input'));
     } else {
       console.error('Stake node address input field not found!');
-      showToast('Could not find stake address field.', 3000, 'error');
+      showToast('Could not find stake address field.', 0, 'error');
     }
   }
 
@@ -6474,6 +6305,14 @@ class ChatModal {
     this.toll = null;
     this.tollUnit = null;
     this.address = null;
+
+    // file attachments
+    this.fileAttachments = [];
+    // context menu properties
+    this.currentContextMessage = null;
+
+    // Flag to prevent multiple downloads
+    this.attachmentDownloadInProgress = false; 
   }
 
   /**
@@ -6495,9 +6334,29 @@ class ChatModal {
     this.messageByteCounter = document.querySelector('.message-byte-counter');
     this.messagesContainer = document.querySelector('.messages-container');
     this.addFriendButtonChat = document.getElementById('addFriendButtonChat');
+    this.addAttachmentButton = document.getElementById('addAttachmentButton');
+    this.chatFileInput = document.getElementById('chatFileInput');
 
-    // Add message click-to-copy handler
-    this.messagesList.addEventListener('click', this.handleClickToCopy.bind(this));
+    // Initialize context menu
+    this.contextMenu = document.getElementById('messageContextMenu');
+    
+    // Add event delegation for message clicks (since messages are created dynamically)
+    this.messagesList.addEventListener('click', this.handleMessageClick.bind(this));
+    
+    // Add context menu option listeners
+    this.contextMenu.addEventListener('click', (e) => {
+      if (e.target.closest('.context-menu-option')) {
+        const action = e.target.closest('.context-menu-option').dataset.action;
+        this.handleContextMenuAction(action);
+      }
+    });
+    
+    // Close context menu when clicking outside
+    document.addEventListener('click', (e) => {
+      if (this.contextMenu && !this.contextMenu.contains(e.target)) {
+        this.closeContextMenu();
+      }
+    });
     this.sendButton.addEventListener('click', this.handleSendMessage.bind(this));
     this.closeButton.addEventListener('click', this.close.bind(this));
     this.sendButton.addEventListener('keydown', ignoreTabKey);
@@ -6544,6 +6403,40 @@ class ChatModal {
       if (!friendModal.getCurrentContactAddress()) return;
       friendModal.open();
     });
+
+    if (this.addAttachmentButton) {
+      this.addAttachmentButton.addEventListener('click', () => {
+        this.triggerFileSelection();
+      });
+    }
+
+    if (this.chatFileInput) {
+      this.chatFileInput.addEventListener('change', (e) => {
+        this.handleFileAttachment(e);
+      });
+    }
+
+    this.messagesList.addEventListener('click', async (e) => {
+      const row = e.target.closest('.attachment-row');
+      if (!row) return;
+      e.preventDefault();
+
+      // Concurent download prevention
+      if (this.attachmentDownloadInProgress) return;
+
+      this.attachmentDownloadInProgress = true;
+
+      const idx  = Number(row.dataset.msgIdx);
+      const item = myData.contacts[this.address].messages[idx];
+
+      try {
+        await this.handleAttachmentDownload(item, row);
+      } finally {
+        this.attachmentDownloadInProgress = false;
+      }
+    });
+
+
   }
 
   /**
@@ -6624,15 +6517,13 @@ class ChatModal {
       chatsScreen.updateChatList();
     }
 
+    // clear file attachments
+    this.fileAttachments = [];
+    this.showAttachmentPreview(); // Hide preview
+
     // Setup state for appendChatModal and perform initial render
     this.address = address;
     this.appendChatModal(false); // Call appendChatModal to render messages, ensure highlight=false
-
-    if (isOnline) {
-      if (wsManager && !wsManager.isSubscribed()) {
-        pollChatInterval(pollIntervalChatting); // poll for messages at a faster rate
-      }
-    }
   }
 
   /**
@@ -6660,6 +6551,10 @@ class ChatModal {
     // Save any unsaved draft before closing
     this.debouncedSaveDraft(this.messageInput.value);
 
+    // clear file attachments
+    this.fileAttachments = [];
+    this.showAttachmentPreview(); // clear listeners
+
     this.modal.classList.remove('active');
     if (chatsScreen.isActive()) {
       chatsScreen.updateChatList();
@@ -6670,11 +6565,6 @@ class ChatModal {
       footer.newChatButton.classList.add('visible');
     }
     this.address = null;
-    if (isOnline) {
-      if (wsManager && !wsManager.isSubscribed()) {
-        pollChatInterval(pollIntervalNormal); // back to polling at slower rate
-      }
-    }
   }
 
   /**
@@ -6844,7 +6734,7 @@ class ChatModal {
       this.messageInput.focus(); // Add focus back to keep keyboard open
 
       const message = this.messageInput.value.trim();
-      if (!message) {
+      if (!message && !this.fileAttachments?.length) {
         this.sendButton.disabled = false;
         return;
       }
@@ -6897,6 +6787,7 @@ class ChatModal {
         myData.contacts[currentAddress].pqPublic = pqRecPubKey;
       }
 
+      /*
       // Generate shared secret using ECDH and take first 32 bytes
       let dhkey = ecSharedKey(keys.secret, recipientPubKey);
       const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey);
@@ -6904,6 +6795,15 @@ class ChatModal {
       combined.set(dhkey);
       combined.set(sharedSecret, dhkey.length);
       dhkey = deriveDhKey(combined);
+      */
+      const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey)
+      const selfKey = encryptData(bin2hex(dhkey), keys.secret+keys.pqSeed, true)  // used to decrypt our own message
+
+      // encrypt the file attachments
+      let encXattach = null;
+      if (this.fileAttachments && this.fileAttachments.length > 0) {
+        encXattach = encryptChacha(dhkey, stringify(this.fileAttachments));
+      }
 
       // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
       // Encrypt message using shared secret
@@ -6915,7 +6815,9 @@ class ChatModal {
         encrypted: true,
         encryptionMethod: 'xchacha20poly1305',
         pqEncSharedKey: bin2base64(cipherText),
+        selfKey: selfKey,
         sent_timestamp: getCorrectedTimestamp(),
+        ...(encXattach && { xattach: encXattach }), // Only include if there are attachments
       };
 
       // Always include username, but only include other info if recipient is a friend
@@ -6945,15 +6847,15 @@ class ChatModal {
         myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : this.toll
 
       const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
-      const txid = await signObj(chatMessageObj, keys);
+      await signObj(chatMessageObj, keys);
+      const txid = getTxid(chatMessageObj)
+console.warn('in send message', txid)
 
       // if there a hidden txid input, get the value to be used to delete that txid from relevant data stores
       const retryTxId = this.retryOfTxId.value;
       if (retryTxId) {
         removeFailedTx(retryTxId, currentAddress);
         this.retryOfTxId.value = '';
-        failedMessageModal.handleFailedMessageData.txid = '';
-        failedMessageModal.handleFailedMessageData.handleFailedMessage = '';
       }
 
       // --- Optimistic UI Update ---
@@ -6965,8 +6867,15 @@ class ChatModal {
         my: true,
         txid: txid,
         status: 'sent',
+        ...(this.fileAttachments && this.fileAttachments.length > 0 && { xattach: this.fileAttachments }), // Only include if there are attachments
       };
       insertSorted(chatsData.contacts[currentAddress].messages, newMessage, 'timestamp');
+
+      // clear file attachments and remove preview
+      if (this.fileAttachments && this.fileAttachments.length > 0) {
+        this.fileAttachments = [];
+        this.showAttachmentPreview();
+      }
 
       // Update or add to chats list, maintaining chronological order
       const chatUpdate = {
@@ -7066,7 +6975,6 @@ class ChatModal {
       message: 'x',
       xmessage: payload,
       timestamp: getCorrectedTimestamp(),
-      network: NETWORK_ACCOUNT_ID,
       fee: parameters.current.transactionFee || 1n * wei, // This is not used by the backend
       networkId: network.netid,
     };
@@ -7148,12 +7056,59 @@ class ChatModal {
       } else {
         // --- Render Chat Message ---
         const messageClass = item.my ? 'sent' : 'received'; // Use item.my directly
-        messageHTML = `
-                    <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
-                        <div class="message-content" style="white-space: pre-wrap">${linkifyUrls(item.message)}</div>
+        
+        // Check if message was deleted
+        if (item?.deleted > 0) {
+          // Render deleted message with special styling
+          messageHTML = `
+                    <div class="message ${messageClass} deleted-message" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
+                        <div class="message-content deleted-content">${item.message}</div>
                         <div class="message-time">${timeString}</div>
                     </div>
                 `;
+        } else {
+          // --- Render Attachments if present ---
+          let attachmentsHTML = '';
+          if (item.xattach && Array.isArray(item.xattach) && item.xattach.length > 0) {
+            attachmentsHTML = item.xattach.map(att => {
+              const emoji = this.getFileEmoji(att.type || '', att.name || '');
+              const fileUrl = att.url || '#';
+              const fileName = att.name || 'Attachment';
+              const fileSize = att.size ? this.formatFileSize(att.size) : '';
+              const fileType = att.type ? att.type.split('/').pop().toUpperCase() : '';
+              return `
+                <div class="attachment-row" style="display: flex; align-items: center; background: #f5f5f7; border-radius: 12px; padding: 10px 12px; margin-bottom: 6px;"
+                  data-url="${fileUrl}"
+                  data-name="${encodeURIComponent(fileName)}"
+                  data-type="${att.type || ''}"
+                  data-pqEncSharedKey="${att.pqEncSharedKey || ''}"
+                  data-selfKey="${att.selfKey || ''}"
+                  data-msg-idx="${i}"
+                >
+                  <span style="font-size: 2.2em; margin-right: 14px;">${emoji}</span>
+                  <div style="min-width:0;">
+                    <span class="attachment-label" style="font-weight:500;color:#222;word-break:break-all;">
+                      ${fileName}
+                    </span><br>
+                    <span style="font-size: 0.93em; color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
+                  </div>
+                </div>
+              `;
+            }).join('');
+          }
+          
+          // --- Render message text (if any) ---
+          const messageTextHTML = item.message && item.message.trim() ?
+            `<div class="message-content" style="white-space: pre-wrap; margin-top: ${attachmentsHTML ? '2px' : '0'};">${linkifyUrls(item.message)}</div>` : '';
+          
+          messageHTML = `
+                      <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
+                          ${attachmentsHTML}
+                          ${messageTextHTML}
+                          <div class="message-time">${timeString}</div>
+                      </div>
+                  `;
+        }
       }
 
       // 4. Append the constructed HTML
@@ -7220,82 +7175,7 @@ class ChatModal {
     }, 300); // <<< Delay of 300 milliseconds for rendering
   }
 
-  /**
-   * Invoked when the user clicks on a message to copy the content
-   * It will copy the content to the clipboard
-   * @param {Event} e - The event object
-   * @returns {void}
-   */
-  async handleClickToCopy(e) {
-    // Check if the click was on a link - if so, don't copy
-    if (e.target.tagName === 'A' || e.target.closest('a')) {
-      return;
-    }
-    
-    const messageEl = e.target.closest('.message');
-    if (!messageEl) return;
 
-    // Prevent copying if the message has failed and not `payment-info`
-    if (messageEl.dataset.status === 'failed') {
-      console.log('Copy prevented for failed message.');
-
-      // If the message is not a payment message, show the failed message modal
-      if (!messageEl.classList.contains('payment-info')) {
-        failedMessageModal.handleFailedMessageClick(messageEl);
-      }
-
-      // If the message is a payment message, show the failed history item modal
-      if (messageEl.classList.contains('payment-info')) {
-        failedTransactionModal.open(messageEl.dataset.txid, messageEl);
-      }
-
-      // TODO: if message is a payment open sendAssetFormModal and fill with information in the payment message?
-
-      return;
-    }
-
-    let textToCopy = null;
-    let contentType = 'Text'; // Default content type for toast
-
-    // Check if it's a payment message
-    if (messageEl.classList.contains('payment-info')) {
-      const paymentMemoEl = messageEl.querySelector('.payment-memo');
-      if (paymentMemoEl) {
-        textToCopy = paymentMemoEl.textContent;
-        contentType = 'Memo'; // Update type for toast
-      } else {
-        // No memo element found in this payment block
-        showToast('No memo to copy', 2000, 'info');
-        return;
-      }
-    } else {
-      // It's a regular chat message
-      const messageContentEl = messageEl.querySelector('.message-content');
-      if (messageContentEl) {
-        textToCopy = messageContentEl.textContent;
-        contentType = 'Message'; // Update type for toast
-      } else {
-        // Should not happen for regular messages, but handle gracefully
-        showToast('No content to copy', 2000, 'info');
-        return;
-      }
-    }
-
-    // Proceed with copying if text was found
-    if (textToCopy && textToCopy.trim()) {
-      try {
-        await navigator.clipboard.writeText(textToCopy.trim());
-        showToast(`${contentType} copied to clipboard`, 2000, 'success');
-      } catch (err) {
-        console.error('Failed to copy:', err);
-        showToast(`Failed to copy ${contentType.toLowerCase()}`, 2000, 'error');
-      }
-    } else if (contentType === 'Memo') {
-      // Explicitly handle the case where memo exists but is empty/whitespace
-      showToast('Memo is empty', 2000, 'info');
-    }
-    // No need for an else here, cases with no element are handled above
-  }
 
   /**
    * Refresh the current view based on which screen the user is viewing.
@@ -7414,136 +7294,704 @@ class ChatModal {
       this.sendButton.disabled = false;
     }
   }
+
+  /**
+   * Handles file selection for chat attachments
+   * @param {Event} event - The file input change event
+   * @returns {Promise<void>}
+   */
+  async handleFileAttachment(event) {
+    const file = event.target.files[0];
+    if (!file) {
+      return; // No file selected
+    }
+
+    // limit to 5 files
+    if (this.fileAttachments.length >= 5) {
+      showToast('You can only attach up to 5 files.', 0, 'error');
+      event.target.value = ''; // Reset file input
+      return;
+    }
+
+    // File size limit (e.g., 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB in bytes
+    if (file.size > maxSize) {
+      showToast('File size too large. Maximum size is 10MB.', 0, 'error');
+      event.target.value = ''; // Reset file input
+      return;
+    }
+
+    // Validate file type
+    const allowedTypePrefixes = ['image/', 'audio/', 'video/'];
+    const allowedExplicitTypes = [
+      'application/pdf', // PDF
+      'text/plain',      // TXT
+      'application/msword', // DOC
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // DOCX
+    ];
+    if (!(allowedTypePrefixes.some(prefix => file.type.startsWith(prefix)) || allowedExplicitTypes.includes(file.type))) {
+      showToast('File type not supported.', 0, 'error');
+      event.target.value = ''; // Reset file input
+      return;
+    }
+
+    try {
+      this.isEncrypting = true;
+      this.sendButton.disabled = true; // Disable send button during encryption
+      this.addAttachmentButton.disabled = true;
+      const loadingToastId = showToast(`Attaching file...`, 0, 'loading');
+      const { dhkey, cipherText: pqEncSharedKey } = await this.getRecipientDhKey(this.address);
+      const password = myAccount.keys.secret + myAccount.keys.pqSeed;
+      const selfKey = encryptData(bin2hex(dhkey), password, true)
+
+      const worker = new Worker('encryption.worker.js', { type: 'module' });
+      worker.onmessage = async (e) => {
+        this.isEncrypting = false;
+        if (e.data.error) {
+          hideToast(loadingToastId);
+          showToast(e.data.error, 0, 'error');
+          this.sendButton.disabled = false; // Re-enable send button
+          this.addAttachmentButton.disabled = false;
+        } else {
+          // Encryption successful
+          // upload to get url here 
+
+          const bytes = new Uint8Array(e.data.cipherBin);
+          const blob = new Blob([bytes], { type: 'application/octet-stream' });
+
+          const form = new FormData();
+          form.append('file', blob, file.name);
+
+          // TODO: move to network.js
+          const uploadUrl = 'https://inv.liberdus.com:2083';
+
+          const response = await fetch(`${uploadUrl}/post`, {
+            method: 'POST',
+            body: form
+          });
+          if (!response.ok) throw new Error(`upload failed ${response.status}`);
+
+          const { id } = await response.json();
+          if (!id) throw new Error('No file ID returned from upload');
+
+          this.fileAttachments.push({
+            url: `${uploadUrl}/get/${id}`,
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            pqEncSharedKey: bin2base64(pqEncSharedKey),
+            selfKey
+          });
+          hideToast(loadingToastId);
+          this.showAttachmentPreview(file);
+          this.sendButton.disabled = false; // Re-enable send button
+          this.addAttachmentButton.disabled = false;
+          showToast(`File "${file.name}" attached successfully`, 2000, 'success');
+        }
+        worker.terminate();
+      };
+
+      worker.onerror = (err) => {
+        hideToast(loadingToastId);
+        showToast(`File encryption failed: ${err.message}`, 0, 'error');
+        this.isEncrypting = false;
+        this.sendButton.disabled = false; // Re-enable send button
+        this.addAttachmentButton.disabled = false;
+        worker.terminate();
+      };
+      
+      // read the file and send it to the worker for encryption
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        worker.postMessage({ fileBuffer: e.target.result, dhkey }, [e.target.result]);
+      };
+      reader.readAsArrayBuffer(file);
+      
+    } catch (error) {
+      console.error('Error handling file attachment:', error);
+      showToast('Error processing file attachment', 0, 'error');
+    } finally {
+      event.target.value = ''; // Reset the file input value
+    }
+  }
+
+  /**
+   * Shows a preview of the attached file just above the textarea
+   * @returns {void}
+   */
+  showAttachmentPreview() {
+    const preview = document.getElementById('attachmentPreview');
+    
+    if (!this.fileAttachments || this.fileAttachments.length === 0) {
+      preview.innerHTML = '';
+      preview.style.display = 'none';
+      return;
+    }
+  
+    const attachmentItems = this.fileAttachments.map((attachment, index) => `
+      <div class="attachment-item">
+        <span class="attachment-icon">📎</span>
+        <span class="attachment-name">${attachment.name}</span>
+        <button class="remove-attachment" data-index="${index}">×</button>
+      </div>
+    `).join('');
+  
+    preview.innerHTML = attachmentItems;
+    
+    // Add event listeners to remove buttons
+    const removeButtons = preview.querySelectorAll('.remove-attachment');
+    removeButtons.forEach(button => {
+      button.addEventListener('click', (e) => {
+        const index = parseInt(e.target.dataset.index);
+        this.removeAttachment(index);
+      });
+    });
+
+    preview.style.display = 'block';
+    
+    // Check if user was at the bottom before showing preview
+    const messageContainer = this.messagesContainer;
+    const wasAtBottom = messageContainer ? 
+      messageContainer.scrollHeight - messageContainer.scrollTop - messageContainer.clientHeight <= 50 : false;
+    
+    // Only auto-scroll if user was already at the bottom
+    if (wasAtBottom) {
+      setTimeout(() => {
+        if (messageContainer) {
+          messageContainer.scrollTop = messageContainer.scrollHeight;
+        }
+      }, 100); // Small delay to ensure the DOM has updated
+    }
+  }
+
+  /**
+   * Removes a specific attached file
+   * @param {number} index - Index of file to remove
+   * @returns {void}
+   */
+  removeAttachment(index) {
+    if (this.fileAttachments && index >= 0 && index < this.fileAttachments.length) {
+      const removedFile = this.fileAttachments.splice(index, 1)[0];
+      this.showAttachmentPreview(); // Refresh the preview
+      showToast(`"${removedFile.name}" removed`, 2000, 'info');
+    }
+  }
+
+  /**
+   * Triggers file selection using the existing hidden input
+   * @returns {void}
+   */
+  triggerFileSelection() {
+    if (this.chatFileInput) {
+      this.chatFileInput.click();
+    }
+  }
+
+  /**
+   * Retrieves the recipient's public keys, caching them if not already available.
+   * @param {string} recipientAddress - The address of the recipient.
+   * @returns {Promise<{publicKey: string, pqPublicKey: string}>}
+   * @throws {Error} If recipient's public keys cannot be retrieved.
+   * */
+  async getRecipientKeys(recipientAddress) {
+    let recipientPubKey = myData.contacts[recipientAddress]?.public;
+    let pqRecPubKey = myData.contacts[recipientAddress]?.pqPublic;
+
+    if (!recipientPubKey || !pqRecPubKey) {
+      const recipientInfo = await queryNetwork(`/account/${longAddress(recipientAddress)}`);
+      recipientPubKey = recipientInfo?.account?.publicKey;
+      pqRecPubKey = recipientInfo?.account?.pqPublicKey;
+
+      if (!recipientPubKey || !pqRecPubKey) {
+        throw new Error("Could not retrieve recipient's public keys.");
+      }
+
+      myData.contacts[recipientAddress].public = recipientPubKey;
+      myData.contacts[recipientAddress].pqPublic = pqRecPubKey;
+    } 
+
+    return {
+      publicKey: recipientPubKey,
+      pqPublicKey: pqRecPubKey
+    };
+  }
+
+  /**
+   * Helper function to get the shared DH key for a recipient.
+   * @param {string} recipientAddress - The recipient's address.
+   * @returns {Promise<{dhkey: Uint8Array, cipherText: Uint8Array}>}
+   */
+  async getRecipientDhKey(recipientAddress) {
+
+    const keys = await this.getRecipientKeys(recipientAddress);
+
+    return dhkeyCombined(myAccount.keys.secret, keys.publicKey, keys.pqPublicKey);
+  }
+
+  /**
+   * Returns an appropriate emoji based on file type and name
+   * @param {string} type - MIME type of the file
+   * @param {string} name - Name of the file
+   * @returns {string} Emoji representing the file type
+   */
+  getFileEmoji(type, name) {
+    if (type && type.startsWith('image/')) return '🖼️';
+    if (type && type.startsWith('audio/')) return '🎵';
+    if (type && type.startsWith('video/')) return '🎬';
+    if ((type === 'application/pdf') || (name && name.toLowerCase().endsWith('.pdf'))) return '📄';
+    if (type && type.startsWith('text/')) return '📄';
+    return '📎';
+  }
+
+  /**
+   * Formats file size in bytes to human-readable format
+   * @param {number} bytes - File size in bytes
+   * @returns {string} Formatted file size string
+   */
+  formatFileSize(bytes) {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  /**
+   * Determines if a file type can be viewed in a browser
+   * @param {string} mimeType - The MIME type of the file
+   * @returns {boolean} True if the file type can be viewed in a browser, false otherwise
+   */
+  isViewableInBrowser(mimeType) {
+    if (!mimeType) return false;
+    
+    const viewableTypes = [
+      'image/',           // All images
+      'text/',            // Text files
+      'application/pdf',  // PDFs
+      'video/',           // Videos
+      'audio/',           // Audio files
+      'application/json', // JSON
+      'application/xml',  // XML
+      'text/xml'          // XML (alternative)
+    ];
+    
+    return viewableTypes.some(type => mimeType.startsWith(type));
+  }
+
+  /**
+   * Triggers a file download
+   * @param {string} blobUrl - The URL of the file to download
+   * @param {string} filename - The name of the file to download
+   * @returns {void}
+   */
+  triggerFileDownload(blobUrl, filename) {
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast(`${filename} downloaded`, 3000, 'success');
+  }
+
+  async handleAttachmentDownload(item, linkEl) {
+    try {
+      const loadingToastId = showToast(`Decrypting attachment...`, 0, 'loading');
+      // 1. Derive a fresh 32‑byte dhkey
+      let dhkey;
+      if (item.my) {
+        // you were the sender ⇒ run encapsulation side again
+        const selfKey = linkEl.dataset.selfkey;
+        const password = myAccount.keys.secret + myAccount.keys.pqSeed;
+        dhkey = hex2bin(decryptData(selfKey, password, true));
+      } else {
+        // you are the receiver ⇒ use fields stashed on the item
+        const recipientKeys = await this.getRecipientKeys(this.address);
+        const pqEncSharedKey = linkEl.dataset.pqencsharedkey;
+        dhkey = dhkeyCombined(
+          myAccount.keys.secret,
+          recipientKeys.publicKey,
+          myAccount.keys.pqSeed,
+          pqEncSharedKey
+        ).dhkey;
+      }
+
+      // 2. Download encrypted bytes
+      const res = await fetch(linkEl.dataset.url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const cipherBin = new Uint8Array(await res.arrayBuffer());
+
+      // 3. bin → base64 → decrypt → clear Uint8Array
+      const cipherB64 = bin2base64(cipherBin);
+      const plainB64  = decryptChacha(dhkey, cipherB64);
+      if (!plainB64) throw new Error('decryptChacha returned null');
+      const clearBin  = base642bin(plainB64);
+
+      // 4. Blob + download
+      const blob    = new Blob([clearBin], { type: linkEl.dataset.type || 'application/octet-stream' });
+      const blobUrl = URL.createObjectURL(blob);
+      const filename = decodeURIComponent(linkEl.dataset.name || 'download');
+
+      hideToast(loadingToastId);
+      if (window.ReactNativeWebView?.postMessage) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          window.ReactNativeWebView.postMessage(
+            JSON.stringify({
+              type: "DOWNLOAD_ATTACHMENT",
+              filename: filename,
+              mime: blob.type,
+              dataUrl: reader.result,
+            })
+          );
+        };
+        reader.readAsDataURL(blob);
+      } else {
+        // Web browser handling
+        const isViewable = this.isViewableInBrowser(blob.type);
+        
+        try {
+          if (isViewable) {
+            // Open in new tab and download
+            const newTab = window.open(blobUrl, '_blank');
+            this.triggerFileDownload(blobUrl, filename);
+            
+            if (newTab) {
+              console.log('opened in new tab');
+            } else {
+              console.log('failed to open in new tab');
+            }
+          } else {
+            // Non-viewable files: download only
+            this.triggerFileDownload(blobUrl, filename);
+          }
+        } finally {
+          // Clean up blob URL after enough time for downloads/tabs to initialize
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+        }
+      }
+
+    } catch (err) {
+      console.error('Attachment decrypt failed:', err);
+      showToast(`Decryption failed.`, 0, 'error');
+    }
+  }
+
+  /**
+   * Handles message click events
+   * @param {Event} e - Click event
+   */
+  handleMessageClick(e) {
+    if (e.target.closest('.attachment-row')) return;
+
+    if (e.target.tagName === 'A' || e.target.closest('a')) return;
+    
+    const messageEl = e.target.closest('.message');
+    if (!messageEl) return;
+
+    if (messageEl.classList.contains('deleted-message')) return;
+
+    if (messageEl.dataset.status === 'failed') {
+      const isPayment = messageEl.classList.contains('payment-info');
+      return isPayment 
+        ? failedTransactionModal.open(messageEl.dataset.txid, messageEl)
+        : failedMessageMenu.open(e, messageEl);
+    }
+
+    this.showMessageContextMenu(e, messageEl);
+  }
+
+  /**
+   * Shows context menu for a message
+   * @param {Event} e - Click event
+   * @param {HTMLElement} messageEl - The message element clicked
+   */
+  showMessageContextMenu(e, messageEl) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    this.currentContextMessage = messageEl;
+    this.positionContextMenu(this.contextMenu, messageEl);
+    this.contextMenu.style.display = 'block';
+  }
+
+  /**
+   * Utility function to position context menus based on available space
+   * @param {HTMLElement} menu - The context menu element
+   * @param {HTMLElement} messageEl - The message element to position relative to
+   */
+  positionContextMenu(menu, messageEl) {
+    const rect = messageEl.getBoundingClientRect();
+    const menuWidth = 200; // match CSS
+    const menuHeight = 100;
+
+    let left = rect.left + (rect.width / 2) - (menuWidth / 2);
+    // If menu would overflow right, push left
+    if (left + menuWidth > window.innerWidth - 10) {
+      left = window.innerWidth - menuWidth - 10;
+    }
+    // If menu would overflow left, push right
+    if (left < 10) {
+      left = 10;
+    }
+
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const top = (spaceBelow >= menuHeight || spaceBelow > spaceAbove)
+      ? rect.bottom + 10
+      : rect.top - menuHeight - 10;
+
+    Object.assign(menu.style, {
+      left: `${left}px`,
+      top: `${top}px`
+    });
+  }
+
+  /**
+   * Closes the context menu
+   */
+  closeContextMenu() {
+    if (!this.contextMenu) return;
+    this.contextMenu.style.display = 'none';
+    this.currentContextMessage = null;
+  }
+
+  /**
+   * Handles context menu option selection
+   * @param {string} action - The action to perform
+   */
+  handleContextMenuAction(action) {
+    const messageEl = this.currentContextMessage;
+    if (!messageEl) return;
+    
+    switch (action) {
+      case 'copy':
+        this.copyMessageContent(messageEl);
+        break;
+      case 'delete':
+        this.deleteMessage(messageEl);
+        break;
+    }
+    
+    this.closeContextMenu();
+  }
+
+  /**
+   * Copies message content to clipboard
+   * @param {HTMLElement} messageEl - The message element
+   */
+  async copyMessageContent(messageEl) {
+    if (messageEl.classList.contains('deleted-message')) {
+      return showToast('Cannot copy deleted message', 2000, 'info');
+    }
+
+    const isPayment = messageEl.classList.contains('payment-info');
+    const selector = isPayment ? '.payment-memo' : '.message-content';
+    const contentType = isPayment ? 'Memo' : 'Message';
+    const contentEl = messageEl.querySelector(selector);
+
+    if (!contentEl) {
+      return showToast(`No ${contentType.toLowerCase()} to copy`, 2000, 'info');
+    }
+
+    const textToCopy = contentEl.textContent?.trim();
+    if (!textToCopy) {
+      return showToast(`${contentType} is empty`, 2000, 'info');
+    }
+
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      showToast(`${contentType} copied to clipboard`, 2000, 'success');
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      showToast(`Failed to copy ${contentType.toLowerCase()}`, 0, 'error');
+    }
+  }
+
+  /**
+   * Deletes a message locally (and potentially from network if it's a sent message)
+   * @param {HTMLElement} messageEl - The message element to delete
+   */
+  deleteMessage(messageEl) {
+    const { txid, messageTimestamp: timestamp } = messageEl.dataset;
+    
+    if (!timestamp || !confirm('Delete this message?')) return;
+    
+    try {
+      const contact = myData.contacts[this.address];
+      const messageIndex = contact?.messages?.findIndex(msg => 
+        msg.timestamp == timestamp || msg.txid === txid
+      );
+      
+      if (messageIndex === -1) return;
+      
+      const message = contact.messages[messageIndex];
+      
+      if (message.deleted) {
+        return showToast('Message already deleted', 2000, 'info');
+      }
+      
+      // Mark as deleted and clear payment info if present
+      Object.assign(message, {
+        deleted: 1,
+        message: "Deleted by me"
+      });
+      // Remove payment-specific fields if present
+      if (message?.amount) {
+        if (message.payment) delete message.payment;
+        if (message.memo) message.memo = "Deleted by me";
+        if (message.amount) delete message.amount;
+        if (message.symbol) delete message.symbol;
+        
+        // Update corresponding transaction in wallet history
+        const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === message.txid);
+        if (txIndex !== -1) {
+          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted by me' });
+          delete myData.wallet.history[txIndex].amount;
+          delete myData.wallet.history[txIndex].symbol;
+          delete myData.wallet.history[txIndex].payment;
+          delete myData.wallet.history[txIndex].sign;
+          delete myData.wallet.history[txIndex].address;
+        }
+      }
+      // Remove attachments if any
+      delete message.xattach;
+      
+      this.appendChatModal();
+      showToast('Message deleted', 2000, 'success');
+      setTimeout(() => {
+        const selector = `[data-message-timestamp="${timestamp}"]`;
+        const deletedEl = this.messagesList.querySelector(selector);
+        if (deletedEl) {
+          deletedEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 300);
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      showToast('Failed to delete message', 0, 'error');
+    }
+  }
 }
 
 const chatModal = new ChatModal();
 
 /**
- * Failed Message Modal Class
+ * Failed Message Context Menu Class
  * @class
- * @description Handles the failed message modal
+ * @description Handles the failed message context menu
  * @returns {void}
  */
-class FailedMessageModal {
+class FailedMessageMenu {
   constructor() {
-    this.handleFailedMessageData = {
-      handleFailedMessage: '',
-      txid: '',
-    };
+    this.menu = document.getElementById('failedMessageContextMenu');
+    this.currentMessageEl = null;
   }
 
   /**
-   * Loads the failed message modal event listeners
+   * Loads the failed message context menu event listeners
    * @returns {void}
    */
   load() {
-    this.modal = document.getElementById('failedMessageModal');
-    this.retryButton = this.modal.querySelector('.retry-button');
-    this.deleteButton = this.modal.querySelector('.delete-button');
-    this.closeButton = document.getElementById('closeFailedMessageModal');
+    if (!this.menu) return;
 
-    this.retryButton.addEventListener('click', this.handleFailedMessageRetry.bind(this));
-    this.deleteButton.addEventListener('click', this.handleFailedMessageDelete.bind(this));
-    this.closeButton.addEventListener('click', this.closeFailedMessageModalAndClearState.bind(this));
-    this.modal.addEventListener('click', this.handleFailedMessageBackdropClick.bind(this));
+    // Menu option click handler
+    this.menu.addEventListener('click', (e) => this.handleMenuAction(e));
+
+    // Hide menu on outside click
+    document.addEventListener('click', (e) => {
+      if (this.menu.style.display === 'block' && !this.menu.contains(e.target)) {
+        this.hide();
+      }
+    });
   }
 
   /**
-   * When user clicks on a failed message this will show the failed message modal with retry, delete (delete from all data stores), and close buttons
-   * It will also store the message content and txid in the handleSendMessage object containing the handleFailedMessage and txid properties
-   * @param {Element} messageEl - The message element that failed
-   * @returns {void}
+   * Shows the context menu for a failed message
+   * @param {Event} event - Click event
+   * @param {HTMLElement} messageEl - The message element clicked
    */
-  handleFailedMessageClick(messageEl) {
-    // Get the message content and txid from the original failed message element
-    const messageContent = messageEl.querySelector('.message-content').textContent;
-    const originalTxid = messageEl.dataset.txid;
+  open(event, messageEl) {
+    if (!this.menu) return;
+    
+    event.preventDefault();
+    event.stopPropagation();
+    this.currentMessageEl = messageEl;
 
-    // Store content and txid in properties of handleSendMessage
-    this.handleFailedMessageData.handleFailedMessage = messageContent;
-    this.handleFailedMessageData.txid = originalTxid;
+    // Use shared positioning utility
+    chatModal.positionContextMenu(this.menu, messageEl);
+    this.menu.style.display = 'block';
+  }
 
-    // Show the modal
-    if (this.modal) {
-      this.modal.classList.add('active');
+  /**
+   * Hides the context menu
+   */
+  hide() {
+    if (this.menu) {
+      this.menu.style.display = 'none';
+    }
+    this.currentMessageEl = null;
+  }
+
+  /**
+   * Handles context menu option clicks
+   * @param {Event} e - Click event
+   */
+  handleMenuAction(e) {
+    const option = e.target.closest('.context-menu-option');
+    if (!option || !this.currentMessageEl) return;
+    
+    const action = option.dataset.action;
+    const messageEl = this.currentMessageEl;
+    this.hide();
+
+    switch (action) {
+      case 'retry':
+        this.handleFailedMessageRetry(messageEl);
+        break;
+      case 'delete':
+        this.handleFailedMessageDelete(messageEl);
+        break;
     }
   }
 
   /**
-   * When the user clicks the retry button in the failed message modal
+   * When the user clicks the retry option in the context menu
    * It will fill the chat modal with the message content and txid of the failed message and focus the message input
+   * @param {HTMLElement} messageEl - The message element that failed
    * @returns {void}
    */
-  handleFailedMessageRetry() {
-    // Use the values stored when handleFailedMessage was called
-    const messageToRetry = this.handleFailedMessageData.handleFailedMessage;
-    const originalTxid = this.handleFailedMessageData.txid;
+  handleFailedMessageRetry(messageEl) {
+    const messageContent = messageEl.querySelector('.message-content')?.textContent;
+    const txid = messageEl.dataset.txid;
 
-    if (
-      chatModal.messageInput &&
-      chatModal.retryOfTxId &&
-      typeof messageToRetry === 'string' &&
-      typeof originalTxid === 'string'
-    ) {
-      chatModal.messageInput.value = messageToRetry;
-      chatModal.retryOfTxId.value = originalTxid;
-
-      this.closeFailedMessageModalAndClearState();
+    if (chatModal.messageInput && chatModal.retryOfTxId && messageContent && txid) {
+      chatModal.messageInput.value = messageContent;
+      chatModal.retryOfTxId.value = txid;
       chatModal.messageInput.focus();
     } else {
       console.error('Error preparing message retry: Necessary elements or data missing.');
-      this.closeFailedMessageModalAndClearState();
     }
   }
 
   /**
-   * When the user clicks the delete button in the failed message modal
+   * When the user clicks the delete option in the context menu
    * It will delete the message from all data stores using removeFailedTx and remove pending tx if exists
+   * @param {HTMLElement} messageEl - The message element that failed
    * @returns {void}
    */
-  handleFailedMessageDelete() {
-    const originalTxid = this.handleFailedMessageData.txid;
+  handleFailedMessageDelete(messageEl) {
+    const txid = messageEl.dataset.txid;
 
-    if (typeof originalTxid === 'string' && originalTxid) {
+    if (txid) {
       const currentAddress = chatModal.address;
-      removeFailedTx(originalTxid, currentAddress);
-
-      this.closeFailedMessageModalAndClearState();
-
-      // refresh current chatModal
+      removeFailedTx(txid, currentAddress);
       chatModal.appendChatModal();
     } else {
       console.error('Error deleting message: TXID not found.');
-      this.closeFailedMessageModalAndClearState();
-    }
-  }
-
-  /**
-   * Invoked when the user clicks the close button in the failed message modal
-   * It will close the modal and clear the stored values
-   * @returns {void}
-   */
-  closeFailedMessageModalAndClearState() {
-    this.modal.classList.remove('active');
-    // Clear the stored values when modal is closed
-    this.handleFailedMessageData.handleFailedMessage = '';
-    this.handleFailedMessageData.txid = '';
-  }
-
-  /**
-   * Invoked when the user clicks the backdrop in the failed message modal
-   * It will close the modal and clear the stored values
-   * @param {Event} event - The event object
-   * @returns {void}
-   */
-  handleFailedMessageBackdropClick(event) {
-    if (event.target === this.modal) {
-      this.closeFailedMessageModalAndClearState();
     }
   }
 }
 
-const failedMessageModal = new FailedMessageModal();
+const failedMessageMenu = new FailedMessageMenu();
 
 /**
  * New Chat Modal Class
@@ -7783,17 +8231,7 @@ class CreateAccountModal {
   }
 
   open() {
-    const accounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-    const networkId = parameters.networkId; // Use consistent casing
-
-    // Add safety check for usernames existence
-    const mismatchedNetids = Object.keys(accounts.netids).filter(netid => 
-      netid !== networkId && 
-      accounts.netids[netid].usernames && 
-      Object.keys(accounts.netids[netid].usernames).length > 0
-    );
-
-    if (mismatchedNetids.length > 0) {
+    if (migrateAccountsModal.hasMigratableAccounts()) {
       this.migrateAccountsSection.style.display = 'block';
     } else {
       this.migrateAccountsSection.style.display = 'none';
@@ -7917,6 +8355,8 @@ class CreateAccountModal {
   async handleSubmit(event) {
     // Disable submit button
     this.submitButton.disabled = true;
+    // disable migrate accounts button
+    this.migrateAccountsButton.disabled = true;
     // Disable input fields, back button, and toggle button
     this.toggleButton.disabled = true;
     this.usernameInput.disabled = true;
@@ -8067,6 +8507,7 @@ class CreateAccountModal {
         existingAccounts.netids[netid].usernames[username] = { address: myAccount.keys.address };
         localStorage.setItem('accounts', stringify(existingAccounts));
         saveState();
+        // handleNativeAppSubscription();
 
         signInModal.open(username);
       } catch (error) {
@@ -8081,6 +8522,9 @@ class CreateAccountModal {
           checkPendingTransactionsIntervalId = null;
         }
 
+        myAccount = null;
+        myData = null;
+
         // Note: `checkPendingTransactions` will also remove the item from `myData.pending` if it's rejected by the service.
         return;
       }
@@ -8089,10 +8533,6 @@ class CreateAccountModal {
       console.error(`DEBUG: handleCreateAccount error in else`, JSON.stringify(res, null, 2));
 
       // Clear intervals
-      if (updateWebSocketIndicatorIntervalId && wsManager) {
-        clearInterval(updateWebSocketIndicatorIntervalId);
-        updateWebSocketIndicatorIntervalId = null;
-      }
       if (checkPendingTransactionsIntervalId) {
         clearInterval(checkPendingTransactionsIntervalId);
         checkPendingTransactionsIntervalId = null;
@@ -8101,6 +8541,9 @@ class CreateAccountModal {
         clearInterval(getSystemNoticeIntervalId);
         getSystemNoticeIntervalId = null;
       }
+
+      myAccount = null;
+      myData = null;
 
       // no toast here since injectTx will show it
       this.reEnableControls();
@@ -8114,6 +8557,7 @@ class CreateAccountModal {
     this.usernameInput.disabled = false;
     this.privateKeyInput.disabled = false;
     this.backButton.disabled = false;
+    this.migrateAccountsButton.disabled = false;
   }
 }
 
@@ -8654,8 +9098,8 @@ class SendAssetFormModal {
           `toll > amount  ${big2str(tollInLIB, 8)} > ${big2str(amountInLIB, 8)} : ${tollInLIB > amountInLIB}`
         );
         if (tollInLIB > amountInLIB) {
-          this.balanceWarning.textContent = 'Amount is less than toll for memo.';
-          this.balanceWarning.style.display = 'block';
+          this.balanceWarning.textContent = 'less than toll for memo';
+          this.balanceWarning.style.display = 'inline';
           return false;
         }
       }
@@ -8769,7 +9213,7 @@ class SendAssetFormModal {
         const context = canvas.getContext('2d');
         if (!context) {
           console.error('Could not get 2d context from canvas');
-          showToast('Error processing image', 3000, 'error');
+          showToast('Error processing image', 0, 'error');
           event.target.value = ''; // Reset file input
           return;
         }
@@ -8792,20 +9236,20 @@ class SendAssetFormModal {
             } else {
               console.error('No valid fill function provided for QR file select');
               // Fallback or default behavior if needed, e.g., show generic error
-              showToast('Internal error handling QR data', 3000, 'error');
+              showToast('Internal error handling QR data', 0, 'error');
             }
           } else {
             // qr.decodeQR might throw an error instead of returning null/undefined
             // This else block might not be reached if errors are always thrown
             console.error('No QR code found in image (qr.js)');
-            showToast('No QR code found in image', 3000, 'error');
+            showToast('No QR code found in image', 0, 'error');
             // Clear the form fields in case of failure to find QR code
             targetModal.resetForm();
           }
         } catch (error) {
           console.error('Error processing QR code image with qr.js:', error);
           // Assume error means no QR code found or decoding failed
-          showToast('Could not read QR code from image', 3000, 'error');
+          showToast('Could not read QR code from image', 0, 'error');
           // Clear the form fields in case of error
           targetModal.resetForm();
 
@@ -8815,7 +9259,7 @@ class SendAssetFormModal {
       };
       img.onerror = function () {
         console.error('Error loading image');
-        showToast('Error loading image file', 3000, 'error');
+        showToast('Error loading image file', 0, 'error');
         event.target.value = ''; // Reset the file input value
         // Clear the form fields in case of image loading error
         targetModal.resetForm();
@@ -8825,7 +9269,7 @@ class SendAssetFormModal {
 
     reader.onerror = function () {
       console.error('Error reading file');
-      showToast('Error reading file', 3000, 'error');
+      showToast('Error reading file', 0, 'error');
       event.target.value = ''; // Reset the file input value
     };
 
@@ -8843,7 +9287,7 @@ class SendAssetFormModal {
     // Explicitly check for the required prefix
     if (!data || !data.startsWith('liberdus://')) {
       console.error("Invalid payment QR code format. Missing 'liberdus://' prefix.", data);
-      showToast('Invalid payment QR code format.', 3000, 'error');
+      showToast('Invalid payment QR code format.', 0, 'error');
       // Optionally clear fields or leave them as they were
       this.usernameInput.value = '';
       this.amountInput.value = '';
@@ -8879,7 +9323,7 @@ class SendAssetFormModal {
       this.amountInput.dispatchEvent(new Event('input'));
     } catch (error) {
       console.error('Error parsing payment QR data:', error, data);
-      showToast('Failed to parse payment QR data.', 3000, 'error');
+      showToast('Failed to parse payment QR data.', 0, 'error');
       // Clear fields on error
       this.usernameInput.value = '';
       this.amountInput.value = '';
@@ -8937,10 +9381,22 @@ class SendAssetConfirmModal {
     const cancelButton = this.cancelButton;
     const username = normalizeUsername(sendAssetFormModal.usernameInput.value);
 
+    // hidden input field retryOfTxId value is not an empty string
+    if (sendAssetFormModal.retryTxIdInput.value) {
+      // remove from myData use txid from hidden field retryOfPaymentTxId
+      removeFailedTx(sendAssetFormModal.retryTxIdInput.value, toAddress);
+
+      // clear the field
+      failedTransactionModal.txid = '';
+      failedTransactionModal.address = '';
+      failedTransactionModal.memo = '';
+      sendAssetFormModal.retryTxIdInput.value = '';
+    }
+
     // if it's your own username disable the send button
     if (username == myAccount.username) {
       confirmButton.disabled = true;
-      showToast('You cannot send assets to yourself', 3000, 'error');
+      showToast('You cannot send assets to yourself', 0, 'error');
       return;
     }
 
@@ -9011,6 +9467,12 @@ class SendAssetConfirmModal {
       createNewContact(toAddress, username, 2);
     }
 
+    /* Support sending payments to addresses that do not have
+      any EC publicKey or PQ publicKey. If any key is missing then we do not
+      include a memo or senderInfo. Thus we should be able to send a 
+      payment to any address. We might not ever use this feature though.
+    */
+
     // Get recipient's public key from contacts
     let recipientPubKey = myData.contacts[toAddress]?.public;
     let pqRecPubKey = myData.contacts[toAddress]?.pqPublic;
@@ -9019,33 +9481,42 @@ class SendAssetConfirmModal {
       const recipientInfo = await queryNetwork(`/account/${longAddress(toAddress)}`);
       if (!recipientInfo?.account?.publicKey) {
         console.log(`no public key found for recipient ${toAddress}`);
-        cancelButton.disabled = false;
-        return;
+//        cancelButton.disabled = false;
+//        return;
       }
-      if (recipientInfo.account.publicKey) {
+      else{
         recipientPubKey = recipientInfo.account.publicKey;
         myData.contacts[toAddress].public = recipientPubKey;
       }
-      if (recipientInfo.account.pqPublicKey) {
+      if (!recipientInfo?.account?.pqPublicKey) {
+        console.log(`no PQ public key found for recipient ${toAddress}`);
+//        cancelButton.disabled = false;
+//        return;
+      }
+      else {
         pqRecPubKey = recipientInfo.account.pqPublicKey;
         myData.contacts[toAddress].pqPublic = pqRecPubKey;
       }
     }
     let dhkey = '';
-    let sharedKeyMethod = 'none';
-    if (recipientPubKey) {
-      dhkey = ecSharedKey(keys.secret, recipientPubKey);
-      sharedKeyMethod = 'ec';
-      if (pqRecPubKey) {
-        // Generate shared secret using ECDH and take first 32 bytes
-        const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey);
-        const combined = new Uint8Array(dhkey.length + sharedSecret.length);
-        combined.set(dhkey);
-        combined.set(sharedSecret, dhkey.length);
-        dhkey = deriveDhKey(combined);
-        pqEncSharedKey = bin2base64(cipherText);
-        sharedKeyMethod = 'pq';
-      }
+    let selfKey = '';
+    let sharedKeyMethod = 'none';  // to support sending just payment to any address
+    if (recipientPubKey && pqRecPubKey) {
+      /*
+      // Generate shared secret using ECDH and take first 32 bytes
+      let dhkey = ecSharedKey(keys.secret, recipientPubKey);
+      const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey);
+      const combined = new Uint8Array(dhkey.length + sharedSecret.length);
+      combined.set(dhkey);
+      combined.set(sharedSecret, dhkey.length);
+      dhkey = deriveDhKey(combined);
+      */
+      const x = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey)
+      dhkey = x.dhkey;
+      const cipherText = x.cipherText;
+      pqEncSharedKey = bin2base64(cipherText);
+      sharedKeyMethod = 'pq';
+      selfKey = encryptData(bin2hex(dhkey), keys.secret+keys.pqSeed, true)  // used to decrypt our own message
     }
 
     let encMemo = '';
@@ -9055,41 +9526,28 @@ class SendAssetConfirmModal {
       encMemo = encryptChacha(dhkey, memo);
     }
 
-    // hidden input field retryOfTxId value is not an empty string
-    if (sendAssetFormModal.retryTxIdInput.value) {
-      // remove from myData use txid from hidden field retryOfPaymentTxId
-      removeFailedTx(sendAssetFormModal.retryTxIdInput.value, toAddress);
-
-      // clear the field
-      failedTransactionModal.txid = '';
-      failedTransactionModal.address = '';
-      failedTransactionModal.memo = '';
-      sendAssetFormModal.retryTxIdInput.value = '';
-    }
-
     // only include the sender info if the recipient is is a friend and has a pqKey
     let encSenderInfo = '';
     let senderInfo = '';
-    if (pqRecPubKey && myData.contacts[toAddress]?.friend === 3) {
-      // Create sender info object
-      senderInfo = {
-        username: myAccount.username,
-        name: myData.account.name,
-        email: myData.account.email,
-        phone: myData.account.phone,
-        linkedin: myData.account.linkedin,
-        x: myData.account.x,
-      };
-    } else if (recipientPubKey) {
-      senderInfo = {
-        username: myAccount.username,
-      };
-    } else {
-      senderInfo = { username: myAccount.address };
-    }
-    if (sharedKeyMethod !== 'none') {
+    if (sharedKeyMethod != 'none'){
+      if (myData.contacts[toAddress]?.friend === 3) {
+        // Create sender info object
+        senderInfo = {
+          username: myAccount.username,
+          name: myData.account.name,
+          email: myData.account.email,
+          phone: myData.account.phone,
+          linkedin: myData.account.linkedin,
+          x: myData.account.x,
+        };
+      } else {
+        senderInfo = {
+          username: myAccount.username,
+        };
+      }
       encSenderInfo = encryptChacha(dhkey, stringify(senderInfo));
     } else {
+      senderInfo = { username: myAccount.address };
       encSenderInfo = stringify(senderInfo);
     }
     // Create message payload
@@ -9099,6 +9557,7 @@ class SendAssetConfirmModal {
       encrypted: true,
       encryptionMethod: 'xchacha20poly1305',
       pqEncSharedKey: pqEncSharedKey,
+      selfKey: selfKey,
       sharedKeyMethod: sharedKeyMethod,
       sent_timestamp: getCorrectedTimestamp(),
     };
@@ -9662,14 +10121,14 @@ class MigrateAccountsModal {
     this.closeButton = document.getElementById('closeMigrateAccountsModal');
     this.form = document.getElementById('migrateAccountsForm');
     this.accountList = document.getElementById('migrateAccountList');
-    this.submitButton = this.form.querySelector('button[type="submit"]');
+    this.submitButton = document.getElementById('submitMigrateAccounts');
 
     this.closeButton.addEventListener('click', () => this.close());
-    this.form.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.submitButton.addEventListener('click', (event) => this.handleSubmit(event));
 
     // if no check boxes are checked, disable the submit button
-    this.form.addEventListener('change', () => {
-      this.submitButton.disabled = this.form.querySelectorAll('input[type="checkbox"]:checked').length === 0;
+    this.accountList.addEventListener('change', () => {
+      this.submitButton.disabled = this.accountList.querySelectorAll('input[type="checkbox"]:checked').length === 0;
     });
   }
 
@@ -9689,134 +10148,233 @@ class MigrateAccountsModal {
   }
 
   /**
-   * Populate the account select with checkboxes for each account in accounts.netids[mismatchedNetid].usernames
-   * @returns {void}
+   * Populate the accounts list with the accounts that can be migrated
+   * @returns {Promise<void>}
    */
   async populateAccounts() {
-    console.log('populate accounts');
-    // an array of objects with { username, netid }
-    const mismatchedAccounts = await this.migratableAccounts();
-
-    // Clear existing options
+    const categories = await this.categorizeAccounts();
     this.accountList.innerHTML = '';
 
-    if (mismatchedAccounts.length === 0) {
-      this.accountList.innerHTML = '<p>No accounts need migration</p>';
-      return;
-    }
+    // Render Mine section
+    this.renderSection('mine', 'Your Registered Accounts', categories.mine,
+      'Accounts already registered to this network');
 
-    // For each in the array, create a checkbox and label with username_netid
-    mismatchedAccounts.forEach(account => {
-      console.log('account', account);
-      const label = document.createElement('label');
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.checked = true;
-      checkbox.value = account.username;
-      checkbox.netid = account.netid;
-      label.appendChild(checkbox);
-      label.appendChild(document.createTextNode(account.username + '_' + account.netid.slice(0, 6)));
-      this.accountList.appendChild(label);
-    });
+    // Render Available section  
+    this.renderSection('available', 'Unregistered Accounts', categories.available,
+      'Accounts available to register');
+
+    // Render Taken section
+    this.renderSection('taken', 'Taken', categories.taken,
+      'Accounts already taken');
   }
 
   /**
-   * Returns an array of migratable accounts from localStorage.
-   * Each object has { username, netid } for accounts that can be migrated to the current network.
-   * Rules:
-   *  - Only accounts from netids different from the current network (parameters.networkId or network.netid)
-   *  - If the username+address is already present on this network, skip
-   *  - If the username is not available to us on this network (checkUsernameAvailability !== 'mine'), skip
+   * Render a section of the accounts list
+   * @param {string} sectionId - The id of the section
+   * @param {string} title - The title of the section
+   * @param {Array} accounts - The accounts to render
+   * @param {string} description - The description of the section
    */
-  async migratableAccounts() {
-    // Get all accounts from localStorage
+  renderSection(sectionId, title, accounts, description) {
+    if (accounts.length === 0) return;
+
+    const section = document.createElement('div');
+    section.className = 'migrate-section';
+    section.innerHTML = `
+      <h3>${title} (${accounts.length})</h3>
+      <p class="section-description">${description}</p>
+      <div class="account-checkboxes" id="${sectionId}-accounts">
+        ${accounts.map(account => `
+          <label>
+            <input type="checkbox" value="${account.username}" 
+                   data-netid="${account.netid}" 
+                   data-section="${sectionId}"
+                   ${sectionId === 'taken' ? 'disabled' : ''}>
+            ${account.username}_${account.netid.slice(0, 6)}
+          </label>
+        `).join('')}
+      </div>
+    `;
+
+    this.accountList.appendChild(section);
+  }
+
+  /**
+   * Check if there are any accounts that could potentially be migrated
+   * @returns {boolean}
+   */
+  hasMigratableAccounts() {
     const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-    // Determine the current network id (prefer parameters.networkId, fallback to network.netid)
     const currentNetId = parameters?.networkId;
-    if (!accountsObj.netids || !currentNetId) return [];
+    if (!accountsObj.netids || !currentNetId) return false;
 
-    const migratable = [];
-    const currentNetUsernames = (accountsObj.netids[currentNetId] && accountsObj.netids[currentNetId].usernames) || {};
-
-    // Loop through all netids except the current one
+    // Loop through all netids except current
     for (const netid in accountsObj.netids) {
-      if (netid === currentNetId) continue;
+      // if netid is the current-netid or not in network.netids, skip
+      if (netid === currentNetId || !network.netids.includes(netid)) continue;
+
       const usernamesObj = accountsObj.netids[netid]?.usernames;
       if (!usernamesObj) continue;
-      for (const username in usernamesObj) {
-        const address = usernamesObj[username].address;
-        // If username+address is already present on this network, skip
-        if (
-          currentNetUsernames[username] &&
-          normalizeAddress(currentNetUsernames[username].address) === normalizeAddress(address)
-        ) {
-          continue;
-        }
-        // Check if the username is available to us on this network
-        // (If not, skip)
-        // Note: checkUsernameAvailability returns 'mine' if available to us
-        // We must await this as it may be async
-        const result = await checkUsernameAvailability(username, address);
-        if (result !== 'mine') continue;
-        migratable.push({ username, netid });
+
+      // if there are any usernames, return true
+      if (Object.keys(usernamesObj).length > 0) {
+        return true;
       }
     }
-    return migratable;
+
+    return false;
+  }
+
+  /**
+   * Categorize the accounts into three sections:
+   *  - Mine: Accounts where the username maps to our address
+   *  - Available: Accounts where the username is available to claim
+   *  - Taken: Accounts where the username is already taken
+   * @returns {Object}
+   */
+  async categorizeAccounts() {
+    const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    const currentNetId = parameters?.networkId;
+
+    const categories = {
+      mine: [],      // username maps to our address
+      available: [], // username is available
+      taken: []      // username is taken
+    };
+
+    // Loop through all netids except current
+    for (const netid in accountsObj.netids) {
+      // if netid is the current netid or not in network.netids, skip
+      if (netid === currentNetId || !network.netids.includes(netid)) continue;
+
+      const usernamesObj = accountsObj.netids[netid]?.usernames;
+      if (!usernamesObj) continue;
+
+      for (const username in usernamesObj) {
+        const address = usernamesObj[username].address;
+
+        // Check availability status
+        const availability = await checkUsernameAvailability(username, address);
+
+        const account = { username, netid, address };
+
+        if (availability === 'mine') {
+          categories.mine.push(account);
+        } else if (availability === 'available') {
+          categories.available.push(account);
+        } else {
+          categories.taken.push(account);
+        }
+      }
+    }
+
+    return categories;
   }
 
   async handleSubmit(event) {
     event.preventDefault();
     console.log('handleSubmit');
+
+    this.submitButton.disabled = true;
+    this.closeButton.disabled = true;
+      
     const selectedAccounts = this.accountList.querySelectorAll('input[type="checkbox"]:checked');
-    console.log('selectedAccounts', selectedAccounts);
-    // remove from accounts.netids[netid].usernames[username]
-    selectedAccounts.forEach(account => {
-      const netid = account.netid;
-      const username = account.value;
-
-      // then perform netid substitution in all files in the app
-      // get the file content
-      let fileContent = localStorage.getItem(username + '_' + netid);
-      if (fileContent) {
-        // if fileContent doesnt include { then we need to decrypt it
-        if (lockModal?.encKey) {
-          console.log('decrypting fileContent');
-          fileContent = decryptData(fileContent, lockModal.encKey, true);
+  
+    const results = {}
+    // Start each account processing with 2-second delays between starts
+    for (let i = 0; i < selectedAccounts.length; i++) {
+      const checkbox = selectedAccounts[i];
+      const section = checkbox.dataset.section;
+      const username = checkbox.value;
+      const netid = checkbox.dataset.netid;
+  
+      const loadingToastId = showToast('Migrating '+username, 0, 'loading');
+      console.log('processing account: ', username, netid, section);  
+      // Start processing this account
+      if (section === 'mine') {
+        this.migrateAccountData(username, netid, parameters.networkId)
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } else if (section === 'available') {
+        myData = loadState(username+'_'+netid)
+        if (myData){ 
+          const res = await postRegisterAlias(username, myData.account.keys)
+          if (res !== null){
+            res.submittedts = getCorrectedTimestamp()
+            res.netid = netid
+            results[username] = res;
+          }
         }
-
-        if (!fileContent) {
-          console.log('fileContent is empty, skipping');
-          return;
-        }
-
-        // perform netid substitution in the file content
-        let substitutionResult = restoreAccountModal.performStringSubstitution(fileContent, {
-          oldString: netid,
-          newString: parameters.networkId
-        });
-        // if lockModal.encKey is set, encrypt the substitutionResult
-        if (lockModal?.encKey) {
-          substitutionResult = encryptData(substitutionResult, lockModal.encKey, true);
-        }
-        // save the file content to localStorage
-        localStorage.setItem(username + '_' + parameters.networkId, substitutionResult);
-        // remove the file from localStorage
-        localStorage.removeItem(username + '_' + netid);
-
-        // update the accounts registry
-        this.updateAccountsRegistry(username, netid, parameters.networkId);
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
-    });
+      hideToast(loadingToastId);
+      welcomeScreen.orderButtons();
+    }
 
-    // show toast for success 2 seconds
-    showToast('Accounts migrated successfully', 2000, 'success');
+    // clearing myData, not being used anymore
+    myData = null;
 
-    // sleep for 2 seconds
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // reload the page
-    window.location.reload();
+    // loop through the results array and check the status of the pending txid which is in results[username].txid
+    // See checkPendingTransactions function for how to check the status of a pending txid
+    // update the result element based on the check; if the txid is successfully processed set it to true
+    // if the txid check does not give a result in time, set it to false
+    // when all results array elements have been resolved exit the loop
+    let done = false;
+    for(;!done;){
+      done = true;
+      for (const username in results) {
+        if (! results[username]?.txid){ continue; }
+        const loadingToastId = showToast('Migrating '+username, 0, 'loading');
+        const txid = results[username].txid;
+        const submittedts = results[username].submittedts
+console.log('migrating ',username,'checking txid', txid)
+        const result = await checkPendingTransaction(txid, submittedts); // return true, false or null
+console.log('    result is',result)
+        if (result !== null){
+          if (result == true){
+            this.migrateAccountData(username, results[username].netid, parameters.networkId)
+          }
+          results[username] = result;
+        }
+        else{ done = false; }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        hideToast(loadingToastId);
+      }
+    }
+    this.populateAccounts();
+    this.submitButton.disabled = false;
+    this.closeButton.disabled = false;
   }
+  
+  /**
+   * Migrate the account data from one netid to another
+   * @param {string} username - The username to migrate
+   * @param {string} netid - The netid to migrate from
+   * @returns {Promise<void>}
+   */
+  migrateAccountData(username, netid, newNetId) {
+    let fileContent = loadState(username+'_'+netid, true)
+  
+    // Perform netid substitution
+    let substitutionResult = restoreAccountModal.performStringSubstitution(fileContent, {
+      oldString: netid,
+      newString: newNetId
+    });
+  
+    // Encrypt if needed
+    if (lockModal?.encKey) {
+      substitutionResult = encryptData(substitutionResult, lockModal.encKey, true);
+    }
+  
+    // Save to new location
+    localStorage.setItem(username + '_' + newNetId, substitutionResult);
+    
+    // Remove old file
+    localStorage.removeItem(username + '_' + netid);
+  
+    // Update accounts registry
+    this.updateAccountsRegistry(username, netid, newNetId);
+  }
+
 
   /**
  * Updates the accounts registry with the given username and netid.
@@ -9867,6 +10425,7 @@ const migrateAccountsModal = new MigrateAccountsModal();
 class LockModal {
   constructor() {
     this.encKey = null;
+    this.mode = 'set'; // set, change, or remove
   }
 
   load() {
@@ -9877,31 +10436,37 @@ class LockModal {
     this.oldPasswordInput = this.modal.querySelector('#oldPassword');
     this.oldPasswordLabel = this.modal.querySelector('#oldPasswordLabel');
     this.newPasswordInput = this.modal.querySelector('#newPassword');
+    this.newPasswordLabel = this.modal.querySelector('#newPasswordLabel');
     this.confirmNewPasswordInput = this.modal.querySelector('#confirmNewPassword');
-    this.lockButton = this.modal.querySelector('.update-button');
+    this.confirmNewPasswordLabel = this.modal.querySelector('#confirmNewPasswordLabel');
+    this.lockButton = this.modal.querySelector('#lockForm button[type="submit"]');
+    this.optionsBox = document.getElementById('lockOptions');
+    this.changeButton = document.getElementById('changePasswordButton');
+    this.removeButton = document.getElementById('removeLockButton');
+    this.formBox = document.getElementById('lockFormContainer');
 
     this.openButton.addEventListener('click', () => this.open());
     this.headerCloseButton.addEventListener('click', () => this.close());
     this.lockForm.addEventListener('submit', (event) => this.handleSubmit(event));
-    // dynamic button state
-    this.newPasswordInput.addEventListener('input', () => debounce(this.updateButtonState(), 250));
-    this.confirmNewPasswordInput.addEventListener('input', () => debounce(this.updateButtonState(), 250));
-    this.oldPasswordInput.addEventListener('input', () => debounce(this.updateButtonState(), 250));
+    // dynamic button state with debounce
+    this.debouncedUpdateButtonState = debounce(() => this.updateButtonState(), 250);
+    this.newPasswordInput.addEventListener('input', this.debouncedUpdateButtonState);
+    this.confirmNewPasswordInput.addEventListener('input', this.debouncedUpdateButtonState);
+    this.oldPasswordInput.addEventListener('input', this.debouncedUpdateButtonState);
     this.passwordWarning = this.modal.querySelector('#passwordWarning');
+    this.changeButton.addEventListener('click', () => this.pickMode('change'));
+    this.removeButton.addEventListener('click', () => this.pickMode('remove'));
   }
 
   open() {
-    // if localStorage.lock exists, then show the old password input
-    if (localStorage?.lock) {
-      this.oldPasswordInput.style.display = 'block';
-      this.oldPasswordLabel.style.display = 'block';
-      this.newPasswordInput.placeholder = 'Leave blank to remove password';
-    } else {
-      this.oldPasswordInput.style.display = 'none';
-      this.oldPasswordLabel.style.display = 'none';
-      this.newPasswordInput.placeholder = '';
-      this.lockButton.textContent = 'Save Password';
-    }
+    const alreadyLocked = Boolean(localStorage?.lock);
+
+    // show or hide the option picker
+    this.optionsBox.style.display = alreadyLocked ? 'block' : 'none';
+    this.formBox.style.display = alreadyLocked ? 'none' : 'block';
+
+    this.mode = alreadyLocked ? null : 'set';
+    this.prepareForm(); 
 
     // disable the button
     this.lockButton.disabled = true;
@@ -9914,6 +10479,51 @@ class LockModal {
 
   close() {
     this.modal.classList.remove('active');
+  }
+
+  pickMode(mode) {
+    this.mode = mode; // 'change' | 'remove'
+    this.optionsBox.style.display = 'none';
+    this.formBox.style.display = 'block';
+    this.prepareForm();
+    this.updateButtonState();
+  }
+
+  // adjust which fields are visible based on selected mode
+  prepareForm() {
+    // hide all the fields
+    this.oldPasswordInput.style.display        = 'none';
+    this.oldPasswordLabel.style.display        = 'none';
+    this.newPasswordInput.style.display        = 'none';
+    this.newPasswordLabel.style.display        = 'none';
+    this.confirmNewPasswordInput.style.display = 'none';
+    this.confirmNewPasswordLabel.style.display = 'none';
+
+    // reveal fields based on mode
+    if (this.mode === 'remove') {
+      // only the current‑password field
+      this.oldPasswordInput.style.display = 'block';
+      this.oldPasswordLabel.style.display = 'block';
+      this.lockButton.textContent = 'Remove Lock';
+
+    } else if (this.mode === 'change') {
+      // current + new + confirm
+      this.oldPasswordInput.style.display        = 'block';
+      this.oldPasswordLabel.style.display        = 'block';
+      this.newPasswordInput.style.display        = 'block';
+      this.newPasswordLabel.style.display        = 'block';
+      this.confirmNewPasswordInput.style.display = 'block';
+      this.confirmNewPasswordLabel.style.display = 'block';
+      this.lockButton.textContent = 'Save Password';
+
+    } else { // 'set' (no existing lock)
+      // new + confirm only
+      this.newPasswordInput.style.display        = 'block';
+      this.newPasswordLabel.style.display        = 'block';
+      this.confirmNewPasswordInput.style.display = 'block';
+      this.confirmNewPasswordLabel.style.display = 'block';
+      this.lockButton.textContent = 'Save Password';
+    }
   }
 
   async handleSubmit(event) {
@@ -9957,7 +10567,7 @@ class LockModal {
 
     // if new password is empty, remove the password from localStorage
     // once we are here we know the old password is correct
-    if (newPassword.length === 0) {
+    if (this.mode === 'remove') {
       await encryptAllAccounts(oldPassword, newPassword)
       delete localStorage.lock;
       this.encKey = null;
@@ -10013,61 +10623,37 @@ class LockModal {
     const oldPassword = this.oldPasswordInput.value;
     
     // Check if old password is filled and new password is empty - "Clear password" mode
-    const isOldPasswordVisible = this.oldPasswordInput.style.display !== 'none';
-    const isClearPasswordMode = isOldPasswordVisible && oldPassword.length > 0 && newPassword.length === 0;
+    // const isOldPasswordVisible = this.oldPasswordInput.style.display !== 'none';
+    // const isClearPasswordMode = isOldPasswordVisible && oldPassword.length > 0 && newPassword.length === 0;
     
     let isValid = false;
-    
-    if (isClearPasswordMode) {
-      // In clear password mode, only old password needs to be filled
-      isValid = true;
-      this.lockButton.textContent = 'Remove Password';
-      
-      // Set placeholder based on confirm password state
-      if (confirmPassword.length > 0) {
-        this.newPasswordInput.placeholder = '';
-      } else {
-        this.newPasswordInput.placeholder = 'Leave blank to remove password';
+    let warningMessage = '';
+
+    if (this.mode === 'remove') {
+      isValid = oldPassword.length > 0;
+    } else { // set or change mode
+      // too short
+      if (newPassword.length > 0 && newPassword.length < 4) {
+        warningMessage = 'too short';
+      } else if (newPassword && confirmPassword && newPassword !== confirmPassword) {
+        warningMessage = 'does not match';
+      } else if (this.mode === 'change' && newPassword && oldPassword && newPassword === oldPassword) {
+        warningMessage = 'same as current';
       }
-    } else {
-      // Regular password set/update mode
-      isValid = newPassword.length > 0 && confirmPassword.length > 0;
-      
-      // If old password field is visible, it must be filled
-      if (isOldPasswordVisible) {
+      isValid = !warningMessage && newPassword.length >= 4 && newPassword === confirmPassword;
+      if (this.mode === 'change') {
         isValid = isValid && oldPassword.length > 0;
       }
-      this.lockButton.textContent = 'Save Password';
-      this.newPasswordInput.placeholder = '';
     }
     
-    // Validate password requirements and set appropriate warnings
-    let warningMessage = '';
-    
-    if (!isClearPasswordMode) {
-      // Check if password is at least 4 characters
-      if (newPassword.length > 0 && newPassword.length < 4) {
-        isValid = false;
-        warningMessage = 'Password must be at least 4 characters.';
-      }
-      // Check if passwords match
-      else if (newPassword && confirmPassword && newPassword !== confirmPassword) {
-        isValid = false;
-        warningMessage = 'Password confirmation does not match.';
-      }
-      // Check if new password is same as old password
-      else if (newPassword && oldPassword && newPassword === oldPassword) {
-        isValid = false;
-        warningMessage = 'New password cannot be the same as the old password.';
-      }
-    }
+    this.passwordWarning.style.display = 'none';
     
     // Update button state and warnings
     this.lockButton.disabled = !isValid;
     
     if (warningMessage) {
       this.passwordWarning.textContent = warningMessage;
-      this.passwordWarning.style.display = 'block';
+      this.passwordWarning.style.display = 'inline';
     } else {
       this.passwordWarning.style.display = 'none';
     }
@@ -10139,6 +10725,8 @@ class UnlockModal {
       this.close();
       if (this.openButtonElementUsed === welcomeScreen.createAccountButton) {
         createAccountModal.openWithReset();
+      } else if (this.openButtonElementUsed === welcomeScreen.importAccountButton) {
+        restoreAccountModal.open();
       } else {
         signInModal.open();
       }
@@ -10174,6 +10762,76 @@ class UnlockModal {
 }
 const unlockModal = new UnlockModal();
 
+class LaunchModal {
+  constructor() {
+
+  }
+
+  load() {
+    this.modal = document.getElementById('launchModal');
+    this.closeButton = document.getElementById('closeLaunchModal');
+    this.launchForm = document.getElementById('launchForm');
+    this.urlInput = this.modal.querySelector('#url');
+    this.launchButton = this.modal.querySelector('button[type="submit"]');
+    this.closeButton.addEventListener('click', () => this.close());
+    this.launchForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.urlInput.addEventListener('input', () => this.updateButtonState());
+  }
+
+  open() {
+    this.modal.classList.add('active');
+    this.urlInput.value = window.location.href.split('?')[0];
+    this.updateButtonState();
+  }
+
+  close() {
+    this.urlInput.value = '';
+    this.modal.classList.remove('active');
+  }
+
+  handleSubmit(event) {
+    event.preventDefault();
+    const url = this.urlInput.value;
+    if (!url) {
+      showToast('Please enter a URL', 0, 'error');
+      return;
+    }
+    
+    // Disable button and show loading state
+    this.launchButton.disabled = true;
+    this.launchButton.textContent = 'Checking URL...';
+    
+    // Validate URL by fetching it
+    fetch(url, { 
+      method: 'HEAD', 
+      mode: 'no-cors',
+      signal: AbortSignal.timeout(10000) // 10 second timeout
+    })
+      .then(() => {
+        // URL is reachable, proceed with launching
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'launch', url }));
+        this.close();
+      })
+      .catch((error) => {
+        // URL is not reachable or timed out
+        showToast('URL is not reachable. Please check the address and try again.', 0, 'error');
+        console.error('URL validation failed:', error);
+      })
+      .finally(() => {
+        // Reset button state
+        this.launchButton.disabled = false;
+        this.launchButton.textContent = 'Launch';
+      });
+  }
+
+  updateButtonState() {
+    const url = this.urlInput.value;
+    this.launchButton.disabled = url.length === 0;
+  }
+}
+
+const launchModal = new LaunchModal();
+
 /**
  * Remove failed transaction from the contacts messages, pending, and wallet history
  * @param {string} txid - The transaction ID to remove
@@ -10194,6 +10852,26 @@ function removeFailedTx(txid, currentAddress) {
   }
   myData.wallet.history = myData?.wallet?.history?.filter((item) => item.txid !== txid);
 }
+
+async function checkPendingTransaction(txid, submittedts){
+  const now = getCorrectedTimestamp();
+  const duration = (now - submittedts) / 1000   // to make it in seconds
+console.log('timestamp is', submittedts, 'duration is', duration)
+  let endpointPath = `/transaction/${txid}`;
+  if (duration > 20){
+    endpointPath = `/collector/api/transaction?appReceiptId=${txid}`;
+  }
+  //console.log(`DEBUG: txid ${txid} endpointPath: ${endpointPath}`);
+  const res = await queryNetwork(endpointPath);
+  //console.log(`DEBUG: txid ${txid} res: ${JSON.stringify(res)}`);  
+  if (duration > 30 && (res.transaction === null || Object.keys(res.transaction).length === 0)) {
+    return false;
+  }
+  if (res?.transaction?.success === true) { return true; }
+  if (res?.transaction?.success === false) { return false }
+  return null;
+}
+
 
 /**
  * Check pending transactions that are at least 5 seconds old
@@ -10331,7 +11009,9 @@ async function checkPendingTransactions() {
             // revert the local myData.contacts[toAddress].timestamp to the old value
             myData.contacts[pendingTxInfo.to].timestamp = pendingTxInfo.oldContactTimestamp;
           } else if (type === 'reclaim_toll') {
-            showToast(`Reclaim toll failed: ${failureReason}`, 0, 'error');
+            if (failureReason !== 'user is trying to reclaim toll but the toll pool is empty') {
+              showToast(`Reclaim toll failed: ${failureReason}`, 0, 'error');
+            }
           } else {
             // for messages, transfer etc.
             showToast(failureReason, 0, 'error');
@@ -10493,6 +11173,11 @@ async function getNetworkParams() {
 getNetworkParams.timestamp = 0;
 
 async function getSystemNotice() {
+  if (!isOnline) {
+    console.log('getSystemNotice skipped: Not online');
+    return;
+  }
+
   try {
     // First, do a HEAD request to check if the file exists and get its timestamp
     const headResponse = await fetch(`./notice.html?${Math.random()}`, { method: 'HEAD' });
@@ -10568,6 +11253,11 @@ function cleanSenderInfo(si) {
 }
 
 function longPoll() {
+  if (!isOnline) {
+    console.log('Poll skipped: Not online');
+    return;
+  }
+
   const myAccount = myData?.account;
   // Skip if no valid account
   if (!myAccount?.keys?.address) {
@@ -10578,7 +11268,7 @@ function longPoll() {
   try {
     longPoll.start = getCorrectedTimestamp();
     const timestamp = myAccount.chatTimestamp || 0;
-    const random = Math.floor(Math.random()*1000000);
+
     // call this with a promise that'll resolve with callback longPollResult function with the data
     const longPollPromise = queryNetwork(`/collector/api/poll?account=${longAddress(myAccount.keys.address)}&chatTimestamp=${timestamp}`);
     console.log(`longPoll started with account=${longAddress(myAccount.keys.address)} chatTimestamp=${timestamp}`);
@@ -10607,6 +11297,7 @@ async function longPollResult(data) {
   // schedule the next poll
   setTimeout(longPoll, nextPoll + 1000);
   if (data?.success){
+    longPollResult.timestamp = data.chatTimestamp;
     try {
       const gotChats = await chatsScreen.updateChatData();
       if (gotChats > 0) {
@@ -10617,6 +11308,7 @@ async function longPollResult(data) {
     }
   }
 }
+longPollResult.timestamp = 0
 
 function getContactDisplayName(contact) {
   return contact?.name || 
