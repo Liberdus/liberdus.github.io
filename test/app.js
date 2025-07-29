@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -79,11 +79,8 @@ import {
   encryptData,
   decryptData,
   decryptMessage,
-  ecSharedKey,
-  pqSharedKey,
   ethHashMessage,
   hashBytes,
-  deriveDhKey,
   generateRandomPrivateKey,
   getPublicKey,
   signMessage,
@@ -125,8 +122,6 @@ import {
 
 const weiDigits = 18;
 const wei = 10n ** BigInt(weiDigits);
-const pollIntervalNormal = 30000; // in millisconds
-const pollIntervalChatting = 5000; // in millseconds
 //network.monitor.url = "http://test.liberdus.com:3000"    // URL of the monitor server
 //network.explorer.url = "http://test.liberdus.com:6001"   // URL of the chain explorer
 const MAX_MEMO_BYTES = 1000; // 1000 bytes for memos
@@ -154,6 +149,34 @@ let parameters = {
     transactionFee: 1n * wei,
   },
 };
+
+// Keyboard handling for React Native WebView
+function adjustForKeyboard() {
+  if (window.visualViewport) {
+    const viewport = window.visualViewport;
+    // show toast
+    /* showToast('Keyboard adjustment with CSS custom properties enabled', 3000, 'success'); */
+    const resizeHandler = () => {
+      // show toast that we are resizing
+      /* showToast('Resizing', 3000, 'success'); */
+      // Set your app container height to the visual viewport height
+      document.documentElement.style.setProperty(
+        '--viewport-height', 
+        `${viewport.height}px`
+      );
+      console.log('📱 Viewport height adjusted to:', viewport.height + 'px');
+    };
+    
+    viewport.addEventListener('resize', resizeHandler);
+    viewport.addEventListener('scroll', resizeHandler);
+    
+    // Set initial height
+    resizeHandler();
+    console.log('✅ Keyboard adjustment with CSS custom properties enabled');
+  } else {
+    console.log('❌ visualViewport not supported for keyboard adjustment');
+  }
+}
 
 /**
  * Check if a username is available or taken
@@ -298,6 +321,12 @@ function newDataRecord(myAccount) {
  * @returns {Promise<void>}
  */
 async function handleNativeAppSubscribe() {
+  // Check if we're online before proceeding
+  if (!isOnline) {
+    console.log('handleNativeAppSubscribe: Device is offline, skipping subscription');
+    return;
+  }
+  
   const urlParams = new URLSearchParams(window.location.search);
   const deviceToken = urlParams.get('device_token');
   const pushToken = urlParams.get('push_token');
@@ -367,6 +396,12 @@ async function handleNativeAppSubscribe() {
  * If this is the last account, it fully unsubscribes the device.
  */
 async function handleNativeAppUnsubscribe() {
+  // Check if we're online before proceeding
+  if (!isOnline) {
+    console.log('handleNativeAppUnsubscribe: Device is offline, skipping unsubscribe');
+    return;
+  }
+  
   const urlParams = new URLSearchParams(window.location.search);
   const deviceToken = urlParams.get('device_token');
   const pushToken = urlParams.get('push_token');
@@ -443,6 +478,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   setupConnectivityDetection();
 
+  // Setup keyboard adjustment for React Native WebView
+  adjustForKeyboard();
+
   // Check for native app subscription tokens and handle subscription
   handleNativeAppSubscribe();
 
@@ -475,6 +513,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // About and Contact Modals
   aboutModal.load();
+  updateWarningModal.load();
   helpModal.load();
 
   // Create Account Modal
@@ -542,6 +581,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Menu Modal
   menuModal.load();
 
+  // Settings Modal
+  settingsModal.load();
+
   // Failed Transaction Modal
   failedTransactionModal.load();
   
@@ -559,6 +601,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Launch Modal
   launchModal.load();
+
+  // React Native App
+  reactNativeApp.load();
+
+  // LocalStorage Monitor
+  localStorageMonitor.load();
 
   // add event listener for back-button presses to prevent shift+tab
   document.querySelectorAll('.back-button').forEach((button) => {
@@ -612,6 +660,8 @@ function handleVisibilityChange() {
       const contact = myData.contacts[chatModal.address];
       chatModal.lastMessageCount = contact?.messages?.length || 0;
     }
+    // save state when app is put into background
+    saveState();
   } else if (document.visibilityState === 'visible') {
     handleNativeAppUnsubscribe();
     // if chatModal was opened, check if message count changed while hidden
@@ -753,6 +803,10 @@ class WelcomeScreen {
       }
     });
 
+    this.openBackupModalButton.addEventListener('click', () => {
+      backupAccountModal.open();
+    });
+
     this.orderButtons();
   }
 
@@ -809,9 +863,11 @@ class Header {
     this.text = this.header.querySelector('.app-name');
     this.logoLink = this.header.querySelector('.logo-link');
     this.menuButton = document.getElementById('toggleMenu');
+    this.settingsButton = document.getElementById('toggleSettings');
 
     this.logoLink.addEventListener('keydown', ignoreShiftTabKey); // add event listener for first-item to prevent shift+tab
     this.menuButton.addEventListener('click', () => menuModal.open());
+    this.settingsButton.addEventListener('click', () => settingsModal.open());
     
     // Add click event for username display to open myInfoModal
     this.text.addEventListener('click', () => {
@@ -1275,12 +1331,6 @@ class MenuModal {
     this.modal = document.getElementById('menuModal');
     this.closeButton = document.getElementById('closeMenu');
     this.closeButton.addEventListener('click', () => this.close());
-    this.profileButton = document.getElementById('openAccountForm');
-    this.profileButton.addEventListener('click', () => myProfileModal.open());
-    this.tollButton = document.getElementById('openToll');
-    this.tollButton.addEventListener('click', () => tollModal.open());
-    this.backupButton = document.getElementById('openExportForm');
-    this.backupButton.addEventListener('click', () => backupAccountModal.open());
     this.validatorButton = document.getElementById('openValidator');
     this.validatorButton.addEventListener('click', () => validatorStakingModal.open());
     this.inviteButton = document.getElementById('openInvite');
@@ -1289,26 +1339,25 @@ class MenuModal {
     this.explorerButton.addEventListener('click', () => {window.open('./explorer', '_blank');});
     this.networkButton = document.getElementById('openMonitor');
     this.networkButton.addEventListener('click', () => {window.open('./network', '_blank');});
-    this.removeButton = document.getElementById('openRemoveAccount');
-    this.removeButton.addEventListener('click', () => removeAccountModal.open());
     this.helpButton = document.getElementById('openHelp');
     this.helpButton.addEventListener('click', () => helpModal.open());
     this.aboutButton = document.getElementById('openAbout');
     this.aboutButton.addEventListener('click', () => aboutModal.open());
     this.signOutButton = document.getElementById('handleSignOut');
     this.signOutButton.addEventListener('click', async () => await this.handleSignOut());
-    this.backupButton = document.getElementById('openBackupModalButton');
-    this.backupButton.addEventListener('click', () => backupAccountModal.open());
     this.bridgeButton = document.getElementById('openBridge');
     this.bridgeButton.addEventListener('click', () => bridgeModal.open());
-    this.launchButton = document.getElementById('openLaunchUrl');
-    this.launchButton.addEventListener('click', () => launchModal.open());
+    
+    
+    // Show launch button if ReactNativeWebView is available
+    if (window?.ReactNativeWebView) {
+      this.launchButton = document.getElementById('openLaunchUrl');
+      this.launchButton.addEventListener('click', () => launchModal.open());
+      this.launchButton.style.display = 'block';
+    }
   }
 
   open() {
-    if (window?.ReactNativeWebView) {
-      this.launchButton.style.display = 'block';
-    }
     this.modal.classList.add('active');
     enterFullscreen();
   }
@@ -1390,6 +1439,50 @@ class MenuModal {
 }
 
 const menuModal = new MenuModal();
+
+class SettingsModal {
+  constructor() { }
+
+  load() {
+    this.modal = document.getElementById('settingsModal');
+    this.closeButton = document.getElementById('closeSettings');
+    this.closeButton.addEventListener('click', () => this.close());
+    
+    this.profileButton = document.getElementById('openAccountForm');
+    this.profileButton.addEventListener('click', () => myProfileModal.open());
+    
+    this.tollButton = document.getElementById('openToll');
+    this.tollButton.addEventListener('click', () => tollModal.open());
+    
+    this.lockButton = document.getElementById('openLockModal');
+    this.lockButton.addEventListener('click', () => lockModal.open());
+    
+    this.backupButton = document.getElementById('openExportForm');
+    this.backupButton.addEventListener('click', () => backupAccountModal.open());
+    
+    this.removeButton = document.getElementById('openRemoveAccount');
+    this.removeButton.addEventListener('click', () => removeAccountModal.open());
+    
+    this.signOutButton = document.getElementById('handleSignOutSettings');
+    this.signOutButton.addEventListener('click', async () => await menuModal.handleSignOut());
+  }
+
+  open() {
+    this.modal.classList.add('active');
+    enterFullscreen();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    enterFullscreen();
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+}
+
+const settingsModal = new SettingsModal();
 
 class WalletScreen {
   constructor() {
@@ -2959,75 +3052,6 @@ async function queryNetwork(url) {
   }
 }
 
-async function pollChatInterval(milliseconds) {
-  pollChats.nextPoll = milliseconds;
-  pollChats();
-}
-
-// Called every 30 seconds if we are online and not subscribed to WebSocket
-async function pollChats() {
-  // Step 3: Poll if we are not subscribed to WebSocket
-  if (!useLongPolling) {
-    // Skip if no valid account
-    if (!myAccount?.keys?.address) {
-      console.log('Poll skipped: No valid account');
-      return;
-    }
-
-    try {
-      const gotChats = await chatsScreen.updateChatData();
-      if (gotChats > 0) {
-        await chatsScreen.updateChatList();
-      }
-
-      if (walletScreen.isActive()) {
-        await walletScreen.updateWalletView();
-      }
-    } catch (error) {
-      console.error('Chat polling error:', error);
-    }
-
-    scheduleNextPoll();
-  } else if (window.chatUpdateTimer) {
-    // Clear polling if WebSocket is subscribed
-    clearTimeout(window.chatUpdateTimer);
-    window.chatUpdateTimer = null;
-    console.log('Poll status: Stopped - using long polling');
-  }
-
-  // Step 4: Log final status
-  const pollStatus = {
-    useLongPolling: useLongPolling,
-    accountValid: Boolean(myAccount?.keys?.address),
-    pollingStatus: window.chatUpdateTimer ? 'polling' : 'not polling',
-  };
-  console.log('Poll Status:', JSON.stringify(pollStatus, null, 2));
-}
-
-// Helper function to schedule next poll
-function scheduleNextPoll() {
-  if (window.chatUpdateTimer) {
-    clearTimeout(window.chatUpdateTimer);
-  }
-
-  const interval = pollChats.nextPoll || pollIntervalNormal;
-  const now = getCorrectedTimestamp();
-  console.log(
-    'Poll schedule:',
-    JSON.stringify(
-      {
-        timestamp: now,
-        nextPollIn: `${interval}ms`,
-        reason: 'WebSocket not subscribed',
-      },
-      null,
-      2
-    )
-  );
-
-  window.chatUpdateTimer = setTimeout(pollChats, interval);
-}
-
 async function getChats(keys, retry = 1) {
   // needs to return the number of chats that need to be processed
   console.log(`getChats retry ${retry}`);
@@ -3674,7 +3698,7 @@ class SearchMessagesModal {
     Object.entries(myData.contacts).forEach(([address, contact]) => {
       if (!contact.messages) return;
 
-      contact.messages.forEach((message, index) => {
+      contact.messages.forEach((message) => {
         if (message.message.toLowerCase().includes(searchLower)) {
           // Highlight matching text
           const messageText = escapeHtml(message.message);
@@ -4045,6 +4069,10 @@ async function handleConnectivityChange() {
     showToast("You're back online!", 3000, 'online');
     // Force update data with reconnection handling
     if (myAccount && myAccount.keys) {
+      // restart long polling
+      if (useLongPolling) {
+        setTimeout(longPoll, 10);
+      }
       try {
         // Update chats with reconnection handling
         const gotChats = await chatsScreen.updateChatData();
@@ -4538,6 +4566,8 @@ class BackupAccountModal {
     this.modal = document.getElementById('exportModal');
     this.passwordInput = document.getElementById('exportPassword');
     this.passwordWarning = document.getElementById('exportPasswordWarning');
+    this.passwordConfirmInput = document.getElementById('exportPasswordConfirm');
+    this.passwordConfirmWarning = document.getElementById('exportPasswordConfirmWarning');
     this.submitButton = document.getElementById('exportForm').querySelector('button[type="submit"]');
     
     document.getElementById('closeExportForm').addEventListener('click', () => this.close());
@@ -4552,6 +4582,7 @@ class BackupAccountModal {
     // Add password validation on input with debounce
     this.debouncedUpdateButtonState = debounce(() => this.updateButtonState(), 250);
     this.passwordInput.addEventListener('input', this.debouncedUpdateButtonState);
+    this.passwordConfirmInput.addEventListener('input', this.debouncedUpdateButtonState);
   }
 
   open() {
@@ -4563,8 +4594,9 @@ class BackupAccountModal {
   close() {
     // called when the modal needs to be closed
     this.modal.classList.remove('active');
-    // Clear password for security
+    // Clear passwords for security
     this.passwordInput.value = '';
+    this.passwordConfirmInput.value = '';
   }
 
   /**
@@ -4712,15 +4744,25 @@ class BackupAccountModal {
 
   updateButtonState() {
     const password = this.passwordInput.value;
+    const confirmPassword = this.passwordConfirmInput.value;
     
     // Password is optional, but if provided, it must be at least 4 characters
     let isValid = true;
     
+    // Validate password length
     if (password.length > 0 && password.length < 4) {
       isValid = false;
       this.passwordWarning.style.display = 'inline';
     } else {
       this.passwordWarning.style.display = 'none';
+    }
+    
+    // Validate password confirmation (only show warning if user has started typing in confirm field)
+    if (password.length > 0 && confirmPassword.length > 0 && confirmPassword !== password) {
+      isValid = false;
+      this.passwordConfirmWarning.style.display = 'inline';
+    } else {
+      this.passwordConfirmWarning.style.display = 'none';
     }
     
     // Update button state
@@ -5474,11 +5516,46 @@ class AboutModal {
       storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
     }
 
-    // Open store URL in new tab (same as explorer/network buttons)
-    window.open(storeUrl, '_blank');
+    // Show update warning modal
+    updateWarningModal.open(storeUrl);
   }
 }
 const aboutModal = new AboutModal();
+
+class UpdateWarningModal {
+  constructor() {}
+
+  load() {
+    this.modal = document.getElementById('updateWarningModal');
+    this.closeButton = document.getElementById('closeUpdateWarningModal');
+    this.backupFirstBtn = document.getElementById('backupFirstBtn');
+    this.proceedToStoreBtn = document.getElementById('proceedToStoreBtn');
+
+    // Set up event listeners
+    this.closeButton.addEventListener('click', () => this.close());
+    this.backupFirstBtn.addEventListener('click', () => backupAccountModal.open());
+    this.proceedToStoreBtn.addEventListener('click', () => this.proceedToStore());
+  }
+
+  open(storeUrl) {
+    // Store the URL for later use
+    this.storeUrl = storeUrl;
+    this.modal.classList.add('active');
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  proceedToStore() {
+    // Close this modal and open the store URL
+    this.close();
+    if (this.storeUrl) {
+      window.open(this.storeUrl, '_blank');
+    }
+  }
+}
+const updateWarningModal = new UpdateWarningModal();
 
 class HelpModal {
   constructor() {}
@@ -6385,7 +6462,7 @@ class ChatModal {
     });
 
     // Add focus event listener for message input to handle scrolling
-    this.messageInput.addEventListener('focus', function () {
+    this.messageInput.addEventListener('focus', () => {
       if (this.messagesContainer) {
         // Check if we're already at the bottom (within 50px threshold)
         const isAtBottom =
@@ -6394,7 +6471,8 @@ class ChatModal {
           // Wait for keyboard to appear and viewport to adjust
           setTimeout(() => {
             this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
-          }, 300); // Increased delay to ensure keyboard is fully shown
+            this.messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); // To provide smoother, more reliable scrolling on mobile.
+          }, 500); // Increased delay to ensure keyboard is fully shown
         }
       }
     });
@@ -10838,6 +10916,40 @@ class LaunchModal {
 const launchModal = new LaunchModal();
 
 /**
+ * React Native App
+ * @class
+ * @description A class for handling communication with the React Native app
+ */
+class ReactNativeApp {
+  constructor() {}
+
+  load() {
+    // Add message listener for React Native WebView communication
+    if (window?.ReactNativeWebView) {
+      window.addEventListener('message', (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'background') {
+            handleNativeAppSubscribe();
+            // if chatModal was opened, save the last message count
+            if (chatModal.isActive() && chatModal.address) {
+              const contact = myData.contacts[chatModal.address];
+              chatModal.lastMessageCount = contact?.messages?.length || 0;
+            }
+            saveState();
+          }
+        } catch (error) {
+          console.error('Error parsing message from React Native:', error);
+        }
+      });
+    }
+  }
+}
+
+const reactNativeApp = new ReactNativeApp();
+
+/**
  * Remove failed transaction from the contacts messages, pending, and wallet history
  * @param {string} txid - The transaction ID to remove
  * @param {string} currentAddress - The address of the current contact
@@ -11333,3 +11445,142 @@ function enterFullscreen() {
     } 
   }
 }
+
+/**
+ * LocalStorageMonitor class
+ * Handles localStorage monitoring and warnings
+ */
+class LocalStorageMonitor {
+  constructor() {
+    this.warningThreshold = 100 * 1024; // 100KB in bytes
+  }
+
+  /**
+   * Initialize the localStorage monitor
+   */
+  load() {
+    console.log('🔧 Loading localStorage monitor...');
+    this.checkStorageOnStartup();
+  }
+
+  /**
+   * Check localStorage usage on app startup
+   */
+  checkStorageOnStartup() {
+    try {
+      const info = this.getStorageInfo();
+
+      // Log to console
+      
+      setTimeout(() => {
+        console.log('📊 STORAGE CHECK');
+        console.log('========================');
+        console.log(`📁 localStorage Used: ${info.usageMB}MB (${info.usageBytes} bytes)`);
+        console.log(`💾 localStorage Available: ${info.availableMB}MB (${info.availableBytes} bytes)`);
+        console.log(`📏 localStorage Total: ${info.totalCapacityMB}MB (${info.totalCapacityBytes} bytes)`);
+        console.log(`📊 Usage: ${info.percentageUsed}%`);
+        console.log('========================\n');
+      }, 1000);
+
+      // Check for low storage warning (less than 100KB available)
+      if (info.availableBytes < this.warningThreshold) {
+        const warningMessage = `⚠️ Storage Warning: Only ${(info.availableBytes / 1024).toFixed(1)}KB remaining! Consider clearing old data.`;
+        console.warn(warningMessage);
+        showToast(warningMessage, 8000, 'warning');
+      } else {
+        console.log(`✅ Storage OK: ${(info.availableBytes / 1024).toFixed(1)}KB available`);
+      }
+    } catch (error) {
+      console.error('Error checking localStorage on startup:', error);
+    }
+  }
+
+  /**
+   * Get localStorage information using the three core functions
+   */
+  getStorageInfo() {
+    const usage = this.getLocalStorageUsage();
+    const availableNow = this.findLocalStorageAvailable(); // How much MORE we can store right now
+    const totalCapacity = usage + availableNow;          // True total capacity
+    const percentageUsed = ((usage / totalCapacity) * 100).toFixed(2);
+
+    return {
+      usageBytes: usage,
+      availableBytes: availableNow,
+      totalCapacityBytes: totalCapacity,
+      totalCapacityMB: (totalCapacity / (1024 * 1024)).toFixed(2),
+      usageMB: (usage / (1024 * 1024)).toFixed(2),
+      availableMB: (availableNow / (1024 * 1024)).toFixed(2),
+      percentageUsed: parseFloat(percentageUsed)
+    };
+  }
+
+  /**
+   * Find available localStorage space using binary search
+   * @returns {number} Available localStorage space in bytes (how much MORE can be stored)
+   */
+  findLocalStorageAvailable() {
+    const testKey = '_storage_test_';
+    let low = 0;
+    let high = 6 * 1024 * 1024; // Start with 6MB (more realistic upper bound)
+    let maxCharacters = 0;
+
+    // Clear any existing test data
+    localStorage.removeItem(testKey);
+
+    // Binary search for maximum storable characters
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const testData = 'x'.repeat(mid);
+
+      try {
+        localStorage.setItem(testKey, testData);
+        localStorage.removeItem(testKey);
+        maxCharacters = mid;
+        low = mid + 1;
+      } catch (e) {
+        high = mid - 1;
+      }
+    }
+
+    // Verification step - test the found limit
+    if (maxCharacters > 0) {
+      try {
+        const verifyData = 'x'.repeat(maxCharacters);
+        localStorage.setItem(testKey, verifyData);
+        localStorage.removeItem(testKey);
+      } catch (e) {
+        // If verification fails, reduce by small amount and retry
+        maxCharacters = Math.max(0, maxCharacters - 1024);
+      }
+    }
+
+    // Convert characters to bytes (UTF-16: 2 bytes per character)
+    // Add key length (test key is 13 characters = 26 bytes)
+    const keyBytes = testKey.length * 2;
+    const maxBytes = (maxCharacters * 2) - keyBytes;
+
+    return Math.max(0, maxBytes);
+  }
+
+  /**
+   * Get current localStorage usage in bytes
+   * @returns {number} Total localStorage usage in bytes
+   */
+  getLocalStorageUsage() {
+    let total = 0;
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        const value = localStorage.getItem(key) || '';
+        total += (key.length + value.length) * 2; // UTF-16 encoding
+      }
+    } catch (e) {
+      console.warn('Error calculating localStorage usage:', e);
+    }
+    return total;
+  }
+}
+
+// Create localStorage monitor instance
+const localStorageMonitor = new LocalStorageMonitor();
