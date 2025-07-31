@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'e'
+const version = 'f'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -34,6 +34,7 @@ async function checkVersion() {
     './',
     'index.html',
 */
+    logsModal.log(`Updated to version: ${newVersion}`)
     await forceReload([
       newUrl,
       'styles.css',
@@ -46,6 +47,7 @@ async function checkVersion() {
     ]);
     window.location.replace(newUrl);
   }
+  logsModal.log(`Started version: ${myVersion}`)
 }
 
 async function forceReload(urls) {
@@ -90,7 +92,7 @@ import {
   passwordToKey,
   dhkeyCombined,
   decryptChacha,
-} from './crypto.js?';
+} from './crypto.js';
 
 // Put standalone conversion function in lib.js
 import {
@@ -118,7 +120,7 @@ import {
   debounce,
   truncateMessage,
   normalizeUnsignedFloat,
-} from './lib.js?';
+} from './lib.js';
 
 const weiDigits = 18;
 const wei = 10n ** BigInt(weiDigits);
@@ -151,32 +153,32 @@ let parameters = {
 };
 
 // Keyboard handling for React Native WebView
-function adjustForKeyboard() {
-  if (window.visualViewport) {
-    const viewport = window.visualViewport;
-    // show toast
-    /* showToast('Keyboard adjustment with CSS custom properties enabled', 3000, 'success'); */
-    const resizeHandler = () => {
-      // show toast that we are resizing
-      /* showToast('Resizing', 3000, 'success'); */
-      // Set your app container height to the visual viewport height
-      document.documentElement.style.setProperty(
-        '--viewport-height', 
-        `${viewport.height}px`
-      );
-      console.log('📱 Viewport height adjusted to:', viewport.height + 'px');
-    };
+// function adjustForKeyboard() {
+//   if (window.visualViewport) {
+//     const viewport = window.visualViewport;
+//     // show toast
+//     /* showToast('Keyboard adjustment with CSS custom properties enabled', 3000, 'success'); */
+//     const resizeHandler = () => {
+//       // show toast that we are resizing
+//       /* showToast('Resizing', 3000, 'success'); */
+//       // Set your app container height to the visual viewport height
+//       document.documentElement.style.setProperty(
+//         '--viewport-height', 
+//         `${viewport.height}px`
+//       );
+//       console.log('📱 Viewport height adjusted to:', viewport.height + 'px');
+//     };
     
-    viewport.addEventListener('resize', resizeHandler);
-    viewport.addEventListener('scroll', resizeHandler);
+//     viewport.addEventListener('resize', resizeHandler);
+//     viewport.addEventListener('scroll', resizeHandler);
     
-    // Set initial height
-    resizeHandler();
-    console.log('✅ Keyboard adjustment with CSS custom properties enabled');
-  } else {
-    console.log('❌ visualViewport not supported for keyboard adjustment');
-  }
-}
+//     // Set initial height
+//     resizeHandler();
+//     console.log('✅ Keyboard adjustment with CSS custom properties enabled');
+//   } else {
+//     console.log('❌ visualViewport not supported for keyboard adjustment');
+//   }
+// }
 
 /**
  * Check if a username is available or taken
@@ -313,6 +315,15 @@ function newDataRecord(myAccount) {
   };
 
   return myData;
+}
+
+/**
+ * Clear myData and myAccount variables
+ * This function centralizes the clearing of user data to ensure consistency
+ */
+function clearMyData() {
+  myData = null;
+  myAccount = null;
 }
 
 /**
@@ -479,7 +490,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupConnectivityDetection();
 
   // Setup keyboard adjustment for React Native WebView
-  adjustForKeyboard();
+  // adjustForKeyboard();
 
   // Check for native app subscription tokens and handle subscription
   handleNativeAppSubscribe();
@@ -515,6 +526,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   aboutModal.load();
   updateWarningModal.load();
   helpModal.load();
+  stakeInfoModal.load();
+  logsModal.load();
 
   // Create Account Modal
   createAccountModal.load();
@@ -533,7 +546,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Stake Modal
   stakeValidatorModal.load();
 
-  // Export Form Modal
+  // Backup Form Modal
   backupAccountModal.load();
 
   // Remove Account Modal
@@ -853,7 +866,7 @@ class WelcomeScreen {
   }
 }
 
-const welcomeScreen = new WelcomeScreen
+const welcomeScreen = new WelcomeScreen();
 
 class Header {
   constructor() {}
@@ -1347,6 +1360,10 @@ class MenuModal {
     this.signOutButton.addEventListener('click', async () => await this.handleSignOut());
     this.bridgeButton = document.getElementById('openBridge');
     this.bridgeButton.addEventListener('click', () => bridgeModal.open());
+    this.logsButton = document.getElementById('openLogs');
+    this.logsButton.addEventListener('click', () => logsModal.open());
+    this.stakeButton = document.getElementById('openStake');
+    this.stakeButton.addEventListener('click', () => stakeInfoModal.open());
     
     
     // Show launch button if ReactNativeWebView is available
@@ -1372,6 +1389,7 @@ class MenuModal {
   }
   
   async handleSignOut() {
+    logsModal.log(`Signout ${myAccount.username}`)
     this.isSignoutExit = true;
 
     // Clear intervals
@@ -1397,7 +1415,10 @@ class MenuModal {
 
     // Close all modals
     menuModal.close();
-    myProfileModal.close();
+    settingsModal.close(); // may be triggered from settings modal, calls openFullscreen() again
+
+    // this seems to be unnecessary but also benign
+    // myProfileModal.close();
 
     // Hide header and footer
     header.close();
@@ -1419,10 +1440,11 @@ class MenuModal {
     // Save myData to localStorage if it exists
     saveState();
 
+    // clear storage
+    clearMyData();
 
     // Add offline fallback
-    if (!navigator.onLine) {
-      // Just reset the UI state without clearing storage
+    if (!isOnline) {
       return;
     }
 
@@ -1432,9 +1454,11 @@ class MenuModal {
 //    window.location.reload();
     await checkVersion();
 
-    const newUrl = window.location.href.split('?')[0];
-    window.location.replace(newUrl);
-
+    // checkVersion() may update online status
+    if (isOnline) {
+      const newUrl = window.location.href.split('?')[0];
+      window.location.replace(newUrl);
+    }
   }
 }
 
@@ -1457,7 +1481,7 @@ class SettingsModal {
     this.lockButton = document.getElementById('openLockModal');
     this.lockButton.addEventListener('click', () => lockModal.open());
     
-    this.backupButton = document.getElementById('openExportForm');
+    this.backupButton = document.getElementById('openBackupForm');
     this.backupButton.addEventListener('click', () => backupAccountModal.open());
     
     this.removeButton = document.getElementById('openRemoveAccount');
@@ -1715,7 +1739,7 @@ function updateTollAmountUI(address) {
 async function updateTollRequired(address) {
   const myAddr = longAddress(myAccount.keys.address);
   const contactAddr = longAddress(address);
-  // use `hashBytes([fromAddr, toAddr].sort().join``)` to get the hash of the sorted addresses and have variable to keep track fromAddr which will be the current users order in the array
+  // use `hashBytes([fromAddr, toAddr].sort().join(''))` to get the hash of the sorted addresses and have variable to keep track fromAddr which will be the current users order in the array
   const sortedAddresses = [myAddr, contactAddr].sort();
   const hash = hashBytes(sortedAddresses.join(''));
   const myIndex = sortedAddresses.indexOf(myAddr);
@@ -2164,6 +2188,7 @@ class SignInModal {
       return;
     }
     myAccount = myData.account;
+    logsModal.log(`SignIn as ${username}_${netid}`)
 
     /* requestNotificationPermission(); */
     if (useLongPolling) {
@@ -2261,12 +2286,14 @@ class MyInfoModal {
   load() {
     this.modal = document.getElementById('myInfoModal');
     this.backButton = document.getElementById('closeMyInfoModal');
+    this.editButton = document.getElementById('myInfoEditButton');
     this.avatarSection = this.modal.querySelector('.contact-avatar-section');
     this.avatarDiv = this.avatarSection.querySelector('.avatar');
     this.nameDiv = this.avatarSection.querySelector('.name');
     this.subtitleDiv = this.avatarSection.querySelector('.subtitle');
 
     this.backButton.addEventListener('click', () => this.close());
+    this.editButton.addEventListener('click', () => myProfileModal.open());
   }
 
   async updateMyInfo() {
@@ -2532,7 +2559,7 @@ class FriendModal {
     const requiredNum = friend === 3 || friend === 2 ? 0 : friend === 1 ? 1 : friend === 0 ? 2 : 1;
     const fromAddr = longAddress(myAccount.keys.address);
     const toAddr = longAddress(address);
-    const chatId_ = hashBytes([fromAddr, toAddr].sort().join``);
+    const chatId_ = hashBytes([fromAddr, toAddr].sort().join(''));
     console.log('DEBUG 1:chatId_', chatId_);
 
     const tx = {
@@ -3498,7 +3525,7 @@ async function postAssetTransfer(to, amount, memo, keys) {
     from: fromAddr,
     to: toAddr,
     amount: BigInt(amount),
-    chatId: hashBytes([fromAddr, toAddr].sort().join``),
+    chatId: hashBytes([fromAddr, toAddr].sort().join('')),
     // TODO backend is not allowing memo > 140 characters; by pass using xmemo; we might have to check the total tx size instead
     // memo: stringify(memo),
     xmemo: memo,
@@ -4506,6 +4533,7 @@ class RemoveAccountModal {
     this.modal = document.getElementById('removeAccountModal');
     document.getElementById('closeRemoveAccountModal').addEventListener('click', () => this.close());
     document.getElementById('confirmRemoveAccount').addEventListener('click', () => this.submit());
+    document.getElementById('openBackupFromRemove').addEventListener('click', () => backupAccountModal.open());
   }
 
   signin() {
@@ -4539,7 +4567,7 @@ class RemoveAccountModal {
     localStorage.removeItem(`${username}_${netid}`);
 
     // Reload the page to redirect to welcome screen
-    myData = null; // need to delete this so that the reload does not save the data into localStore again
+    clearMyData(); // need to delete this so that the reload does not save the data into localStore again
     window.location.reload();
   }
 
@@ -4563,15 +4591,15 @@ class BackupAccountModal {
 
   load() {
     // called when the DOM is loaded; can setup event handlers here
-    this.modal = document.getElementById('exportModal');
-    this.passwordInput = document.getElementById('exportPassword');
-    this.passwordWarning = document.getElementById('exportPasswordWarning');
-    this.passwordConfirmInput = document.getElementById('exportPasswordConfirm');
-    this.passwordConfirmWarning = document.getElementById('exportPasswordConfirmWarning');
-    this.submitButton = document.getElementById('exportForm').querySelector('button[type="submit"]');
+    this.modal = document.getElementById('backupModal');
+    this.passwordInput = document.getElementById('backupPassword');
+    this.passwordWarning = document.getElementById('backupPasswordWarning');
+    this.passwordConfirmInput = document.getElementById('backupPasswordConfirm');
+    this.passwordConfirmWarning = document.getElementById('backupPasswordConfirmWarning');
+    this.submitButton = document.getElementById('backupForm').querySelector('button[type="submit"]');
     
-    document.getElementById('closeExportForm').addEventListener('click', () => this.close());
-    document.getElementById('exportForm').addEventListener('submit', (event) => {
+    document.getElementById('closeBackupForm').addEventListener('click', () => this.close());
+    document.getElementById('backupForm').addEventListener('submit', (event) => {
       if (myData) {
         this.handleSubmitOne(event);
       } else {
@@ -4631,7 +4659,7 @@ class BackupAccountModal {
     // Disable button to prevent multiple submissions
     this.submitButton.disabled = true;
 
-    const password = document.getElementById('exportPassword').value;
+    const password = this.passwordInput.value;
     const jsonData = stringify(myData, null, 2);
 
     try {
@@ -4666,7 +4694,7 @@ class BackupAccountModal {
         URL.revokeObjectURL(url);
       }
 
-      // Close export modal
+      // Close backup modal
       this.close();
     } catch (error) {
       console.error('Encryption failed:', error);
@@ -4686,7 +4714,7 @@ class BackupAccountModal {
     // Disable button to prevent multiple submissions
     this.submitButton.disabled = true;
 
-    const password = document.getElementById('exportPassword').value;
+    const password = this.passwordInput.value;
     const myLocalStore = this.copyLocalStorageToObject();
 //    console.log(myLocalStore);
     const jsonData = stringify(myLocalStore, null, 2);
@@ -4706,7 +4734,7 @@ class BackupAccountModal {
         reader.onloadend = () => {
           const base64DataUrl = reader.result;
           window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'EXPORT_BACKUP',
+            type: 'BACKUP_DATA',
             filename,
             dataUrl: base64DataUrl,
           }));
@@ -4723,7 +4751,7 @@ class BackupAccountModal {
         URL.revokeObjectURL(url);
       }
 
-      // Close export modal
+      // Close backup modal
       this.close();
     } catch (error) {
       console.error('Encryption failed:', error);
@@ -4757,10 +4785,17 @@ class BackupAccountModal {
       this.passwordWarning.style.display = 'none';
     }
     
-    // Validate password confirmation (only show warning if user has started typing in confirm field)
-    if (password.length > 0 && confirmPassword.length > 0 && confirmPassword !== password) {
-      isValid = false;
-      this.passwordConfirmWarning.style.display = 'inline';
+    // Validate password confirmation
+    // If password has been entered, confirmation is required and must match
+    if (password.length > 0) {
+      if (confirmPassword.length === 0) {
+        isValid = false;
+      } else if (confirmPassword !== password) {
+        isValid = false;
+        this.passwordConfirmWarning.style.display = 'inline';
+      } else {
+        this.passwordConfirmWarning.style.display = 'none';
+      }
     } else {
       this.passwordConfirmWarning.style.display = 'none';
     }
@@ -5021,7 +5056,7 @@ class RestoreAccountModal {
       // Reset form and close modal after delay
       setTimeout(() => {
         this.close();
-        myData = null // since we already saved to localStore, we want to make sure beforeunload calling saveState does not also save
+        clearMyData(); // since we already saved to localStore, we want to make sure beforeunload calling saveState does not also save
         window.location.reload(); // need to go through Sign In to make sure imported account exists on network
         this.clearForm();
       }, 2000);
@@ -5581,6 +5616,85 @@ class HelpModal {
 }
 const helpModal = new HelpModal();
 
+class StakeInfoModal {
+  constructor() {}
+
+  load() {
+    this.modal = document.getElementById('stakeInfoModal');
+    this.closeButton = document.getElementById('closeStakeInfoModal');
+    this.continueButton = document.getElementById('continueToStake');
+    
+    this.closeButton.addEventListener('click', () => this.close());
+    this.continueButton.addEventListener('click', () => this.handleContinue());
+  }
+
+  open() {
+    this.modal.classList.add('active');
+    enterFullscreen();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    enterFullscreen();
+  }
+
+  handleContinue() {
+    // Get the stake URL from network configuration
+    const stakeURL = network?.stakeUrl || 'https://liberdus.com/stake';
+    // Open the stake URL in a new tab
+    window.open(stakeURL, '_blank');
+    this.close();
+  }
+}
+const stakeInfoModal = new StakeInfoModal();
+
+class LogsModal {
+  constructor() {
+    this.data = localStorage.getItem('logs') || '';
+  }
+
+  load() {
+    this.modal = document.getElementById('logsModal');
+    this.closeButton = document.getElementById('closeLogsModal');
+    this.logsTextarea = document.getElementById('logsTextarea');
+    this.clearButton = document.getElementById('clearLogsButton');
+
+    this.closeButton.addEventListener('click', () => this.close());
+    if (this.clearButton) {
+      this.clearButton.addEventListener('click', () => this.clear());
+    }
+  }
+
+  open() {
+    this.modal.classList.add('active');
+    // Fill the textarea with data and position the scroll to the bottom
+    this.logsTextarea.value = this.data;
+    this.logsTextarea.scrollTop = this.logsTextarea.scrollHeight;
+  }
+
+  log(s) {
+    try {
+      this.data += s + '\n\n';
+      localStorage.setItem('logs', this.data);
+    } catch (e) {
+      console.error('Error saving logs to localStorage:', e);
+    }
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  clear() {
+    this.data = '';
+    localStorage.setItem('logs', '');
+    if (this.logsTextarea) {
+      this.logsTextarea.value = '';
+    }
+  }
+}
+const logsModal = new LogsModal();
+
 class MyProfileModal {
   constructor() {}
 
@@ -5707,6 +5821,11 @@ class MyProfileModal {
     this.closeButton.disabled = true;
     this.submitButton.disabled = true;
 
+    // if myInfo modal is open update the info
+    if (myInfoModal && myInfoModal.isActive()) {
+      myInfoModal.updateMyInfo();
+    }
+
     // Hide success message after 2 seconds
     setTimeout(() => {
       this.close();
@@ -5733,6 +5852,9 @@ class ValidatorStakingModal {
     this.loadingElement = document.getElementById('validator-loading');
     this.errorElement = document.getElementById('validator-error-message');
 
+    // Stake info section
+    this.stakeInfoSection = document.getElementById('validator-stake-info');
+
     // Display elements
     this.totalStakeElement = document.getElementById('validator-total-stake');
     this.totalStakeUsdElement = document.getElementById('validator-total-stake-usd');
@@ -5740,6 +5862,8 @@ class ValidatorStakingModal {
     this.userStakeUsdElement = document.getElementById('validator-user-stake-usd');
     this.nomineeLabelElement = document.getElementById('validator-nominee-label');
     this.nomineeValueElement = document.getElementById('validator-nominee');
+    this.earnMessageElement = document.getElementById('validator-earn-message');
+    this.learnMoreButton = document.getElementById('validator-learn-more');
 
     // Skeleton bar elements
     this.pendingSkeletonBar = document.getElementById('pending-nominee-skeleton-1');
@@ -5756,6 +5880,11 @@ class ValidatorStakingModal {
 
     this.unstakeButton.addEventListener('click', () => this.handleUnstake());
     this.backButton.addEventListener('click', () => this.close());
+    
+    // Set up the learn more button click handler
+    if (this.learnMoreButton) {
+      this.learnMoreButton.addEventListener('click', this.handleLearnMoreClick.bind(this));
+    }
   }
 
   async open() {
@@ -5768,9 +5897,14 @@ class ValidatorStakingModal {
     // Reset conditional elements to default state
     this.nomineeLabelElement.textContent = 'Nominated Validator:';
     this.nomineeValueElement.textContent = '';
-    // Ensure stake items are visible by default
-    this.userStakeLibElement.style.display = 'flex';
-    this.userStakeUsdElement.style.display = 'flex';
+    // Ensure stake info section and items are visible by default
+    this.stakeInfoSection.style.display = 'block';
+    this.userStakeLibElement.parentElement.style.display = 'flex';
+    this.userStakeUsdElement.parentElement.style.display = 'flex';
+    // Hide earn message by default
+    if (this.earnMessageElement) {
+      this.earnMessageElement.style.display = 'none';
+    }
     // Disable unstake button initially
     this.unstakeButton.disabled = true;
     this.stakeButton.disabled = false;
@@ -5918,13 +6052,17 @@ class ValidatorStakingModal {
       this.marketStakeUsdValue.textContent = displayMarketStakeUsd;
 
       if (!nominee) {
-        this.nomineeLabelElement.textContent = 'No Nominated Validator';
-        this.nomineeValueElement.textContent = ''; // Ensure value is empty
-        this.userStakeLibElement.style.display = 'none'; // Hide LIB stake item
-        this.userStakeUsdElement.style.display = 'none'; // Hide USD stake item
+        // Case: No Nominee - Hide the stake info section completely and show earn message
+        this.stakeInfoSection.style.display = 'none';
+        
+        // Show earn message and learn more button
+        if (this.earnMessageElement) {
+          this.earnMessageElement.style.display = 'block';
+        }
       } else {
-        // Case: Nominee Exists
-
+        // Case: Nominee Exists - Show staking info section
+        this.stakeInfoSection.style.display = 'block';
+        
         // userStakedBaseUnits is a BigInt object or null/undefined. Pass its string representation.
         const displayUserStakedLib = userStakedBaseUnits != null ? big2str(userStakedBaseUnits, 18).slice(0, 6) : 'N/A';
         const displayUserStakedUsd = userStakedUsd != null ? '$' + userStakedUsd.toFixed(6) : 'N/A';
@@ -5933,9 +6071,11 @@ class ValidatorStakingModal {
         this.nomineeValueElement.textContent = nominee;
         this.userStakeLibElement.textContent = displayUserStakedLib;
         this.userStakeUsdElement.textContent = displayUserStakedUsd;
-        // Ensure items are visible (using flex as defined in CSS) - redundant due to reset, but safe
-        this.userStakeLibElement.style.display = 'flex';
-        this.userStakeUsdElement.style.display = 'flex';
+        
+        // Hide earn message
+        if (this.earnMessageElement) {
+          this.earnMessageElement.style.display = 'none';
+        }
       }
 
       this.detailsElement.style.display = 'block'; // Or 'flex' if it's a flex container
@@ -5963,6 +6103,11 @@ class ValidatorStakingModal {
 
   close() {
     this.modal.classList.remove('active');
+  }
+  
+  handleLearnMoreClick() {
+    const validatorUrl = network.validatorUrl || 'https://liberdus.com/validator';
+    window.open(validatorUrl, '_blank');
   }
 
   async handleUnstake() {
@@ -6719,7 +6864,7 @@ class ChatModal {
       type: 'reclaim_toll',
       from: longAddress(myData.account.keys.address),
       to: longAddress(contactAddress),
-      chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join``),
+      chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join('')),
       timestamp: getCorrectedTimestamp(),
       networkId: network.netid,
     };
@@ -6741,7 +6886,7 @@ class ChatModal {
     // keep track receiver index during the sort
     const sortedAddresses = [longAddress(myData.account.keys.address), longAddress(contactAddress)].sort();
     const receiverIndex = sortedAddresses.indexOf(longAddress(contactAddress));
-    const chatId = hashBytes(sortedAddresses.join``);
+    const chatId = hashBytes(sortedAddresses.join(''));
     const chatIdAccount = await queryNetwork(`/messages/${chatId}/toll`);
     if (!chatIdAccount || !chatIdAccount.toll) {
       console.warn('chatIdAccount not found', chatIdAccount);
@@ -6790,7 +6935,7 @@ class ChatModal {
       type: 'read',
       from: longAddress(myData.account.keys.address),
       to: longAddress(contactAddress),
-      chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join``),
+      chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join('')),
       timestamp: getCorrectedTimestamp(),
       oldContactTimestamp: myData.contacts[contactAddress].timestamp,
       networkId: network.netid,
@@ -7054,7 +7199,7 @@ console.warn('in send message', txid)
       from: fromAddr,
       to: toAddr,
       amount: tollInLib,
-      chatId: hashBytes([fromAddr, toAddr].sort().join``),
+      chatId: hashBytes([fromAddr, toAddr].sort().join('')),
       message: 'x',
       xmessage: payload,
       timestamp: getCorrectedTimestamp(),
@@ -8294,12 +8439,14 @@ class CreateAccountModal {
     this.togglePrivateKeyVisibility = document.getElementById('togglePrivateKeyVisibility');
     this.migrateAccountsSection = document.getElementById('migrateAccountsSection');
     this.migrateAccountsButton = document.getElementById('migrateAccountsButton');
+    this.launchSection = document.getElementById('launchSection');
+    this.launchButton = document.getElementById('launchButton');
 
     // Setup event listeners
     this.form.addEventListener('submit', (e) => this.handleSubmit(e));
     this.usernameInput.addEventListener('input', (e) => this.handleUsernameInput(e));
     this.toggleButton.addEventListener('change', () => this.handleTogglePrivateKeyInput());
-    this.backButton.addEventListener('click', () => this.close());
+    this.backButton.addEventListener('click', () => this.closeWithReload());
 
     // Add listener for the password visibility toggle
     this.togglePrivateKeyVisibility.addEventListener('click', () => {
@@ -8311,6 +8458,12 @@ class CreateAccountModal {
     });
 
     this.migrateAccountsButton.addEventListener('click', async () => await migrateAccountsModal.open());
+    if (window.ReactNativeWebView) {
+      this.launchSection.style.display = 'block';
+      this.launchButton.addEventListener('click', () => {
+        launchModal.open()
+      });
+    }
   }
 
   open() {
@@ -8324,8 +8477,18 @@ class CreateAccountModal {
     enterFullscreen();
   }
 
+  // we still need to keep this since it can be called by other modals
   close() {
+    // reload the welcome page so that if accounts were migrated the signin button will be shown
     this.modal.classList.remove('active');
+  }
+
+  // this is called by the back button on the create account modal
+  closeWithReload() {
+    // reload the welcome page so that if accounts were migrated the signin button will be shown
+    const newUrl = window.location.href.split('?')[0];
+    window.location.replace(newUrl);
+
   }
 
   openWithReset() {
@@ -8605,8 +8768,7 @@ class CreateAccountModal {
           checkPendingTransactionsIntervalId = null;
         }
 
-        myAccount = null;
-        myData = null;
+        clearMyData();
 
         // Note: `checkPendingTransactions` will also remove the item from `myData.pending` if it's rejected by the service.
         return;
@@ -8625,8 +8787,7 @@ class CreateAccountModal {
         getSystemNoticeIntervalId = null;
       }
 
-      myAccount = null;
-      myData = null;
+      clearMyData();
 
       // no toast here since injectTx will show it
       this.reEnableControls();
@@ -10154,21 +10315,86 @@ class FailedTransactionModal {
 const failedTransactionModal = new FailedTransactionModal();
 
 class BridgeModal {
-  constructor() {}
+  constructor() {
+    this.direction = 'in'; // 'out' = from Liberdus to external, 'in' = from external to Liberdus
+    this.selectedNetwork = null;
+  }
 
   load() {
     this.modal = document.getElementById('bridgeModal');
     this.closeButton = document.getElementById('closeBridgeModal');
-    this.bridgeToPolygonButton = document.getElementById('bridgeToPolygon');
-    this.bridgeFromPolygonButton = document.getElementById('bridgeFromPolygon');
-
+    this.form = document.getElementById('bridgeForm');
+    this.networkSelect = document.getElementById('bridgeNetwork');
+    this.networkSelectGroup = document.querySelector('#bridgeNetwork').closest('.form-group');
+    this.directionSelect = document.getElementById('bridgeDirection');
+    
+    // Add event listeners
     this.closeButton.addEventListener('click', () => this.close());
-    this.bridgeFromPolygonButton.addEventListener('click', () => {window.open('./bridge', '_blank');});
-    this.bridgeToPolygonButton.addEventListener('click', () => this.openSendAssetModalToBridge());
+    this.form.addEventListener('submit', (e) => this.handleSubmit(e));
+    this.networkSelect.addEventListener('change', () => this.updateSelectedNetwork());
+    this.directionSelect.addEventListener('change', () => this.handleDirectionChange());
+    
+    // Load bridge networks from network.js
+    this.populateBridgeNetworks();
+  }
+  
+  populateBridgeNetworks() {
+    // Clear existing options
+    this.networkSelect.innerHTML = '';
+    
+    // Check if network.bridges exists
+    if (network && network.bridges && Array.isArray(network.bridges)) {
+      // Add each bridge network as an option
+      network.bridges.forEach((bridge, index) => {
+        const option = document.createElement('option');
+        option.value = index;
+        option.textContent = bridge.name;
+        this.networkSelect.appendChild(option);
+      });
+      
+      // Set default selected network
+      if (network.bridges.length > 0) {
+        this.selectedNetwork = network.bridges[0];
+      }
+    } 
+  }
+  
+  updateSelectedNetwork() {
+    const index = parseInt(this.networkSelect.value);
+    if (network && network.bridges && network.bridges[index]) {
+      this.selectedNetwork = network.bridges[index];
+    }
+  }
+  
+  handleDirectionChange() {
+    this.direction = this.directionSelect.value;
+
+    // Show network dropdown only for 'out' direction (Liberdus to external network)
+    if (this.direction === 'out') {
+      this.networkSelectGroup.style.display = 'block';
+    } else {
+      // Hide network dropdown for 'in' direction (external network to Liberdus)
+      this.networkSelectGroup.style.display = 'none';
+    }
   }
 
   open() {
     this.modal.classList.add('active');
+    
+    // Reset defaults
+    this.direction = 'in';
+    if (this.directionSelect) {
+      this.directionSelect.value = 'in';
+    }
+    
+    // Ensure networks are populated
+    this.populateBridgeNetworks();
+    
+    // Update selected network
+    this.updateSelectedNetwork();
+    
+    // Set initial visibility of network dropdown
+    this.handleDirectionChange();
   }
 
   close() {
@@ -10178,15 +10404,33 @@ class BridgeModal {
   isActive() {
     return this.modal.classList.contains('active');
   }
+  
+  handleSubmit(event) {
+    event.preventDefault();
+    this.direction = this.directionSelect.value;
 
-  openSendAssetModalToBridge() {
-    this.close();
-    sendAssetFormModal.open();
-    sendAssetFormModal.usernameInput.value = BRIDGE_USERNAME;
-    sendAssetFormModal.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    if (this.direction === 'out') {
+      // From Liberdus to external network
+      this.openSendAssetModalToBridge();
+    } else {
+      // From external network to Liberdus
+      this.openBridgePage();
+    }
   }
 
+  openSendAssetModalToBridge() {
+    if (!this.selectedNetwork) return;
+    
+    this.close();
+    sendAssetFormModal.open();
+    sendAssetFormModal.usernameInput.value = this.selectedNetwork.username;
+    sendAssetFormModal.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+  }
   
+  openBridgePage() {
+    const bridgeUrl = network && network.bridgeUrl ? network.bridgeUrl : './bridge';
+    window.open(bridgeUrl, '_blank');
+  }
 }
 
 const bridgeModal = new BridgeModal();
@@ -10350,6 +10594,25 @@ class MigrateAccountsModal {
         }
       }
     }
+    
+    // Sort function for accounts - first by netid (using network.netids order), then by username
+    const sortAccounts = (accounts) => {
+      return accounts.sort((a, b) => {
+        // First compare by netid order in network.netids
+        const netidIndexA = network.netids.indexOf(a.netid);
+        const netidIndexB = network.netids.indexOf(b.netid);
+        if (netidIndexA !== netidIndexB) {
+          return netidIndexA - netidIndexB;
+        }
+        // Then sort by username alphabetically
+        return a.username.localeCompare(b.username);
+      });
+    };
+    
+    // Sort each category
+    categories.mine = sortAccounts(categories.mine);
+    categories.available = sortAccounts(categories.available);
+    categories.taken = sortAccounts(categories.taken);
 
     return categories;
   }
@@ -10394,7 +10657,7 @@ class MigrateAccountsModal {
     }
 
     // clearing myData, not being used anymore
-    myData = null;
+    clearMyData();
 
     // loop through the results array and check the status of the pending txid which is in results[username].txid
     // See checkPendingTransactions function for how to check the status of a pending txid
@@ -10921,11 +11184,15 @@ const launchModal = new LaunchModal();
  * @description A class for handling communication with the React Native app
  */
 class ReactNativeApp {
-  constructor() {}
+  constructor() {
+    this.isReactNativeWebView = this.checkIfReactNativeWebView();
+  }
 
   load() {
-    // Add message listener for React Native WebView communication
-    if (window?.ReactNativeWebView) {
+    if (this.isReactNativeWebView) {
+      console.log('🌐 Initializing React Native WebView Communication');
+      this.captureInitialViewportHeight();
+
       window.addEventListener('message', (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -10939,14 +11206,88 @@ class ReactNativeApp {
             }
             saveState();
           }
+
+          if (data.type === 'KEYBOARD_SHOWN') {
+            this.detectKeyboardOverlap(data.keyboardHeight);
+          }
         } catch (error) {
           console.error('Error parsing message from React Native:', error);
         }
       });
     }
   }
+
+  checkIfReactNativeWebView() {
+    return typeof window !== 'undefined' &&
+      typeof window.ReactNativeWebView !== 'undefined' &&
+      typeof window.ReactNativeWebView.postMessage === 'function';
+  }
+
+  postMessage(data) {
+    if (this.isReactNativeWebView) {
+      try {
+        window.ReactNativeWebView.postMessage(JSON.stringify(data));
+      } catch (error) {
+        console.warn('Failed to post message to React Native:', error);
+      }
+    }
+  }
+
+  captureInitialViewportHeight() {
+    const currentHeight = window.innerHeight;
+    console.log('📏 Capturing initial viewport height:', currentHeight);
+    this.postMessage({
+        type: 'VIEWPORT_HEIGHT',
+        height: currentHeight
+    });
+  }
+
+  isInputElement(element) {
+    if (!element) return false;
+
+    const tagName = element.tagName.toLowerCase();
+    const isContentEditable = element.contentEditable === 'true';
+
+    return tagName === 'input' ||
+      tagName === 'textarea' ||
+      isContentEditable ||
+      element.getAttribute('role') === 'textbox';
+  }
+
+  detectKeyboardOverlap(keyboardHeight) {
+    const input = document.activeElement;
+    if (!this.isInputElement(input)) {
+      return;
+    }
+
+    try {
+      const rect = input.getBoundingClientRect();
+      const screenHeight = window.screen.height;
+      const keyboardTop = screenHeight - keyboardHeight;
+
+      const inputBottom = rect.bottom;
+      const inputIsAboveKeyboard = inputBottom < keyboardTop;
+      const needsManualHandling = !inputIsAboveKeyboard;
+
+      console.log('⌨️ Native keyboard detection:', {
+        keyboardHeight,
+        inputBottom,
+        keyboardTop,
+        needsManualHandling
+      });
+
+      this.postMessage({
+        type: 'KEYBOARD_DETECTION',
+        needsManualHandling,
+        keyboardHeight,
+      });
+    } catch (error) {
+      console.warn('Error in keyboard detection:', error);
+    }
+  }
 }
 
+// Initialize and load the app
 const reactNativeApp = new ReactNativeApp();
 
 /**
@@ -10988,7 +11329,6 @@ console.log('timestamp is', submittedts, 'duration is', duration)
   if (res?.transaction?.success === false) { return false }
   return null;
 }
-
 
 /**
  * Check pending transactions that are at least 5 seconds old
@@ -11453,6 +11793,7 @@ function enterFullscreen() {
 class LocalStorageMonitor {
   constructor() {
     this.warningThreshold = 100 * 1024; // 100KB in bytes
+    this.CAPACITY_KEY = '_localStorage_total_capacity_';
   }
 
   /**
@@ -11496,12 +11837,12 @@ class LocalStorageMonitor {
   }
 
   /**
-   * Get localStorage information using the three core functions
+   * Get localStorage information using cached or calculated capacity
    */
   getStorageInfo() {
     const usage = this.getLocalStorageUsage();
-    const availableNow = this.findLocalStorageAvailable(); // How much MORE we can store right now
-    const totalCapacity = usage + availableNow;          // True total capacity
+    const totalCapacity = this.getCachedOrCalculateCapacity();
+    const availableNow = totalCapacity - usage;
     const percentageUsed = ((usage / totalCapacity) * 100).toFixed(2);
 
     return {
@@ -11513,6 +11854,28 @@ class LocalStorageMonitor {
       availableMB: (availableNow / (1024 * 1024)).toFixed(2),
       percentageUsed: parseFloat(percentageUsed)
     };
+  }
+
+  /**
+   * Get cached localStorage capacity or calculate it for the first time
+   * @returns {number} Total localStorage capacity in bytes
+   */
+  getCachedOrCalculateCapacity() {
+    const storedCapacity = localStorage.getItem(this.CAPACITY_KEY);
+    if (storedCapacity) {
+      console.log('✅ Using stored localStorage capacity:', storedCapacity);
+      return parseInt(storedCapacity);
+    }
+    
+    console.log('🔄 Calculating localStorage capacity for first time...');
+    const usage = this.getLocalStorageUsage();
+    const available = this.findLocalStorageAvailable(); // Only runs once!
+    const totalCapacity = usage + available;
+    
+    localStorage.setItem(this.CAPACITY_KEY, totalCapacity.toString());
+    console.log('💾 Stored localStorage capacity for future use:', totalCapacity);
+    
+    return totalCapacity;
   }
 
   /**
@@ -11584,3 +11947,5 @@ class LocalStorageMonitor {
 
 // Create localStorage monitor instance
 const localStorageMonitor = new LocalStorageMonitor();
+
+
