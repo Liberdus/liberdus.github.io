@@ -2,14 +2,14 @@
   name: Home
   href: '#home'
 -
-  name: Why
-  href: '#why'
+  name: Intro
+  href: '#intro'
 -
   name: Features
   href: '#features'
 -
-  name: How
-  href: '#how'
+  name: Funnding
+  href: '#funding'
 -
   name: Earn
   href: '#earn'
