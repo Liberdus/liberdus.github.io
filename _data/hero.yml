@@ -6,7 +6,7 @@ maintext: >
 closeemphasis: 
 restofclose: Hard money worth chatting about.
 button1:
-  href: '#why'
+  href: '#intro'
   text: Learn more&nbsp;<i class="fa fa-angle-down"></i> 
 button2:
   href: 'Liberdus-Litepaper.pdf'
