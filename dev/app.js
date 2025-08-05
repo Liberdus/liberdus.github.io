@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'g'
+const version = 'h'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -506,7 +506,6 @@ function handleBeforeUnload(e) {
 // This is for installed apps where we can't stop the back button; just save the state
 function handleVisibilityChange() {
   console.log('in handleVisibilityChange', document.visibilityState);
-  logsModal.log('in handleVisibilityChange', document.visibilityState);
   if (!myAccount) {
     return;
   }
@@ -2045,6 +2044,10 @@ class SignInModal {
   async handleRemoveAccount() {
     removeAccountModal.removeAccount();
   }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
 }
 
 // create a singleton instance of the SignInModal
@@ -2870,7 +2873,6 @@ async function getChats(keys, retry = 1) {
   //console.log('last messages', myData.contacts[keys.address].messages.at(-1))
   //console.log('timestamp', myData.contacts[keys.address].messages.at(-1).timestamp)
   let timestamp = myAccount.chatTimestamp || 0;
-  logsModal.log(`getChats: using chatTimestamp=${timestamp}`);
   //    const timestamp = myData.contacts[keys.address]?.messages?.at(-1).timestamp || 0
 
   if (timestamp > longPollResult.timestamp){ timestamp = longPollResult.timestamp }
@@ -2889,7 +2891,6 @@ async function getChats(keys, retry = 1) {
     await processChats(senders.chats, keys);
   } else {
     console.error('getChats: no senders found')
-    logsModal.log(`getChats: updating chatTimestamp to ${timestamp} (no new chats found)`);
     myAccount.chatTimestamp = timestamp;
   }
   if (chatModal.address) {
@@ -2923,7 +2924,6 @@ function playTransferSound() {
 async function processChats(chats, keys) {
   let newTimestamp = 0;
   const timestamp = myAccount.chatTimestamp || 0;
-  logsModal.log(`processChats: using chatTimestamp=${timestamp} for message queries`);
   const messageQueryTimestamp = Math.max(0, timestamp);
   let hasAnyTransfer = false;
 
@@ -3216,7 +3216,6 @@ if (mine) console.warn('txid in processChats is', txidHex)
   // Update the global timestamp AFTER processing all senders
   if (newTimestamp > 0) {
     // Update the timestamp
-    logsModal.log(`processChats: updating chatTimestamp from ${myAccount.chatTimestamp} to ${newTimestamp}`);
     myAccount.chatTimestamp = newTimestamp;
     console.log('Updated global chat timestamp to', newTimestamp);
   }
@@ -11238,7 +11237,6 @@ class ReactNativeApp {
       window.addEventListener('message', (event) => {
         try {
           const data = JSON.parse(event.data);
-          logsModal.log(`ReactNativeApp: received message: ${data.type}`);
 
           if (data.type === 'background') {
             this.handleNativeAppSubscribe();
@@ -11294,6 +11292,11 @@ class ReactNativeApp {
               // User is not signed in - save the notification address and open sign-in modal
               console.log('🔔 User not signed in, saving notification address for priority');
               this.saveNotificationAddress(normalizedToAddress);
+              // If the user clicks on a notification and the app is already on the SignIn modal, we need to refresh the SignIn modal to have the bell emoji and new ordering to appear.
+              if (signInModal.isActive()) {
+                signInModal.close();
+                signInModal.open();
+              }
               return;
             }
             
@@ -11515,6 +11518,12 @@ class ReactNativeApp {
    * If this is the last account, it fully unsubscribes the device.
    */
   async handleNativeAppUnsubscribe() {
+    // Early return if running on Android device in React Native WebView
+    if (window.ReactNativeWebView && navigator.userAgent.toLowerCase().includes('android')) {
+      console.log('handleNativeAppUnsubscribe: Skipping unsubscribe on Android device');
+      return;
+    }
+
     // Check if we're online before proceeding
     if (!isOnline) {
       console.log('handleNativeAppUnsubscribe: Device is offline, skipping unsubscribe');
@@ -12039,7 +12048,6 @@ function longPoll() {
   try {
     longPoll.start = getCorrectedTimestamp();
     const timestamp = myAccount.chatTimestamp || 0;
-    logsModal.log(`longPoll: using chatTimestamp=${timestamp}`);
 
     // call this with a promise that'll resolve with callback longPollResult function with the data
     const longPollPromise = queryNetwork(`/collector/api/poll?account=${longAddress(myAccount.keys.address)}&chatTimestamp=${timestamp}`);
