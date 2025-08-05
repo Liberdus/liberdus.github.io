@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.07.31.18.22" />
+    <link rel="stylesheet" href="./styles.css?v=2025.08.05.12.02" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.07.31.18.22" type="module"></script>
+    <script src="./app.js?v=2025.08.05.12.02" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -96,6 +96,9 @@
         </div>
         <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
           Version <span id="versionDisplay"></span>
+        </div>
+        <div style="font-size: 0.8rem; margin-top: 5px; text-align: center" id="appVersionDisplay" class="hidden">
+          App Version: <span id="appVersionText"></span>
         </div>
         <!-- Add a unused anchor tag with nothing in it and add a class to it so can't shift and end up on another modal. Should still be displayed but will just show nothing -->
         <a class="last-item" href="#" id="welcomeScreenLastItem"> </a>
@@ -1160,7 +1163,8 @@
               </div>
               <div>
                 <button id="openBackupFromRemove" class="primary-button">Backup Account</button>
-                <button id="confirmRemoveAccount" class="update-button">Remove</button>
+                <button id="confirmRemoveAccount" class="update-button">Remove Account</button>
+                <button id="confirmRemoveAllAccounts" class="update-button">Remove All Accounts</button>
               </div>
             </div>
           </div>

@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'f'
+const version = 'g'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -326,162 +326,6 @@ function clearMyData() {
   myAccount = null;
 }
 
-/**
- * Handle native app subscription tokens and handle subscription
- * This is used to subscribe to push notifications for the native app
- * @returns {Promise<void>}
- */
-async function handleNativeAppSubscribe() {
-  // Check if we're online before proceeding
-  if (!isOnline) {
-    console.log('handleNativeAppSubscribe: Device is offline, skipping subscription');
-    return;
-  }
-  
-  const urlParams = new URLSearchParams(window.location.search);
-  const deviceToken = urlParams.get('device_token');
-  const pushToken = urlParams.get('push_token');
-  
-  if (deviceToken && pushToken) {
-    console.log('Native app subscription tokens detected:', { deviceToken, pushToken });
-    
-    try {
-      // Get the user's address from localStorage if available
-      const { netid } = network;
-      const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-      const netidAccounts = existingAccounts.netids[netid];
-      
-      let addresses = [];
-      if (netidAccounts?.usernames) {
-        // Get addresses from all stored accounts and convert to long format
-        addresses = Object.values(netidAccounts.usernames).map(account => longAddress(account.address));
-      }
-
-      if (addresses.length < 1) return;
-      
-      const payload = {
-        deviceToken,
-        expoPushToken: pushToken,
-        addresses: addresses
-      };
-      
-      // Get the appropriate gateway for this request
-      const selectedGateway = getGatewayForRequest();
-      if (!selectedGateway) {
-        console.error('No gateway available for subscription request');
-        showToast('No gateway available', 0, 'error');
-        return;
-      }
-      
-      const SUBSCRIPTION_API = `${selectedGateway.web}/notifier/subscribe`;
-
-      console.log('payload', payload);
-      console.log('SUBSCRIPTION_API', SUBSCRIPTION_API);
-      
-      const response = await fetch(SUBSCRIPTION_API, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        console.log('Subscription successful:', result);
-        /* showToast('Push notifications enabled', 3000, 'success'); */
-      } else {
-        console.error('Subscription failed:', response.status, response.statusText);
-        /* showToast('Failed to enable push notifications', 3000, 'error'); */
-      }
-    } catch (error) {
-      console.error('Error subscribing to push notifications:', error);
-      /* showToast('Error enabling push notifications', 3000, 'error'); */
-    }
-  }
-}
-
-/**
- * Unsubscribe the native app from push notifications for the current account.
- * If other accounts are on the device, it updates the subscription to only include them.
- * If this is the last account, it fully unsubscribes the device.
- */
-async function handleNativeAppUnsubscribe() {
-  // Check if we're online before proceeding
-  if (!isOnline) {
-    console.log('handleNativeAppUnsubscribe: Device is offline, skipping unsubscribe');
-    return;
-  }
-  
-  const urlParams = new URLSearchParams(window.location.search);
-  const deviceToken = urlParams.get('device_token');
-  const pushToken = urlParams.get('push_token');
-
-  // cannot unsubscribe if no device token is provided
-  if (!deviceToken) return;
-
-  if (!myAccount || !myAccount.keys || !myAccount.keys.address) {
-    console.warn('handleNativeAppUnsubscribe called without an active account. Aborting.');
-    return;
-  }
-
-  const currentUserAddress = longAddress(myAccount.keys.address);
-
-  // Get all other stored addresses on this device for the current network.
-  const { netid } = network;
-  const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-  const netidAccounts = existingAccounts.netids[netid];
-  let allStoredAddresses = [];
-  if (netidAccounts?.usernames) {
-    allStoredAddresses = Object.values(netidAccounts.usernames).map(account => longAddress(account.address));
-  }
-
-  // Create a list of addresses to keep subscribed, excluding the current user.
-  const remainingAddresses = allStoredAddresses.filter(addr => addr !== currentUserAddress);
-
-  let payload;
-
-  if (remainingAddresses.length === 0) {
-    // This is the only account. Unsubscribe the device completely.
-    payload = {
-      deviceToken,
-      addresses: [],
-    };
-  } else {
-    // Other accounts remain. Update the subscription to only include them.
-    if (!pushToken) {
-      console.warn('Cannot update subscription for remaining accounts without a pushToken.');
-      return;
-    }
-    payload = {
-      deviceToken,
-      expoPushToken: pushToken,
-      addresses: remainingAddresses,
-    };
-  }
-
-  const selectedGateway = getGatewayForRequest();
-  if (!selectedGateway) {
-    console.error('No gateway available for unsubscribe request');
-    return;
-  }
-  const SUBSCRIPTION_API = `${selectedGateway.web}/notifier/subscribe`;
-
-  try {
-    const res = await fetch(SUBSCRIPTION_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
-    if (!res.ok) {
-      console.error('Unsubscribe failed:', res.status, res.statusText);
-    }
-  } catch (err) {
-    console.error('Error during unsubscribe:', err);
-  }
-}
-
 // Load saved account data and update chat list on page load
 document.addEventListener('DOMContentLoaded', async () => {
   await checkVersion(); // version needs to be checked before anything else happens
@@ -493,7 +337,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // adjustForKeyboard();
 
   // Check for native app subscription tokens and handle subscription
-  handleNativeAppSubscribe();
+  reactNativeApp.handleNativeAppSubscribe();
 
   // Unlock Modal
   unlockModal.load();
@@ -649,7 +493,7 @@ function handleUnload() {
 
 // Add unload handler to save myData
 function handleBeforeUnload(e) {
-  handleNativeAppSubscribe();
+  reactNativeApp.handleNativeAppSubscribe();
   if (menuModal.isSignoutExit){
     return;
   }
@@ -662,12 +506,13 @@ function handleBeforeUnload(e) {
 // This is for installed apps where we can't stop the back button; just save the state
 function handleVisibilityChange() {
   console.log('in handleVisibilityChange', document.visibilityState);
+  logsModal.log('in handleVisibilityChange', document.visibilityState);
   if (!myAccount) {
     return;
   }
 
   if (document.visibilityState === 'hidden') {
-    handleNativeAppSubscribe();
+    reactNativeApp.handleNativeAppSubscribe();
     // if chatModal was opened, save the last message count
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
@@ -676,7 +521,7 @@ function handleVisibilityChange() {
     // save state when app is put into background
     saveState();
   } else if (document.visibilityState === 'visible') {
-    handleNativeAppUnsubscribe();
+    reactNativeApp.handleNativeAppUnsubscribe();
     // if chatModal was opened, check if message count changed while hidden
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
@@ -785,10 +630,16 @@ class WelcomeScreen {
     this.networkNameDisplay = document.getElementById('networkNameDisplay');
     this.lastItem = document.getElementById('welcomeScreenLastItem');
     this.openBackupModalButton = document.getElementById('openBackupModalButton');
+    this.appVersionDisplay = document.getElementById('appVersionDisplay');
+    this.appVersionText = document.getElementById('appVersionText');
     
     
     this.versionDisplay.textContent = myVersion + ' ' + version;
     this.networkNameDisplay.textContent = network.name;
+
+    if (reactNativeApp?.appVersion) {
+      this.updateAppVersionDisplay(reactNativeApp.appVersion);
+    }
     
     this.signInButton.addEventListener('click', () => {
       if (localStorage.lock && unlockModal.isLocked()) {
@@ -825,6 +676,8 @@ class WelcomeScreen {
 
   open() {
     this.screen.style.display = 'flex';
+    // Show the navigation bar on the native app
+    reactNativeApp.sendNavigationBarVisibility(true);
   }
 
   close() {
@@ -862,6 +715,13 @@ class WelcomeScreen {
       this.createAccountButton.classList.remove('secondary-button');
       this.openBackupModalButton.classList.remove('hidden');
       this.welcomeButtons.appendChild(this.openBackupModalButton);
+    }
+  }
+
+  updateAppVersionDisplay(appVersion) {
+    if (appVersion) {
+      this.appVersionText.textContent = appVersion;
+      this.appVersionDisplay.classList.remove('hidden');
     }
   }
 }
@@ -1448,7 +1308,7 @@ class MenuModal {
       return;
     }
 
-    await handleNativeAppSubscribe();
+    await reactNativeApp.handleNativeAppSubscribe();
 
     // Only reload if online
 //    window.location.reload();
@@ -1683,123 +1543,6 @@ function createNewContact(addr, username, friendStatus = 1) {
   c.tollRequiredToSend = 1;
   c.friend = friendStatus;
 }
-
-/**
- * updateTollAmountUI updates the toll amount UI for a given contact
- * sets chatModal.toll and chatModal.tollUnit to the bigint toll and string tollUnit of the contact
- * @param {string} address - the address of the contact
- * @returns {void}
- */
-function updateTollAmountUI(address) {
-  const tollValue = document.getElementById('tollValue');
-  tollValue.style.color = 'black';
-  const contact = myData.contacts[address];
-  let toll = contact.toll || 0n;
-  const tollUnit = contact.tollUnit || 'LIB';
-  const decimals = 18;
-  const mainIsUSD = tollUnit === 'USD';
-  const mainValue = parseFloat(big2str(toll, decimals));
-  // Conversion factor (USD/LIB)
-  const scaleMul = parameters.current.stabilityScaleMul || 1;
-  const scaleDiv = parameters.current.stabilityScaleDiv || 1;
-  const factor = scaleDiv !== 0 ? scaleMul / scaleDiv : 1;
-  let mainString, otherString;
-  if (mainIsUSD) {
-    toll = bigxnum2big(toll, (1.0 / factor).toString());
-    mainString = mainValue.toFixed(6) + ' USD';
-    const libValue = mainValue / factor;
-    otherString = libValue.toFixed(6) + ' LIB';
-  } else {
-    mainString = mainValue.toFixed(6) + ' LIB';
-    const usdValue = mainValue * factor;
-    otherString = usdValue.toFixed(6) + ' USD';
-  }
-  let display;
-  if (contact.tollRequiredToSend == 1) {
-    display = `${mainString} = ${otherString}`;
-  } else if (contact.tollRequiredToSend == 2) {
-    tollValue.style.color = 'red';
-    display = `blocked`;
-  } else {
-    // light green used to show success
-    tollValue.style.color = '#28a745';
-    display = `free; ${mainString} = ${otherString}`;
-  }
-  tollValue.textContent = display;
-
-  chatModal.toll = toll;
-  chatModal.tollUnit = tollUnit;
-}
-
-/**
- * updateTollRequired queries contact object and updates the tollRequiredByMe and tollRequiredByOther fields
- * @param {string} address - the address of the contact
- * @returns {void}
- */
-async function updateTollRequired(address) {
-  const myAddr = longAddress(myAccount.keys.address);
-  const contactAddr = longAddress(address);
-  // use `hashBytes([fromAddr, toAddr].sort().join(''))` to get the hash of the sorted addresses and have variable to keep track fromAddr which will be the current users order in the array
-  const sortedAddresses = [myAddr, contactAddr].sort();
-  const hash = hashBytes(sortedAddresses.join(''));
-  const myIndex = sortedAddresses.indexOf(myAddr);
-  const toIndex = 1 - myIndex;
-
-  // console.log(`hash: ${hash}`);
-
-  try {
-    // query the contact's toll field from the network
-    const contactAccountData = await queryNetwork(`/messages/${hash}/toll`);
-
-    if (contactAccountData?.error === 'No account with the given chatId') {
-      console.warn(`chatId has not been created yet: ${address}`, contactAccountData.error);
-    } else if (contactAccountData?.error) {
-      console.error(`Error querying toll required for address: ${address}`, contactAccountData.error);
-      return;
-    }
-
-    const localContact = myData.contacts[address];
-    localContact.tollRequiredToSend = contactAccountData.toll.required[toIndex];
-    localContact.tollRequiredToReceive = contactAccountData.toll.required[myIndex];
-
-    if (chatModal.isActive() && chatModal.address === address) {
-      updateTollAmountUI(address);
-    }
-
-    // console.log(`localContact.tollRequiredToSend: ${localContact.tollRequiredToSend}`);
-    // console.log(`localContact.tollRequiredToReceive: ${localContact.tollRequiredToReceive}`);
-  } catch (error) {
-    console.warn(`Error updating contact toll required to send and receive: ${error}`);
-  }
-}
-
-/**
- * Invoked when opening chatModal. In the background, it will query the contact's toll field from the network.
- * If the queried toll value is different from the toll field in localStorage, it will update the toll field in localStorage and update the UI element that displays the toll field value.
- * @param {string} address - the address of the contact
- * @returns {void}
- */
-async function updateTollValue(address) {
-  // query the contact's toll field from the network
-  const contactAccountData = await queryNetwork(`/account/${longAddress(address)}`);
-  const queriedToll = contactAccountData?.account?.data?.toll; // type bigint
-  const queriedTollUnit = contactAccountData?.account?.data?.tollUnit; // type string */
-
-  // update the toll value in the UI if the queried toll value is different from the toll value or toll unit in localStorage
-  if (myData.contacts[address].toll != queriedToll || myData.contacts[address].tollUnit != queriedTollUnit) {
-    myData.contacts[address].toll = queriedToll;
-    myData.contacts[address].tollUnit = queriedTollUnit;
-    // if correct modal is open for this address, update the toll value
-    if (chatModal.isActive() && chatModal.address === address) {
-      updateTollAmountUI(address);
-    }
-  } else {
-    console.log(`Returning early since queried toll value is the same as the toll field in localStorage`);
-    // return early
-    return;
-  }
-}
-
 
 class ScanQRModal {
   constructor() {
@@ -2089,10 +1832,31 @@ class SignInModal {
       return;
     }
 
-    // Populate select with usernames
+    // Get the notified address and sort usernames to prioritize it
+    const notifiedAddress = localStorage.getItem('lastNotificationAddress');
+    let sortedUsernames = [...usernames];
+    
+    if (notifiedAddress) {
+      // Find which username owns the notified address
+      for (const [username, accountData] of Object.entries(netidAccounts.usernames)) {
+        if (accountData.address === notifiedAddress) {
+          // Move this username to the front
+          sortedUsernames = sortedUsernames.filter(u => u !== username);
+          sortedUsernames.unshift(username);
+          break;
+        }
+      }
+    }
+
+    // Populate select with sorted usernames
     this.usernameSelect.innerHTML = `
       <option value="" disabled selected hidden>Select an account</option>
-      ${usernames.map((username) => `<option value="${username}">${username}</option>`).join('')}
+      ${sortedUsernames.map((username) => {
+        // Check if this username owns the notified address
+        const isNotifiedAccount = notifiedAddress && netidAccounts.usernames[username]?.address === notifiedAddress;
+        const dotIndicator = isNotifiedAccount ? ' 🔔' : '';
+        return `<option value="${username}">${username}${dotIndicator}</option>`;
+      }).join('')}
     `;
 
     // If a username should be auto-selected (either preselect or only one account), do it
@@ -2206,11 +1970,18 @@ class SignInModal {
     window.addEventListener('beforeunload', handleBeforeUnload);
     document.addEventListener('visibilitychange', handleVisibilityChange); // Keep as document
 
-    handleNativeAppUnsubscribe();
+    reactNativeApp.handleNativeAppUnsubscribe();
+    reactNativeApp.sendNavigationBarVisibility(false);
 
     // Close modal and proceed to app
     this.close();
     welcomeScreen.close();
+    
+    // Clear any notification address since user has signed in
+    if (reactNativeApp) {
+      reactNativeApp.clearNotificationAddress();
+    }
+    
     await footer.switchView('chats'); // Default view
   }
 
@@ -2272,7 +2043,7 @@ class SignInModal {
   }
 
   async handleRemoveAccount() {
-    removeAccountModal.confirmSubmit();
+    removeAccountModal.removeAccount();
   }
 }
 
@@ -3099,6 +2870,7 @@ async function getChats(keys, retry = 1) {
   //console.log('last messages', myData.contacts[keys.address].messages.at(-1))
   //console.log('timestamp', myData.contacts[keys.address].messages.at(-1).timestamp)
   let timestamp = myAccount.chatTimestamp || 0;
+  logsModal.log(`getChats: using chatTimestamp=${timestamp}`);
   //    const timestamp = myData.contacts[keys.address]?.messages?.at(-1).timestamp || 0
 
   if (timestamp > longPollResult.timestamp){ timestamp = longPollResult.timestamp }
@@ -3117,6 +2889,7 @@ async function getChats(keys, retry = 1) {
     await processChats(senders.chats, keys);
   } else {
     console.error('getChats: no senders found')
+    logsModal.log(`getChats: updating chatTimestamp to ${timestamp} (no new chats found)`);
     myAccount.chatTimestamp = timestamp;
   }
   if (chatModal.address) {
@@ -3150,6 +2923,7 @@ function playTransferSound() {
 async function processChats(chats, keys) {
   let newTimestamp = 0;
   const timestamp = myAccount.chatTimestamp || 0;
+  logsModal.log(`processChats: using chatTimestamp=${timestamp} for message queries`);
   const messageQueryTimestamp = Math.max(0, timestamp);
   let hasAnyTransfer = false;
 
@@ -3442,6 +3216,7 @@ if (mine) console.warn('txid in processChats is', txidHex)
   // Update the global timestamp AFTER processing all senders
   if (newTimestamp > 0) {
     // Update the timestamp
+    logsModal.log(`processChats: updating chatTimestamp from ${myAccount.chatTimestamp} to ${newTimestamp}`);
     myAccount.chatTimestamp = newTimestamp;
     console.log('Updated global chat timestamp to', newTimestamp);
   }
@@ -4532,7 +4307,8 @@ class RemoveAccountModal {
     // called when the DOM is loaded; can setup event handlers here
     this.modal = document.getElementById('removeAccountModal');
     document.getElementById('closeRemoveAccountModal').addEventListener('click', () => this.close());
-    document.getElementById('confirmRemoveAccount').addEventListener('click', () => this.submit());
+    document.getElementById('confirmRemoveAccount').addEventListener('click', () => this.removeAccount());
+    document.getElementById('confirmRemoveAllAccounts').addEventListener('click', () => this.removeAllAccounts());
     document.getElementById('openBackupFromRemove').addEventListener('click', () => backupAccountModal.open());
   }
 
@@ -4571,13 +4347,44 @@ class RemoveAccountModal {
     window.location.reload();
   }
 
-  confirmSubmit() {
-    const usernameSelect = document.getElementById('username');
-    const username = usernameSelect.value;
-    if (!username) return;
-    const confirmed = confirm(`Are you sure you want to remove account "${username}"?`);
+  removeAccount(username = myAccount.username) {
+    const confirmed = confirm(`Are you sure you want to remove the account "${username}" from this device?`);
     if (!confirmed) return;
-    this.submit(username);
+    
+    const { netid } = network;
+
+    // Get existing accounts
+    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+
+    // Remove the account from the accounts object
+    if (existingAccounts.netids[netid] && existingAccounts.netids[netid].usernames) {
+      delete existingAccounts.netids[netid].usernames[username];
+      localStorage.setItem('accounts', stringify(existingAccounts));
+    }
+    // Remove the account data from localStorage
+    localStorage.removeItem(`${username}_${netid}`);
+
+    // Reload the page to redirect to welcome screen
+    clearMyData(); // need to delete this so that the reload does not save the data into localStore again
+    window.location.reload();
+  }
+  
+  removeAllAccounts() {
+    const confirmText = prompt(`WARNING: All accounts and data will be permanently removed from this device.\n\nType "REMOVE ALL" to confirm:`);
+    if (confirmText !== "REMOVE ALL") {
+      showToast('Remove all cancelled', 2000, 'warning');
+      return;
+    }
+    
+    // Clear all localStorage data
+    localStorage.clear();
+    
+    // Show success message
+    showToast('All data has been removed from this device', 3000, 'success');
+    
+    // Reload the page to redirect to welcome screen
+    clearMyData();
+    window.location.reload();
   }
 
   signout() {
@@ -4734,7 +4541,7 @@ class BackupAccountModal {
         reader.onloadend = () => {
           const base64DataUrl = reader.result;
           window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'BACKUP_DATA',
+            type: 'EXPORT_BACKUP',
             filename,
             dataUrl: base64DataUrl,
           }));
@@ -6688,15 +6495,15 @@ class ChatModal {
     walletScreen.updateWalletBalances();
 
     // update the toll value. Will not await this and it'll update the toll value while the modal is open.
-    updateTollValue(address);
+    this.updateTollValue(address);
 
     // update local contact object with the toll required to send and receive
-    updateTollRequired(address);
+    this.updateTollRequired(address);
 
     // clear hidden txid input
     this.retryOfTxId.value = '';
 
-    updateTollAmountUI(address);
+    this.updateTollAmountUI(address);
 
     // Add data attributes to store the username and address
     this.sendMoneyButton.dataset.username = contact.username || address;
@@ -8098,6 +7905,121 @@ console.warn('in send message', txid)
       showToast('Failed to delete message', 0, 'error');
     }
   }
+
+  /**
+   * updateTollAmountUI updates the toll amount UI for a given contact
+   * @param {string} address - the address of the contact
+   * @returns {void}
+   */
+  updateTollAmountUI(address) {
+    const tollValue = document.getElementById('tollValue');
+    tollValue.style.color = 'black';
+    const contact = myData.contacts[address];
+    let toll = contact.toll || 0n;
+    const tollUnit = contact.tollUnit || 'LIB';
+    const decimals = 18;
+    const mainIsUSD = tollUnit === 'USD';
+    const mainValue = parseFloat(big2str(toll, decimals));
+    // Conversion factor (USD/LIB)
+    const scaleMul = parameters.current.stabilityScaleMul || 1;
+    const scaleDiv = parameters.current.stabilityScaleDiv || 1;
+    const factor = scaleDiv !== 0 ? scaleMul / scaleDiv : 1;
+    let mainString, otherString;
+    if (mainIsUSD) {
+      toll = bigxnum2big(toll, (1.0 / factor).toString());
+      mainString = mainValue.toFixed(6) + ' USD';
+      const libValue = mainValue / factor;
+      otherString = libValue.toFixed(6) + ' LIB';
+    } else {
+      mainString = mainValue.toFixed(6) + ' LIB';
+      const usdValue = mainValue * factor;
+      otherString = usdValue.toFixed(6) + ' USD';
+    }
+    let display;
+    if (contact.tollRequiredToSend == 1) {
+      display = `${mainString} = ${otherString}`;
+    } else if (contact.tollRequiredToSend == 2) {
+      tollValue.style.color = 'red';
+      display = `blocked`;
+    } else {
+      // light green used to show success
+      tollValue.style.color = '#28a745';
+      display = `free; ${mainString} = ${otherString}`;
+    }
+    tollValue.textContent = display;
+
+    this.toll = toll;
+    this.tollUnit = tollUnit;
+  }
+
+  /**
+   * updateTollRequired queries contact object and updates the tollRequiredByMe and tollRequiredByOther fields
+   * @param {string} address - the address of the contact
+   * @returns {void}
+   */
+  async updateTollRequired(address) {
+    const myAddr = longAddress(myAccount.keys.address);
+    const contactAddr = longAddress(address);
+    // use `hashBytes([fromAddr, toAddr].sort().join(''))` to get the hash of the sorted addresses and have variable to keep track fromAddr which will be the current users order in the array
+    const sortedAddresses = [myAddr, contactAddr].sort();
+    const hash = hashBytes(sortedAddresses.join(''));
+    const myIndex = sortedAddresses.indexOf(myAddr);
+    const toIndex = 1 - myIndex;
+
+    // console.log(`hash: ${hash}`);
+
+    try {
+      // query the contact's toll field from the network
+      const contactAccountData = await queryNetwork(`/messages/${hash}/toll`);
+
+      if (contactAccountData?.error === 'No account with the given chatId') {
+        console.warn(`chatId has not been created yet: ${address}`, contactAccountData.error);
+      } else if (contactAccountData?.error) {
+        console.error(`Error querying toll required for address: ${address}`, contactAccountData.error);
+        return;
+      }
+
+      const localContact = myData.contacts[address];
+      localContact.tollRequiredToSend = contactAccountData.toll.required[toIndex];
+      localContact.tollRequiredToReceive = contactAccountData.toll.required[myIndex];
+
+      if (this.isActive() && this.address === address) {
+        this.updateTollAmountUI(address);
+      }
+
+      // console.log(`localContact.tollRequiredToSend: ${localContact.tollRequiredToSend}`);
+      // console.log(`localContact.tollRequiredToReceive: ${localContact.tollRequiredToReceive}`);
+    } catch (error) {
+      console.warn(`Error updating contact toll required to send and receive: ${error}`);
+    }
+  }
+
+  /**
+   * Invoked when opening chatModal. In the background, it will query the contact's toll field from the network.
+   * If the queried toll value is different from the toll field in localStorage, it will update the toll field in localStorage and update the UI element that displays the toll field value.
+   * @param {string} address - the address of the contact
+   * @returns {void}
+   */
+  async updateTollValue(address) {
+    // query the contact's toll field from the network
+    const contactAccountData = await queryNetwork(`/account/${longAddress(address)}`);
+    const queriedToll = contactAccountData?.account?.data?.toll; // type bigint
+    const queriedTollUnit = contactAccountData?.account?.data?.tollUnit; // type string */
+
+    // update the toll value in the UI if the queried toll value is different from the toll value or toll unit in localStorage
+    if (myData.contacts[address].toll != queriedToll || myData.contacts[address].tollUnit != queriedTollUnit) {
+      myData.contacts[address].toll = queriedToll;
+      myData.contacts[address].tollUnit = queriedTollUnit;
+      // if correct modal is open for this address, update the toll value
+      if (this.isActive() && this.address === address) {
+        this.updateTollAmountUI(address);
+      }
+    } else {
+      console.log(`Returning early since queried toll value is the same as the toll field in localStorage`);
+      // return early
+      return;
+    }
+  }
 }
 
 const chatModal = new ChatModal();
@@ -8804,7 +8726,6 @@ class CreateAccountModal {
     this.migrateAccountsButton.disabled = false;
   }
 }
-
 // Initialize the create account modal
 const createAccountModal = new CreateAccountModal();
 
@@ -10493,6 +10414,10 @@ class MigrateAccountsModal {
     // Render Taken section
     this.renderSection('taken', 'Taken', categories.taken,
       'Accounts already taken');
+      
+    // Check for inconsistencies and render them
+    const inconsistencies = await this.checkAccountsInconsistency();
+    this.renderInconsistencies(inconsistencies);
   }
 
   /**
@@ -10595,27 +10520,27 @@ class MigrateAccountsModal {
       }
     }
     
-    // Sort function for accounts - first by netid (using network.netids order), then by username
-    const sortAccounts = (accounts) => {
-      return accounts.sort((a, b) => {
-        // First compare by netid order in network.netids
-        const netidIndexA = network.netids.indexOf(a.netid);
-        const netidIndexB = network.netids.indexOf(b.netid);
-        if (netidIndexA !== netidIndexB) {
-          return netidIndexA - netidIndexB;
-        }
-        // Then sort by username alphabetically
-        return a.username.localeCompare(b.username);
-      });
-    };
-    
     // Sort each category
-    categories.mine = sortAccounts(categories.mine);
-    categories.available = sortAccounts(categories.available);
-    categories.taken = sortAccounts(categories.taken);
+    categories.mine = this.sortAccounts(categories.mine);
+    categories.available = this.sortAccounts(categories.available);
+    categories.taken = this.sortAccounts(categories.taken);
 
     return categories;
   }
+
+  // Sort function for accounts - first by netid (using network.netids order), then by username
+  sortAccounts = (accounts) => {
+    return accounts.sort((a, b) => {
+      // First compare by netid order in network.netids
+      const netidIndexA = network.netids.indexOf(a.netid);
+      const netidIndexB = network.netids.indexOf(b.netid);
+      if (netidIndexA !== netidIndexB) {
+        return netidIndexA - netidIndexB;
+      }
+      // Then sort by username alphabetically
+      return a.username.localeCompare(b.username);
+    });
+  };
 
   async handleSubmit(event) {
     event.preventDefault();
@@ -10758,6 +10683,122 @@ console.log('    result is',result)
     const checkboxes = this.accountList.querySelectorAll('input[type="checkbox"]');
     checkboxes.forEach(checkbox => checkbox.checked = false);
     this.submitButton.disabled = true;
+  }
+  
+  /**
+   * Check for consistency between accounts registry and actual account data in localStorage
+   * @returns {Promise<Object>} An object containing the inconsistencies found
+   */
+  async checkAccountsInconsistency() {
+    const result = {
+      missingAccounts: [], // Accounts in accounts object but missing the account entry
+      unregisteredAccounts: [] // Accounts not in accounts object but have entries in localStorage
+    };
+    
+    const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    
+    for (const netid in accountsObj.netids) {
+      const usernamesObj = accountsObj.netids[netid]?.usernames;
+      if (!usernamesObj) continue;
+      
+      for (const username in usernamesObj) {
+        const accountKey = `${username}_${netid}`;
+        const accountFile = localStorage.getItem(accountKey);
+        
+        if (!accountFile) {
+          // Found an account in registry but the account file is missing
+          result.missingAccounts.push({
+            username,
+            netid
+          });
+        }
+      }
+    }
+
+    const allKeys = Object.keys(localStorage);
+    
+    // Filter keys that match the pattern username_netid
+    const accountFileKeys = allKeys.filter(key => {
+      // Skip the 'accounts' key itself
+      if (key === 'accounts') return false;
+      
+      const parts = key.split('_');
+      if (parts.length !== 2) return false;
+      
+      const netid = parts[1];
+      if (netid.length != 64) return false;
+      
+      return true;
+    });
+    
+    for (const key of accountFileKeys) {
+      const [username, netid] = key.split('_');
+      
+      const isRegistered = accountsObj.netids[netid]?.usernames?.[username];
+      
+      if (!isRegistered) {
+        result.unregisteredAccounts.push({
+          username,
+          netid
+        });
+      }
+    }
+    result.missingAccounts = this.sortAccounts(result.missingAccounts);
+    result.unregisteredAccounts = this.sortAccounts(result.unregisteredAccounts);
+
+    return result;
+  }
+  
+  /**
+   * Render the inconsistencies found in the accounts
+   * @param {Object} inconsistencies - The inconsistencies to render
+   */
+  renderInconsistencies(inconsistencies) {
+    const { missingAccounts, unregisteredAccounts } = inconsistencies;
+    
+    if (missingAccounts.length === 0 && unregisteredAccounts.length === 0) {
+      return;
+    }
+    
+    const container = document.createElement('div');
+    container.className = 'migrate-inconsistencies';
+    container.innerHTML = `<h3>Account Inconsistencies</h3>`;
+    
+    if (missingAccounts.length > 0) {
+      const missingSection = document.createElement('div');
+      missingSection.className = 'inconsistency-section';
+      missingSection.innerHTML = `
+        <h4>Accounts entries without data (${missingAccounts.length})</h4>
+        <p class="section-description">In accounts object but missing specific account data.</p>
+        <div class="inconsistency-list">
+          ${missingAccounts.map(account => `
+            <div class="inconsistency-item">
+              <span>${account.username}_${account.netid.slice(0, 6)}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+      container.appendChild(missingSection);
+    }
+    
+    if (unregisteredAccounts.length > 0) {
+      const unregisteredSection = document.createElement('div');
+      unregisteredSection.className = 'inconsistency-section';
+      unregisteredSection.innerHTML = `
+        <h4>Accounts missing from Accounts Object (${unregisteredAccounts.length})</h4>
+        <p class="section-description">Account data exists but missing from accounts object.</p>
+        <div class="inconsistency-list">
+          ${unregisteredAccounts.map(account => `
+            <div class="inconsistency-item">
+              <span>${account.username}_${account.netid.slice(0, 6)}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+      container.appendChild(unregisteredSection);
+    }
+    
+    this.accountList.appendChild(container);
   }
 }
 
@@ -11186,6 +11227,7 @@ const launchModal = new LaunchModal();
 class ReactNativeApp {
   constructor() {
     this.isReactNativeWebView = this.checkIfReactNativeWebView();
+    this.appVersion = null;
   }
 
   load() {
@@ -11196,9 +11238,10 @@ class ReactNativeApp {
       window.addEventListener('message', (event) => {
         try {
           const data = JSON.parse(event.data);
+          logsModal.log(`ReactNativeApp: received message: ${data.type}`);
 
           if (data.type === 'background') {
-            handleNativeAppSubscribe();
+            this.handleNativeAppSubscribe();
             // if chatModal was opened, save the last message count
             if (chatModal.isActive() && chatModal.address) {
               const contact = myData.contacts[chatModal.address];
@@ -11207,8 +11250,78 @@ class ReactNativeApp {
             saveState();
           }
 
+          if (data.type === 'foreground') {
+            if (myData || myAccount) {
+              this.handleNativeAppUnsubscribe();
+            }
+          }
+
           if (data.type === 'KEYBOARD_SHOWN') {
             this.detectKeyboardOverlap(data.keyboardHeight);
+          }
+
+          if (data.type === 'INITIAL_APP_PARAMS') {
+            console.log('📱 Received initial app parameters:', data.data);
+            // Handle app version
+            if (data?.data?.appVersion) {
+              console.log('📱 App version:', data.data.appVersion);
+              this.appVersion = data.data.appVersion || `N/A`
+              // Update the welcome screen to display the app version
+              welcomeScreen.updateAppVersionDisplay(this.appVersion); 
+              
+            }
+            // Handle device tokens
+            if (data.data.deviceToken) {
+              console.log('📱 Device token received');
+              // Store device token for push notifications
+              window.deviceToken = data.data.deviceToken;
+            }
+            if (data.data.expoPushToken) {
+              console.log('📱 Expo push token received');
+              // Store expo push token for push notifications
+              window.expoPushToken = data.data.expoPushToken;
+            }
+          }
+
+          if (data.type === 'NOTIFICATION_TAPPED') {
+            console.log('🔔 Notification tapped, opening chat with:', data.to);
+
+            // normalize the address
+            const normalizedToAddress = normalizeAddress(data.to);
+            
+            // Check if user is signed in
+            if (!myData || !myAccount) {
+              // User is not signed in - save the notification address and open sign-in modal
+              console.log('🔔 User not signed in, saving notification address for priority');
+              this.saveNotificationAddress(normalizedToAddress);
+              return;
+            }
+            
+            // User is signed in - check if it's the right account
+            const isCurrentAccount = this.isCurrentAccount(normalizedToAddress);
+            /* showToast('isCurrentAccount: ' + isCurrentAccount, 10000, 'success');
+            showToast('data.to: ' + normalizedToAddress, 10000, 'success');
+            showToast('myData.account.keys.address: ' + myData.account.keys.address, 10000, 'success'); */
+            if (isCurrentAccount) {
+              // We're signed in to the account that received the notification
+              console.log('🔔 You are signed in to the account that received the message');
+              // TODO: Open chat modal when z-index issue is resolved
+              // chatModal.open(data.from);
+              /* showToast('You are signed in to the account that received the message', 5000, 'success'); */
+            } else {
+              // We're signed in to a different account, ask user what to do
+              const shouldSignOut = confirm('You received a message for a different account. Would you like to sign out to switch to that account?');
+              
+              if (shouldSignOut) {
+                // Sign out and save the notification address for priority
+                this.saveNotificationAddress(normalizedToAddress);
+                menuModal.handleSignOut();
+              } else {
+                // User chose to stay signed in, just save the address for next time
+                this.saveNotificationAddress(normalizedToAddress);
+                console.log('User chose to stay signed in - notified account will appear first next time');
+              }
+            }
           }
         } catch (error) {
           console.error('Error parsing message from React Native:', error);
@@ -11283,6 +11396,207 @@ class ReactNativeApp {
       });
     } catch (error) {
       console.warn('Error in keyboard detection:', error);
+    }
+  }
+
+  isCurrentAccount(recipientAddress) {
+    if (!myData || !myAccount) return false;
+    
+    // Check if the current user's address matches the recipient address
+    return myData.account.keys.address === recipientAddress;
+  }
+
+  saveNotificationAddress(contactAddress) {
+    localStorage.setItem('lastNotificationAddress', contactAddress);
+    console.log(` Saved notification address: ${contactAddress}`);
+  }
+
+  clearNotificationAddress() {
+    localStorage.removeItem('lastNotificationAddress');
+    console.log('🧹 Cleared notification address');
+  }
+
+  // Send navigation bar visibility
+  sendNavigationBarVisibility(visible) {
+    this.postMessage({
+      type: 'NAV_BAR',
+      visible
+    });
+  }
+
+  /**
+   * Handle native app subscription tokens and handle subscription
+   * This is used to subscribe to push notifications for the native app
+   * @returns {Promise<void>}
+   */
+  async handleNativeAppSubscribe() {
+    // Check if we're online before proceeding
+    if (!isOnline) {
+      console.log('handleNativeAppSubscribe: Device is offline, skipping subscription');
+      return;
+    }
+
+    let deviceToken = null;
+    let pushToken = null;
+
+    // if params in URL, get the device token and push token
+    if (window.location.search && window.location.search.includes('device_token') && window.location.search.includes('push_token')) {
+      const urlParams = new URLSearchParams(window.location.search);
+      deviceToken = urlParams.get('device_token');
+      pushToken = urlParams.get('push_token');
+    } else {
+      // if params not in URL, get the device token and push token from window
+      deviceToken = window.deviceToken || null;
+      pushToken = window.expoPushToken || null;
+    }
+    
+    if (deviceToken && pushToken) {
+      console.log('Native app subscription tokens detected:', { deviceToken, pushToken });
+      
+      try {
+        // Get the user's address from localStorage if available
+        const { netid } = network;
+        const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+        const netidAccounts = existingAccounts.netids[netid];
+        
+        let addresses = [];
+        if (netidAccounts?.usernames) {
+          // Get addresses from all stored accounts and convert to long format
+          addresses = Object.values(netidAccounts.usernames).map(account => longAddress(account.address));
+        }
+
+        if (addresses.length < 1) return;
+        
+        const payload = {
+          deviceToken,
+          expoPushToken: pushToken,
+          addresses: addresses
+        };
+        
+        // Get the appropriate gateway for this request
+        const selectedGateway = getGatewayForRequest();
+        if (!selectedGateway) {
+          console.error('No gateway available for subscription request');
+          showToast('No gateway available', 0, 'error');
+          return;
+        }
+        
+        const SUBSCRIPTION_API = `${selectedGateway.web}/notifier/subscribe`;
+
+        console.log('payload', payload);
+        console.log('SUBSCRIPTION_API', SUBSCRIPTION_API);
+        
+        const response = await fetch(SUBSCRIPTION_API, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload)
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          console.log('Subscription successful:', result);
+          /* showToast('Push notifications enabled', 3000, 'success'); */
+        } else {
+          console.error('Subscription failed:', response.status, response.statusText);
+          /* showToast('Failed to enable push notifications', 3000, 'error'); */
+        }
+      } catch (error) {
+        console.error('Error subscribing to push notifications:', error);
+        /* showToast('Error enabling push notifications', 3000, 'error'); */
+      }
+    }
+  }
+
+  /**
+   * Unsubscribe the native app from push notifications for the current account.
+   * If other accounts are on the device, it updates the subscription to only include them.
+   * If this is the last account, it fully unsubscribes the device.
+   */
+  async handleNativeAppUnsubscribe() {
+    // Check if we're online before proceeding
+    if (!isOnline) {
+      console.log('handleNativeAppUnsubscribe: Device is offline, skipping unsubscribe');
+      return;
+    }
+
+    let deviceToken = null;
+    let pushToken = null;
+
+    // if params in URL, get the device token and push token
+    if (window.location.search && window.location.search.includes('device_token') && window.location.search.includes('push_token')) {
+      const urlParams = new URLSearchParams(window.location.search);
+      deviceToken = urlParams.get('device_token');
+      pushToken = urlParams.get('push_token');
+    } else {
+      // if params not in URL, get the device token and push token from window
+      deviceToken = window.deviceToken || null;
+      pushToken = window.expoPushToken || null;
+    }
+
+    // cannot unsubscribe if no device token is provided
+    if (!deviceToken) return;
+
+    if (!myAccount || !myAccount.keys || !myAccount.keys.address) {
+      console.warn('handleNativeAppUnsubscribe called without an active account. Aborting.');
+      return;
+    }
+
+    const currentUserAddress = longAddress(myAccount.keys.address);
+
+    // Get all other stored addresses on this device for the current network.
+    const { netid } = network;
+    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    const netidAccounts = existingAccounts.netids[netid];
+    let allStoredAddresses = [];
+    if (netidAccounts?.usernames) {
+      allStoredAddresses = Object.values(netidAccounts.usernames).map(account => longAddress(account.address));
+    }
+
+    // Create a list of addresses to keep subscribed, excluding the current user.
+    const remainingAddresses = allStoredAddresses.filter(addr => addr !== currentUserAddress);
+
+    let payload;
+
+    if (remainingAddresses.length === 0) {
+      // This is the only account. Unsubscribe the device completely.
+      payload = {
+        deviceToken,
+        addresses: [],
+      };
+    } else {
+      // Other accounts remain. Update the subscription to only include them.
+      if (!pushToken) {
+        console.warn('Cannot update subscription for remaining accounts without a pushToken.');
+        return;
+      }
+      payload = {
+        deviceToken,
+        expoPushToken: pushToken,
+        addresses: remainingAddresses,
+      };
+    }
+
+    const selectedGateway = getGatewayForRequest();
+    if (!selectedGateway) {
+      console.error('No gateway available for unsubscribe request');
+      return;
+    }
+    const SUBSCRIPTION_API = `${selectedGateway.web}/notifier/subscribe`;
+
+    try {
+      const res = await fetch(SUBSCRIPTION_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        console.error('Unsubscribe failed:', res.status, res.statusText);
+      }
+    } catch (err) {
+      console.error('Error during unsubscribe:', err);
     }
   }
 }
@@ -11725,6 +12039,7 @@ function longPoll() {
   try {
     longPoll.start = getCorrectedTimestamp();
     const timestamp = myAccount.chatTimestamp || 0;
+    logsModal.log(`longPoll: using chatTimestamp=${timestamp}`);
 
     // call this with a promise that'll resolve with callback longPollResult function with the data
     const longPollPromise = queryNetwork(`/collector/api/poll?account=${longAddress(myAccount.keys.address)}&chatTimestamp=${timestamp}`);
@@ -11913,7 +12228,7 @@ class LocalStorageMonitor {
         localStorage.setItem(testKey, verifyData);
         localStorage.removeItem(testKey);
       } catch (e) {
-        // If verification fails, reduce by small amount and retry
+        // If verification fails, reduce by small amount
         maxCharacters = Math.max(0, maxCharacters - 1024);
       }
     }
@@ -11947,5 +12262,6 @@ class LocalStorageMonitor {
 
 // Create localStorage monitor instance
 const localStorageMonitor = new LocalStorageMonitor();
+
 
 
