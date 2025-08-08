@@ -1955,6 +1955,27 @@ input[type='file'].form-control {
   margin-bottom: 1.5rem;
 }
 
+#backupModal .checkbox-label {
+  display: flex;
+  align-items: center;
+  font-family: var(--font-primary);
+  font-size: var(--font-size-base);
+  color: var(--text-color);
+  cursor: pointer;
+  margin-bottom: 0;
+}
+
+#backupModal .checkbox-label input[type="checkbox"] {
+  margin-right: 8px;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+#backupModal .form-group {
+  margin-bottom: 1rem;
+}
+
 /* Remove Account Modal Styles */
 #removeAccountModal .form-container {
   display: flex;
@@ -2103,6 +2124,44 @@ input[type='file'].form-control {
   border: 1px solid #e0e0e0;
   border-radius: 8px;
   padding: 1rem;
+}
+
+/* Inconsistencies styles */
+.migrate-inconsistencies {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.migrate-inconsistencies h3 {
+  margin-bottom: 0.5rem;
+}
+
+.inconsistency-section {
+  margin-bottom: 1.5rem;
+}
+
+.inconsistency-section h4 {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+  color: var(--text-color);
+}
+
+.inconsistency-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 0.5rem;
+}
+
+.inconsistency-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background-color: var(--background-light);
+  border-radius: 6px;
+  font-size: 0.9rem;
 }
 
 .migrate-section h3 {
@@ -5150,7 +5209,7 @@ small {
 }
 
 #updateWarningModal .warning-content p:first-child {
-  color: #dc3545;
+  color: var(--danger-color);
   font-weight: bold;
 }
 
@@ -5160,11 +5219,40 @@ small {
 
 /* Make the "Continue to App Store" button red to emphasize danger */
 #updateWarningModal .secondary-button {
-  background-color: #dc3545;
+  background-color: var(--danger-color);
   color: white;
 }
 
 #updateWarningModal .secondary-button:hover {
-  background-color: #c82333;
+  background-color: var(--danger-color);
   opacity: 1;
+}
+
+/* Launch Modal specific styles */
+.launch-warning {
+  color: var(--danger-color);
+  font-weight: bold;
+  margin-bottom: 1rem;
+}
+
+.backup-section {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.backup-note {
+  margin-bottom: 1rem;
+  color: var(--text-color);
+}
+
+/* Launch Modal button styling */
+#launchModal .secondary-button {
+  background-color: var(--danger-color);
+  color: white;
+}
+
+#launchModal .secondary-button:hover {
+  background-color: var(--danger-color);
+  opacity: 0.9;
 }
