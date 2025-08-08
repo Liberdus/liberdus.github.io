@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -2057,7 +2057,12 @@ class SignInModal {
   }
 
   async handleRemoveAccount() {
-    removeAccountModal.removeAccount();
+    const username = this.usernameSelect.value;
+    if (!username) {
+      showToast('Please select an account to remove', 2000, 'warning');
+      return;
+    }
+    removeAccountModal.removeAccount(username);
   }
 
   isActive() {
@@ -4362,7 +4367,17 @@ class RemoveAccountModal {
     window.location.reload();
   }
 
-  removeAccount(username = myAccount.username) {
+  removeAccount(username = null) {
+    // Username must be provided explicitly - when called from sign-in modal, myAccount is not yet available
+    if (!username) {
+      // if myAccount is available and removeAccountModal is open, use myAccount.username
+      if(myAccount && this.isActive()) {
+        username = myAccount.username;
+      } else {
+        showToast('No account selected for removal', 0, 'error');
+        return;
+      }
+    }
     const confirmed = confirm(`Are you sure you want to remove the account "${username}" from this device?`);
     if (!confirmed) return;
     
@@ -4400,6 +4415,10 @@ class RemoveAccountModal {
     // Reload the page to redirect to welcome screen
     clearMyData();
     window.location.reload();
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
   }
 
   signout() {
@@ -5809,40 +5828,23 @@ class ValidatorStakingModal {
       const userStakedBaseUnits = userAccountData?.account?.operatorAccountInfo?.stake; // BigInt object
 
       const stakeRequiredUsd = networkAccountData?.account?.current?.stakeRequiredUsd; // BigInt object
-      const stabilityScaleMul = networkAccountData?.account?.current?.stabilityScaleMul; // number
-      const stabilityScaleDiv = networkAccountData?.account?.current?.stabilityScaleDiv; // number
 
       const marketPrice = await getMarketPrice(); // number or null
+      const stabilityFactor = getStabilityFactor(); // number
 
-      // Calculate Derived Values
-      let stabilityFactor = null;
-      if (stabilityScaleMul != null && stabilityScaleDiv != null && Number(stabilityScaleDiv) !== 0) {
-        stabilityFactor = Number(stabilityScaleMul) / Number(stabilityScaleDiv);
-      }
 
       let stakeAmountLibBaseUnits = null; // This will be a BigInt object or null
       if (
         stakeRequiredUsd != null &&
         typeof stakeRequiredUsd === 'bigint' &&
-        stabilityScaleMul != null &&
-        typeof stabilityScaleMul === 'number' &&
-        stabilityScaleDiv != null &&
-        typeof stabilityScaleDiv === 'number' &&
-        stabilityScaleDiv !== 0
+        stabilityFactor > 0
       ) {
         try {
-          // No need to parse stakeRequiredUsd from string, it's already a BigInt
-          const scaleMulBigInt = BigInt(stabilityScaleMul);
-          const scaleDivBigInt = BigInt(stabilityScaleDiv);
-          if (scaleMulBigInt !== 0n) {
-            stakeAmountLibBaseUnits = (stakeRequiredUsd * scaleDivBigInt) / scaleMulBigInt;
-          } else {
-            console.warn('Stability scale multiplier is zero, cannot calculate LIB stake amount.');
-          }
+          stakeAmountLibBaseUnits = bigxnum2big(stakeRequiredUsd, (1 / stabilityFactor).toString());
         } catch (e) {
           console.error('Error calculating stakeAmountLibBaseUnits with BigInt:', e, {
-            stabilityScaleMul,
-            stabilityScaleDiv,
+            stabilityFactor,
+            stakeRequiredUsd: stakeRequiredUsd.toString()
           });
         }
       }
@@ -7966,9 +7968,7 @@ console.warn('in send message', txid)
     const mainIsUSD = tollUnit === 'USD';
     const mainValue = parseFloat(big2str(toll, decimals));
     // Conversion factor (USD/LIB)
-    const scaleMul = parameters.current.stabilityScaleMul || 1;
-    const scaleDiv = parameters.current.stabilityScaleDiv || 1;
-    const factor = scaleDiv !== 0 ? scaleMul / scaleDiv : 1;
+    const factor = getStabilityFactor();
     let mainString, otherString;
     if (mainIsUSD) {
       toll = bigxnum2big(toll, (1.0 / factor).toString());
@@ -9083,9 +9083,7 @@ class SendAssetFormModal {
     const mainIsUSD = tollUnit === 'USD';
     const mainValue = parseFloat(big2str(toll, decimals));
     // Conversion factor (USD/LIB)
-    const scaleMul = parameters.current.stabilityScaleMul || 1;
-    const scaleDiv = parameters.current.stabilityScaleDiv || 1;
-    const factor = scaleDiv !== 0 ? scaleMul / scaleDiv : 1;
+    const factor = getStabilityFactor();
     let mainString, otherString;
     if (mainIsUSD) {
       toll = bigxnum2big(toll, (1.0 / factor).toString());
@@ -9329,9 +9327,7 @@ class SendAssetFormModal {
     if (this.tollInfo.required == 1) {
       if (this.memoInput.value.trim() != '') {
         console.log('checking if toll > amount');
-        const scaleMul = parameters.current.stabilityScaleMul || 1;
-        const scaleDiv = parameters.current.stabilityScaleDiv || 1;
-        const factor = scaleDiv !== 0 ? scaleMul / scaleDiv : 1;
+        const factor = getStabilityFactor();
         let amountInLIB = amount;
         let tollInLIB = this.tollInfo.toll;
         if (this.tollInfo.tollUnit !== 'LIB') {
