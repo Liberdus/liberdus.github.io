@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -12448,6 +12448,8 @@ class LocalStorageMonitor {
 const localStorageMonitor = new LocalStorageMonitor();
 
 function getStabilityFactor() {
-  return parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+  return parameters.current.stabilityScaleDiv / parameters.current.stabilityScaleMul;
+// need to change this back when we change the code to multiply by stabilityFactor where it was dividing and visa-versa
+//  return parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
 }
 
