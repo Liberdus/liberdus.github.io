@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -336,6 +336,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Setup keyboard adjustment for React Native WebView
   // adjustForKeyboard();
 
+  // React Native App
+  reactNativeApp.load();
+
   // Check for native app subscription tokens and handle subscription
   reactNativeApp.handleNativeAppSubscribe();
 
@@ -459,9 +462,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Launch Modal
   launchModal.load();
 
-  // React Native App
-  reactNativeApp.load();
-
   // LocalStorage Monitor
   localStorageMonitor.load();
 
@@ -528,6 +528,10 @@ function handleVisibilityChange() {
       if (currentCount !== chatModal.lastMessageCount) {
         chatModal.appendChatModal(true);
       }
+    }
+    // send message `GetAllPanelNotifications` to React Native when app is brought back to foreground
+    if (window?.ReactNativeWebView) {
+      reactNativeApp.fetchAllPanelNotifications();
     }
   }
 }
@@ -947,6 +951,9 @@ class ChatsScreen {
         while (retryCount <= maxRetries) {
           try {
             gotChats = await getChats(myAccount.keys);
+            if (gotChats > 0) {
+              saveState();
+            }
             break; // Success, exit the retry loop
           } catch (networkError) {
             retryCount++;
@@ -1308,6 +1315,7 @@ class MenuModal {
     }
 
     await reactNativeApp.handleNativeAppSubscribe();
+    reactNativeApp.sendClearNotifications();
 
     // Only reload if online
 //    window.location.reload();
@@ -1831,14 +1839,15 @@ class SignInModal {
       return;
     }
 
-    // Get the notified address and sort usernames to prioritize it
-    const notifiedAddress = localStorage.getItem('lastNotificationAddress');
+    // Get the notified addresses and sort usernames to prioritize them
+    const notifiedAddresses = reactNativeApp ? reactNativeApp.getNotificationAddresses() : [];
     let sortedUsernames = [...usernames];
     
-    if (notifiedAddress) {
-      // Find which username owns the notified address
+    // if there are notified addresses, sort the usernames to prioritize them
+    if (notifiedAddresses.length > 0) {
+      // Find which usernames own the notified addresses
       for (const [username, accountData] of Object.entries(netidAccounts.usernames)) {
-        if (accountData.address === notifiedAddress) {
+        if (notifiedAddresses.includes(accountData.address)) {
           // Move this username to the front
           sortedUsernames = sortedUsernames.filter(u => u !== username);
           sortedUsernames.unshift(username);
@@ -1847,12 +1856,12 @@ class SignInModal {
       }
     }
 
-    // Populate select with sorted usernames
+    // Populate select with sorted usernames and add an emoji to the username if it owns a notified address
     this.usernameSelect.innerHTML = `
       <option value="" disabled selected hidden>Select an account</option>
       ${sortedUsernames.map((username) => {
         // Check if this username owns the notified address
-        const isNotifiedAccount = notifiedAddress && netidAccounts.usernames[username]?.address === notifiedAddress;
+        const isNotifiedAccount = notifiedAddresses.includes(netidAccounts.usernames[username]?.address);
         const dotIndicator = isNotifiedAccount ? ' 🔔' : '';
         return `<option value="${username}">${username}${dotIndicator}</option>`;
       }).join('')}
@@ -1976,9 +1985,15 @@ class SignInModal {
     this.close();
     welcomeScreen.close();
     
-    // Clear any notification address since user has signed in
+    // Clear notification address only if signing into account that owns the notification address and only remove that account from the array 
     if (reactNativeApp) {
-      reactNativeApp.clearNotificationAddress();
+      logsModal.log('About to clear', myAccount.keys.address);
+      const notifiedAddresses = reactNativeApp.getNotificationAddresses();
+      if (notifiedAddresses.length > 0) {
+        logsModal.log('Clearing notification address for', myAccount.keys.address);
+        // remove address if it's in the array
+        reactNativeApp.clearNotificationAddress(myAccount.keys.address);
+      }
     }
     
     await footer.switchView('chats'); // Default view
@@ -3386,13 +3401,10 @@ async function injectTx(tx, txid) {
         pendingTxData.friend = tx.friend;
       } else if (tx.type === 'read') {
         pendingTxData.oldContactTimestamp = tx.oldContactTimestamp;
-      } else if (
-        tx.type === 'message' ||
-        tx.type === 'transfer' ||
-        tx.type === 'deposit_stake' ||
-        tx.type === 'withdraw_stake'
-      ) {
+      } else if (tx.type === 'message' || tx.type === 'transfer') {
         pendingTxData.to = normalizeAddress(tx.to);
+      } else if (tx.type === 'deposit_stake' || tx.type === 'withdraw_stake') {
+        pendingTxData.to = tx.nominee; // Store 64-character address as-is for stake transactions
       }
       myData.pending.push(pendingTxData);
     } else {
@@ -3414,6 +3426,10 @@ async function injectTx(tx, txid) {
     }
     console.error('Error injecting transaction:', error);
     return null;
+  } finally {
+    setTimeout(() => {
+      saveState();
+    }, 1000);
   }
 }
 
@@ -4403,14 +4419,12 @@ class BackupAccountModal {
     this.passwordConfirmInput = document.getElementById('backupPasswordConfirm');
     this.passwordConfirmWarning = document.getElementById('backupPasswordConfirmWarning');
     this.submitButton = document.getElementById('backupForm').querySelector('button[type="submit"]');
+    this.backupAllAccountsCheckbox = document.getElementById('backupAllAccounts');
+    this.backupAllAccountsGroup = document.getElementById('backupAllAccountsGroup');
     
     document.getElementById('closeBackupForm').addEventListener('click', () => this.close());
     document.getElementById('backupForm').addEventListener('submit', (event) => {
-      if (myData) {
-        this.handleSubmitOne(event);
-      } else {
-        this.handleSubmitAll(event);
-      }
+      this.handleSubmit(event);
     });
     
     // Add password validation on input with debounce
@@ -4422,6 +4436,18 @@ class BackupAccountModal {
   open() {
     // called when the modal needs to be opened
     this.modal.classList.add('active');
+    
+    // Show/hide checkbox based on login status
+    if (myData) {
+      // User is signed in - show checkbox
+      this.backupAllAccountsGroup.style.display = 'block';
+      this.backupAllAccountsCheckbox.checked = false; // Default to current account
+    } else {
+      // User is not signed in - hide checkbox but default to all accounts
+      this.backupAllAccountsGroup.style.display = 'none';
+      this.backupAllAccountsCheckbox.checked = true; // Default to all accounts
+    }
+    
     this.updateButtonState();
   }
 
@@ -4431,6 +4457,8 @@ class BackupAccountModal {
     // Clear passwords for security
     this.passwordInput.value = '';
     this.passwordConfirmInput.value = '';
+    // Reset checkbox
+    this.backupAllAccountsCheckbox.checked = false;
   }
 
   /**
@@ -4452,6 +4480,23 @@ class BackupAccountModal {
       return `liberdus-${username}-${dateStr}-${timeStr}-${networkIdPrefix}.json`;
     } else {
       return `liberdus-${dateStr}-${timeStr}-${networkIdPrefix}.json`;
+    }
+  }
+
+  /**
+   * Handle the form submission based on checkbox state.
+   * @param {Event} event - The event object.
+   */
+  async handleSubmit(event) {
+    event.preventDefault();
+
+    // Determine which backup method to use
+    if (myData && !this.backupAllAccountsCheckbox.checked) {
+      // User is signed in and wants to backup only current account
+      await this.handleSubmitOne(event);
+    } else {
+      // User wants to backup all accounts (either not signed in or checkbox checked)
+      await this.handleSubmitAll(event);
     }
   }
 
@@ -4960,7 +5005,7 @@ class TollModal {
     this.currentCurrency = this.currentCurrency === 'LIB' ? 'USD' : 'LIB';
     this.tollCurrencySymbol.textContent = this.currentCurrency;
 
-    const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+    const scalabilityFactor = getStabilityFactor();
     if (this.newTollAmountInputElement.value !== '') {
       const currentValue = parseFloat(this.newTollAmountInputElement.value);
       const convertedValue =
@@ -5004,7 +5049,7 @@ class TollModal {
         return;
       }
       if (this.currentCurrency === 'USD') {
-        const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+        const scalabilityFactor = getStabilityFactor();
         const newTollLIB = bigxnum2big(newToll, (1 / scalabilityFactor).toString());
         if (newTollLIB < this.minToll) {
           const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
@@ -5022,7 +5067,7 @@ class TollModal {
       }
     } else {
       // For USD, convert the max toll to USD for comparison
-      const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+      const scalabilityFactor = getStabilityFactor();
       const maxTollUSD = MAX_TOLL * scalabilityFactor;
       if (newTollValue > maxTollUSD) {
         showToast(`Toll cannot exceed ${maxTollUSD.toFixed(2)} USD`, 0, 'error');
@@ -5053,7 +5098,7 @@ class TollModal {
    * @returns {void}
    */
   updateTollDisplay(toll, tollUnit) {
-    const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+    const scalabilityFactor = getStabilityFactor();
     let tollValueLib = '';
     let tollValueUSD = '';
 
@@ -5142,7 +5187,7 @@ class TollModal {
         return `Toll must be at least ${parseFloat(big2str(this.minToll, 18)).toFixed(6)} LIB or 0 LIB`;
       }
     } else {
-      const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+      const scalabilityFactor = getStabilityFactor();
       const newTollLIB = bigxnum2big(newToll, (1 / scalabilityFactor).toString());
       if (newTollLIB < this.minToll) {
         const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
@@ -5477,8 +5522,9 @@ class LogsModal {
     this.logsTextarea.value = this.data;
     this.logsTextarea.scrollTop = this.logsTextarea.scrollHeight;
   }
-
-  log(s) {
+  
+  log(...args) {
+    const s = args.join(' ');
     try {
       this.data += s + '\n\n';
       localStorage.setItem('logs', this.data);
@@ -8360,13 +8406,16 @@ class CreateAccountModal {
     this.togglePrivateKeyVisibility = document.getElementById('togglePrivateKeyVisibility');
     this.migrateAccountsSection = document.getElementById('migrateAccountsSection');
     this.migrateAccountsButton = document.getElementById('migrateAccountsButton');
-    this.launchSection = document.getElementById('launchSection');
     this.launchButton = document.getElementById('launchButton');
+    this.updateButton = document.getElementById('updateButton');
+    this.toggleMoreOptions = document.getElementById('toggleMoreOptions');
+    this.moreOptionsSection = document.getElementById('moreOptionsSection');
 
     // Setup event listeners
     this.form.addEventListener('submit', (e) => this.handleSubmit(e));
     this.usernameInput.addEventListener('input', (e) => this.handleUsernameInput(e));
     this.toggleButton.addEventListener('change', () => this.handleTogglePrivateKeyInput());
+    this.toggleMoreOptions.addEventListener('change', () => this.handleToggleMoreOptions());
     this.backButton.addEventListener('click', () => this.closeWithReload());
 
     // Add listener for the password visibility toggle
@@ -8380,9 +8429,12 @@ class CreateAccountModal {
 
     this.migrateAccountsButton.addEventListener('click', async () => await migrateAccountsModal.open());
     if (window.ReactNativeWebView) {
-      this.launchSection.style.display = 'block';
       this.launchButton.addEventListener('click', () => {
         launchModal.open()
+      });
+      
+      this.updateButton.addEventListener('click', () => {
+        aboutModal.openStore();
       });
     }
   }
@@ -8418,6 +8470,14 @@ class CreateAccountModal {
     this.privateKeyInput.value = '';
     this.usernameAvailable.style.display = 'none';
     this.privateKeyError.style.display = 'none';
+    
+    // Reset More Options section
+    this.toggleMoreOptions.checked = false;
+    this.moreOptionsSection.style.display = 'none';
+    this.toggleButton.checked = false;
+    this.privateKeySection.style.display = 'none';
+    this.launchButton.style.display = 'none';
+    this.updateButton.style.display = 'none';
     
     // Open the modal
     this.open();
@@ -8481,6 +8541,25 @@ class CreateAccountModal {
     
     if (!isChecked) {
       this.privateKeyError.style.display = 'none';
+    }
+  }
+  
+  handleToggleMoreOptions() {
+    const isChecked = this.toggleMoreOptions.checked;
+    this.moreOptionsSection.style.display = isChecked ? 'block' : 'none';
+    
+    if (!isChecked) {
+      // Reset private key options when more options is unchecked
+      this.toggleButton.checked = false;
+      // Hide private key section if More Options is unchecked
+      this.privateKeySection.style.display = 'none';
+      this.privateKeyInput.value = '';
+      this.privateKeyError.style.display = 'none';
+      this.launchButton.style.display = 'none';
+      this.updateButton.style.display = 'none';
+    } else if (window.ReactNativeWebView) {
+      this.launchButton.style.display = 'block';
+      this.updateButton.style.display = 'block';
     }
   }
 
@@ -9066,7 +9145,7 @@ class SendAssetFormModal {
     const cancelButton = sendAssetConfirmModal.cancelButton;
 
     await getNetworkParams();
-    const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+    const scalabilityFactor = getStabilityFactor();
 
     // get `usdAmount` and `libAmount`
     let usdAmount;
@@ -9115,7 +9194,7 @@ class SendAssetFormModal {
     const isUSD = this.balanceSymbol.textContent === 'USD';
 
     if (isUSD) {
-      const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+      const scalabilityFactor = getStabilityFactor();
       // Convert to USD before displaying
       this.amountInput.value = (parseFloat(maxAmountStr) * scalabilityFactor).toString();
     } else {
@@ -9160,7 +9239,7 @@ class SendAssetFormModal {
 
     await getNetworkParams();
     const txFeeInLIB = parameters.current.transactionFee || 1n * wei;
-    const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+    const scalabilityFactor = getStabilityFactor();
 
     // Preserve the current toggle state (LIB/USD) instead of overwriting it
     const currentSymbol = this.balanceSymbol.textContent;
@@ -9220,7 +9299,7 @@ class SendAssetFormModal {
     let amountForValidation = amount;
     if (isUSD && amount) {
       await getNetworkParams();
-      const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+      const scalabilityFactor = getStabilityFactor();
       amountForValidation = parseFloat(amount) / scalabilityFactor;
     }
 
@@ -9289,7 +9368,7 @@ class SendAssetFormModal {
 
     // get the scalability factor for LIB/USD conversion
     await getNetworkParams();
-    const scalabilityFactor = parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+    const scalabilityFactor = getStabilityFactor();
 
     // Get the raw values in LIB format
     const asset = myData.wallet.assets[this.assetSelectDropdown.value];
@@ -11159,9 +11238,11 @@ class LaunchModal {
     this.launchForm = document.getElementById('launchForm');
     this.urlInput = this.modal.querySelector('#url');
     this.launchButton = this.modal.querySelector('button[type="submit"]');
+    this.backupButton = this.modal.querySelector('#launchModalBackupButton');
     this.closeButton.addEventListener('click', () => this.close());
     this.launchForm.addEventListener('submit', (event) => this.handleSubmit(event));
     this.urlInput.addEventListener('input', () => this.updateButtonState());
+    this.backupButton.addEventListener('click', () => backupAccountModal.open());
   }
 
   open() {
@@ -11227,6 +11308,8 @@ class ReactNativeApp {
   constructor() {
     this.isReactNativeWebView = this.checkIfReactNativeWebView();
     this.appVersion = null;
+    this.deviceToken = null;
+    this.expoPushToken = null;
   }
 
   load() {
@@ -11237,6 +11320,7 @@ class ReactNativeApp {
       window.addEventListener('message', (event) => {
         try {
           const data = JSON.parse(event.data);
+          logsModal.log('📱 Received message type from React Native:', data.type);
 
           if (data.type === 'background') {
             this.handleNativeAppSubscribe();
@@ -11258,11 +11342,11 @@ class ReactNativeApp {
             this.detectKeyboardOverlap(data.keyboardHeight);
           }
 
-          if (data.type === 'INITIAL_APP_PARAMS') {
-            console.log('📱 Received initial app parameters:', data.data);
+          if (data.type === 'APP_PARAMS') {
+            logsModal.log('📱 Received app parameters:', data.data);
             // Handle app version
             if (data?.data?.appVersion) {
-              console.log('📱 App version:', data.data.appVersion);
+              logsModal.log('📱 App version:', data.data.appVersion);
               this.appVersion = data.data.appVersion || `N/A`
               // Update the welcome screen to display the app version
               welcomeScreen.updateAppVersionDisplay(this.appVersion); 
@@ -11270,19 +11354,26 @@ class ReactNativeApp {
             }
             // Handle device tokens
             if (data.data.deviceToken) {
-              console.log('📱 Device token received');
+              logsModal.log('📱 Device token received');
               // Store device token for push notifications
-              window.deviceToken = data.data.deviceToken;
+              this.deviceToken = data.data.deviceToken;
             }
             if (data.data.expoPushToken) {
-              console.log('📱 Expo push token received');
+              logsModal.log('📱 Expo push token received');
               // Store expo push token for push notifications
-              window.expoPushToken = data.data.expoPushToken;
+              this.expoPushToken = data.data.expoPushToken;
             }
+            this.handleNativeAppSubscribe();
+          }
+
+          if (data.type === 'NEW_NOTIFICATION') {
+            logsModal.log('🔔 New notification received!');
+            // fetch all notifications
+            this.fetchAllPanelNotifications();
           }
 
           if (data.type === 'NOTIFICATION_TAPPED') {
-            console.log('🔔 Notification tapped, opening chat with:', data.to);
+            logsModal.log('🔔 Notification tapped, opening chat with:', data.to);
 
             // normalize the address
             const normalizedToAddress = normalizeAddress(data.to);
@@ -11290,7 +11381,7 @@ class ReactNativeApp {
             // Check if user is signed in
             if (!myData || !myAccount) {
               // User is not signed in - save the notification address and open sign-in modal
-              console.log('🔔 User not signed in, saving notification address for priority');
+              logsModal.log('🔔 User not signed in, saving notification address for priority');
               this.saveNotificationAddress(normalizedToAddress);
               // If the user clicks on a notification and the app is already on the SignIn modal, we need to refresh the SignIn modal to have the bell emoji and new ordering to appear.
               if (signInModal.isActive()) {
@@ -11307,29 +11398,60 @@ class ReactNativeApp {
             showToast('myData.account.keys.address: ' + myData.account.keys.address, 10000, 'success'); */
             if (isCurrentAccount) {
               // We're signed in to the account that received the notification
-              console.log('🔔 You are signed in to the account that received the message');
+              logsModal.log('🔔 You are signed in to the account that received the message');
               // TODO: Open chat modal when z-index issue is resolved
               // chatModal.open(data.from);
               /* showToast('You are signed in to the account that received the message', 5000, 'success'); */
             } else {
               // We're signed in to a different account, ask user what to do
               const shouldSignOut = confirm('You received a message for a different account. Would you like to sign out to switch to that account?');
-              
+              this.saveNotificationAddress(normalizedToAddress);
               if (shouldSignOut) {
                 // Sign out and save the notification address for priority
-                this.saveNotificationAddress(normalizedToAddress);
                 menuModal.handleSignOut();
               } else {
                 // User chose to stay signed in, just save the address for next time
-                this.saveNotificationAddress(normalizedToAddress);
-                console.log('User chose to stay signed in - notified account will appear first next time');
+                logsModal.log('User chose to stay signed in - notified account will appear first next time');
               }
             }
           }
+
+          if (data.type === 'ALL_NOTIFICATIONS_IN_PANEL') {
+            logsModal.log('📋 Received all panel notifications:', JSON.stringify(data.notifications));
+            
+            if (data.notifications && Array.isArray(data.notifications) && data.notifications.length > 0) {
+              let processedCount = 0;
+              data.notifications.forEach((notification, index) => {
+                try {
+                  // Extract address from notification body text
+                  if (notification?.body && typeof notification.body === 'string') {
+                    // Look for pattern "to 0x..." in the body
+                    // expecting to just return one address
+                    const addressMatch = notification.body.match(/to\s+(\S+)/);
+                    if (addressMatch && addressMatch[1]) {
+                      const normalizedToAddress = normalizeAddress(addressMatch[1]);
+                      this.saveNotificationAddress(normalizedToAddress);
+                      processedCount++;
+                      logsModal.log(`📋 Extracted address from notification ${index}: ${normalizedToAddress}`);
+                    }
+                  }
+                } catch (error) {
+                  console.warn(`📋 Error processing notification ${index}:`, error);
+                }
+              });
+              logsModal.log(`📋 Processed ${processedCount}/${data.notifications.length} notifications`);
+            } else {
+              logsModal.log('📋 No valid notifications received');
+            }
+          }
         } catch (error) {
-          console.error('Error parsing message from React Native:', error);
+          logsModal.error('Error parsing message from React Native:', error);
         }
       });
+      
+      this.fetchAppParams();
+      // send message `GetAllPanelNotifications` to React Native when app is opened during DOMContentLoaded
+      this.fetchAllPanelNotifications();
     }
   }
 
@@ -11347,6 +11469,21 @@ class ReactNativeApp {
         console.warn('Failed to post message to React Native:', error);
       }
     }
+  }
+
+  // Fetch App Params from React Native
+  fetchAppParams() {
+    this.postMessage({
+      type: 'APP_PARAMS'
+    });
+  }
+
+  // fetch all panel notifications
+  fetchAllPanelNotifications() {
+    logsModal.log('Sending message `GetAllPanelNotifications` to React Native');
+    this.postMessage({
+      type: 'GetAllPanelNotifications',
+    });
   }
 
   captureInitialViewportHeight() {
@@ -11409,14 +11546,43 @@ class ReactNativeApp {
     return myData.account.keys.address === recipientAddress;
   }
 
+  /**
+   * Save the notification address to localStorage array of addresses
+   * @param {string} contactAddress - The address of the contact to save
+   */
   saveNotificationAddress(contactAddress) {
-    localStorage.setItem('lastNotificationAddress', contactAddress);
-    console.log(` Saved notification address: ${contactAddress}`);
+    if (!contactAddress || typeof contactAddress !== 'string') return;
+    
+    try {
+      const addresses = this.getNotificationAddresses();
+      if (!addresses.includes(contactAddress)) {
+        addresses.push(contactAddress);
+        localStorage.setItem('lastNotificationAddresses', JSON.stringify(addresses));
+        console.log(`✅ Saved notification address: ${contactAddress}`);
+      }
+    } catch (error) {
+      console.error('❌ Error saving notification address:', error);
+    }
   }
 
-  clearNotificationAddress() {
-    localStorage.removeItem('lastNotificationAddress');
-    console.log('🧹 Cleared notification address');
+  /**
+   * Clear only selected address from the array
+   * @param {string} address - The address to clear
+   */
+  clearNotificationAddress(address) {
+    if (!address || typeof address !== 'string') return;
+    
+    try {
+      const addresses = this.getNotificationAddresses();
+      const index = addresses.indexOf(address);
+      if (index !== -1) {
+        addresses.splice(index, 1);
+        localStorage.setItem('lastNotificationAddresses', JSON.stringify(addresses));
+        console.log(`✅ Cleared notification address: ${address}`);
+      }
+    } catch (error) {
+      console.error('❌ Error clearing notification address:', error);
+    }
   }
 
   // Send navigation bar visibility
@@ -11425,6 +11591,30 @@ class ReactNativeApp {
       type: 'NAV_BAR',
       visible
     });
+  }
+
+  // Send clear notifications message
+  sendClearNotifications() {
+    this.postMessage({
+      type: 'CLEAR_NOTI'
+    });
+  }
+
+  /**
+   * Safely retrieve notification addresses from localStorage
+   * @returns {Array} Array of notification addresses, empty array if none or error
+   */
+  getNotificationAddresses() {
+    try {
+      const stored = localStorage.getItem('lastNotificationAddresses');
+      if (!stored) return [];
+      
+      const parsed = parse(stored);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      console.warn('⚠️ Failed to parse notification addresses:', error);
+      return [];
+    }
   }
 
   /**
@@ -11439,19 +11629,9 @@ class ReactNativeApp {
       return;
     }
 
-    let deviceToken = null;
-    let pushToken = null;
+    const deviceToken = this.deviceToken || null;
+    const pushToken = this.expoPushToken || null;
 
-    // if params in URL, get the device token and push token
-    if (window.location.search && window.location.search.includes('device_token') && window.location.search.includes('push_token')) {
-      const urlParams = new URLSearchParams(window.location.search);
-      deviceToken = urlParams.get('device_token');
-      pushToken = urlParams.get('push_token');
-    } else {
-      // if params not in URL, get the device token and push token from window
-      deviceToken = window.deviceToken || null;
-      pushToken = window.expoPushToken || null;
-    }
     
     if (deviceToken && pushToken) {
       console.log('Native app subscription tokens detected:', { deviceToken, pushToken });
@@ -11530,19 +11710,8 @@ class ReactNativeApp {
       return;
     }
 
-    let deviceToken = null;
-    let pushToken = null;
-
-    // if params in URL, get the device token and push token
-    if (window.location.search && window.location.search.includes('device_token') && window.location.search.includes('push_token')) {
-      const urlParams = new URLSearchParams(window.location.search);
-      deviceToken = urlParams.get('device_token');
-      pushToken = urlParams.get('push_token');
-    } else {
-      // if params not in URL, get the device token and push token from window
-      deviceToken = window.deviceToken || null;
-      pushToken = window.expoPushToken || null;
-    }
+    const deviceToken = this.deviceToken || null;
+    const pushToken = this.expoPushToken || null;
 
     // cannot unsubscribe if no device token is provided
     if (!deviceToken) return;
@@ -11669,6 +11838,8 @@ async function checkPendingTransactions() {
   }
 
   if (myData.pending.length === 0) return; // No pending transactions to check
+
+  const startingPendingCount = myData.pending.length;
 
   console.log(`checking pending transactions (${myData.pending.length})`);
   const now = getCorrectedTimestamp();
@@ -11823,6 +11994,11 @@ async function checkPendingTransactions() {
   // if createAccountModal is open, skip balance change
   if (!createAccountModal.isActive()) {
     walletScreen.updateWalletBalances();
+  }
+
+  // save state if pending transactions were processed
+  if (startingPendingCount !== myData.pending.length) {
+    saveState();
   }
 }
 
@@ -12271,5 +12447,7 @@ class LocalStorageMonitor {
 // Create localStorage monitor instance
 const localStorageMonitor = new LocalStorageMonitor();
 
-
+function getStabilityFactor() {
+  return parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+}
 
