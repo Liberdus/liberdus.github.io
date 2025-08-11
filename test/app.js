@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'a'
+const version = 'b'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -704,8 +704,10 @@ class WelcomeScreen {
       this.welcomeButtons.appendChild(this.signInButton);
       this.welcomeButtons.appendChild(this.createAccountButton);
       this.welcomeButtons.appendChild(this.importAccountButton);
-      this.signInButton.classList.add('primary-button');
-      this.signInButton.classList.remove('secondary-button');
+      this.signInButton.classList.add('btn--primary');
+      this.signInButton.classList.remove('btn--secondary');
+      this.createAccountButton.classList.remove('btn--primary');
+      this.createAccountButton.classList.add('btn--secondary');
       this.openBackupModalButton.classList.remove('hidden');
       this.welcomeButtons.appendChild(this.openBackupModalButton);
     } else {
@@ -714,8 +716,8 @@ class WelcomeScreen {
       this.importAccountButton.classList.remove('hidden');
       this.welcomeButtons.appendChild(this.createAccountButton);
       this.welcomeButtons.appendChild(this.importAccountButton);
-      this.createAccountButton.classList.add('primary-button');
-      this.createAccountButton.classList.remove('secondary-button');
+      this.createAccountButton.classList.remove('btn--secondary');
+      this.createAccountButton.classList.add('btn--primary')
       this.openBackupModalButton.classList.remove('hidden');
       this.welcomeButtons.appendChild(this.openBackupModalButton);
     }
@@ -5579,7 +5581,7 @@ class MyProfileModal {
     this.linkedin = document.getElementById('linkedin');
     this.x = document.getElementById('x');
     this.accountForm = document.getElementById('accountForm');
-    this.submitButton = document.querySelector('#accountForm .update-button');
+    this.submitButton = document.querySelector('#accountForm .btn.btn--primary');
 
     this.closeButton.addEventListener('click', () => this.close());
     this.accountForm.addEventListener('submit', (event) => this.handleSubmit(event));
@@ -11287,7 +11289,7 @@ class UnlockModal {
     this.closeButton = document.getElementById('closeUnlockModal');
     this.unlockForm = document.getElementById('unlockForm');
     this.passwordInput = this.modal.querySelector('#password');
-    this.unlockButton = this.modal.querySelector('.update-button');
+    this.unlockButton = this.modal.querySelector('.btn.btn--primary');
 
     this.closeButton.addEventListener('click', () => this.close());
     this.unlockForm.addEventListener('submit', (event) => this.handleSubmit(event));
