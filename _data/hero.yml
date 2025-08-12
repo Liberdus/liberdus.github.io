@@ -3,8 +3,8 @@ tagline: "Liberdus"
 maintext: "Hard money worth chatting about."
   
 
-closeemphasis: "Hard money worth chatting about."
-restofclose: "Hard money worth chatting about."
+closeemphasis: ""
+restofclose: "A decentralized texting app with a fixed supply utility coin."
 button1:
   href: '#intro'
   text: Learn more&nbsp;<i class="fa fa-angle-down"></i> 
