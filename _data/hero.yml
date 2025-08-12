@@ -4,7 +4,7 @@ maintext: "Hard money worth chatting about."
   
 
 closeemphasis: ""
-restofclose: "A decentralized chat app with a fixed supply utility coin."
+restofclose: "A decentralized chat app with a fixed supply utility token."
 button1:
   href: '#intro'
   text: Learn more&nbsp;<i class="fa fa-angle-down"></i> 
