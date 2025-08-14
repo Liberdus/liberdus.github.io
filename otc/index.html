@@ -16,7 +16,7 @@
       href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css"
     />
     <!-- Core styles -->
-    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/styles.css?v=2025.08.14.10.52" />
     <!-- Component-specific styles -->
     <link rel="stylesheet" href="css/components/forms.css" />
     <link rel="stylesheet" href="css/components/orders.css" />
@@ -34,7 +34,7 @@
       }
     </script>
     <!-- Main application entry point -->
-    <script type="module" src="js/app.js" defer></script>
+    <script type="module" src="js/app.js?v=2025.08.14.10.52" defer></script>
   </head>
   <!-- Body contains the main application structure -->
   <body>
@@ -46,7 +46,7 @@
           <div class="logo-container">
             <img src="assets/1.png" alt="LiberSwap Logo" class="logo-image" />
             <h1>LiberOTCSwap</h1>
-            <span class="version">v1.0.25</span>
+            <span class="version">v1.0.26</span>
           </div>
         </div>
         <!-- Theme toggle and wallet connection controls -->
@@ -250,20 +250,20 @@
         <div class="content-wrapper card">
           <!-- Navigation tabs for different sections -->
           <nav class="nav-tabs">
-            <button class="tab-button active" data-tab="create-order">
+            <button class="tab-button active" data-tab="create-order" style="display: none;">
               Create Order
             </button>
-            <button class="tab-button" data-tab="view-orders">
+            <button class="tab-button" data-tab="view-orders" style="display: none;">
               View Orders
             </button>
-            <button class="tab-button" data-tab="my-orders">My Orders</button>
-            <button class="tab-button" data-tab="taker-orders">
+            <button class="tab-button" data-tab="my-orders" style="display: none;">My Orders</button>
+            <button class="tab-button" data-tab="taker-orders" style="display: none;">
               Invited Orders
             </button>
-            <button class="tab-button" data-tab="cleanup-orders">
+            <button class="tab-button" data-tab="cleanup-orders" style="display: none;">
               Cleanup
             </button>
-            <button class="tab-button" data-tab="contract-params">
+            <button class="tab-button" data-tab="contract-params" style="display: none;">
               Parameters
             </button>
           </nav>

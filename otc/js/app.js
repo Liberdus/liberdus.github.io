@@ -23,14 +23,19 @@ class App {
         this.warn = logger.warn.bind(logger);
 
         this.debug('App constructor called');
+    }
+
+    async load () {
+        this.debug('Loading app components...');
+
+        await this.initializeWalletManager();
+        await this.initializePricingService();
+        await this.initializeWebSocket();
         
         // Initialize CreateOrder first
         this.components = {
             'create-order': new CreateOrder()
         };
-        
-        // Render CreateOrder immediately
-        this.components['create-order'].initialize();
         
         // Then initialize other components that might depend on CreateOrder's DOM elements
         this.components = {
@@ -51,7 +56,7 @@ class App {
             await this.connectWallet();
         };
 
-        // Handle other components
+        // Fallback for rendering components that are not CreateOrder, ViewOrders, TakerOrders, WalletUI, or Cleanup
         Object.entries(this.components).forEach(([id, component]) => {
             if (component instanceof BaseComponent && 
                 !(component instanceof CreateOrder) && 
@@ -123,24 +128,34 @@ class App {
         this.updateTabVisibility = (isConnected) => {
             const tabButtons = document.querySelectorAll('.tab-button');
             tabButtons.forEach(button => {
-                if (button.dataset.tab === 'create-order') return; // Always show create-order
-                button.style.display = isConnected ? 'block' : 'none';
+                // always show view-orders, cleanup-orders, contract-params
+                if (button.dataset.tab === 'view-orders' || button.dataset.tab === 'cleanup-orders' || button.dataset.tab === 'contract-params') {
+                    button.style.display = 'block';
+                } else {
+                    button.style.display = isConnected ? 'block' : 'none';
+                }
             });
             
             // If disconnected and not on create-order tab, switch to it
-            if (!isConnected && this.currentTab !== 'create-order') {
-                this.showTab('create-order');
+            if (!isConnected && this.currentTab !== 'view-orders') {
+                this.showTab('view-orders');
             }
         };
 
         // Update initial tab visibility
         this.updateTabVisibility(false);
 
-        // Add this to your existing JavaScript
-        document.querySelector('.taker-toggle').addEventListener('click', function() {
-            this.classList.toggle('active');
-            document.querySelector('.taker-input-content').classList.toggle('hidden');
-        });
+        // Initialize taker orders toggle
+        const takerToggle = document.querySelector('.taker-toggle');
+        if (takerToggle) {
+            takerToggle.addEventListener('click', function() {
+                this.classList.toggle('active');
+                const takerInputContent = document.querySelector('.taker-input-content');
+                if (takerInputContent) {
+                    takerInputContent.classList.toggle('hidden');
+                }
+            });
+        }
 
         // Add new property to track WebSocket readiness
         this.wsInitialized = false;
@@ -155,8 +170,10 @@ class App {
         `;
         document.body.appendChild(this.loadingOverlay);
 
-        // Keep main content hidden initially
-        mainContent.style.display = 'none';
+        // Show main content after initialization
+        if (mainContent) {
+            mainContent.style.display = 'block';
+        }
 
         // Initialize theme handling
         this.initializeTheme();
@@ -203,6 +220,20 @@ class App {
             reinitializeComponents(window.ethereum.selectedAddress);
         });
 
+        await window.webSocket.syncAllOrders();
+
+        // Initialize components in read-only mode initially
+        const readOnlyMode = !window.walletManager?.provider;
+        await this.initializeComponents(readOnlyMode);
+        
+        // Show the initial tab (view-orders) in read-only mode
+        await this.showTab('view-orders');
+        
+        // Remove loading overlay after initialization
+        if (this.loadingOverlay && this.loadingOverlay.parentElement) {
+            this.loadingOverlay.remove();
+        }
+
         this.lastDisconnectNotification = 0;
     }
 
@@ -223,7 +254,9 @@ class App {
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.shiftKey && e.key === 'D') {
                 const panel = document.querySelector('.debug-panel');
-                panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+                if (panel) {
+                    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+                }
             }
         });
 
@@ -247,62 +280,53 @@ class App {
         });
     }
 
-    async initialize() {
-        if (this.isInitializing) {
-            console.log('[App] Already initializing, skipping...');
-            return;
-        }
-
-        this.isInitializing = true;
+    async initializeWalletManager() {
         try {
-            this.debug('Starting initialization...');
-            
-            // Add this line at the start
-            const mainContent = document.querySelector('.main-content');
-            
+            this.debug('Initializing wallet manager...');
             window.walletManager = walletManager;
             await walletManager.init(true);
-            
+            this.debug('Wallet manager initialized');
+        } catch (error) {
+            this.debug('Wallet manager initialization error:', error);
+        }
+    }
+
+    async initializePricingService() {
+        try {
+            this.debug('Initializing pricing service...');
             // Initialize PricingService first and make it globally available
             window.pricingService = new PricingService();
             await window.pricingService.initialize();
-            
+            this.debug('Pricing service initialized');
+        } catch (error) {
+            this.debug('Pricing service initialization error:', error);
+        }
+    }
+
+    async initializeWebSocket() {
+        try {
+            this.debug('Initializing WebSocket...');
             // Initialize WebSocket with the global pricingService
-            window.webSocket = new WebSocketService({ 
-                pricingService: window.pricingService 
+            window.webSocket = new WebSocketService({
+                pricingService: window.pricingService
             });
-            
+
             // Subscribe to orderSyncComplete event before initialization
             window.webSocket.subscribe('orderSyncComplete', () => {
                 this.wsInitialized = true;
                 this.loadingOverlay.remove();
                 this.debug('WebSocket order sync complete, showing content');
             });
-            
+
             const wsInitialized = await window.webSocket.initialize();
             if (!wsInitialized) {
                 this.debug('WebSocket initialization failed, falling back to HTTP');
                 // Still remove overlay in case of failure
                 this.loadingOverlay.remove();
             }
-            
-            await this.initializeComponents(true);
-            
-            // Add this line near the end, before removing loading overlay
-            setTimeout(() => {
-                this.loadingOverlay.remove();
-                mainContent.style.display = 'block'; // Show content after initialization
-                mainContent.classList.add('initialized');
-                this.debug('Initialization complete');
-            }, 500); // Small delay to ensure loading animation is visible
+            this.debug('WebSocket initialized');
         } catch (error) {
-            this.debug('Initialization error:', error);
-            // Still show content in case of error
-            mainContent?.classList.add('initialized');
-            // Remove overlay in case of error
-            this.loadingOverlay.remove();
-        } finally {
-            this.isInitializing = false;
+            this.debug('WebSocket initialization error:', error);
         }
     }
 
@@ -311,23 +335,36 @@ class App {
             this.debug('Initializing components in ' + 
                 (readOnlyMode ? 'read-only' : 'connected') + ' mode');
             
-            // Only initialize the current tab's component
-            const currentComponent = this.components[this.currentTab];
-            if (currentComponent && typeof currentComponent.initialize === 'function') {
-                this.debug(`Initializing current component: ${this.currentTab}`);
-                try {
-                    await currentComponent.initialize(readOnlyMode);
-                } catch (error) {
-                    console.error(`[App] Error initializing ${this.currentTab}:`, error);
+            // In read-only mode, initialize the three tabs that should always be visible
+            if (readOnlyMode) {
+                const readOnlyTabs = ['view-orders', 'cleanup-orders', 'contract-params'];
+                for (const tabId of readOnlyTabs) {
+                    const component = this.components[tabId];
+                    if (component && typeof component.initialize === 'function') {
+                        this.debug(`Initializing read-only component: ${tabId}`);
+                        try {
+                            await component.initialize(readOnlyMode);
+                        } catch (error) {
+                            console.error(`[App] Error initializing ${tabId}:`, error);
+                        }
+                    }
+                }
+            } else {
+                // In connected mode, initialize the current tab's component
+                const currentComponent = this.components[this.currentTab];
+                if (currentComponent && typeof currentComponent.initialize === 'function') {
+                    this.debug(`Initializing current component: ${this.currentTab}`);
+                    try {
+                        await currentComponent.initialize(readOnlyMode);
+                    } catch (error) {
+                        console.error(`[App] Error initializing ${this.currentTab}:`, error);
+                    }
                 }
             }
             
-            // Show the current tab
-            this.showTab(this.currentTab);
-            
-            this.debug('Component initialized');
+            this.debug('Components initialized');
         } catch (error) {
-            console.error('[App] Error initializing component:', error);
+            console.error('[App] Error initializing components:', error);
             this.showError("Component failed to initialize. Limited functionality available.");
         }
     }
@@ -516,22 +553,23 @@ class App {
                 }
             });
             
+            // Clean up WebSocket service
+            if (window.webSocket?.cleanup) {
+                try {
+                    window.webSocket.cleanup();
+                } catch (error) {
+                    console.warn(`Error cleaning up WebSocket service:`, error);
+                }
+            }
+            
             // Create and initialize CreateOrder component when wallet is connected
             const createOrderComponent = new CreateOrder();
             this.components['create-order'] = createOrderComponent;
             await createOrderComponent.initialize(false);
             
-            // Reinitialize only the current tab's component
-            const currentComponent = this.components[this.currentTab];
-            if (currentComponent && typeof currentComponent.initialize === 'function') {
-                this.debug(`Reinitializing current component: ${this.currentTab}`);
-                try {
-                    await currentComponent.initialize(false);
-                } catch (error) {
-                    console.error(`[App] Error reinitializing ${this.currentTab}:`, error);
-                }
-            }
-
+            // Reinitialize all components in connected mode
+            await this.initializeComponents(false);
+            
             // Re-show the current tab
             await this.showTab(this.currentTab);
             
@@ -577,24 +615,18 @@ class App {
     }
 }
 
+window.app = new App();
+
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        window.app = new App();
-        window.app.initializeEventListeners();
-        window.app.showTab(window.app.currentTab);
+        window.app.load();
         
         // Add network config button event listener here
         const networkConfigButton = document.querySelector('.network-config-button');
         if (networkConfigButton) {
             networkConfigButton.addEventListener('click', showAppParametersPopup);
         }
-        
-        // Wait for wallet initialization to complete
-        await window.app.initialize().catch(error => {
-            console.error('[App] Failed to initialize wallet:', error);
-            throw error;
-        });
         
         window.app.debug('Initialization complete');
     } catch (error) {
@@ -610,6 +642,12 @@ const networkBadge = document.querySelector('.network-badge');
 // Dynamically populate network options
 const populateNetworkOptions = () => {
     const networks = getAllNetworks();
+    
+    // Check if network elements exist
+    if (!networkButton || !networkDropdown || !networkBadge) {
+        console.warn('Network selector elements not found');
+        return;
+    }
     
     // If only one network, hide dropdown functionality
     if (networks.length <= 1) {
@@ -627,8 +665,12 @@ const populateNetworkOptions = () => {
     document.querySelectorAll('.network-option').forEach(option => {
         option.addEventListener('click', async () => {
             try {
-                networkBadge.textContent = option.textContent;
-                networkDropdown.classList.add('hidden');
+                if (networkBadge) {
+                    networkBadge.textContent = option.textContent;
+                }
+                if (networkDropdown) {
+                    networkDropdown.classList.add('hidden');
+                }
                 
                 if (window.walletManager && window.walletManager.isConnected()) {
                     const chainId = option.dataset.chainId;
@@ -639,8 +681,15 @@ const populateNetworkOptions = () => {
                 }
             } catch (error) {
                 console.error('Failed to switch network:', error);
-                networkBadge.textContent = networkButton.querySelector('.network-badge').textContent;
-                app.showError('Failed to switch network: ' + error.message);
+                if (networkBadge && networkButton) {
+                    const buttonBadge = networkButton.querySelector('.network-badge');
+                    if (buttonBadge) {
+                        networkBadge.textContent = buttonBadge.textContent;
+                    }
+                }
+                if (window.app) {
+                    window.app.showError('Failed to switch network: ' + error.message);
+                }
             }
         });
     });
