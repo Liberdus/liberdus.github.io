@@ -27,7 +27,7 @@ const network = {
       "username": "bridgebsc",
     },
   ],
-  "stakeUrl": "https://liberdus.com/stake",
+  "farmUrl": "https://liberdus.com/farm",
   "validatorUrl": "https://liberdus.com/validator",
-  "bridgeUrl": "https://liberdus.com/bridge",
+  "bridgeUrl": "./bridge",
 }
