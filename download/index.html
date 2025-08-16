@@ -5,138 +5,84 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Download Liberdus</title>
   <meta name="description" content="Download the Liberdus app for iOS and Android, or launch the web app in your browser." />
-  <style>
-    :root {
-      --wrap: 1120px;
-      --gap: 1.25rem;
-      --radius: 16px;
-    }
-    /* Base */
-    html, body { height: 100%; }
-    body { margin: 0; font: 16px/1.6 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif; color: #121212; background: #fff; }
-    a { color: inherit; text-underline-offset: 2px; }
-    img { max-width: 100%; height: auto; display: block; }
-    .wrap { max-width: var(--wrap); margin: 0 auto; padding: 2.5rem var(--gap); }
-
-    /* Header / Nav */
-    .site-header { position: sticky; top: 0; z-index: 100; background: #ffffffcc; backdrop-filter: saturate(180%) blur(8px); border-bottom: 1px solid #eee; }
-    .nav { display: flex; align-items: center; gap: 1rem; justify-content: space-between; }
-    .brand { display: flex; align-items: center; gap: .625rem; text-decoration: none; font-weight: 700; letter-spacing: .2px; }
-    .brand .logo { width: 28px; height: 28px; border-radius: 6px; background: radial-gradient(24px 24px at 30% 30%, #111 0, #555 55%, #999 80%); }
-    .nav ul { list-style: none; display: flex; gap: .75rem; padding: 0; margin: 0; align-items: center; flex-wrap: wrap; }
-    .nav a { text-decoration: none; padding: .5rem .75rem; border-radius: 999px; }
-    .nav a:hover { background: #f2f2f2; }
-    .nav .active { background: #111; color: #fff; }
-
-    /* Hero */
-    .hero { padding: 5rem 0 3rem; background: radial-gradient(80rem 40rem at 10% 10%, #f6f7fb 0, #fff 60%); }
-    .hero .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: .8rem; opacity: .7; }
-    .hero h1 { font-size: clamp(2rem, 4vw, 3rem); line-height: 1.15; margin: .25rem 0 .75rem; }
-    .hero p { max-width: 48rem; margin: 0 auto 1.25rem; opacity: .9; }
-    .cta-row { display: flex; gap: .75rem; flex-wrap: wrap; justify-content: center; margin-top: .5rem; }
-
-    /* Buttons */
-    .btn { display: inline-block; padding: .75rem 1rem; border-radius: 999px; text-decoration: none; border: 1px solid #ddd; font-weight: 600; }
-    .btn.primary { background: #111; color: #fff; border-color: #111; }
-    .btn.secondary { background: #fff; color: #111; }
-    .btn.ghost { background: transparent; }
-
-    /* Cards grid */
-    .grid { display: grid; gap: var(--gap); }
-    .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .card { border: 1px solid #eee; border-radius: var(--radius); padding: 1.25rem; background: #fff; }
-    .card h3 { margin: 0 0 .25rem; }
-    .card p { margin: 0 0 .75rem; opacity: .9; }
-
-    /* Info sections */
-    section + section { border-top: 1px solid #f0f0f0; }
-    h2 { font-size: clamp(1.25rem, 2.6vw, 1.75rem); margin: 0 0 .5rem; }
-    .note { background: #f9fafb; border: 1px solid #eef0f2; border-radius: var(--radius); padding: 1rem; }
-
-    /* Footer */
-    footer { border-top: 1px solid #eee; background: #fff; }
-    .footer-grid { display: grid; gap: 1rem; align-items: center; justify-content: space-between; grid-template-columns: 1fr auto; }
-    .social { display: flex; gap: .5rem; }
-    .social a { padding: .5rem .75rem; border-radius: 999px; border: 1px solid #eee; text-decoration: none; }
-
-    /* Responsive */
-    @media (max-width: 900px) {
-      .grid.cols-3 { grid-template-columns: 1fr; }
-      .nav { gap: .5rem; }
-    }
-  </style>
+  <!-- Copy the SAME stylesheet links used on the homepage and paste them here. Example:
+  <link rel="stylesheet" href="/assets/site.css">
+  <link rel="stylesheet" href="/assets/theme.css">
+  -->
+  <link rel="shortcut icon" href="../img/favicon.ico" type="image/x-icon">
+  <!-- Bootstrap Core CSS -->
+  <link href="../css/bootstrap.min.css" rel="stylesheet">
+  <!-- Animate CSS -->
+  <link href="../css/animate.css" rel="stylesheet">
+  <!-- Font-awesome -->
+  <link rel="stylesheet" href="../fonts/font-awesome/css/font-awesome.min.css">
+  <!-- Flaticon -->
+  <link rel="stylesheet" href="../fonts/flaticon/flaticon.css">
+  <!-- Google font-->
+  <link href="https://fonts.googleapis.com/css?family=Poppins:300,400,400i,500,600,700,800,900" rel="stylesheet">
+  <!-- Main CSS -->
+  <link href="../style.css" rel="stylesheet">
+  <!-- Our styles -->
+  <link href="../css/our-styles.css" rel="stylesheet">
 </head>
 <body>
   <!-- Header / Nav -->
-  <header class="site-header">
-    <div class="wrap nav" role="navigation" aria-label="Primary">
-      <a class="brand" href="/" aria-label="Liberdus Home">
-        <span class="logo" aria-hidden="true"></span>
-        <span>Liberdus</span>
-      </a>
-      <ul>
-        <li><a href="/">Home</a></li>
-        <li><a href="/" title="Intro">Intro</a></li>
-        <li><a href="/" title="Features">Features</a></li>
-        <li><a href="/" title="Funding">Funding</a></li>
-        <li><a href="/" title="Earn">Earn</a></li>
-        <li><a href="/" title="Roadmap">Roadmap</a></li>
-        <li><a href="/" title="Tokenomics">Tokenomics</a></li>
-        <li><a href="/" title="FAQ">FAQ</a></li>
-        <li><a href="/" title="Join">Join</a></li>
-        <li><a class="active" href="/download/">Download</a></li>
-        <li><a href="/Liberdus-Litepaper.pdf" title="Litepaper">Litepaper</a></li>
-      </ul>
-    </div>
-  </header>
+  <header>
+  <nav aria-label="Primary">
+    <ul>
+      <li><a href="/">Home</a></li>
+      <li><a href="/">Intro</a></li>
+      <li><a href="/">Features</a></li>
+      <li><a href="/">Funding</a></li>
+      <li><a href="/">Earn</a></li>
+      <li><a href="/">Roadmap</a></li>
+      <li><a href="/">Tokenomics</a></li>
+      <li><a href="/">FAQ</a></li>
+      <li><a href="/">Join</a></li>
+      <li><a href="/download/" aria-current="page">Download</a></li>
+      <li><a href="/Liberdus-Litepaper.pdf">Litepaper</a></li>
+    </ul>
+  </nav>
+</header>
 
   <!-- Hero -->
-  <section class="hero">
-    <div class="wrap" style="text-align:center">
-      <div class="eyebrow">Get the App</div>
-      <h1>Download Liberdus</h1>
-      <p>Install the mobile app or launch the browser version. Back up your account before switching devices.</p>
-      <div class="cta-row">
-        <a class="btn primary" href="https://testflight.apple.com/join/zSRCWyxy">iOS (TestFlight)</a>
-        <a class="btn primary" href="https://play.google.com/store/apps/details?id=com.jairaj.liberdus">Android</a>
-        <a class="btn ghost" href="https://liberdus.com/test">Open in browser</a>
-      </div>
-    </div>
-  </section>
+  <section>
+  <h1>Download Liberdus</h1>
+  <p>Install the mobile app or launch the browser version. Back up your account before switching devices.</p>
+  <p>
+    <a href="https://testflight.apple.com/join/zSRCWyxy">iOS (TestFlight)</a>
+    · <a href="https://play.google.com/store/apps/details?id=com.jairaj.liberdus">Android</a>
+    · <a href="https://liberdus.com/test">Open in browser</a>
+  </p>
+</section>
 
   <!-- Download Options -->
+<section>
+  <h2>Choose your platform</h2>
+  <ul>
+    <li>
+      <h3>iOS (TestFlight)</h3>
+      <p>Install TestFlight, then open it to install Liberdus.</p>
+      <p><a href="https://testflight.apple.com/join/zSRCWyxy">Get TestFlight build</a></p>
+    </li>
+    <li>
+      <h3>Android (Play)</h3>
+      <p>If prompted, sign in with the Gmail you shared for testing access.</p>
+      <p><a href="https://play.google.com/store/apps/details?id=com.jairaj.liberdus">Get Android app</a></p>
+    </li>
+    <li>
+      <h3>Use in Browser</h3>
+      <p>No download required. Great for a quick try on desktop or mobile.</p>
+      <p><a href="https://liberdus.com/test">Launch web app</a></p>
+    </li>
+  </ul>
+</section>
+<!-- Migration & Backup -->
   <section>
-    <div class="wrap">
-      <div class="grid cols-3">
-        <article class="card">
-          <h3>iOS (TestFlight)</h3>
-          <p>Install TestFlight, then open it to install Liberdus.</p>
-          <a class="btn secondary" href="https://testflight.apple.com/join/zSRCWyxy">Get TestFlight build</a>
-        </article>
-        <article class="card">
-          <h3>Android (Play)</h3>
-          <p>If prompted, sign in with the Gmail you shared for testing access.</p>
-          <a class="btn secondary" href="https://play.google.com/store/apps/details?id=com.jairaj.liberdus">Get Android app</a>
-        </article>
-        <article class="card">
-          <h3>Use in Browser</h3>
-          <p>No download required. Great for a quick try on desktop or mobile.</p>
-          <a class="btn secondary" href="https://liberdus.com/test">Launch web app</a>
-        </article>
-      </div>
-    </div>
-  </section>
-
-  <!-- Migration & Backup -->
-  <section>
-    <div class="wrap">
-      <h2>Migrate &amp; Back Up</h2>
-      <div class="note">
-        <p>To move accounts from browser to app, back up in the browser to save a file and restore it inside the app. You can also migrate from app to browser.</p>
-        <p>Back up your accounts periodically so you don’t lose important data. This is a test phase and the network may be reset occasionally.</p>
-      </div>
-    </div>
-  </section>
+  <h2>Migrate &amp; Back Up</h2>
+  <p>To move accounts from browser to app, back up in the browser to save a file and restore it inside the app. You can also migrate from app to browser.</p>
+  <p>Back up your accounts periodically so you don’t lose important data. This is a test phase and the network may be reset occasionally.</p>
+</section>
 
   <!-- Footer -->
   <footer>
