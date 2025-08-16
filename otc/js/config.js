@@ -2,6 +2,9 @@ import { abi as CONTRACT_ABI } from './abi/OTCSwap.js';
 import { ethers } from 'ethers';
 import { createLogger } from './services/LogService.js';
 
+export const APP_BRAND = 'LiberdusOTC';
+export const APP_LOGO = 'assets/1.png';
+
 const networkConfig = {
     "137": {
         name: "Polygon",
@@ -311,16 +314,24 @@ export class WalletManager {
         }
     }
 
-    handleAccountsChanged(accounts) {
+    async handleAccountsChanged(accounts) {
         this.debug('Accounts changed:', accounts);
         if (accounts.length === 0) {
             this.account = null;
             this.isConnected = false;
+            this.signer = null;
+            this.contract = null;
+            this.contractInitialized = false;
             this.debug('No accounts, triggering disconnect');
             this.notifyListeners('disconnect', {});
         } else if (accounts[0] !== this.account) {
             this.account = accounts[0];
             this.isConnected = true;
+            try {
+                await this.initializeSigner(this.account);
+            } catch (e) {
+                this.error('Error reinitializing signer on account change:', e);
+            }
             this.debug('New account:', this.account);
             this.notifyListeners('accountsChanged', { account: this.account });
         }
