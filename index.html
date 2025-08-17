@@ -398,8 +398,8 @@
 					<div class="text-center wow fadeIn">
 						<h2>Join the discussion</h2>
 						<p>Join our Discord server or newsletter !!</p>
-						<a class="btn btn-primary cta-reddit-btn" href="https://discord.gg/2cpJzFnwCR" target=_blank><i class="fa fa-comment"></i> Discord</a>
-						<a class="btn btn-primary cta-reddit-btn" href="https://groups.google.com/g/liberdus-news" target=_blank><i class="fa fa-envelope"></i> Newsletter</a>
+						<a class="btn btn-primary" href="https://discord.gg/2cpJzFnwCR" target=_blank><i class="fa fa-comment"></i> Discord</a>
+						<a class="btn btn-primary" href="https://groups.google.com/g/liberdus-news" target=_blank><i class="fa fa-envelope"></i> Newsletter</a>
 					</div>
 				</div>
 			</div>
@@ -427,7 +427,7 @@
 				</div>
 				<div class="col-md-12">
 					<div class="copyright text-center">
-						<p>&copy; Copyright 2025 | All rights reserved.</p>
+						<p>&copy; Copyright 2019-<span id="y"></span> | All rights reserved.</p>
 					</div>
 				</div>
 			</div>
@@ -453,9 +453,15 @@
 	<script src="js/wow.js"></script>
 	<script src="js/smooth-scroll.polyfills.min.js"></script>
     <script src="js/script.js"></script>
-	
+
+	<script>
+	    // set current year in footer
+    	document.getElementById('y').textContent = new Date().getFullYear();
+  	</script>
+
 </body>
 </html>
+
 
 
 
