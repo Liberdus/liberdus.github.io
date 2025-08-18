@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.08.11.11.09" />
+    <link rel="stylesheet" href="./styles.css?v=2025.08.18.17.48" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.08.11.11.09" type="module"></script>
+    <script src="./app.js?v=2025.08.18.17.48" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -222,7 +222,7 @@
         </div>
         <div class="modal-content">
           <ul class="menu-list">
-            <li class="menu-item" id="openStake" data-icon="trending-up">Stake</li>
+            <li class="menu-item" id="openFarm" data-icon="trending-up">Farm</li>
             <li class="menu-item" id="openValidator" data-icon="shield">Validator</li>
             <li class="menu-item" id="openInvite" data-icon="mail">Invite</li>
             <li class="menu-item" id="openBridge" data-icon="arrow-right-arrow-left">Bridge</li>
@@ -266,6 +266,12 @@
         <div class="modal-content">
           <div class="form-container">
             <div style="padding: 1rem">
+              <p>To ask questions please join our Discord server.</p>
+              <div class="form-actions">
+                <button id="joinDiscord" class="btn btn--primary btn--pill btn--full">Join Discord</button>
+              </div>
+            </div>
+            <div style="padding: 1rem">
               <p>Please contact our team to report bugs or make suggestions.</p>
               <div class="form-actions">
                 <button id="submitFeedback" class="btn btn--primary btn--pill btn--full">Submit Feedback</button>
@@ -276,18 +282,18 @@
         <a class="last-item" href="#"> </a>
       </div>
 
-      <!-- Stake Information Modal -->
-      <div class="modal fixed-header" id="stakeInfoModal">
+      <!-- Farm Information Modal -->
+      <div class="modal fixed-header" id="farmModal">
         <div class="modal-header">
-          <button class="back-button" id="closeStakeInfoModal"></button>
-          <div class="modal-title">Stake</div>
+          <button class="back-button" id="closeFarmModal"></button>
+          <div class="modal-title">Farm</div>
         </div>
         <div class="modal-content">
           <div class="form-container">
             <div style="padding: 1rem">
               <p>Now you can earn LIB for being a liquidity provider.</p>
               <div class="form-actions">
-                <button id="continueToStake" class="btn btn--primary btn--pill btn--full">Continue</button>
+                <button id="continueToFarm" class="btn btn--primary btn--pill btn--full">Continue</button>
               </div>
             </div>
           </div>
@@ -346,8 +352,8 @@
                 <a class="about-link" href="styles.css" target="_blank">styles.css</a>
                 <a class="about-link" href="app.js" target="_blank">app.js</a>
                 <br>
-                <a class="about-link" href="crypto.js?v=2025.08.11.11.09" target="_blank">crypto.js</a>
-                <a class="about-link" href="lib.js?v=2025.08.11.11.09" target="_blank">lib.js</a>
+                <a class="about-link" href="crypto.js?v=2025.08.18.17.48" target="_blank">crypto.js</a>
+                <a class="about-link" href="lib.js?v=2025.08.18.17.48" target="_blank">lib.js</a>
                 <a class="about-link" href="network.js" target="_blank">network.js</a>
               </div>
 
@@ -709,7 +715,7 @@
             <form id="importForm" class="form--narrow">
               <div class="form-group">
                 <label for="importFile">Select File</label>
-                <input type="file" id="importFile" class="form-control" required />
+                <input type="file" id="importFile" class="form-control" required accept=".json,application/json" />
               </div>
               <div class="form-group">
                 <label for="importPassword">Password (if encrypted)</label>
@@ -791,12 +797,7 @@
             </div>
             <input type="hidden" id="retryOfTxId" />
             <!-- Add hidden file input for chat attachments -->
-            <input type="file" id="chatFileInput"
-            accept="image/*,video/*,audio/*,video/mp4,video/x-m4v,
-            .jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.webm,.ogg,.ogv,
-            .avi,.wmv,.flv,.mkv,.mp3,.wav,.ogg,.m4a,.aac,.flac,
-            .pdf,.txt,.doc,.docx"
-            style="display:none;">
+            <input type="file" id="chatFileInput" style="display:none;">
             <button class="send-button" id="handleSendMessage">
               <svg viewBox="0 0 24 24">
                 <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
@@ -947,7 +948,7 @@
               </label>
             </div>
           <div class="form-actions">
-            <button type="submit" class="btn btn--primary btn--pill btn--full">Update</button>
+            <button id="friendSubmitButton" type="submit" class="btn btn--primary btn--pill btn--full">Update</button>
           </div>
           </form>
           <a class="last-item" href="#"></a>
@@ -1469,6 +1470,10 @@
                 <span class="info-label">Staked Amount (USD):</span>
                 <span class="info-value" id="validator-user-stake-usd"></span>
               </div>
+              <div class="info-item" id="validator-rewards-item">
+                <span class="info-label">Estimated Rewards:</span>
+                <span class="info-value" id="validator-rewards-estimate">N/A</span>
+              </div>
             </div>
 
             <div class="info-section">
@@ -1642,6 +1647,8 @@
               </div>
               <div class="form-actions">
                 <button type="submit" id="submitStake" class="btn btn--primary btn--pill btn--full">Submit Stake</button>
+                <button type="button" id="faucetButton" class="btn btn--secondary btn--pill btn--full" disabled>Claim LIB</button>
+                <p class="action-description">You can claim LIB tokens from the faucet to stake your node.</p>
               </div>
             </form>
           </div>

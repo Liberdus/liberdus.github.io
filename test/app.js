@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -373,7 +373,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   aboutModal.load();
   updateWarningModal.load();
   helpModal.load();
-  stakeInfoModal.load();
+  farmModal.load();
   logsModal.load();
 
   // Create Account Modal
@@ -474,6 +474,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     item.addEventListener('keydown', ignoreTabKey);
   });
 
+  document.addEventListener('visibilitychange', handleVisibilityChange); // Keep as document
+
   getNetworkParams();
 
   welcomeScreen.lastItem.focus();
@@ -506,9 +508,6 @@ function handleBeforeUnload(e) {
 // This is for installed apps where we can't stop the back button; just save the state
 function handleVisibilityChange() {
   console.log('in handleVisibilityChange', document.visibilityState);
-  if (!myAccount) {
-    return;
-  }
 
   if (document.visibilityState === 'hidden') {
     reactNativeApp.handleNativeAppSubscribe();
@@ -520,7 +519,9 @@ function handleVisibilityChange() {
     // save state when app is put into background
     saveState();
   } else if (document.visibilityState === 'visible') {
-    reactNativeApp.handleNativeAppUnsubscribe();
+    if (myAccount) {
+      reactNativeApp.handleNativeAppUnsubscribe();
+    }
     // if chatModal was opened, check if message count changed while hidden
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
@@ -1230,8 +1231,8 @@ class MenuModal {
     this.bridgeButton.addEventListener('click', () => bridgeModal.open());
     this.logsButton = document.getElementById('openLogs');
     this.logsButton.addEventListener('click', () => logsModal.open());
-    this.stakeButton = document.getElementById('openStake');
-    this.stakeButton.addEventListener('click', () => stakeInfoModal.open());
+    this.farmButton = document.getElementById('openFarm');
+    this.farmButton.addEventListener('click', () => farmModal.open());
     
     
     // Show launch button if ReactNativeWebView is available
@@ -1276,7 +1277,6 @@ class MenuModal {
 
     // Remove event listeners for beforeunload and visibilitychange
     window.removeEventListener('beforeunload', handleBeforeUnload);
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
 
     // Lock the app
     unlockModal.lock();
@@ -1551,6 +1551,7 @@ function createNewContact(addr, username, friendStatus = 1) {
   c.tollRequiredToReceive = 1;
   c.tollRequiredToSend = 1;
   c.friend = friendStatus;
+  c.friendOld = friendStatus;
 }
 
 class ScanQRModal {
@@ -1823,23 +1824,16 @@ class SignInModal {
     this.backButton.addEventListener('click', () => this.close());
   }
 
-  async open(preselectedUsername_) {
-    // Get existing accounts
+  /**
+   * Update the username select dropdown with notification indicators and sort by notification status
+   * @param {string} [selectedUsername] - Optionally preserve a selected username
+   * @returns {Object} Object containing usernames array and account information
+   */
+  updateUsernameSelect(selectedUsername = null) {
     const { netid } = network;
     const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
     const netidAccounts = existingAccounts.netids[netid];
     const usernames = netidAccounts?.usernames ? Object.keys(netidAccounts.usernames) : [];
-    this.preselectedUsername = preselectedUsername_;
-
-    // First show the modal so we can properly close it if needed
-    this.modal.classList.add('active');
-
-    // If no accounts exist, close modal and open Create Account modal
-    if (usernames.length === 0) {
-      this.close();
-      createAccountModal.open();
-      return;
-    }
 
     // Get the notified addresses and sort usernames to prioritize them
     const notifiedAddresses = reactNativeApp ? reactNativeApp.getNotificationAddresses() : [];
@@ -1868,6 +1862,30 @@ class SignInModal {
         return `<option value="${username}">${username}${dotIndicator}</option>`;
       }).join('')}
     `;
+
+    // Restore the previously selected username if it exists
+    if (selectedUsername && usernames.includes(selectedUsername)) {
+      this.usernameSelect.value = selectedUsername;
+    }
+
+    return { usernames, netidAccounts, sortedUsernames };
+  }
+
+  async open(preselectedUsername_) {
+    this.preselectedUsername = preselectedUsername_;
+
+    // First show the modal so we can properly close it if needed
+    this.modal.classList.add('active');
+
+    // Update username select and get usernames
+    const { usernames } = this.updateUsernameSelect();
+
+    // If no accounts exist, close modal and open Create Account modal
+    if (usernames.length === 0) {
+      this.close();
+      createAccountModal.open();
+      return;
+    }
 
     // If a username should be auto-selected (either preselect or only one account), do it
     const autoSelect = preselectedUsername_ && usernames.includes(preselectedUsername_) ? preselectedUsername_ : null;
@@ -1978,7 +1996,6 @@ class SignInModal {
     // Register events that will saveState if the browser is closed without proper signOut
     // Add beforeunload handler to save myData; don't use unload event, it is getting depricated
     window.addEventListener('beforeunload', handleBeforeUnload);
-    document.addEventListener('visibilitychange', handleVisibilityChange); // Keep as document
 
     reactNativeApp.handleNativeAppUnsubscribe();
     reactNativeApp.sendNavigationBarVisibility(false);
@@ -2069,6 +2086,22 @@ class SignInModal {
 
   isActive() {
     return this.modal.classList.contains('active');
+  }
+
+  /**
+   * Update the display to reflect new notifications while the modal is open
+   * This is called when new notifications arrive while the modal is open
+   */
+  updateNotificationDisplay() {
+    // Only update if the modal is actually active
+    if (!this.isActive()) return;
+    
+    // Get the currently selected username so we can keep it selected after the update
+    const selectedUsername = this.usernameSelect.value;
+    
+    // Update the dropdown with sorted usernames and notification indicators
+    // This will also preserve the selected username if it still exists
+    this.updateUsernameSelect(selectedUsername);
   }
 }
 
@@ -2323,6 +2356,7 @@ class FriendModal {
   load() {
     this.modal = document.getElementById('friendModal');
     this.friendForm = document.getElementById('friendForm');
+    this.submitButton = document.getElementById('friendSubmitButton');
 
     // Friend modal form submission
     this.friendForm.addEventListener('submit', (event) => this.handleFriendSubmit(event));
@@ -2335,6 +2369,14 @@ class FriendModal {
   open() {
     const contact = myData.contacts[this.currentContactAddress];
     if (!contact) return;
+
+    // if .friend and .friendOld values are not the same disable the submit button
+    if (contact.friend !== contact.friendOld) {
+      showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'error');
+      this.submitButton.disabled = true;
+    } else {
+      this.submitButton.disabled = false;
+    }
 
     // Set the current friend status
     const status = contact?.friend.toString();
@@ -2365,7 +2407,6 @@ class FriendModal {
       required: requiredNum,
       type: 'update_toll_required',
       timestamp: getCorrectedTimestamp(),
-      friend: friend,
       networkId: network.netid,
     };
     const txid = await signObj(tx, myAccount.keys);
@@ -2381,14 +2422,9 @@ class FriendModal {
    */
   async handleFriendSubmit(event) {
     event.preventDefault();
-
-    if (!this.currentContactAddress) return;
-
+    this.submitButton.disabled = true;
     const contact = myData.contacts[this.currentContactAddress];
-    if (!contact) return;
-
     const selectedStatus = this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value;
-    if (!selectedStatus) return;
 
     // send transaction to update chat toll
     const res = await this.postUpdateTollRequired(this.currentContactAddress, Number(selectedStatus));
@@ -2398,6 +2434,9 @@ class FriendModal {
       );
       return;
     }
+
+    // store the old friend status
+    contact.friendOld = contact.friend;
 
     // Update friend status based on selected value
     contact.friend = Number(selectedStatus);
@@ -2431,6 +2470,7 @@ class FriendModal {
 
     // Close the friend modal
     this.closeFriendModal();
+    this.submitButton.disabled = false;
   }
 
   // setAddress fuction that sets a global variable that can be used to set the currentContactAddress
@@ -3015,6 +3055,29 @@ if (mine) console.warn('txid in processChats is', txidHex)
           }
           //console.log("payload", payload)
           decryptMessage(payload, keys, mine); // modifies the payload object
+          
+          // Process new message format if it's JSON, otherwise keep old format
+          if (typeof payload.message === 'string') {
+            try {
+              const parsedMessage = JSON.parse(payload.message);
+              // Check if it's the new message format with type field
+              if (parsedMessage && typeof parsedMessage === 'object' && parsedMessage.type === 'message') {
+                // Extract actual message text
+                payload.message = parsedMessage.message;
+                
+                // Handle attachments field (replacing xattach)
+                if (parsedMessage.attachments) {
+                  // If we have both new attachments and old xattach, prioritize the new format
+                  if (!payload.xattach) {
+                    payload.xattach = parsedMessage.attachments;
+                  }
+                }
+              }
+            } catch (e) {
+              // Not JSON or invalid format - keep using the message as is (backwards compatibility)
+            }
+          }
+          
           if (payload.senderInfo && !mine){
             contact.senderInfo = cleanSenderInfo(payload.senderInfo)
             delete payload.senderInfo;
@@ -3057,7 +3120,17 @@ if (mine) console.warn('txid in processChats is', txidHex)
           payload.my = mine;
           payload.timestamp = payload.sent_timestamp;
           payload.txid = txidHex;
-          delete payload.pqEncSharedKey; 
+          delete payload.pqEncSharedKey;
+          
+          // Clean up any temporary fields used during processing
+          if (payload.attachments) {
+            // If we processed attachments from the new format, make sure they're in xattach
+            if (!payload.xattach) {
+              payload.xattach = payload.attachments;
+            }
+            delete payload.attachments;
+          }
+          
           insertSorted(contact.messages, payload, 'timestamp');
           // if we are not in the chatModal of who sent it, playChatSound or if device visibility is hidden play sound
           if (!inActiveChatWithSender || document.visibilityState === 'hidden') {
@@ -3405,7 +3478,7 @@ async function injectTx(tx, txid) {
         pendingTxData.username = tx.alias;
         pendingTxData.address = tx.from; // User's address (longAddress form)
       } else if (tx.type === 'update_toll_required') {
-        pendingTxData.friend = tx.friend;
+        pendingTxData.to = normalizeAddress(tx.to);
       } else if (tx.type === 'read') {
         pendingTxData.oldContactTimestamp = tx.oldContactTimestamp;
       } else if (tx.type === 'message' || tx.type === 'transfer') {
@@ -5015,6 +5088,10 @@ class TollModal {
     this.modal.classList.remove('active');
   }
 
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
   /**
    * Handle the toggle of the toll currency
    * @param {Event} event - The event object
@@ -5471,10 +5548,14 @@ class HelpModal {
     this.modal = document.getElementById('helpModal');
     this.closeButton = document.getElementById('closeHelpModal');
     this.submitFeedbackButton = document.getElementById('submitFeedback');
+    this.joinDiscordButton = document.getElementById('joinDiscord');
 
     this.closeButton.addEventListener('click', () => this.close());
     this.submitFeedbackButton.addEventListener('click', () => {
       window.open('https://github.com/liberdus/web-client-v2/issues', '_blank');
+    });
+    this.joinDiscordButton.addEventListener('click', () => {
+      window.open('https://discord.gg/2cpJzFnwCR', '_blank');
     });
   }
 
@@ -5488,14 +5569,14 @@ class HelpModal {
 }
 const helpModal = new HelpModal();
 
-class StakeInfoModal {
+class FarmModal {
   constructor() {}
 
   load() {
-    this.modal = document.getElementById('stakeInfoModal');
-    this.closeButton = document.getElementById('closeStakeInfoModal');
-    this.continueButton = document.getElementById('continueToStake');
-    
+    this.modal = document.getElementById('farmModal');
+    this.closeButton = document.getElementById('closeFarmModal');
+    this.continueButton = document.getElementById('continueToFarm');
+
     this.closeButton.addEventListener('click', () => this.close());
     this.continueButton.addEventListener('click', () => this.handleContinue());
   }
@@ -5511,14 +5592,14 @@ class StakeInfoModal {
   }
 
   handleContinue() {
-    // Get the stake URL from network configuration
-    const stakeURL = network?.stakeUrl || 'https://liberdus.com/stake';
-    // Open the stake URL in a new tab
-    window.open(stakeURL, '_blank');
+    // Get the farm URL from network configuration
+    const farmURL = network?.farmUrl || 'https://liberdus.com/farm';
+    // Open the farm URL in a new tab
+    window.open(farmURL, '_blank');
     this.close();
   }
 }
-const stakeInfoModal = new StakeInfoModal();
+const farmModal = new FarmModal();
 
 class LogsModal {
   constructor() {
@@ -5743,6 +5824,7 @@ class ValidatorStakingModal {
     this.nomineeValueElement = document.getElementById('validator-nominee');
     this.earnMessageElement = document.getElementById('validator-earn-message');
     this.learnMoreButton = document.getElementById('validator-learn-more');
+    this.rewardsEstimateElement = document.getElementById('validator-rewards-estimate');
 
     // Skeleton bar elements
     this.pendingSkeletonBar = document.getElementById('pending-nominee-skeleton-1');
@@ -5783,6 +5865,10 @@ class ValidatorStakingModal {
     // Hide earn message by default
     if (this.earnMessageElement) {
       this.earnMessageElement.style.display = 'none';
+    }
+    // Reset rewards display by default
+    if (this.rewardsEstimateElement) {
+      this.rewardsEstimateElement.textContent = 'N/A';
     }
     // Disable unstake button initially
     this.unstakeButton.disabled = true;
@@ -5921,6 +6007,11 @@ class ValidatorStakingModal {
         if (this.earnMessageElement) {
           this.earnMessageElement.style.display = 'block';
         }
+        
+        // Reset rewards display
+        if (this.rewardsEstimateElement) {
+          this.rewardsEstimateElement.textContent = 'N/A';
+        }
       } else {
         // Case: Nominee Exists - Show staking info section
         this.stakeInfoSection.style.display = 'block';
@@ -5937,6 +6028,19 @@ class ValidatorStakingModal {
         // Hide earn message
         if (this.earnMessageElement) {
           this.earnMessageElement.style.display = 'none';
+        }
+
+        const nodeRewardAmountUsd = networkAccountData.account.current.nodeRewardAmountUsd;
+        const nodeRewardInterval = networkAccountData?.account?.current?.nodeRewardInterval; 
+
+        // Calculate and display estimated rewards based on node's start time
+        try {
+          await this.calculateAndDisplayValidatorRewards(nominee, nodeRewardAmountUsd, nodeRewardInterval);
+        } catch (e) {
+          console.error('Error calculating rewards: ', e);
+          
+          // Set fallback value on error
+          if (this.rewardsEstimateElement) this.rewardsEstimateElement.textContent = 'N/A';
         }
       }
 
@@ -6220,6 +6324,81 @@ class ValidatorStakingModal {
   }
 
   /**
+   * Calculates and displays validator rewards
+   * @param {string} nominee - The nominee address
+   * @param {BigInt} nodeRewardAmountUsd - The reward amount in USD (could be an object with value property or a BigInt)
+   * @param {number} nodeRewardInterval - The reward interval in milliseconds
+   * @returns {Promise<void>}
+   */
+  async calculateAndDisplayValidatorRewards(nominee, nodeRewardAmountUsd, nodeRewardInterval) {
+    if (!nominee || !nodeRewardAmountUsd || !nodeRewardInterval) {
+      if (this.rewardsEstimateElement) this.rewardsEstimateElement.textContent = 'N/A';
+      return;
+    }
+    
+    // Get validator info to calculate rewards based on start time
+    let validatorData;
+    try {
+      validatorData = await queryNetwork(`/account/${nominee}`);
+    } catch (e) {
+      console.warn('Failed to fetch validator data for rewards calculation:', e);
+      if (this.rewardsEstimateElement) this.rewardsEstimateElement.textContent = 'N/A';
+      return;
+    }
+
+    // Get already accumulated rewards from node account - for both active and inactive validators
+    const accumulatedRewardLib = validatorData.account.reward;
+    let accumulatedRewardUsd = BigInt(0);
+    // Convert accumulatedRewardLib from LIB to USD using stability factor
+    try {
+      const stabilityFactor = getStabilityFactor();
+      if (stabilityFactor > 0) {
+        accumulatedRewardUsd = bigxnum2big(accumulatedRewardLib, stabilityFactor.toString());
+      }
+    } catch (e) {
+      console.warn('Failed to convert reward from LIB to USD:', e);
+    }
+
+    const rewardStartTime = validatorData?.account?.rewardStartTime || 0; // in seconds
+    const rewardEndTime = validatorData?.account?.rewardEndTime || 0; // in seconds
+    
+    // If the validator hasn't started earning rewards, but might have accumulated rewards
+    // OR if the validator has ended (rewardEndTime > 0), only show accumulated rewards
+    if (!rewardStartTime || rewardEndTime > 0) {
+      // Display only accumulated rewards
+      const bigStrValue = big2str(accumulatedRewardUsd.toString(), 18);
+      const numValue = parseFloat(bigStrValue);
+      const rewardsDisplay = '$' + numValue.toFixed(2);
+      this.rewardsEstimateElement.textContent = rewardsDisplay || '$0.00';
+      return;
+    }
+    
+    // Calculate rewards based on time since start (only for active validators)
+    const now = Math.floor(Date.now() / 1000); // current time in seconds
+    const timeSinceStart = now - rewardStartTime; // seconds running
+    const timeInMs = timeSinceStart * 1000;
+    
+    // Calculate both completed and partial intervals
+    const completedIntervals = timeInMs / nodeRewardInterval;
+    
+    // Calculate total rewards including partial completion of current interval
+    const completedRewards = bigxnum2big(nodeRewardAmountUsd, completedIntervals.toString());
+    
+    // Add already accumulated rewards from the node account to estimated rewards
+    const totalRewardsValue = completedRewards + accumulatedRewardUsd;
+    
+    // Convert to display format with 2 decimal places for USD
+    const bigStrValue = big2str(totalRewardsValue.toString(), 18);
+    const numValue = parseFloat(bigStrValue);
+    const rewardsDisplay = '$' + numValue.toFixed(2);
+    
+    // Set reward estimate text
+    if (this.rewardsEstimateElement) {
+      this.rewardsEstimateElement.textContent = rewardsDisplay;
+    }
+  }
+
+  /**
    * Check if the validator staking modal is active
    * @returns {boolean}
    */
@@ -6234,6 +6413,7 @@ class StakeValidatorModal {
     this.stakedAmount = 0n;
     this.lastValidationTimestamp = 0;
     this.hasNominee = false;
+    this.isFaucetRequestInProgress = false;
   }
 
   load() {
@@ -6252,6 +6432,7 @@ class StakeValidatorModal {
     this.scanStakeQRButton = document.getElementById('scanStakeQRButton');
     this.uploadStakeQRButton = document.getElementById('uploadStakeQRButton');
     this.stakeQRFileInput = document.getElementById('stakeQrFileInput');
+    this.faucetButton = document.getElementById('faucetButton');
 
     // Setup event listeners
     this.form.addEventListener('submit', (event) => this.handleSubmit(event));
@@ -6265,6 +6446,7 @@ class StakeValidatorModal {
     this.scanStakeQRButton.addEventListener('click', () => scanQRModal.open());
     this.uploadStakeQRButton.addEventListener('click', () => this.stakeQRFileInput.click());
     this.stakeQRFileInput.addEventListener('change', (event) => sendAssetFormModal.handleQRFileSelect(event, this));
+    this.faucetButton.addEventListener('click', () => this.requestFromFaucet());
 
     // Add listener for opening the modal
     document.getElementById('openStakeModal').addEventListener('click', () => this.open());
@@ -6287,6 +6469,10 @@ class StakeValidatorModal {
     this.nodeAddressInput.value = isNominee ? nominee : '';
     this.nodeAddressGroup.style.display = isNominee ? 'none' : 'block';
     this.submitButton.textContent = isNominee ? 'Add Stake' : 'Submit Stake';
+    
+    // Reset faucet button state
+    this.faucetButton.disabled = true;
+    this.isFaucetRequestInProgress = false;
 
     // Set minimum stake amount
     const minStakeAmount = this.form.dataset.minStake || '0';
@@ -6300,7 +6486,8 @@ class StakeValidatorModal {
 
   close() {
     this.modal.classList.remove('active');
-    // TODO: clear input fields
+    // Reset the form fields
+    this.resetForm();
   }
 
   async handleSubmit(event) {
@@ -6405,9 +6592,12 @@ class StakeValidatorModal {
     this.amountWarning.textContent = '';
     this.nodeAddressWarning.style.display = 'none';
     this.nodeAddressWarning.textContent = '';
+    
+    // Disable faucet button by default
+    this.faucetButton.disabled = true;
 
     // Check 1: Empty Fields
-    if (!amountStr || !nodeAddress) {
+    if (!nodeAddress) {
       return;
     }
 
@@ -6422,6 +6612,13 @@ class StakeValidatorModal {
     } else {
       this.nodeAddressWarning.style.display = 'none';
       this.nodeAddressWarning.textContent = '';
+      
+      // Enable faucet button if node address is valid
+      this.faucetButton.disabled = false;
+    }
+
+    if (!amountStr) {
+      return;
     }
 
     // --- Amount Checks ---
@@ -6516,6 +6713,57 @@ class StakeValidatorModal {
     this.amountWarning.textContent = '';
     this.nodeAddressWarning.style.display = 'none';
     this.nodeAddressWarning.textContent = '';
+    this.faucetButton.disabled = true;
+  }
+  
+  /**
+   * Request funds from the faucet for the validator node
+   * @returns {Promise<void>}
+   */
+  async requestFromFaucet() {
+    if (this.isFaucetRequestInProgress) {
+      return;
+    }
+
+    const toastId = showToast('Requesting from faucet...', 0, 'loading');
+    try {
+      this.isFaucetRequestInProgress = true;
+      this.faucetButton.disabled = true;
+      
+      const payload = {
+        nodeAddress: this.nodeAddressInput.value.trim(),
+        userAddress: longAddress(myAccount.keys.address),
+        username: myAccount.username,
+      };
+      await signObj(payload, myAccount.keys);
+      
+      const faucetUrl = network.faucetUrl || 'https://dev.liberdus.com:3355/faucet';
+      
+      const response = await fetch(faucetUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        showToast('Faucet request successful! The LIB will be sent to your wallet.', 5000, 'success');
+        this.close();
+      } else {
+        const errorMessage = result.message || result.error || 'Unknown error';
+        showToast(`Faucet error: ${errorMessage}`, 0, 'error');
+      }
+      
+    } catch (error) {
+      console.error('Faucet request error:', error);
+      showToast(`Faucet request failed: ${error.message || 'Unknown error'}`, 0, 'error');
+    } finally {
+      hideToast(toastId);
+      this.isFaucetRequestInProgress = false;
+    }
   }
 }
 const stakeValidatorModal = new StakeValidatorModal();
@@ -7543,20 +7791,6 @@ console.warn('in send message', txid)
     const maxSize = 10 * 1024 * 1024; // 10MB in bytes
     if (file.size > maxSize) {
       showToast('File size too large. Maximum size is 10MB.', 0, 'error');
-      event.target.value = ''; // Reset file input
-      return;
-    }
-
-    // Validate file type
-    const allowedTypePrefixes = ['image/', 'audio/', 'video/'];
-    const allowedExplicitTypes = [
-      'application/pdf', // PDF
-      'text/plain',      // TXT
-      'application/msword', // DOC
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // DOCX
-    ];
-    if (!(allowedTypePrefixes.some(prefix => file.type.startsWith(prefix)) || allowedExplicitTypes.includes(file.type))) {
-      showToast('File type not supported.', 0, 'error');
       event.target.value = ''; // Reset file input
       return;
     }
@@ -11408,21 +11642,38 @@ class LaunchModal {
     this.launchButton.disabled = true;
     this.launchButton.textContent = 'Checking URL...';
     
-    // Validate URL by fetching it
-    fetch(url, { 
-      method: 'HEAD', 
-      mode: 'no-cors',
-      signal: AbortSignal.timeout(10000) // 10 second timeout
+    // Create the network.js URL to check
+    let urlObj = new URL(url);
+    // Ensure path ends with slash before appending network.js
+    const path = urlObj.pathname === '' ? '/' : (urlObj.pathname.endsWith('/') ? urlObj.pathname : urlObj.pathname + '/');
+    const networkJsUrl = urlObj.origin + path + 'network.js';
+    
+    // Validate if network.js exists and has required properties
+    fetch(networkJsUrl, { 
+      signal: AbortSignal.timeout(10000), 
+      mode: 'cors',
+      credentials: 'same-origin'
     })
-      .then(() => {
-        // URL is reachable, proceed with launching
+      .then(response => {
+        if (!response.ok) throw new Error('network.js not found');
+        return response.text();
+      })
+      .then(networkJsText => {
+        // Check for required network properties
+        const requiredProps = ['network', 'name', 'netid', 'gateways'];
+        const missingProps = requiredProps.filter(prop => !networkJsText.includes(prop));
+        
+        if (missingProps.length > 0) {
+          throw new Error(`Invalid network.js: Missing ${missingProps.join(', ')}`);
+        }
+        
+        // Valid network.js, proceed with launching
         window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'launch', url }));
         this.close();
       })
       .catch((error) => {
-        // URL is not reachable or timed out
-        showToast('URL is not reachable. Please check the address and try again.', 0, 'error');
-        console.error('URL validation failed:', error);
+        showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
+        console.error('URL validation failed:', error, 'URL:', networkJsUrl);
       })
       .finally(() => {
         // Reset button state
@@ -11523,10 +11774,10 @@ class ReactNativeApp {
               // User is not signed in - save the notification address and open sign-in modal
               logsModal.log('🔔 User not signed in, saving notification address for priority');
               this.saveNotificationAddress(normalizedToAddress);
-              // If the user clicks on a notification and the app is already on the SignIn modal, we need to refresh the SignIn modal to have the bell emoji and new ordering to appear.
+              // If the user clicks on a notification and the app is already on the SignIn modal, 
+              // update the display to reflect the new notification
               if (signInModal.isActive()) {
-                signInModal.close();
-                signInModal.open();
+                signInModal.updateNotificationDisplay();
               }
               return;
             }
@@ -11580,6 +11831,11 @@ class ReactNativeApp {
                 }
               });
               logsModal.log(`📋 Processed ${processedCount}/${data.notifications.length} notifications`);
+              
+              // If the sign in modal is open, update the display to show new notifications
+              if (signInModal.isActive()) {
+                signInModal.updateNotificationDisplay();
+              }
             } else {
               logsModal.log('📋 No valid notifications received');
             }
@@ -12041,10 +12297,14 @@ async function checkPendingTransactions() {
 
         if (type === 'toll') {
           console.log(`Toll transaction successfully processed!`);
+          if (tollModal.isActive()) {
+            showToast(`Toll change successful!`, 3000, 'success');
+          }
         }
 
         if (type === 'update_toll_required') {
           console.log(`DEBUG: update_toll_required transaction successfully processed!`);
+          myData.contacts[pendingTxInfo.to].friendOld = myData.contacts[pendingTxInfo.to].friend;
         }
 
         if (type === 'read') {
@@ -12094,7 +12354,7 @@ async function checkPendingTransactions() {
           } else if (type === 'update_toll_required') {
             showToast(`Update contact status failed: ${failureReason}. Reverting contact to old status.`, 0, 'error');
             // revert the local myData.contacts[toAddress].friend to the old value
-            myData.contacts[pendingTxInfo.to].friend = pendingTxInfo.friend;
+            myData.contacts[pendingTxInfo.to].friend = myData.contacts[pendingTxInfo.to].friendOld;
           } else if (type === 'read') {
             showToast(`Read transaction failed: ${failureReason}`, 0, 'error');
             // revert the local myData.contacts[toAddress].timestamp to the old value
