@@ -3,9 +3,10 @@ import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
 import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
 import { getNetworkConfig } from '../config.js';
-import { PricingService } from '../services/PricingService.js';
 import { walletManager } from '../config.js';
 import { createLogger } from '../services/LogService.js';
+import { tokenIconService } from '../services/TokenIconService.js';
+import { generateTokenIconHTML } from '../utils/tokenIcons.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
@@ -40,18 +41,20 @@ export class ViewOrders extends BaseComponent {
         // Add loading state
         this.isLoading = false;
 
-        // Add pricing service
-        this.pricingService = new PricingService();
+        // Use global pricing service instead of local instance
+        this.pricingService = window.pricingService;
 
-        // Subscribe to pricing updates
-        this.pricingService.subscribe((event) => {
-            if (event === 'refreshComplete') {
-                this.debug('Prices updated, refreshing orders view');
-                this.refreshOrdersView().catch(error => {
-                    this.error('Error refreshing orders after price update:', error);
-                });
-            }
-        });
+        // Subscribe to pricing updates from global service
+        if (window.pricingService) {
+            window.pricingService.subscribe((event) => {
+                if (event === 'refreshComplete') {
+                    this.debug('Prices updated, refreshing orders view');
+                    this.refreshOrdersView().catch(error => {
+                        this.error('Error refreshing orders after price update:', error);
+                    });
+                }
+            });
+        }
 
         // Subscribe to WebSocket updates
         if (window.webSocket) {
@@ -103,47 +106,59 @@ export class ViewOrders extends BaseComponent {
             </div>`;
     }
 
-    getTokenIcon(token) {
+    async getTokenIcon(token) {
         try {
             if (!token?.address) {
                 this.debug('No token address provided:', token);
                 return this.getDefaultTokenIcon();
             }
 
-            // Generate color-based icon for all tokens
-            this.debug('Generating color-based icon for token:', token.symbol);
-            const symbol = token.symbol || '?';
-            const firstLetter = symbol.charAt(0).toUpperCase();
+            // If token already has an iconUrl, use it
+            if (token.iconUrl) {
+                this.debug('Using existing iconUrl for token:', token.symbol);
+                return generateTokenIconHTML(token.iconUrl, token.symbol, token.address);
+            }
             
-            const colors = [
-                '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
-                '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
-            ];
+            // Otherwise, get icon URL from token icon service
+            const chainId = walletManager.chainId ? parseInt(walletManager.chainId, 16) : 137; // Default to Polygon
+            const iconUrl = await tokenIconService.getIconUrl(token.address, chainId);
             
-            const colorIndex = token.address ? 
-                parseInt(token.address.slice(-6), 16) % colors.length :
-                Math.floor(Math.random() * colors.length);
-            const backgroundColor = colors[colorIndex];
-            
-            return `
-                <div class="token-icon">
-                    <div class="token-icon-fallback" style="background: ${backgroundColor}">
-                        ${firstLetter}
-                    </div>
-                </div>
-            `;
+            // Generate HTML using the utility function
+            return generateTokenIconHTML(iconUrl, token.symbol, token.address);
         } catch (error) {
-            this.debug('Error generating token icon:', error);
+            this.debug('Error getting token icon:', error);
             return this.getDefaultTokenIcon();
         }
     }
 
     getDefaultTokenIcon() {
-        return `
-            <div class="token-icon">
-                <div class="token-icon-fallback" style="background: #FF6B6B">?</div>
-            </div>
-        `;
+        return generateTokenIconHTML('fallback', '?', 'unknown');
+    }
+
+    // Helper method to render token icon asynchronously
+    async renderTokenIcon(token, container) {
+        try {
+            const iconHtml = await this.getTokenIcon(token);
+            container.innerHTML = iconHtml;
+        } catch (error) {
+            this.debug('Error rendering token icon:', error);
+            // Fallback to basic icon
+            container.innerHTML = generateTokenIconHTML('fallback', token.symbol, token.address);
+        }
+    }
+
+    // Update last updated timestamp
+    updateLastUpdatedTimestamp(element) {
+        if (!element || !this.pricingService) return;
+        
+        const lastUpdateTime = this.pricingService.getLastUpdateTime();
+        if (lastUpdateTime && lastUpdateTime !== 'Never') {
+            element.textContent = `Last updated: ${lastUpdateTime}`;
+            element.style.display = 'inline';
+        } else {
+            element.textContent = 'No prices loaded yet';
+            element.style.display = 'inline';
+        }
     }
 
     setupErrorHandling() {
@@ -495,6 +510,7 @@ For Buyers:
                 <div class="refresh-container">
                     <button id="refresh-prices-btn" class="refresh-prices-button">↻ Refresh Prices</button>
                     <span class="refresh-status"></span>
+                    <span class="last-updated" id="last-updated-timestamp"></span>
                 </div>
 
                 <div class="pagination-controls">
@@ -512,6 +528,10 @@ For Buyers:
         // Setup refresh button functionality
         const refreshButton = bottomControls.querySelector('#refresh-prices-btn');
         const statusIndicator = bottomControls.querySelector('.refresh-status');
+        const lastUpdatedElement = bottomControls.querySelector('#last-updated-timestamp');
+        
+        // Initialize last updated timestamp
+        this.updateLastUpdatedTimestamp(lastUpdatedElement);
         
         let refreshTimeout;
         refreshButton.addEventListener('click', async () => {
@@ -527,6 +547,8 @@ For Buyers:
                 if (result.success) {
                     statusIndicator.className = 'refresh-status success';
                     statusIndicator.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+                    // Update timestamp after successful refresh
+                    this.updateLastUpdatedTimestamp(lastUpdatedElement);
                     await this.refreshOrdersView();
                 } else {
                     statusIndicator.className = 'refresh-status error';
@@ -879,7 +901,9 @@ For Buyers:
                 <td>${order.id}</td>
                 <td>
                     <div class="token-info">
-                        ${this.getTokenIcon(sellTokenInfo)}
+                        <div class="token-icon">
+                            <div class="loading-spinner"></div>
+                        </div>
                         <div class="token-details">
                             <span>${sellTokenInfo.symbol}</span>
                             <span class="token-price ${sellPriceClass}">${formatUsdPrice(sellTokenUsdPrice)}</span>
@@ -889,7 +913,9 @@ For Buyers:
                 <td>${formattedSellAmount}</td>
                 <td>
                     <div class="token-info">
-                        ${this.getTokenIcon(buyTokenInfo)}
+                        <div class="token-icon">
+                            <div class="loading-spinner"></div>
+                        </div>
                         <div class="token-details">
                             <span>${buyTokenInfo.symbol}</span>
                             <span class="token-price ${buyPriceClass}">${formatUsdPrice(buyTokenUsdPrice)}</span>
@@ -901,6 +927,13 @@ For Buyers:
                 <td>${expiryText}</td>
                 <td class="order-status">${orderStatus}</td>
                 <td class="action-column"></td>`;
+
+            // Render token icons asynchronously
+            const sellTokenIconContainer = tr.querySelector('.token-info:first-child .token-icon');
+            const buyTokenIconContainer = tr.querySelector('.token-info:last-child .token-icon');
+            
+            this.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
+            this.renderTokenIcon(buyTokenInfo, buyTokenIconContainer);
 
             // Start expiry timer for this row
             this.startExpiryTimer(tr);
