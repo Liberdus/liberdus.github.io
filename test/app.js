@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'j'
+const version = 'k'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -3167,6 +3167,21 @@ if (mine) console.warn('txid in processChats is', txidHex)
           }
           //console.log("payload", payload)
           decryptMessage(payload, keys, mine); // modifies the payload object
+
+          // Process new message format if it's JSON, otherwise keep old format
+          if (typeof payload.message === 'string') {
+            try {
+              const parsedMessage = JSON.parse(payload.message);
+              // Check if it's the new message format with type field
+              if (parsedMessage && typeof parsedMessage === 'object' && parsedMessage.type === 'transfer') {
+                // Extract actual message text
+                payload.message = parsedMessage.message;
+              }
+            } catch (e) {
+              // Not JSON or invalid format - keep using the message as is (backwards compatibility)
+            }
+          }
+
           if (payload.senderInfo && !mine) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
