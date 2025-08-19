@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'o'
+const version = 'p'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -44,6 +44,7 @@ async function checkVersion() {
       'crypto.js',
       'encryption.worker.js',
       'offline.html',
+      'notice.html',
     ]);
     window.location.replace(newUrl);
   }
@@ -1551,6 +1552,7 @@ function createNewContact(addr, username, friendStatus = 1) {
   c.tollRequiredToReceive = 1;
   c.tollRequiredToSend = 1;
   c.friend = friendStatus;
+  c.friendOld = friendStatus;
 }
 
 class ScanQRModal {
@@ -3054,6 +3056,29 @@ if (mine) console.warn('txid in processChats is', txidHex)
           }
           //console.log("payload", payload)
           decryptMessage(payload, keys, mine); // modifies the payload object
+          
+          // Process new message format if it's JSON, otherwise keep old format
+          if (typeof payload.message === 'string') {
+            try {
+              const parsedMessage = JSON.parse(payload.message);
+              // Check if it's the new message format with type field
+              if (parsedMessage && typeof parsedMessage === 'object' && parsedMessage.type === 'message') {
+                // Extract actual message text
+                payload.message = parsedMessage.message;
+                
+                // Handle attachments field (replacing xattach)
+                if (parsedMessage.attachments) {
+                  // If we have both new attachments and old xattach, prioritize the new format
+                  if (!payload.xattach) {
+                    payload.xattach = parsedMessage.attachments;
+                  }
+                }
+              }
+            } catch (e) {
+              // Not JSON or invalid format - keep using the message as is (backwards compatibility)
+            }
+          }
+          
           if (payload.senderInfo && !mine){
             contact.senderInfo = cleanSenderInfo(payload.senderInfo)
             delete payload.senderInfo;
@@ -3096,7 +3121,17 @@ if (mine) console.warn('txid in processChats is', txidHex)
           payload.my = mine;
           payload.timestamp = payload.sent_timestamp;
           payload.txid = txidHex;
-          delete payload.pqEncSharedKey; 
+          delete payload.pqEncSharedKey;
+          
+          // Clean up any temporary fields used during processing
+          if (payload.attachments) {
+            // If we processed attachments from the new format, make sure they're in xattach
+            if (!payload.xattach) {
+              payload.xattach = payload.attachments;
+            }
+            delete payload.attachments;
+          }
+          
           insertSorted(contact.messages, payload, 'timestamp');
           // if we are not in the chatModal of who sent it, playChatSound or if device visibility is hidden play sound
           if (!inActiveChatWithSender || document.visibilityState === 'hidden') {
@@ -3132,6 +3167,21 @@ if (mine) console.warn('txid in processChats is', txidHex)
           }
           //console.log("payload", payload)
           decryptMessage(payload, keys, mine); // modifies the payload object
+
+          // Process new message format if it's JSON, otherwise keep old format
+          if (typeof payload.message === 'string') {
+            try {
+              const parsedMessage = JSON.parse(payload.message);
+              // Check if it's the new message format with type field
+              if (parsedMessage && typeof parsedMessage === 'object' && parsedMessage.type === 'transfer') {
+                // Extract actual message text
+                payload.message = parsedMessage.message;
+              }
+            } catch (e) {
+              // Not JSON or invalid format - keep using the message as is (backwards compatibility)
+            }
+          }
+
           if (payload.senderInfo && !mine) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
@@ -5054,6 +5104,10 @@ class TollModal {
     this.modal.classList.remove('active');
   }
 
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
   /**
    * Handle the toggle of the toll currency
    * @param {Event} event - The event object
@@ -5510,10 +5564,14 @@ class HelpModal {
     this.modal = document.getElementById('helpModal');
     this.closeButton = document.getElementById('closeHelpModal');
     this.submitFeedbackButton = document.getElementById('submitFeedback');
+    this.joinDiscordButton = document.getElementById('joinDiscord');
 
     this.closeButton.addEventListener('click', () => this.close());
     this.submitFeedbackButton.addEventListener('click', () => {
       window.open('https://github.com/liberdus/web-client-v2/issues', '_blank');
+    });
+    this.joinDiscordButton.addEventListener('click', () => {
+      window.open('https://discord.gg/2cpJzFnwCR', '_blank');
     });
   }
 
@@ -8642,7 +8700,6 @@ class NewChatModal {
     // Check if contact exists
     if (!chatsData.contacts[recipientAddress]) {
       createNewContact(recipientAddress, username, 2);
-      chatsData.contacts[recipientAddress].friendOld = 2;
       // default to 2 (Acquaintance) so recipient does not need to pay toll
       friendModal.postUpdateTollRequired(recipientAddress, 2);
     }
@@ -12256,6 +12313,9 @@ async function checkPendingTransactions() {
 
         if (type === 'toll') {
           console.log(`Toll transaction successfully processed!`);
+          if (tollModal.isActive()) {
+            showToast(`Toll change successful!`, 3000, 'success');
+          }
         }
 
         if (type === 'update_toll_required') {
@@ -12520,16 +12580,30 @@ async function getSystemNotice() {
       return;
     }
 
-    const timestamp = parseInt(lines[0]);
-    if (isNaN(timestamp)) {
-      console.warn('Invalid timestamp in notice file');
+    // Find the first line that's not a comment and can be parsed as a timestamp
+    let timestampLine = null;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line && !line.startsWith('<!--') && !line.startsWith('-->')) {
+        const parsed = parseInt(line);
+        if (!isNaN(parsed)) {
+          timestampLine = i;
+          break;
+        }
+      }
+    }
+
+    if (timestampLine === null) {
+      console.warn('No valid timestamp found in notice file');
       return;
     }
 
+    const timestamp = parseInt(lines[timestampLine]);
+
     // Check if we need to show the notice
     if (!myData.settings.noticets || myData.settings.noticets < timestamp) {
-      // Join remaining lines for the notice message
-      const noticeMessage = lines.slice(1).join('\n').trim();
+      // Join remaining lines for the notice message (skip the timestamp line)
+      const noticeMessage = lines.slice(timestampLine + 1).join('\n').trim();
       if (noticeMessage) {
         showToast(noticeMessage, 0, 'error');
         // Update the timestamp in settings
