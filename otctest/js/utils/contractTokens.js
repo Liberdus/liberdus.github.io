@@ -178,19 +178,19 @@ async function getTokenMetadata(tokenAddress) {
                 decimals: 18
             },
             // Amoy Testnet tokens
-            '0x541234871a2554fa8d6d9f5e208534e1cb3d0578': {
+            '0x224708430f2FF85E32cd77e986eE558Eb8cC77D9': {
                 symbol: 'FEE',
                 name: 'Fee Token',
                 decimals: 18
             },
-            '0xdf65ce996e81e9b5f7b9359aecb153a8d6bcbdc8': {
-                symbol: 'TTA',
-                name: 'Trading Token Alpha',
+            '0xB93D55595796D8c59beFC0C9045415B4d567f27c': {
+                symbol: 'TT1',
+                name: 'Trading Token 1',
                 decimals: 18
             },
-            '0xbfbe971338d0cc5f81545a261bd085d7f8ee43f1': {
-                symbol: 'TTB',
-                name: 'Trading Token Beta',
+            '0x963322CC131A072F333A76ac321Bb80b6cb5375C': {
+                symbol: 'TT2',
+                name: 'Trading Token 2',
                 decimals: 18
             }
         };

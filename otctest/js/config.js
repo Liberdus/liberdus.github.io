@@ -10,7 +10,7 @@ const networkConfig = {
         name: "Amoy",
         displayName: "Polygon Amoy Testnet",
         isDefault: true,
-        contractAddress: "0x1E6fa7Bf1543cd18bB73743Da6846c450aDDf4DC",
+        contractAddress: "0x0BE723F88aDb867022fA0a71EB82365556cb3c8C",
         contractABI: CONTRACT_ABI,
         explorer: "https://www.oklink.com/amoy",
         rpcUrl: "https://rpc-amoy.polygon.technology",
