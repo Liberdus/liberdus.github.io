@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -3062,15 +3062,89 @@ if (mine) console.warn('txid in processChats is', txidHex)
             try {
               const parsedMessage = JSON.parse(payload.message);
               // Check if it's the new message format with type field
-              if (parsedMessage && typeof parsedMessage === 'object' && parsedMessage.type === 'message') {
-                // Extract actual message text
-                payload.message = parsedMessage.message;
-                
-                // Handle attachments field (replacing xattach)
-                if (parsedMessage.attachments) {
-                  // If we have both new attachments and old xattach, prioritize the new format
-                  if (!payload.xattach) {
-                    payload.xattach = parsedMessage.attachments;
+              if (parsedMessage && typeof parsedMessage === 'object') {
+                // Handle delete messages
+                if (parsedMessage.type === 'delete') {
+                  const txidToDelete = parsedMessage.txid;
+                  
+                  // Verify that the sender is the same who sent the message they're trying to delete
+                  const messageToDelete = contact.messages.find(msg => msg.txid === txidToDelete);
+                  
+                  if (messageToDelete) {
+                    // Only allow deletion if the sender of this delete tx is the same who sent the original message
+                    // (normalize addresses for comparison)
+                    const originalSender = normalizeAddress(tx.from);
+                    
+                    if (!messageToDelete.my && originalSender === from) {
+                      // This is a message received from sender, who is now deleting it - valid
+                      console.log(`Deleting message ${txidToDelete} as requested by sender`);
+                      
+                      // Mark the message as deleted
+                      messageToDelete.deleted = 1;
+                      messageToDelete.message = "Deleted by sender";
+                      
+                      // Remove payment-specific fields if present
+                      if (messageToDelete.amount) {
+                        if (messageToDelete.payment) delete messageToDelete.payment;
+                        if (messageToDelete.memo) messageToDelete.memo = "Deleted by sender";
+                        if (messageToDelete.amount) delete messageToDelete.amount;
+                        if (messageToDelete.symbol) delete messageToDelete.symbol;
+                        
+                        // Update corresponding transaction in wallet history
+                        const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
+                        if (txIndex !== -1) {
+                          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted by sender' });
+                          delete myData.wallet.history[txIndex].amount;
+                          delete myData.wallet.history[txIndex].symbol;
+                          delete myData.wallet.history[txIndex].payment;
+                          delete myData.wallet.history[txIndex].sign;
+                          delete myData.wallet.history[txIndex].address;
+                        }
+                      }
+                    } else if (messageToDelete.my && normalizeAddress(keys.address) === normalizeAddress(tx.from)) {
+                      // This is our own message, and we're deleting it - valid
+                      console.log(`Deleting our message ${txidToDelete} as requested by us`);
+                      
+                      // Mark the message as deleted
+                      messageToDelete.deleted = 1;
+                      messageToDelete.message = "Deleted by you";
+                      
+                      // Remove payment-specific fields if present - same logic as above
+                      if (messageToDelete.amount) {
+                        if (messageToDelete.payment) delete messageToDelete.payment;
+                        if (messageToDelete.memo) messageToDelete.memo = "Deleted by you";
+                        if (messageToDelete.amount) delete messageToDelete.amount;
+                        if (messageToDelete.symbol) delete messageToDelete.symbol;
+                        
+                        // Update corresponding transaction in wallet history
+                        const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
+                        if (txIndex !== -1) {
+                          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted by you' });
+                          delete myData.wallet.history[txIndex].amount;
+                          delete myData.wallet.history[txIndex].symbol;
+                          delete myData.wallet.history[txIndex].payment;
+                          delete myData.wallet.history[txIndex].sign;
+                          delete myData.wallet.history[txIndex].address;
+                        }
+                      }
+                    }
+                    
+                    if (chatModal.isActive() && chatModal.address === from) {
+                      chatModal.appendChatModal();
+                    }
+                    // Don't process this message further - it's just a control message
+                    continue;
+                  }
+                } else if (parsedMessage.type === 'message') {
+                  // Regular message format processing
+                  payload.message = parsedMessage.message;
+                  
+                  // Handle attachments field (replacing xattach)
+                  if (parsedMessage.attachments) {
+                    // If we have both new attachments and old xattach, prioritize the new format
+                    if (!payload.xattach) {
+                      payload.xattach = parsedMessage.attachments;
+                    }
                   }
                 }
               }
@@ -7289,15 +7363,20 @@ class ChatModal {
       const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey)
       const selfKey = encryptData(bin2hex(dhkey), keys.secret+keys.pqSeed, true)  // used to decrypt our own message
 
-      // encrypt the file attachments
-      let encXattach = null;
+      // Convert message to new JSON format with type and optional attachments
+      const messageObj = {
+        type: 'message',
+        message: message
+      };
+
+      // Handle attachments - add them to the JSON structure instead of using xattach
       if (this.fileAttachments && this.fileAttachments.length > 0) {
-        encXattach = encryptChacha(dhkey, stringify(this.fileAttachments));
+        messageObj.attachments = this.fileAttachments;
       }
 
       // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
-      // Encrypt message using shared secret
-      const encMessage = encryptChacha(dhkey, message);
+      // Encrypt the JSON message using shared secret
+      const encMessage = encryptChacha(dhkey, stringify(messageObj));
 
       // Create message payload
       const payload = {
@@ -7306,8 +7385,7 @@ class ChatModal {
         encryptionMethod: 'xchacha20poly1305',
         pqEncSharedKey: bin2base64(cipherText),
         selfKey: selfKey,
-        sent_timestamp: getCorrectedTimestamp(),
-        ...(encXattach && { xattach: encXattach }), // Only include if there are attachments
+        sent_timestamp: getCorrectedTimestamp()
       };
 
       // Always include username, but only include other info if recipient is a friend
@@ -8186,6 +8264,14 @@ console.warn('in send message', txid)
     e.stopPropagation();
     
     this.currentContextMessage = messageEl;
+    
+    // Show/hide "Delete for all" option based on whether the message is from the current user
+    const isMine = messageEl.classList.contains('sent');
+    const deleteForAllOption = this.contextMenu.querySelector('[data-action="delete-for-all"]');
+    if (deleteForAllOption) {
+      deleteForAllOption.style.display = isMine ? 'flex' : 'none';
+    }
+    
     this.positionContextMenu(this.contextMenu, messageEl);
     this.contextMenu.style.display = 'block';
   }
@@ -8246,12 +8332,16 @@ console.warn('in send message', txid)
       case 'delete':
         this.deleteMessage(messageEl);
         break;
+      case 'delete-for-all':
+        this.deleteMessageForAll(messageEl);
+        break;
     }
     
     this.closeContextMenu();
   }
 
-  /**
+
+    /**
    * Copies message content to clipboard
    * @param {HTMLElement} messageEl - The message element
    */
@@ -8344,6 +8434,103 @@ console.warn('in send message', txid)
     } catch (error) {
       console.error('Error deleting message:', error);
       showToast('Failed to delete message', 0, 'error');
+    }
+  }
+
+    /**
+   * Deletes a message for all users by sending a delete message transaction
+   * @param {HTMLElement} messageEl - The message element to delete for all
+   */
+  async deleteMessageForAll(messageEl) {
+    const { txid, messageTimestamp: timestamp } = messageEl.dataset;
+    
+    if (!timestamp || !confirm('Delete this message for all participants?')) return;
+    
+    try {
+      // Get the message object from contact.messages
+      const contact = myData.contacts[this.address];
+      const messageIndex = contact?.messages?.findIndex(msg => 
+        msg.timestamp == timestamp || msg.txid === txid
+      );
+      
+      if (messageIndex === -1) return;
+      
+      const message = contact.messages[messageIndex];
+      
+      if (message.deleted) {
+        return showToast('Message already deleted', 2000, 'info');
+      }
+
+      // Check if the message was sent by the current user
+      if (!message.my) {
+        return showToast('You can only delete your own messages for all', 0, 'error');
+      }
+
+      // Create and send a "delete" message
+      const keys = myAccount.keys;
+      if (!keys) {
+        showToast('Keys not found', 0, 'error');
+        return;
+      }
+
+      // Get recipient's public key from contacts
+      let recipientPubKey = myData.contacts[this.address]?.public;
+      let pqRecPubKey = myData.contacts[this.address]?.pqPublic;
+      if (!recipientPubKey || !pqRecPubKey) {
+        const recipientInfo = await queryNetwork(`/account/${longAddress(this.address)}`);
+        if (!recipientInfo?.account?.publicKey) {
+          console.log(`No public key found for recipient ${this.address}`);
+          return showToast('Failed to get recipient key', 0, 'error');
+        }
+        recipientPubKey = recipientInfo.account.publicKey;
+        myData.contacts[this.address].public = recipientPubKey;
+        pqRecPubKey = recipientInfo.account.pqPublicKey;
+        myData.contacts[this.address].pqPublic = pqRecPubKey;
+      }
+
+      const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey);
+      const selfKey = encryptData(bin2hex(dhkey), keys.secret+keys.pqSeed, true);
+
+      // Create delete message payload
+      const deleteObj = {
+        type: 'delete',
+        txid: txid  // ID of the message to delete
+      };
+
+      // Encrypt the message
+      const encMessage = encryptChacha(dhkey, stringify(deleteObj));
+
+      // Create message payload
+      const payload = {
+        message: encMessage,
+        encrypted: true,
+        encryptionMethod: 'xchacha20poly1305',
+        pqEncSharedKey: bin2base64(cipherText),
+        selfKey: selfKey,
+        sent_timestamp: getCorrectedTimestamp()
+      };
+
+      // Prepare and send the delete message transaction
+      const deleteMessageObj = await this.createChatMessage(this.address, payload, 0n, keys);
+      await signObj(deleteMessageObj, keys);
+      const deleteTxid = getTxid(deleteMessageObj);
+
+      // Send the delete transaction
+      const response = await injectTx(deleteMessageObj, deleteTxid);
+
+      if (!response || !response.result || !response.result.success) {
+        console.log('Delete message failed to send', response);
+        return showToast('Failed to delete message: ' + (response?.result?.reason || 'Unknown error'), 0, 'error');
+      }
+
+      showToast('Delete request sent', 3000, 'success');
+      
+      // Note: We don't do optimistic UI updates for delete-for-all
+      // The message will be deleted when we process the delete tx from the network
+      
+    } catch (error) {
+      console.error('Delete for all error:', error);
+      showToast('Failed to delete message. Please try again.', 0, 'error');
     }
   }
 
@@ -10154,9 +10341,13 @@ class SendAssetConfirmModal {
 
     let encMemo = '';
     if (memo && sharedKeyMethod !== 'none') {
+      const memoObj = {
+        type: "transfer",
+        message: memo
+      };
       // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
       // Encrypt message using shared secret
-      encMemo = encryptChacha(dhkey, memo);
+      encMemo = encryptChacha(dhkey, stringify(memoObj));
     }
 
     // only include the sender info if the recipient is is a friend and has a pqKey
