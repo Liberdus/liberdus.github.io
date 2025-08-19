@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -12587,19 +12587,8 @@ async function getSystemNotice() {
 
     // Check if we need to show the notice
     if (!myData.settings.noticets || myData.settings.noticets < timestamp) {
-      // Get message content: start after timestamp line, stop at closing comment or end
-      let messageLines = [];
-      for (let i = timestampLine + 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line === '-->') {
-          break; // Stop at closing comment tag
-        }
-        if (line) {
-          messageLines.push(line);
-        }
-      }
-      
-      const noticeMessage = messageLines.join('\n').trim();
+      // Join remaining lines for the notice message (skip the timestamp line)
+      const noticeMessage = lines.slice(timestampLine + 1).join('\n').trim();
       if (noticeMessage) {
         showToast(noticeMessage, 0, 'error');
         // Update the timestamp in settings
