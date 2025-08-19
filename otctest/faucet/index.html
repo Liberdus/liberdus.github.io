@@ -1,210 +1,936 @@
+<!-- Auto-updated on 2025-08-19T21:07:52.623Z -->
+<!-- Auto-updated on 2025-08-19T19:46:21.342Z -->
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Test Token Faucet</title>
-    
-    <script type="importmap">
-      {
-        "imports": {
-          "ethers": "https://unpkg.com/ethers@5.7.2/dist/ethers.esm.min.js"
+    <title>OTCSwap Faucet</title>
+         <script
+       src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"
+       type="application/javascript"
+       onerror="loadEthersFallback()"
+     ></script>
+     <script>
+       function loadEthersFallback() {
+         console.log('Primary CDN failed, trying fallback...');
+         const script = document.createElement('script');
+         script.src = 'https://unpkg.com/ethers@5.7.2/dist/ethers.umd.min.js';
+         script.onload = () => console.log('Ethers loaded from fallback CDN');
+         script.onerror = () => {
+           console.error('Failed to load ethers from all CDNs');
+           alert('Failed to load ethers library. Please check your internet connection and refresh the page.');
+         };
+         document.head.appendChild(script);
+       }
+     </script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+
+              .container {
+          background: white;
+          border-radius: 20px;
+          box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+          padding: 40px;
+          max-width: 700px;
+          width: 100%;
+          text-align: center;
+        }
+
+        .section {
+          background: #f8f9fa;
+          border-radius: 15px;
+          padding: 25px;
+          margin: 20px 0;
+          border-left: 5px solid #667eea;
+          box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        }
+
+        .section-title {
+          font-size: 1.3em;
+          font-weight: 700;
+          color: #333;
+          margin-bottom: 15px;
+          text-align: left;
+          border-bottom: 2px solid #667eea;
+          padding-bottom: 8px;
+        }
+
+      .logo {
+        font-size: 2.5em;
+        font-weight: bold;
+        color: #667eea;
+        margin-bottom: 10px;
+      }
+
+      .subtitle {
+        color: #666;
+        margin-bottom: 30px;
+        font-size: 1.1em;
+      }
+
+              .status {
+          padding: 18px;
+          border-radius: 12px;
+          margin: 20px 0;
+          font-weight: 600;
+          font-size: 1.1em;
+          border: 2px solid transparent;
+          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+      .status.connected {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+
+      .status.disconnected {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+
+      .status.loading {
+        background: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+      }
+
+      .status.success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+
+      .status.error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+
+              .button {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          border: none;
+          padding: 16px 32px;
+          border-radius: 25px;
+          font-size: 1.1em;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          margin: 12px;
+          min-width: 200px;
+          box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+          position: relative;
+          overflow: hidden;
+        }
+
+        .button::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: -100%;
+          width: 100%;
+          height: 100%;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+          transition: left 0.5s;
+        }
+
+        .button:hover::before {
+          left: 100%;
+        }
+
+      .button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+      }
+
+      .button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+
+      .token-info {
+        background: #f8f9fa;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 20px 0;
+        text-align: left;
+      }
+
+      .token-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 0;
+        border-bottom: 1px solid #eee;
+      }
+
+      .token-item:last-child {
+        border-bottom: none;
+      }
+
+      .token-name {
+        font-weight: 600;
+        color: #333;
+      }
+
+      .token-amount {
+        color: #667eea;
+        font-weight: 600;
+      }
+
+      .address {
+        font-family: monospace;
+        font-size: 0.9em;
+        color: #666;
+        word-break: break-all;
+        margin: 10px 0;
+      }
+
+      .loading {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #667eea;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
         }
       }
-    </script>
 
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+      .hidden {
+        display: none;
+      }
 
-        :root {
-            --gb-dark: #8B4513;    /* Saddle Brown */
-            --gb-medium: #CD853F;  /* Peru */
-            --gb-light: #DEB887;   /* Burlywood */
-            --gb-lightest: #FFE4B5; /* Moccasin */
-        }
+      .config-section {
+        background: #f8f9fa;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 20px 0;
+        text-align: left;
+      }
 
-        body {
-            font-family: 'Press Start 2P', cursive;
-            background-color: var(--gb-dark);
-            color: var(--gb-lightest);
-            margin: 0;
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-size: 14px;
-            line-height: 1.5;
-        }
+      .config-input {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        margin: 5px 0;
+        font-family: monospace;
+      }
 
-        .container {
-            text-align: center;
-            padding: 2rem;
-            background-color: var(--gb-medium);
-            border: 8px solid var(--gb-light);
-            border-radius: 20px;
-            box-shadow: inset 0 0 10px var(--gb-dark);
-            max-width: 90%;
-            width: 400px;
-        }
-
-        h1 {
-            color: var(--gb-lightest);
-            margin-bottom: 1.5rem;
-            font-size: 1.2rem;
-        }
-
-        p {
-            margin-bottom: 2rem;
-            font-size: 0.8rem;
-        }
-
-        .addresses {
-            font-size: 12px;
-            margin: 20px 0;
-            word-break: break-all;
-            color: var(--gb-lightest);
-        }
-
-        .address-label {
-            color: var(--gb-lightest);
-            opacity: 0.8;
-            margin-top: 10px;
-        }
-
-        button {
-            background-color: var(--gb-dark);
-            color: var(--gb-lightest);
-            border: 4px solid var(--gb-light);
-            padding: 12px 24px;
-            margin: 10px;
-            cursor: pointer;
-            font-family: 'Press Start 2P', cursive;
-            font-size: 0.8rem;
-            transition: all 0.2s ease;
-        }
-
-        button:hover:not(:disabled) {
-            background-color: var(--gb-light);
-            color: var(--gb-dark);
-            transform: scale(1.05);
-        }
-
-        button:active:not(:disabled) {
-            transform: scale(0.95);
-        }
-
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        #status {
-            margin-top: 20px;
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 0.7rem;
-        }
-
-        .success {
-            background-color: var(--gb-light);
-            color: var(--gb-dark);
-        }
-
-        .error {
-            background-color: var(--gb-dark);
-            color: var(--gb-lightest);
-        }
+      .config-label {
+        font-weight: 600;
+        color: #333;
+        margin-top: 15px;
+        display: block;
+      }
     </style>
-
-    <script type="module">
-        import { ethers } from 'ethers';
-        
-        window.addEventListener('load', async () => {
-            const faucetAddress = '0x3730f410e91F146089325fbD23f49D9ef544964F';
-            const faucetABI = [
-                "function getTokens() external",
-                "function getSecondTokenAddress() external view returns (address)",
-                "event TokensDistributed(address indexed recipient, uint256 amount, address firstToken, address secondToken)"
-            ];
-
-            let provider;
-            let signer;
-            let contract;
-            let secondTokenContract;
-            
-            const connectButton = document.getElementById('connectButton');
-            const getTokensButton = document.getElementById('getTokensButton');
-            const statusDiv = document.getElementById('status');
-            const firstTokenAddress = document.getElementById('firstTokenAddress');
-            const secondTokenAddress = document.getElementById('secondTokenAddress');
-
-            async function connectWallet() {
-                try {
-                    if (typeof window.ethereum === 'undefined') {
-                        throw new Error('Please install MetaMask to use this dApp');
-                    }
-                    await window.ethereum.request({ method: 'eth_requestAccounts' });
-                    provider = new ethers.providers.Web3Provider(window.ethereum);
-                    signer = provider.getSigner();
-                    contract = new ethers.Contract(faucetAddress, faucetABI, signer);
-
-                    // Display first token address (faucet address)
-                    firstTokenAddress.textContent = faucetAddress;
-
-                    // Get and display second token address
-                    const secondAddress = await contract.getSecondTokenAddress();
-                    secondTokenAddress.textContent = secondAddress;
-
-                    const address = await signer.getAddress();
-                    connectButton.textContent = `Connected: ${address.substring(0, 6)}...${address.substring(38)}`;
-                    getTokensButton.disabled = false;
-
-                    showStatus('Wallet connected successfully!', 'success');
-                } catch (error) {
-                    showStatus(`Error: ${error.message}`, 'error');
-                }
-            }
-
-            async function getTokens() {
-                try {
-                    getTokensButton.disabled = true;
-                    showStatus("Transaction pending...", "success");
-
-                    const tx = await contract.getTokens();
-                    await tx.wait();
-
-                    showStatus("Tokens received successfully!", "success");
-                } catch (error) {
-                    showStatus(`Error: ${error.message}`, "error");
-                } finally {
-                    getTokensButton.disabled = false;
-                }
-            }
-
-            function showStatus(message, type) {
-                statusDiv.textContent = message;
-                statusDiv.className = type;
-                statusDiv.style.display = 'block';
-            }
-
-            connectButton.addEventListener('click', connectWallet);
-            getTokensButton.addEventListener('click', getTokens);
-        });
-    </script>
   </head>
   <body>
     <div class="container">
-        <h1>Test Token Faucet</h1>
-        <p>CONNECT WALLET TO CONTINUE</p>
-        <div class="addresses">
-            <div class="address-label">First Token:</div>
-            <div id="firstTokenAddress">Connect wallet to view</div>
-            <div class="address-label">Second Token:</div>
-            <div id="secondTokenAddress">Connect wallet to view</div>
+      <div class="logo">🚰</div>
+      <h1>OTCSwap Faucet</h1>
+      <p class="subtitle">Get test tokens for the OTCSwap platform</p>
+
+      <div id="status" class="status disconnected">
+        <span id="statusText">Please connect your wallet</span>
+      </div>
+
+             <div id="walletInfo" class="section hidden">
+         <div class="section-title">🔗 Connected Wallet</div>
+         <p><strong>Connected Address:</strong></p>
+         <div class="address" id="userAddress"></div>
+       </div>
+
+       <div id="configSection" class="section">
+         <div class="section-title">⚙️ Faucet Configuration</div>
+         <p>
+           <strong
+             >Enter the Faucet contract address after deployment:</strong
+           >
+         </p>
+
+        <label class="config-label">Faucet Contract Address:</label>
+        <input
+          type="text"
+          id="faucetAddress"
+          class="config-input"
+          placeholder="0x..."
+          value="0x16fD809E44C2731D0B8002aB977aF909D80DccD1"
+        />
+
+        <div
+          style="
+            margin-top: 20px;
+            padding: 18px;
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            border-radius: 12px;
+            border-left: 5px solid #2196f3;
+            box-shadow: 0 2px 8px rgba(33, 150, 243, 0.1);
+          "
+        >
+          <strong style="color: #1565c0;">🌐 Public Faucet Mode:</strong> Any connected wallet can request tokens directly from the faucet contract. No private keys needed!
         </div>
-        <button id="connectButton">Connect Wallet</button>
-        <button id="getTokensButton" disabled>Get Tokens</button>
-        <div id="status" style="display: none;"></div>
+
+        <div
+          style="
+            margin-top: 20px;
+            padding: 18px;
+            background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+            border-radius: 12px;
+            border-left: 5px solid #ff9800;
+            box-shadow: 0 2px 8px rgba(255, 152, 0, 0.1);
+          "
+        >
+          <strong style="color: #e65100;">⏱️ Cooldown Protection:</strong> Users can only request tokens once per hour to prevent abuse.
+        </div>
+       </div>
+      </div>
+
+             <div id="tokenInfo" class="section hidden">
+         <div class="section-title">🎁 Available Tokens</div>
+         <div class="token-item">
+           <span class="token-name">Fee Token (FEE)</span>
+           <span class="token-amount">100 tokens</span>
+         </div>
+         <div class="token-item">
+           <span class="token-name">Trading Token Alpha (TTA)</span>
+           <span class="token-amount">1,000 tokens</span>
+         </div>
+         <div class="token-item">
+           <span class="token-name">Trading Token Beta (TTB)</span>
+           <span class="token-amount">1,000 tokens</span>
+         </div>
+         <div style="margin-top: 15px; padding: 10px; background: #e8f5e8; border-radius: 8px; font-size: 0.9em; color: #2e7d32;">
+           <strong>⏱️ Cooldown:</strong> You can request tokens once every hour
+         </div>
+       </div>
+
+      <button id="connectBtn" class="button" onclick="connectWallet()">
+        Connect Wallet
+      </button>
+
+      <button
+        id="requestBtn"
+        class="button hidden"
+        onclick="requestTokens()"
+        disabled
+      >
+        Request Tokens
+      </button>
+
+             <div id="tokenManagement" class="section hidden">
+         <div class="section-title">🎛️ Token Management</div>
+         <div style="display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px;">
+           <button class="button" onclick="pauseAllTokens()" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);">
+             ⏸️ Pause All Tokens
+           </button>
+           <button class="button" onclick="unpauseAllTokens()" style="background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);">
+             ▶️ Unpause All Tokens
+           </button>
+         </div>
+         
+         <div id="tokenStatus" style="margin-top: 20px; padding: 20px; background: #ffffff; border-radius: 12px; border: 2px solid #e0e0e0;">
+           <h4 style="margin: 0 0 15px 0; color: #333; font-size: 1.2em;">📊 Token Status</h4>
+           <div id="tokenStatusContent">
+             <p style="color: #666; font-style: italic;">Click "Check Status" to see current token states</p>
+           </div>
+           <button class="button" onclick="checkTokenStatus()" style="margin-top: 15px; background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);">
+             🔍 Check Status
+           </button>
+         </div>
+       </div>
+
+       <div id="faucetStatusSection" class="section hidden">
+         <div class="section-title">📊 Faucet Status</div>
+         <div id="faucetStatus" style="margin-top: 20px; padding: 20px; background: #ffffff; border-radius: 12px; border: 2px solid #e0e0e0;">
+           <h4 style="margin: 0 0 15px 0; color: #333; font-size: 1.2em;">🔍 Faucet Information</h4>
+           <div id="faucetStatusContent">
+             <p style="color: #666; font-style: italic;">Click "Check Status" to see faucet details</p>
+           </div>
+           <button class="button" onclick="checkFaucetStatus()" style="margin-top: 15px; background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);">
+             🔍 Check Status
+           </button>
+         </div>
+       </div>
+
+      <div id="loading" class="hidden">
+        <div class="loading"></div>
+        <p>Processing your request...</p>
+      </div>
     </div>
+
+    <script>
+      // Configuration
+      const CONFIG = {
+        network: {
+          chainId: "0x13881", // Amoy testnet (80002 in decimal)
+          chainName: "Amoy Testnet",
+          nativeCurrency: {
+            name: "MATIC",
+            symbol: "MATIC",
+            decimals: 18,
+          },
+          rpcUrls: ["https://rpc-amoy.polygon.technology/"],
+          blockExplorerUrls: ["https://www.oklink.com/amoy"],
+        },
+        amounts: {
+          feeToken: "100000000000000000000", // 100 tokens (18 decimals)
+          tradingToken: "1000000000000000000000", // 1000 tokens (18 decimals)
+        },
+      };
+
+      let provider, signer, userAddress;
+
+      async function connectWallet() {
+        try {
+          // Check if ethers is loaded
+          if (typeof ethers === 'undefined') {
+            throw new Error('Ethers library not loaded. Please refresh the page and try again.');
+          }
+          
+          updateStatus("Connecting to wallet...", "loading");
+
+          // Check if MetaMask is installed
+          if (typeof window.ethereum === "undefined") {
+            throw new Error(
+              "MetaMask is not installed. Please install MetaMask and try again."
+            );
+          }
+
+          // Request account access
+          const accounts = await window.ethereum.request({
+            method: "eth_requestAccounts",
+          });
+          userAddress = accounts[0];
+
+          // Create provider and signer
+          provider = new ethers.providers.Web3Provider(window.ethereum);
+          signer = provider.getSigner();
+
+          // Check if we're on the correct network
+          const network = await provider.getNetwork();
+          if (network.chainId !== 80002) {
+            // Amoy testnet
+            await switchToAmoyNetwork();
+          }
+
+          updateStatus(
+            `Connected: ${userAddress.substring(
+              0,
+              6
+            )}...${userAddress.substring(38)}`,
+            "connected"
+          );
+          document.getElementById("userAddress").textContent = userAddress;
+          document.getElementById("walletInfo").classList.remove("hidden");
+          document.getElementById("tokenInfo").classList.remove("hidden");
+          document.getElementById("tokenManagement").classList.remove("hidden");
+          document.getElementById("faucetStatusSection").classList.remove("hidden");
+          document.getElementById("connectBtn").classList.add("hidden");
+          document.getElementById("requestBtn").classList.remove("hidden");
+          document.getElementById("requestBtn").disabled = false;
+        } catch (error) {
+          console.error("Error connecting wallet:", error);
+          updateStatus(`Error: ${error.message}`, "error");
+        }
+      }
+
+      async function switchToAmoyNetwork() {
+        try {
+          await window.ethereum.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: CONFIG.network.chainId }],
+          });
+        } catch (switchError) {
+          // This error code indicates that the chain has not been added to MetaMask
+          if (switchError.code === 4902) {
+            try {
+              await window.ethereum.request({
+                method: "wallet_addEthereumChain",
+                params: [CONFIG.network],
+              });
+            } catch (addError) {
+              throw new Error("Failed to add Amoy network to MetaMask");
+            }
+          } else {
+            throw switchError;
+          }
+        }
+      }
+
+      async function requestTokens() {
+        if (!signer || !userAddress) {
+          updateStatus("Please connect your wallet first", "error");
+          return;
+        }
+
+        try {
+          updateStatus("Requesting tokens...", "loading");
+          document.getElementById("requestBtn").disabled = true;
+          document.getElementById("loading").classList.remove("hidden");
+
+          // Get faucet address from input field
+          const faucetAddress = document.getElementById("faucetAddress").value;
+
+          // Validate faucet address
+          if (!ethers.utils.isAddress(faucetAddress)) {
+            throw new Error("Please enter a valid faucet contract address");
+          }
+
+          // Faucet ABI
+          const faucetABI = [
+            "function requestTokens(address user) external",
+            "function canRequestTokens(address user) external view returns (bool)",
+            "function getRemainingCooldown(address user) external view returns (uint256)",
+            "function feeTokenAmount() external view returns (uint256)",
+            "function tradingTokenAmount() external view returns (uint256)",
+            "function cooldownPeriod() external view returns (uint256)"
+          ];
+
+          // Create faucet contract instance
+          const faucet = new ethers.Contract(faucetAddress, faucetABI, signer);
+
+          // Check if user can request tokens
+          const canRequest = await faucet.canRequestTokens(userAddress);
+          if (!canRequest) {
+            const remainingCooldown = await faucet.getRemainingCooldown(userAddress);
+            const minutes = Math.ceil(remainingCooldown / 60);
+            throw new Error(`Please wait ${minutes} minutes before requesting tokens again`);
+          }
+
+          // Request tokens
+          const tx = await faucet.requestTokens(userAddress);
+          await tx.wait();
+
+          updateStatus("Tokens sent successfully! Check your wallet.", "success");
+          console.log("Transaction hash:", tx.hash);
+
+        } catch (error) {
+          console.error("Error requesting tokens:", error);
+          updateStatus(`Error: ${error.message}`, "error");
+        } finally {
+          document.getElementById("requestBtn").disabled = false;
+          document.getElementById("loading").classList.add("hidden");
+        }
+      }
+
+      function updateStatus(message, type) {
+        const statusElement = document.getElementById("status");
+        const statusTextElement = document.getElementById("statusText");
+
+        statusElement.className = `status ${type}`;
+        statusTextElement.textContent = message;
+      }
+
+      // Listen for account changes
+      if (typeof window.ethereum !== "undefined") {
+        window.ethereum.on("accountsChanged", function (accounts) {
+          if (accounts.length === 0) {
+            // User disconnected
+            updateStatus("Please connect your wallet", "disconnected");
+            document.getElementById("walletInfo").classList.add("hidden");
+            document.getElementById("tokenInfo").classList.add("hidden");
+            document.getElementById("connectBtn").classList.remove("hidden");
+            document.getElementById("requestBtn").classList.add("hidden");
+          } else {
+            // User switched accounts
+            userAddress = accounts[0];
+            document.getElementById("userAddress").textContent = userAddress;
+            updateStatus(
+              `Connected: ${userAddress.substring(
+                0,
+                6
+              )}...${userAddress.substring(38)}`,
+              "connected"
+            );
+          }
+        });
+
+        window.ethereum.on("chainChanged", function (chainId) {
+          if (chainId !== CONFIG.network.chainId) {
+            updateStatus("Please switch to Amoy testnet", "error");
+          }
+        });
+      }
+
+      // Token Management Functions
+      async function pauseAllTokens() {
+        if (!signer || !userAddress) {
+          updateStatus("Please connect your wallet first", "error");
+          return;
+        }
+
+        try {
+          updateStatus("Pausing all tokens...", "loading");
+          
+          // Get faucet address from input
+          const faucetAddress = document.getElementById("faucetAddress").value;
+          if (!ethers.utils.isAddress(faucetAddress)) {
+            throw new Error("Please configure a valid faucet address first");
+          }
+
+          // Get token addresses from faucet contract
+          const faucetABI = [
+            "function feeToken() external view returns (address)",
+            "function tradingToken1() external view returns (address)",
+            "function tradingToken2() external view returns (address)"
+          ];
+          const faucet = new ethers.Contract(faucetAddress, faucetABI, signer);
+          
+          const [feeTokenAddress, tradingToken1Address, tradingToken2Address] = await Promise.all([
+            faucet.feeToken(),
+            faucet.tradingToken1(),
+            faucet.tradingToken2()
+          ]);
+
+          const tokenABI = [
+            "function pause() public",
+            "function paused() view returns (bool)",
+            "function owner() view returns (address)"
+          ];
+
+          const feeToken = new ethers.Contract(feeTokenAddress, tokenABI, signer);
+          const tradingToken1 = new ethers.Contract(tradingToken1Address, tokenABI, signer);
+          const tradingToken2 = new ethers.Contract(tradingToken2Address, tokenABI, signer);
+
+          // Check if user is owner of all tokens
+          const feeTokenOwner = await feeToken.owner();
+          const tradingToken1Owner = await tradingToken1.owner();
+          const tradingToken2Owner = await tradingToken2.owner();
+
+          if (userAddress.toLowerCase() !== feeTokenOwner.toLowerCase() ||
+              userAddress.toLowerCase() !== tradingToken1Owner.toLowerCase() ||
+              userAddress.toLowerCase() !== tradingToken2Owner.toLowerCase()) {
+            throw new Error("You must be the owner of all tokens to pause them");
+          }
+
+          // Pause all tokens
+          const tx1 = await feeToken.pause();
+          const tx2 = await tradingToken1.pause();
+          const tx3 = await tradingToken2.pause();
+
+          await Promise.all([tx1.wait(), tx2.wait(), tx3.wait()]);
+
+          updateStatus("All tokens paused successfully!", "success");
+          await checkTokenStatus();
+
+        } catch (error) {
+          console.error("Error pausing tokens:", error);
+          updateStatus(`Error: ${error.message}`, "error");
+        }
+      }
+
+      async function unpauseAllTokens() {
+        if (!signer || !userAddress) {
+          updateStatus("Please connect your wallet first", "error");
+          return;
+        }
+
+        try {
+          updateStatus("Unpausing all tokens...", "loading");
+          
+          // Get faucet address from input
+          const faucetAddress = document.getElementById("faucetAddress").value;
+          if (!ethers.utils.isAddress(faucetAddress)) {
+            throw new Error("Please configure a valid faucet address first");
+          }
+
+          // Get token addresses from faucet contract
+          const faucetABI = [
+            "function feeToken() external view returns (address)",
+            "function tradingToken1() external view returns (address)",
+            "function tradingToken2() external view returns (address)"
+          ];
+          const faucet = new ethers.Contract(faucetAddress, faucetABI, signer);
+          
+          const [feeTokenAddress, tradingToken1Address, tradingToken2Address] = await Promise.all([
+            faucet.feeToken(),
+            faucet.tradingToken1(),
+            faucet.tradingToken2()
+          ]);
+
+          const tokenABI = [
+            "function unpause() public",
+            "function paused() view returns (bool)",
+            "function owner() view returns (address)"
+          ];
+
+          const feeToken = new ethers.Contract(feeTokenAddress, tokenABI, signer);
+          const tradingToken1 = new ethers.Contract(tradingToken1Address, tokenABI, signer);
+          const tradingToken2 = new ethers.Contract(tradingToken2Address, tokenABI, signer);
+
+          // Check if user is owner of all tokens
+          const feeTokenOwner = await feeToken.owner();
+          const tradingToken1Owner = await tradingToken1.owner();
+          const tradingToken2Owner = await tradingToken2.owner();
+
+          if (userAddress.toLowerCase() !== feeTokenOwner.toLowerCase() ||
+              userAddress.toLowerCase() !== tradingToken1Owner.toLowerCase() ||
+              userAddress.toLowerCase() !== tradingToken2Owner.toLowerCase()) {
+            throw new Error("You must be the owner of all tokens to unpause them");
+          }
+
+          // Unpause all tokens
+          const tx1 = await feeToken.unpause();
+          const tx2 = await tradingToken1.unpause();
+          const tx3 = await tradingToken2.unpause();
+
+          await Promise.all([tx1.wait(), tx2.wait(), tx3.wait()]);
+
+          updateStatus("All tokens unpaused successfully!", "success");
+          await checkTokenStatus();
+
+        } catch (error) {
+          console.error("Error unpausing tokens:", error);
+          updateStatus(`Error: ${error.message}`, "error");
+        }
+      }
+
+      async function checkTokenStatus() {
+        if (!signer || !userAddress) {
+          updateStatus("Please connect your wallet first", "error");
+          return;
+        }
+
+        try {
+          updateStatus("Checking token status...", "loading");
+          
+          // Get faucet address from input
+          const faucetAddress = document.getElementById("faucetAddress").value;
+          if (!ethers.utils.isAddress(faucetAddress)) {
+            throw new Error("Please configure a valid faucet address first");
+          }
+
+          // Get token addresses from faucet contract
+          const faucetABI = [
+            "function feeToken() external view returns (address)",
+            "function tradingToken1() external view returns (address)",
+            "function tradingToken2() external view returns (address)"
+          ];
+          const faucet = new ethers.Contract(faucetAddress, faucetABI, signer);
+          
+          const [feeTokenAddress, tradingToken1Address, tradingToken2Address] = await Promise.all([
+            faucet.feeToken(),
+            faucet.tradingToken1(),
+            faucet.tradingToken2()
+          ]);
+
+          const tokenABI = [
+            "function paused() view returns (bool)",
+            "function owner() view returns (address)",
+            "function name() view returns (string)",
+            "function symbol() view returns (string)"
+          ];
+
+          const feeToken = new ethers.Contract(feeTokenAddress, tokenABI, signer);
+          const tradingToken1 = new ethers.Contract(tradingToken1Address, tokenABI, signer);
+          const tradingToken2 = new ethers.Contract(tradingToken2Address, tokenABI, signer);
+
+          // Get token status
+          const [feePaused, feeOwner, feeName, feeSymbol] = await Promise.all([
+            feeToken.paused(),
+            feeToken.owner(),
+            feeToken.name(),
+            feeToken.symbol()
+          ]);
+
+          const [trading1Paused, trading1Owner, trading1Name, trading1Symbol] = await Promise.all([
+            tradingToken1.paused(),
+            tradingToken1.owner(),
+            tradingToken1.name(),
+            tradingToken1.symbol()
+          ]);
+
+          const [trading2Paused, trading2Owner, trading2Name, trading2Symbol] = await Promise.all([
+            tradingToken2.paused(),
+            tradingToken2.owner(),
+            tradingToken2.name(),
+            tradingToken2.symbol()
+          ]);
+
+          // Check if user is owner
+          const isOwner = userAddress.toLowerCase() === feeOwner.toLowerCase() &&
+                        userAddress.toLowerCase() === trading1Owner.toLowerCase() &&
+                        userAddress.toLowerCase() === trading2Owner.toLowerCase();
+
+          // Update status display
+          const statusContent = document.getElementById("tokenStatusContent");
+          statusContent.innerHTML = `
+            <div style="margin-bottom: 15px;">
+              <strong>Fee Token (${feeSymbol}):</strong> 
+              <span style="color: ${feePaused ? '#f44336' : '#4caf50'}; font-weight: bold;">
+                ${feePaused ? 'PAUSED' : 'ACTIVE'}
+              </span>
+            </div>
+            <div style="margin-bottom: 15px;">
+              <strong>Trading Token 1 (${trading1Symbol}):</strong> 
+              <span style="color: ${trading1Paused ? '#f44336' : '#4caf50'}; font-weight: bold;">
+                ${trading1Paused ? 'PAUSED' : 'ACTIVE'}
+              </span>
+            </div>
+            <div style="margin-bottom: 15px;">
+              <strong>Trading Token 2 (${trading2Symbol}):</strong> 
+              <span style="color: ${trading2Paused ? '#f44336' : '#4caf50'}; font-weight: bold;">
+                ${trading2Paused ? 'PAUSED' : 'ACTIVE'}
+              </span>
+            </div>
+            <div style="margin-top: 20px; padding: 10px; background: ${isOwner ? '#e8f5e8' : '#ffe8e8'}; border-radius: 5px;">
+              <strong>Management Access:</strong> 
+              <span style="color: ${isOwner ? '#4caf50' : '#f44336'}; font-weight: bold;">
+                ${isOwner ? 'OWNER (Can pause/unpause)' : 'NOT OWNER (Read-only)'}
+              </span>
+            </div>
+          `;
+
+          updateStatus("Token status updated!", "success");
+
+        } catch (error) {
+          console.error("Error checking token status:", error);
+          updateStatus(`Error: ${error.message}`, "error");
+        }
+      }
+
+      // Faucet Status Function
+      async function checkFaucetStatus() {
+        if (!signer || !userAddress) {
+          updateStatus("Please connect your wallet first", "error");
+          return;
+        }
+
+        try {
+          updateStatus("Checking faucet status...", "loading");
+          
+          const faucetAddress = document.getElementById("faucetAddress").value;
+
+          if (!ethers.utils.isAddress(faucetAddress)) {
+            throw new Error("Please configure a valid faucet address first");
+          }
+
+          const faucetABI = [
+            "function feeTokenAmount() external view returns (uint256)",
+            "function tradingTokenAmount() external view returns (uint256)",
+            "function cooldownPeriod() external view returns (uint256)",
+            "function canRequestTokens(address user) external view returns (bool)",
+            "function getRemainingCooldown(address user) external view returns (uint256)",
+            "function feeToken() external view returns (address)",
+            "function tradingToken1() external view returns (address)",
+            "function tradingToken2() external view returns (address)"
+          ];
+
+          const faucet = new ethers.Contract(faucetAddress, faucetABI, signer);
+
+          // Get faucet information
+          const [feeAmount, tradingAmount, cooldown, canRequest, remainingCooldown] = await Promise.all([
+            faucet.feeTokenAmount(),
+            faucet.tradingTokenAmount(),
+            faucet.cooldownPeriod(),
+            faucet.canRequestTokens(userAddress),
+            faucet.getRemainingCooldown(userAddress)
+          ]);
+
+          // Get token addresses
+          const [feeTokenAddr, tradingToken1Addr, tradingToken2Addr] = await Promise.all([
+            faucet.feeToken(),
+            faucet.tradingToken1(),
+            faucet.tradingToken2()
+          ]);
+
+          // Token ABI for getting names
+          const tokenABI = [
+            "function name() view returns (string)",
+            "function symbol() view returns (string)"
+          ];
+
+          const feeToken = new ethers.Contract(feeTokenAddr, tokenABI, signer);
+          const tradingToken1 = new ethers.Contract(tradingToken1Addr, tokenABI, signer);
+          const tradingToken2 = new ethers.Contract(tradingToken2Addr, tokenABI, signer);
+
+          // Get token names
+          const [feeName, feeSymbol, trading1Name, trading1Symbol, trading2Name, trading2Symbol] = await Promise.all([
+            feeToken.name(),
+            feeToken.symbol(),
+            tradingToken1.name(),
+            tradingToken1.symbol(),
+            tradingToken2.name(),
+            tradingToken2.symbol()
+          ]);
+
+          // Format amounts
+          const feeAmountFormatted = ethers.utils.formatEther(feeAmount);
+          const tradingAmountFormatted = ethers.utils.formatEther(tradingAmount);
+          const cooldownHours = cooldown / 3600;
+          const remainingMinutes = Math.ceil(remainingCooldown / 60);
+
+          // Update status display
+          const statusContent = document.getElementById("faucetStatusContent");
+          statusContent.innerHTML = `
+            <div style="margin-bottom: 15px;">
+              <strong>Fee Token (${feeSymbol}):</strong> 
+              <span style="color: #4caf50; font-weight: bold;">
+                ${feeAmountFormatted} tokens
+              </span>
+            </div>
+            <div style="margin-bottom: 15px;">
+              <strong>Trading Token 1 (${trading1Symbol}):</strong> 
+              <span style="color: #4caf50; font-weight: bold;">
+                ${tradingAmountFormatted} tokens
+              </span>
+            </div>
+            <div style="margin-bottom: 15px;">
+              <strong>Trading Token 2 (${trading2Symbol}):</strong> 
+              <span style="color: #4caf50; font-weight: bold;">
+                ${tradingAmountFormatted} tokens
+              </span>
+            </div>
+            <div style="margin-bottom: 15px;">
+              <strong>Cooldown Period:</strong> 
+              <span style="color: #ff9800; font-weight: bold;">
+                ${cooldownHours} hours
+              </span>
+            </div>
+            <div style="margin-top: 20px; padding: 10px; background: ${canRequest ? '#e8f5e8' : '#fff3e0'}; border-radius: 5px;">
+              <strong>Your Status:</strong> 
+              <span style="color: ${canRequest ? '#4caf50' : '#ff9800'}; font-weight: bold;">
+                ${canRequest ? 'CAN REQUEST TOKENS' : `WAIT ${remainingMinutes} MINUTES`}
+              </span>
+            </div>
+          `;
+
+          updateStatus("Faucet status updated!", "success");
+
+        } catch (error) {
+          console.error("Error checking faucet status:", error);
+          updateStatus(`Error: ${error.message}`, "error");
+        }
+      }
+    </script>
   </body>
 </html>

@@ -72,16 +72,6 @@
   text-align: center;
 }
 
-.status.error {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
-.status.success {
-  background: #dcfce7;
-  color: #16a34a;
-}
-
 /* Token symbol display */
 #sellTokenSymbol,
 #buyTokenSymbol {
@@ -318,30 +308,26 @@
 }
 
 .token-selector {
-  display: flex;
+  display: inline-flex;
+  flex-direction: row;
   align-items: center;
   padding: 4px 8px;
-  background: white;
-  border: 1px solid #e8e8e8;
   border-radius: 16px;
   cursor: pointer;
-  gap: 8px;
+  gap: 4px;
 }
 
-.token-selector:hover {
-  background: #f7f8fa;
+/* Vertical stack for selector + balance chip */
+.token-selector-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center; /* center children horizontally */
+  gap: 4px;
 }
 
 .dropdown-arrow {
   font-size: 12px;
   color: #7d7d7d;
-}
-
-.balance-text {
-  font-size: 12px;
-  color: #7d7d7d;
-  margin-top: 4px;
-  display: block;
 }
 
 .swap-arrow {
@@ -914,6 +900,7 @@
   gap: 12px;
   position: relative;
   z-index: 1;
+  min-height: 120px;
 }
 
 .token-input-wrapper {
@@ -1032,18 +1019,6 @@
   z-index: 1;
 }
 
-/* Unified token input */
-.unified-token-input {
-  display: flex;
-  align-items: center;
-  background: var(--bg-tertiary);
-  border-radius: 12px;
-  padding: 16px;
-  gap: 12px;
-  position: relative;
-  z-index: 1;
-}
-
 /* Fee container spacing */
 .fee-container {
   margin-top: 20px;
@@ -1078,6 +1053,16 @@
   color: #666;
   font-size: 14px;
   gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.taker-toggle:hover {
+  background-color: var(--bg-secondary);
+  border-radius: 8px;
+}
+
+.taker-toggle .chevron-down {
+  transition: transform 0.2s ease;
 }
 
 .taker-input-content {
@@ -1227,32 +1212,10 @@
   font-size: 0.85em;
 }
 
-.token-balance-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.token-balance {
-  color: var(--text-primary);
-  font-size: 0.9em;
-}
-
-.token-balance-usd {
-  color: var(--text-secondary);
-  font-size: 0.85em;
-}
-
 .token-selector-left {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.token-balance-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 
 .amount-container {
@@ -1263,18 +1226,396 @@
   font-feature-settings: "tnum";
 }
 
-.token-balance {
-  color: var(--text-primary);
-  font-size: 0.9em;
-}
-
-.token-balance-usd {
-  color: var(--text-secondary);
-  font-size: 0.85em;
-}
-
 .token-selector-left {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Token Balance States */
+.token-has-balance {
+  border-left: 3px solid #10b981;
+}
+
+.token-no-balance {
+  border-left: 3px solid #6b7280;
+  opacity: 0.7;
+}
+
+/* Buy token modal specific styling - remove borders and ensure consistent hover */
+#buyTokenModal .token-item {
+  border-left: none !important;
+}
+
+#buyTokenModal .token-item:hover {
+  background-color: var(--bg-tertiary) !important;
+  opacity: 1 !important;
+}
+
+.token-not-allowed {
+  border-left: 3px solid #ef4444;
+  opacity: 0.8;
+  background-color: #fef2f2;
+}
+
+.token-not-allowed:hover {
+  background-color: #fee2e2;
+  opacity: 1;
+}
+
+.token-has-balance:hover {
+  background-color: #f0fdf4;
+  border-color: #059669;
+}
+
+.token-no-balance:hover {
+  background-color: #f9fafb;
+  opacity: 1;
+}
+
+/* Disabled token styling for sell selection */
+.token-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.token-disabled:hover {
+  background-color: inherit;
+  border-color: inherit;
+}
+
+.token-disabled .token-item-content {
+  opacity: 0.6;
+}
+
+.has-balance {
+  color: #059669;
+  font-weight: 600;
+}
+
+.no-balance {
+  color: #6b7280;
+}
+
+.no-balance-text {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* Token Not Allowed Message */
+.token-not-allowed-message {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  padding: 12px;
+  border-radius: 6px;
+  margin-top: 8px;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+/* Empty State Styling */
+.token-list-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: #6b7280;
+}
+
+.empty-state-icon {
+  font-size: 3rem;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.empty-state-text {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #374151;
+}
+
+.empty-state-subtext {
+  font-size: 0.875rem;
+  color: #9ca3af;
+  line-height: 1.5;
+}
+
+/* Token List Summary */
+.token-list-summary {
+  border-top: 1px solid #e5e7eb;
+  padding: 12px 16px;
+  background: #f9fafb;
+  margin-top: 8px;
+  border-radius: 0 0 8px 8px;
+}
+
+.summary-text {
+  font-size: 0.875rem;
+  color: #6b7280;
+  text-align: center;
+}
+
+/* Token Item Actions */
+.token-item-actions {
+  display: flex;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.token-explorer-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: #6b7280;
+  transition: all 0.2s ease;
+}
+
+.token-explorer-link:hover {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+.token-explorer-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Contract Loading State */
+.contract-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: #6b7280;
+}
+
+.contract-loading .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #e5e7eb;
+  border-top: 2px solid #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Contract Error State */
+.contract-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  padding: 12px;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+/* Token Item Improvements */
+.token-item {
+  transition: all 0.2s ease;
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+
+.token-item:last-child {
+  margin-bottom: 0;
+}
+
+.token-item-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  width: 100%;
+}
+
+.token-item-left {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.token-item-right {
+  display: flex;
+  align-items: center;
+  margin-left: 12px;
+}
+
+.token-balance-with-usd {
+  text-align: right;
+  margin-right: 8px;
+}
+
+.token-balance-amount {
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1.2;
+}
+
+.token-balance-usd {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+  .token-item-content {
+    padding: 10px 12px;
+  }
+
+  .token-item-symbol {
+    font-size: 0.875rem;
+  }
+
+  .token-item-name {
+    font-size: 0.75rem;
+  }
+
+  .token-balance-amount {
+    font-size: 0.8rem;
+  }
+
+  .token-balance-usd {
+    font-size: 0.7rem;
+  }
+}
+
+/* Token Balance Display - New Implementation */
+
+.token-balance-display:hover {
+  background: var(--bg-tertiary); /* match selector hover */
+}
+
+.balance-clickable {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px; /* match selector content spacing */
+  padding: 6px 12px; /* pill padding */
+  border-radius: 20px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px; /* match selector */
+  color: var(--text-primary);
+  transition: background-color 0.2s;
+  white-space: nowrap;
+  min-width: 120px; /* match selector min-width */
+}
+
+.balance-clickable:hover {
+  background: var(--bg-tertiary);
+}
+
+.balance-clickable:focus {
+  outline: 2px solid #4b6bfb;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.balance-clickable:active {
+  transform: scale(0.98);
+}
+
+.balance-amount {
+  font-size: 14px; /* match selector */
+  font-weight: 500;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  min-width: 0;
+}
+
+.balance-usd {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  opacity: 0.8;
+}
+
+/* Explicitly hide balance USD chips by ID when present */
+#sellTokenBalanceUSD,
+#buyTokenBalanceUSD {
+  display: none !important;
+}
+
+/* Position balance displays relative to their containers */
+#sellContainer {
+  position: relative;
+}
+
+#buyContainer {
+  position: relative;
+}
+
+/* Ensure balance displays flow naturally after their containers */
+.token-balance-display {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0;
+  margin-right: 0;
+  border-radius: 20px; /* match selector */
+  padding: 6px 12px; /* match selector */
+  transition: background-color 0.2s; /* match selector */
+  font-size: 14px; /* match selector */
+  color: var(--text-primary);
+  gap: 8px; /* match selector */
+  align-self: center; /* center chip in the group */
+  min-width: 120px; /* match selector min-width */
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+  .token-balance-display {
+    margin-top: 3px;
+    padding: 3px 6px;
+  }
+
+  .balance-amount {
+    font-size: 10px;
+  }
+
+  .balance-usd {
+    font-size: 9px;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .token-balance-display {
+    border: 2px solid var(--text-primary);
+  }
+
+  .balance-clickable:focus {
+    outline: 3px solid var(--text-primary);
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .token-balance-display,
+  .balance-clickable {
+    transition: none;
+  }
+
+  .balance-clickable:active {
+    transform: none;
+  }
 }

@@ -65,12 +65,61 @@ export class Cleanup extends BaseComponent {
             this.container.innerHTML = '';
             
             if (readOnlyMode) {
-                this.debug('Read-only mode, showing connect prompt');
-                this.container.innerHTML = `
-                    <div class="tab-content-wrapper">
+                this.debug('Read-only mode, showing cleanup opportunities with connect prompt');
+                const wrapper = this.createElement('div', 'tab-content-wrapper');
+                wrapper.innerHTML = `
+                    <div class="cleanup-section">
                         <h2>Cleanup Expired Orders</h2>
-                        <p class="connect-prompt">Connect wallet to view cleanup opportunities</p>
+                        <div class="cleanup-info">
+                            <p>Help maintain the orderbook by cleaning up expired orders</p>
+                            <div class="cleanup-stats">
+                                <div class="cleanup-rewards">
+                                    <h3>Cleanup Information</h3>
+                                    <div>Next cleanup reward: <span id="current-reward">Loading...</span></div>
+                                    <div>Orders ready: <span id="cleanup-ready">Loading...</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="connect-prompt">
+                            <p>Connect wallet to perform cleanup actions</p>
+                        </div>
+                        <button id="cleanup-button" class="action-button" disabled>
+                            Connect Wallet to Clean Orders
+                        </button>
                     </div>`;
+                
+                this.container.appendChild(wrapper);
+
+                // Set up the cleanup button event listener for read-only mode
+                this.cleanupButton = document.getElementById('cleanup-button');
+                if (this.cleanupButton) {
+                    this.cleanupButton.addEventListener('click', () => {
+                        if (window.walletManager) {
+                            window.walletManager.connect().catch(error => {
+                                this.showError('Failed to connect wallet: ' + error.message);
+                            });
+                        }
+                    });
+                }
+
+                // Add wallet connection listener to reinitialize when wallet connects
+                if (window.walletManager) {
+                    window.walletManager.addListener((event, data) => {
+                        if (event === 'connect') {
+                            this.debug('Wallet connected in read-only mode, reinitializing...');
+                            this.initialize(false); // Reinitialize in connected mode
+                        }
+                    });
+                }
+
+                // Check cleanup opportunities even in read-only mode
+                this.debug('Starting cleanup opportunities check in read-only mode');
+                await this.checkCleanupOpportunities();
+                
+                this.intervalId = setInterval(() => this.checkCleanupOpportunities(), 5 * 60 * 1000);
+                
+                this.isInitialized = true;
+                this.debug('Read-only mode initialization complete');
                 return;
             }
 
@@ -157,10 +206,11 @@ export class Cleanup extends BaseComponent {
             const orders = this.webSocket.getOrders();
             const currentTime = Math.floor(Date.now() / 1000);
             
-            // Filter eligible orders
-            const eligibleOrders = orders.filter(order => 
-                currentTime > order.timings.graceEndsAt
-            );
+            // Filter eligible orders (defensive against missing timings)
+            const eligibleOrders = orders.filter(order => {
+                const graceEndsAt = order?.timings?.graceEndsAt;
+                return typeof graceEndsAt === 'number' && currentTime > graceEndsAt;
+            });
 
             // Get the first order that will be cleaned (lowest ID)
             const nextOrderToClean = eligibleOrders.length > 0 
@@ -218,8 +268,19 @@ export class Cleanup extends BaseComponent {
             }
 
             if (elements.cleanupButton) {
-                elements.cleanupButton.disabled = eligibleOrders.length === 0;
-                elements.cleanupButton.textContent = 'Clean Orders';
+                // Check if wallet is connected
+                const isWalletConnected = window.walletManager?.isWalletConnected();
+                
+                if (!isWalletConnected) {
+                    elements.cleanupButton.disabled = false; // Enable button to connect wallet
+                    elements.cleanupButton.textContent = 'Connect Wallet to Clean Orders';
+                } else if (eligibleOrders.length === 0) {
+                    elements.cleanupButton.disabled = true;
+                    elements.cleanupButton.textContent = 'No Orders to Clean';
+                } else {
+                    elements.cleanupButton.disabled = false;
+                    elements.cleanupButton.textContent = 'Clean Orders';
+                }
             }
 
             this.debug('Cleanup opportunities:', {
@@ -274,19 +335,42 @@ export class Cleanup extends BaseComponent {
             this.debug('Order sync complete event received');
             this.checkCleanupOpportunities();
         });
+
+        // Add wallet connection event listeners
+        if (window.walletManager) {
+            window.walletManager.addListener((event, data) => {
+                if (event === 'connect') {
+                    this.debug('Wallet connected, updating cleanup button state');
+                    this.checkCleanupOpportunities();
+                } else if (event === 'disconnect') {
+                    this.debug('Wallet disconnected, updating cleanup button state');
+                    this.checkCleanupOpportunities();
+                }
+            });
+        }
     }
 
     async performCleanup() {
         try {
+            // Check if wallet is connected first
+            if (!window.walletManager?.isWalletConnected()) {
+                this.debug('Wallet not connected, attempting to connect...');
+                try {
+                    await window.walletManager.connect();
+                    // After successful connection, refresh the button state
+                    await this.checkCleanupOpportunities();
+                    return;
+                } catch (error) {
+                    this.error('Failed to connect wallet:', error);
+                    this.showError('Failed to connect wallet: ' + error.message);
+                    return;
+                }
+            }
+
             const contract = this.webSocket?.contract;
             if (!contract) {
                 this.error('Contract not initialized');
                 throw new Error('Contract not initialized');
-            }
-
-            if (!window.walletManager?.provider) {
-                this.warn('Wallet not connected');
-                throw new Error('Wallet not connected');
             }
 
             const signer = await window.walletManager.getSigner();
@@ -301,9 +385,10 @@ export class Cleanup extends BaseComponent {
 
             const orders = this.webSocket.getOrders();
             const currentTime = Math.floor(Date.now() / 1000);
-            const eligibleOrders = orders.filter(order => 
-                currentTime > order.timings.graceEndsAt
-            );
+            const eligibleOrders = orders.filter(order => {
+                const graceEndsAt = order?.timings?.graceEndsAt;
+                return typeof graceEndsAt === 'number' && currentTime > graceEndsAt;
+            });
 
             if (eligibleOrders.length === 0) {
                 throw new Error('No eligible orders to clean');
@@ -436,65 +521,44 @@ export class Cleanup extends BaseComponent {
         }
     }
 
-    showSuccess(message) {
+    showSuccess(message, duration = 5000) {
         this.debug('Success:', message);
         
-        // Create success message element
-        const successMessage = document.createElement('div');
-        successMessage.className = 'success-message';
-        successMessage.textContent = message;
-
-        // Find the fee config form and add message
+        // Show toast notification
+        if (window.showSuccess) {
+            window.showSuccess(message, duration);
+        }
+        
+        // Clear form inputs for fee config form
         const feeConfigForm = document.querySelector('.fee-config-form');
         if (feeConfigForm) {
-            // Remove any existing messages
-            const existingMessage = feeConfigForm.querySelector('.success-message, .error-message');
-            if (existingMessage) {
-                existingMessage.remove();
-            }
-
-            // Add new message
-            feeConfigForm.appendChild(successMessage);
-            feeConfigForm.classList.add('update-success');
-
-            // Clear form inputs
             const feeTokenInput = document.getElementById('fee-token');
             const feeAmountInput = document.getElementById('fee-amount');
             if (feeTokenInput) feeTokenInput.value = '';
             if (feeAmountInput) feeAmountInput.value = '';
-
-            // Remove message and animation after delay
-            setTimeout(() => {
-                successMessage.remove();
-                feeConfigForm.classList.remove('update-success');
-            }, 3000);
         }
     }
 
-    showError(message) {
+    showError(message, duration = 0) {
         this.error('Error:', message);
         
-        // Create error message element
-        const errorMessage = document.createElement('div');
-        errorMessage.className = 'error-message';
-        errorMessage.textContent = message;
+        // Show toast notification
+        if (window.showError) {
+            window.showError(message, duration);
+        }
+    }
 
-        // Find the fee config form and add message
-        const feeConfigForm = document.querySelector('.fee-config-form');
-        if (feeConfigForm) {
-            // Remove any existing messages
-            const existingMessage = feeConfigForm.querySelector('.success-message, .error-message');
-            if (existingMessage) {
-                existingMessage.remove();
-            }
+    showWarning(message, duration = 5000) {
+        this.debug('Warning:', message);
+        if (window.showWarning) {
+            window.showWarning(message, duration);
+        }
+    }
 
-            // Add new message
-            feeConfigForm.appendChild(errorMessage);
-
-            // Remove message after delay
-            setTimeout(() => {
-                errorMessage.remove();
-            }, 3000);
+    showInfo(message, duration = 5000) {
+        this.debug('Info:', message);
+        if (window.showInfo) {
+            window.showInfo(message, duration);
         }
     }
 
@@ -541,6 +605,14 @@ export class Cleanup extends BaseComponent {
             this.debug('Cleaning up cleanup check interval');
             clearInterval(this.intervalId);
         }
+        
+        // Remove wallet listeners
+        if (window.walletManager) {
+            // Note: We can't easily remove specific listeners, but the component will be recreated
+            // when needed, so this is acceptable for now
+            this.debug('Wallet listeners will be cleaned up on component recreation');
+        }
+        
         this.debug('Resetting component state');
         this.isInitialized = false;
         this.isInitializing = false;
@@ -581,22 +653,6 @@ export class Cleanup extends BaseComponent {
             // Clear the form
             document.getElementById('fee-token').value = '';
             document.getElementById('fee-amount').value = '';
-
-            // Add success message
-            const feeConfigForm = document.querySelector('.fee-config-form');
-            const successMessage = document.createElement('div');
-            successMessage.className = 'success-message';
-            successMessage.textContent = 'Fee configuration updated successfully!';
-            feeConfigForm.appendChild(successMessage);
-
-            // Add success animation class
-            feeConfigForm.classList.add('update-success');
-
-            // Remove success message and animation after 3 seconds
-            setTimeout(() => {
-                successMessage.remove();
-                feeConfigForm.classList.remove('update-success');
-            }, 3000);
 
             this.showSuccess('Fee configuration updated successfully');
         } catch (error) {

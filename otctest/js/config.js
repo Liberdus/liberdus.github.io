@@ -2,55 +2,103 @@ import { abi as CONTRACT_ABI } from './abi/OTCSwap.js';
 import { ethers } from 'ethers';
 import { createLogger } from './services/LogService.js';
 
+export const APP_BRAND = 'LiberdusOTC';
+export const APP_LOGO = 'assets/1.png';
+
 const networkConfig = {
     "80002": {
         name: "Amoy",
-        displayName: "Amoy Testnet",
+        displayName: "Polygon Amoy Testnet",
         isDefault: true,
-        contractAddress: "0xB533C2a0b87ffeC0a4fB835636078b0291083cC2",
-        // Previous addresses for reference:
-        // 0x9d8776a98ad4642004EBC1bA55Dbe286456Bf76c w/ fee token and 7 days expiration
-        // 0x3D97a9F520563CCed7AF0675EEBFE91F87973956 w/ fee token and 7 minutes expiration
-        
+        contractAddress: "0x1E6fa7Bf1543cd18bB73743Da6846c450aDDf4DC",
         contractABI: CONTRACT_ABI,
-        explorer: "https://amoy.polygonscan.com",
-        rpcUrl: "https://rpc.ankr.com/polygon_amoy",
+        explorer: "https://www.oklink.com/amoy",
+        rpcUrl: "https://rpc-amoy.polygon.technology",
         fallbackRpcUrls: [
             "https://rpc.ankr.com/polygon_amoy",
             "https://polygon-amoy.blockpi.network/v1/rpc/public",
-            "wss://polygon-amoy-bor-rpc.publicnode.com",
             "https://polygon-amoy.public.blastapi.io"
         ],
         chainId: "0x13882",
         nativeCurrency: {
-            name: "POLYGON Ecosystem Token",
+            name: "POL",
             symbol: "POL",
             decimals: 18
         },
-        wsUrl: `wss://polygon-amoy.gateway.tenderly.co`,
+        wsUrl: "wss://polygon-amoy-bor-rpc.publicnode.com",
         fallbackWsUrls: [
-            `wss://polygon-amoy.g.alchemy.com/v2/SiEh1ZidfpxItbVCgPN573bPGOqQee9r`,
-            'wss://polygon-bor-amoy-rpc.publicnode.com',
-            'wss://polygon-amoy-bor.publicnode.com',
+            "wss://polygon-amoy.public.blastapi.io"
         ]
     },
 };
 
 
 export const DEBUG_CONFIG = {
-    APP: false,
-    WEBSOCKET: false,
-    WALLET: false,
-    VIEW_ORDERS: false,
-    CREATE_ORDER: false,
-    MY_ORDERS: false,
-    TAKER_ORDERS: false,
-    CLEANUP_ORDERS: false,
-    WALLET_UI: false,
-    BASE_COMPONENT: false,
-    PRICING: false,
-    TOKENS: false,
+    APP: true,
+    WEBSOCKET: true,
+    WALLET: true,
+    VIEW_ORDERS: true,
+    CREATE_ORDER: true,
+    MY_ORDERS: true,
+    TAKER_ORDERS: true,
+    CLEANUP_ORDERS: true,
+    WALLET_UI: true,
+    BASE_COMPONENT: true,
+    PRICING: true,
+    TOKENS: true,
+    TOKEN_ICON_SERVICE: true, // Add token icon service debugging
+    TOAST: true, // Enable toast debugging for testing
     // Add more specific flags as needed
+};
+
+// Token Icon Service Configuration
+export const TOKEN_ICON_CONFIG = {
+    // CoinGecko API configuration
+    COINGECKO_API_BASE: 'https://api.coingecko.com/api/v3',
+    COINGECKO_ICON_BASE: 'https://assets.coingecko.com/coins/images',
+    
+    // CoinGecko chain mapping
+    CHAIN_ID_MAP: {
+        '1': 'ethereum',
+        '137': 'polygon-pos',
+        '80002': 'polygon-pos', // Amoy testnet uses same mapping as Polygon
+        '56': 'binance-smart-chain',
+        '42161': 'arbitrum-one',
+        '10': 'optimistic-ethereum',
+        '43114': 'avalanche',
+        '250': 'fantom',
+        '25': 'cronos'
+    },
+    
+    // Known token mappings for Polygon (expandable)
+    KNOWN_TOKENS: {
+        "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": "usd-coin", // USDC
+        "0xc2132d05d31c914a87c6611c10748aeb04b58e8f": "tether", // USDT
+        "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": "weth", // WETH
+        "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270": "matic-network", // WMATIC
+        "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6": "wrapped-bitcoin", // WBTC
+    },
+    
+    // Special cases
+    SPECIAL_TOKENS: {
+        "0x693ed886545970f0a3adf8c59af5ccdb6ddf0a76": "assets/32.png" // Liberdus
+    },
+    
+    // Rate limiting configuration
+    RATE_LIMIT_DELAY: 100, // ms between requests
+    MAX_CACHE_SIZE: 1000, // Maximum number of cached icons
+    CACHE_EXPIRY: 24 * 60 * 60 * 1000, // 24 hours in ms
+    
+    // Icon validation configuration
+    VALIDATION_TIMEOUT: 5000, // 5 seconds timeout for icon validation
+    MAX_RETRIES: 3, // Maximum retries for failed icon requests
+    
+    // Fallback configuration
+    ENABLE_FALLBACK_ICONS: true, // Enable color-based fallback icons
+    FALLBACK_COLORS: [
+        '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
+        '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
+    ]
 };
 
 export const getAllNetworks = () => Object.values(networkConfig);
@@ -118,6 +166,10 @@ export class WalletManager {
         this.contractABI = getDefaultNetwork().contractABI;
         this.isInitialized = false;
         this.contractInitialized = false;
+        
+        // Add user preference tracking for disconnect state
+        this.userDisconnected = false;
+        this.STORAGE_KEY = 'wallet_user_disconnected';
     }
 
     async init() {
@@ -125,7 +177,10 @@ export class WalletManager {
             this.debug('Starting initialization...');
             
             if (typeof window.ethereum === 'undefined') {
-                throw new Error("MetaMask is not installed!");
+                this.debug('MetaMask is not installed, initializing in read-only mode');
+                this.provider = null;
+                this.isInitialized = true;
+                return;
             }
 
             this.provider = new ethers.providers.Web3Provider(window.ethereum);
@@ -147,12 +202,31 @@ export class WalletManager {
             window.ethereum.on('connect', this.handleConnect.bind(this));
             window.ethereum.on('disconnect', this.handleDisconnect.bind(this));
 
-            // Check if already connected
-            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-            if (accounts.length > 0) {
-                await this.initializeSigner(accounts[0]);
-                const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-                this.handleChainChanged(chainId);
+            // Check user disconnect preference before auto-connecting
+            this.loadUserDisconnectPreference();
+            
+            // Only auto-connect if user hasn't manually disconnected
+            if (!this.userDisconnected) {
+                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                if (accounts.length > 0) {
+                    this.debug('Auto-connecting to existing MetaMask session');
+                    // Ensure internal state reflects connected session
+                    this.account = accounts[0];
+                    const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+                    this.chainId = chainId;
+                    // Enforce default network behavior on reload (same as connect flow)
+                    this.handleChainChanged(chainId);
+                    this.isConnected = true;
+                    // Initialize signer and contract for the session
+                    await this.initializeSigner(this.account);
+                    // Notify listeners so UI can react as connected
+                    this.notifyListeners('connect', {
+                        account: this.account,
+                        chainId: this.chainId
+                    });
+                }
+            } else {
+                this.debug('User has manually disconnected, skipping auto-connect');
             }
 
             this.isInitialized = true;
@@ -165,6 +239,9 @@ export class WalletManager {
 
     async checkConnection() {
         try {
+            if (!this.provider) {
+                return false;
+            }
             const accounts = await this.provider.listAccounts();
             return accounts.length > 0;
         } catch (error) {
@@ -175,6 +252,9 @@ export class WalletManager {
 
     async initializeSigner(account) {
         try {
+            if (!this.provider) {
+                throw new Error('No provider available');
+            }
             this.signer = this.provider.getSigner();
             await this.initializeContract();
             return this.signer;
@@ -214,6 +294,10 @@ export class WalletManager {
             return null;
         }
 
+        if (!this.provider) {
+            throw new Error('MetaMask is not installed');
+        }
+
         this.isConnecting = true;
         try {
             this.debug('Requesting accounts...');
@@ -231,13 +315,16 @@ export class WalletManager {
             const decimalChainId = parseInt(chainId, 16).toString();
             this.debug('Decimal Chain ID:', decimalChainId);
             
-            if (decimalChainId !== "137") {
+            if (decimalChainId !== "80002") {
                 await this.switchToDefaultNetwork();
             }
 
             this.account = accounts[0];
             this.chainId = chainId;
             this.isConnected = true;
+
+            // Clear user disconnect preference when they manually connect
+            this.saveUserDisconnectPreference(false);
 
             // Initialize signer before notifying listeners
             await this.initializeSigner(this.account);
@@ -285,16 +372,24 @@ export class WalletManager {
         }
     }
 
-    handleAccountsChanged(accounts) {
+    async handleAccountsChanged(accounts) {
         this.debug('Accounts changed:', accounts);
         if (accounts.length === 0) {
             this.account = null;
             this.isConnected = false;
+            this.signer = null;
+            this.contract = null;
+            this.contractInitialized = false;
             this.debug('No accounts, triggering disconnect');
             this.notifyListeners('disconnect', {});
         } else if (accounts[0] !== this.account) {
             this.account = accounts[0];
             this.isConnected = true;
+            try {
+                await this.initializeSigner(this.account);
+            } catch (e) {
+                this.error('Error reinitializing signer on account change:', e);
+            }
             this.debug('New account:', this.account);
             this.notifyListeners('accountsChanged', { account: this.account });
         }
@@ -332,15 +427,34 @@ export class WalletManager {
     }
 
     isWalletConnected() {
+        if (!this.provider) {
+            return false;
+        }
         return this.isConnected;
     }
 
     disconnect() {
+        this.debug('User manually disconnecting wallet');
+        
+        // Save user's disconnect preference
+        this.saveUserDisconnectPreference(true);
+        
+        // Clear connection state
         this.account = null;
+        this.chainId = null;
         this.isConnected = false;
+        this.signer = null;
+        this.contract = null;
+        this.contractInitialized = false;
+        
+        // Notify listeners of disconnect
+        this.notifyListeners('disconnect', {});
+        
         if (this.onDisconnect) {
             this.onDisconnect();
         }
+        
+        this.debug('Wallet disconnected and preference saved');
     }
 
     addListener(callback) {
@@ -357,10 +471,16 @@ export class WalletManager {
 
     // Add getter methods
     getSigner() {
+        if (!this.provider) {
+            return null;
+        }
         return this.signer;
     }
 
     getContract() {
+        if (!this.provider) {
+            return null;
+        }
         return this.contract;
     }
 
@@ -431,6 +551,40 @@ export class WalletManager {
 
     isConnected() {
         return this.account !== null && this.chainId !== null;
+    }
+
+    loadUserDisconnectPreference() {
+        const disconnected = localStorage.getItem(this.STORAGE_KEY);
+        if (disconnected === 'true') {
+            this.userDisconnected = true;
+            this.debug('User has manually disconnected from MetaMask.');
+        } else {
+            this.userDisconnected = false;
+            this.debug('User has not manually disconnected from MetaMask.');
+        }
+    }
+
+    saveUserDisconnectPreference(disconnected) {
+        localStorage.setItem(this.STORAGE_KEY, disconnected);
+        this.userDisconnected = disconnected;
+        this.debug(`User disconnect preference saved: ${disconnected}`);
+    }
+
+    /**
+     * Check if the user has manually disconnected
+     * @returns {boolean} True if user has manually disconnected
+     */
+    hasUserDisconnected() {
+        return this.userDisconnected;
+    }
+
+    /**
+     * Clear the user's disconnect preference (useful for testing or admin actions)
+     */
+    clearDisconnectPreference() {
+        localStorage.removeItem(this.STORAGE_KEY);
+        this.userDisconnected = false;
+        this.debug('User disconnect preference cleared');
     }
 }
 

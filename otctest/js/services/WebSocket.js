@@ -1,8 +1,8 @@
 import { ethers } from 'ethers';
 import { getNetworkConfig } from '../config.js';
-import { NETWORK_TOKENS } from '../utils/tokens.js';
 import { erc20Abi } from '../abi/erc20.js';
 import { createLogger } from './LogService.js';
+import { tokenIconService } from './TokenIconService.js';
 
 export class WebSocketService {
     constructor() {
@@ -79,18 +79,9 @@ export class WebSocketService {
 
         try {
             this.debug('Starting initialization...');
-            
             this.initializationPromise = (async () => {
                 // Wait for provider connection
                 const config = getNetworkConfig();
-                this.debug('Network config loaded, attempting WebSocket connection...');
-                
-                this.contractAddress = config.contractAddress;
-                this.contractABI = config.contractABI;
-                
-                if (!this.contractABI) {
-                    throw new Error('Contract ABI not found in network config');
-                }
                 
                 const wsUrls = [config.wsUrl, ...config.fallbackWsUrls];
                 let connected = false;
@@ -114,6 +105,15 @@ export class WebSocketService {
                     throw new Error('Failed to connect to any WebSocket URL');
                 }
 
+                // Initialize contract before fetching constants
+                this.debug('Initializing contract...');
+                this.contractAddress = config.contractAddress;
+                this.contractABI = config.contractABI;
+
+                if (!this.contractABI) {
+                    throw new Error('Contract ABI not found in network config');
+                }
+
                 this.contract = new ethers.Contract(
                     this.contractAddress,
                     this.contractABI,
@@ -132,14 +132,6 @@ export class WebSocketService {
                     orderExpiry: this.orderExpiry.toString(),
                     gracePeriod: this.gracePeriod.toString()
                 });
-
-                // Wait for contract initialization
-                this.debug('Contract initialized, starting order sync...');
-                await this.syncAllOrders(this.contract);
-                
-                // Setup event listeners after sync
-                this.debug('Setting up event listeners...');
-                await this.setupEventListeners(this.contract);
                 
                 // Subscribe to pricing service after everything else is ready
                 if (window.pricingService) {
@@ -148,6 +140,13 @@ export class WebSocketService {
                         this.debug('Price update received, updating all deals...');
                         this.updateAllDeals();
                     });
+                    // Trigger initial allowed token price fetch after contract is ready
+                    try {
+                        await window.pricingService.getAllowedTokens();
+                        await window.pricingService.fetchAllowedTokensPrices();
+                    } catch (err) {
+                        this.debug('Initial allowed token fetch after WS init failed:', err);
+                    }
                 } else {
                     this.debug('Warning: PricingService not available');
                 }
@@ -182,6 +181,13 @@ export class WebSocketService {
         try {
             this.debug('Setting up event listeners for contract:', contract.address);
             
+            // Clean up any existing event listeners first
+            if (this.provider) {
+                this.provider.removeAllListeners("connect");
+                this.provider.removeAllListeners("disconnect");
+                this.provider.removeAllListeners("block");
+            }
+            
             // Add connection state tracking
             this.provider.on("connect", () => {
                 this.debug('Provider connected');
@@ -198,13 +204,38 @@ export class WebSocketService {
             
             // Listen for new blocks to ensure connection is alive
             this.provider.on("block", async (blockNumber) => {
-                await this.queueRequest(async () => {
-                    this.debug('New block received:', blockNumber);
-                });
+                try {
+                    await this.queueRequest(async () => {
+                        this.debug('New block received:', blockNumber);
+                    });
+                } catch (error) {
+                    this.debug('Error processing block event:', error);
+                    // Don't let block processing errors crash the app
+                }
             });
+
+            // Add error handling for WebSocket connection
+            this.provider._websocket.onerror = (error) => {
+                this.debug('WebSocket error:', error);
+            };
+
+            this.provider._websocket.onclose = (event) => {
+                this.debug('WebSocket closed:', event);
+                // Attempt to reconnect if not manually closed
+                if (event.code !== 1000) {
+                    this.debug('WebSocket closed unexpectedly, attempting to reconnect...');
+                    setTimeout(() => {
+                        this.reconnect();
+                    }, 5000);
+                }
+            };
 
             contract.on("OrderCreated", async (...args) => {
                 try {
+                    if (!args || args.length < 9) {
+                        this.debug('Invalid OrderCreated event args:', args);
+                        return;
+                    }
                     const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee, event] = args;
                     
                     let orderData = {
@@ -236,7 +267,7 @@ export class WebSocketService {
                         id: orderData.id,
                         maker: orderData.maker,
                         status: orderData.status,
-                        timestamp: orderData.timings.createdAt
+                        timestamp: orderData.timings?.createdAt || 0
                     });
                     
                     // Notify subscribers
@@ -305,151 +336,140 @@ export class WebSocketService {
         }
     }
 
-    async syncAllOrders(contract) {
-        let retryCount = 0;
-        const maxRetries = 3;
-        
-        while (retryCount < maxRetries) {
-            try {
-                this.debug('Starting order sync with contract:', contract.address);
-                
-                // Get current block and calculate 20 days ago
-                const currentBlock = await this.provider.getBlockNumber();
-                const blocksPerDay = (24 * 60 * 60) / 2;
-                const startBlock = currentBlock - (blocksPerDay * 20);
-                
-                this.debug('Fetching events from block', startBlock, 'to', currentBlock);
-                
-                // Clear existing cache before sync
-                this.orderCache.clear();
-
-                // Fetch all relevant events
-                const [createdEvents, filledEvents, canceledEvents, cleanedEvents, retryEvents] = await Promise.all([
-                    contract.queryFilter(contract.filters.OrderCreated(), startBlock, currentBlock),
-                    contract.queryFilter(contract.filters.OrderFilled(), startBlock, currentBlock),
-                    contract.queryFilter(contract.filters.OrderCanceled(), startBlock, currentBlock),
-                    contract.queryFilter(contract.filters.OrderCleanedUp(), startBlock, currentBlock),
-                    contract.queryFilter(contract.filters.RetryOrder(), startBlock, currentBlock)
-                ]);
-
-                this.debug('Events fetched:', {
-                    created: createdEvents.length,
-                    filled: filledEvents.length,
-                    canceled: canceledEvents.length,
-                    cleaned: cleanedEvents.length,
-                    retry: retryEvents.length
-                });
-
-                // Process OrderCreated events first to build the base state
-                for (const event of createdEvents) {
-                    const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee] = event.args;
-                    let orderData = {
-                        id: orderId.toNumber(),
-                        maker,
-                        taker,
-                        sellToken,
-                        sellAmount,
-                        buyToken,
-                        buyAmount,
-                        timings: {
-                            createdAt: timestamp.toNumber(),
-                            expiresAt: timestamp.toNumber() + this.orderExpiry.toNumber(),
-                            graceEndsAt: timestamp.toNumber() + this.orderExpiry.toNumber() + this.gracePeriod.toNumber()
-                        },
-                        status: 'Active',
-                        orderCreationFee: fee,
-                        tries: 0
-                    };
-
-                    // Calculate and add deal metrics
-                    orderData = await this.calculateDealMetrics(orderData);
-                    this.orderCache.set(orderData.id, orderData);
-                    this.debug('Added order to cache:', orderData);
-                }
-
-                this.debug('After processing created events, cache size:', this.orderCache.size);
-
-                // Then process status changes
-                for (const event of filledEvents) {
-                    const [orderId] = event.args;
-                    const orderIdNum = orderId.toNumber();
-                    const order = this.orderCache.get(orderIdNum);
-                    if (order) {
-                        order.status = 'Filled';
-                        this.orderCache.set(orderIdNum, order);
-                        this.debug('Updated order to Filled:', orderIdNum);
-                    } else {
-                        this.debug('Filled event for unknown order:', orderIdNum);
-                    }
-                }
-
-                for (const event of canceledEvents) {
-                    const [orderId] = event.args;
-                    const orderIdNum = orderId.toNumber();
-                    const order = this.orderCache.get(orderIdNum);
-                    if (order) {
-                        order.status = 'Canceled';
-                        this.orderCache.set(orderIdNum, order);
-                        this.debug('Updated order to Canceled:', orderIdNum);
-                    } else {
-                        this.debug('Canceled event for unknown order:', orderIdNum);
-                    }
-                }
-
-                // Process cleanup events (remove orders)
-                for (const event of cleanedEvents) {
-                    const [orderId] = event.args;
-                    const orderIdNum = orderId.toNumber();
-                    if (this.orderCache.has(orderIdNum)) {
-                        this.orderCache.delete(orderIdNum);
-                        this.debug('Removed cleaned up order:', orderIdNum);
-                    }
-                }
-
-                // Process retry events (update order ID and tries)
-                for (const event of retryEvents) {
-                    const [oldOrderId, newOrderId, maker, tries, timestamp] = event.args;
-                    const oldOrderIdNum = oldOrderId.toNumber();
-                    const newOrderIdNum = newOrderId.toNumber();
-                    
-                    const order = this.orderCache.get(oldOrderIdNum);
-                    if (order) {
-                        // Update order with new ID and tries count
-                        order.id = newOrderIdNum;
-                        order.tries = tries.toNumber();
-                        order.timestamp = timestamp.toNumber();
-                        
-                        // Remove old order ID and add with new ID
-                        this.orderCache.delete(oldOrderIdNum);
-                        this.orderCache.set(newOrderIdNum, order);
-                        this.debug('Updated retried order:', {oldId: oldOrderIdNum, newId: newOrderIdNum, tries: tries.toString()});
-                    }
-                }
-
-                // Log final cache state
-                this.debug('Final order cache:', {
-                    size: this.orderCache.size,
-                    orders: Array.from(this.orderCache.entries()).map(([id, order]) => ({
-                        id,
-                        status: order.status,
-                        timestamp: order.timestamp
-                    }))
-                });
-
-                this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
-                
-                return true;
-            } catch (error) {
-                retryCount++;
-                this.warn(`Order sync attempt ${retryCount} failed:`, error);
-                
-                if (retryCount >= maxRetries) {
-                    this.error('Max retry attempts reached, sync failed');
-                    throw error;
-                }
-                
-                await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
+    cleanup() {
+        try {
+            this.debug('Cleaning up WebSocket service...');
+            
+            // Remove provider event listeners
+            if (this.provider) {
+                this.provider.removeAllListeners("connect");
+                this.provider.removeAllListeners("disconnect");
+                this.provider.removeAllListeners("block");
             }
+            
+            // Remove contract event listeners
+            if (this.contract) {
+                this.contract.removeAllListeners("OrderCreated");
+                this.contract.removeAllListeners("OrderFilled");
+                this.contract.removeAllListeners("OrderCanceled");
+                this.contract.removeAllListeners("OrderCleanedUp");
+                this.contract.removeAllListeners("RetryOrder");
+            }
+            
+            // Clear cache
+            this.orderCache.clear();
+            
+            this.debug('WebSocket service cleanup complete');
+        } catch (error) {
+            this.debug('Error during cleanup:', error);
+        }
+    }
+
+        async syncAllOrders() {
+        this.debug('Starting order sync with existing contract...');
+        
+        if (!this.contract) {
+            throw new Error('Contract not initialized. Call initialize() first.');
+        }
+        try {
+            this.debug('Starting order sync with contract:', this.contract.address);
+            
+            let nextOrderId = 0;
+            try {
+                nextOrderId = await this.contract.nextOrderId();
+                this.debug('nextOrderId result:', nextOrderId.toString());
+            } catch (error) {
+                this.debug('nextOrderId call failed, using default value:', error);
+            }
+
+            // Clear existing cache before sync
+            this.orderCache.clear();
+            
+            // Process orders in smaller batches to avoid rate limiting
+            const batchSize = 3; // Process only 3 orders at a time
+            const totalBatches = Math.ceil(nextOrderId / batchSize);
+            
+            this.debug(`Processing ${nextOrderId} orders in ${totalBatches} batches of ${batchSize}`);
+            
+            for (let batch = 0; batch < totalBatches; batch++) {
+                const startIndex = batch * batchSize;
+                const endIndex = Math.min(startIndex + batchSize, nextOrderId);
+                
+                this.debug(`Processing batch ${batch + 1}/${totalBatches} (orders ${startIndex}-${endIndex - 1})`);
+                
+                                // Process current batch
+                for (let i = startIndex; i < endIndex; i++) {
+                    try {
+                        // Add longer delay to avoid rate limiting
+                        if (i > startIndex) {
+                            await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
+                        }
+                        
+                        const order = await this.contract.orders(i);
+                        this.debug(`Order ${i} data:`, {
+                            maker: order.maker,
+                            taker: order.taker,
+                            sellToken: order.sellToken,
+                            buyToken: order.buyToken,
+                            status: order.status.toString(),
+                            isZeroMaker: order.maker === ethers.constants.AddressZero
+                        });
+                        
+                        // Only filter out zero-address makers (non-existent orders)
+                        if (order.maker !== ethers.constants.AddressZero) {
+                            const orderData = {
+                                id: i,
+                                maker: order.maker,
+                                taker: order.taker,
+                                sellToken: order.sellToken,
+                                sellAmount: order.sellAmount,
+                                buyToken: order.buyToken,
+                                buyAmount: order.buyAmount,
+                                timestamp: order.timestamp.toNumber(),
+                                status: ['Active', 'Filled', 'Canceled'][order.status], // Map enum to string
+                                orderCreationFee: order.orderCreationFee,
+                                tries: order.tries,
+                                timings: {
+                                    createdAt: order.timestamp.toNumber(),
+                                    expiresAt: order.timestamp.toNumber() + (this.orderExpiry ? this.orderExpiry.toNumber() : 604800), // Default 7 days
+                                    graceEndsAt: order.timestamp.toNumber() +
+                                        (this.orderExpiry ? this.orderExpiry.toNumber() : 604800) +
+                                        (this.gracePeriod ? this.gracePeriod.toNumber() : 604800) // Default 7 + 7 days
+                                }
+                            };
+                            this.orderCache.set(i, orderData);
+                            this.debug('Added order to cache:', orderData);
+                        }
+                    } catch (error) {
+                        this.debug(`Failed to read order ${i}:`, error);
+                        
+                        // If it's a rate limit error, add extra delay
+                        if (error.code === 'CALL_EXCEPTION' && error.error?.code === -32005) {
+                            this.debug(`Rate limit hit for order ${i}, waiting 2 seconds...`);
+                            await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
+                        }
+                        
+                        continue;
+                    }
+                }
+                
+                // Add delay between batches
+                if (batch < totalBatches - 1) {
+                    this.debug(`Batch ${batch + 1} complete, waiting 1 second before next batch...`);
+                    await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second between batches
+                }
+            }
+            
+            this.debug('Order sync complete. Cache size:', this.orderCache.size);
+            this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
+            this.debug('Setting up event listeners...');
+            // TODO move this where needed (after sync)
+            await this.setupEventListeners(this.contract);
+            
+        } catch (error) {
+            this.debug('Order sync failed:', error);
+            this.orderCache.clear();
+            this.notifySubscribers('orderSyncComplete', {});
         }
     }
 
@@ -633,22 +653,13 @@ export class WebSocketService {
             // Normalize address to lowercase for consistent comparison
             const normalizedAddress = tokenAddress.toLowerCase();
 
-            // 1. First check our tokenCache
+            // 1. First check cache
             if (this.tokenCache.has(normalizedAddress)) {
                 this.debug('Token info found in cache:', normalizedAddress);
                 return this.tokenCache.get(normalizedAddress);
             }
 
-            // 2. Then check NETWORK_TOKENS (predefined list)
-            const networkConfig = getNetworkConfig();
-            const predefinedToken = NETWORK_TOKENS[networkConfig.name]?.[normalizedAddress];
-            if (predefinedToken) {
-                this.debug('Token info found in predefined list:', normalizedAddress);
-                this.tokenCache.set(normalizedAddress, predefinedToken);
-                return predefinedToken;
-            }
-
-            // 3. If not found, fetch from contract using queueRequest
+            // 2. Fetch from contract using queueRequest
             this.debug('Fetching token info from contract:', normalizedAddress);
             return await this.queueRequest(async () => {
                 const contract = new ethers.Contract(tokenAddress, erc20Abi, this.provider);
@@ -658,11 +669,21 @@ export class WebSocketService {
                     contract.name()
                 ]);
 
+                // Get icon URL for the token
+                let iconUrl = null;
+                try {
+                    const chainId = 137; // Polygon - TODO: might want to get this dynamically
+                    iconUrl = await tokenIconService.getIconUrl(tokenAddress, chainId);
+                } catch (err) {
+                    this.debug(`Failed to get icon for token ${tokenAddress}:`, err);
+                }
+
                 const tokenInfo = {
                     address: normalizedAddress,
                     symbol,
                     decimals: Number(decimals),
-                    name
+                    name,
+                    iconUrl: iconUrl
                 };
 
                 // Cache the result
@@ -712,7 +733,7 @@ export class WebSocketService {
     // Use this to determine to provide a fill button in the UI
     canFillOrder(order, currentAccount) {
         if (order.status !== 'Active') return false;
-        if (Date.now()/1000 > order.timings.expiresAt) return false;
+        if (order.timings?.expiresAt && Date.now()/1000 > order.timings.expiresAt) return false;
         if (order.maker?.toLowerCase() === currentAccount?.toLowerCase()) return false;
         return order.taker === ethers.constants.AddressZero || 
                order.taker?.toLowerCase() === currentAccount?.toLowerCase();
@@ -722,7 +743,7 @@ export class WebSocketService {
     // Use this to determine to provide a cancel button in the UI
     canCancelOrder(order, currentAccount) {
         if (order.status !== 'Active') return false;
-        if (Date.now()/1000 > order.timings.graceEndsAt) return false;
+        if (order.timings?.graceEndsAt && Date.now()/1000 > order.timings.graceEndsAt) return false;
         return order.maker?.toLowerCase() === currentAccount?.toLowerCase();
     }
 
@@ -736,16 +757,54 @@ export class WebSocketService {
         // Then check timing using cached timings
         const currentTime = Math.floor(Date.now() / 1000);
 
-        if (currentTime > order.timings.graceEndsAt) {
+                    if (order.timings?.graceEndsAt && currentTime > order.timings.graceEndsAt) {
             this.debug('Order not active: Past grace period');
             return '';
         }
-        if (currentTime > order.timings.expiresAt) {
+                    if (order.timings?.expiresAt && currentTime > order.timings.expiresAt) {
             this.debug('Order status: Awaiting Clean');
             return 'Expired';
         }
 
         this.debug('Order status: Active');
         return 'Active';
+    }
+
+    // Reconnect method for handling WebSocket disconnections
+    async reconnect() {
+        try {
+            this.debug('Attempting to reconnect WebSocket...');
+            
+            // Clean up existing connection
+            if (this.provider) {
+                try {
+                    this.provider.removeAllListeners();
+                    if (this.provider._websocket) {
+                        this.provider._websocket.close();
+                    }
+                } catch (error) {
+                    this.debug('Error cleaning up old connection:', error);
+                }
+            }
+
+            // Reset state
+            this.isInitialized = false;
+            this.provider = null;
+            this.contract = null;
+
+            // Wait a bit before reconnecting
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Reinitialize
+            await this.initialize();
+            
+            this.debug('WebSocket reconnection successful');
+        } catch (error) {
+            this.error('WebSocket reconnection failed:', error);
+            // Try again after a longer delay
+            setTimeout(() => {
+                this.reconnect();
+            }, 10000);
+        }
     }
 }

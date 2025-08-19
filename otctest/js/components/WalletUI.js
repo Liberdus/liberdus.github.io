@@ -69,9 +69,6 @@ export class WalletUI extends BaseComponent {
             this.debug('Connect result:', result);
             if (result && result.account) {
                 this.updateUI(result.account);
-                if (window.app && typeof window.app.handleWalletConnect === 'function') {
-                    await window.app.handleWalletConnect(result.account);
-                }
             }
         } catch (error) {
             this.error('Error in handleConnectClick:', error);
@@ -110,14 +107,21 @@ export class WalletUI extends BaseComponent {
             this.debug('Starting init...');
             
             if (typeof window.ethereum === 'undefined') {
-                this.error('MetaMask is not installed!');
-                return false;
+                this.debug('MetaMask is not installed, initializing in read-only mode');
+                return true;
             }
 
             // Setup event listeners
             this.setupEventListeners();
             
-            // Check if already connected, but only if not already connecting
+            // Check if user has manually disconnected
+            if (walletManager.hasUserDisconnected()) {
+                this.debug('User has manually disconnected, showing connect button');
+                this.showConnectButton();
+                return true;
+            }
+            
+            // Check if already connected, but only if not already connecting and user hasn't manually disconnected
             if (!walletManager.isConnecting) {
                 const accounts = await window.ethereum.request({ method: 'eth_accounts' });
                 if (accounts && accounts.length > 0) {
@@ -144,53 +148,27 @@ export class WalletUI extends BaseComponent {
                     window.app.components['create-order'].cleanup();
                 }
                 
-                // Add this line to update the create order button
+                // Update create order button
                 const createOrderBtn = document.getElementById('createOrderBtn');
                 if (createOrderBtn) {
                     createOrderBtn.disabled = true;
                     createOrderBtn.textContent = 'Connect Wallet to Create Order';
                 }
                 
-                await walletManager.disconnect();
-                this.showConnectButton();
-                
-                // Clear our app's connection state
-                await walletManager.disconnect();
-                
-                // Clean up CreateOrder component
-                if (window.app?.components['create-order']?.cleanup) {
-                    window.app.components['create-order'].cleanup();
-                }
+                // Use the new disconnect method that saves user preference
+                walletManager.disconnect();
                 
                 // Reset UI
                 this.showConnectButton();
                 this.accountAddress.textContent = '';
                 
-                // Clear any cached provider state
-                if (window.ethereum) {
-                    // Remove all listeners to ensure clean slate
-                    window.ethereum.removeAllListeners();
-                    // Re-initialize necessary listeners
-                    this.setupEventListeners();
-                }
-                
                 // Update tab visibility
-                if (window.app && typeof window.app.updateTabVisibility === 'function') {
+                if (window.app?.updateTabVisibility) {
                     window.app.updateTabVisibility(false);
                 }
                 
-                // Show more detailed message to user
-                const message = "Wallet disconnected from this site. For complete security:\n" +
-                              "1. Open MetaMask extension\n" +
-                              "2. Click on your account icon\n" +
-                              "3. Select 'Lock' or 'Disconnect this site'";
-                
-                if (window.app && typeof window.app.showSuccess === 'function') {
-                    window.app.showSuccess(message);
-                }
-                
-                // Trigger app-level disconnect handler
-                if (window.app && typeof window.app.handleWalletDisconnect === 'function') {
+                // Only trigger app-level disconnect handler (which will show the message)
+                if (window.app?.handleWalletDisconnect) {
                     window.app.handleWalletDisconnect();
                 }
             } catch (error) {
@@ -205,9 +183,6 @@ export class WalletUI extends BaseComponent {
                 case 'connect':
                     this.debug('Connect event received');
                     this.updateUI(data.account);
-                    if (window.app && typeof window.app.handleWalletConnect === 'function') {
-                        window.app.handleWalletConnect(data.account);
-                    }
                     break;
                 case 'disconnect':
                     this.debug('Disconnect event received');
