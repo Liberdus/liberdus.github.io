@@ -85,6 +85,13 @@ export const DEBUG_CONFIG = {
     // Add more specific flags as needed
 };
 
+// Centralized order-related constants
+export const ORDER_CONSTANTS = {
+    STATUS_MAP: ['Active', 'Filled', 'Canceled'],
+    DEFAULT_ORDER_EXPIRY_SECS: 7 * 24 * 60 * 60, // 7 days
+    DEFAULT_GRACE_PERIOD_SECS: 7 * 24 * 60 * 60 // 7 days
+};
+
 // Token Icon Service Configuration
 export const TOKEN_ICON_CONFIG = {
     // CoinGecko API configuration
@@ -95,6 +102,7 @@ export const TOKEN_ICON_CONFIG = {
     CHAIN_ID_MAP: {
         '1': 'ethereum',
         '137': 'polygon-pos',
+        '80002': 'polygon-amoy',
         '56': 'binance-smart-chain',
         '42161': 'arbitrum-one',
         '10': 'optimistic-ethereum',
@@ -348,7 +356,7 @@ export class WalletManager {
             const decimalChainId = parseInt(chainId, 16).toString();
             this.debug('Decimal Chain ID:', decimalChainId);
             
-            if (decimalChainId !== "137") {
+            if (decimalChainId !== "137") { //TODO: need to not hardcode this
                 await this.switchToDefaultNetwork();
             }
 
