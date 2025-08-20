@@ -1,145 +1,96 @@
-# OTC Frontend
+# OTC Token Swap DApp
 
-A decentralized over-the-counter trading interface for ERC20 tokens.
+A decentralized application for over-the-counter token swaps on Polygon networks.
 
-## 🌟 Features
+## Networks Supported
+- Polygon Mainnet
+- Polygon Amoy Testnet
+- additional can be added depending on where smart contract is deployed and added to configs
 
-- Create and manage OTC orders for ERC20 tokens
-- View available orders as a taker (ViewOrders.js)
-- Real-time order updates via WebSocket (WebSocket.js)
-- Token price discovery and deal calculations (PricingService.js)
-- Order cleanup functionality (Cleanup.js)
-- Advanced filtering and sorting options 
-- Responsive design with dark/light theme support
-- Debug panel for development
+## Prerequisites
+- Node.js
+- MetaMask
+- Test tokens for testing (on respective networks)
+- An `.env` file in the root directory
 
-## 📋 Prerequisites
+## Environment Setup
+1. Create a `.env` file in the root directory with the following variables:
+```env
+PRIVATE_KEY=your_private_key
+CONTRACT_ADDRESS=0xF9D874860d5801233dd84569fad8513e0037A5d9
+RECIPIENT_ADDRESS=your_recipient_address
+TOKEN1_ADDRESS=0xd85e481D10f8d77762e6215E87C5900D8b098e94
+TOKEN2_ADDRESS=0xcDC1F663207f1ec636C5AF85C1D669A4a3d02fB3
+YOUR_ALCHEMY_KEY=your_alchemy_key
+```
 
-- Modern web browser with MetaMask or similar Web3 wallet
-- Node.js (for development)
-- Access to Polygon network (mainnet)
+## Network Configuration
+The application currently runs on Polygon Amoy Testnet. Network configuration is managed in `config.js`:
 
-## 🚀 Quick Start (local environment)
+```javascript
+{
+    "80002": {
+        name: "Amoy",
+        contractAddress: "0xF9D874860d5801233dd84569fad8513e0037A5d9",
+        explorer: "https://www.oklink.com/amoy",
+        rpcUrl: "https://rpc.ankr.com/polygon_amoy",
+        fallbackRpcUrls: [
+            "https://polygon-amoy.blockpi.network/v1/rpc/public",
+            "https://polygon-amoy.public.blastapi.io"
+        ]
+    }
+}
+```
 
-1. Clone the repository:
+## Getting Started (locally)
+
+1. Install dependencies:
 ```bash
-git https://github.com/Liberdus/liberdus.github.io
-cd liberdus.github.io
+npm install
 ```
 
-2. Configure your environment:
-   - Update network configurations in `js/config.js`
+2. Ensure your `.env` file is properly configured
 
-3. Start the development server:
+3. Start the node server:
 ```bash
-# Using npm
-npm ci
-npm http-server
+http-server
 ```
 
-4. Enter OTC webpage by using one of these local URLs provided by running `http-server`
-```
-Available on:
-  http://127.0.0.1:8080
-  http://192.168.86.49:8080
-  http://10.96.0.72:8080
-```
+4. Connect your wallet - the application will automatically:
+   - Request connection to MetaMask
+   - Switch to Amoy testnet if needed
+   - Initialize the contract interface
 
-## 🏗️ Project Structure
+## Features
+- Create OTC swap orders
+- Fill existing orders
+- Cancel your orders
+- View active orders
+- Network switching support
+- Real-time order updates
 
-```
-otc/
-├── css/                    # Styling
-│   ├── components/        # Component-specific styles
-│   └── styles.css        # Global styles
-├── js/
-│   ├── abi/              # Contract ABIs
-│   ├── components/       # UI Components
-│   ├── services/        # Core services
-│   └── app.js           # Main application
-├── docs/                 # Documentation
-```
+## Testing
+1. Test on Amoy testnet first
+2. Get test tokens from the Polygon faucet
+3. Ensure your wallet has sufficient native tokens for gas
 
-## 🔧 Core Components
+## Security Notes
+- Always verify token addresses
+- Check order details carefully before swapping
+- Never share your private keys
+- Use trusted token contracts only
 
-### Components
-- `CreateOrder`: Order creation interface
-- `ViewOrders`: Base order viewing functionality
-- `MyOrders`: Seller's order management
-- `TakerOrders`: Buyer's order interface
-- `Cleanup`: Order cleanup functionality
-- `ContractParams`: Contract configuration display
+## Network Details
 
-### Services
-- `WebSocket`: Real-time order updates
-- `PricingService`: Token price discovery
-- `WalletManager`: Wallet connection handling
+### Amoy Testnet (Current Network)
+- Chain ID: 80002 (0x13882)
+- Primary RPC URL: https://rpc.ankr.com/polygon_amoy
+- Fallback RPC URLs:
+  - https://polygon-amoy.blockpi.network/v1/rpc/public
+  - https://polygon-amoy.public.blastapi.io
+- Explorer: https://www.oklink.com/amoy
+- Faucet: https://faucet.polygon.technology/
+- Native Currency: POL (18 decimals)
 
-## 📖 Documentation
-
-Detailed documentation is available in the `/docs` directory:
-- [Data Structures](docs/data-structures.md)
-- [Refresh Button Implementation](docs/refresh-button.md)
-
-## 🔍 Debugging
-
-1. Enable debug mode by adding `debug=true` to URL parameters
-2. Use the Debug Panel (accessible via UI) to:
-   - Monitor WebSocket events
-   - Track order updates
-   - View token cache
-   - Test error scenarios
-
-## 🛠️ Development
-
-### Adding New Features
-
-1. Create component in `js/components/`
-2. Add corresponding styles in `css/components/`
-3. Register component in `app.js`
-4. Update documentation
-
-### Code Style
-- Use ES6+ features
-- Follow component-based architecture
-- Maintain consistent error handling
-- Document complex logic
-- Use CSS variables for theming
-
-## 🧪 Testing
-
-```bash
-# Run unit tests
-npm test
-
-# Run integration tests
-npm run test:integration
-```
-
-## 🔐 Security
-
-- All transactions require explicit user approval
-- Token approvals are managed per order
-- Price calculations include slippage protection
-- Real-time validation of order parameters
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Open Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [Ethers.js](https://docs.ethers.io/v5/)
-- [Web3Modal](https://github.com/Web3Modal/web3modal)
-- [Community contributors]
-
-
-
+## Support
+For issues and feature requests, please open an issue on the repository.
