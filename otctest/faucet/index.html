@@ -348,14 +348,26 @@
 
              <div id="tokenManagement" class="section hidden">
          <div class="section-title">🎛️ Token Management</div>
-         <div style="display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px;">
-           <button class="button" onclick="pauseAllTokens()" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);">
-             ⏸️ Pause All Tokens
-           </button>
-           <button class="button" onclick="unpauseAllTokens()" style="background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);">
-             ▶️ Unpause All Tokens
-           </button>
-         </div>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px;">
+          <button class="button" onclick="pauseFeeToken()" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);">
+            ⏸️ Pause Fee Token
+          </button>
+          <button class="button" onclick="unpauseFeeToken()" style="background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);">
+            ▶️ Unpause Fee Token
+          </button>
+          <button class="button" onclick="pauseTradingToken1()" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);">
+            ⏸️ Pause Trading Token 1
+          </button>
+          <button class="button" onclick="unpauseTradingToken1()" style="background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);">
+            ▶️ Unpause Trading Token 1
+          </button>
+          <button class="button" onclick="pauseTradingToken2()" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);">
+            ⏸️ Pause Trading Token 2
+          </button>
+          <button class="button" onclick="unpauseTradingToken2()" style="background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);">
+            ▶️ Unpause Trading Token 2
+          </button>
+        </div>
          
          <div id="tokenStatus" style="margin-top: 20px; padding: 20px; background: #ffffff; border-radius: 12px; border: 2px solid #e0e0e0;">
            <h4 style="margin: 0 0 15px 0; color: #333; font-size: 1.2em;">📊 Token Status</h4>
@@ -582,134 +594,266 @@
       }
 
       // Token Management Functions
-      async function pauseAllTokens() {
+      async function pauseFeeToken() {
         if (!signer || !userAddress) {
           updateStatus("Please connect your wallet first", "error");
           return;
         }
 
         try {
-          updateStatus("Pausing all tokens...", "loading");
-          
-          // Get faucet address from input
+          updateStatus("Pausing Fee Token...", "loading");
           const faucetAddress = document.getElementById("faucetAddress").value;
           if (!ethers.utils.isAddress(faucetAddress)) {
             throw new Error("Please configure a valid faucet address first");
           }
 
-          // Get token addresses from faucet contract
           const faucetABI = [
-            "function feeToken() external view returns (address)",
-            "function tradingToken1() external view returns (address)",
-            "function tradingToken2() external view returns (address)"
+            "function feeToken() external view returns (address)"
           ];
           const faucet = new ethers.Contract(faucetAddress, faucetABI, signer);
-          
-          const [feeTokenAddress, tradingToken1Address, tradingToken2Address] = await Promise.all([
-            faucet.feeToken(),
-            faucet.tradingToken1(),
-            faucet.tradingToken2()
-          ]);
+          const feeTokenAddress = await faucet.feeToken();
 
           const tokenABI = [
             "function pause() public",
-            "function paused() view returns (bool)",
-            "function owner() view returns (address)"
+            "function unpause() public",
+            "function owner() view returns (address)",
+            "function paused() view returns (bool)"
           ];
-
-          const feeToken = new ethers.Contract(feeTokenAddress, tokenABI, signer);
-          const tradingToken1 = new ethers.Contract(tradingToken1Address, tokenABI, signer);
-          const tradingToken2 = new ethers.Contract(tradingToken2Address, tokenABI, signer);
-
-          // Check if user is owner of all tokens
-          const feeTokenOwner = await feeToken.owner();
-          const tradingToken1Owner = await tradingToken1.owner();
-          const tradingToken2Owner = await tradingToken2.owner();
-
-          if (userAddress.toLowerCase() !== feeTokenOwner.toLowerCase() ||
-              userAddress.toLowerCase() !== tradingToken1Owner.toLowerCase() ||
-              userAddress.toLowerCase() !== tradingToken2Owner.toLowerCase()) {
-            throw new Error("You must be the owner of all tokens to pause them");
+          const token = new ethers.Contract(feeTokenAddress, tokenABI, signer);
+          const tokenOwner = await token.owner();
+          if (userAddress.toLowerCase() !== tokenOwner.toLowerCase()) {
+            throw new Error("You must be the token owner to pause it");
           }
-
-          // Pause all tokens
-          const tx1 = await feeToken.pause();
-          const tx2 = await tradingToken1.pause();
-          const tx3 = await tradingToken2.pause();
-
-          await Promise.all([tx1.wait(), tx2.wait(), tx3.wait()]);
-
-          updateStatus("All tokens paused successfully!", "success");
+          const isPaused = await token.paused();
+          if (isPaused) {
+            throw new Error("Fee Token is already paused");
+          }
+          const tx = await token.pause();
+          await tx.wait();
+          updateStatus("Fee Token paused successfully!", "success");
           await checkTokenStatus();
-
         } catch (error) {
-          console.error("Error pausing tokens:", error);
+          console.error("Error pausing Fee Token:", error);
           updateStatus(`Error: ${error.message}`, "error");
         }
       }
 
-      async function unpauseAllTokens() {
+      async function unpauseFeeToken() {
         if (!signer || !userAddress) {
           updateStatus("Please connect your wallet first", "error");
           return;
         }
 
         try {
-          updateStatus("Unpausing all tokens...", "loading");
-          
-          // Get faucet address from input
+          updateStatus("Unpausing Fee Token...", "loading");
           const faucetAddress = document.getElementById("faucetAddress").value;
           if (!ethers.utils.isAddress(faucetAddress)) {
             throw new Error("Please configure a valid faucet address first");
           }
 
-          // Get token addresses from faucet contract
           const faucetABI = [
-            "function feeToken() external view returns (address)",
-            "function tradingToken1() external view returns (address)",
+            "function feeToken() external view returns (address)"
+          ];
+          const faucet = new ethers.Contract(faucetAddress, faucetABI, signer);
+          const feeTokenAddress = await faucet.feeToken();
+
+          const tokenABI = [
+            "function pause() public",
+            "function unpause() public",
+            "function owner() view returns (address)",
+            "function paused() view returns (bool)"
+          ];
+          const token = new ethers.Contract(feeTokenAddress, tokenABI, signer);
+          const tokenOwner = await token.owner();
+          if (userAddress.toLowerCase() !== tokenOwner.toLowerCase()) {
+            throw new Error("You must be the token owner to unpause it");
+          }
+          const isPaused = await token.paused();
+          if (!isPaused) {
+            throw new Error("Fee Token is not paused");
+          }
+          const tx = await token.unpause();
+          await tx.wait();
+          updateStatus("Fee Token unpaused successfully!", "success");
+          await checkTokenStatus();
+        } catch (error) {
+          console.error("Error unpausing Fee Token:", error);
+          updateStatus(`Error: ${error.message}`, "error");
+        }
+      }
+
+      async function pauseTradingToken1() {
+        if (!signer || !userAddress) {
+          updateStatus("Please connect your wallet first", "error");
+          return;
+        }
+
+        try {
+          updateStatus("Pausing Trading Token 1...", "loading");
+          const faucetAddress = document.getElementById("faucetAddress").value;
+          if (!ethers.utils.isAddress(faucetAddress)) {
+            throw new Error("Please configure a valid faucet address first");
+          }
+
+          const faucetABI = [
+            "function tradingToken1() external view returns (address)"
+          ];
+          const faucet = new ethers.Contract(faucetAddress, faucetABI, signer);
+          const tokenAddress = await faucet.tradingToken1();
+
+          const tokenABI = [
+            "function pause() public",
+            "function unpause() public",
+            "function owner() view returns (address)",
+            "function paused() view returns (bool)"
+          ];
+          const token = new ethers.Contract(tokenAddress, tokenABI, signer);
+          const tokenOwner = await token.owner();
+          if (userAddress.toLowerCase() !== tokenOwner.toLowerCase()) {
+            throw new Error("You must be the token owner to pause it");
+          }
+          const isPaused = await token.paused();
+          if (isPaused) {
+            throw new Error("Trading Token 1 is already paused");
+          }
+          const tx = await token.pause();
+          await tx.wait();
+          updateStatus("Trading Token 1 paused successfully!", "success");
+          await checkTokenStatus();
+        } catch (error) {
+          console.error("Error pausing Trading Token 1:", error);
+          updateStatus(`Error: ${error.message}`, "error");
+        }
+      }
+
+      async function unpauseTradingToken1() {
+        if (!signer || !userAddress) {
+          updateStatus("Please connect your wallet first", "error");
+          return;
+        }
+
+        try {
+          updateStatus("Unpausing Trading Token 1...", "loading");
+          const faucetAddress = document.getElementById("faucetAddress").value;
+          if (!ethers.utils.isAddress(faucetAddress)) {
+            throw new Error("Please configure a valid faucet address first");
+          }
+
+          const faucetABI = [
+            "function tradingToken1() external view returns (address)"
+          ];
+          const faucet = new ethers.Contract(faucetAddress, faucetABI, signer);
+          const tokenAddress = await faucet.tradingToken1();
+
+          const tokenABI = [
+            "function pause() public",
+            "function unpause() public",
+            "function owner() view returns (address)",
+            "function paused() view returns (bool)"
+          ];
+          const token = new ethers.Contract(tokenAddress, tokenABI, signer);
+          const tokenOwner = await token.owner();
+          if (userAddress.toLowerCase() !== tokenOwner.toLowerCase()) {
+            throw new Error("You must be the token owner to unpause it");
+          }
+          const isPaused = await token.paused();
+          if (!isPaused) {
+            throw new Error("Trading Token 1 is not paused");
+          }
+          const tx = await token.unpause();
+          await tx.wait();
+          updateStatus("Trading Token 1 unpaused successfully!", "success");
+          await checkTokenStatus();
+        } catch (error) {
+          console.error("Error unpausing Trading Token 1:", error);
+          updateStatus(`Error: ${error.message}`, "error");
+        }
+      }
+
+      async function pauseTradingToken2() {
+        if (!signer || !userAddress) {
+          updateStatus("Please connect your wallet first", "error");
+          return;
+        }
+
+        try {
+          updateStatus("Pausing Trading Token 2...", "loading");
+          const faucetAddress = document.getElementById("faucetAddress").value;
+          if (!ethers.utils.isAddress(faucetAddress)) {
+            throw new Error("Please configure a valid faucet address first");
+          }
+
+          const faucetABI = [
             "function tradingToken2() external view returns (address)"
           ];
           const faucet = new ethers.Contract(faucetAddress, faucetABI, signer);
-          
-          const [feeTokenAddress, tradingToken1Address, tradingToken2Address] = await Promise.all([
-            faucet.feeToken(),
-            faucet.tradingToken1(),
-            faucet.tradingToken2()
-          ]);
+          const tokenAddress = await faucet.tradingToken2();
 
           const tokenABI = [
+            "function pause() public",
             "function unpause() public",
-            "function paused() view returns (bool)",
-            "function owner() view returns (address)"
+            "function owner() view returns (address)",
+            "function paused() view returns (bool)"
           ];
+          const token = new ethers.Contract(tokenAddress, tokenABI, signer);
+          const tokenOwner = await token.owner();
+          if (userAddress.toLowerCase() !== tokenOwner.toLowerCase()) {
+            throw new Error("You must be the token owner to pause it");
+          }
+          const isPaused = await token.paused();
+          if (isPaused) {
+            throw new Error("Trading Token 2 is already paused");
+          }
+          const tx = await token.pause();
+          await tx.wait();
+          updateStatus("Trading Token 2 paused successfully!", "success");
+          await checkTokenStatus();
+        } catch (error) {
+          console.error("Error pausing Trading Token 2:", error);
+          updateStatus(`Error: ${error.message}`, "error");
+        }
+      }
 
-          const feeToken = new ethers.Contract(feeTokenAddress, tokenABI, signer);
-          const tradingToken1 = new ethers.Contract(tradingToken1Address, tokenABI, signer);
-          const tradingToken2 = new ethers.Contract(tradingToken2Address, tokenABI, signer);
+      async function unpauseTradingToken2() {
+        if (!signer || !userAddress) {
+          updateStatus("Please connect your wallet first", "error");
+          return;
+        }
 
-          // Check if user is owner of all tokens
-          const feeTokenOwner = await feeToken.owner();
-          const tradingToken1Owner = await tradingToken1.owner();
-          const tradingToken2Owner = await tradingToken2.owner();
-
-          if (userAddress.toLowerCase() !== feeTokenOwner.toLowerCase() ||
-              userAddress.toLowerCase() !== tradingToken1Owner.toLowerCase() ||
-              userAddress.toLowerCase() !== tradingToken2Owner.toLowerCase()) {
-            throw new Error("You must be the owner of all tokens to unpause them");
+        try {
+          updateStatus("Unpausing Trading Token 2...", "loading");
+          const faucetAddress = document.getElementById("faucetAddress").value;
+          if (!ethers.utils.isAddress(faucetAddress)) {
+            throw new Error("Please configure a valid faucet address first");
           }
 
-          // Unpause all tokens
-          const tx1 = await feeToken.unpause();
-          const tx2 = await tradingToken1.unpause();
-          const tx3 = await tradingToken2.unpause();
+          const faucetABI = [
+            "function tradingToken2() external view returns (address)"
+          ];
+          const faucet = new ethers.Contract(faucetAddress, faucetABI, signer);
+          const tokenAddress = await faucet.tradingToken2();
 
-          await Promise.all([tx1.wait(), tx2.wait(), tx3.wait()]);
-
-          updateStatus("All tokens unpaused successfully!", "success");
+          const tokenABI = [
+            "function pause() public",
+            "function unpause() public",
+            "function owner() view returns (address)",
+            "function paused() view returns (bool)"
+          ];
+          const token = new ethers.Contract(tokenAddress, tokenABI, signer);
+          const tokenOwner = await token.owner();
+          if (userAddress.toLowerCase() !== tokenOwner.toLowerCase()) {
+            throw new Error("You must be the token owner to unpause it");
+          }
+          const isPaused = await token.paused();
+          if (!isPaused) {
+            throw new Error("Trading Token 2 is not paused");
+          }
+          const tx = await token.unpause();
+          await tx.wait();
+          updateStatus("Trading Token 2 unpaused successfully!", "success");
           await checkTokenStatus();
-
         } catch (error) {
-          console.error("Error unpausing tokens:", error);
+          console.error("Error unpausing Trading Token 2:", error);
           updateStatus(`Error: ${error.message}`, "error");
         }
       }
