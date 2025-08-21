@@ -1,6 +1,7 @@
 import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { getNetworkConfig, walletManager } from '../config.js';
+import { setVisibility } from '../utils/ui.js';
 import { erc20Abi } from '../abi/erc20.js';
 import { getContractAllowedTokens, getAllWalletTokens, clearTokenCaches } from '../utils/contractTokens.js';
 import { contractService } from '../services/ContractService.js';
@@ -8,6 +9,7 @@ import { createLogger } from '../services/LogService.js';
 import { validateSellBalance } from '../utils/balanceValidation.js';
 import { tokenIconService } from '../services/TokenIconService.js';
 import { generateTokenIconHTML, getFallbackIconData } from '../utils/tokenIcons.js';
+import { handleTransactionError } from '../utils/ui.js';
 
 export class CreateOrder extends BaseComponent {
     // Liberdus token address constant
@@ -18,6 +20,8 @@ export class CreateOrder extends BaseComponent {
         this.contract = null;
         this.provider = null;
         this.initialized = false;
+        this.isRendered = false;
+        this.hasLoadedData = false;
         this.tokenCache = new Map();
         this.boundCreateOrderHandler = this.handleCreateOrder.bind(this);
         this.isSubmitting = false;
@@ -25,6 +29,8 @@ export class CreateOrder extends BaseComponent {
         this.sellToken = null;
         this.buyToken = null;
         this.tokenSelectorListeners = {};  // Store listeners to prevent duplicates
+        this.boundWindowClickHandler = null;
+        this.amountInputListeners = {};
         
         // Initialize logger
         const logger = createLogger('CREATE_ORDER');
@@ -51,9 +57,10 @@ export class CreateOrder extends BaseComponent {
         this.debug('Resetting CreateOrder component state...');
         this.initialized = false;
         this.initializing = false;
+        this.hasLoadedData = false;
         this.tokens = [];
-        this.sellToken = null;
-        this.buyToken = null;
+        // this.sellToken = null;  // Commented out - not resetting form
+        // this.buyToken = null;   // Commented out - not resetting form
         this.feeToken = null;
         this.tokenCache.clear();
         this.resetBalanceDisplays();
@@ -96,7 +103,7 @@ export class CreateOrder extends BaseComponent {
         }
     }
 
-    async initialize(readOnlyMode = true) {
+    async initialize(readOnlyMode = true, options = {}) {
         if (this.initializing || this.initialized) {
             this.debug('Already initializing or initialized, skipping...');
             return;
@@ -109,9 +116,22 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug('Starting initialization...');
             
-            // Render the HTML first
+            // Render the HTML once
             const container = document.getElementById('create-order');
-            container.innerHTML = this.render();
+            if (!this.isRendered) {
+                container.innerHTML = this.render();
+                this.isRendered = true;
+
+                // Initialize initial visibility state for static elements
+                const sellUsd = document.getElementById('sellAmountUSD');
+                const buyUsd = document.getElementById('buyAmountUSD');
+                const sellBal = document.getElementById('sellTokenBalanceDisplay');
+                const buyBal = document.getElementById('buyTokenBalanceDisplay');
+                setVisibility(sellUsd, false);
+                setVisibility(buyUsd, false);
+                setVisibility(sellBal, false);
+                setVisibility(buyBal, false);
+            }
             
             // Handle read-only mode first, before any other initialization
             if (readOnlyMode) {
@@ -165,8 +185,10 @@ export class CreateOrder extends BaseComponent {
             // Enable form when wallet is connected
             this.setConnectedMode();
             
-            // Setup UI immediately
-            this.populateTokenDropdowns();
+            // Setup UI only on first render to preserve user input on tab switches
+            if (!this.hasLoadedData) {
+                this.populateTokenDropdowns();
+            }
             this.setupCreateOrderListener();
             
             // Wait for contract to be ready
@@ -179,6 +201,7 @@ export class CreateOrder extends BaseComponent {
             ]);
 
             this.updateFeeDisplay();
+            this.hasLoadedData = true;
             
             // Initialize token selectors
             this.initializeTokenSelectors();
@@ -282,7 +305,7 @@ export class CreateOrder extends BaseComponent {
     }
 
     setReadOnlyMode() {
-        console.log('[CreateOrder] Setting read-only mode');
+        this.debug('Setting read-only mode');
         const createOrderBtn = document.getElementById('createOrderBtn');
         const orderCreationFee = document.getElementById('orderCreationFee');
         
@@ -352,8 +375,8 @@ export class CreateOrder extends BaseComponent {
                 balanceAmount.textContent = formattedBalance;
                 balanceUSDElement.textContent = `• $${balanceUSD}`;
                 
-                // Show the balance display
-                balanceDisplay.style.display = 'block';
+                // Show the balance display without layout shift
+                setVisibility(balanceDisplay, true);
                 
                 // Update ARIA label with current balance
                 const balanceBtn = document.getElementById(`${type}TokenBalanceBtn`);
@@ -376,7 +399,7 @@ export class CreateOrder extends BaseComponent {
         try {
             const balanceDisplay = document.getElementById(`${type}TokenBalanceDisplay`);
             if (balanceDisplay) {
-                balanceDisplay.style.display = 'none';
+                setVisibility(balanceDisplay, false);
                 this.debug(`Hidden ${type} balance display`);
             }
         } catch (error) {
@@ -419,35 +442,42 @@ export class CreateOrder extends BaseComponent {
         // Setup taker toggle functionality
         const takerToggle = document.querySelector('.taker-toggle');
         if (takerToggle) {
-            console.log('[CreateOrder] Setting up taker toggle functionality');
+            this.debug('Setting up taker toggle functionality');
             // Remove existing listeners using clone technique
             const newTakerToggle = takerToggle.cloneNode(true);
             takerToggle.parentNode.replaceChild(newTakerToggle, takerToggle);
             
             // Add click listener
-            newTakerToggle.addEventListener('click', function(e) {
-                console.log('[CreateOrder] Taker toggle clicked');
+            newTakerToggle.addEventListener('click', (e) => {
+                this.debug('Taker toggle clicked');
                 e.preventDefault();
                 e.stopPropagation();
                 
-                this.classList.toggle('active');
+                newTakerToggle.classList.toggle('active');
                 const takerInputContent = document.querySelector('.taker-input-content');
                 if (takerInputContent) {
                     takerInputContent.classList.toggle('hidden');
                 }
                 
                 // Update chevron direction
-                const chevron = this.querySelector('.chevron-down');
+                const chevron = newTakerToggle.querySelector('.chevron-down');
                 if (chevron) {
-                    if (this.classList.contains('active')) {
+                    if (newTakerToggle.classList.contains('active')) {
                         chevron.style.transform = 'rotate(180deg)';
+                        // Focus on taker address input when toggle is activated
+                        setTimeout(() => {
+                            const takerAddressInput = document.getElementById('takerAddress');
+                            if (takerAddressInput) {
+                                takerAddressInput.focus();
+                            }
+                        }, 100); // Small delay to ensure DOM is updated
                     } else {
                         chevron.style.transform = 'rotate(0deg)';
                     }
                 }
             });
         } else {
-            console.log('[CreateOrder] Taker toggle button not found');
+            this.debug('Taker toggle button not found');
         }
     }
 
@@ -648,7 +678,21 @@ export class CreateOrder extends BaseComponent {
                     if (!tx) return; // User rejected the transaction
 
                     this.showInfo('Waiting for confirmation...');
-                    await tx.wait();
+                    
+                    // Add timeout handling for tx.wait()
+                    const waitPromise = tx.wait();
+                    const timeoutPromise = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Transaction timeout - please check your wallet')), 30000)
+                    );
+                    
+                    const receipt = await Promise.race([waitPromise, timeoutPromise]);
+                    
+                    // Verify transaction was actually successful
+                    if (!receipt || receipt.status === 0) {
+                        throw new Error('Transaction failed on-chain');
+                    }
+                    
+                    this.debug('Transaction confirmed successfully:', receipt);
                     
                     // After success: clear cached balances and refresh any open token modals
                     try {
@@ -670,6 +714,18 @@ export class CreateOrder extends BaseComponent {
                     retryCount++;
                     this.debug(`Create order attempt ${retryCount} failed:`, error);
 
+                    // Handle timeout specifically
+                    if (error.message?.includes('Transaction timeout')) {
+                        this.showError('Transaction timed out. Please check your wallet and try again.');
+                        return; // Don't retry timeouts, let user try manually
+                    }
+
+                    // Handle on-chain failures
+                    if (error.message?.includes('Transaction failed on-chain')) {
+                        this.showError('Transaction failed on-chain. Please check your balance and try again.');
+                        return; // Don't retry on-chain failures
+                    }
+
                     if (retryCount <= maxRetries && 
                         (error.message?.includes('nonce') || 
                          error.message?.includes('replacement fee too low'))) {
@@ -682,43 +738,16 @@ export class CreateOrder extends BaseComponent {
             }
 
             this.showSuccess('Order created successfully!');
-            this.resetForm();
+            // this.resetForm();  // Commented out - not resetting form
             
             // Reload orders if needed
             if (window.app?.loadOrders) {
                 window.app.loadOrders();
             }
-
-            // Clear form inputs
-            document.getElementById('sellAmount').value = '';
-            document.getElementById('buyAmount').value = '';
-            document.getElementById('takerAddress').value = '';
-            
-            // Reset token selectors if needed
-            this.sellToken = null;
-            this.buyToken = null;
-            
-            // Update UI to reflect cleared state
-            const sellTokenSelector = document.getElementById('sellTokenSelector');
-            const buyTokenSelector = document.getElementById('buyTokenSelector');
-            
-            if (sellTokenSelector) {
-                sellTokenSelector.innerHTML = 'Select Token';
-            }
-            if (buyTokenSelector) {
-                buyTokenSelector.innerHTML = 'Select Token';
-            }
-            
-            // Reset any other UI elements
-            this.updateCreateButtonState();
-            
-            // Show success message
-            this.showSuccess('Order created successfully!');
-
         } catch (error) {
             this.debug('Create order error:', error);
-            const userMessage = this.getUserFriendlyError(error);
-            this.showError(userMessage);
+            // Use utility function for consistent error handling
+            handleTransactionError(error, this, 'order creation');
         } finally {
             this.isSubmitting = false;
             createOrderBtn.disabled = false;
@@ -759,54 +788,54 @@ export class CreateOrder extends BaseComponent {
 
     resetForm() {
         // Clear token inputs and amounts
-        document.getElementById('sellToken').value = '';
-        document.getElementById('sellAmount').value = '';
-        document.getElementById('buyToken').value = '';
-        document.getElementById('buyAmount').value = '';
+        // document.getElementById('sellToken').value = '';  // Commented out - not resetting form
+        // document.getElementById('sellAmount').value = '';  // Commented out - not resetting form
+        // document.getElementById('buyToken').value = '';  // Commented out - not resetting form
+        // document.getElementById('buyAmount').value = '';  // Commented out - not resetting form
         
         // Clear taker address input
-        const takerInput = document.getElementById('takerAddress');
-        if (takerInput) {
-            takerInput.value = '';
-        }
+        // const takerInput = document.getElementById('takerAddress');  // Commented out - not resetting form
+        // if (takerInput) {  // Commented out - not resetting form
+        //     takerInput.value = '';  // Commented out - not resetting form
+        // }  // Commented out - not resetting form
         
         // Clear balance displays
-        this.resetBalanceDisplays();
+        // this.resetBalanceDisplays();  // Commented out - not resetting form
         
         // Clear component state
-        this.sellToken = null;
-        this.buyToken = null;
+        // this.sellToken = null;  // Commented out - not resetting form
+        // this.buyToken = null;  // Commented out - not resetting form
         
         // Reset token selectors to default state
-        ['sell', 'buy'].forEach(type => {
-            const selector = document.getElementById(`${type}TokenSelector`);
-            if (selector) {
-                selector.innerHTML = `
-                    <span class="token-selector-content">
-                        <span>Select Token</span>
-                        <svg width="12" height="12" viewBox="0 0 12 12">
-                            <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                        </svg>
-                    </span>
-                `;
-            }
-        });
+        // ['sell', 'buy'].forEach(type => {  // Commented out - not resetting form
+        //     const selector = document.getElementById(`${type}TokenSelector`);  // Commented out - not resetting form
+        //     if (selector) {  // Commented out - not resetting form
+        //         selector.innerHTML = `  // Commented out - not resetting form
+        //             <span class="token-selector-content">  // Commented out - not resetting form
+        //                 <span>Select Token</span>  // Commented out - not resetting form
+        //                 <svg width="12" height="12" viewBox="0 0 12 12">  // Commented out - not resetting form
+        //                     <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>  // Commented out - not resetting form
+        //                 </svg>  // Commented out - not resetting form
+        //             </span>  // Commented out - not resetting form
+        //         `;  // Commented out - not resetting form
+        //     }  // Commented out - not resetting form
+        // });  // Commented out - not resetting form
         
         // Remove any token address tooltips
-        document.querySelectorAll('.token-address-tooltip').forEach(tooltip => {
-            tooltip.remove();
-        });
+        // document.querySelectorAll('.token-address-tooltip').forEach(tooltip => {  // Commented out - not resetting form
+        //     tooltip.remove();  // Commented out - not resetting form
+        // });  // Commented out - not resetting form
         
         // Remove USD amount displays
-        ['sell', 'buy'].forEach(type => {
-            const usdDisplay = document.getElementById(`${type}AmountUSD`);
-            if (usdDisplay) {
-                usdDisplay.remove();
-            }
-        });
+        // ['sell', 'buy'].forEach(type => {  // Commented out - not resetting form
+        //     const usdDisplay = document.getElementById(`${type}AmountUSD`);  // Commented out - not resetting form
+        //     if (usdDisplay) {  // Commented out - not resetting form
+        //         usdDisplay.remove();  // Commented out - not resetting form
+        //     }  // Commented out - not resetting form
+        // });  // Commented out - not resetting form
         
         // Update create button state
-        this.updateCreateButtonState();
+        // this.updateCreateButtonState();  // Commented out - not resetting form
     }
 
     async loadContractTokens() {
@@ -893,6 +922,13 @@ export class CreateOrder extends BaseComponent {
             // Assemble input wrapper
             inputWrapper.appendChild(label);
             inputWrapper.appendChild(amountInput);
+            // Pre-create USD display to preserve layout; keep hidden until valid
+            const usdDisplayStatic = document.createElement('div');
+            usdDisplayStatic.id = `${type}AmountUSD`;
+            usdDisplayStatic.className = 'amount-usd is-hidden';
+            usdDisplayStatic.setAttribute('aria-hidden', 'true');
+            usdDisplayStatic.textContent = '≈ $0.00';
+            inputWrapper.appendChild(usdDisplayStatic);
             
             // Create token selector button
             const tokenSelector = document.createElement('button');
@@ -920,8 +956,8 @@ export class CreateOrder extends BaseComponent {
             // Create balance display (hidden until a token is selected) AS A SIBLING UNDER THE SELECTOR
             const balanceDisplay = document.createElement('div');
             balanceDisplay.id = `${type}TokenBalanceDisplay`;
-            balanceDisplay.className = 'token-balance-display';
-            balanceDisplay.style.display = 'none';
+            balanceDisplay.className = 'token-balance-display is-hidden';
+            balanceDisplay.setAttribute('aria-hidden', 'true');
             balanceDisplay.innerHTML = `
                 <button id="${type}TokenBalanceBtn" class="balance-clickable" aria-label="Click to fill ${type} amount with available balance">
                     <span class="balance-amount" id="${type}TokenBalanceAmount">0.00</span>
@@ -1550,6 +1586,11 @@ export class CreateOrder extends BaseComponent {
             this.expiryTimers.forEach(timerId => clearInterval(timerId));
             this.expiryTimers.clear();
         }
+        // Remove global click handler for modals if present
+        if (this.boundWindowClickHandler) {
+            window.removeEventListener('click', this.boundWindowClickHandler);
+            this.boundWindowClickHandler = null;
+        }
     }
 
     // Add this method to the CreateOrder class
@@ -1683,16 +1724,11 @@ export class CreateOrder extends BaseComponent {
             this.debug(`Current allowance: ${currentAllowance.toString()}`);
             this.debug(`Required amount: ${requiredAmount.toString()}`);
 
-            // If allowance is insufficient, reset and approve new amount
+            // If allowance is insufficient, approve only what's needed
             if (currentAllowance.lt(requiredAmount)) {
-                if (!currentAllowance.isZero()) {
-                    this.debug('Resetting existing allowance');
-                    const resetTx = await tokenContract.approve(this.contract.address, 0);
-                    await resetTx.wait();
-                    this.debug('Allowance reset successful');
-                }
-
-                this.showInfo('Requesting token approval...');
+                const additionalAmount = requiredAmount.sub(currentAllowance);
+                
+                this.showInfo(`Requesting additional token approval (${ethers.utils.formatUnits(additionalAmount, await this.getTokenDecimals(tokenAddress))} more needed)...`);
                 const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
                 this.showInfo('Please confirm the approval in your wallet...');
                 
@@ -1706,8 +1742,8 @@ export class CreateOrder extends BaseComponent {
             return true;
         } catch (error) {
             this.debug('Token approval error:', error);
-            const userMessage = this.getUserFriendlyError(error);
-            this.showError(userMessage);
+            // Use utility function for consistent error handling
+            handleTransactionError(error, this, 'token approval');
             return false;
         }
     }
@@ -1717,6 +1753,16 @@ export class CreateOrder extends BaseComponent {
         // Check for common error codes and messages
         if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
             return 'Transaction was declined';
+        }
+        
+        // Handle timeout specifically
+        if (error.message?.includes('Transaction timeout')) {
+            return 'Transaction timed out. Please check your wallet and try again.';
+        }
+        
+        // Handle on-chain failures
+        if (error.message?.includes('Transaction failed on-chain')) {
+            return 'Transaction failed on-chain. Please check your balance and try again.';
         }
         
         // Handle contract revert errors with detailed messages
@@ -1744,6 +1790,35 @@ export class CreateOrder extends BaseComponent {
         return 'Transaction failed - please try again';
     }
 
+    // Helper method to verify transaction status
+    async verifyTransactionStatus(txHash) {
+        try {
+            const provider = walletManager.getProvider();
+            if (!provider) {
+                throw new Error('Provider not available');
+            }
+
+            // Wait a bit for transaction to be mined
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Get transaction receipt
+            const receipt = await provider.getTransactionReceipt(txHash);
+            
+            if (!receipt) {
+                throw new Error('Transaction not found on-chain');
+            }
+
+            if (receipt.status === 0) {
+                throw new Error('Transaction failed on-chain');
+            }
+
+            return receipt;
+        } catch (error) {
+            this.debug('Transaction verification failed:', error);
+            throw error;
+        }
+    }
+
     // Update the fee display in the UI
     updateFeeDisplay() {
         if (!this.feeToken?.amount || !this.feeToken?.symbol || !this.feeToken?.decimals) {
@@ -1762,12 +1837,12 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug(`Token selected for ${type}:`, token);
             
-            // Clear USD display if no token is selected
+            // Hide USD display if no token is selected (preserve layout)
             if (!token) {
                 this[`${type}Token`] = null;
                 const usdDisplay = document.getElementById(`${type}AmountUSD`);
                 if (usdDisplay) {
-                    usdDisplay.remove();
+                    setVisibility(usdDisplay, false);
                 }
                 // Hide balance display when no token is selected
                 this.hideBalanceDisplay(type);
@@ -1876,6 +1951,11 @@ export class CreateOrder extends BaseComponent {
                 amountInput.parentNode.replaceChild(newInput, amountInput);
                 // Add new listener
                 newInput.addEventListener('input', () => this.updateTokenAmounts(type));
+                
+                // Focus on the input field after token selection
+                setTimeout(() => {
+                    newInput.focus();
+                }, 100); // Small delay to ensure DOM is updated
             }
         } catch (error) {
             this.debug('Error in handleTokenSelect:', error);
@@ -1997,25 +2077,24 @@ export class CreateOrder extends BaseComponent {
             // Find USD display element
             let usdDisplay = document.getElementById(`${type}AmountUSD`);
             
-            // If no token selected or amount is 0/empty, remove the USD display
+            // If no token selected or amount is 0/empty, hide the USD display without removing
             if (!token || !amount || amount === '0') {
                 if (usdDisplay) {
-                    usdDisplay.remove();
+                    setVisibility(usdDisplay, false);
                 }
                 return;
             }
             
             if (token && amount) {
                 const usdValue = Number(amount) * token.usdPrice;
-                // Create USD display element if it doesn't exist
+                // Ensure USD display element exists (in template) and update it
                 if (!usdDisplay) {
-                    usdDisplay = document.createElement('div');
-                    usdDisplay.id = `${type}AmountUSD`;
-                    usdDisplay.className = 'amount-usd';
-                    const amountInput = document.getElementById(`${type}Amount`);
-                    amountInput.parentNode.insertBefore(usdDisplay, amountInput.nextSibling);
+                    usdDisplay = document.getElementById(`${type}AmountUSD`);
                 }
-                usdDisplay.textContent = `$${usdValue.toFixed(2)}`;
+                if (usdDisplay) {
+                    usdDisplay.textContent = `$${usdValue.toFixed(2)}`;
+                    setVisibility(usdDisplay, true);
+                }
             }
             
             this.updateCreateButtonState();
@@ -2039,18 +2118,6 @@ export class CreateOrder extends BaseComponent {
                 // Create new listener for opening modal
                 this.tokenSelectorListeners[type] = async () => {
                     modal.style.display = 'block';
-                    
-                    // Pre-fetch prices for all allowed tokens in background
-                    if (window.pricingService && this.tokens?.length > 0) {
-                        const tokenAddresses = this.tokens.map(t => t.address);
-                        window.pricingService.fetchPricesForTokens(tokenAddresses)
-                            .then(() => {
-                                this.debug('Pre-fetched prices for all tokens');
-                            })
-                            .catch(error => {
-                                this.debug('Failed to pre-fetch prices:', error);
-                            });
-                    }
                 };
 
                 // Add new listener
@@ -2063,12 +2130,15 @@ export class CreateOrder extends BaseComponent {
                     };
                 }
 
-                // Close modal when clicking outside
-                window.addEventListener('click', (event) => {
-                    if (event.target.classList.contains('token-modal')) {
-                        event.target.style.display = 'none';
-                    }
-                });
+                // Close modal when clicking outside (register once)
+                if (!this.boundWindowClickHandler) {
+                    this.boundWindowClickHandler = (event) => {
+                        if (event.target.classList?.contains('token-modal')) {
+                            event.target.style.display = 'none';
+                        }
+                    };
+                    window.addEventListener('click', this.boundWindowClickHandler);
+                }
             }
         });
     }
@@ -2114,7 +2184,13 @@ export class CreateOrder extends BaseComponent {
         ['sell', 'buy'].forEach(type => {
             const amountInput = document.getElementById(`${type}Amount`);
             if (amountInput) {
-                amountInput.addEventListener('input', () => this.updateTokenAmounts(type));
+                // Remove prior listener if present
+                if (this.amountInputListeners[type]) {
+                    amountInput.removeEventListener('input', this.amountInputListeners[type]);
+                }
+                // Create and store new listener
+                this.amountInputListeners[type] = () => this.updateTokenAmounts(type);
+                amountInput.addEventListener('input', this.amountInputListeners[type]);
             }
         });
 
@@ -2213,13 +2289,13 @@ export class CreateOrder extends BaseComponent {
                             <input type="number" id="sellAmount" placeholder="0.0" />
                             <button id="sellAmountMax" class="max-button">MAX</button>
                         </div>
-                        <div class="amount-usd" id="sellAmountUSD">≈ $0.00</div>
+                        <div class="amount-usd is-hidden" id="sellAmountUSD" aria-hidden="true">≈ $0.00</div>
                         <div id="sellTokenSelector" class="token-selector">
                             <div class="token-selector-content">
                                 <span>Select Token</span>
                             </div>
                         </div>
-                        <div id="sellTokenBalanceDisplay" class="token-balance-display" style="display: none;">
+                        <div id="sellTokenBalanceDisplay" class="token-balance-display is-hidden" aria-hidden="true">
                             <button id="sellTokenBalanceBtn" class="balance-clickable" aria-label="Click to fill sell amount with available balance">
                                 <span class="balance-amount" id="sellTokenBalanceAmount">0.00</span>
                                 <span class="balance-usd" id="sellTokenBalanceUSD">• $0.00</span>
@@ -2239,13 +2315,13 @@ export class CreateOrder extends BaseComponent {
                         <div class="amount-input-wrapper">
                             <input type="number" id="buyAmount" placeholder="0.0" />
                         </div>
-                        <div class="amount-usd" id="buyAmountUSD">≈ $0.00</div>
+                        <div class="amount-usd is-hidden" id="buyAmountUSD" aria-hidden="true">≈ $0.00</div>
                         <div id="buyTokenSelector" class="token-selector">
                             <div class="token-selector-content">
                                 <span>Select Token</span>
                             </div>
                         </div>
-                        <div id="buyTokenBalanceDisplay" class="token-balance-display" style="display: none;">
+                        <div id="buyTokenBalanceDisplay" class="token-balance-display is-hidden" aria-hidden="true">
                             <button id="buyTokenBalanceBtn" class="balance-clickable" aria-label="Click to fill buy amount with available balance">
                                 <span class="balance-amount" id="buyTokenBalanceAmount">0.00</span>
                                 <span class="balance-usd" id="buyTokenBalanceUSD">• $0.00</span>

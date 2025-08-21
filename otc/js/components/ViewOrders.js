@@ -7,6 +7,7 @@ import { walletManager } from '../config.js';
 import { createLogger } from '../services/LogService.js';
 import { tokenIconService } from '../services/TokenIconService.js';
 import { generateTokenIconHTML } from '../utils/tokenIcons.js';
+import { handleTransactionError } from '../utils/ui.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
@@ -99,10 +100,8 @@ export class ViewOrders extends BaseComponent {
             };
             walletManager.addListener(this.walletListener);
             
-            // Initialize table and setup WebSocket
-            await super.init();
+            // Setup WebSocket subscriptions
             await this.setupWebSocket();
-            await this.refreshOrdersView();
             
             this.debug('ViewOrders initialization complete');
         } catch (error) {
@@ -218,8 +217,9 @@ export class ViewOrders extends BaseComponent {
 
     async initialize(readOnlyMode = true) {
         if (!this.initialized) {
-            // First time setup - create table structure
+            // First time setup - create table structure and setup WebSocket
             await this.setupTable();
+            await this.setupWebSocket();
             this.initialized = true;
         }
         // Just refresh the view with current cache
@@ -395,6 +395,16 @@ export class ViewOrders extends BaseComponent {
     }
 
     async setupTable() {
+        // Prevent multiple table setups
+        if (this._tableSetup) {
+            this.debug('Table already setup, skipping...');
+            return;
+        }
+        this._tableSetup = true;
+        
+        // Clear existing content to prevent duplicates
+        this.container.innerHTML = '';
+        
         const tableContainer = this.createElement('div', 'table-container');
         
         // Main filter controls
@@ -840,12 +850,8 @@ For Buyers:
         } catch (error) {
             this.debug('Fill order error details:', error);
             
-            // Handle specific error cases
-            if (error.code === 4001) {
-                this.showError('Transaction rejected by user');
-            } else {
-                this.showError(this.getReadableError(error));
-            }
+            // Use utility function for consistent error handling
+            handleTransactionError(error, this, 'fill order');
         } finally {
             if (button) {
                 button.disabled = false;
@@ -899,6 +905,10 @@ For Buyers:
             this.expiryTimers.forEach(timerId => clearInterval(timerId));
             this.expiryTimers.clear();
         }
+        
+        // Reset table setup flag to allow re-initialization if needed
+        this._tableSetup = false;
+        
         // Don't clear the table
     }
 
