@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'
+const version = 'u'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -8647,7 +8647,8 @@ console.warn('in send message', txid)
       };
 
       // Prepare and send the delete message transaction
-      const deleteMessageObj = await this.createChatMessage(this.address, payload, 0n, keys);
+      let tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
+      const deleteMessageObj = await this.createChatMessage(this.address, payload, tollInLib, keys);
       await signObj(deleteMessageObj, keys);
       const deleteTxid = getTxid(deleteMessageObj);
 
