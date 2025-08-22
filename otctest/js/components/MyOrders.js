@@ -1,7 +1,7 @@
 import { ViewOrders } from './ViewOrders.js';
 import { createLogger } from '../services/LogService.js';
 import { ethers } from 'ethers';
-import { handleTransactionError } from '../utils/ui.js';
+import { handleTransactionError, processOrderAddress, generateStatusCellHTML, setupClickToCopy } from '../utils/ui.js';
 
 export class MyOrders extends ViewOrders {
     constructor() {
@@ -53,10 +53,18 @@ export class MyOrders extends ViewOrders {
                 return;
             }
 
+            // Check if table already exists to avoid rebuilding
+            const existingTable = this.container.querySelector('.orders-table');
+            if (!existingTable) {
+                this.debug('Table does not exist, setting up...');
+                await this.setupTable();
+            } else {
+                this.debug('Table already exists, skipping setup');
+            }
+
             // Check if WebSocket cache is already available
             if (window.webSocket?.orderCache.size > 0) {
                 this.debug('Using existing WebSocket cache');
-                await this.setupTable();
                 await this.refreshOrdersView();
                 return;
             }
@@ -74,8 +82,7 @@ export class MyOrders extends ViewOrders {
                 });
             }
 
-            // Setup table and refresh view
-            await this.setupTable();
+            // Refresh view
             await this.refreshOrdersView();
 
         } catch (error) {
@@ -177,10 +184,7 @@ export class MyOrders extends ViewOrders {
                     </tr>`;
             }
 
-            // After table is rebuilt, restore checkbox state
-            if (checkbox) {
-                checkbox.checked = showOnlyCancellable;
-            }
+            // Checkbox state is now preserved in setupTable(), no need to restore here
 
         } catch (error) {
             this.error('Error refreshing orders:', error);
@@ -198,6 +202,10 @@ export class MyOrders extends ViewOrders {
 
     // Keep the setupTable method as is since it's specific to MyOrders view
     async setupTable() {
+        // Store current filter state before rebuilding table
+        const existingCheckbox = this.container.querySelector('#fillable-orders-toggle');
+        const showOnlyCancellable = existingCheckbox?.checked ?? true; // Default to true if no existing state
+        
         // Get tokens from WebSocket's tokenCache first
         const tokens = Array.from(window.webSocket.tokenCache.values())
             .sort((a, b) => a.symbol.localeCompare(b.symbol)); // Sort alphabetically by symbol
@@ -242,7 +250,7 @@ export class MyOrders extends ViewOrders {
                                 </svg>
                             </button>
                             <label class="filter-toggle">
-                                <input type="checkbox" id="fillable-orders-toggle" checked>
+                                <input type="checkbox" id="fillable-orders-toggle" ${showOnlyCancellable ? 'checked' : ''}>
                                 <span>Show only cancellable orders</span>
                             </label>
                         </div>
@@ -587,6 +595,9 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
             // Get order status from WebSocket cache
             const orderStatus = window.webSocket.getOrderStatus(order);
 
+            // Get counterparty address for display
+            const userAddress = window.walletManager.getAccount()?.toLowerCase();
+            const { counterpartyAddress, isZeroAddr, formattedAddress } = processOrderAddress(order, userAddress);
             tr.innerHTML = `
                 <td>${order.id}</td>
                 <td>
@@ -611,12 +622,13 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 <td>${safeFormattedBuyAmount}</td>
                 <td>${(deal || 0).toFixed(6)}</td>
                 <td>${expiryText}</td>
-                <td class="order-status">${orderStatus}</td>
+                <td class="order-status">
+                    ${generateStatusCellHTML(orderStatus, counterpartyAddress, isZeroAddr, formattedAddress)}
+                </td>
                 <td class="action-column"></td>`;
 
             // Add cancel button logic to action column
             const actionCell = tr.querySelector('.action-column');
-            const userAddress = window.walletManager.getAccount()?.toLowerCase();
             
             // Use WebSocket helper to determine if order can be cancelled
             if (window.webSocket.canCancelOrder(order, userAddress)) {
@@ -686,6 +698,10 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
             } else {
                 actionCell.textContent = '-';
             }
+
+            // Add click-to-copy functionality for counterparty address
+            const addressElement = tr.querySelector('.counterparty-address.clickable');
+            setupClickToCopy(addressElement);
 
             // Render token icons asynchronously (match column positions)
             const sellTokenIconContainer = tr.querySelector('td:nth-child(2) .token-icon');
