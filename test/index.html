@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.08.19.16.46" />
+    <link rel="stylesheet" href="./styles.css?v=2025.08.22.12.54" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.08.19.16.46" type="module"></script>
+    <script src="./app.js?v=2025.08.22.12.54" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -352,8 +352,8 @@
                 <a class="about-link" href="styles.css" target="_blank">styles.css</a>
                 <a class="about-link" href="app.js" target="_blank">app.js</a>
                 <br>
-                <a class="about-link" href="crypto.js?v=2025.08.19.16.46" target="_blank">crypto.js</a>
-                <a class="about-link" href="lib.js?v=2025.08.19.16.46" target="_blank">lib.js</a>
+                <a class="about-link" href="crypto.js?v=2025.08.22.12.54" target="_blank">crypto.js</a>
+                <a class="about-link" href="lib.js?v=2025.08.22.12.54" target="_blank">lib.js</a>
                 <a class="about-link" href="network.js" target="_blank">network.js</a>
               </div>
 
@@ -772,6 +772,7 @@
           </div>
           <!-- Add header actions container for the edit button and send money button -->
           <div class="header-actions">
+            <button class="icon-button phone-icon" id="chatCallButton" aria-label="Start call"></button>
             <button class="icon-button edit-icon" id="chatEditButton" aria-label="Edit contact"></button>
             <button class="icon-button send-money-icon" id="chatSendMoneyButton" aria-label="Send money"></button>
             <button class="icon-button add-friend-icon" id="addFriendButtonChat" aria-label="Add friend"></button>
@@ -798,6 +799,7 @@
             <input type="hidden" id="retryOfTxId" />
             <!-- Add hidden file input for chat attachments -->
             <input type="file" id="chatFileInput" style="display:none;">
+            <button class="icon-button voice-record-button" id="voiceRecordButton" aria-label="Record voice message"></button>
             <button class="send-button" id="handleSendMessage">
               <svg viewBox="0 0 24 24">
                 <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
@@ -808,11 +810,65 @@
         <a class="last-item" href="#"> </a>
       </div>
 
+      <!-- Voice Recording Modal -->
+      <div id="voiceRecordingModal" style="display: none;">
+        <div class="voice-recording-content">
+          <div class="voice-recording-header">
+            <h3>Voice Message</h3>
+          </div>
+          <div class="voice-recording-body">
+            <div class="voice-recording-visual">
+              <div class="recording-indicator" id="recordingIndicator">
+                <div class="pulse-ring"></div>
+                <div class="pulse-ring"></div>
+                <div class="microphone-icon">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="recording-timer" id="recordingTimer">00:00</div>
+            </div>
+            
+            <div class="voice-recording-controls">
+              <!-- Initial state: Start and Cancel buttons -->
+              <div class="initial-controls" id="initialControls">
+                <button class="voice-btn voice-btn-secondary" id="cancelRecordingButton">Cancel</button>
+                <button class="voice-btn voice-btn-primary" id="startRecordingButton">Start Recording</button>
+              </div>
+              
+              <!-- Recording state: Stop button -->
+              <div class="recording-controls" id="recordingControls" style="display: none;">
+                <button class="voice-btn voice-btn-danger" id="stopRecordingButton">Stop</button>
+              </div>
+              
+              <!-- Recorded state: Cancel, Listen, and Send buttons -->
+              <div class="recorded-controls" id="recordedControls" style="display: none;">
+                <button class="voice-btn voice-btn-secondary" id="cancelVoiceMessageButton">Cancel</button>
+                <button class="voice-btn voice-btn-secondary" id="listenVoiceMessageButton">Listen</button>
+                <button class="voice-btn voice-btn-primary" id="sendVoiceMessageButton">Send</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Message Context Menu -->
       <div class="message-context-menu" id="messageContextMenu" style="display: none;">
         <div class="context-menu-option" data-action="copy" data-icon="copy">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Copy</span>
+        </div>
+        <!-- Call-specific action: Join -->
+        <div class="context-menu-option" data-action="join" data-icon="call" style="display: none;">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Join</span>
+        </div>
+        <!-- Call-specific action: Invite -->
+        <div class="context-menu-option" data-action="call-invite" data-icon="call-invite" style="display: none;">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Invite</span>
         </div>
         <div class="context-menu-option" data-action="delete" data-icon="delete">
           <span class="context-menu-icon"></span>
@@ -821,6 +877,39 @@
         <div class="context-menu-option" data-action="delete-for-all" data-icon="delete" style="display: none;">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Delete for all</span>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Call Invite Modal -->
+      <div class="modal fixed-header" id="callInviteModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeCallInviteModal"></button>
+          <div class="modal-title">Call Invite</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container call-invite-modal-container">
+            <div class="call-invite-contacts-scroll">
+              <div class="contacts-list" id="callInviteContactsList">
+                <!-- Contacts will be populated here -->
+              </div>
+            </div>
+            <template id="callInviteContactTemplate">
+              <div class="call-invite-contact-row" data-address="">
+                <label class="call-invite-contact-label">
+                  <input type="checkbox" class="call-invite-contact-checkbox" value="" />
+                  <span class="call-invite-contact-name"></span>
+                </label>
+              </div>
+            </template>
+            <div class="call-invite-modal-footer">
+              <div id="callInviteCounter" class="call-invite-counter">0 selected (max 10)</div>
+              <div class="call-invite-footer-actions">
+                <button id="callInviteCancelBtn" class="btn btn--secondary btn--pill">Cancel</button>
+                <button id="callInviteSendBtn" class="btn btn--primary btn--pill">Invite</button>
+              </div>
+            </div>
+          </div>
         </div>
         <a class="last-item" href="#"> </a>
       </div>
