@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.08.20.17.13" />
+    <link rel="stylesheet" href="./styles.css?v=2025.08.22.11.47" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.08.20.17.13" type="module"></script>
+    <script src="./app.js?v=2025.08.22.11.47" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -860,6 +860,16 @@
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Copy</span>
         </div>
+        <!-- Call-specific action: Join -->
+        <div class="context-menu-option" data-action="join" data-icon="call" style="display: none;">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Join</span>
+        </div>
+        <!-- Call-specific action: Invite -->
+        <div class="context-menu-option" data-action="call-invite" data-icon="call-invite" style="display: none;">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Invite</span>
+        </div>
         <div class="context-menu-option" data-action="delete" data-icon="delete">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Delete for me</span>
@@ -867,6 +877,39 @@
         <div class="context-menu-option" data-action="delete-for-all" data-icon="delete" style="display: none;">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Delete for all</span>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Call Invite Modal -->
+      <div class="modal fixed-header" id="callInviteModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeCallInviteModal"></button>
+          <div class="modal-title">Call Invite</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container call-invite-modal-container">
+            <div class="call-invite-contacts-scroll">
+              <div class="contacts-list" id="callInviteContactsList">
+                <!-- Contacts will be populated here -->
+              </div>
+            </div>
+            <template id="callInviteContactTemplate">
+              <div class="call-invite-contact-row" data-address="">
+                <label class="call-invite-contact-label">
+                  <input type="checkbox" class="call-invite-contact-checkbox" value="" />
+                  <span class="call-invite-contact-name"></span>
+                </label>
+              </div>
+            </template>
+            <div class="call-invite-modal-footer">
+              <div id="callInviteCounter" class="call-invite-counter">0 selected (max 10)</div>
+              <div class="call-invite-footer-actions">
+                <button id="callInviteCancelBtn" class="btn btn--secondary btn--pill">Cancel</button>
+                <button id="callInviteSendBtn" class="btn btn--primary btn--pill">Invite</button>
+              </div>
+            </div>
+          </div>
         </div>
         <a class="last-item" href="#"> </a>
       </div>

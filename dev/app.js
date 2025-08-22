@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 's'
+const version = 't'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -468,6 +468,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Voice Recording Modal
   voiceRecordingModal.load();
+
+  // Call Invite Modal
+  callInviteModal.load();
 
   // add event listener for back-button presses to prevent shift+tab
   document.querySelectorAll('.back-button').forEach((button) => {
@@ -1947,6 +1950,9 @@ class SignInModal {
       event.preventDefault();
     }
 
+    history.pushState({state:1}, "", ".")
+    window.addEventListener('popstate', handleBrowserBackButton);
+    
     enterFullscreen();
     
     const username = this.usernameSelect.value;
@@ -7730,10 +7736,15 @@ console.warn('in send message', txid)
           if (item.message && item.message.trim()) {
             // Check if this is a call message
             if (item.type === 'call') {
-              // Render call message as a special clickable link
-              messageTextHTML = `<div class="message-content call-message">
-                <a href="${item.message}" target="_blank" rel="noopener noreferrer" class="call-link">📞 Join Video Call</a>
-              </div>`;
+              // Render call message with a left circular phone icon (clickable) and plain text to the right
+              // Icon is an anchor so only the icon is clickable (like voice play button)
+              messageTextHTML = `
+                <div class="call-message">
+                  <a href="${item.message}" target="_blank" rel="noopener noreferrer" class="call-message-phone-button" aria-label="Join Video Call">
+                    <span class="sr-only">Join Video Call</span>
+                  </a>
+                  <div class="call-message-text">Join Video Call</div>
+                </div>`;
             } else {
               // Regular message rendering
               messageTextHTML = `<div class="message-content" style="white-space: pre-wrap; margin-top: ${attachmentsHTML ? '2px' : '0'};">${linkifyUrls(item.message)}</div>`;
@@ -7754,7 +7765,7 @@ console.warn('in send message', txid)
                   </svg>
                 </button>
                 <div class="voice-message-info">
-                  <div class="voice-message-duration">Voice message</div>
+                  <div class="voice-message-text">Voice message</div>
                   <div class="voice-message-time-display">0:00 / ${duration}</div>
                 </div>
               </div>`;
@@ -8363,6 +8374,21 @@ console.warn('in send message', txid)
     if (deleteForAllOption) {
       deleteForAllOption.style.display = isMine ? 'flex' : 'none';
     }
+
+    // If this is a call message, show call-specific options and hide copy
+    const isCall = !!messageEl.querySelector('.call-message');
+    const copyOption = this.contextMenu.querySelector('[data-action="copy"]');
+    const joinOption = this.contextMenu.querySelector('[data-action="join"]');
+    const inviteOption = this.contextMenu.querySelector('[data-action="call-invite"]');
+    if (isCall) {
+      if (copyOption) copyOption.style.display = 'none';
+      if (joinOption) joinOption.style.display = 'flex';
+      if (inviteOption) inviteOption.style.display = 'flex';
+    } else {
+      if (copyOption) copyOption.style.display = 'flex';
+      if (joinOption) joinOption.style.display = 'none';
+      if (inviteOption) inviteOption.style.display = 'none';
+    }
     
     this.positionContextMenu(this.contextMenu, messageEl);
     this.contextMenu.style.display = 'block';
@@ -8421,6 +8447,13 @@ console.warn('in send message', txid)
       case 'copy':
         this.copyMessageContent(messageEl);
         break;
+      case 'join':
+        this.handleJoinCall(messageEl);
+        break;
+      case 'call-invite':
+        this.closeContextMenu();
+        callInviteModal.open(messageEl);
+        break;
       case 'delete':
         this.deleteMessage(messageEl);
         break;
@@ -8463,6 +8496,17 @@ console.warn('in send message', txid)
       console.error('Failed to copy:', err);
       showToast(`Failed to copy ${contentType.toLowerCase()}`, 0, 'error');
     }
+  }
+
+  /**
+   * Attempts to join the call represented by the call message element.
+   * @param {HTMLElement} messageEl
+   */
+  handleJoinCall(messageEl) {
+    const callLink = messageEl.querySelector('.call-message a')?.href;
+    if (!callLink) return showToast('Call link not found', 2000, 'error');
+    window.open(callLink, '_blank');
+    this.closeContextMenu();
   }
 
   /**
@@ -9199,6 +9243,246 @@ console.warn('in send message', txid)
 
 const chatModal = new ChatModal();
 
+class CallInviteModal {
+  constructor() {
+    this.messageEl = null;
+  }
+
+  load() {
+    this.modal = document.getElementById('callInviteModal');
+    this.contactsList = document.getElementById('callInviteContactsList');
+    this.template = document.getElementById('callInviteContactTemplate');
+    this.inviteCounter = document.getElementById('callInviteCounter');
+    this.inviteSendButton = document.getElementById('callInviteSendBtn');
+    this.cancelButton = document.getElementById('callInviteCancelBtn');
+    this.closeButton = document.getElementById('closeCallInviteModal');
+
+    this.contactsList.addEventListener('change', this.updateCounter.bind(this));
+    this.inviteSendButton.addEventListener('click', this.sendInvites.bind(this));
+    this.cancelButton.addEventListener('click', () => {
+      console.log('Invite modal cancelled');
+      this.close();
+    });
+    this.closeButton.addEventListener('click', this.close.bind(this));
+  }
+
+  /**
+   * Opens the invite modal and populates contact list.
+   * @param {HTMLElement} messageEl
+   */
+  open(messageEl) {
+    this.messageEl = messageEl;
+
+    this.contactsList.innerHTML = '';
+    this.modal.classList.add('active');
+
+    // Build contacts list (exclude the current chat participant and self) and group by status
+    const allContacts = Object.values(myData.contacts || {})
+      .filter(c => c.address !== chatModal.address && c.address !== myAccount.address)
+      .map(c => ({
+        address: c.address,
+        username: c.username || c.address,
+        friend: c.friend || 1
+      }));
+
+    // Group contacts by friend status: friends (3), acquaintances (2), others (1), blocked (0)
+    const groups = {
+      friends: allContacts.filter(c => c.friend === 3).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
+      acquaintances: allContacts.filter(c => c.friend === 2).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
+      others: allContacts.filter(c => ![2,3,0].includes(c.friend)).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
+    };
+
+    const sectionMeta = [
+      { key: 'friends', label: 'Friends' },
+      { key: 'acquaintances', label: 'Connections' },
+      { key: 'others', label: 'Tolled' },
+    ];
+
+    for (const { key, label } of sectionMeta) {
+      const list = groups[key];
+      if (!list || list.length === 0) continue;
+      const header = document.createElement('div');
+      header.className = 'call-invite-section-header';
+      header.textContent = label;
+      this.contactsList.appendChild(header);
+
+      for (const contact of list) {
+        const clone = this.template.content ? this.template.content.cloneNode(true) : null;
+        if (!clone) continue;
+        const row = clone.querySelector('.call-invite-contact-row');
+        const checkbox = clone.querySelector('.call-invite-contact-checkbox');
+        const nameSpan = clone.querySelector('.call-invite-contact-name');
+        if (row) row.dataset.address = contact.address || '';
+        if (checkbox) {
+          checkbox.value = contact.address || '';
+          checkbox.id = `invite_cb_${(contact.address||'').replace(/[^a-zA-Z0-9]/g,'')}`;
+        }
+        if (nameSpan) nameSpan.textContent = contact.username || contact.address || 'Unknown';
+        const labelEl = clone.querySelector('.call-invite-contact-label');
+        if (labelEl && checkbox) {
+            labelEl.addEventListener('click', (ev) => {
+              // If the checkbox is disabled (max reached), do nothing
+              if (checkbox.disabled) return;
+              if (ev.target === checkbox) return;
+              ev.preventDefault();
+              checkbox.checked = !checkbox.checked;
+              this.updateCounter();
+            });
+        }
+        this.contactsList.appendChild(clone);
+      }
+    }
+
+    // initial counter update
+    this.updateCounter();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  updateCounter() {
+    const selected = this.contactsList.querySelectorAll('.call-invite-contact-checkbox:checked').length;
+    this.inviteCounter.textContent = `${selected} selected (max 10)`;
+    this.inviteSendButton.disabled = selected === 0;
+    // enforce max 10: disable unchecked boxes when limit reached
+    const unchecked = Array.from(this.contactsList.querySelectorAll('.call-invite-contact-checkbox:not(:checked)'));
+    if (selected >= 10) {
+      unchecked.forEach(cb => cb.disabled = true);
+    } else {
+      unchecked.forEach(cb => cb.disabled = false);
+    }
+  }
+
+  async sendInvites() {
+    const selectedBoxes = Array.from(this.contactsList.querySelectorAll('.call-invite-contact-checkbox:checked'));
+    const addresses = selectedBoxes.map(cb => cb.value).slice(0,10);
+    // get call link from original message
+    const msgCallLink = this.messageEl.querySelector('.call-message a')?.href;
+    if (!msgCallLink) return showToast('Call link not found', 2000, 'error');
+
+    this.inviteSendButton.disabled = true;
+    this.inviteSendButton.textContent = 'Sending...';
+
+    try {
+      for (const addr of addresses) {
+        const keys = myAccount.keys;
+        if (!keys) {
+          showToast('Keys not found', 0, 'error');
+          break;
+        }
+
+        const contact = myData.contacts[addr];
+        const payload = { type: 'call', url: msgCallLink };
+
+        let messagePayload = {};
+        const recipientPubKey = contact.public;
+        const pqRecPubKey = contact.pqPublic;
+        if (!recipientPubKey || !pqRecPubKey) {
+          showToast(`Skipping ${contact.username || addr} (missing keys)`, 2000, 'warning');
+          continue;
+        }
+        const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey);
+        const encMessage = encryptChacha(dhkey, stringify(payload));
+        const selfKey = encryptData(bin2hex(dhkey), keys.secret+keys.pqSeed, true);
+
+        messagePayload = {
+          message: encMessage,
+          encrypted: true,
+          encryptionMethod: 'xchacha20poly1305',
+          pqEncSharedKey: bin2base64(cipherText),
+          selfKey: selfKey,
+          sent_timestamp: getCorrectedTimestamp()
+        };
+
+        // get user toll amount
+        const sortedAddresses = [longAddress(keys.address), longAddress(addr)].sort();
+        const chatId = hashBytes(sortedAddresses.join(''));
+        const chatIdAccount = await queryNetwork(`/messages/${chatId}/toll`);
+        const toIndex = sortedAddresses.indexOf(longAddress(addr));
+        const tollRequiredToSend = chatIdAccount.toll?.required?.[toIndex] ?? 1;
+        let toll = 0n;
+        if (tollRequiredToSend === 1) {
+          const contactData = await queryNetwork(`/account/${longAddress(addr)}`);
+          if (!contactData || !contactData.account) {
+            showToast(`Skipping ${contact.username || addr} (account not found)`, 2000, 'warning');
+            continue;
+          }
+          const tollUnit = contactData.account?.data?.tollUnit || 'LIB';
+          const factor = getStabilityFactor();
+          if (tollUnit === 'USD') {
+            // Convert toll to LIB
+            toll = bigxnum2big(contactData.account.data.toll, (1.0 / factor).toString());
+          } else {
+            toll = contactData.account.data.toll;
+          }
+        }
+
+        const messageObj = await chatModal.createChatMessage(addr, messagePayload, toll, keys);
+        await signObj(messageObj, keys);
+        const txid = getTxid(messageObj);
+        await injectTx(messageObj, txid);
+
+        // Create new message object for local display immediately
+        const newMessage = {
+          message: payload.url,
+          timestamp: messagePayload.sent_timestamp,
+          sent_timestamp: messagePayload.sent_timestamp,
+          my: true,
+          txid: txid,
+          status: 'sent',
+          type: 'call'
+        };
+        insertSorted(contact.messages, newMessage, 'timestamp');
+
+        // Update chats list
+        const chatUpdate = {
+          address: addr,
+          timestamp: newMessage.sent_timestamp,
+          txid: txid,
+        };
+
+        const existingChatIndex = myData.chats.findIndex((chat) => chat.address === addr);
+        if (existingChatIndex !== -1) {
+          myData.chats.splice(existingChatIndex, 1);
+        }
+        insertSorted(myData.chats, chatUpdate, 'timestamp');
+
+        // Update the chat modal UI immediately
+        if (chatModal.isActive() && chatModal.address === addr) {
+          chatModal.appendChatModal();
+        }
+
+        // Send the message transaction
+        const response = await injectTx(messageObj, txid);
+
+        if (!response || !response.result || !response.result.success) {
+          console.log('call message failed to send', response);
+          updateTransactionStatus(txid, addr, 'failed', 'message');
+          if (chatModal.isActive() && chatModal.address === addr) {
+            chatModal.appendChatModal();
+          }
+        }
+        showToast(`Call invite sent to ${contact.username || addr}`, 3000, 'success');
+      }
+
+    } catch (err) {
+      console.error('Invite send error', err);
+      showToast('Failed to send invites', 0, 'error');
+    } finally {
+      this.inviteSendButton.disabled = false;
+      this.inviteSendButton.textContent = 'Invite';
+      this.close();
+    }
+  };
+}
+
+const callInviteModal = new CallInviteModal();
+
 /**
  * Failed Message Context Menu Class
  * @class
@@ -9371,9 +9655,6 @@ class VoiceRecordingModal {
         this.close();
       }
     });
-
-    // Add event listeners
-    this.setupEventListeners();
   }
 
   /**
@@ -13993,3 +14274,141 @@ function getStabilityFactor() {
 //  return parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
 }
 
+
+function handleBrowserBackButton(event) {
+  console.log('in popstate')
+  history.pushState({state:1}, '', '.');
+
+  const topModal = findTopModal();
+  
+  if (topModal) {
+    const modalId = topModal.id;
+    const modalInstance = window[modalId];
+    
+    const closed = closeTopModal(topModal)
+    if (closed){
+      return true;
+    }
+  }
+  return false;
+}
+
+function findTopModal() {
+  const activeModals = document.querySelectorAll('.modal.active');
+  if (activeModals.length === 0) return null;
+  const topModal = activeModals[activeModals.length - 1];
+  return topModal;
+}
+
+function closeTopModal(topModal){
+  const modalId = topModal.id;
+  console.log('trying to close', modalId)
+  switch (modalId) {
+    case 'chatModal':
+      chatModal.close();
+      break;
+    case 'menuModal':
+      menuModal.close();
+      break;
+    case 'settingsModal':
+      settingsModal.close();
+      break;
+    case 'sendAssetFormModal':
+      sendAssetFormModal.close();
+      break;
+    case 'historyModal':
+      historyModal.close();
+      break;
+    case 'scanQRModal':
+      scanQRModal.close();
+      break;
+    case 'newChatModal':
+      newChatModal.close();
+      break;
+    case 'createAccountModal':
+      createAccountModal.close();
+      break;
+    case 'backupAccountModal':
+      backupAccountModal.close();
+      break;
+    case 'restoreAccountModal':
+      restoreAccountModal.close();
+      break;
+    case 'tollModal':
+      tollModal.close();
+      break;
+    case 'inviteModal':
+      inviteModal.close();
+      break;
+    case 'aboutModal':
+      aboutModal.close();
+      break;
+    case 'helpModal':
+      helpModal.close();
+      break;
+    case 'farmModal':
+      farmModal.close();
+      break;
+    case 'logsModal':
+      logsModal.close();
+      break;
+    case 'myProfileModal':
+      myProfileModal.close();
+      break;
+    case 'validatorStakingModal':
+      validatorStakingModal.close();
+      break;
+    case 'stakeValidatorModal':
+      stakeValidatorModal.close();
+      break;
+    case 'contactInfoModal':
+      contactInfoModal.close();
+      break;
+    case 'friendModal':
+      friendModal.close();
+      break;
+    case 'editContactModal':
+      editContactModal.close();
+      break;
+    case 'searchMessagesModal':
+      searchMessagesModal.close();
+      break;
+    case 'searchContactsModal':
+      searchContactsModal.close();
+      break;
+    case 'receiveModal':
+      receiveModal.close();
+      break;
+    case 'sendAssetConfirmModal':
+      sendAssetConfirmModal.close();
+      break;
+    case 'failedTransactionModal':
+      failedTransactionModal.close();
+      break;
+    case 'bridgeModal':
+      bridgeModal.close();
+      break;
+    case 'migrateAccountsModal':
+      migrateAccountsModal.close();
+      break;
+    case 'lockModal':
+      lockModal.close();
+      break;
+    case 'unlockModal':
+      unlockModal.close();
+      break;
+    case 'launchModal':
+      launchModal.close();
+      break;
+    case 'updateWarningModal':
+      updateWarningModal.close();
+      break;
+    case 'removeAccountModal':
+      removeAccountModal.close();
+      break;
+    default:
+      console.log('Unknown modal:', modalId);
+      return false;
+  }
+  return true; // means we closed a modal
+}
