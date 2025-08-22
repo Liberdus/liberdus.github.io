@@ -964,8 +964,8 @@ For Buyers:
             const buyPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.buyToken)) ? 'price-estimate' : '';
 
             const orderStatus = window.webSocket.getOrderStatus(order);
-                            const expiryEpoch = order?.timings?.expiresAt;
-                            const expiryText = typeof expiryEpoch === 'number' ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) : 'Unknown';
+            const expiryEpoch = order?.timings?.expiresAt;
+            const expiryText = typeof expiryEpoch === 'number' ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) : 'Unknown';
 
             tr.innerHTML = `
                 <td>${order.id}</td>
@@ -1068,8 +1068,9 @@ For Buyers:
 
         const updateExpiryAndButton = async () => {
             const expiresCell = row.querySelector('td:nth-child(7)');
+            const statusCell = row.querySelector('.order-status');
             const actionCell = row.querySelector('.action-column');
-            if (!expiresCell || !actionCell) return;
+            if (!expiresCell || !statusCell || !actionCell) return;
 
             const orderId = row.dataset.orderId;
             const order = window.webSocket.orderCache.get(Number(orderId));
@@ -1088,13 +1089,23 @@ For Buyers:
                 expiresCell.textContent = newExpiryText;
             }
 
-            // Update action column content
+            // Update status column to show current status
+            const currentStatus = window.webSocket.getOrderStatus(order);
+            const statusMainElement = statusCell.querySelector('.status-main');
+            if (statusMainElement && statusMainElement.textContent !== currentStatus) {
+                statusMainElement.textContent = currentStatus;
+                this.debug(`Updated status for order ${order.id}: ${currentStatus}`);
+            } else if (!statusMainElement && statusCell.textContent !== currentStatus) {
+                // Fallback for old structure
+                statusCell.textContent = currentStatus;
+                this.debug(`Updated status for order ${order.id}: ${currentStatus}`);
+            }
+
+            // Update action column content - no status text here, only actions
             if (isUserOrder) {
-                actionCell.innerHTML = '<span class="your-order">Your Order</span>';
-            } else if (isExpired) {
-                actionCell.innerHTML = '<span class="expired-order">Expired</span>';
+                actionCell.innerHTML = '<span class="mine-label">Mine</span>';
             } else if (!isUserOrder && window.webSocket.canFillOrder(order, currentAccount)) {
-                actionCell.innerHTML = `<button class="fill-button" data-order-id="${order.id}">Fill Order</button>`;
+                actionCell.innerHTML = `<button class="fill-button" data-order-id="${order.id}">Fill</button>`;
                 const fillButton = actionCell.querySelector('.fill-button');
                 if (fillButton) {
                     fillButton.addEventListener('click', () => this.fillOrder(order.id));
