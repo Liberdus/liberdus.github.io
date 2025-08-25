@@ -109,6 +109,7 @@ export const DEBUG_CONFIG = {
     TOKENS: false,
     TOKEN_ICON_SERVICE: false, // Add token icon service debugging
     TOAST: false, // Enable toast debugging for testing
+    PRICING_DEFAULT_TO_ONE: true, // Default missing prices to 1 for testing, false for production
     // Add more specific flags as needed
 };
 
