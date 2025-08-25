@@ -96,9 +96,9 @@ const networkConfig = {
 
 export const DEBUG_CONFIG = {
     APP: false,
-    WEBSOCKET: true, // Enable to debug status calculation
+    WEBSOCKET: false,
     WALLET: false,
-    VIEW_ORDERS: true, // Enable to debug status updates
+    VIEW_ORDERS: false,
     CREATE_ORDER: false,
     MY_ORDERS: false,
     TAKER_ORDERS: false,
