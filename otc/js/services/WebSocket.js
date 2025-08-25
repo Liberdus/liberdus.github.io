@@ -589,8 +589,17 @@ export class WebSocketService {
                             (this.gracePeriod ? this.gracePeriod.toNumber() : ORDER_CONSTANTS.DEFAULT_GRACE_PERIOD_SECS)
                     }
                 };
-                this.orderCache.set(o.id, orderData);
-                this.debug('Added order to cache:', orderData);
+                // Calculate deal metrics for the order
+                try {
+                    const enrichedOrderData = await this.calculateDealMetrics(orderData);
+                    this.orderCache.set(o.id, enrichedOrderData);
+                    this.debug('Added order to cache with deal metrics:', enrichedOrderData);
+                } catch (error) {
+                    this.debug('Failed to calculate deal metrics for order', o.id, ':', error);
+                    // Still add the order without deal metrics as fallback
+                    this.orderCache.set(o.id, orderData);
+                    this.debug('Added order to cache without deal metrics:', orderData);
+                }
             }
 
             // Validate and summarize order cache
@@ -774,9 +783,25 @@ export class WebSocketService {
             const buyTokenUsdPrice = window.pricingService.getPrice(orderData.buyToken);
             const sellTokenUsdPrice = window.pricingService.getPrice(orderData.sellToken);
 
+            // Check if we have valid price data
+            if (buyTokenUsdPrice === undefined || sellTokenUsdPrice === undefined) {
+                this.debug('Missing price data, skipping deal calculation for order:', orderData.id);
+                return orderData; // Return order without deal metrics
+            }
+
             // Format amounts using correct decimals
             const sellAmount = ethers.utils.formatUnits(orderData.sellAmount, sellTokenInfo.decimals);
             const buyAmount = ethers.utils.formatUnits(orderData.buyAmount, buyTokenInfo.decimals);
+
+            if (sellAmount === 0) {
+                this.debug('Division by zero: sellAmount is 0 for order:', orderData.id);
+                return orderData;
+            }
+            
+            if (buyTokenUsdPrice === 0) {
+                this.debug('Division by zero: buyTokenUsdPrice is 0 for order:', orderData.id);
+                return orderData;
+            }
 
             // Calculate Price (what you get / what you give from taker perspective)
             const price = Number(buyAmount) / Number(sellAmount);
@@ -786,8 +811,18 @@ export class WebSocketService {
             
             // Calculate Deal (Price * Rate)
             const deal = price * rate;
+            
+            // Validate calculations
+            if (isNaN(price) || isNaN(rate) || isNaN(deal)) {
+                this.debug('Invalid calculation result for order:', orderData.id, {
+                    price, rate, deal,
+                    buyAmount, sellAmount,
+                    buyTokenUsdPrice, sellTokenUsdPrice
+                });
+                return orderData;
+            }
 
-            return {
+            const result = {
                 ...orderData,
                 dealMetrics: {
                     price,
@@ -800,8 +835,10 @@ export class WebSocketService {
                     lastUpdated: Date.now()
                 }
             };
+            
+            return result;
         } catch (error) {
-            this.debug('Error calculating deal metrics:', error);
+            this.debug('Error calculating deal metrics for order', orderData.id, ':', error);
             return orderData;
         }
     }

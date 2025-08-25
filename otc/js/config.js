@@ -68,20 +68,21 @@ const networkConfig = {
 
 
 export const DEBUG_CONFIG = {
-    APP: true,
-    WEBSOCKET: true,
-    WALLET: true,
-    VIEW_ORDERS: true,
-    CREATE_ORDER: true,
-    MY_ORDERS: true,
-    TAKER_ORDERS: true,
-    CLEANUP_ORDERS: true,
-    WALLET_UI: true,
-    BASE_COMPONENT: true,
-    PRICING: true,
-    TOKENS: true,
-    TOKEN_ICON_SERVICE: true, // Add token icon service debugging
-    TOAST: true, // Enable toast debugging for testing
+    APP: false,
+    WEBSOCKET: false, // Enable to debug status calculation
+    WALLET: false,
+    VIEW_ORDERS: false, // Enable to debug status updates
+    CREATE_ORDER: false,
+    MY_ORDERS: false,
+    TAKER_ORDERS: false,
+    CLEANUP_ORDERS: false,
+    WALLET_UI: false,
+    BASE_COMPONENT: false,
+    PRICING: false,
+    TOKENS: false,
+    TOKEN_ICON_SERVICE: false, // Add token icon service debugging
+    TOAST: false, // Enable toast debugging for testing
+    PRICING_DEFAULT_TO_ONE: false, // Default missing prices to 1 for testing, false for production
     // Add more specific flags as needed
 };
 
