@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'v'
+const version = 'w'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -44,7 +44,6 @@ async function checkVersion() {
       'crypto.js',
       'encryption.worker.js',
       'offline.html',
-      'notice.html',
     ]);
     window.location.replace(newUrl);
   }
@@ -13097,7 +13096,7 @@ class LaunchModal {
       credentials: 'same-origin'
     })
       .then(response => {
-        if (!response.ok) throw new Error('network.js not found');
+        if (!response.ok) throw new Error(`network.js not found (HTTP ${response.status})`);
         return response.text();
       })
       .then(networkJsText => {
@@ -13115,7 +13114,10 @@ class LaunchModal {
       })
       .catch((error) => {
         showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
-        console.error('URL validation failed:', error, 'URL:', networkJsUrl);
+        const errStr = error && (error.stack || error.message)
+            ? `${error.name || 'Error'}: ${error.message}\n${error.stack || ''}`
+            : String(error);
+        logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, errStr);
       })
       .finally(() => {
         // Reset button state
@@ -14025,30 +14027,16 @@ async function getSystemNotice() {
       return;
     }
 
-    // Find the first line that's not a comment and can be parsed as a timestamp
-    let timestampLine = null;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line && !line.startsWith('<!--') && !line.startsWith('-->')) {
-        const parsed = parseInt(line);
-        if (!isNaN(parsed)) {
-          timestampLine = i;
-          break;
-        }
-      }
-    }
-
-    if (timestampLine === null) {
-      console.warn('No valid timestamp found in notice file');
+    const timestamp = parseInt(lines[0]);
+    if (isNaN(timestamp)) {
+      console.warn('Invalid timestamp in notice file');
       return;
     }
 
-    const timestamp = parseInt(lines[timestampLine]);
-
     // Check if we need to show the notice
     if (!myData.settings.noticets || myData.settings.noticets < timestamp) {
-      // Join remaining lines for the notice message (skip the timestamp line)
-      const noticeMessage = lines.slice(timestampLine + 1).join('\n').trim();
+      // Join remaining lines for the notice message
+      const noticeMessage = lines.slice(1).join('\n').trim();
       if (noticeMessage) {
         showToast(noticeMessage, 0, 'error');
         // Update the timestamp in settings
