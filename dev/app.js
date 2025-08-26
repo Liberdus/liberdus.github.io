@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -13094,7 +13094,7 @@ class LaunchModal {
     fetch(networkJsUrl, { 
       signal: AbortSignal.timeout(10000), 
       mode: 'cors',
-      credentials: 'same-origin'
+      credentials: 'omit'
     })
       .then(response => {
         if (!response.ok) throw new Error(`network.js not found (HTTP ${response.status})`);
