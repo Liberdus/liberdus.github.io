@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'f'
+const version = 'g'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -13089,7 +13089,7 @@ class LaunchModal {
     // Ensure path ends with slash before appending network.js
     const path = urlObj.pathname === '' ? '/' : (urlObj.pathname.endsWith('/') ? urlObj.pathname : urlObj.pathname + '/');
     const networkJsUrl = urlObj.origin + path + 'network.js';
-    
+
     // Validate if network.js exists and has required properties
     const result = await fetch(networkJsUrl)
 
@@ -13105,6 +13105,7 @@ class LaunchModal {
     const missingProps = requiredProps.filter(prop => !networkJson.includes(prop));
     
     if (missingProps.length > 0) {
+      logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, `missingProps=${missingProps.join(', ')}`);
       throw new Error(`Invalid network.js: Missing ${missingProps.join(', ')}`);
     }
 
@@ -13115,6 +13116,8 @@ class LaunchModal {
     // reset the button
     this.launchButton.disabled = false;
     this.launchButton.textContent = 'Launch';
+
+    logsModal.log('Launch URL validation success', `url=${networkJsUrl}`);
 
       /* .then(response => {
         logsModal.log('Launch URL validation response', `url=${networkJsUrl}`, `status=${response.status}`);
