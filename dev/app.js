@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'i'
+const version = 'j'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -44,7 +44,6 @@ async function checkVersion() {
       'crypto.js',
       'encryption.worker.js',
       'offline.html',
-      'notice.html',
     ]);
     window.location.replace(newUrl);
   }
@@ -13083,89 +13082,46 @@ class LaunchModal {
     // Disable button and show loading state
     this.launchButton.disabled = true;
     this.launchButton.textContent = 'Checking URL...';
-    
+
     // Create the network.js URL to check
     let urlObj = new URL(url);
-    // Ensure path ends with slash before appending network.js
     const path = urlObj.pathname === '' ? '/' : (urlObj.pathname.endsWith('/') ? urlObj.pathname : urlObj.pathname + '/');
     const networkJsUrl = urlObj.origin + path + 'network.js';
-
-    let result;
-    let networkJson;
-    // Validate if network.js exists and has required properties
-    try{ 
-      result = await fetch(networkJsUrl)
-    }catch(error){
-      logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, error);
-      showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
-      return;
-    }
     
-
-    if (!result.ok) {
-      throw new Error(`network.js not found (HTTP ${result.status})`);
-    }
-
-    try{  
-      networkJson = await result.text()
+    try {
+      logsModal.log('Launch URL validation starting', `url=${networkJsUrl}`);
+  
+      // Validate if network.js exists and has required properties
+      const result = await fetch(networkJsUrl);
+  
+      if (!result.ok) {
+        throw new Error(`network.js not found (HTTP ${result.status}: ${result.statusText})`);
+      }
+  
+      const networkJson = await result.text();
       logsModal.log('Launch URL validation network.js text', `url=${networkJsUrl}`, networkJson);
-    }catch(error){
+  
+      // Check for required network properties
+      const requiredProps = ['network', 'name', 'netid', 'gateways'];
+      const missingProps = requiredProps.filter(prop => !networkJson?.includes(prop));
+    
+      if (missingProps.length > 0) {
+        throw new Error(`Invalid network.js: Missing ${missingProps.join(', ')}`);
+      }
+  
+      // Success - proceed with launching
+      logsModal.log('Launch URL validation success', `url=${networkJsUrl}`);
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'launch', url }));
+      this.close();
+  
+    } catch (error) {
       logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, error);
       showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
-      return;
+    } finally {
+      // Reset button state (this should always happen)
+      this.launchButton.disabled = false;
+      this.launchButton.textContent = 'Launch';
     }
-
-    // Check for required network properties
-    const requiredProps = ['network', 'name', 'netid', 'gateways'];
-    const missingProps = requiredProps.filter(prop => !networkJson?.includes(prop));
-    
-    if (missingProps.length > 0) {
-      logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, `missingProps=${missingProps.join(', ')}`);
-      throw new Error(`Invalid network.js: Missing ${missingProps.join(', ')}`);
-    }
-
-    // Valid network.js, proceed with launching
-    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'launch', url }));
-    this.close();
-
-    // reset the button
-    this.launchButton.disabled = false;
-    this.launchButton.textContent = 'Launch';
-
-    logsModal.log('Launch URL validation success', `url=${networkJsUrl}`);
-
-      /* .then(response => {
-        logsModal.log('Launch URL validation response', `url=${networkJsUrl}`, `status=${response.status}`);
-        if (!response.ok) throw new Error(`network.js not found (HTTP ${response.status})`);
-        return response.text();
-      })
-      .then(networkJsText => {
-        logsModal.log('Launch URL validation network.js text', `url=${networkJsUrl}`, networkJsText);
-        // Check for required network properties
-        const requiredProps = ['network', 'name', 'netid', 'gateways'];
-        const missingProps = requiredProps.filter(prop => !networkJsText.includes(prop));
-        
-        if (missingProps.length > 0) {
-          throw new Error(`Invalid network.js: Missing ${missingProps.join(', ')}`);
-        }
-        
-        // Valid network.js, proceed with launching
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'launch', url }));
-        this.close();
-      })
-      .catch(async (error) => {
-        logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, error);
-        showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
-        const errStr = error && (error.stack || error.message)
-            ? `${error.name || 'Error'}: ${error.message}\n${error.stack || ''}`
-            : String(error);
-        logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, errStr);
-      })
-      .finally(() => {
-        // Reset button state
-        this.launchButton.disabled = false;
-        this.launchButton.textContent = 'Launch';
-      }); */
   }
 
   updateButtonState() {
@@ -14069,30 +14025,16 @@ async function getSystemNotice() {
       return;
     }
 
-    // Find the first line that's not a comment and can be parsed as a timestamp
-    let timestampLine = null;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line && !line.startsWith('<!--') && !line.startsWith('-->')) {
-        const parsed = parseInt(line);
-        if (!isNaN(parsed)) {
-          timestampLine = i;
-          break;
-        }
-      }
-    }
-
-    if (timestampLine === null) {
-      console.warn('No valid timestamp found in notice file');
+    const timestamp = parseInt(lines[0]);
+    if (isNaN(timestamp)) {
+      console.warn('Invalid timestamp in notice file');
       return;
     }
 
-    const timestamp = parseInt(lines[timestampLine]);
-
     // Check if we need to show the notice
     if (!myData.settings.noticets || myData.settings.noticets < timestamp) {
-      // Join remaining lines for the notice message (skip the timestamp line)
-      const noticeMessage = lines.slice(timestampLine + 1).join('\n').trim();
+      // Join remaining lines for the notice message
+      const noticeMessage = lines.slice(1).join('\n').trim();
       if (noticeMessage) {
         showToast(noticeMessage, 0, 'error');
         // Update the timestamp in settings
