@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -13091,16 +13091,14 @@ class LaunchModal {
     const networkJsUrl = urlObj.origin + path + 'network.js';
     
     // Validate if network.js exists and has required properties
-    fetch(networkJsUrl, { 
-      signal: AbortSignal.timeout(10000), 
-      mode: 'cors',
-      credentials: 'omit'
-    })
+    fetch(networkJsUrl)
       .then(response => {
+        logsModal.log('Launch URL validation response', `url=${networkJsUrl}`, `status=${response.status}`);
         if (!response.ok) throw new Error(`network.js not found (HTTP ${response.status})`);
         return response.text();
       })
       .then(networkJsText => {
+        logsModal.log('Launch URL validation network.js text', `url=${networkJsUrl}`, networkJsText);
         // Check for required network properties
         const requiredProps = ['network', 'name', 'netid', 'gateways'];
         const missingProps = requiredProps.filter(prop => !networkJsText.includes(prop));
@@ -13114,6 +13112,7 @@ class LaunchModal {
         this.close();
       })
       .catch((error) => {
+        logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, error);
         showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
         const errStr = error && (error.stack || error.message)
             ? `${error.name || 'Error'}: ${error.message}\n${error.stack || ''}`
