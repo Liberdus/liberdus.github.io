@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'g'
+const version = 'h'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -13090,15 +13090,30 @@ class LaunchModal {
     const path = urlObj.pathname === '' ? '/' : (urlObj.pathname.endsWith('/') ? urlObj.pathname : urlObj.pathname + '/');
     const networkJsUrl = urlObj.origin + path + 'network.js';
 
+    let result;
+    let networkJson;
     // Validate if network.js exists and has required properties
-    const result = await fetch(networkJsUrl)
+    try{ 
+      result = await fetch(networkJsUrl)
+    }catch(error){
+      logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, error);
+      showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
+      return;
+    }
+    
 
     if (!result.ok) {
       throw new Error(`network.js not found (HTTP ${result.status})`);
     }
 
-    const networkJson = await result.json();
-    logsModal.log('Launch URL validation network.json', `url=${networkJsUrl}`, networkJson);
+    try{  
+      networkJson = await result.json();
+      logsModal.log('Launch URL validation network.json', `url=${networkJsUrl}`, networkJson);
+    }catch(error){
+      logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, error);
+      showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
+      return;
+    }
 
     // Check for required network properties
     const requiredProps = ['network', 'name', 'netid', 'gateways'];
