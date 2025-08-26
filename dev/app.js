@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'd'
+const version = 'e'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -13098,7 +13098,7 @@ class LaunchModal {
     
     // Ensure path ends with slash before appending network.js
     const path = urlObj.pathname === '' ? '/' : (urlObj.pathname.endsWith('/') ? urlObj.pathname : urlObj.pathname + '/');
-    const networkJsUrl = urlObj.origin + path + 'network.json';
+    const networkJsUrl = urlObj.origin + path + 'network.js';
     
         logsModal.log('Launch URL validation - parsed URL', `original=${url}`, `origin=${urlObj.origin}`, `path=${path}`, `networkJsUrl=${networkJsUrl}`);
     
@@ -13112,9 +13112,11 @@ class LaunchModal {
     logsModal.log('Launch URL validation starting', `url=${networkJsUrl}`);
   
     
-    fetch(networkJsUrl, { 
-      headers: {
-        'Accept': 'application/javascript, text/javascript, */*'
+    fetch(networkJsUrl, {
+      cache: 'reload',  // this bypasses the cache to get from the server and updates the cache
+      headers: {        // this bypasses the cache of any proxies between the client and the server
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
       }
     })
       .then(response => {
