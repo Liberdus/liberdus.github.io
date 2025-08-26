@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -2756,7 +2756,7 @@ class HistoryModal {
                 </div>
                 <div class="transaction-amount">-- --</div>
               </div>
-              <div class="transaction-memo">${tx.memo || "Deleted by me"}</div>
+              <div class="transaction-memo">${tx.memo || "Deleted on this device"}</div>
             </div>
           `;
         }
@@ -3116,19 +3116,19 @@ if (mine) console.warn('txid in processChats is', txidHex)
                       
                       // Mark the message as deleted
                       messageToDelete.deleted = 1;
-                      messageToDelete.message = "Deleted by you";
+                      messageToDelete.message = "Deleted for all";
                       
                       // Remove payment-specific fields if present - same logic as above
                       if (messageToDelete.amount) {
                         if (messageToDelete.payment) delete messageToDelete.payment;
-                        if (messageToDelete.memo) messageToDelete.memo = "Deleted by you";
+                        if (messageToDelete.memo) messageToDelete.memo = "Deleted for all";
                         if (messageToDelete.amount) delete messageToDelete.amount;
                         if (messageToDelete.symbol) delete messageToDelete.symbol;
                         
                         // Update corresponding transaction in wallet history
                         const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
                         if (txIndex !== -1) {
-                          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted by you' });
+                          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted for all' });
                           delete myData.wallet.history[txIndex].amount;
                           delete myData.wallet.history[txIndex].symbol;
                           delete myData.wallet.history[txIndex].payment;
@@ -5475,6 +5475,7 @@ class InviteModal {
     this.submitButton = document.querySelector('#inviteForm button[type="submit"]');
     this.closeButton = document.getElementById('closeInviteModal');
     this.inviteForm = document.getElementById('inviteForm');
+    this.shareButton = document.getElementById('shareInviteButton');
 
     this.closeButton.addEventListener('click', () => this.close());
     this.inviteForm.addEventListener('submit', (event) => this.handleSubmit(event));
@@ -5485,6 +5486,8 @@ class InviteModal {
     this.invitePhoneInput.addEventListener('input', () => this.invitePhoneInput.value = normalizePhone(this.invitePhoneInput.value));
     this.invitePhoneInput.addEventListener('blur', () => this.invitePhoneInput.value = normalizePhone(this.invitePhoneInput.value, true));
     this.invitePhoneInput.addEventListener('input', () => this.validateInputs());
+
+    this.shareButton.addEventListener('click', () => this.shareLiberdusInvite());
   }
 
   validateInputs() {
@@ -5572,6 +5575,35 @@ class InviteModal {
       }
     } catch (error) {
       showToast('Failed to send invitation. Please try again.', 0, 'error');
+    }
+  }
+
+  async shareLiberdusInvite() {
+    const url = "https://liberdus.com/download";
+    const title = "Join me on Liberdus";
+    const text = `Message ${myAccount.username} on Liberdus! ${url}`;
+
+    // 1) Try native share sheet
+    if (navigator.share) {
+      try {
+        await navigator.share({ url, text, title });
+        return; // success
+      } catch (err) {
+        // iOS Safari/WKWebView: cancel → AbortError / "Share canceled"
+        if (err && (err.name === "AbortError" || /canceled/i.test(String(err.message || "")))) {
+          showToast("Share canceled", 2000, "warning");
+          return; // don't fallback: user activation is gone
+        }
+        // fall through to clipboard on real errors
+      }
+    }
+
+    // 2) Clipboard fallback (no mailto)
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("Invite copied to clipboard!", 3000, "success");
+    } catch {
+      showToast("Could not copy invite link.", 0, "error");
     }
   }
 }
@@ -8535,19 +8567,19 @@ console.warn('in send message', txid)
       // Mark as deleted and clear payment info if present
       Object.assign(message, {
         deleted: 1,
-        message: "Deleted by me"
+        message: "Deleted on this device"
       });
       // Remove payment-specific fields if present
       if (message?.amount) {
         if (message.payment) delete message.payment;
-        if (message.memo) message.memo = "Deleted by me";
+        if (message.memo) message.memo = "Deleted on this device";
         if (message.amount) delete message.amount;
         if (message.symbol) delete message.symbol;
         
         // Update corresponding transaction in wallet history
         const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === message.txid);
         if (txIndex !== -1) {
-          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted by me' });
+          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted on this device' });
           delete myData.wallet.history[txIndex].amount;
           delete myData.wallet.history[txIndex].symbol;
           delete myData.wallet.history[txIndex].payment;
@@ -8792,10 +8824,10 @@ console.warn('in send message', txid)
     try {
       // Generate a 256-bit random number and convert to base64
       const randomBytes = generateRandomBytes(32); // 32 bytes = 256 bits
-      const randomBase64 = bin2base64(randomBytes);
-      
+      const randomHex = bin2hex(randomBytes).slice(0, 20);
+
       // Create the Jitsi Meet URL
-      const jitsiUrl = `https://meet.jit.si/${randomBase64}`;
+      const jitsiUrl = `https://meet.jit.si/${randomHex}`;
       
       // Open the Jitsi URL in a new tab
       window.open(jitsiUrl, '_blank');
@@ -8897,6 +8929,8 @@ console.warn('in send message', txid)
       // Create and send the call message transaction
       let tollInLib = myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : this.toll;
       const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
+      chatMessageObj.callType = true
+
       await signObj(chatMessageObj, keys);
       const txid = getTxid(chatMessageObj);
 
@@ -13109,6 +13143,8 @@ class ReactNativeApp {
     this.appVersion = null;
     this.deviceToken = null;
     this.expoPushToken = null;
+    this.fcmToken = null;
+    this.voipToken = null;
   }
 
   load() {
@@ -13161,6 +13197,16 @@ class ReactNativeApp {
               logsModal.log('📱 Expo push token received');
               // Store expo push token for push notifications
               this.expoPushToken = data.data.expoPushToken;
+            }
+            if (data.data.fcmToken) {
+              logsModal.log('📱 FCM push token received');
+              // Store fcm push token for call notifications
+              this.fcmToken = data.data.fcmToken;
+            }
+            if (data.data.voipToken) {
+              logsModal.log('📱 VOIP push token received');
+              // Store voip push token for call notifications
+              this.voipToken = data.data.voipToken;
             }
             this.handleNativeAppSubscribe();
           }
@@ -13434,11 +13480,12 @@ class ReactNativeApp {
     }
 
     const deviceToken = this.deviceToken || null;
-    const pushToken = this.expoPushToken || null;
-
+    const expoPushToken = this.expoPushToken || null;
+    const fcmToken = this.fcmToken || null;
+    const voipToken = this.voipToken || null;
     
-    if (deviceToken && pushToken) {
-      console.log('Native app subscription tokens detected:', { deviceToken, pushToken });
+    if (deviceToken && expoPushToken) {
+      console.log('Native app subscription tokens detected:', { deviceToken, expoPushToken, fcmToken, voipToken });
       
       try {
         // Get the user's address from localStorage if available
@@ -13456,7 +13503,9 @@ class ReactNativeApp {
         
         const payload = {
           deviceToken,
-          expoPushToken: pushToken,
+          expoPushToken,
+          ...fcmToken && { fcmToken },
+          ...voipToken && { voipToken },
           addresses: addresses
         };
         
@@ -13467,7 +13516,7 @@ class ReactNativeApp {
           showToast('No gateway available', 0, 'error');
           return;
         }
-        
+
         const SUBSCRIPTION_API = `${selectedGateway.web}/notifier/subscribe`;
 
         console.log('payload', payload);
@@ -13515,7 +13564,9 @@ class ReactNativeApp {
     }
 
     const deviceToken = this.deviceToken || null;
-    const pushToken = this.expoPushToken || null;
+    const expoPushToken = this.expoPushToken || null;
+    const fcmToken = this.fcmToken || null;
+    const voipToken = this.voipToken || null;
 
     // cannot unsubscribe if no device token is provided
     if (!deviceToken) return;
@@ -13555,7 +13606,9 @@ class ReactNativeApp {
       }
       payload = {
         deviceToken,
-        expoPushToken: pushToken,
+        expoPushToken,
+        ...fcmToken && { fcmToken },
+        ...voipToken && { voipToken },
         addresses: remainingAddresses,
       };
     }
