@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -13098,7 +13098,7 @@ class LaunchModal {
     
     // Ensure path ends with slash before appending network.js
     const path = urlObj.pathname === '' ? '/' : (urlObj.pathname.endsWith('/') ? urlObj.pathname : urlObj.pathname + '/');
-    const networkJsUrl = urlObj.origin + path + 'notice.html';
+    const networkJsUrl = urlObj.origin + path + 'network.js';
     
         logsModal.log('Launch URL validation - parsed URL', `original=${url}`, `origin=${urlObj.origin}`, `path=${path}`, `networkJsUrl=${networkJsUrl}`);
     
@@ -13112,15 +13112,27 @@ class LaunchModal {
     logsModal.log('Launch URL validation starting', `url=${networkJsUrl}`);
   
     
-    fetch(networkJsUrl)
+    fetch(networkJsUrl, { 
+      headers: {
+        'Accept': 'application/javascript, text/javascript, */*'
+      }
+    })
       .then(response => {
-        logsModal.log('Launch URL validation response', `url=${networkJsUrl}`, `status=${response.status}`, `statusText=${response.statusText}`, `ok=${response.ok}`);
+        logsModal.log('Launch URL validation response', `url=${networkJsUrl}`, `status=${response.status}`, `statusText=${response.statusText}`, `ok=${response.ok}`, `contentType=${response.headers.get('content-type')}`);
+        
         if (!response.ok) {
           const error = new Error(`network.js not found (HTTP ${response.status}: ${response.statusText})`);
           error.status = response.status;
           error.statusText = response.statusText;
           throw error;
         }
+        
+        // Check content type
+        const contentType = response.headers.get('content-type');
+        if (contentType && !contentType.includes('javascript') && !contentType.includes('text/plain')) {
+          logsModal.log('Launch URL validation - unexpected content type', `expected=javascript`, `received=${contentType}`);
+        }
+        
         return response.text();
       })
       .then(networkJsText => {
