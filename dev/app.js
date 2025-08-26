@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'a'
+const version = 'b'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -13098,7 +13098,7 @@ class LaunchModal {
     
     // Ensure path ends with slash before appending network.js
     const path = urlObj.pathname === '' ? '/' : (urlObj.pathname.endsWith('/') ? urlObj.pathname : urlObj.pathname + '/');
-    const networkJsUrl = urlObj.origin + path + 'network.js';
+    const networkJsUrl = urlObj.origin + path + 'notice.html';
     
         logsModal.log('Launch URL validation - parsed URL', `original=${url}`, `origin=${urlObj.origin}`, `path=${path}`, `networkJsUrl=${networkJsUrl}`);
     
@@ -13110,12 +13110,9 @@ class LaunchModal {
     
     // Validate if network.js exists and has required properties
     logsModal.log('Launch URL validation starting', `url=${networkJsUrl}`);
+  
     
-    // Add timeout to fetch request
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-    
-    fetch(networkJsUrl, { signal: controller.signal })
+    fetch(networkJsUrl)
       .then(response => {
         logsModal.log('Launch URL validation response', `url=${networkJsUrl}`, `status=${response.status}`, `statusText=${response.statusText}`, `ok=${response.ok}`);
         if (!response.ok) {
@@ -13173,8 +13170,6 @@ class LaunchModal {
         showToast(userMessage, 0, 'error');
       })
       .finally(() => {
-        // Clear timeout
-        clearTimeout(timeoutId);
         // Reset button state
         this.launchButton.disabled = false;
         this.launchButton.textContent = 'Launch';
