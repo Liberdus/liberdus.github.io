@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'z'
+const version = 'a'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -13085,20 +13085,53 @@ class LaunchModal {
     this.launchButton.textContent = 'Checking URL...';
     
     // Create the network.js URL to check
-    let urlObj = new URL(url);
+    let urlObj;
+    try {
+      urlObj = new URL(url);
+    } catch (urlError) {
+      logsModal.log('Launch URL validation - invalid URL format', `url=${url}`, `error=${urlError.message}`);
+      showToast(`Invalid URL format: ${urlError.message}`, 0, 'error');
+      this.launchButton.disabled = false;
+      this.launchButton.textContent = 'Launch';
+      return;
+    }
+    
     // Ensure path ends with slash before appending network.js
     const path = urlObj.pathname === '' ? '/' : (urlObj.pathname.endsWith('/') ? urlObj.pathname : urlObj.pathname + '/');
     const networkJsUrl = urlObj.origin + path + 'network.js';
     
+        logsModal.log('Launch URL validation - parsed URL', `original=${url}`, `origin=${urlObj.origin}`, `path=${path}`, `networkJsUrl=${networkJsUrl}`);
+    
+    // Check for potential CORS issues
+    const currentOrigin = window.location.origin;
+    if (urlObj.origin !== currentOrigin) {
+      logsModal.log('Launch URL validation - cross-origin request detected', `currentOrigin=${currentOrigin}`, `targetOrigin=${urlObj.origin}`);
+    }
+    
     // Validate if network.js exists and has required properties
-    fetch(networkJsUrl)
+    logsModal.log('Launch URL validation starting', `url=${networkJsUrl}`);
+    
+    // Add timeout to fetch request
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
+    fetch(networkJsUrl, { signal: controller.signal })
       .then(response => {
-        logsModal.log('Launch URL validation response', `url=${networkJsUrl}`, `status=${response.status}`);
-        if (!response.ok) throw new Error(`network.js not found (HTTP ${response.status})`);
+        logsModal.log('Launch URL validation response', `url=${networkJsUrl}`, `status=${response.status}`, `statusText=${response.statusText}`, `ok=${response.ok}`);
+        if (!response.ok) {
+          const error = new Error(`network.js not found (HTTP ${response.status}: ${response.statusText})`);
+          error.status = response.status;
+          error.statusText = response.statusText;
+          throw error;
+        }
         return response.text();
       })
       .then(networkJsText => {
-        logsModal.log('Launch URL validation network.js text', `url=${networkJsUrl}`, networkJsText);
+        logsModal.log('Launch URL validation network.js text length', `url=${networkJsUrl}`, `length=${networkJsText.length}`);
+        if (networkJsText.length === 0) {
+          throw new Error('network.js is empty');
+        }
+        
         // Check for required network properties
         const requiredProps = ['network', 'name', 'netid', 'gateways'];
         const missingProps = requiredProps.filter(prop => !networkJsText.includes(prop));
@@ -13112,14 +13145,36 @@ class LaunchModal {
         this.close();
       })
       .catch((error) => {
-        logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, error);
-        showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
-        const errStr = error && (error.stack || error.message)
-            ? `${error.name || 'Error'}: ${error.message}\n${error.stack || ''}`
-            : String(error);
-        logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, errStr);
+        // Enhanced error logging with more details
+        const errorDetails = {
+          name: error.name || 'Unknown',
+          message: error.message || 'No message',
+          stack: error.stack || 'No stack',
+          status: error.status || 'N/A',
+          statusText: error.statusText || 'N/A',
+          type: error.constructor.name,
+          url: networkJsUrl
+        };
+        
+        logsModal.log('Launch URL validation failed - detailed error', JSON.stringify(errorDetails, null, 2));
+        
+        // Show user-friendly error message
+        let userMessage = 'Invalid Liberdus URL. ';
+        if (error.name === 'AbortError') {
+          userMessage += 'Request timed out (10 seconds)';
+        } else if (error.status) {
+          userMessage += `HTTP ${error.status}: ${error.statusText || 'Unknown error'}`;
+        } else if (error.message) {
+          userMessage += error.message;
+        } else {
+          userMessage += 'Network error occurred';
+        }
+        
+        showToast(userMessage, 0, 'error');
       })
       .finally(() => {
+        // Clear timeout
+        clearTimeout(timeoutId);
         // Reset button state
         this.launchButton.disabled = false;
         this.launchButton.textContent = 'Launch';
