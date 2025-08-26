@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'e'
+const version = 'f'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -13056,7 +13056,7 @@ class LaunchModal {
     this.launchButton = this.modal.querySelector('button[type="submit"]');
     this.backupButton = this.modal.querySelector('#launchModalBackupButton');
     this.closeButton.addEventListener('click', () => this.close());
-    this.launchForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.launchForm.addEventListener('submit', async (event) => await this.handleSubmit(event));
     this.urlInput.addEventListener('input', () => this.updateButtonState());
     this.backupButton.addEventListener('click', () => backupAccountModal.open());
   }
@@ -13072,7 +13072,7 @@ class LaunchModal {
     this.modal.classList.remove('active');
   }
 
-  handleSubmit(event) {
+  async handleSubmit(event) {
     event.preventDefault();
     const url = this.urlInput.value;
     if (!url) {
@@ -13085,64 +13085,44 @@ class LaunchModal {
     this.launchButton.textContent = 'Checking URL...';
     
     // Create the network.js URL to check
-    let urlObj;
-    try {
-      urlObj = new URL(url);
-    } catch (urlError) {
-      logsModal.log('Launch URL validation - invalid URL format', `url=${url}`, `error=${urlError.message}`);
-      showToast(`Invalid URL format: ${urlError.message}`, 0, 'error');
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
-      return;
-    }
-    
+    let urlObj = new URL(url);
     // Ensure path ends with slash before appending network.js
     const path = urlObj.pathname === '' ? '/' : (urlObj.pathname.endsWith('/') ? urlObj.pathname : urlObj.pathname + '/');
     const networkJsUrl = urlObj.origin + path + 'network.js';
     
-        logsModal.log('Launch URL validation - parsed URL', `original=${url}`, `origin=${urlObj.origin}`, `path=${path}`, `networkJsUrl=${networkJsUrl}`);
-    
-    // Check for potential CORS issues
-    const currentOrigin = window.location.origin;
-    if (urlObj.origin !== currentOrigin) {
-      logsModal.log('Launch URL validation - cross-origin request detected', `currentOrigin=${currentOrigin}`, `targetOrigin=${urlObj.origin}`);
-    }
-    
     // Validate if network.js exists and has required properties
-    logsModal.log('Launch URL validation starting', `url=${networkJsUrl}`);
-  
+    const result = await fetch(networkJsUrl)
+
+    if (!result.ok) {
+      throw new Error(`network.js not found (HTTP ${result.status})`);
+    }
+
+    const networkJson = await result.json();
+    logsModal.log('Launch URL validation network.json', `url=${networkJsUrl}`, networkJson);
+
+    // Check for required network properties
+    const requiredProps = ['network', 'name', 'netid', 'gateways'];
+    const missingProps = requiredProps.filter(prop => !networkJson.includes(prop));
     
-    fetch(networkJsUrl, {
-      cache: 'reload',  // this bypasses the cache to get from the server and updates the cache
-      headers: {        // this bypasses the cache of any proxies between the client and the server
-        'Cache-Control': 'no-cache',
-        Pragma: 'no-cache',
-      }
-    })
-      .then(response => {
-        logsModal.log('Launch URL validation response', `url=${networkJsUrl}`, `status=${response.status}`, `statusText=${response.statusText}`, `ok=${response.ok}`, `contentType=${response.headers.get('content-type')}`);
-        
-        if (!response.ok) {
-          const error = new Error(`network.js not found (HTTP ${response.status}: ${response.statusText})`);
-          error.status = response.status;
-          error.statusText = response.statusText;
-          throw error;
-        }
-        
-        // Check content type
-        const contentType = response.headers.get('content-type');
-        if (contentType && !contentType.includes('javascript') && !contentType.includes('text/plain')) {
-          logsModal.log('Launch URL validation - unexpected content type', `expected=javascript`, `received=${contentType}`);
-        }
-        
+    if (missingProps.length > 0) {
+      throw new Error(`Invalid network.js: Missing ${missingProps.join(', ')}`);
+    }
+
+    // Valid network.js, proceed with launching
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'launch', url }));
+    this.close();
+
+    // reset the button
+    this.launchButton.disabled = false;
+    this.launchButton.textContent = 'Launch';
+
+      /* .then(response => {
+        logsModal.log('Launch URL validation response', `url=${networkJsUrl}`, `status=${response.status}`);
+        if (!response.ok) throw new Error(`network.js not found (HTTP ${response.status})`);
         return response.text();
       })
       .then(networkJsText => {
-        logsModal.log('Launch URL validation network.js text length', `url=${networkJsUrl}`, `length=${networkJsText.length}`);
-        if (networkJsText.length === 0) {
-          throw new Error('network.js is empty');
-        }
-        
+        logsModal.log('Launch URL validation network.js text', `url=${networkJsUrl}`, networkJsText);
         // Check for required network properties
         const requiredProps = ['network', 'name', 'netid', 'gateways'];
         const missingProps = requiredProps.filter(prop => !networkJsText.includes(prop));
@@ -13155,39 +13135,19 @@ class LaunchModal {
         window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'launch', url }));
         this.close();
       })
-      .catch((error) => {
-        // Enhanced error logging with more details
-        const errorDetails = {
-          name: error.name || 'Unknown',
-          message: error.message || 'No message',
-          stack: error.stack || 'No stack',
-          status: error.status || 'N/A',
-          statusText: error.statusText || 'N/A',
-          type: error.constructor.name,
-          url: networkJsUrl
-        };
-        
-        logsModal.log('Launch URL validation failed - detailed error', JSON.stringify(errorDetails, null, 2));
-        
-        // Show user-friendly error message
-        let userMessage = 'Invalid Liberdus URL. ';
-        if (error.name === 'AbortError') {
-          userMessage += 'Request timed out (10 seconds)';
-        } else if (error.status) {
-          userMessage += `HTTP ${error.status}: ${error.statusText || 'Unknown error'}`;
-        } else if (error.message) {
-          userMessage += error.message;
-        } else {
-          userMessage += 'Network error occurred';
-        }
-        
-        showToast(userMessage, 0, 'error');
+      .catch(async (error) => {
+        logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, error);
+        showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
+        const errStr = error && (error.stack || error.message)
+            ? `${error.name || 'Error'}: ${error.message}\n${error.stack || ''}`
+            : String(error);
+        logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, errStr);
       })
       .finally(() => {
         // Reset button state
         this.launchButton.disabled = false;
         this.launchButton.textContent = 'Launch';
-      });
+      }); */
   }
 
   updateButtonState() {
