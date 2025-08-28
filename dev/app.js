@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'n'
+const version = 'o'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -13243,6 +13243,8 @@ class LaunchModal {
         'Cache-Control': 'no-cache',
         Pragma: 'no-cache',
       }});
+
+      logsModal.log('Launch URL validation network.js fetch result', `url=${networkJsUrl}`, result);
   
       if (!result.ok) {
         throw new Error(`network.js not found (HTTP ${result.status}: ${result.statusText})`);
