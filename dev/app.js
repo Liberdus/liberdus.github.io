@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'm'
+const version = 'n'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -13236,9 +13236,10 @@ class LaunchModal {
     logsModal.log('Launch URL validation starting', `url=${networkJsUrl}`);
 
     let networkJson;
+    let result;
     try {
       // Validate if network.js exists and has required properties
-      const result = await fetch(networkJsUrl, {cache: 'reload', headers: {
+      result = await fetch(networkJsUrl, {cache: 'reload', headers: {
         'Cache-Control': 'no-cache',
         Pragma: 'no-cache',
       }});
@@ -13247,10 +13248,25 @@ class LaunchModal {
         throw new Error(`network.js not found (HTTP ${result.status}: ${result.statusText})`);
       }
   
-      networkJson = await result.text();
+      
     } catch (error) {
       logsModal.log('Launch URL validation failed - fetch error', `url=${networkJsUrl}`, error);
       showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
+      // reset button state
+      this.launchButton.disabled = false;
+      this.launchButton.textContent = 'Launch';
+      return;
+    }
+
+    logsModal.log('Launch URL validation network.js text', `url=${networkJsUrl}`, result);
+    try{
+      networkJson = await result.text();
+    } catch (error) {
+      logsModal.log('Launch URL validation failed - network.js text', `url=${networkJsUrl}`, error);
+      showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
+      // reset button state
+      this.launchButton.disabled = false;
+      this.launchButton.textContent = 'Launch';
       return;
     }
 
@@ -13267,6 +13283,9 @@ class LaunchModal {
     } catch (error) {
       logsModal.log('Launch URL validation failed - property validation', `url=${networkJsUrl}`, error);
       showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
+      // reset button state
+      this.launchButton.disabled = false;
+      this.launchButton.textContent = 'Launch';
       return;
     }
 
