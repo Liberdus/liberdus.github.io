@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 's'
+const version = 't'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -13111,7 +13111,12 @@ class LaunchModal {
       
       logsModal.log('Launch URL validation - fetch successful', `url=${networkJsUrl}`, `status=${result.status}`);
     } catch (fetchError) {
-      logsModal.log('Launch URL validation - fetch failed', `url=${networkJsUrl}`, `error=${fetchError.message}`);
+      console.log('Full fetch error:', fetchError);
+      console.log('Error name:', fetchError.name);
+      console.log('Error message:', fetchError.message);
+      console.log('Error stack:', fetchError.stack);
+      logsModal.log('fetchError ', fetchError);
+      logsModal.log('Launch URL validation - fetch failed', `url=${networkJsUrl}`, `error=${fetchError.message}`, `errorName=${fetchError.name}`);
       showToast(`Network error: ${fetchError.message}`, 0, 'error');
       this.launchButton.disabled = false;
       this.launchButton.textContent = 'Launch';
