@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'o'
+const version = 'p'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -13232,49 +13232,27 @@ class LaunchModal {
     const path = urlObj.pathname === '' ? '/' : (urlObj.pathname.endsWith('/') ? urlObj.pathname : urlObj.pathname + '/');
     const networkJsUrl = urlObj.origin + path + 'network.js';
     
-    
-    logsModal.log('Launch URL validation starting', `url=${networkJsUrl}`);
-
-    let networkJson;
-    let result;
     try {
+      logsModal.log('Launch URL validation starting', `url=${networkJsUrl}`);
+  
       // Validate if network.js exists and has required properties
-      result = await fetch(networkJsUrl, {cache: 'reload', headers: {
-        'Cache-Control': 'no-cache',
-        Pragma: 'no-cache',
-      }});
-
-      logsModal.log('Launch URL validation network.js fetch result', `url=${networkJsUrl}`, result);
+      // have accept javascript and content-type application/javascript
+      const result = await fetch(networkJsUrl, {
+        cache: 'reload', 
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+          'Accept': 'application/javascript',
+        }
+      });
   
       if (!result.ok) {
         throw new Error(`network.js not found (HTTP ${result.status}: ${result.statusText})`);
       }
   
-      
-    } catch (error) {
-      logsModal.log('Launch URL validation failed - fetch error', `url=${networkJsUrl}`, error);
-      showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
-      // reset button state
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
-      return;
-    }
-
-    logsModal.log('Launch URL validation network.js text', `url=${networkJsUrl}`, result);
-    try{
-      networkJson = await result.text();
-    } catch (error) {
-      logsModal.log('Launch URL validation failed - network.js text', `url=${networkJsUrl}`, error);
-      showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
-      // reset button state
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
-      return;
-    }
-
-    logsModal.log('Launch URL validation network.js text', `url=${networkJsUrl}`, networkJson);
-
-    try {
+      const networkJson = await result.text();
+      logsModal.log('Launch URL validation network.js text', `url=${networkJsUrl}`, networkJson);
+  
       // Check for required network properties
       const requiredProps = ['network', 'name', 'netid', 'gateways'];
       const missingProps = requiredProps.filter(prop => !networkJson?.includes(prop));
@@ -13282,23 +13260,15 @@ class LaunchModal {
       if (missingProps.length > 0) {
         throw new Error(`Invalid network.js: Missing ${missingProps.join(', ')}`);
       }
-    } catch (error) {
-      logsModal.log('Launch URL validation failed - property validation', `url=${networkJsUrl}`, error);
-      showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
-      // reset button state
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
-      return;
-    }
-
-    try {
+  
       // Success - proceed with launching
       logsModal.log('Launch URL validation success', `url=${networkJsUrl}`);
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'launch', url }));
       this.close();
+  
     } catch (error) {
-      logsModal.log('Launch URL validation failed - launch execution', `url=${networkJsUrl}`, error);
-      showToast(`Failed to launch URL. Error: ${error.message}`, 0, 'error');
+      logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, error);
+      showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
     } finally {
       // Reset button state (this should always happen)
       this.launchButton.disabled = false;
@@ -13356,7 +13326,6 @@ class ReactNativeApp {
           }
 
           if (data.type === 'KEYBOARD_SHOWN') {
-            logsModal.log('⌨️ Keyboard shown event received, height:', data.keyboardHeight);
             this.detectKeyboardOverlap(data.keyboardHeight);
           }
 
@@ -13543,7 +13512,6 @@ class ReactNativeApp {
   detectKeyboardOverlap(keyboardHeight) {
     const input = document.activeElement;
     if (!this.isInputElement(input)) {
-      logsModal.log('⌨️ No active input element found for keyboard detection');
       return;
     }
 
@@ -13563,14 +13531,6 @@ class ReactNativeApp {
         needsManualHandling
       });
 
-      logsModal.log('⌨️ Keyboard overlap detection:', {
-        keyboardHeight,
-        inputBottom,
-        keyboardTop,
-        needsManualHandling,
-        inputElement: input.tagName + (input.id ? '#' + input.id : '') + (input.className ? '.' + input.className.split(' ')[0] : '')
-      });
-
       this.postMessage({
         type: 'KEYBOARD_DETECTION',
         needsManualHandling,
@@ -13578,7 +13538,6 @@ class ReactNativeApp {
       });
     } catch (error) {
       console.warn('Error in keyboard detection:', error);
-      logsModal.log('❌ Error in keyboard detection:', error.message);
     }
   }
 
