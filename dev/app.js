@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'l'
+const version = 'm'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -9952,6 +9952,8 @@ class VoiceRecordingModal {
    */
   async sendVoiceMessage() {
     if (!this.recordedBlob) return;
+
+    const loadingToastId = showToast('Sending voice message...', 0, 'loading');
     
     this.sendVoiceMessageButton.disabled = true;
 
@@ -10015,13 +10017,14 @@ class VoiceRecordingModal {
       
       // Send the voice message through chat modal
       await chatModal.sendVoiceMessageTx(voiceMessageUrl, duration, pqEncSharedKey, selfKey);
-      
+
       this.close();
       
     } catch (error) {
       console.error('Error sending voice message:', error);
       showToast(`Failed to send voice message: ${error.message}`, 0, 'error');
     } finally {
+      hideToast(loadingToastId);
       this.sendVoiceMessageButton.disabled = false;
     }
   }
@@ -13235,7 +13238,10 @@ class LaunchModal {
     let networkJson;
     try {
       // Validate if network.js exists and has required properties
-      const result = await fetch(networkJsUrl);
+      const result = await fetch(networkJsUrl, {cache: 'reload', headers: {
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      }});
   
       if (!result.ok) {
         throw new Error(`network.js not found (HTTP ${result.status}: ${result.statusText})`);
