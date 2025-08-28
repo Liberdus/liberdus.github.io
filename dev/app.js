@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1030,6 +1030,12 @@ class ChatsScreen {
             // Memo is stored in the 'message' field for transfers
             previewHTML += ` <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 25)}</span>`;
           }
+        } else if (latestActivity.type === 'call') {
+          previewHTML = `<span><i>Join call</i></span>`;
+        } else if (latestActivity.type === 'vm') {
+          previewHTML = `<span><i>Voice message</i></span>`;
+        } else if ((!latestActivity.message || String(latestActivity.message).trim() === '') && latestActivity.xattach) {
+          previewHTML = `<span><i>Attachment</i></span>`;
         } else {
           // Latest item is a regular message
           const messageText = escapeHtml(latestActivity.message);
@@ -6846,7 +6852,7 @@ class StakeValidatorModal {
    * @param {string} data - The QR data to fill the stake address input field
    * @returns {void}
    * */
-  fillFromQR(data) {
+  async fillFromQR(data) {
     console.log('Filling stake address from QR data:', data);
 
     // Directly set the value of the stakeNodeAddress input field
@@ -6944,6 +6950,18 @@ class ChatModal {
 
     // Flag to prevent multiple downloads
     this.attachmentDownloadInProgress = false; 
+
+    // Abort controller for cancelling file operations
+    this.abortController = new AbortController();
+  }
+
+  /**
+   * Cancels all ongoing file operations and creates a new abort controller
+   * @returns {void}
+   */
+  cancelAllOperations() {
+    this.abortController.abort();
+    this.abortController = new AbortController();
   }
 
   /**
@@ -7211,6 +7229,9 @@ class ChatModal {
 
     // Save any unsaved draft before closing
     this.debouncedSaveDraft(this.messageInput.value);
+
+    // Cancel all ongoing file operations
+    this.cancelAllOperations();
 
     // clear file attachments
     this.fileAttachments = [];
@@ -8022,11 +8043,12 @@ console.warn('in send message', txid)
       return;
     }
 
+    let loadingToastId;
     try {
       this.isEncrypting = true;
       this.sendButton.disabled = true; // Disable send button during encryption
       this.addAttachmentButton.disabled = true;
-      const loadingToastId = showToast(`Attaching file...`, 0, 'loading');
+      loadingToastId = showToast(`Attaching file...`, 0, 'loading');
       const { dhkey, cipherText: pqEncSharedKey } = await this.getRecipientDhKey(this.address);
       const password = myAccount.keys.secret + myAccount.keys.pqSeed;
       const selfKey = encryptData(bin2hex(dhkey), password, true)
@@ -8052,28 +8074,42 @@ console.warn('in send message', txid)
           // TODO: move to network.js
           const uploadUrl = 'https://inv.liberdus.com:2083';
 
-          const response = await fetch(`${uploadUrl}/post`, {
-            method: 'POST',
-            body: form
-          });
-          if (!response.ok) throw new Error(`upload failed ${response.status}`);
+          try {
+            const response = await fetch(`${uploadUrl}/post`, {
+              method: 'POST',
+              body: form,
+              signal: this.abortController.signal
+            });
+            if (!response.ok) throw new Error(`upload failed ${response.status}`);
 
-          const { id } = await response.json();
-          if (!id) throw new Error('No file ID returned from upload');
+            const { id } = await response.json();
+            if (!id) throw new Error('No file ID returned from upload');
 
-          this.fileAttachments.push({
-            url: `${uploadUrl}/get/${id}`,
-            name: file.name,
-            size: file.size,
-            type: file.type,
-            pqEncSharedKey: bin2base64(pqEncSharedKey),
-            selfKey
-          });
-          hideToast(loadingToastId);
-          this.showAttachmentPreview(file);
-          this.sendButton.disabled = false; // Re-enable send button
-          this.addAttachmentButton.disabled = false;
-          showToast(`File "${file.name}" attached successfully`, 2000, 'success');
+            this.fileAttachments.push({
+              url: `${uploadUrl}/get/${id}`,
+              name: file.name,
+              size: file.size,
+              type: file.type,
+              pqEncSharedKey: bin2base64(pqEncSharedKey),
+              selfKey
+            });
+            hideToast(loadingToastId);
+            this.showAttachmentPreview(file);
+            this.sendButton.disabled = false; // Re-enable send button
+            this.addAttachmentButton.disabled = false;
+            showToast(`File "${file.name}" attached successfully`, 2000, 'success');
+          } catch (fetchError) {
+            // Handle fetch errors (including AbortError) inside the worker callback
+            if (fetchError.name === 'AbortError') {
+              hideToast(loadingToastId);
+            } else {
+              hideToast(loadingToastId);
+              showToast(`Upload failed: ${fetchError.message}`, 0, 'error');
+            }
+            this.sendButton.disabled = false;
+            this.addAttachmentButton.disabled = false;
+            this.isEncrypting = false;
+          }
         }
         worker.terminate();
       };
@@ -8096,7 +8132,18 @@ console.warn('in send message', txid)
       
     } catch (error) {
       console.error('Error handling file attachment:', error);
-      showToast('Error processing file attachment', 0, 'error');
+      
+      // Hide loading toast if it was an abort error
+      if (error.name === 'AbortError') {
+        hideToast(loadingToastId);
+      } else {
+        showToast('Error processing file attachment', 0, 'error');
+      }
+      
+      // Re-enable buttons
+      this.sendButton.disabled = false;
+      this.addAttachmentButton.disabled = false;
+      this.isEncrypting = false;
     } finally {
       event.target.value = ''; // Reset the file input value
     }
@@ -8281,8 +8328,9 @@ console.warn('in send message', txid)
   }
 
   async handleAttachmentDownload(item, linkEl) {
+    let loadingToastId;
     try {
-      const loadingToastId = showToast(`Decrypting attachment...`, 0, 'loading');
+      loadingToastId = showToast(`Decrypting attachment...`, 0, 'loading');
       // 1. Derive a fresh 32‑byte dhkey
       let dhkey;
       if (item.my) {
@@ -8303,7 +8351,9 @@ console.warn('in send message', txid)
       }
 
       // 2. Download encrypted bytes
-      const res = await fetch(linkEl.dataset.url);
+      const res = await fetch(linkEl.dataset.url, {
+        signal: this.abortController.signal
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const cipherBin = new Uint8Array(await res.arrayBuffer());
 
@@ -8359,7 +8409,13 @@ console.warn('in send message', txid)
 
     } catch (err) {
       console.error('Attachment decrypt failed:', err);
-      showToast(`Decryption failed.`, 0, 'error');
+      
+      // Hide loading toast if it was an abort error
+      if (err.name === 'AbortError') {
+        hideToast(loadingToastId);
+      } else {
+        showToast(`Decryption failed.`, 0, 'error');
+      }
     }
   }
 
@@ -9457,6 +9513,7 @@ class CallInviteModal {
         }
 
         const messageObj = await chatModal.createChatMessage(addr, messagePayload, toll, keys);
+        messageObj.callType = true
         await signObj(messageObj, keys);
         const txid = getTxid(messageObj);
         await injectTx(messageObj, txid);
@@ -10425,7 +10482,19 @@ class CreateAccountModal {
     this.backButton.disabled = true;
 
     event.preventDefault();
+    
+    // Validate username at submit time after normalization
     const username = normalizeUsername(this.usernameInput.value);
+    
+    // Check if username is too short after normalization
+    if (username.length < 3) {
+      this.usernameAvailable.textContent = 'too short';
+      this.usernameAvailable.style.color = '#dc3545';
+      this.usernameAvailable.style.display = 'inline';
+      this.reEnableControls();
+      return;
+    }
+    
 
     // Get network ID from network.js
     const { netid } = network;
@@ -10691,6 +10760,8 @@ class SendAssetFormModal {
       // Clear custom validity message when user types
       event.target.setCustomValidity('');
     });
+    // Clear amount field on focus if it contains only "0"
+    this.amountInput.addEventListener('focus', this.handleAmountFocus.bind(this));
     // event listener for toggle LIB/USD button
     this.toggleBalanceButton.addEventListener('click', this.handleToggleBalance.bind(this));
     this.memoInput.addEventListener('input', this.handleMemoInputChange.bind(this));
@@ -11171,7 +11242,9 @@ class SendAssetFormModal {
    * @returns {void}
    */
   async handleToggleBalance(e) {
-    e.preventDefault();
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
     this.balanceSymbol.textContent = this.balanceSymbol.textContent === 'LIB' ? 'USD' : 'LIB';
 
     // check the context value of the button to determine if it's LIB or USD
@@ -11195,6 +11268,22 @@ class SendAssetFormModal {
     }
 
     this.updateBalanceAndFeeDisplay(balanceInLIB, feeInLIB, !isLib, scalabilityFactor);
+  }
+
+  /**
+   * Handles focus event on amount input field
+   * Clears the field if it contains only "0" to improve user experience
+   * @param {Event} e - The focus event object
+   * @returns {void}
+   */
+  handleAmountFocus(e) {
+    const input = e.target;
+    const value = input.value.trim();
+    
+    // Clear the field if the numeric value is 0
+    if (parseFloat(value) === 0) {
+      input.value = '';
+    }
   }
 
   /**
@@ -11335,7 +11424,7 @@ class SendAssetFormModal {
    * @param {string} data - The QR code data to fill the form with
    * @returns {void}
    * */
-  fillFromQR(data) {
+  async fillFromQR(data) {
     console.log('Attempting to fill payment form from QR:', data);
 
     // Explicitly check for the required prefix
@@ -11364,6 +11453,20 @@ class SendAssetFormModal {
 
       if (paymentData.u) {
         this.usernameInput.value = paymentData.u;
+      }
+      if (paymentData.d) {
+        try {
+          const symbol = String(paymentData.d).toUpperCase();
+          const current = String(this.balanceSymbol.textContent || 'LIB').toUpperCase();
+          if (symbol === 'USD' && current !== 'USD') {
+            // call the existing toggle handler to reuse conversion logic
+            await this.handleToggleBalance();
+          } else if (symbol === 'LIB' && current !== 'LIB') {
+            await this.handleToggleBalance();
+          }
+        } catch (err) {
+          console.error('Error toggling balance from QR display unit field', err);
+        }
       }
       if (paymentData.a) {
         this.amountInput.value = paymentData.a;
@@ -11749,6 +11852,8 @@ class ReceiveModal {
     this.qrcodeContainer = document.getElementById('qrcode');
     this.previewElement = document.getElementById('qrDataPreview');
     this.copyButton = document.getElementById('copyAddress');
+    this.toggleReceiveBalanceButton = document.getElementById('toggleReceiveBalance');
+    this.receiveBalanceSymbol = document.getElementById('receiveBalanceSymbol');
 
     // Create debounced function
     this.debouncedUpdateQRCode = debounce(() => this.updateQRCode(), 300);
@@ -11764,6 +11869,7 @@ class ReceiveModal {
     this.amountInput.addEventListener('input', () => this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value));
     this.amountInput.addEventListener('input', this.debouncedUpdateQRCode);
     this.memoInput.addEventListener('input', this.debouncedUpdateQRCode);
+    this.toggleReceiveBalanceButton.addEventListener('click', this.handleToggleBalance.bind(this));
   }
 
   open() {
@@ -11798,6 +11904,9 @@ class ReceiveModal {
     // Clear input fields
     this.amountInput.value = '';
     this.memoInput.value = '';
+
+    this.receiveBalanceSymbol.textContent = 'LIB';
+
 
     // Initial update for addresses based on the first asset
     this.updateReceiveAddresses();
@@ -11868,6 +11977,7 @@ class ReceiveModal {
       u: myAccount.username, // username
       i: assetId, // assetId
       s: symbol, // symbol
+      d: String(this.receiveBalanceSymbol.textContent || 'LIB').toUpperCase() //display unit
     };
 
     // Add optional fields if they have values
@@ -11954,6 +12064,37 @@ class ReceiveModal {
         console.error('Error generating fallback QR code:', fallbackError);
         this.qrcodeContainer.innerHTML = '<p style="color: red; text-align: center;">Failed to generate QR code.</p>';
       }
+    }
+  }
+
+  /**
+   * Toggle LIB/USD display for the receive amount and update the QR accordingly
+   */
+  async handleToggleBalance() {
+    try {
+      this.receiveBalanceSymbol.textContent = this.receiveBalanceSymbol.textContent === 'LIB' ? 'USD' : 'LIB';
+
+      const isLib = this.receiveBalanceSymbol.textContent === 'LIB';
+
+      await getNetworkParams();
+      const scalabilityFactor = getStabilityFactor();
+
+      if (this.amountInput && this.amountInput.value.trim() !== '') {
+        const currentValue = parseFloat(this.amountInput.value);
+        if (!isNaN(currentValue)) {
+          if (!isLib) {
+            // now showing USD, convert LIB -> USD
+            this.amountInput.value = (currentValue * scalabilityFactor).toString();
+          } else {
+            // now showing LIB, convert USD -> LIB
+            this.amountInput.value = (currentValue / scalabilityFactor).toString();
+          }
+        }
+      }
+
+      this.updateQRCode();
+    } catch (err) {
+      console.error('Error toggling receive balance:', err);
     }
   }
 
@@ -13088,9 +13229,11 @@ class LaunchModal {
     const path = urlObj.pathname === '' ? '/' : (urlObj.pathname.endsWith('/') ? urlObj.pathname : urlObj.pathname + '/');
     const networkJsUrl = urlObj.origin + path + 'network.js';
     
+    
+    logsModal.log('Launch URL validation starting', `url=${networkJsUrl}`);
+
+    let networkJson;
     try {
-      logsModal.log('Launch URL validation starting', `url=${networkJsUrl}`);
-  
       // Validate if network.js exists and has required properties
       const result = await fetch(networkJsUrl);
   
@@ -13098,9 +13241,16 @@ class LaunchModal {
         throw new Error(`network.js not found (HTTP ${result.status}: ${result.statusText})`);
       }
   
-      const networkJson = await result.text();
-      logsModal.log('Launch URL validation network.js text', `url=${networkJsUrl}`, networkJson);
-  
+      networkJson = await result.text();
+    } catch (error) {
+      logsModal.log('Launch URL validation failed - fetch error', `url=${networkJsUrl}`, error);
+      showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
+      return;
+    }
+
+    logsModal.log('Launch URL validation network.js text', `url=${networkJsUrl}`, networkJson);
+
+    try {
       // Check for required network properties
       const requiredProps = ['network', 'name', 'netid', 'gateways'];
       const missingProps = requiredProps.filter(prop => !networkJson?.includes(prop));
@@ -13108,15 +13258,20 @@ class LaunchModal {
       if (missingProps.length > 0) {
         throw new Error(`Invalid network.js: Missing ${missingProps.join(', ')}`);
       }
-  
+    } catch (error) {
+      logsModal.log('Launch URL validation failed - property validation', `url=${networkJsUrl}`, error);
+      showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
+      return;
+    }
+
+    try {
       // Success - proceed with launching
       logsModal.log('Launch URL validation success', `url=${networkJsUrl}`);
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'launch', url }));
       this.close();
-  
     } catch (error) {
-      logsModal.log('Launch URL validation failed', `url=${networkJsUrl}`, error);
-      showToast(`Invalid Liberdus URL. Error: ${error.message}`, 0, 'error');
+      logsModal.log('Launch URL validation failed - launch execution', `url=${networkJsUrl}`, error);
+      showToast(`Failed to launch URL. Error: ${error.message}`, 0, 'error');
     } finally {
       // Reset button state (this should always happen)
       this.launchButton.disabled = false;
@@ -13174,6 +13329,7 @@ class ReactNativeApp {
           }
 
           if (data.type === 'KEYBOARD_SHOWN') {
+            logsModal.log('⌨️ Keyboard shown event received, height:', data.keyboardHeight);
             this.detectKeyboardOverlap(data.keyboardHeight);
           }
 
@@ -13360,6 +13516,7 @@ class ReactNativeApp {
   detectKeyboardOverlap(keyboardHeight) {
     const input = document.activeElement;
     if (!this.isInputElement(input)) {
+      logsModal.log('⌨️ No active input element found for keyboard detection');
       return;
     }
 
@@ -13379,6 +13536,14 @@ class ReactNativeApp {
         needsManualHandling
       });
 
+      logsModal.log('⌨️ Keyboard overlap detection:', {
+        keyboardHeight,
+        inputBottom,
+        keyboardTop,
+        needsManualHandling,
+        inputElement: input.tagName + (input.id ? '#' + input.id : '') + (input.className ? '.' + input.className.split(' ')[0] : '')
+      });
+
       this.postMessage({
         type: 'KEYBOARD_DETECTION',
         needsManualHandling,
@@ -13386,6 +13551,7 @@ class ReactNativeApp {
       });
     } catch (error) {
       console.warn('Error in keyboard detection:', error);
+      logsModal.log('❌ Error in keyboard detection:', error.message);
     }
   }
 
@@ -13600,7 +13766,7 @@ class ReactNativeApp {
       };
     } else {
       // Other accounts remain. Update the subscription to only include them.
-      if (!pushToken) {
+      if (!expoPushToken) {
         console.warn('Cannot update subscription for remaining accounts without a pushToken.');
         return;
       }
