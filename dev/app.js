@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'v'
+const version = 'w'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -30,10 +30,7 @@ async function checkVersion() {
     alert('Updating to new version: ' + newVersion + ' ' + version);
     localStorage.setItem('version', newVersion); // Save new version
     const newUrl = window.location.href.split('?')[0];
-/* probably don't need to forece reload these since we are reloading newUrl now
-    './',
-    'index.html',
-*/
+
     logsModal.log(`Updated to version: ${newVersion}`)
     await forceReload([
       newUrl,
@@ -141,51 +138,24 @@ let getSystemNoticeIntervalId = null;
 
 // Used in getNetworkParams function
 const NETWORK_ACCOUNT_UPDATE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes in milliseconds
-const NETWORK_ACCOUNT_ID = '0000000000000000000000000000000000000000000000000000000000000000';
+const NETWORK_ACCOUNT_ID = '0'.repeat(64);
 const MAX_TOLL = 1_000_000; // 1M limit
 
-// TODO - get the parameters from the network
-// mock network parameters
 let parameters = {
   current: {
     transactionFee: 1n * wei,
   },
 };
 
-// Keyboard handling for React Native WebView
-// function adjustForKeyboard() {
-//   if (window.visualViewport) {
-//     const viewport = window.visualViewport;
-//     // show toast
-//     /* showToast('Keyboard adjustment with CSS custom properties enabled', 3000, 'success'); */
-//     const resizeHandler = () => {
-//       // show toast that we are resizing
-//       /* showToast('Resizing', 3000, 'success'); */
-//       // Set your app container height to the visual viewport height
-//       document.documentElement.style.setProperty(
-//         '--viewport-height', 
-//         `${viewport.height}px`
-//       );
-//       console.log('📱 Viewport height adjusted to:', viewport.height + 'px');
-//     };
-    
-//     viewport.addEventListener('resize', resizeHandler);
-//     viewport.addEventListener('scroll', resizeHandler);
-    
-//     // Set initial height
-//     resizeHandler();
-//     console.log('✅ Keyboard adjustment with CSS custom properties enabled');
-//   } else {
-//     console.log('❌ visualViewport not supported for keyboard adjustment');
-//   }
-// }
-
 /**
  * Check if a username is available or taken
  * @param {*} username 
  * @param {*} address 
  * @param {*} foundAddressObject 
- * @returns 'mine' if the username is available and the address matches, 'taken' if the username is taken, 'available' if the username is available but the address does not match, 'error' if there is an error
+ * @returns 'mine' if the username is taken and the address matches,
+ *          'taken' if the username is taken and address does not match,
+ *          'available' if the username is available,
+ *          'error' if there is an error
  */
 async function checkUsernameAvailability(username, address, foundAddressObject) {
   if (foundAddressObject) {
@@ -233,10 +203,7 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
   const usernameBytes = utf82bin(normalizeUsername(username));
   const usernameHash = hashBytes(usernameBytes);
   try {
-    const response = await fetch(
-//      `${selectedGateway.protocol}://${selectedGateway.host}:${selectedGateway.port}/address/${usernameHash}`
-      `${selectedGateway.web}/address/${usernameHash}`
-    );
+    const response = await fetch(`${selectedGateway.web}/address/${usernameHash}`);
     const data = await response.json();
     if (data && data.address) {
       if (address && normalizeAddress(data.address) === normalizeAddress(address)) {
@@ -332,9 +299,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   timeDifference(); // Calculate and log time difference early
 
   setupConnectivityDetection();
-
-  // Setup keyboard adjustment for React Native WebView
-  // adjustForKeyboard();
 
   // React Native App
   reactNativeApp.load();
@@ -4092,6 +4056,8 @@ function hideToast(toastId) {
 // Handle online/offline events
 async function handleConnectivityChange() {
   if (isOnline) {
+    await getNetworkParams();
+    if (!isOnline) return;
     console.log('Just came back online.');
     // We just came back online
     updateUIForConnectivity();
@@ -5471,12 +5437,12 @@ const tollModal = new TollModal();
 class InviteModal {
   constructor() {
     this.invitedContacts = new Set(); // Track invited emails/phones
+    this.inviteURL = "https://liberdus.com/download";
   }
 
   load() {
     this.modal = document.getElementById('inviteModal');
-    this.inviteEmailInput = document.getElementById('inviteEmail');
-    this.invitePhoneInput = document.getElementById('invitePhone');
+    this.inviteMessageInput = document.getElementById('inviteMessage');
     this.submitButton = document.querySelector('#inviteForm button[type="submit"]');
     this.closeButton = document.getElementById('closeInviteModal');
     this.inviteForm = document.getElementById('inviteForm');
@@ -5485,30 +5451,25 @@ class InviteModal {
     this.closeButton.addEventListener('click', () => this.close());
     this.inviteForm.addEventListener('submit', (event) => this.handleSubmit(event));
 
-    // input event listeners for email and phone fields
-    this.inviteEmailInput.addEventListener('input', () => this.inviteEmailInput.value = normalizeEmail(this.inviteEmailInput.value));
-    this.inviteEmailInput.addEventListener('input', () => this.validateInputs());
-    this.invitePhoneInput.addEventListener('input', () => this.invitePhoneInput.value = normalizePhone(this.invitePhoneInput.value));
-    this.invitePhoneInput.addEventListener('blur', () => this.invitePhoneInput.value = normalizePhone(this.invitePhoneInput.value, true));
-    this.invitePhoneInput.addEventListener('input', () => this.validateInputs());
-
-    this.shareButton.addEventListener('click', () => this.shareLiberdusInvite());
+    // input listener for editable message
+    this.inviteMessageInput.addEventListener('input', () => this.validateInputs());
   }
 
   validateInputs() {
-    const email = this.inviteEmailInput.value.trim();
-    const phone = this.invitePhoneInput.value.trim();
-    if (email || phone) {
-      this.submitButton.disabled = false;
-    } else {
-      this.submitButton.disabled = true;
-    }
+    const message = (this.inviteMessageInput && this.inviteMessageInput.value) ? this.inviteMessageInput.value.trim() : '';
+    this.submitButton.disabled = !message;
   }
 
   open() {
     // Clear any previous values
-    this.inviteEmailInput.value = '';
-    this.invitePhoneInput.value = '';
+    // Prefill the editable invite message with a useful default
+    const defaultText = `Message ${myAccount?.username || ''} on Liberdus! ${this.inviteURL}`;
+    if (this.inviteMessageInput) {
+      // Only set default if the user hasn't previously entered something
+      if (!this.inviteMessageInput.value || !this.inviteMessageInput.value.trim()) {
+        this.inviteMessageInput.value = defaultText;
+      }
+    }
     this.validateInputs(); // Set initial button state
     this.modal.classList.add('active');
   }
@@ -5521,72 +5482,28 @@ class InviteModal {
     event.preventDefault();
     this.submitButton.disabled = true;
 
-    const email = this.inviteEmailInput.value.trim();
-    const phone = this.invitePhoneInput.value.trim();
+    const message = this.inviteMessageInput.value.trim();
 
-    if (!email && !phone) {
-      showToast('Please enter either an email or phone number', 0, 'error');
-      // Ensure button is disabled again if somehow submitted while empty
-      this.submitButton.disabled = true;
-      return;
-    }
-
-    // Check if we've already invited this email or phone
-    const emailAlreadyInvited = email && this.invitedContacts.has(email);
-    const phoneAlreadyInvited = phone && this.invitedContacts.has(phone);
-    
-    if (emailAlreadyInvited || phoneAlreadyInvited) {
-      let message = '';
-      if (emailAlreadyInvited && phoneAlreadyInvited) {
-        message = "You've already sent invites to both this email and phone number";
-      } else if (emailAlreadyInvited) {
-        message = "You've already sent an invite to this email";
-      } else {
-        message = "You've already sent an invite to this phone number";
-      }
-      
-      showToast(message, 0, 'error');
-      // Clear the input and re-enable button so they can enter different contacts
-      this.inviteEmailInput.value = '';
-      this.invitePhoneInput.value = '';
-      this.validateInputs(); // will disable the button since inputs are now empty
+    if (!message) {
+      showToast('Please enter a message to share', 0, 'error');
+      this.submitButton.disabled = false;
       return;
     }
 
     try {
-        const response = await fetch('https://inv.liberdus.com:2053/api/invite', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user: myAccount.username,
-          email: email || undefined,
-          phone: phone || undefined,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        // Add the successfully invited contacts to our tracking set
-        if (email) this.invitedContacts.add(email);
-        if (phone) this.invitedContacts.add(phone);
-        
-        showToast('Invitation sent successfully!', 3000, 'success');
-        this.close();
-      } else {
-        showToast(data.error || 'Failed to send invitation', 0, 'error');
-      }
-    } catch (error) {
-      showToast('Failed to send invitation. Please try again.', 0, 'error');
+      await this.shareLiberdusInvite(message);
+    } catch (err) {
+      // shareLiberdusInvite will show its own errors; if it throws, show a fallback
+      showToast('Could not share invitation. Try copying manually.', 0, 'error');
+      this.submitButton.disabled = false;
     }
   }
 
-  async shareLiberdusInvite() {
+  async shareLiberdusInvite(overrideText) {
     const url = "https://liberdus.com/download";
     const title = "Join me on Liberdus";
-    const text = `Message ${myAccount.username} on Liberdus! ${url}`;
+    const defaultText = `Message ${myAccount.username} on Liberdus! ${this.inviteURL}`;
+    const text = (typeof overrideText === 'string' && overrideText.trim().length) ? overrideText.trim() : defaultText;
 
     // 1) Try native share sheet
     if (navigator.share) {
@@ -12406,6 +12323,7 @@ class MigrateAccountsModal {
     this.closeButton = document.getElementById('closeMigrateAccountsModal');
     this.form = document.getElementById('migrateAccountsForm');
     this.accountList = document.getElementById('migrateAccountList');
+    this.errorAndInconsistentAccounts = document.getElementById('errorAndInconsistentAccounts');
     this.submitButton = document.getElementById('submitMigrateAccounts');
 
     this.closeButton.addEventListener('click', () => this.close());
@@ -12451,6 +12369,10 @@ class MigrateAccountsModal {
     // Render Taken section
     this.renderSection('taken', 'Taken', categories.taken,
       'Accounts already taken');
+
+    // Render Error section
+    this.renderSection('error', 'Error', categories.error,
+      'Error checking username availability');
       
     // Check for inconsistencies and render them
     const inconsistencies = await this.checkAccountsInconsistency();
@@ -12484,8 +12406,11 @@ class MigrateAccountsModal {
         `).join('')}
       </div>
     `;
-
-    this.accountList.appendChild(section);
+    if (sectionId === 'error') {
+      this.errorAndInconsistentAccounts.appendChild(section);
+    } else {
+      this.accountList.appendChild(section);
+    }
   }
 
   /**
@@ -12528,7 +12453,8 @@ class MigrateAccountsModal {
     const categories = {
       mine: [],      // username maps to our address
       available: [], // username is available
-      taken: []      // username is taken
+      taken: [],      // username is taken
+      error: []      // error checking username availability
     };
 
     // Loop through all netids except current
@@ -12551,8 +12477,12 @@ class MigrateAccountsModal {
           categories.mine.push(account);
         } else if (availability === 'available') {
           categories.available.push(account);
-        } else {
+        } else if (availability === 'taken') {
           categories.taken.push(account);
+        } else if (availability === 'error') {
+          categories.error.push(account);
+        } else {
+          console.error("Unknown availability status: ", availability);
         }
       }
     }
@@ -12561,6 +12491,7 @@ class MigrateAccountsModal {
     categories.mine = this.sortAccounts(categories.mine);
     categories.available = this.sortAccounts(categories.available);
     categories.taken = this.sortAccounts(categories.taken);
+    categories.error = this.sortAccounts(categories.error);
 
     return categories;
   }
@@ -12835,7 +12766,7 @@ console.log('    result is',result)
       container.appendChild(unregisteredSection);
     }
     
-    this.accountList.appendChild(container);
+    this.errorAndInconsistentAccounts.appendChild(container);
   }
 }
 
@@ -14171,11 +14102,15 @@ async function getNetworkParams() {
       }
       return;
     } else {
+      isOnline = false;
+      updateUIForConnectivity();
       console.warn(
         `getNetworkParams: Received null or undefined data from queryNetwork for account ${NETWORK_ACCOUNT_ID}. Cached data (if any) will remain unchanged.`
       );
     }
   } catch (error) {
+    isOnline = false;
+    updateUIForConnectivity();
     console.error(
       `getNetworkParams: Error fetching network account data for ${NETWORK_ACCOUNT_ID}: Cached data (if any) will remain unchanged.`,
       error

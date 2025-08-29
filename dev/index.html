@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.08.28.13.30" />
+    <link rel="stylesheet" href="./styles.css?v=2025.08.29.11.44" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.08.28.13.30" type="module"></script>
+    <script src="./app.js?v=2025.08.29.11.44" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -1801,28 +1801,15 @@
         <div class="modal-content">
           <div class="form-container">
             <p class="modal-summary">
-              Enter an email. An invitation with your account username will be sent to the email address.
+              Invite your friends to join Liberdus. You may edit the message before sharing.
             </p>
             <form id="inviteForm" class="form--narrow">
               <div class="form-group">
-                <label for="inviteEmail">Email</label>
-                <input type="email" id="inviteEmail" class="form-control" placeholder="Enter email address" />
-              </div>
-              <div class="form-group" style="display: none">
-                <label for="invitePhone">Phone Number</label>
-                <input type="tel" id="invitePhone" class="form-control" placeholder="Enter phone number" />
+                <label for="inviteMessage">Message</label>
+                <textarea id="inviteMessage" class="form-control" rows="4" placeholder="Edit the message that will be shared"></textarea>
               </div>
               <div class="form-actions">
-                <button type="submit" class="btn btn--primary btn--pill btn--full">Send Invitation</button>
-              </div>
-              <div class="form-group">
-                <p class="modal-summary">Or share your invite link</p>
-                <button type="button"
-                        id="shareInviteButton"
-                        class="btn btn--secondary btn--pill btn--full"
-                        aria-label="Share invite link">
-                  Share Invite Link
-                </button>
+                <button type="submit" class="btn btn--primary btn--pill btn--full">Share Invitation</button>
               </div>
             </form>
           </div>
@@ -1879,6 +1866,9 @@
               <!-- Three sections will be rendered here -->
             </div>
             <button type="button" id="submitMigrateAccounts" class="btn btn--primary btn--pill btn--full">Migrate Accounts</button>
+            <div id="errorAndInconsistentAccounts" class="form-text warning-text">
+              <!-- Error and inconsistent accounts will be rendered here -->
+            </div>
           </div>
         </div>
         <a class="last-item" href="#"> </a>
