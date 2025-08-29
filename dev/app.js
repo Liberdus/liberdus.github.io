@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -224,14 +224,6 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
   }
 }
 
-function getAvailableUsernames() {
-  const { netid } = network;
-  const accounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-  const netidAccounts = accounts.netids[netid];
-  if (!netidAccounts || !netidAccounts.usernames) return [];
-  return Object.keys(netidAccounts.usernames);
-}
-
 function newDataRecord(myAccount) {
 
   const myData = {
@@ -259,7 +251,6 @@ function newDataRecord(myAccount) {
           balance: 0n,
           networth: 0.0,
           addresses: [
-            // TODO remove addresses and only the address in myData.account.keys.address
             {
               address: myAccount.keys.address,
               balance: 0n,
@@ -302,9 +293,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // React Native App
   reactNativeApp.load();
-
-  // Check for native app subscription tokens and handle subscription
-  reactNativeApp.handleNativeAppSubscribe();
 
   // Unlock Modal
   unlockModal.load();
@@ -449,19 +437,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   getNetworkParams();
 
   welcomeScreen.lastItem.focus();
-
-  // Deprecated - do not want to encourage or confuse users with this feature since on IOS uses seperate local storage
-  //setupAddToHomeScreen();
 });
-
-/* this is no longer used; using handleBeforeUnload instead
-function handleUnload() {
-  console.log('in handleUnload');
-  if (menuModal.isSignoutExit) {
-    return;
-  } // User selected to Signout; state was already saved
-}
-*/
 
 // Add unload handler to save myData
 function handleBeforeUnload(e) {
@@ -664,8 +640,8 @@ class WelcomeScreen {
 
   orderButtons() {
     // Check for existing accounts and arrange welcome buttons
-    const usernames = getAvailableUsernames();
-    const hasAccounts = usernames.length > 0;
+    const { usernames } = signInModal.getSignInUsernames() || { usernames: [] };
+    const hasAccounts = usernames?.length > 0;
     // Reorder buttons based on accounts existence
     if (hasAccounts) {
       this.welcomeButtons.innerHTML = ''; // Clear existing order
@@ -1801,15 +1777,24 @@ class SignInModal {
   }
 
   /**
+   * Get the available usernames for the current network
+   * @returns {string[]} - An array of available usernames
+   */
+  getSignInUsernames() {
+    const { netid } = network;
+    const accounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    const netidAccounts = accounts.netids[netid];
+    if (!netidAccounts || !netidAccounts.usernames) return [];
+    return { usernames: Object.keys(netidAccounts.usernames), netidAccounts };
+  }
+
+  /**
    * Update the username select dropdown with notification indicators and sort by notification status
    * @param {string} [selectedUsername] - Optionally preserve a selected username
    * @returns {Object} Object containing usernames array and account information
    */
   updateUsernameSelect(selectedUsername = null) {
-    const { netid } = network;
-    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-    const netidAccounts = existingAccounts.netids[netid];
-    const usernames = netidAccounts?.usernames ? Object.keys(netidAccounts.usernames) : [];
+    const { usernames, netidAccounts } = signInModal.getSignInUsernames() || [];
 
     // Get the notified addresses and sort usernames to prioritize them
     const notifiedAddresses = reactNativeApp ? reactNativeApp.getNotificationAddresses() : [];
@@ -12400,7 +12385,7 @@ class MigrateAccountsModal {
             <input type="checkbox" value="${account.username}" 
                    data-netid="${account.netid}" 
                    data-section="${sectionId}"
-                   ${sectionId === 'taken' ? 'disabled' : ''}>
+                   ${sectionId === ('taken' || 'error') ? 'disabled' : ''}>
             ${account.username}_${account.netid.slice(0, 6)}
           </label>
         `).join('')}
@@ -13429,6 +13414,8 @@ class ReactNativeApp {
       this.fetchAppParams();
       // send message `GetAllPanelNotifications` to React Native when app is opened during DOMContentLoaded
       this.fetchAllPanelNotifications();
+      // Check for native app subscription tokens and handle subscription
+      this.handleNativeAppSubscribe();
     }
   }
 
