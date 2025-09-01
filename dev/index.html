@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.08.29.13.08" />
+    <link rel="stylesheet" href="./styles.css?v=2025.09.01.13.16" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.08.29.13.08" type="module"></script>
+    <script src="./app.js?v=2025.09.01.13.16" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -728,11 +728,29 @@
               </div>
               <div class="form-group">
                 <label>
+                  <input type="checkbox" id="overwriteAccountsCheckbox"> 
+                  Overwrite existing accounts from backup file
+                </label>
+              </div>
+
+              <div class="form-group" id="backupAccountLockGroup" style="display: none;">
+                <label for="backupAccountLock">Backup Account Password</label>
+                <input
+                  type="password"
+                  id="backupAccountLock"
+                  class="form-control"
+                  placeholder="Enter password used to lock accounts in backup"
+                />
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn btn--primary btn--pill btn--full">Load Account</button>
+              </div>
+              <div class="form-group">
+                <label>
                   <input type="checkbox" id="developerOptionsToggle"> 
                   Developer Options
                 </label>
               </div>
-
               <!-- Developer options section (initially hidden) -->
               <div id="developerOptionsSection" class="developer-options" style="display: none;">
                 <div class="form-group">
@@ -752,9 +770,6 @@
                   <input type="text" id="newStringCustom" class="form-control u-mt-5" 
                         placeholder="Enter custom new string">
                 </div>
-              </div>
-              <div class="form-actions">
-                <button type="submit" class="btn btn--primary btn--pill btn--full">Load Account</button>
               </div>
             </form>
           </div>
