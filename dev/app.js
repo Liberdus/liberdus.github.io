@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'z'
+const version = 'a'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -737,6 +737,14 @@ class Footer {
     this.footer.classList.remove('active');
   }
 
+  openNewChatButton() {
+    this.newChatButton.classList.add('visible');
+  }
+
+  closeNewChatButton() {
+    this.newChatButton.classList.remove('visible');
+  }
+
   async switchView(view) {
     // Store the current view for potential rollback
     const previousView = document.querySelector('.app-screen.active')?.id?.replace('Screen', '') || 'chats';
@@ -748,20 +756,20 @@ class Footer {
       contactsScreen.close();
       walletScreen.close();
   
-      // Show selected screen
-      document.getElementById(`${view}Screen`).classList.add('active');
-  
       // Update nav buttons - remove active class from all
       this.chatButton.classList.remove('active');
       this.contactsButton.classList.remove('active');
       this.walletButton.classList.remove('active');
   
-      // Add active class to selected button
+      // Add active class to selected button and add active or use .open() for relevant screen
       if (view === 'chats') {
+        chatsScreen.open();
         this.chatButton.classList.add('active');
       } else if (view === 'contacts') {
+        contactsScreen.open();
         this.contactsButton.classList.add('active');
       } else if (view === 'wallet') {
+        walletScreen.open();
         this.walletButton.classList.add('active');
       }
   
@@ -779,9 +787,9 @@ class Footer {
   
       // Show/hide new chat button
       if (view === 'chats' || view === 'contacts') {
-        this.newChatButton.classList.add('visible');
+        this.openNewChatButton();
       } else {
-        this.newChatButton.classList.remove('visible');
+        this.closeNewChatButton();
       }
   
       // Update lists when switching views
@@ -909,16 +917,10 @@ class ChatsScreen {
   // Update chat list UI
   updateChatList() {
     const chatList = this.chatList;
-    //const chatsData = myData
     const contacts = myData.contacts;
     const chats = myData.chats;
     if (chats.length === 0) {
-      chatList.innerHTML = `
-            <div class="empty-state">
-                <div style="font-size: 2rem; margin-bottom: 1rem"></div>
-                <div style="font-weight: bold; margin-bottom: 0.5rem">Click the + button to start a chat</div>
-                <div>Your conversations will appear here</div>
-            </div>`;
+      chatList.querySelector('.empty-state').style.display = 'block';
       return;
     }
 
@@ -954,7 +956,7 @@ class ChatsScreen {
           // Optionally add memo preview
           if (latestActivity.message) {
             // Memo is stored in the 'message' field for transfers
-            previewHTML += ` <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 25)}</span>`;
+            previewHTML += ` <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 50)}</span>`;
           }
         } else if (latestActivity.type === 'call') {
           previewHTML = `<span><i>Join call</i></span>`;
@@ -962,6 +964,8 @@ class ChatsScreen {
           previewHTML = `<span><i>Voice message</i></span>`;
         } else if ((!latestActivity.message || String(latestActivity.message).trim() === '') && latestActivity.xattach) {
           previewHTML = `<span><i>Attachment</i></span>`;
+        } else if (latestActivity.xattach && latestActivity.message && String(latestActivity.message).trim() !== '') {
+          previewHTML = `<span><i>Attachment</i></span> <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 40)}</span>`;
         } else {
           // Latest item is a regular message
           const messageText = escapeHtml(latestActivity.message);
@@ -1044,12 +1048,7 @@ class ContactsScreen {
     const contacts = myData.contacts;
 
     if (Object.keys(contacts).length === 0) {
-      this.contactsList.innerHTML = `
-            <div class="empty-state">
-                <div style="font-size: 2rem; margin-bottom: 1rem"></div>
-                <div style="font-weight: bold; margin-bottom: 0.5rem">No Contacts Yet</div>
-                <div>Your contacts will appear here</div>
-            </div>`;
+      this.contactsList.querySelector('.empty-state').style.display = 'block';
       return;
     }
 
@@ -1140,6 +1139,158 @@ class ContactsScreen {
 
 const contactsScreen = new ContactsScreen();
 
+class WalletScreen {
+  constructor() {
+
+  }
+
+  load() {
+    // screen
+    this.screen = document.getElementById('walletScreen');
+    // balance elements
+    this.totalBalance = document.getElementById('walletTotalBalance');
+    this.refreshBalanceButton = document.getElementById('refreshBalance');
+    // assets list
+    this.assetsList = document.getElementById('assetsList');
+    // action buttons
+    this.openSendAssetFormModalButton = document.getElementById('openSendAssetFormModal');
+    this.openReceiveModalButton = document.getElementById('openReceiveModal');
+    this.openHistoryModalButton = document.getElementById('openHistoryModal');
+
+    this.openSendAssetFormModalButton.addEventListener('click', () => {
+      sendAssetFormModal.open();
+    });
+    this.openReceiveModalButton.addEventListener('click', () => {
+      receiveModal.open();
+    });
+    this.openHistoryModalButton.addEventListener('click', () => {
+      historyModal.open();
+    });
+
+    // Add refresh balance button handler
+    this.refreshBalanceButton.addEventListener('click', async () => {
+      
+      // Add active class for animation
+      this.refreshBalanceButton.classList.add('active');
+      
+      // Remove active class after animation completes
+      setTimeout(() => {
+        this.refreshBalanceButton.classList.remove('active');
+        // Force blur to remove focus
+        this.refreshBalanceButton.blur();
+      }, 300);
+
+      this.updateWalletView();
+    });
+  }
+
+  open() {
+    this.screen.classList.add('active');
+  }
+
+  close() {
+    this.screen.classList.remove('active');
+  }
+
+  isActive() {
+    return this.screen.classList.contains('active');
+  }
+
+  // Update wallet view; refresh wallet
+  async updateWalletView() {
+    const walletData = myData.wallet;
+
+    await this.updateWalletBalances();
+
+    // Update total networth
+    this.totalBalance.textContent = (walletData.networth || 0).toFixed(2);
+
+    if (!Array.isArray(walletData.assets) || walletData.assets.length === 0) {
+      this.assetsList.querySelector('.empty-state').style.display = 'block';
+      return;
+    }
+
+    this.assetsList.innerHTML = walletData.assets
+      .map((asset) => {
+        console.log('asset balance', asset, asset.balance);
+        return `
+              <div class="asset-item">
+                  <div class="asset-logo"><img src="./media/liberdus_logo_50.png" class="asset-logo"></div>
+                  <div class="asset-info">
+                      <div class="asset-name">${asset.name}</div>
+                      <div class="asset-symbol">$${asset.price} / ${asset.symbol}</div>
+                  </div>
+                  <div class="asset-balance">${(Number(asset.balance) / Number(wei)).toFixed(6)}<br><span class="asset-symbol">$${asset.networth.toFixed(6)}</span></div>
+              </div>
+          `;
+      })
+      .join('');
+  }
+
+  // refresh wallet balance
+  async updateWalletBalances() {
+    if (!myAccount || !myData || !myData.wallet || !myData.wallet.assets) {
+      console.error('No wallet data available');
+      return;
+    } else if (!isOnline) {
+      console.warn('Not online. Not updating wallet balances');
+      return;
+    }
+    await updateAssetPricesIfNeeded();
+    const now = getCorrectedTimestamp();
+    if (!myData.wallet.timestamp) {
+      myData.wallet.timestamp = 0;
+    }
+    if (now - myData.wallet.timestamp < 5000) {
+      return;
+    }
+
+    let totalWalletNetworth = 0.0;
+    let failedToGetBalance = false;
+    // Update balances for each asset and address
+    for (const asset of myData.wallet.assets) {
+      let assetTotalBalance = 0n;
+
+      // Get balance for each address in the asset
+      for (const addr of asset.addresses) {
+        try {
+          const address = longAddress(addr.address);
+          const data = await queryNetwork(`/account/${address}/balance`);
+          if (!data) {
+            failedToGetBalance = true;
+            console.error(`Error fetching balance for address ${addr.address}:`, data);
+            continue;
+          }
+          console.log('balance', data);
+          if (data?.balance) {
+            // Update address balance
+            addr.balance = data.balance;
+          }
+          // Add to asset total (convert to USD using asset price)
+          assetTotalBalance += addr.balance;
+        } catch (error) {
+          console.error(`Error fetching balance for address ${addr.address}:`, error);
+        }
+      }
+      asset.balance = assetTotalBalance;
+      asset.networth = (asset.price * Number(assetTotalBalance)) / Number(wei);
+
+      // Add this asset's total to wallet total
+      totalWalletNetworth += asset.networth;
+    }
+
+    if (failedToGetBalance) {
+      showToast(`Error fetching balance. Try again later.` ,0 ,'error');
+      console.error('Failed to get balance for some addresses');
+    }
+
+    // Update total wallet balance
+    myData.wallet.networth = totalWalletNetworth;
+    myData.wallet.timestamp = now;
+  }
+}
+
+const walletScreen = new WalletScreen();
 
 class MenuModal {
   constructor() {
@@ -1222,13 +1373,10 @@ class MenuModal {
     menuModal.close();
     settingsModal.close(); // may be triggered from settings modal, calls openFullscreen() again
 
-    // this seems to be unnecessary but also benign
-    // myProfileModal.close();
-
     // Hide header and footer
     header.close();
     footer.close();
-    footer.newChatButton.classList.remove('visible');
+    footer.closeNewChatButton();
 
     // Reset header text
     header.setText('Liberdus');
@@ -1255,9 +1403,6 @@ class MenuModal {
 
     await reactNativeApp.handleNativeAppSubscribe();
     reactNativeApp.sendClearNotifications();
-
-    // Only reload if online
-//    window.location.reload();
     await checkVersion();
 
     // checkVersion() may update online status
@@ -1313,156 +1458,6 @@ class SettingsModal {
 }
 
 const settingsModal = new SettingsModal();
-
-class WalletScreen {
-  constructor() {
-
-  }
-
-  load() {
-    // screen
-    this.screen = document.getElementById('walletScreen');
-    // balance elements
-    this.totalBalance = document.getElementById('walletTotalBalance');
-    this.refreshBalanceButton = document.getElementById('refreshBalance');
-    // assets list
-    this.assetsList = document.getElementById('assetsList');
-    // action buttons
-    this.openSendAssetFormModalButton = document.getElementById('openSendAssetFormModal');
-    this.openReceiveModalButton = document.getElementById('openReceiveModal');
-    this.openHistoryModalButton = document.getElementById('openHistoryModal');
-
-    this.openSendAssetFormModalButton.addEventListener('click', () => {
-      sendAssetFormModal.open();
-    });
-    this.openReceiveModalButton.addEventListener('click', () => {
-      receiveModal.open();
-    });
-    this.openHistoryModalButton.addEventListener('click', () => {
-      historyModal.open();
-    });
-
-    // Add refresh balance button handler
-    this.refreshBalanceButton.addEventListener('click', async () => {
-      
-      // Add active class for animation
-      this.refreshBalanceButton.classList.add('active');
-      
-      // Remove active class after animation completes
-      setTimeout(() => {
-        this.refreshBalanceButton.classList.remove('active');
-        // Force blur to remove focus
-        this.refreshBalanceButton.blur();
-      }, 300);
-
-      // await updateWalletBalances();
-      this.updateWalletView();
-    });
-  }
-
-  open() {
-    this.screen.classList.add('active');
-  }
-
-  close() {
-    this.screen.classList.remove('active');
-  }
-
-  isActive() {
-    return this.screen.classList.contains('active');
-  }
-
-  // Update wallet view; refresh wallet
-  async updateWalletView() {
-    const walletData = myData.wallet;
-
-    await this.updateWalletBalances();
-
-    // Update total networth
-    this.totalBalance.textContent = (walletData.networth || 0).toFixed(2);
-
-    if (!Array.isArray(walletData.assets) || walletData.assets.length === 0) {
-      this.assetsList.innerHTML = `
-              <div class="empty-state">
-                  <div style="font-size: 2rem; margin-bottom: 1rem"></div>
-                  <div style="font-weight: bold; margin-bottom: 0.5rem">No Assets Yet</div>
-                  <div>Your assets will appear here</div>
-              </div>`;
-      return;
-    }
-
-    this.assetsList.innerHTML = walletData.assets
-      .map((asset) => {
-        console.log('asset balance', asset, asset.balance);
-        return `
-              <div class="asset-item">
-                  <div class="asset-logo"><img src="./media/liberdus_logo_50.png" class="asset-logo"></div>
-                  <div class="asset-info">
-                      <div class="asset-name">${asset.name}</div>
-                      <div class="asset-symbol">$${asset.price} / ${asset.symbol}</div>
-                  </div>
-                  <div class="asset-balance">${(Number(asset.balance) / Number(wei)).toFixed(6)}<br><span class="asset-symbol">$${asset.networth.toFixed(6)}</span></div>
-              </div>
-          `;
-      })
-      .join('');
-  }
-
-  // refresh wallet balance
-  async updateWalletBalances() {
-    if (!myAccount || !myData || !myData.wallet || !myData.wallet.assets) {
-      console.error('No wallet data available');
-      return;
-    } else if (!isOnline) {
-      console.warn('Not online. Not updating wallet balances');
-      return;
-    }
-    await updateAssetPricesIfNeeded();
-    const now = getCorrectedTimestamp();
-    if (!myData.wallet.timestamp) {
-      myData.wallet.timestamp = 0;
-    }
-    if (now - myData.wallet.timestamp < 5000) {
-      return;
-    }
-
-    // TODO - first update the asset prices from a public API
-
-    let totalWalletNetworth = 0.0;
-
-    // Update balances for each asset and address
-    for (const asset of myData.wallet.assets) {
-      let assetTotalBalance = 0n;
-
-      // Get balance for each address in the asset
-      for (const addr of asset.addresses) {
-        try {
-          const address = longAddress(addr.address);
-          const data = await queryNetwork(`/account/${address}/balance`);
-          console.log('balance', data);
-          // Update address balance
-          addr.balance = data.balance || 0n;
-
-          // Add to asset total (convert to USD using asset price)
-          assetTotalBalance += addr.balance;
-        } catch (error) {
-          console.error(`Error fetching balance for address ${addr.address}:`, error);
-        }
-      }
-      asset.balance = assetTotalBalance;
-      asset.networth = (asset.price * Number(assetTotalBalance)) / Number(wei);
-
-      // Add this asset's total to wallet total
-      totalWalletNetworth += asset.networth;
-    }
-
-    // Update total wallet balance
-    myData.wallet.networth = totalWalletNetworth;
-    myData.wallet.timestamp = now;
-  }
-}
-
-const walletScreen = new WalletScreen();
 
 /**
  * createNewContact
@@ -1533,10 +1528,6 @@ class ScanQRModal {
         this.stopCamera();
       }
 
-      // Hide previous results
-      // resultContainer.classList.add('hidden');
-
-      // statusMessage.textContent = 'Accessing camera...';
       // Request camera access with specific error handling
       try {
         this.camera.stream = await navigator.mediaDevices.getUserMedia({
@@ -1551,6 +1542,7 @@ class ScanQRModal {
         // Handle specific getUserMedia errors
         switch (mediaError.name) {
           case 'NotAllowedError':
+            this.close();
             throw new Error(
               'Camera access was denied. Please check your browser settings and grant permission to use the camera.'
             );
@@ -1577,13 +1569,10 @@ class ScanQRModal {
 
         // Enable scanning and update button
         this.camera.scanning = true;
-        // toggleButton.textContent = 'Stop Camera';
 
         // Start scanning for QR codes
         // Use interval instead of requestAnimationFrame for better control over scan frequency
         this.camera.scanInterval = setInterval(() => this.readQRCode(), 100); // scan every 100ms (10 times per second)
-
-        // statusMessage.textContent = 'Camera active. Point at a QR code.';
       };
 
       // Add error handler for video element
@@ -1598,9 +1587,6 @@ class ScanQRModal {
 
       // Show user-friendly error message
       showToast(error.message || 'Failed to access camera. Please check your permissions and try again.', 0, 'error');
-
-      // Re-throw the error if you need to handle it further up
-      throw error;
     }
   }
 
@@ -1646,47 +1632,16 @@ class ScanQRModal {
         }
       } catch (error) {
         // qr.decodeQR throws error if not found or on error
-        //console.log('QR scanning error or not found:', error); // Optional: Log if needed
+        //console.log('QR scanning error or not found:', error); // Optional: Log if needed since function is called every 100ms
       }
     }
   }
 
   handleSuccessfulScan(data) {
-    // const scanHighlight = document.getElementById('scan-highlight');
-    // Stop scanning
-    if (this.camera.scanInterval) {
-      clearInterval(this.camera.scanInterval);
-      this.camera.scanInterval = null;
-    }
-
-    this.camera.scanning = false;
-
-    // Stop the camera
-    this.stopCamera();
-
-    /*
-      // Show highlight effect
-      scanHighlight.classList.add('active');
-      setTimeout(() => {
-          scanHighlight.classList.remove('active');
-      }, 500);
-  */
-
-    // Display the result
-    //    qrResult.textContent = data;
-    //    resultContainer.classList.remove('hidden');
-    console.log('Raw QR Data Scanned:', data);
-    if (this.fillFunction) {
-      // Call the assigned fill function (e.g., fillPaymentFromQR or fillStakeAddressFromQR)
-      this.fillFunction(data);
-    }
-
     this.close();
-
-    // Update status
-    //    statusMessage.textContent = 'QR code detected! Camera stopped.';
+    console.log('Raw QR Data Scanned');
+    if (this.fillFunction) this.fillFunction(data); // Call the assigned fill function (e.g., fillPaymentFromQR or fillStakeAddressFromQR)
   }
-
 }
 
 const scanQRModal = new ScanQRModal();
@@ -1709,7 +1664,18 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
 
   await getNetworkParams();
   const asset = myData.wallet.assets[assetIndex];
-  const feeInWei = parameters.current.transactionFee || 1n * wei;
+  
+  // Check if transaction fee is available from network parameters
+  if (!parameters.current || !parameters.current.transactionFee) {
+    console.error('Transaction fee not available from network parameters');
+    if (balanceWarning) {
+      balanceWarning.textContent = 'Network error: Cannot determine transaction fee';
+      balanceWarning.style.display = 'inline';
+    }
+    return false;
+  }
+  
+  const feeInWei = parameters.current.transactionFee;
   const totalRequired = amount + feeInWei;
   const hasInsufficientBalance = BigInt(asset.balance) < totalRequired;
 
@@ -1761,6 +1727,60 @@ class SignInModal {
     this.backButton.addEventListener('click', () => this.close());
   }
 
+  // Centralized UI state helpers for availability results
+  setUiForMine() {
+    this.submitButton.disabled = false;
+    this.submitButton.textContent = 'Sign In';
+    this.submitButton.style.display = 'inline';
+    this.removeButton.style.display = 'none';
+    this.notFoundMessage.style.display = 'none';
+  }
+
+  setUiDisabledSignIn() {
+    this.submitButton.disabled = true;
+    this.submitButton.textContent = 'Sign In';
+    this.submitButton.style.display = 'inline';
+    this.removeButton.style.display = 'none';
+    this.notFoundMessage.style.display = 'none';
+  }
+
+  setUiForTaken() {
+    this.submitButton.style.display = 'none';
+    this.removeButton.style.display = 'inline';
+    this.notFoundMessage.textContent = 'taken';
+    this.notFoundMessage.style.display = 'inline';
+  }
+
+  setUiForAvailableNotFound() {
+    this.submitButton.disabled = false;
+    this.submitButton.textContent = 'Recreate';
+    this.submitButton.style.display = 'inline';
+    this.removeButton.style.display = 'inline';
+    this.notFoundMessage.textContent = 'not found';
+    this.notFoundMessage.style.display = 'inline';
+  }
+
+  setUiForNetworkError() {
+    this.submitButton.disabled = true;
+    this.submitButton.textContent = 'Sign In';
+    this.submitButton.style.display = 'none';
+    this.removeButton.style.display = 'none';
+    this.notFoundMessage.textContent = 'network error';
+    this.notFoundMessage.style.display = 'inline';
+  }
+
+  // When auto-selecting after account creation, the network may not have propagated
+  // the alias yet. In that case we suppress the
+  // transient "not found" and allow local sign-in using stored state.
+  applyAutoSelectNotFoundOverride() {
+    this.notFoundMessage.textContent = '';
+    this.notFoundMessage.style.display = 'none';
+    this.submitButton.style.display = 'inline';
+    this.submitButton.disabled = false;
+    this.submitButton.textContent = 'Sign In';
+    this.removeButton.style.display = 'none';
+  }
+
   /**
    * Get the available usernames for the current network
    * @returns {string[]} - An array of available usernames
@@ -1779,31 +1799,38 @@ class SignInModal {
    * @returns {Object} Object containing usernames array and account information
    */
   updateUsernameSelect(selectedUsername = null) {
-    const { usernames, netidAccounts } = signInModal.getSignInUsernames() || [];
+    const signInData = signInModal.getSignInUsernames() || {};
+    const usernames = Array.isArray(signInData.usernames) ? signInData.usernames : [];
+    const netidAccounts = signInData.netidAccounts || { usernames: {} };
 
     // Get the notified addresses and sort usernames to prioritize them
     const notifiedAddresses = reactNativeApp ? reactNativeApp.getNotificationAddresses() : [];
+    const notifiedAddressSet = new Set(Array.isArray(notifiedAddresses) ? notifiedAddresses : []);
     let sortedUsernames = [...usernames];
+    const notifiedUsernameSet = new Set();
     
-    // if there are notified addresses, sort the usernames to prioritize them
+    // if there are notified addresses, partition the usernames (stable) so notified come first
     if (notifiedAddresses.length > 0) {
-      // Find which usernames own the notified addresses
-      for (const [username, accountData] of Object.entries(netidAccounts.usernames)) {
-        if (notifiedAddresses.includes(accountData.address)) {
-          // Move this username to the front
-          sortedUsernames = sortedUsernames.filter(u => u !== username);
-          sortedUsernames.unshift(username);
-          break;
+      const notifiedUsernames = [];
+      const otherUsernames = [];
+      for (const username of sortedUsernames) {
+        const address = netidAccounts?.usernames?.[username]?.address;
+        const isNotified = Boolean(address && notifiedAddressSet.has(address));
+        if (isNotified) {
+          notifiedUsernames.push(username);
+          notifiedUsernameSet.add(username);
+        } else {
+          otherUsernames.push(username);
         }
       }
+      sortedUsernames = [...notifiedUsernames, ...otherUsernames];
     }
 
     // Populate select with sorted usernames and add an emoji to the username if it owns a notified address
     this.usernameSelect.innerHTML = `
       <option value="" disabled selected hidden>Select an account</option>
       ${sortedUsernames.map((username) => {
-        // Check if this username owns the notified address
-        const isNotifiedAccount = notifiedAddresses.includes(netidAccounts.usernames[username]?.address);
+        const isNotifiedAccount = notifiedUsernameSet.has(username);
         const dotIndicator = isNotifiedAccount ? ' 🔔' : '';
         return `<option value="${username}">${username}${dotIndicator}</option>`;
       }).join('')}
@@ -1834,18 +1861,12 @@ class SignInModal {
     }
 
     // If a username should be auto-selected (either preselect or only one account), do it
-    const autoSelect = preselectedUsername_ && usernames.includes(preselectedUsername_) ? preselectedUsername_ : null;
-    if (autoSelect) {
-      this.usernameSelect.value = autoSelect;
+    if ((preselectedUsername_ && usernames.includes(preselectedUsername_))) {
+      this.usernameSelect.value = this.preselectedUsername;
       await this.handleUsernameChange();
+      // happens when autoselect parameter is given since new account was just created and network may not have propagated account
       if (this.notFoundMessage.textContent === 'not found') {
-        // remove not found and make button available
-        this.notFoundMessage.textContent = '';
-        this.notFoundMessage.style.display = 'none';
-        this.submitButton.style.display = 'inline';
-        this.submitButton.disabled = false;
-        this.submitButton.textContent = 'Sign In';
-        this.removeButton.style.display = 'none';
+        this.applyAutoSelectNotFoundOverride();
         this.handleSignIn();
       }
       return;
@@ -1859,11 +1880,7 @@ class SignInModal {
     }
 
     // Multiple accounts exist, show modal with select dropdown
-    this.submitButton.disabled = true; // Keep button disabled until an account is selected
-    this.submitButton.textContent = 'Sign In';
-    this.submitButton.style.display = 'inline';
-    this.removeButton.style.display = 'none';
-    this.notFoundMessage.style.display = 'none';
+    this.setUiDisabledSignIn();
 
     // set timeout to focus on the last item so shift+tab and tab prevention works
     setTimeout(() => {
@@ -1874,11 +1891,7 @@ class SignInModal {
   close() {
     // clear signInModal input fields
     this.usernameSelect.value = '';
-    this.submitButton.disabled = true;
-    this.submitButton.textContent = 'Sign In';
-    this.submitButton.style.display = 'inline';
-    this.removeButton.style.display = 'none';
-    this.notFoundMessage.style.display = 'none';
+    this.setUiDisabledSignIn();
     
     this.modal.classList.remove('active');
     this.preselectedUsername = null;
@@ -1910,7 +1923,6 @@ class SignInModal {
 
     // Check if the button text is 'Recreate'
     if (this.submitButton.textContent === 'Recreate') {
-//      const myData = parse(localStorage.getItem(`${username}_${netid}`));
       const myData = loadState(`${username}_${netid}`);
       const privateKey = myData.account.keys.secret;
       createAccountModal.usernameInput.value = username;
@@ -1931,7 +1943,6 @@ class SignInModal {
     myAccount = myData.account;
     logsModal.log(`SignIn as ${username}_${netid}`)
 
-    /* requestNotificationPermission(); */
     if (useLongPolling) {
       setTimeout(longPoll(), 10);
     }
@@ -1997,30 +2008,13 @@ class SignInModal {
       this.handleSignIn();
       return;
     } else if (availability === 'mine') {
-      this.submitButton.disabled = false;
-      this.submitButton.textContent = 'Sign In';
-      this.submitButton.style.display = 'inline';
-      this.removeButton.style.display = 'none';
-      this.notFoundMessage.style.display = 'none';
+      this.setUiForMine();
     } else if (availability === 'taken') {
-      this.submitButton.style.display = 'none';
-      this.removeButton.style.display = 'inline';
-      this.notFoundMessage.textContent = 'taken';
-      this.notFoundMessage.style.display = 'inline';
+      this.setUiForTaken();
     } else if (availability === 'available') {
-      this.submitButton.disabled = false;
-      this.submitButton.textContent = 'Recreate';
-      this.submitButton.style.display = 'inline';
-      this.removeButton.style.display = 'inline';
-      this.notFoundMessage.textContent = 'not found';
-      this.notFoundMessage.style.display = 'inline';
+      this.setUiForAvailableNotFound();
     } else {
-      this.submitButton.disabled = true;
-      this.submitButton.textContent = 'Sign In';
-      this.submitButton.style.display = 'none';
-      this.removeButton.style.display = 'none';
-      this.notFoundMessage.textContent = 'network error';
-      this.notFoundMessage.style.display = 'inline';
+      this.setUiForNetworkError();
     }
   }
 
@@ -2074,6 +2068,10 @@ class MyInfoModal {
     this.editButton.addEventListener('click', () => myProfileModal.open());
   }
 
+  /**
+   * Update the my info modal with the current my account data
+   * @returns {Promise<void>}
+   */
   async updateMyInfo() {
     if (!myAccount) return;
 
@@ -2083,6 +2081,7 @@ class MyInfoModal {
     this.nameDiv.textContent = myAccount.username;
     this.subtitleDiv.textContent = myAccount.keys.address;
 
+    // Extract account data and define field configurations
     const { account = {} } = myData ?? {};
     const fields = {
       name:      { id: 'myInfoName',      label: 'Name' },
@@ -2097,6 +2096,7 @@ class MyInfoModal {
       Object.values(fields).map(({ id }) => [id, document.getElementById(id)])
     );
 
+    // Loop through each field config to update DOM elements and show/hide containers
     for (const [key, cfg] of Object.entries(fields)) {
       const el = elements[cfg.id];
       if (!el) continue; // skip if element not found
@@ -2112,6 +2112,7 @@ class MyInfoModal {
       container.style.display = empty ? 'none' : 'block';
       if (empty) continue;
 
+      // Set field value and href if applicable
       el.textContent = val;
       if (cfg.href) el.href = cfg.href(val);
     }
@@ -2147,7 +2148,7 @@ class ContactInfoModal {
     this.nameEditButton = document.getElementById('nameEditButton');
     this.chatButton = document.getElementById('contactInfoChatButton');
     this.sendButton = document.getElementById('contactInfoSendButton');
-    this.addFriendButton = document.getElementById('addFriendButtonContactInfo');
+    this.openFriendModalButton = document.getElementById('addFriendButtonContactInfo');
     this.avatarSection = this.modal.querySelector('.contact-avatar-section');
     this.avatarDiv = this.avatarSection.querySelector('.avatar');
     this.nameDiv = this.avatarSection.querySelector('.name');
@@ -2176,7 +2177,7 @@ class ContactInfoModal {
     });
 
     // Add add friend button handler
-    this.addFriendButton.addEventListener('click', () => {
+    this.openFriendModalButton.addEventListener('click', () => {
       if (!this.currentContactAddress) return;
       friendModal.open();
     });
@@ -2310,6 +2311,13 @@ class FriendModal {
     // Friend modal form submission
     this.friendForm.addEventListener('submit', (event) => this.handleFriendSubmit(event));
 
+    // Enable/disable submit button based on selection changes
+    this.friendForm.addEventListener('change', (e) => {
+      if (e.target && e.target.name === 'friendStatus') {
+        this.updateSubmitButtonState();
+      }
+    });
+
     // Friend modal close button
     this.modal.querySelector('.back-button').addEventListener('click', () => this.closeFriendModal());
   }
@@ -2319,18 +2327,13 @@ class FriendModal {
     const contact = myData.contacts[this.currentContactAddress];
     if (!contact) return;
 
-    // if .friend and .friendOld values are not the same disable the submit button
-    if (contact.friend !== contact.friendOld) {
-      showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'error');
-      this.submitButton.disabled = true;
-    } else {
-      this.submitButton.disabled = false;
-    }
-
     // Set the current friend status
     const status = contact?.friend.toString();
     const radio = this.friendForm.querySelector(`input[value="${status}"]`);
     if (radio) radio.checked = true;
+
+    // Initialize submit button state
+    this.updateSubmitButtonState();
 
     this.modal.classList.add('active');
   }
@@ -2375,12 +2378,19 @@ class FriendModal {
     const contact = myData.contacts[this.currentContactAddress];
     const selectedStatus = this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value;
 
+    if (selectedStatus == null || Number(selectedStatus) === contact.friend) {
+      this.submitButton.disabled = true;
+      console.log('No change in friend status or no status selected.');
+      return;
+    }
+
     // send transaction to update chat toll
     const res = await this.postUpdateTollRequired(this.currentContactAddress, Number(selectedStatus));
     if (res?.result?.success === false) {
       console.log(
         `[handleFriendSubmit] update_toll_required transaction failed: ${res?.result?.reason}. Did not update contact status.`
       );
+      showToast('Failed to update friend status. Please try again.', 0, 'error');
       return;
     }
 
@@ -2405,10 +2415,6 @@ class FriendModal {
 
     // Mark that we need to update the contact list
     this.needsContactListUpdate = true;
-
-    // TODO - do we really need to saveState here
-    // Save state
-//    saveState();
 
     // Update the friend button
     this.updateFriendButton(contact, 'addFriendButtonContactInfo');
@@ -2439,6 +2445,31 @@ class FriendModal {
     button.classList.remove('status-0', 'status-1', 'status-2', 'status-3');
     // Add the current status class
     button.classList.add(`status-${contact.friend}`);
+  }
+
+  // Update the submit button's enabled state based on current and selected status
+  updateSubmitButtonState() {
+    const contact = myData?.contacts?.[this.currentContactAddress];
+    if (!contact) {
+      this.submitButton.disabled = true;
+      return;
+    }
+
+    // If there's already a pending tx (friend != friendOld) keep disabled
+    if (contact.friend !== contact.friendOld) {
+      this.submitButton.disabled = true;
+      showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'error');
+      return;
+    }
+
+    const selectedStatus = this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value;
+    if (!selectedStatus) {
+      this.submitButton.disabled = true;
+      return;
+    }
+
+    // Enable only if different from current friend status
+    this.submitButton.disabled = Number(selectedStatus) === contact.friend;
   }
 
   // get the current contact address
@@ -2730,12 +2761,7 @@ class HistoryModal {
   }
 
   showEmptyState() {
-    this.transactionList.innerHTML = `
-      <div class="empty-state">
-        <div style="font-size: 2rem; margin-bottom: 1rem"></div>
-        <div style="font-weight: bold; margin-bottom: 0.5rem">No Transactions</div>
-        <div>Your transaction history will appear here</div>
-      </div>`;
+    this.transactionList.querySelector('.empty-state').style.display = 'block';
   }
 
   handleAssetChange() {
@@ -3954,7 +3980,7 @@ const searchContactsModal = new SearchContactsModal();
 // Create a display info object from a contact object
 function createDisplayInfo(contact) {
   return {
-    username: contact.username || contact.address.slice(0, 8) + '...' + contact.address.slice(-6),
+    username: contact.username || contact.address.slice(0, 8) + '…' + contact.address.slice(-6),
     name: contact.name || 'Not Entered',
     providedname: contact.senderInfo?.name || 'Not provided',
     email: contact.senderInfo?.email || 'Not provided',
@@ -4668,12 +4694,30 @@ class BackupAccountModal {
    */
   async handleSubmitOne(event) {
     event.preventDefault();
+    saveState();
 
     // Disable button to prevent multiple submissions
     this.submitButton.disabled = true;
 
     const password = this.passwordInput.value;
-    const jsonData = stringify(myData, null, 2);
+    // Build new structured backup object
+    const username = myData?.account?.username;
+    const netid = myData?.account?.netid;
+    const accountKey = `${username}_${netid}`;
+    // get key from localStorage
+    const account = localStorage.getItem(accountKey);
+
+    const backupObj = {
+      [accountKey]: account,
+    };
+
+    // Include global lock value from localStorage if present
+    const lockVal = localStorage.getItem('lock');
+    if (lockVal !== null) {
+      backupObj.lock = lockVal;
+    }
+
+    const jsonData = stringify(backupObj, null, 2);
 
     try {
       // Encrypt data if password is provided
@@ -5056,7 +5100,11 @@ class RestoreAccountModal {
 
       const localKey = `${username}_${netid}`;
       const exists = localStorage.getItem(localKey) !== null;
-      if (exists && !overwrite) continue; // skip when not overwriting
+      if (exists && !overwrite) {
+        // skip when not overwriting
+        showToast(`Account ${username} on ${netid.slice(0, 6)}... already exists. Not overwriting.`, 3000, 'warning');
+        continue;
+      }
 
       let value = backupData[key];
 
@@ -5149,8 +5197,6 @@ class RestoreAccountModal {
       // We first parse to jsonData so that if the parse does not work we don't destroy myData
       const backupData = parse(fileContent);
 
-      // if backupData has a version key then we assume all accounts were backed up and being restored
-      if (backupData.version) {
         // Instead of clearing localStorage, we'll merge accounts from backup into localStorage
         // Ask for confirmation (previous behavior warned about clearing; keep a similar warning)
         const confirmed = confirm('⚠️ WARNING: This will import all accounts from the backup file.\n\nExisting local accounts will not be removed. If "Overwrite existing accounts" is checked, accounts with the same username and netid will be replaced.\n\nIt is recommended to backup your current data before proceeding.\n\nDo you want to continue with the restore?');
@@ -5166,42 +5212,6 @@ class RestoreAccountModal {
           return; // merge failed — keep modal open and do not proceed to reset/close
         }
         showToast('Accounts restored successfully!', 2000, 'success');
-      }
-      // we are restoring only one account
-      else {
-        // also need to set myAccount
-        const acc = backupData.account; // this could have other things which are not needed
-        myAccount = {
-          netid: acc.netid,
-          username: acc.username,
-          keys: {
-            address: acc.keys.address,
-            public: acc.keys.public,
-            secret: acc.keys.secret,
-            type: acc.keys.type,
-          },
-        };
-        // Get existing accounts or create new structure
-        const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-        // Ensure netid exists
-        if (!existingAccounts.netids[myAccount.netid]) {
-          existingAccounts.netids[myAccount.netid] = { usernames: {} };
-        }
-        // Store updated accounts back in localStorage
-        existingAccounts.netids[myAccount.netid].usernames[myAccount.username] = {
-          address: myAccount.keys.address,
-        };
-        localStorage.setItem('accounts', stringify(existingAccounts));
-
-        // if lock enckey exist we need to encrypt the myData
-        const updatedMyData = lockModal?.encKey ? encryptData(stringify(backupData), lockModal?.encKey, true) : stringify(backupData);
-
-        // Store the localStore entry for username_netid
-        localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, updatedMyData);
-        // Show success message using toast
-        showToast('Account restored successfully!', 2000, 'success');
-      }
-
       
       // handleNativeAppSubscription()
 
@@ -7156,7 +7166,7 @@ class ChatModal {
     this.messageByteCounter.style.display = 'none';
 
     friendModal.setAddress(address);
-    footer.newChatButton.classList.remove('visible');
+    footer.closeNewChatButton();
     const contact = myData.contacts[address];
     friendModal.updateFriendButton(contact, 'addFriendButtonChat');
     // Set user info
@@ -7264,11 +7274,11 @@ class ChatModal {
     this.modal.classList.remove('active');
     if (chatsScreen.isActive()) {
       chatsScreen.updateChatList();
-      footer.newChatButton.classList.add('visible');
+      footer.openNewChatButton();
     }
     if (contactsScreen.isActive()) {
       contactsScreen.updateContactsList();
-      footer.newChatButton.classList.add('visible');
+      footer.openNewChatButton();
     }
     this.address = null;
   }
@@ -10122,7 +10132,7 @@ class NewChatModal {
    */
   openNewChatModal() {
     this.modal.classList.add('active');
-    footer.newChatButton.classList.remove('visible');
+    footer.closeNewChatButton();
     this.usernameAvailable.style.display = 'none';
     this.submitButton.disabled = true;
 
@@ -10146,10 +10156,10 @@ class NewChatModal {
     this.modal.classList.remove('active');
     this.newChatForm.reset();
     if (chatsScreen.isActive()) {
-      footer.newChatButton.classList.add('visible');
+      footer.openNewChatButton();
     }
     if (contactsScreen.isActive()) {
-      footer.newChatButton.classList.add('visible');
+      footer.openNewChatButton();
     }
   }
 
@@ -11565,18 +11575,6 @@ class SendAssetConfirmModal {
     const cancelButton = this.cancelButton;
     const username = normalizeUsername(sendAssetFormModal.usernameInput.value);
 
-    // hidden input field retryOfTxId value is not an empty string
-    if (sendAssetFormModal.retryTxIdInput.value) {
-      // remove from myData use txid from hidden field retryOfPaymentTxId
-      removeFailedTx(sendAssetFormModal.retryTxIdInput.value, toAddress);
-
-      // clear the field
-      failedTransactionModal.txid = '';
-      failedTransactionModal.address = '';
-      failedTransactionModal.memo = '';
-      sendAssetFormModal.retryTxIdInput.value = '';
-    }
-
     // if it's your own username disable the send button
     if (username == myAccount.username) {
       confirmButton.disabled = true;
@@ -11640,6 +11638,18 @@ class SendAssetConfirmModal {
         return;
       }
       toAddress = normalizeAddress(data.address);
+
+      // hidden input field retryOfTxId value is not an empty string
+      if (sendAssetFormModal.retryTxIdInput.value) {
+        // remove from myData use txid from hidden field retryOfPaymentTxId
+        removeFailedTx(sendAssetFormModal.retryTxIdInput.value, toAddress);
+
+        // clear the field
+        failedTransactionModal.txid = '';
+        failedTransactionModal.address = '';
+        failedTransactionModal.memo = '';
+        sendAssetFormModal.retryTxIdInput.value = '';
+      }
     } catch (error) {
       console.error('Error looking up username:', error);
       showToast('Error looking up username', 0, 'error');
@@ -12248,7 +12258,7 @@ class FailedTransactionModal {
       // find username in myData.contacts[this.address].senderInfo.username
       // enter as an input to invoke the oninput event
       sendAssetFormModal.usernameInput.value =
-        myData.contacts[this.address]?.senderInfo?.username || this.address || '';
+        myData.contacts[this.address]?.username || '';
       sendAssetFormModal.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
   
       // 4. fill in the amount input
@@ -14384,7 +14394,7 @@ longPollResult.timestamp = 0
 function getContactDisplayName(contact) {
   return contact?.name || 
          contact?.username || 
-         `${contact?.address?.slice(0, 8)}...${contact?.address?.slice(-6)}`;
+         `${contact?.address?.slice(0, 8)}…${contact?.address?.slice(-6)}`;
 }
 
 function isMobile() {
