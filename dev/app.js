@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -426,6 +426,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Call Invite Modal
   callInviteModal.load();
 
+  // Remove Accounts Modal
+  removeAccountsModal.load();
+
   // add event listener for back-button presses to prevent shift+tab
   document.querySelectorAll('.back-button').forEach((button) => {
     button.addEventListener('keydown', ignoreShiftTabKey);
@@ -561,7 +564,6 @@ class WelcomeScreen {
     this.screen = document.getElementById('welcomeScreen');
     this.signInButton = document.getElementById('signInButton');
     this.createAccountButton = document.getElementById('createAccountButton');
-    /* this.importAccountButton = document.getElementById('importAccountButton'); */
     this.openWelcomeMenuButton = document.getElementById('openWelcomeMenu');
     this.welcomeButtons = document.querySelector('.welcome-buttons');
     this.logoLink = this.screen.querySelector('.logo-link');
@@ -569,7 +571,6 @@ class WelcomeScreen {
     this.versionDisplay = document.getElementById('versionDisplay');
     this.networkNameDisplay = document.getElementById('networkNameDisplay');
     this.lastItem = document.getElementById('welcomeScreenLastItem');
-    this.openBackupModalButton = document.getElementById('openBackupModalButton');
     this.appVersionDisplay = document.getElementById('appVersionDisplay');
     this.appVersionText = document.getElementById('appVersionText');
     
@@ -597,16 +598,6 @@ class WelcomeScreen {
         createAccountModal.openWithReset();
       }
     });
-
-    /* this.importAccountButton.addEventListener('click', () => {
-      if (localStorage.lock && unlockModal.isLocked()) {
-        unlockModal.openButtonElementUsed = this.importAccountButton;
-        unlockModal.open();
-      } else {
-        restoreAccountModal.open();
-      }
-    }); */
-
     this.openWelcomeMenuButton.addEventListener('click', () => {
       welcomeMenuModal.open();
     });
@@ -637,6 +628,7 @@ class WelcomeScreen {
       this.welcomeButtons.innerHTML = ''; // Clear existing order
       this.signInButton.classList.remove('hidden');
       this.createAccountButton.classList.remove('hidden');
+      this.openWelcomeMenuButton.classList.remove('hidden');
       this.welcomeButtons.appendChild(this.signInButton);
       this.welcomeButtons.appendChild(this.createAccountButton);
       this.welcomeButtons.appendChild(this.openWelcomeMenuButton);
@@ -644,15 +636,14 @@ class WelcomeScreen {
       this.signInButton.classList.remove('btn--secondary');
       this.createAccountButton.classList.remove('btn--primary');
       this.createAccountButton.classList.add('btn--secondary');
-      
     } else {
       this.welcomeButtons.innerHTML = ''; // Clear existing order
       this.createAccountButton.classList.remove('hidden');
+      this.openWelcomeMenuButton.classList.remove('hidden');
       this.welcomeButtons.appendChild(this.createAccountButton);
       this.welcomeButtons.appendChild(this.openWelcomeMenuButton);
       this.createAccountButton.classList.remove('btn--secondary');
       this.createAccountButton.classList.add('btn--primary')
-      
     }
   }
 
@@ -679,14 +670,15 @@ class WelcomeMenuModal {
     this.removeButton = document.getElementById('welcomeOpenRemove');
     this.migrateButton = document.getElementById('welcomeOpenMigrate');
     this.launchButton = document.getElementById('welcomeOpenLaunch');
+    this.lockButton = document.getElementById('welcomeOpenLockModal');
     this.updateButton = document.getElementById('welcomeOpenUpdate');
     
 
     this.backupButton.addEventListener('click', () => backupAccountModal.open());
     this.restoreButton.addEventListener('click', () => restoreAccountModal.open());
-    this.removeButton.addEventListener('click', () => removeAccountModal.open());
+    this.removeButton.addEventListener('click', () => removeAccountsModal.open());
     this.migrateButton.addEventListener('click', () => migrateAccountsModal.open());
-    
+    this.lockButton.addEventListener('click', () => lockModal.open());
 
     // Show launch button if ReactNativeWebView is available
     if (window?.ReactNativeWebView) {
@@ -1314,7 +1306,7 @@ class WalletScreen {
             continue;
           }
           console.log('balance', data);
-          if (data?.balance) {
+          if (data?.balance !== undefined) {
             // Update address balance
             addr.balance = data.balance;
           }
@@ -4544,7 +4536,6 @@ class RemoveAccountModal {
     this.modal = document.getElementById('removeAccountModal');
     document.getElementById('closeRemoveAccountModal').addEventListener('click', () => this.close());
     document.getElementById('confirmRemoveAccount').addEventListener('click', () => this.removeAccount());
-    document.getElementById('confirmRemoveAllAccounts').addEventListener('click', () => this.removeAllAccounts());
     document.getElementById('openBackupFromRemove').addEventListener('click', () => backupAccountModal.open());
   }
 
@@ -4614,8 +4605,187 @@ class RemoveAccountModal {
     clearMyData(); // need to delete this so that the reload does not save the data into localStore again
     window.location.reload();
   }
-  
-  removeAllAccounts() {
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  signout() {
+    // called when user is logging out
+  }
+}
+const removeAccountModal = new RemoveAccountModal();
+
+// Modal to remove multiple accounts at once from welcome screen
+class RemoveAccountsModal {
+  constructor() {}
+
+  load() {
+    this.modal = document.getElementById('removeAccountsModal');
+    this.closeButton = document.getElementById('closeRemoveAccountsModal');
+    this.listContainer = document.getElementById('removeAccountsList');
+    this.submitButton = document.getElementById('submitRemoveAccounts');
+    this.removeAllButton = document.getElementById('removeAllAccountsButton');
+    this.closeButton.addEventListener('click', () => this.close());
+    this.submitButton.addEventListener('click', () => this.handleSubmit());
+    this.removeAllButton.addEventListener('click', () => this.handleRemoveAllAccounts());
+  }
+
+  open() {
+    this.renderAccounts();
+    this.submitButton.disabled = true;
+    this.modal.classList.add('active');
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    this.listContainer.innerHTML = '';
+  }
+
+  isActive() { 
+    return this.modal?.classList.contains('active'); 
+  }
+
+  getAllAccountsData() {
+    const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    const result = [];
+    // Walk accounts registry to get username + netid list and derive counts
+    for (const netid in accountsObj.netids) {
+      const usernamesObj = accountsObj.netids[netid]?.usernames || {};
+      for (const username in usernamesObj) {
+        const key = `${username}_${netid}`;
+        const state = loadState(key); // decrypted & parsed
+        let contactsCount = 0;
+        let messagesCount = 0;
+        if (state) {
+          try {
+            contactsCount = Object.keys(state.contacts || {}).length;
+            // Sum messages arrays lengths per contact
+            if (state.contacts) {
+              for (const addr in state.contacts) {
+                messagesCount += (state.contacts[addr].messages?.length || 0);
+              }
+            }
+          } catch (e) {
+            console.warn('Error counting contacts/messages for', key, e);
+          }
+        }
+        result.push({ username, netid, contactsCount, messagesCount });
+      }
+    }
+
+    // Find any orphaned account files not in accounts object (username_netid)
+    for (let i = 0; i < localStorage.length; i++) {
+      const storageKey = localStorage.key(i);
+      if (!storageKey) continue;
+      const parts = storageKey.split('_');
+      if (parts.length !== 2) continue;
+      const [username, netid] = parts;
+      if (netid.length !== 64) continue;
+      const already = result.find(r => r.username === username && r.netid === netid);
+      if (already) continue;
+      const state = loadState(storageKey);
+      let contactsCount = 0; let messagesCount = 0;
+      if (state) {
+        try {
+          contactsCount = Object.keys(state.contacts || {}).length;
+          if (state.contacts) {
+            for (const addr in state.contacts) {
+              messagesCount += (state.contacts[addr].messages?.length || 0);
+            }
+          }
+        } catch (e) {
+          console.warn('Error counting orphan account', storageKey, e);
+        }
+      }
+      result.push({ username, netid, contactsCount, messagesCount, orphan: true });
+    }
+    return result;
+  }
+
+  sortAccounts(accounts) {
+    const orderedNetids = network.netids || [];
+    return accounts.sort((a,b) => {
+      const ia = orderedNetids.indexOf(a.netid);
+      const ib = orderedNetids.indexOf(b.netid);
+      const aKnown = ia !== -1; const bKnown = ib !== -1;
+      if (aKnown && bKnown && ia !== ib) return ia - ib; // both known use index order
+      if (aKnown && !bKnown) return -1; // known before unknown
+      if (!aKnown && bKnown) return 1;
+      if (!aKnown && !bKnown) { // both unknown alphabetical by netid
+        if (a.netid !== b.netid) return a.netid.localeCompare(b.netid);
+      }
+      // same netid or both unknown same netid -> by username
+      return a.username.localeCompare(b.username);
+    });
+  }
+
+  groupByNetid(accounts) {
+    const groups = {};
+    for (const acct of accounts) {
+      if (!groups[acct.netid]) groups[acct.netid] = [];
+      groups[acct.netid].push(acct);
+    }
+    return groups;
+  }
+
+  renderAccounts() {
+    const accounts = this.sortAccounts(this.getAllAccountsData());
+    const groups = this.groupByNetid(accounts);
+    this.listContainer.innerHTML = '';
+    const orderedNetids = [...(network.netids || [])];
+    // Append unknown netids afterwards
+    const unknownNetids = Object.keys(groups).filter(n => !orderedNetids.includes(n)).sort();
+    const finalOrder = [...orderedNetids.filter(n => groups[n]), ...unknownNetids];
+    for (const netid of finalOrder) {
+      const section = document.createElement('div');
+      section.className = 'remove-accounts-section';
+      const accountsForNet = groups[netid];
+      section.innerHTML = `<h3>${netid.slice(0,6)} (${accountsForNet.length})</h3>`;
+      const list = document.createElement('div');
+      list.className = 'account-checkboxes';
+      accountsForNet.forEach(acc => {
+        const label = document.createElement('label');
+        label.className = 'remove-account-row';
+        label.innerHTML = `
+          <input type="checkbox" data-username="${acc.username}" data-netid="${acc.netid}" />
+          <span class="remove-account-username">${acc.username}</span>
+          <span class="remove-account-stats">${acc.contactsCount} contacts, ${acc.messagesCount} messages${acc.orphan ? ' (orphan)' : ''}</span>
+        `;
+        list.appendChild(label);
+      });
+      section.appendChild(list);
+      this.listContainer.appendChild(section);
+    }
+    // checkbox change handler for enabling submit
+    this.listContainer.addEventListener('change', () => {
+      const checked = this.listContainer.querySelectorAll('input[type="checkbox"]:checked').length;
+      this.submitButton.disabled = checked === 0;
+    }, { once: true }); // attach once, inside we attach nested listeners via event bubbling
+  }
+
+  handleSubmit() {
+    const checked = this.listContainer.querySelectorAll('input[type="checkbox"]:checked');
+    if (checked.length === 0) return;
+    const confirmText = confirm(`Remove ${checked.length} selected account(s) from this device?`);
+    if (!confirmText) return;
+    const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    checked.forEach(cb => {
+      const username = cb.dataset.username;
+      const netid = cb.dataset.netid;
+      // remove account data file
+      localStorage.removeItem(`${username}_${netid}`);
+      // remove from registry if present
+      if (accountsObj.netids[netid] && accountsObj.netids[netid].usernames && accountsObj.netids[netid].usernames[username]) {
+        delete accountsObj.netids[netid].usernames[username];
+      }
+    });
+    localStorage.setItem('accounts', stringify(accountsObj));
+    showToast('Selected accounts removed', 3000, 'success');
+    this.close();
+  }
+
+  handleRemoveAllAccounts() {
     const confirmText = prompt(`WARNING: All accounts and data will be permanently removed from this device.\n\nType "REMOVE ALL" to confirm:`);
     if (confirmText !== "REMOVE ALL") {
       showToast('Remove all cancelled', 2000, 'warning');
@@ -4632,16 +4802,8 @@ class RemoveAccountModal {
     clearMyData();
     window.location.reload();
   }
-
-  isActive() {
-    return this.modal.classList.contains('active');
-  }
-
-  signout() {
-    // called when user is logging out
-  }
 }
-const removeAccountModal = new RemoveAccountModal();
+const removeAccountsModal = new RemoveAccountsModal();
 
 class BackupAccountModal {
   constructor() {}
@@ -7081,6 +7243,10 @@ class ChatModal {
 
     // Abort controller for cancelling file operations
     this.abortController = new AbortController();
+    
+    // Keyboard detection properties
+    this.isKeyboardVisible = false; // Track keyboard state
+    this.initialViewportHeight = window.innerHeight; // Store initial viewport height
   }
 
   /**
@@ -7163,6 +7329,21 @@ class ChatModal {
 
       // Save draft (text is already limited to 2000 chars by maxlength attribute)
       this.debouncedSaveDraft(e.target.value);
+    });
+
+    // Add viewport resize listener for keyboard detection
+    window.addEventListener('resize', () => {
+      const currentHeight = window.innerHeight;
+      const heightDifference = this.initialViewportHeight - currentHeight;
+      
+      // If viewport height decreased significantly, keyboard is likely open
+      if (heightDifference > 150) { // 150px threshold for keyboard detection
+        this.isKeyboardVisible = true;
+        console.log('⌨️ Keyboard detected as open (viewport height decreased by', heightDifference, 'px)');
+      } else if (heightDifference < 50) { // If height increased or stayed similar, keyboard is likely closed
+        this.isKeyboardVisible = false;
+        console.log('⌨️ Keyboard detected as closed (viewport height difference:', heightDifference, 'px)');
+      }
     });
 
     // Add focus event listener for message input to handle scrolling
@@ -8546,12 +8727,27 @@ console.warn('in send message', txid)
   }
 
   /**
+   * Detects if the keyboard is currently open
+   * @returns {boolean} True if keyboard is likely open
+   */
+  isKeyboardOpen() {
+    // Use the tracked state from resize listener for more reliable detection
+    return this.isKeyboardVisible;
+  }
+
+  /**
    * Handles message click events
    * @param {Event} e - Click event
    */
   handleMessageClick(e) {
     if (e.target.closest('.attachment-row')) return;
     if (e.target.closest('.voice-message-play-button')) return;
+
+    // Check if keyboard is open - if so, don't show context menu
+    if (this.isKeyboardOpen()) {
+      console.log('⌨️ Keyboard is open, preventing context menu');
+      return;
+    }
 
     if (e.target.tagName === 'A' || e.target.closest('a')) return;
     
@@ -8562,9 +8758,12 @@ console.warn('in send message', txid)
 
     if (messageEl.dataset.status === 'failed') {
       const isPayment = messageEl.classList.contains('payment-info');
-      return isPayment 
-        ? failedTransactionModal.open(messageEl.dataset.txid, messageEl)
-        : failedMessageMenu.open(e, messageEl);
+      if (isPayment) {
+        // Open main context menu but configure for failed payment
+        this.showMessageContextMenu(e, messageEl);
+        return;
+      }
+      return failedMessageMenu.open(e, messageEl);
     }
 
     this.showMessageContextMenu(e, messageEl);
@@ -8593,14 +8792,23 @@ console.warn('in send message', txid)
     const copyOption = this.contextMenu.querySelector('[data-action="copy"]');
     const joinOption = this.contextMenu.querySelector('[data-action="join"]');
     const inviteOption = this.contextMenu.querySelector('[data-action="call-invite"]');
+    const editResendOption = this.contextMenu.querySelector('[data-action="edit-resend"]');
+    const isFailedPayment = messageEl.dataset.status === 'failed' && messageEl.classList.contains('payment-info');
+    // For failed payment messages, hide copy and delete-for-all regardless of sender
+    if (isFailedPayment) {
+      if (copyOption) copyOption.style.display = 'none';
+      if (deleteForAllOption) deleteForAllOption.style.display = 'none';
+    }
     if (isCall) {
       if (copyOption) copyOption.style.display = 'none';
       if (joinOption) joinOption.style.display = 'flex';
       if (inviteOption) inviteOption.style.display = 'flex';
+      if (editResendOption) editResendOption.style.display = 'none';
     } else {
       if (copyOption) copyOption.style.display = 'flex';
       if (joinOption) joinOption.style.display = 'none';
       if (inviteOption) inviteOption.style.display = 'none';
+      if (editResendOption) editResendOption.style.display = isFailedPayment ? 'flex' : 'none';
     }
     
     this.positionContextMenu(this.contextMenu, messageEl);
@@ -8614,29 +8822,24 @@ console.warn('in send message', txid)
    */
   positionContextMenu(menu, messageEl) {
     const rect = messageEl.getBoundingClientRect();
-    const menuWidth = 200; // match CSS
+    const container = messageEl.closest('.messages-container');
+    const containerRect = container?.getBoundingClientRect() || { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+    
+    const menuWidth = 200;
     const menuHeight = 100;
-
-    let left = rect.left + (rect.width / 2) - (menuWidth / 2);
-    // If menu would overflow right, push left
-    if (left + menuWidth > window.innerWidth - 10) {
-      left = window.innerWidth - menuWidth - 10;
+    
+    // Center horizontally, clamp to container
+    let left = Math.max(containerRect.left + 10, 
+                        Math.min(containerRect.right - menuWidth - 10, 
+                                 rect.left + rect.width/2 - menuWidth/2));
+    
+    // Prefer below, fallback to above, clamp to container
+    let top = rect.bottom + 10;
+    if (top + menuHeight > containerRect.bottom) {
+      top = Math.max(containerRect.top + 10, rect.top - menuHeight - 10);
     }
-    // If menu would overflow left, push right
-    if (left < 10) {
-      left = 10;
-    }
-
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceAbove = rect.top;
-    const top = (spaceBelow >= menuHeight || spaceBelow > spaceAbove)
-      ? rect.bottom + 10
-      : rect.top - menuHeight - 10;
-
-    Object.assign(menu.style, {
-      left: `${left}px`,
-      top: `${top}px`
-    });
+    
+    Object.assign(menu.style, { left: `${left}px`, top: `${top}px` });
   }
 
   /**
@@ -8668,14 +8871,65 @@ console.warn('in send message', txid)
         callInviteModal.open(messageEl);
         break;
       case 'delete':
-        this.deleteMessage(messageEl);
+        if (messageEl.dataset.status === 'failed' && messageEl.classList.contains('payment-info')) {
+          this.deleteFailedPayment(messageEl);
+        } else {
+          this.deleteMessage(messageEl);
+        }
         break;
       case 'delete-for-all':
         this.deleteMessageForAll(messageEl);
         break;
+      case 'edit-resend':
+        this.handleFailedPaymentEditResend(messageEl);
+        break;
     }
     
     this.closeContextMenu();
+  }
+
+  /**
+   * Deletes a failed payment
+   * @param {HTMLElement} messageEl
+   */
+  deleteFailedPayment(messageEl) {
+      const txid = messageEl.dataset.txid;
+      if (txid) {
+        const currentAddress = this.address;
+        removeFailedTx(txid, currentAddress);
+        this.appendChatModal();
+      }
+  }
+
+  /**
+   * Prefill Send form for a failed payment to edit and resend
+   * @param {HTMLElement} messageEl
+   */
+  handleFailedPaymentEditResend(messageEl) {
+    const txid = messageEl.dataset.txid;
+    const address = messageEl?.dataset?.address || this.address;
+    const memo = messageEl.querySelector('.payment-memo')?.textContent || '';
+
+    if (!sendAssetFormModal?.modal || !sendAssetFormModal?.retryTxIdInput) return;
+
+    // Open send modal
+    sendAssetFormModal.open();
+
+    // Hidden retry txid input (used later to remove original failed tx on successful resend)
+    sendAssetFormModal.retryTxIdInput.value = txid || '';
+
+    // Memo
+    sendAssetFormModal.memoInput.value = memo || '';
+
+    // Recipient username (best-effort from contacts)
+    sendAssetFormModal.usernameInput.value = myData.contacts[address]?.username || '';
+    sendAssetFormModal.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    // Amount from wallet history (BigInt → string)
+    const amountBig = myData.wallet.history.find((tx) => tx.txid === txid)?.amount;
+    if (typeof amountBig === 'bigint') {
+      sendAssetFormModal.amountInput.value = big2str(amountBig, 18);
+    }
   }
 
 
@@ -10407,8 +10661,6 @@ class CreateAccountModal {
     this.togglePrivateKeyVisibility = document.getElementById('togglePrivateKeyVisibility');
     this.migrateAccountsSection = document.getElementById('migrateAccountsSection');
     this.migrateAccountsButton = document.getElementById('migrateAccountsButton');
-    this.launchButton = document.getElementById('launchButton');
-    this.updateButton = document.getElementById('updateButton');
     this.toggleMoreOptions = document.getElementById('toggleMoreOptions');
     this.moreOptionsSection = document.getElementById('moreOptionsSection');
 
@@ -10429,15 +10681,6 @@ class CreateAccountModal {
     });
 
     this.migrateAccountsButton.addEventListener('click', async () => await migrateAccountsModal.open());
-    if (window.ReactNativeWebView) {
-      this.launchButton.addEventListener('click', () => {
-        launchModal.open()
-      });
-      
-      this.updateButton.addEventListener('click', () => {
-        aboutModal.openStore();
-      });
-    }
   }
 
   open() {
@@ -10477,8 +10720,6 @@ class CreateAccountModal {
     this.moreOptionsSection.style.display = 'none';
     this.toggleButton.checked = false;
     this.privateKeySection.style.display = 'none';
-    this.launchButton.style.display = 'none';
-    this.updateButton.style.display = 'none';
     
     // Open the modal
     this.open();
@@ -10556,11 +10797,6 @@ class CreateAccountModal {
       this.privateKeySection.style.display = 'none';
       this.privateKeyInput.value = '';
       this.privateKeyError.style.display = 'none';
-      this.launchButton.style.display = 'none';
-      this.updateButton.style.display = 'none';
-    } else if (window.ReactNativeWebView) {
-      this.launchButton.style.display = 'block';
-      this.updateButton.style.display = 'block';
     }
   }
 
@@ -11730,18 +11966,6 @@ class SendAssetConfirmModal {
         return;
       }
       toAddress = normalizeAddress(data.address);
-
-      // hidden input field retryOfTxId value is not an empty string
-      if (sendAssetFormModal.retryTxIdInput.value) {
-        // remove from myData use txid from hidden field retryOfPaymentTxId
-        removeFailedTx(sendAssetFormModal.retryTxIdInput.value, toAddress);
-
-        // clear the field
-        failedTransactionModal.txid = '';
-        failedTransactionModal.address = '';
-        failedTransactionModal.memo = '';
-        sendAssetFormModal.retryTxIdInput.value = '';
-      }
     } catch (error) {
       console.error('Error looking up username:', error);
       showToast('Error looking up username', 0, 'error');
@@ -11865,6 +12089,18 @@ class SendAssetConfirmModal {
           await sendAssetFormModal.reopen();
         }
         throw new Error('Transaction failed');
+      }
+
+      // hidden input field retryOfTxId value is not an empty string
+      if (sendAssetFormModal.retryTxIdInput.value) {
+        // remove from myData use txid from hidden field retryOfPaymentTxId
+        removeFailedTx(sendAssetFormModal.retryTxIdInput.value, toAddress);
+
+        // clear the field
+        failedTransactionModal.txid = '';
+        failedTransactionModal.address = '';
+        failedTransactionModal.memo = '';
+        sendAssetFormModal.retryTxIdInput.value = '';
       }
 
       /* if (!response || !response.result || !response.result.success) {
