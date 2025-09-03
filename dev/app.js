@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'a'
+const version = 'b'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -306,6 +306,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Welcome Screen
   welcomeScreen.load()
 
+  // Welcome Menu Modal
+  welcomeMenuModal.load();
+
   // Footer
   footer.load();
 
@@ -551,7 +554,6 @@ function loadState(account, noparse=false){
   return parse(data);
 }
 
-
 class WelcomeScreen {
   constructor() {}
 
@@ -559,7 +561,8 @@ class WelcomeScreen {
     this.screen = document.getElementById('welcomeScreen');
     this.signInButton = document.getElementById('signInButton');
     this.createAccountButton = document.getElementById('createAccountButton');
-    this.importAccountButton = document.getElementById('importAccountButton');
+    /* this.importAccountButton = document.getElementById('importAccountButton'); */
+    this.openWelcomeMenuButton = document.getElementById('openWelcomeMenu');
     this.welcomeButtons = document.querySelector('.welcome-buttons');
     this.logoLink = this.screen.querySelector('.logo-link');
     this.logoLink.addEventListener('keydown', ignoreShiftTabKey);  // add event listener for first-item to prevent shift+tab
@@ -595,17 +598,17 @@ class WelcomeScreen {
       }
     });
 
-    this.importAccountButton.addEventListener('click', () => {
+    /* this.importAccountButton.addEventListener('click', () => {
       if (localStorage.lock && unlockModal.isLocked()) {
         unlockModal.openButtonElementUsed = this.importAccountButton;
         unlockModal.open();
       } else {
         restoreAccountModal.open();
       }
-    });
+    }); */
 
-    this.openBackupModalButton.addEventListener('click', () => {
-      backupAccountModal.open();
+    this.openWelcomeMenuButton.addEventListener('click', () => {
+      welcomeMenuModal.open();
     });
 
     this.orderButtons();
@@ -634,26 +637,22 @@ class WelcomeScreen {
       this.welcomeButtons.innerHTML = ''; // Clear existing order
       this.signInButton.classList.remove('hidden');
       this.createAccountButton.classList.remove('hidden');
-      this.importAccountButton.classList.remove('hidden');
       this.welcomeButtons.appendChild(this.signInButton);
       this.welcomeButtons.appendChild(this.createAccountButton);
-      this.welcomeButtons.appendChild(this.importAccountButton);
+      this.welcomeButtons.appendChild(this.openWelcomeMenuButton);
       this.signInButton.classList.add('btn--primary');
       this.signInButton.classList.remove('btn--secondary');
       this.createAccountButton.classList.remove('btn--primary');
       this.createAccountButton.classList.add('btn--secondary');
-      this.openBackupModalButton.classList.remove('hidden');
-      this.welcomeButtons.appendChild(this.openBackupModalButton);
+      
     } else {
       this.welcomeButtons.innerHTML = ''; // Clear existing order
       this.createAccountButton.classList.remove('hidden');
-      this.importAccountButton.classList.remove('hidden');
       this.welcomeButtons.appendChild(this.createAccountButton);
-      this.welcomeButtons.appendChild(this.importAccountButton);
+      this.welcomeButtons.appendChild(this.openWelcomeMenuButton);
       this.createAccountButton.classList.remove('btn--secondary');
       this.createAccountButton.classList.add('btn--primary')
-      this.openBackupModalButton.classList.remove('hidden');
-      this.welcomeButtons.appendChild(this.openBackupModalButton);
+      
     }
   }
 
@@ -666,6 +665,59 @@ class WelcomeScreen {
 }
 
 const welcomeScreen = new WelcomeScreen();
+
+class WelcomeMenuModal {
+  constructor() {}
+
+  load() {
+    this.modal = document.getElementById('welcomeMenuModal');
+    this.closeButton = document.getElementById('closeWelcomeMenu');
+    this.closeButton.addEventListener('click', () => this.close());
+
+    this.backupButton = document.getElementById('welcomeOpenBackup');
+    this.restoreButton = document.getElementById('welcomeOpenRestore');
+    this.removeButton = document.getElementById('welcomeOpenRemove');
+    this.migrateButton = document.getElementById('welcomeOpenMigrate');
+    this.launchButton = document.getElementById('welcomeOpenLaunch');
+    this.updateButton = document.getElementById('welcomeOpenUpdate');
+    
+
+    this.backupButton.addEventListener('click', () => backupAccountModal.open());
+    this.restoreButton.addEventListener('click', () => restoreAccountModal.open());
+    this.removeButton.addEventListener('click', () => removeAccountModal.open());
+    this.migrateButton.addEventListener('click', () => migrateAccountsModal.open());
+    
+
+    // Show launch button if ReactNativeWebView is available
+    if (window?.ReactNativeWebView) {
+      this.launchButton.addEventListener('click', () => launchModal.open());
+      this.launchButton.style.display = 'block';
+      this.updateButton.addEventListener('click', () => aboutModal.openStore());
+      this.updateButton.style.display = 'block';
+    }
+  }
+
+  open() {
+    if (localStorage.lock && unlockModal.isLocked()) {
+      unlockModal.openButtonElementUsed = welcomeScreen.openWelcomeMenuButton;
+      unlockModal.open();
+    } else {
+      this.modal.classList.add('active');
+      enterFullscreen();
+    }
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    enterFullscreen();
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+}
+
+const welcomeMenuModal = new WelcomeMenuModal();
 
 class Header {
   constructor() {}
@@ -1923,6 +1975,7 @@ class SignInModal {
 
     // Check if the button text is 'Recreate'
     if (this.submitButton.textContent === 'Recreate') {
+//      const myData = parse(localStorage.getItem(`${username}_${netid}`));
       const myData = loadState(`${username}_${netid}`);
       const privateKey = myData.account.keys.secret;
       createAccountModal.usernameInput.value = username;
@@ -1943,6 +1996,7 @@ class SignInModal {
     myAccount = myData.account;
     logsModal.log(`SignIn as ${username}_${netid}`)
 
+    /* requestNotificationPermission(); */
     if (useLongPolling) {
       setTimeout(longPoll(), 10);
     }
@@ -2068,10 +2122,6 @@ class MyInfoModal {
     this.editButton.addEventListener('click', () => myProfileModal.open());
   }
 
-  /**
-   * Update the my info modal with the current my account data
-   * @returns {Promise<void>}
-   */
   async updateMyInfo() {
     if (!myAccount) return;
 
@@ -2081,7 +2131,6 @@ class MyInfoModal {
     this.nameDiv.textContent = myAccount.username;
     this.subtitleDiv.textContent = myAccount.keys.address;
 
-    // Extract account data and define field configurations
     const { account = {} } = myData ?? {};
     const fields = {
       name:      { id: 'myInfoName',      label: 'Name' },
@@ -2096,7 +2145,6 @@ class MyInfoModal {
       Object.values(fields).map(({ id }) => [id, document.getElementById(id)])
     );
 
-    // Loop through each field config to update DOM elements and show/hide containers
     for (const [key, cfg] of Object.entries(fields)) {
       const el = elements[cfg.id];
       if (!el) continue; // skip if element not found
@@ -2112,7 +2160,6 @@ class MyInfoModal {
       container.style.display = empty ? 'none' : 'block';
       if (empty) continue;
 
-      // Set field value and href if applicable
       el.textContent = val;
       if (cfg.href) el.href = cfg.href(val);
     }
@@ -2148,7 +2195,7 @@ class ContactInfoModal {
     this.nameEditButton = document.getElementById('nameEditButton');
     this.chatButton = document.getElementById('contactInfoChatButton');
     this.sendButton = document.getElementById('contactInfoSendButton');
-    this.openFriendModalButton = document.getElementById('addFriendButtonContactInfo');
+    this.addFriendButton = document.getElementById('addFriendButtonContactInfo');
     this.avatarSection = this.modal.querySelector('.contact-avatar-section');
     this.avatarDiv = this.avatarSection.querySelector('.avatar');
     this.nameDiv = this.avatarSection.querySelector('.name');
@@ -2177,7 +2224,7 @@ class ContactInfoModal {
     });
 
     // Add add friend button handler
-    this.openFriendModalButton.addEventListener('click', () => {
+    this.addFriendButton.addEventListener('click', () => {
       if (!this.currentContactAddress) return;
       friendModal.open();
     });
@@ -5195,7 +5242,7 @@ class RestoreAccountModal {
       }
 
       // We first parse to jsonData so that if the parse does not work we don't destroy myData
-      const backupData = parse(fileContent);
+      let backupData = parse(fileContent);
 
         // Instead of clearing localStorage, we'll merge accounts from backup into localStorage
         // Ask for confirmation (previous behavior warned about clearing; keep a similar warning)
@@ -5204,6 +5251,15 @@ class RestoreAccountModal {
         if (!confirmed) {
           showToast('Restore cancelled by user', 2000, 'info');
           return;
+        }
+
+        // backwards compatibility for old single account export
+        if(typeof backupData === 'object' && 'account' in backupData) {
+          const username = backupData.account.username;
+          const netid = backupData.account.netid;
+          backupData = {
+            [`${username}_${netid}`]: stringify(backupData)
+          };
         }
 
         // Merge and abort if merge failed
@@ -5566,12 +5622,25 @@ class InviteModal {
     this.closeButton = document.getElementById('closeInviteModal');
     this.inviteForm = document.getElementById('inviteForm');
     this.shareButton = document.getElementById('shareInviteButton');
+    this.resetInviteButton = document.getElementById('resetInviteMessage');
 
     this.closeButton.addEventListener('click', () => this.close());
     this.inviteForm.addEventListener('submit', (event) => this.handleSubmit(event));
 
     // input listener for editable message
     this.inviteMessageInput.addEventListener('input', () => this.validateInputs());
+    // reset invite message
+    this.resetInviteButton.addEventListener('click', () => this.handleResetClick());
+  }
+
+  handleResetClick() {
+    this.inviteMessageInput.value = this.getDefaultInviteText();
+    this.validateInputs();
+    this.inviteMessageInput.focus();
+  }
+
+  getDefaultInviteText() {
+    return `Message ${myAccount?.username || ''} on Liberdus! ${this.inviteURL}`;
   }
 
   validateInputs() {
@@ -5582,11 +5651,13 @@ class InviteModal {
   open() {
     // Clear any previous values
     // Prefill the editable invite message with a useful default
-    const defaultText = `Message ${myAccount?.username || ''} on Liberdus! ${this.inviteURL}`;
+    const savedText = myData?.settings?.inviteMessage;
+    const defaultText = this.getDefaultInviteText();
+    const initialText = (savedText && savedText.trim()) ? savedText : defaultText;
     if (this.inviteMessageInput) {
       // Only set default if the user hasn't previously entered something
       if (!this.inviteMessageInput.value || !this.inviteMessageInput.value.trim()) {
-        this.inviteMessageInput.value = defaultText;
+        this.inviteMessageInput.value = initialText;
       }
     }
     this.validateInputs(); // Set initial button state
@@ -5599,22 +5670,33 @@ class InviteModal {
 
   async handleSubmit(event) {
     event.preventDefault();
-    this.submitButton.disabled = true;
 
     const message = this.inviteMessageInput.value.trim();
 
     if (!message) {
       showToast('Please enter a message to share', 0, 'error');
-      this.submitButton.disabled = false;
       return;
     }
+
+    // Save edited message to settings and persist
+    if (myData && myData.settings) {
+      myData.settings.inviteMessage = message;
+      saveState();
+    }
+
+    // 2-second cooldown on Share button
+    this.submitButton.disabled = true;
+    this.resetInviteButton.disabled = true;
+    setTimeout(() => {
+      this.validateInputs();
+      this.resetInviteButton.disabled = false;
+    }, 2000);
 
     try {
       await this.shareLiberdusInvite(message);
     } catch (err) {
-      // shareLiberdusInvite will show its own errors; if it throws, show a fallback
+      // shareLiberdusInvite will show its own errors; rely on cooldown to re-enable
       showToast('Could not share invitation. Try copying manually.', 0, 'error');
-      this.submitButton.disabled = false;
     }
   }
 
@@ -5624,7 +5706,17 @@ class InviteModal {
     const defaultText = `Message ${myAccount.username} on Liberdus! ${this.inviteURL}`;
     const text = (typeof overrideText === 'string' && overrideText.trim().length) ? overrideText.trim() : defaultText;
 
-    // 1) Try native share sheet
+    // 1) Check if running in React Native WebView
+    if (reactNativeApp.isReactNativeWebView) {
+      try {
+        reactNativeApp.shareInvite(url, text, title);
+        return; // success
+      } catch (err) {
+        // fall through to native share or clipboard on errors
+      }
+    }
+
+    // 2) Try native share sheet
     if (navigator.share) {
       try {
         await navigator.share({ url, text, title });
@@ -5639,7 +5731,7 @@ class InviteModal {
       }
     }
 
-    // 2) Clipboard fallback (no mailto)
+    // 3) Clipboard fallback (no mailto)
     try {
       await navigator.clipboard.writeText(text);
       showToast("Invite copied to clipboard!", 3000, "success");
@@ -13195,10 +13287,11 @@ class UnlockModal {
       lockModal.encKey = await passwordToKey(password+"liberdusData")
       this.unlock();
       this.close();
-      if (this.openButtonElementUsed === welcomeScreen.createAccountButton) {
-        createAccountModal.openWithReset();
-      } else if (this.openButtonElementUsed === welcomeScreen.importAccountButton) {
-        restoreAccountModal.open();
+      const targetElement = this.openButtonElementUsed;
+      this.openButtonElementUsed = null;
+      if (targetElement && typeof targetElement.click === 'function' && document.contains(targetElement)) {
+        // Defer click to next tick to ensure unlock modal has fully closed
+        setTimeout(() => targetElement.click(), 0);
       } else {
         signInModal.open();
       }
@@ -13879,6 +13972,15 @@ class ReactNativeApp {
     } catch (err) {
       console.error('Error during unsubscribe:', err);
     }
+  }
+  
+  shareInvite(url, text, title) {
+    this.postMessage({
+      type: 'SHARE_INVITE',
+      url,
+      text,
+      title
+    });
   }
 }
 
