@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'd'
+const version = 'e'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -41,6 +41,7 @@ async function checkVersion() {
       'crypto.js',
       'encryption.worker.js',
       'offline.html',
+      'meet/index.html',
     ]);
     window.location.replace(newUrl);
   }
@@ -2770,6 +2771,43 @@ class HistoryModal {
           `;
         }
         
+        // Handle stake transactions differently
+        if (tx.type === 'deposit_stake' || tx.type === 'withdraw_stake') {
+          const isStake = tx.type === 'deposit_stake';
+          const isUnstake = tx.type === 'withdraw_stake';
+          const stakeType = isStake ? 'stake' : 'unstake';
+          
+          // Determine unstake color based on amount (positive = blue, negative = red)
+          let unstakeTypeClass = '';
+          if (isUnstake) {
+            const amount = Number(tx.amount);
+            unstakeTypeClass = amount >= 0 ? 'unstake-positive' : 'unstake-negative';
+          }
+          
+          // Add data attribute for negative unstake transactions to help with CSS styling
+          const amountNegativeAttr = (isUnstake && Number(tx.amount) < 0) ? 'data-amount-negative="true"' : '';
+          
+          return `
+            <div class="transaction-item" data-memo="${stakeType}" ${txidAttr} ${statusAttr} ${amountNegativeAttr}>
+              <div class="transaction-info">
+                <div class="transaction-type ${isStake ? 'stake' : unstakeTypeClass}">
+                  ${isStake ? '↑ Staked' : '↓ Unstaked'}
+                </div>
+                <div class="transaction-amount">
+                  ${isStake ? '-' : (Number(tx.amount) >= 0 ? '+' : '-')} ${Math.abs(Number(tx.amount) / Number(wei)).toFixed(6)} ${asset.symbol}
+                </div>
+              </div>
+              <div class="transaction-details">
+                <div class="transaction-address">
+                  ${isStake ? 'To:' : 'From:'} ${tx.nominee || 'Unknown Validator'}
+                </div>
+                <div class="transaction-time">${formatTime(tx.timestamp)}</div>
+              </div>
+              <div class="transaction-memo">${stakeType}</div>
+            </div>
+          `;
+        }
+        
         // Render normal transaction
         const contactName = getContactDisplayName(contacts[tx.address]);
         
@@ -4691,21 +4729,34 @@ class RemoveAccountsModal {
       }
     }
 
-    // Find any orphaned account files not in accounts object (username_netid)
+    // Find any orphaned account files not in accounts object
     for (let i = 0; i < localStorage.length; i++) {
       const storageKey = localStorage.key(i);
       if (!storageKey) continue;
-      const parts = storageKey.split('_');
-      if (parts.length !== 2) continue;
-      const [username, netid] = parts;
-      if (netid.length !== 64) continue;
+      
+      // Use regex to extract username and netid from storage key
+      const match = storageKey.match(/(.+)_(.+)$/);
+      if (!match) continue;
+      
+      const [, username, netid] = match;
+      
+      // Validate username and netid
+      if (!username || !netid) continue;
+      
+      // Check if this account is already in our result list
       const already = result.find(r => r.username === username && r.netid === netid);
       if (already) continue;
+      
+      // Check if this account is registered in the accounts object
+      const isRegistered = accountsObj.netids[netid]?.usernames?.[username];
+      if (isRegistered) continue;
+      
       const state = loadState(storageKey);
       let contactsCount = 0; let messagesCount = 0;
       if (state) {
         try {
           contactsCount = Object.keys(state.contacts || {}).length;
+          // Sum messages arrays lengths per contact
           if (state.contacts) {
             for (const addr in state.contacts) {
               messagesCount += (state.contacts[addr].messages?.length || 0);
@@ -6654,7 +6705,7 @@ class ValidatorStakingModal {
         myData.wallet.history.unshift({
           nominee: nodeAddress,
           amount: bigxnum2big(wei, '0'),
-          memo: 'unstake',
+          type: 'withdraw_stake',
           sign: 1,
           status: 'sent',
           timestamp: getCorrectedTimestamp(),
@@ -6995,7 +7046,7 @@ class StakeValidatorModal {
         myData.wallet.history.unshift({
           nominee: nodeAddress,
           amount: amount_in_wei,
-          memo: 'stake',
+          type: 'deposit_stake',
           sign: -1,
           status: 'sent',
           timestamp: getCorrectedTimestamp(),
@@ -13153,17 +13204,16 @@ console.log('    result is',result)
       // Skip the 'accounts' key itself
       if (key === 'accounts') return false;
       
-      const parts = key.split('_');
-      if (parts.length !== 2) return false;
-      
-      const netid = parts[1];
-      if (netid.length != 64) return false;
+      const match = key.match(/(.+)_(.+)$/);
+      if (!match) return false;
       
       return true;
     });
     
     for (const key of accountFileKeys) {
-      const [username, netid] = key.split('_');
+      const match = key.match(/(.+)_(.+)$/);
+      if (!match) continue;
+      const [, username, netid] = match;
       
       const isRegistered = accountsObj.netids[netid]?.usernames?.[username];
       
