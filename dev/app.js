@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -2864,8 +2864,8 @@ class HistoryModal {
       return;
     }
     
-    const memo = item.querySelector('.transaction-memo')?.textContent;
-    if (memo === 'stake' || memo === 'unstake') {
+    const type = item.querySelector('.transaction-type')?.textContent;
+    if (type.includes('stake')) {
       validatorStakingModal.open();
       return;
     }
@@ -3657,13 +3657,14 @@ async function injectTx(tx, txid) {
       }
       myData.pending.push(pendingTxData);
     } else {
-      showToast('Error injecting transaction: ' + data?.result?.reason, 0, 'error');
+      let toastMessage = 'Error injecting transaction: ' + data?.result?.reason;
       console.error('Error injecting transaction:', data?.result?.reason);
       if (data?.result?.reason?.includes('timestamp out of range')) {
         console.error('Timestamp out of range, updating timestamp');
         timeDifference()
-        showToast('Try again.', 0, 'error');
+        toastMessage += ' (Please try again)';
       }
+      showToast(toastMessage, 0, 'error');
     }
     return data;
   } catch (error) {
@@ -13459,13 +13460,18 @@ class LockModal {
     // if new password is empty, remove the password from localStorage
     // once we are here we know the old password is correct
     if (this.mode === 'remove') {
-      await encryptAllAccounts(oldPassword, newPassword)
-      delete localStorage.lock;
-      this.encKey = null;
-      // remove the loading toast
-      if (waitingToastId) hideToast(waitingToastId);
-      showToast('Password removed', 2000, 'success');
-      this.close();
+      try {
+        await encryptAllAccounts(oldPassword, newPassword)
+        delete localStorage.lock;
+        this.encKey = null;
+        // remove the loading toast
+        if (waitingToastId) hideToast(waitingToastId);
+        showToast('Password removed', 2000, 'success');
+        this.close();
+      } catch (error) {
+        console.error('Decryption failed:', error);
+        showToast('Failed to decrypt accounts. Please try again.', 0, 'error');
+      }
       return;
     }
 
