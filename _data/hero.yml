@@ -9,8 +9,8 @@ button1:
   href: '#intro'
   text: Learn more&nbsp;<i class="fa fa-angle-down"></i> 
 button2:
-  href: 'Liberdus-Litepaper.pdf'
-  text: Litepaper
-button3:
   href: './download'
   text: Download
+button3:
+  href: 'Liberdus-Litepaper.pdf'
+  text: Litepaper
