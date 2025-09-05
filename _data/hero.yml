@@ -11,3 +11,6 @@ button1:
 button2:
   href: 'Liberdus-Litepaper.pdf'
   text: Litepaper
+button3:
+  href: './download'
+  text: Download
