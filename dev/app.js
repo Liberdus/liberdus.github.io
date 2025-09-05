@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'g'
+const version = 'h'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -9342,12 +9342,29 @@ console.warn('in send message', txid)
    */
   async handleCallUser() {
     try {
+      // Synchronous eligibility based on cached value fetched on ChatModal open
+      const contact = myData.contacts[this.address] || {};
+      const required = contact.tollRequiredToSend;
+      if (required !== 0) {
+        const username = contact.username || `${this.address.slice(0, 8)}...${this.address.slice(-6)}`;
+        if (required === 2) {
+          showToast('You are blocked by this user', 0, 'error');
+        } else {
+          showToast(
+            `You can only call people who have added you as a friend or connection. Ask ${username} to add you as a friend or connection`,
+            0,
+            'info'
+          );
+        }
+        return;
+      }
+
       // Generate a 256-bit random number and convert to base64
       const randomBytes = generateRandomBytes(32); // 32 bytes = 256 bits
       const randomHex = bin2hex(randomBytes).slice(0, 20);
 
       // Create the Meet URL
-      const meetUrl = `./meet?room=${randomHex}`;
+      const meetUrl = `https://meet.liberdus.com/${randomHex}`;
       
       // Open the URL in a new tab
       window.open(meetUrl, '_blank');
