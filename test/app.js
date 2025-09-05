@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'n'
+const version = 'o'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -41,6 +41,7 @@ async function checkVersion() {
       'crypto.js',
       'encryption.worker.js',
       'offline.html',
+      'meet/index.html',
     ]);
     window.location.replace(newUrl);
   }
@@ -306,6 +307,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Welcome Screen
   welcomeScreen.load()
 
+  // Welcome Menu Modal
+  welcomeMenuModal.load();
+
   // Footer
   footer.load();
 
@@ -423,6 +427,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Call Invite Modal
   callInviteModal.load();
 
+  // Remove Accounts Modal
+  removeAccountsModal.load();
+
   // add event listener for back-button presses to prevent shift+tab
   document.querySelectorAll('.back-button').forEach((button) => {
     button.addEventListener('keydown', ignoreShiftTabKey);
@@ -511,19 +518,6 @@ async function encryptAllAccounts(oldPassword, newPassword) {
         }
       }
 
-      /*
-      // If data is still not an object, parse it
-      let parsedData;
-      try {
-        parsedData = typeof data === 'string' ? parse(data) : data;
-      } catch (e) {
-        console.error(`Failed to parse data for ${key}:`, e);
-        continue;
-      }
-
-      // Stringify for storage
-      let newData = stringify(parsedData);
-      */
       let newData = data;
 
       // If newEncKey is set, encrypt; otherwise, store as plaintext
@@ -564,7 +558,6 @@ function loadState(account, noparse=false){
   return parse(data);
 }
 
-
 class WelcomeScreen {
   constructor() {}
 
@@ -572,14 +565,13 @@ class WelcomeScreen {
     this.screen = document.getElementById('welcomeScreen');
     this.signInButton = document.getElementById('signInButton');
     this.createAccountButton = document.getElementById('createAccountButton');
-    this.importAccountButton = document.getElementById('importAccountButton');
+    this.openWelcomeMenuButton = document.getElementById('openWelcomeMenu');
     this.welcomeButtons = document.querySelector('.welcome-buttons');
     this.logoLink = this.screen.querySelector('.logo-link');
     this.logoLink.addEventListener('keydown', ignoreShiftTabKey);  // add event listener for first-item to prevent shift+tab
     this.versionDisplay = document.getElementById('versionDisplay');
     this.networkNameDisplay = document.getElementById('networkNameDisplay');
     this.lastItem = document.getElementById('welcomeScreenLastItem');
-    this.openBackupModalButton = document.getElementById('openBackupModalButton');
     this.appVersionDisplay = document.getElementById('appVersionDisplay');
     this.appVersionText = document.getElementById('appVersionText');
     
@@ -607,18 +599,8 @@ class WelcomeScreen {
         createAccountModal.openWithReset();
       }
     });
-
-    this.importAccountButton.addEventListener('click', () => {
-      if (localStorage.lock && unlockModal.isLocked()) {
-        unlockModal.openButtonElementUsed = this.importAccountButton;
-        unlockModal.open();
-      } else {
-        restoreAccountModal.open();
-      }
-    });
-
-    this.openBackupModalButton.addEventListener('click', () => {
-      backupAccountModal.open();
+    this.openWelcomeMenuButton.addEventListener('click', () => {
+      welcomeMenuModal.open();
     });
 
     this.orderButtons();
@@ -647,26 +629,22 @@ class WelcomeScreen {
       this.welcomeButtons.innerHTML = ''; // Clear existing order
       this.signInButton.classList.remove('hidden');
       this.createAccountButton.classList.remove('hidden');
-      this.importAccountButton.classList.remove('hidden');
+      this.openWelcomeMenuButton.classList.remove('hidden');
       this.welcomeButtons.appendChild(this.signInButton);
       this.welcomeButtons.appendChild(this.createAccountButton);
-      this.welcomeButtons.appendChild(this.importAccountButton);
+      this.welcomeButtons.appendChild(this.openWelcomeMenuButton);
       this.signInButton.classList.add('btn--primary');
       this.signInButton.classList.remove('btn--secondary');
       this.createAccountButton.classList.remove('btn--primary');
       this.createAccountButton.classList.add('btn--secondary');
-      this.openBackupModalButton.classList.remove('hidden');
-      this.welcomeButtons.appendChild(this.openBackupModalButton);
     } else {
       this.welcomeButtons.innerHTML = ''; // Clear existing order
       this.createAccountButton.classList.remove('hidden');
-      this.importAccountButton.classList.remove('hidden');
+      this.openWelcomeMenuButton.classList.remove('hidden');
       this.welcomeButtons.appendChild(this.createAccountButton);
-      this.welcomeButtons.appendChild(this.importAccountButton);
+      this.welcomeButtons.appendChild(this.openWelcomeMenuButton);
       this.createAccountButton.classList.remove('btn--secondary');
       this.createAccountButton.classList.add('btn--primary')
-      this.openBackupModalButton.classList.remove('hidden');
-      this.welcomeButtons.appendChild(this.openBackupModalButton);
     }
   }
 
@@ -679,6 +657,60 @@ class WelcomeScreen {
 }
 
 const welcomeScreen = new WelcomeScreen();
+
+class WelcomeMenuModal {
+  constructor() {}
+
+  load() {
+    this.modal = document.getElementById('welcomeMenuModal');
+    this.closeButton = document.getElementById('closeWelcomeMenu');
+    this.closeButton.addEventListener('click', () => this.close());
+
+    this.backupButton = document.getElementById('welcomeOpenBackup');
+    this.restoreButton = document.getElementById('welcomeOpenRestore');
+    this.removeButton = document.getElementById('welcomeOpenRemove');
+    this.migrateButton = document.getElementById('welcomeOpenMigrate');
+    this.launchButton = document.getElementById('welcomeOpenLaunch');
+    this.lockButton = document.getElementById('welcomeOpenLockModal');
+    this.updateButton = document.getElementById('welcomeOpenUpdate');
+    
+
+    this.backupButton.addEventListener('click', () => backupAccountModal.open());
+    this.restoreButton.addEventListener('click', () => restoreAccountModal.open());
+    this.removeButton.addEventListener('click', () => removeAccountsModal.open());
+    this.migrateButton.addEventListener('click', () => migrateAccountsModal.open());
+    this.lockButton.addEventListener('click', () => lockModal.open());
+
+    // Show launch button if ReactNativeWebView is available
+    if (window?.ReactNativeWebView) {
+      this.launchButton.addEventListener('click', () => launchModal.open());
+      this.launchButton.style.display = 'block';
+      this.updateButton.addEventListener('click', () => aboutModal.openStore());
+      this.updateButton.style.display = 'block';
+    }
+  }
+
+  open() {
+    if (localStorage.lock && unlockModal.isLocked()) {
+      unlockModal.openButtonElementUsed = welcomeScreen.openWelcomeMenuButton;
+      unlockModal.open();
+    } else {
+      this.modal.classList.add('active');
+      enterFullscreen();
+    }
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    enterFullscreen();
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+}
+
+const welcomeMenuModal = new WelcomeMenuModal();
 
 class Header {
   constructor() {}
@@ -750,6 +782,14 @@ class Footer {
     this.footer.classList.remove('active');
   }
 
+  openNewChatButton() {
+    this.newChatButton.classList.add('visible');
+  }
+
+  closeNewChatButton() {
+    this.newChatButton.classList.remove('visible');
+  }
+
   async switchView(view) {
     // Store the current view for potential rollback
     const previousView = document.querySelector('.app-screen.active')?.id?.replace('Screen', '') || 'chats';
@@ -761,20 +801,20 @@ class Footer {
       contactsScreen.close();
       walletScreen.close();
   
-      // Show selected screen
-      document.getElementById(`${view}Screen`).classList.add('active');
-  
       // Update nav buttons - remove active class from all
       this.chatButton.classList.remove('active');
       this.contactsButton.classList.remove('active');
       this.walletButton.classList.remove('active');
   
-      // Add active class to selected button
+      // Add active class to selected button and add active or use .open() for relevant screen
       if (view === 'chats') {
+        chatsScreen.open();
         this.chatButton.classList.add('active');
       } else if (view === 'contacts') {
+        contactsScreen.open();
         this.contactsButton.classList.add('active');
       } else if (view === 'wallet') {
+        walletScreen.open();
         this.walletButton.classList.add('active');
       }
   
@@ -792,16 +832,15 @@ class Footer {
   
       // Show/hide new chat button
       if (view === 'chats' || view === 'contacts') {
-        this.newChatButton.classList.add('visible');
+        this.openNewChatButton();
       } else {
-        this.newChatButton.classList.remove('visible');
+        this.closeNewChatButton();
       }
   
       // Update lists when switching views
       if (view === 'chats') {
         this.chatButton.classList.remove('has-notification');
-        // TODO: maybe need to invoke updateChatData here?
-        await chatsScreen.updateChatList();
+        chatsScreen.updateChatList();
   
         // focus onto last-item in the footer
         if (footer.lastItem) {
@@ -921,18 +960,12 @@ class ChatsScreen {
   }
 
   // Update chat list UI
-  async updateChatList() {
+  updateChatList() {
     const chatList = this.chatList;
-    //const chatsData = myData
     const contacts = myData.contacts;
     const chats = myData.chats;
     if (chats.length === 0) {
-      chatList.innerHTML = `
-            <div class="empty-state">
-                <div style="font-size: 2rem; margin-bottom: 1rem"></div>
-                <div style="font-weight: bold; margin-bottom: 0.5rem">Click the + button to start a chat</div>
-                <div>Your conversations will appear here</div>
-            </div>`;
+      chatList.querySelector('.empty-state').style.display = 'block';
       return;
     }
 
@@ -941,9 +974,9 @@ class ChatsScreen {
     // Clear existing chat items before adding new ones
     chatList.innerHTML = '';
 
-    const chatElements = await Promise.all(
-      chats.map(async (chat) => {
-        const identicon = await generateIdenticon(chat.address);
+    const chatElements =
+      chats.map((chat) => {
+        const identicon = generateIdenticon(chat.address);
         const contact = contacts[chat.address];
 
         // If contact doesn't exist, skip this chat item
@@ -968,7 +1001,7 @@ class ChatsScreen {
           // Optionally add memo preview
           if (latestActivity.message) {
             // Memo is stored in the 'message' field for transfers
-            previewHTML += ` <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 25)}</span>`;
+            previewHTML += ` <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 50)}</span>`;
           }
         } else if (latestActivity.type === 'call') {
           previewHTML = `<span><i>Join call</i></span>`;
@@ -976,6 +1009,8 @@ class ChatsScreen {
           previewHTML = `<span><i>Voice message</i></span>`;
         } else if ((!latestActivity.message || String(latestActivity.message).trim() === '') && latestActivity.xattach) {
           previewHTML = `<span><i>Attachment</i></span>`;
+        } else if (latestActivity.xattach && latestActivity.message && String(latestActivity.message).trim() !== '') {
+          previewHTML = `<span><i>Attachment</i></span> <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 40)}</span>`;
         } else {
           // Latest item is a regular message
           const messageText = escapeHtml(latestActivity.message);
@@ -1012,7 +1047,6 @@ class ChatsScreen {
 
         return li; // Return the created DOM element
       })
-    );
 
     // Append the created (and non-null) list item elements to the chatList
     chatElements.forEach((element) => {
@@ -1059,12 +1093,7 @@ class ContactsScreen {
     const contacts = myData.contacts;
 
     if (Object.keys(contacts).length === 0) {
-      this.contactsList.innerHTML = `
-            <div class="empty-state">
-                <div style="font-size: 2rem; margin-bottom: 1rem"></div>
-                <div style="font-weight: bold; margin-bottom: 0.5rem">No Contacts Yet</div>
-                <div>Your contacts will appear here</div>
-            </div>`;
+      this.contactsList.querySelector('.empty-state').style.display = 'block';
       return;
     }
 
@@ -1111,7 +1140,7 @@ class ContactsScreen {
 
     // Helper to render a contact item
     const renderContactItem = async (contact, itemClass) => {
-      const identicon = await generateIdenticon(contact.address);
+      const identicon = generateIdenticon(contact.address);
       const contactName = getContactDisplayName(contact);
       return `
             <li class="${itemClass}">
@@ -1155,6 +1184,158 @@ class ContactsScreen {
 
 const contactsScreen = new ContactsScreen();
 
+class WalletScreen {
+  constructor() {
+
+  }
+
+  load() {
+    // screen
+    this.screen = document.getElementById('walletScreen');
+    // balance elements
+    this.totalBalance = document.getElementById('walletTotalBalance');
+    this.refreshBalanceButton = document.getElementById('refreshBalance');
+    // assets list
+    this.assetsList = document.getElementById('assetsList');
+    // action buttons
+    this.openSendAssetFormModalButton = document.getElementById('openSendAssetFormModal');
+    this.openReceiveModalButton = document.getElementById('openReceiveModal');
+    this.openHistoryModalButton = document.getElementById('openHistoryModal');
+
+    this.openSendAssetFormModalButton.addEventListener('click', () => {
+      sendAssetFormModal.open();
+    });
+    this.openReceiveModalButton.addEventListener('click', () => {
+      receiveModal.open();
+    });
+    this.openHistoryModalButton.addEventListener('click', () => {
+      historyModal.open();
+    });
+
+    // Add refresh balance button handler
+    this.refreshBalanceButton.addEventListener('click', async () => {
+      
+      // Add active class for animation
+      this.refreshBalanceButton.classList.add('active');
+      
+      // Remove active class after animation completes
+      setTimeout(() => {
+        this.refreshBalanceButton.classList.remove('active');
+        // Force blur to remove focus
+        this.refreshBalanceButton.blur();
+      }, 300);
+
+      this.updateWalletView();
+    });
+  }
+
+  open() {
+    this.screen.classList.add('active');
+  }
+
+  close() {
+    this.screen.classList.remove('active');
+  }
+
+  isActive() {
+    return this.screen.classList.contains('active');
+  }
+
+  // Update wallet view; refresh wallet
+  async updateWalletView() {
+    const walletData = myData.wallet;
+
+    await this.updateWalletBalances();
+
+    // Update total networth
+    this.totalBalance.textContent = (walletData.networth || 0).toFixed(2);
+
+    if (!Array.isArray(walletData.assets) || walletData.assets.length === 0) {
+      this.assetsList.querySelector('.empty-state').style.display = 'block';
+      return;
+    }
+
+    this.assetsList.innerHTML = walletData.assets
+      .map((asset) => {
+        console.log('asset balance', asset, asset.balance);
+        return `
+              <div class="asset-item">
+                  <div class="asset-logo"><img src="./media/liberdus_logo_50.png" class="asset-logo"></div>
+                  <div class="asset-info">
+                      <div class="asset-name">${asset.name}</div>
+                      <div class="asset-symbol">$${asset.price} / ${asset.symbol}</div>
+                  </div>
+                  <div class="asset-balance">${(Number(asset.balance) / Number(wei)).toFixed(6)}<br><span class="asset-symbol">$${asset.networth.toFixed(6)}</span></div>
+              </div>
+          `;
+      })
+      .join('');
+  }
+
+  // refresh wallet balance
+  async updateWalletBalances() {
+    if (!myAccount || !myData || !myData.wallet || !myData.wallet.assets) {
+      console.error('No wallet data available');
+      return;
+    } else if (!isOnline) {
+      console.warn('Not online. Not updating wallet balances');
+      return;
+    }
+    await updateAssetPricesIfNeeded();
+    const now = getCorrectedTimestamp();
+    if (!myData.wallet.timestamp) {
+      myData.wallet.timestamp = 0;
+    }
+    if (now - myData.wallet.timestamp < 5000) {
+      return;
+    }
+
+    let totalWalletNetworth = 0.0;
+    let failedToGetBalance = false;
+    // Update balances for each asset and address
+    for (const asset of myData.wallet.assets) {
+      let assetTotalBalance = 0n;
+
+      // Get balance for each address in the asset
+      for (const addr of asset.addresses) {
+        try {
+          const address = longAddress(addr.address);
+          const data = await queryNetwork(`/account/${address}/balance`);
+          if (!data) {
+            failedToGetBalance = true;
+            console.error(`Error fetching balance for address ${addr.address}:`, data);
+            continue;
+          }
+          console.log('balance', data);
+          if (data?.balance !== undefined) {
+            // Update address balance
+            addr.balance = data.balance;
+          }
+          // Add to asset total (convert to USD using asset price)
+          assetTotalBalance += addr.balance;
+        } catch (error) {
+          console.error(`Error fetching balance for address ${addr.address}:`, error);
+        }
+      }
+      asset.balance = assetTotalBalance;
+      asset.networth = (asset.price * Number(assetTotalBalance)) / Number(wei);
+
+      // Add this asset's total to wallet total
+      totalWalletNetworth += asset.networth;
+    }
+
+    if (failedToGetBalance) {
+      showToast(`Error fetching balance. Try again later.` ,0 ,'error');
+      console.error('Failed to get balance for some addresses');
+    }
+
+    // Update total wallet balance
+    myData.wallet.networth = totalWalletNetworth;
+    myData.wallet.timestamp = now;
+  }
+}
+
+const walletScreen = new WalletScreen();
 
 class MenuModal {
   constructor() {
@@ -1237,13 +1418,10 @@ class MenuModal {
     menuModal.close();
     settingsModal.close(); // may be triggered from settings modal, calls openFullscreen() again
 
-    // this seems to be unnecessary but also benign
-    // myProfileModal.close();
-
     // Hide header and footer
     header.close();
     footer.close();
-    footer.newChatButton.classList.remove('visible');
+    footer.closeNewChatButton();
 
     // Reset header text
     header.setText('Liberdus');
@@ -1270,9 +1448,6 @@ class MenuModal {
 
     await reactNativeApp.handleNativeAppSubscribe();
     reactNativeApp.sendClearNotifications();
-
-    // Only reload if online
-//    window.location.reload();
     await checkVersion();
 
     // checkVersion() may update online status
@@ -1328,156 +1503,6 @@ class SettingsModal {
 }
 
 const settingsModal = new SettingsModal();
-
-class WalletScreen {
-  constructor() {
-
-  }
-
-  load() {
-    // screen
-    this.screen = document.getElementById('walletScreen');
-    // balance elements
-    this.totalBalance = document.getElementById('walletTotalBalance');
-    this.refreshBalanceButton = document.getElementById('refreshBalance');
-    // assets list
-    this.assetsList = document.getElementById('assetsList');
-    // action buttons
-    this.openSendAssetFormModalButton = document.getElementById('openSendAssetFormModal');
-    this.openReceiveModalButton = document.getElementById('openReceiveModal');
-    this.openHistoryModalButton = document.getElementById('openHistoryModal');
-
-    this.openSendAssetFormModalButton.addEventListener('click', () => {
-      sendAssetFormModal.open();
-    });
-    this.openReceiveModalButton.addEventListener('click', () => {
-      receiveModal.open();
-    });
-    this.openHistoryModalButton.addEventListener('click', () => {
-      historyModal.open();
-    });
-
-    // Add refresh balance button handler
-    this.refreshBalanceButton.addEventListener('click', async () => {
-      
-      // Add active class for animation
-      this.refreshBalanceButton.classList.add('active');
-      
-      // Remove active class after animation completes
-      setTimeout(() => {
-        this.refreshBalanceButton.classList.remove('active');
-        // Force blur to remove focus
-        this.refreshBalanceButton.blur();
-      }, 300);
-
-      // await updateWalletBalances();
-      this.updateWalletView();
-    });
-  }
-
-  open() {
-    this.screen.classList.add('active');
-  }
-
-  close() {
-    this.screen.classList.remove('active');
-  }
-
-  isActive() {
-    return this.screen.classList.contains('active');
-  }
-
-  // Update wallet view; refresh wallet
-  async updateWalletView() {
-    const walletData = myData.wallet;
-
-    await this.updateWalletBalances();
-
-    // Update total networth
-    this.totalBalance.textContent = (walletData.networth || 0).toFixed(2);
-
-    if (!Array.isArray(walletData.assets) || walletData.assets.length === 0) {
-      this.assetsList.innerHTML = `
-              <div class="empty-state">
-                  <div style="font-size: 2rem; margin-bottom: 1rem"></div>
-                  <div style="font-weight: bold; margin-bottom: 0.5rem">No Assets Yet</div>
-                  <div>Your assets will appear here</div>
-              </div>`;
-      return;
-    }
-
-    this.assetsList.innerHTML = walletData.assets
-      .map((asset) => {
-        console.log('asset balance', asset, asset.balance);
-        return `
-              <div class="asset-item">
-                  <div class="asset-logo"><img src="./media/liberdus_logo_50.png" class="asset-logo"></div>
-                  <div class="asset-info">
-                      <div class="asset-name">${asset.name}</div>
-                      <div class="asset-symbol">$${asset.price} / ${asset.symbol}</div>
-                  </div>
-                  <div class="asset-balance">${(Number(asset.balance) / Number(wei)).toFixed(6)}<br><span class="asset-symbol">$${asset.networth.toFixed(6)}</span></div>
-              </div>
-          `;
-      })
-      .join('');
-  }
-
-  // refresh wallet balance
-  async updateWalletBalances() {
-    if (!myAccount || !myData || !myData.wallet || !myData.wallet.assets) {
-      console.error('No wallet data available');
-      return;
-    } else if (!isOnline) {
-      console.warn('Not online. Not updating wallet balances');
-      return;
-    }
-    await updateAssetPricesIfNeeded();
-    const now = getCorrectedTimestamp();
-    if (!myData.wallet.timestamp) {
-      myData.wallet.timestamp = 0;
-    }
-    if (now - myData.wallet.timestamp < 5000) {
-      return;
-    }
-
-    // TODO - first update the asset prices from a public API
-
-    let totalWalletNetworth = 0.0;
-
-    // Update balances for each asset and address
-    for (const asset of myData.wallet.assets) {
-      let assetTotalBalance = 0n;
-
-      // Get balance for each address in the asset
-      for (const addr of asset.addresses) {
-        try {
-          const address = longAddress(addr.address);
-          const data = await queryNetwork(`/account/${address}/balance`);
-          console.log('balance', data);
-          // Update address balance
-          addr.balance = data.balance || 0n;
-
-          // Add to asset total (convert to USD using asset price)
-          assetTotalBalance += addr.balance;
-        } catch (error) {
-          console.error(`Error fetching balance for address ${addr.address}:`, error);
-        }
-      }
-      asset.balance = assetTotalBalance;
-      asset.networth = (asset.price * Number(assetTotalBalance)) / Number(wei);
-
-      // Add this asset's total to wallet total
-      totalWalletNetworth += asset.networth;
-    }
-
-    // Update total wallet balance
-    myData.wallet.networth = totalWalletNetworth;
-    myData.wallet.timestamp = now;
-  }
-}
-
-const walletScreen = new WalletScreen();
 
 /**
  * createNewContact
@@ -1548,10 +1573,6 @@ class ScanQRModal {
         this.stopCamera();
       }
 
-      // Hide previous results
-      // resultContainer.classList.add('hidden');
-
-      // statusMessage.textContent = 'Accessing camera...';
       // Request camera access with specific error handling
       try {
         this.camera.stream = await navigator.mediaDevices.getUserMedia({
@@ -1566,6 +1587,7 @@ class ScanQRModal {
         // Handle specific getUserMedia errors
         switch (mediaError.name) {
           case 'NotAllowedError':
+            this.close();
             throw new Error(
               'Camera access was denied. Please check your browser settings and grant permission to use the camera.'
             );
@@ -1592,13 +1614,10 @@ class ScanQRModal {
 
         // Enable scanning and update button
         this.camera.scanning = true;
-        // toggleButton.textContent = 'Stop Camera';
 
         // Start scanning for QR codes
         // Use interval instead of requestAnimationFrame for better control over scan frequency
         this.camera.scanInterval = setInterval(() => this.readQRCode(), 100); // scan every 100ms (10 times per second)
-
-        // statusMessage.textContent = 'Camera active. Point at a QR code.';
       };
 
       // Add error handler for video element
@@ -1613,9 +1632,6 @@ class ScanQRModal {
 
       // Show user-friendly error message
       showToast(error.message || 'Failed to access camera. Please check your permissions and try again.', 0, 'error');
-
-      // Re-throw the error if you need to handle it further up
-      throw error;
     }
   }
 
@@ -1661,47 +1677,16 @@ class ScanQRModal {
         }
       } catch (error) {
         // qr.decodeQR throws error if not found or on error
-        //console.log('QR scanning error or not found:', error); // Optional: Log if needed
+        //console.log('QR scanning error or not found:', error); // Optional: Log if needed since function is called every 100ms
       }
     }
   }
 
   handleSuccessfulScan(data) {
-    // const scanHighlight = document.getElementById('scan-highlight');
-    // Stop scanning
-    if (this.camera.scanInterval) {
-      clearInterval(this.camera.scanInterval);
-      this.camera.scanInterval = null;
-    }
-
-    this.camera.scanning = false;
-
-    // Stop the camera
-    this.stopCamera();
-
-    /*
-      // Show highlight effect
-      scanHighlight.classList.add('active');
-      setTimeout(() => {
-          scanHighlight.classList.remove('active');
-      }, 500);
-  */
-
-    // Display the result
-    //    qrResult.textContent = data;
-    //    resultContainer.classList.remove('hidden');
-    console.log('Raw QR Data Scanned:', data);
-    if (this.fillFunction) {
-      // Call the assigned fill function (e.g., fillPaymentFromQR or fillStakeAddressFromQR)
-      this.fillFunction(data);
-    }
-
     this.close();
-
-    // Update status
-    //    statusMessage.textContent = 'QR code detected! Camera stopped.';
+    console.log('Raw QR Data Scanned');
+    if (this.fillFunction) this.fillFunction(data); // Call the assigned fill function (e.g., fillPaymentFromQR or fillStakeAddressFromQR)
   }
-
 }
 
 const scanQRModal = new ScanQRModal();
@@ -1724,7 +1709,18 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
 
   await getNetworkParams();
   const asset = myData.wallet.assets[assetIndex];
-  const feeInWei = parameters.current.transactionFee || 1n * wei;
+  
+  // Check if transaction fee is available from network parameters
+  if (!parameters.current || !parameters.current.transactionFee) {
+    console.error('Transaction fee not available from network parameters');
+    if (balanceWarning) {
+      balanceWarning.textContent = 'Network error: Cannot determine transaction fee';
+      balanceWarning.style.display = 'inline';
+    }
+    return false;
+  }
+  
+  const feeInWei = parameters.current.transactionFee;
   const totalRequired = amount + feeInWei;
   const hasInsufficientBalance = BigInt(asset.balance) < totalRequired;
 
@@ -1776,6 +1772,60 @@ class SignInModal {
     this.backButton.addEventListener('click', () => this.close());
   }
 
+  // Centralized UI state helpers for availability results
+  setUiForMine() {
+    this.submitButton.disabled = false;
+    this.submitButton.textContent = 'Sign In';
+    this.submitButton.style.display = 'inline';
+    this.removeButton.style.display = 'none';
+    this.notFoundMessage.style.display = 'none';
+  }
+
+  setUiDisabledSignIn() {
+    this.submitButton.disabled = true;
+    this.submitButton.textContent = 'Sign In';
+    this.submitButton.style.display = 'inline';
+    this.removeButton.style.display = 'none';
+    this.notFoundMessage.style.display = 'none';
+  }
+
+  setUiForTaken() {
+    this.submitButton.style.display = 'none';
+    this.removeButton.style.display = 'inline';
+    this.notFoundMessage.textContent = 'taken';
+    this.notFoundMessage.style.display = 'inline';
+  }
+
+  setUiForAvailableNotFound() {
+    this.submitButton.disabled = false;
+    this.submitButton.textContent = 'Recreate';
+    this.submitButton.style.display = 'inline';
+    this.removeButton.style.display = 'inline';
+    this.notFoundMessage.textContent = 'not found';
+    this.notFoundMessage.style.display = 'inline';
+  }
+
+  setUiForNetworkError() {
+    this.submitButton.disabled = true;
+    this.submitButton.textContent = 'Sign In';
+    this.submitButton.style.display = 'none';
+    this.removeButton.style.display = 'none';
+    this.notFoundMessage.textContent = 'network error';
+    this.notFoundMessage.style.display = 'inline';
+  }
+
+  // When auto-selecting after account creation, the network may not have propagated
+  // the alias yet. In that case we suppress the
+  // transient "not found" and allow local sign-in using stored state.
+  applyAutoSelectNotFoundOverride() {
+    this.notFoundMessage.textContent = '';
+    this.notFoundMessage.style.display = 'none';
+    this.submitButton.style.display = 'inline';
+    this.submitButton.disabled = false;
+    this.submitButton.textContent = 'Sign In';
+    this.removeButton.style.display = 'none';
+  }
+
   /**
    * Get the available usernames for the current network
    * @returns {string[]} - An array of available usernames
@@ -1794,31 +1844,38 @@ class SignInModal {
    * @returns {Object} Object containing usernames array and account information
    */
   updateUsernameSelect(selectedUsername = null) {
-    const { usernames, netidAccounts } = signInModal.getSignInUsernames() || [];
+    const signInData = signInModal.getSignInUsernames() || {};
+    const usernames = Array.isArray(signInData.usernames) ? signInData.usernames : [];
+    const netidAccounts = signInData.netidAccounts || { usernames: {} };
 
     // Get the notified addresses and sort usernames to prioritize them
     const notifiedAddresses = reactNativeApp ? reactNativeApp.getNotificationAddresses() : [];
+    const notifiedAddressSet = new Set(Array.isArray(notifiedAddresses) ? notifiedAddresses : []);
     let sortedUsernames = [...usernames];
+    const notifiedUsernameSet = new Set();
     
-    // if there are notified addresses, sort the usernames to prioritize them
+    // if there are notified addresses, partition the usernames (stable) so notified come first
     if (notifiedAddresses.length > 0) {
-      // Find which usernames own the notified addresses
-      for (const [username, accountData] of Object.entries(netidAccounts.usernames)) {
-        if (notifiedAddresses.includes(accountData.address)) {
-          // Move this username to the front
-          sortedUsernames = sortedUsernames.filter(u => u !== username);
-          sortedUsernames.unshift(username);
-          break;
+      const notifiedUsernames = [];
+      const otherUsernames = [];
+      for (const username of sortedUsernames) {
+        const address = netidAccounts?.usernames?.[username]?.address;
+        const isNotified = Boolean(address && notifiedAddressSet.has(address));
+        if (isNotified) {
+          notifiedUsernames.push(username);
+          notifiedUsernameSet.add(username);
+        } else {
+          otherUsernames.push(username);
         }
       }
+      sortedUsernames = [...notifiedUsernames, ...otherUsernames];
     }
 
     // Populate select with sorted usernames and add an emoji to the username if it owns a notified address
     this.usernameSelect.innerHTML = `
       <option value="" disabled selected hidden>Select an account</option>
       ${sortedUsernames.map((username) => {
-        // Check if this username owns the notified address
-        const isNotifiedAccount = notifiedAddresses.includes(netidAccounts.usernames[username]?.address);
+        const isNotifiedAccount = notifiedUsernameSet.has(username);
         const dotIndicator = isNotifiedAccount ? ' 🔔' : '';
         return `<option value="${username}">${username}${dotIndicator}</option>`;
       }).join('')}
@@ -1849,18 +1906,12 @@ class SignInModal {
     }
 
     // If a username should be auto-selected (either preselect or only one account), do it
-    const autoSelect = preselectedUsername_ && usernames.includes(preselectedUsername_) ? preselectedUsername_ : null;
-    if (autoSelect) {
-      this.usernameSelect.value = autoSelect;
+    if ((preselectedUsername_ && usernames.includes(preselectedUsername_))) {
+      this.usernameSelect.value = this.preselectedUsername;
       await this.handleUsernameChange();
+      // happens when autoselect parameter is given since new account was just created and network may not have propagated account
       if (this.notFoundMessage.textContent === 'not found') {
-        // remove not found and make button available
-        this.notFoundMessage.textContent = '';
-        this.notFoundMessage.style.display = 'none';
-        this.submitButton.style.display = 'inline';
-        this.submitButton.disabled = false;
-        this.submitButton.textContent = 'Sign In';
-        this.removeButton.style.display = 'none';
+        this.applyAutoSelectNotFoundOverride();
         this.handleSignIn();
       }
       return;
@@ -1874,11 +1925,7 @@ class SignInModal {
     }
 
     // Multiple accounts exist, show modal with select dropdown
-    this.submitButton.disabled = true; // Keep button disabled until an account is selected
-    this.submitButton.textContent = 'Sign In';
-    this.submitButton.style.display = 'inline';
-    this.removeButton.style.display = 'none';
-    this.notFoundMessage.style.display = 'none';
+    this.setUiDisabledSignIn();
 
     // set timeout to focus on the last item so shift+tab and tab prevention works
     setTimeout(() => {
@@ -1889,11 +1936,7 @@ class SignInModal {
   close() {
     // clear signInModal input fields
     this.usernameSelect.value = '';
-    this.submitButton.disabled = true;
-    this.submitButton.textContent = 'Sign In';
-    this.submitButton.style.display = 'inline';
-    this.removeButton.style.display = 'none';
-    this.notFoundMessage.style.display = 'none';
+    this.setUiDisabledSignIn();
     
     this.modal.classList.remove('active');
     this.preselectedUsername = null;
@@ -2012,30 +2055,13 @@ class SignInModal {
       this.handleSignIn();
       return;
     } else if (availability === 'mine') {
-      this.submitButton.disabled = false;
-      this.submitButton.textContent = 'Sign In';
-      this.submitButton.style.display = 'inline';
-      this.removeButton.style.display = 'none';
-      this.notFoundMessage.style.display = 'none';
+      this.setUiForMine();
     } else if (availability === 'taken') {
-      this.submitButton.style.display = 'none';
-      this.removeButton.style.display = 'inline';
-      this.notFoundMessage.textContent = 'taken';
-      this.notFoundMessage.style.display = 'inline';
+      this.setUiForTaken();
     } else if (availability === 'available') {
-      this.submitButton.disabled = false;
-      this.submitButton.textContent = 'Recreate';
-      this.submitButton.style.display = 'inline';
-      this.removeButton.style.display = 'inline';
-      this.notFoundMessage.textContent = 'not found';
-      this.notFoundMessage.style.display = 'inline';
+      this.setUiForAvailableNotFound();
     } else {
-      this.submitButton.disabled = true;
-      this.submitButton.textContent = 'Sign In';
-      this.submitButton.style.display = 'none';
-      this.removeButton.style.display = 'none';
-      this.notFoundMessage.textContent = 'network error';
-      this.notFoundMessage.style.display = 'inline';
+      this.setUiForNetworkError();
     }
   }
 
@@ -2092,7 +2118,7 @@ class MyInfoModal {
   async updateMyInfo() {
     if (!myAccount) return;
 
-    const identicon = await generateIdenticon(myAccount.keys.address, 96);
+    const identicon = generateIdenticon(myAccount.keys.address, 96);
 
     this.avatarDiv.innerHTML = identicon;
     this.nameDiv.textContent = myAccount.username;
@@ -2200,7 +2226,7 @@ class ContactInfoModal {
   // Update contact info values
   async updateContactInfo(displayInfo) {
     // Generate identicon for the contact
-    const identicon = await generateIdenticon(displayInfo.address, 96);
+    const identicon = generateIdenticon(displayInfo.address, 96);
 
     // Update the avatar section
     this.avatarDiv.innerHTML = identicon;
@@ -2325,6 +2351,13 @@ class FriendModal {
     // Friend modal form submission
     this.friendForm.addEventListener('submit', (event) => this.handleFriendSubmit(event));
 
+    // Enable/disable submit button based on selection changes
+    this.friendForm.addEventListener('change', (e) => {
+      if (e.target && e.target.name === 'friendStatus') {
+        this.updateSubmitButtonState();
+      }
+    });
+
     // Friend modal close button
     this.modal.querySelector('.back-button').addEventListener('click', () => this.closeFriendModal());
   }
@@ -2334,18 +2367,13 @@ class FriendModal {
     const contact = myData.contacts[this.currentContactAddress];
     if (!contact) return;
 
-    // if .friend and .friendOld values are not the same disable the submit button
-    if (contact.friend !== contact.friendOld) {
-      showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'error');
-      this.submitButton.disabled = true;
-    } else {
-      this.submitButton.disabled = false;
-    }
-
     // Set the current friend status
     const status = contact?.friend.toString();
     const radio = this.friendForm.querySelector(`input[value="${status}"]`);
     if (radio) radio.checked = true;
+
+    // Initialize submit button state
+    this.updateSubmitButtonState();
 
     this.modal.classList.add('active');
   }
@@ -2390,12 +2418,19 @@ class FriendModal {
     const contact = myData.contacts[this.currentContactAddress];
     const selectedStatus = this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value;
 
+    if (selectedStatus == null || Number(selectedStatus) === contact.friend) {
+      this.submitButton.disabled = true;
+      console.log('No change in friend status or no status selected.');
+      return;
+    }
+
     // send transaction to update chat toll
     const res = await this.postUpdateTollRequired(this.currentContactAddress, Number(selectedStatus));
     if (res?.result?.success === false) {
       console.log(
         `[handleFriendSubmit] update_toll_required transaction failed: ${res?.result?.reason}. Did not update contact status.`
       );
+      showToast('Failed to update friend status. Please try again.', 0, 'error');
       return;
     }
 
@@ -2420,10 +2455,6 @@ class FriendModal {
 
     // Mark that we need to update the contact list
     this.needsContactListUpdate = true;
-
-    // TODO - do we really need to saveState here
-    // Save state
-//    saveState();
 
     // Update the friend button
     this.updateFriendButton(contact, 'addFriendButtonContactInfo');
@@ -2454,6 +2485,31 @@ class FriendModal {
     button.classList.remove('status-0', 'status-1', 'status-2', 'status-3');
     // Add the current status class
     button.classList.add(`status-${contact.friend}`);
+  }
+
+  // Update the submit button's enabled state based on current and selected status
+  updateSubmitButtonState() {
+    const contact = myData?.contacts?.[this.currentContactAddress];
+    if (!contact) {
+      this.submitButton.disabled = true;
+      return;
+    }
+
+    // If there's already a pending tx (friend != friendOld) keep disabled
+    if (contact.friend !== contact.friendOld) {
+      this.submitButton.disabled = true;
+      showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'error');
+      return;
+    }
+
+    const selectedStatus = this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value;
+    if (!selectedStatus) {
+      this.submitButton.disabled = true;
+      return;
+    }
+
+    // Enable only if different from current friend status
+    this.submitButton.disabled = Number(selectedStatus) === contact.friend;
   }
 
   // get the current contact address
@@ -2715,6 +2771,43 @@ class HistoryModal {
           `;
         }
         
+        // Handle stake transactions differently
+        if (tx.type === 'deposit_stake' || tx.type === 'withdraw_stake') {
+          const isStake = tx.type === 'deposit_stake';
+          const isUnstake = tx.type === 'withdraw_stake';
+          const stakeType = isStake ? 'stake' : 'unstake';
+          
+          // Determine unstake color based on amount (positive = blue, negative = red)
+          let unstakeTypeClass = '';
+          if (isUnstake) {
+            const amount = Number(tx.amount);
+            unstakeTypeClass = amount >= 0 ? 'unstake-positive' : 'unstake-negative';
+          }
+          
+          // Add data attribute for negative unstake transactions to help with CSS styling
+          const amountNegativeAttr = (isUnstake && Number(tx.amount) < 0) ? 'data-amount-negative="true"' : '';
+          
+          return `
+            <div class="transaction-item" data-memo="${stakeType}" ${txidAttr} ${statusAttr} ${amountNegativeAttr}>
+              <div class="transaction-info">
+                <div class="transaction-type ${isStake ? 'stake' : unstakeTypeClass}">
+                  ${isStake ? '↑ Staked' : '↓ Unstaked'}
+                </div>
+                <div class="transaction-amount">
+                  ${isStake ? '-' : (Number(tx.amount) >= 0 ? '+' : '-')} ${Math.abs(Number(tx.amount) / Number(wei)).toFixed(6)} ${asset.symbol}
+                </div>
+              </div>
+              <div class="transaction-details">
+                <div class="transaction-address">
+                  ${isStake ? 'To:' : 'From:'} ${tx.nominee || 'Unknown Validator'}
+                </div>
+                <div class="transaction-time">${formatTime(tx.timestamp)}</div>
+              </div>
+              <div class="transaction-memo">${stakeType}</div>
+            </div>
+          `;
+        }
+        
         // Render normal transaction
         const contactName = getContactDisplayName(contacts[tx.address]);
         
@@ -2745,12 +2838,7 @@ class HistoryModal {
   }
 
   showEmptyState() {
-    this.transactionList.innerHTML = `
-      <div class="empty-state">
-        <div style="font-size: 2rem; margin-bottom: 1rem"></div>
-        <div style="font-weight: bold; margin-bottom: 0.5rem">No Transactions</div>
-        <div>Your transaction history will appear here</div>
-      </div>`;
+    this.transactionList.querySelector('.empty-state').style.display = 'block';
   }
 
   handleAssetChange() {
@@ -2776,8 +2864,8 @@ class HistoryModal {
       return;
     }
     
-    const memo = item.querySelector('.transaction-memo')?.textContent;
-    if (memo === 'stake' || memo === 'unstake') {
+    const type = item.querySelector('.transaction-type')?.textContent;
+    if (type.includes('stake')) {
       validatorStakingModal.open();
       return;
     }
@@ -3569,13 +3657,14 @@ async function injectTx(tx, txid) {
       }
       myData.pending.push(pendingTxData);
     } else {
-      showToast('Error injecting transaction: ' + data?.result?.reason, 0, 'error');
+      let toastMessage = 'Error injecting transaction: ' + data?.result?.reason;
       console.error('Error injecting transaction:', data?.result?.reason);
       if (data?.result?.reason?.includes('timestamp out of range')) {
         console.error('Timestamp out of range, updating timestamp');
         timeDifference()
-        showToast('Try again.', 0, 'error');
+        toastMessage += ' (Please try again)';
       }
+      showToast(toastMessage, 0, 'error');
     }
     return data;
   } catch (error) {
@@ -3749,7 +3838,7 @@ class SearchMessagesModal {
       resultElement.className = 'chat-item search-result-item';
 
       // Generate identicon for the contact
-      const identicon = await generateIdenticon(result.contactAddress);
+      const identicon = generateIdenticon(result.contactAddress);
 
       // Format message preview with "You:" prefix if it's a sent message
       // make this textContent?
@@ -3913,7 +4002,7 @@ class SearchContactsModal {
       contactElement.className = 'chat-item contact-item';
 
       // Generate identicon for the contact
-      const identicon = await generateIdenticon(contact.address);
+      const identicon = generateIdenticon(contact.address);
 
       // Determine which field matched for display
       const matchedField = [
@@ -3969,7 +4058,7 @@ const searchContactsModal = new SearchContactsModal();
 // Create a display info object from a contact object
 function createDisplayInfo(contact) {
   return {
-    username: contact.username || contact.address.slice(0, 8) + '...' + contact.address.slice(-6),
+    username: contact.username || contact.address.slice(0, 8) + '…' + contact.address.slice(-6),
     name: contact.name || 'Not Entered',
     providedname: contact.senderInfo?.name || 'Not provided',
     email: contact.senderInfo?.email || 'Not provided',
@@ -3981,11 +4070,16 @@ function createDisplayInfo(contact) {
 }
 
 // Add this function before the ContactInfoModal class
-function showToast(message, duration = 2000, type = 'default') {
+function showToast(message, duration = 2000, type = 'default', isHTML = false) {
   const toastContainer = document.getElementById('toastContainer');
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-  toast.textContent = message;
+  
+  if (isHTML) {
+    toast.innerHTML = message;
+  } else {
+    toast.textContent = message;
+  }
 
   // Generate a unique ID for this toast
   const toastId = 'toast-' + getCorrectedTimestamp() + '-' + Math.floor(Math.random() * 1000);
@@ -4013,7 +4107,19 @@ function showToast(message, duration = 2000, type = 'default') {
       toast.onclick = () => {
         hideToast(toastId);
       };
-    } else if (duration > 0) {
+    } else if (duration <= 0) {
+      // Sticky non-error toast (e.g., info) with close button
+      toast.style.pointerEvents = 'auto';
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'toast-close-btn';
+      closeBtn.setAttribute('aria-label', 'Close');
+      closeBtn.innerHTML = '&times;';
+      toast.appendChild(closeBtn);
+
+      toast.onclick = () => {
+        hideToast(toastId);
+      };
+    } else {
       setTimeout(() => {
         hideToast(toastId);
       }, duration);
@@ -4057,7 +4163,7 @@ async function handleConnectivityChange() {
         // Update chats with reconnection handling
         const gotChats = await chatsScreen.updateChatData();
         if (gotChats > 0) {
-          await chatsScreen.updateChatList();
+          chatsScreen.updateChatList();
         }
 
         // Update contacts with reconnection handling
@@ -4486,7 +4592,6 @@ class RemoveAccountModal {
     this.modal = document.getElementById('removeAccountModal');
     document.getElementById('closeRemoveAccountModal').addEventListener('click', () => this.close());
     document.getElementById('confirmRemoveAccount').addEventListener('click', () => this.removeAccount());
-    document.getElementById('confirmRemoveAllAccounts').addEventListener('click', () => this.removeAllAccounts());
     document.getElementById('openBackupFromRemove').addEventListener('click', () => backupAccountModal.open());
   }
 
@@ -4556,8 +4661,206 @@ class RemoveAccountModal {
     clearMyData(); // need to delete this so that the reload does not save the data into localStore again
     window.location.reload();
   }
-  
-  removeAllAccounts() {
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  signout() {
+    // called when user is logging out
+  }
+}
+const removeAccountModal = new RemoveAccountModal();
+
+// Modal to remove multiple accounts at once from welcome screen
+class RemoveAccountsModal {
+  constructor() {}
+
+  load() {
+    this.modal = document.getElementById('removeAccountsModal');
+    this.closeButton = document.getElementById('closeRemoveAccountsModal');
+    this.listContainer = document.getElementById('removeAccountsList');
+    this.submitButton = document.getElementById('submitRemoveAccounts');
+    this.removeAllButton = document.getElementById('removeAllAccountsButton');
+    this.closeButton.addEventListener('click', () => this.close());
+    this.submitButton.addEventListener('click', () => this.handleSubmit());
+    this.removeAllButton.addEventListener('click', () => this.handleRemoveAllAccounts());
+  }
+
+  open() {
+    this.renderAccounts();
+    this.submitButton.disabled = true;
+    this.modal.classList.add('active');
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    this.listContainer.innerHTML = '';
+  }
+
+  isActive() { 
+    return this.modal?.classList.contains('active'); 
+  }
+
+  getAllAccountsData() {
+    const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    const result = [];
+    // Walk accounts registry to get username + netid list and derive counts
+    for (const netid in accountsObj.netids) {
+      const usernamesObj = accountsObj.netids[netid]?.usernames || {};
+      for (const username in usernamesObj) {
+        const key = `${username}_${netid}`;
+        const state = loadState(key); // decrypted & parsed
+        let contactsCount = 0;
+        let messagesCount = 0;
+        if (state) {
+          try {
+            contactsCount = Object.keys(state.contacts || {}).length;
+            // Sum messages arrays lengths per contact
+            if (state.contacts) {
+              for (const addr in state.contacts) {
+                messagesCount += (state.contacts[addr].messages?.length || 0);
+              }
+            }
+          } catch (e) {
+            console.warn('Error counting contacts/messages for', key, e);
+          }
+        }
+        result.push({ username, netid, contactsCount, messagesCount });
+      }
+    }
+
+    // Find any orphaned account files not in accounts object
+    for (let i = 0; i < localStorage.length; i++) {
+      const storageKey = localStorage.key(i);
+      if (!storageKey) continue;
+      
+      // Use regex to extract username and netid from storage key
+      const match = storageKey.match(/(.+)_(.+)$/);
+      if (!match) continue;
+      
+      const [, username, netid] = match;
+      
+      // Validate username and netid
+      if (!username || !netid) continue;
+      
+      // Check if this account is already in our result list
+      const already = result.find(r => r.username === username && r.netid === netid);
+      if (already) continue;
+      
+      // Check if this account is registered in the accounts object
+      const isRegistered = accountsObj.netids[netid]?.usernames?.[username];
+      if (isRegistered) continue;
+      let state = null;
+      try{
+        state = loadState(storageKey);
+      } catch (e) {
+        console.warn('Error loading orphan account', storageKey, e);
+        result.push({ username, netid, contactsCount: -1, messagesCount: -1, orphan: true });
+        continue;
+      }
+      let contactsCount = 0; let messagesCount = 0;
+      if (state) {
+        try {
+          contactsCount = Object.keys(state.contacts || {}).length;
+          // Sum messages arrays lengths per contact
+          if (state.contacts) {
+            for (const addr in state.contacts) {
+              messagesCount += (state.contacts[addr].messages?.length || 0);
+            }
+          }
+        } catch (e) {
+          console.warn('Error counting orphan account', storageKey, e);
+        }
+      }
+      result.push({ username, netid, contactsCount, messagesCount, orphan: true });
+    }
+    return result;
+  }
+
+  sortAccounts(accounts) {
+    const orderedNetids = network.netids || [];
+    return accounts.sort((a,b) => {
+      const ia = orderedNetids.indexOf(a.netid);
+      const ib = orderedNetids.indexOf(b.netid);
+      const aKnown = ia !== -1; const bKnown = ib !== -1;
+      if (aKnown && bKnown && ia !== ib) return ia - ib; // both known use index order
+      if (aKnown && !bKnown) return -1; // known before unknown
+      if (!aKnown && bKnown) return 1;
+      if (!aKnown && !bKnown) { // both unknown alphabetical by netid
+        if (a.netid !== b.netid) return a.netid.localeCompare(b.netid);
+      }
+      // same netid or both unknown same netid -> by username
+      return a.username.localeCompare(b.username);
+    });
+  }
+
+  groupByNetid(accounts) {
+    const groups = {};
+    for (const acct of accounts) {
+      if (!groups[acct.netid]) groups[acct.netid] = [];
+      groups[acct.netid].push(acct);
+    }
+    return groups;
+  }
+
+  renderAccounts() {
+    const accounts = this.sortAccounts(this.getAllAccountsData());
+    const groups = this.groupByNetid(accounts);
+    this.listContainer.innerHTML = '';
+    const orderedNetids = [...(network.netids || [])];
+    // Append unknown netids afterwards
+    const unknownNetids = Object.keys(groups).filter(n => !orderedNetids.includes(n)).sort();
+    const finalOrder = [...orderedNetids.filter(n => groups[n]), ...unknownNetids];
+    for (const netid of finalOrder) {
+      const section = document.createElement('div');
+      section.className = 'remove-accounts-section';
+      const accountsForNet = groups[netid];
+      section.innerHTML = `<h3>${netid.slice(0,6)} (${accountsForNet.length})</h3>`;
+      const list = document.createElement('div');
+      list.className = 'account-checkboxes';
+      accountsForNet.forEach(acc => {
+        const label = document.createElement('label');
+        label.className = 'remove-account-row';
+        label.innerHTML = `
+          <input type="checkbox" data-username="${acc.username}" data-netid="${acc.netid}" />
+          <span class="remove-account-username">${acc.username}</span>
+          <span class="remove-account-stats">${acc.contactsCount} contacts, ${acc.messagesCount} messages${acc.orphan ? ' (orphan)' : ''}</span>
+        `;
+        list.appendChild(label);
+      });
+      section.appendChild(list);
+      this.listContainer.appendChild(section);
+    }
+    // checkbox change handler for enabling submit
+    this.listContainer.addEventListener('change', () => {
+      const checked = this.listContainer.querySelectorAll('input[type="checkbox"]:checked').length;
+      this.submitButton.disabled = checked === 0;
+    }, { once: true }); // attach once, inside we attach nested listeners via event bubbling
+  }
+
+  handleSubmit() {
+    const checked = this.listContainer.querySelectorAll('input[type="checkbox"]:checked');
+    if (checked.length === 0) return;
+    const confirmText = confirm(`Remove ${checked.length} selected account(s) from this device?`);
+    if (!confirmText) return;
+    const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    checked.forEach(cb => {
+      const username = cb.dataset.username;
+      const netid = cb.dataset.netid;
+      // remove account data file
+      localStorage.removeItem(`${username}_${netid}`);
+      // remove from registry if present
+      if (accountsObj.netids[netid] && accountsObj.netids[netid].usernames && accountsObj.netids[netid].usernames[username]) {
+        delete accountsObj.netids[netid].usernames[username];
+      }
+    });
+    localStorage.setItem('accounts', stringify(accountsObj));
+    showToast('Selected accounts removed', 3000, 'success');
+    this.close();
+  }
+
+  handleRemoveAllAccounts() {
     const confirmText = prompt(`WARNING: All accounts and data will be permanently removed from this device.\n\nType "REMOVE ALL" to confirm:`);
     if (confirmText !== "REMOVE ALL") {
       showToast('Remove all cancelled', 2000, 'warning');
@@ -4574,16 +4877,8 @@ class RemoveAccountModal {
     clearMyData();
     window.location.reload();
   }
-
-  isActive() {
-    return this.modal.classList.contains('active');
-  }
-
-  signout() {
-    // called when user is logging out
-  }
 }
-const removeAccountModal = new RemoveAccountModal();
+const removeAccountsModal = new RemoveAccountsModal();
 
 class BackupAccountModal {
   constructor() {}
@@ -4683,12 +4978,30 @@ class BackupAccountModal {
    */
   async handleSubmitOne(event) {
     event.preventDefault();
+    saveState();
 
     // Disable button to prevent multiple submissions
     this.submitButton.disabled = true;
 
     const password = this.passwordInput.value;
-    const jsonData = stringify(myData, null, 2);
+    // Build new structured backup object
+    const username = myData?.account?.username;
+    const netid = myData?.account?.netid;
+    const accountKey = `${username}_${netid}`;
+    // get key from localStorage
+    const account = localStorage.getItem(accountKey);
+
+    const backupObj = {
+      [accountKey]: account,
+    };
+
+    // Include global lock value from localStorage if present
+    const lockVal = localStorage.getItem('lock');
+    if (lockVal !== null) {
+      backupObj.lock = lockVal;
+    }
+
+    const jsonData = stringify(backupObj, null, 2);
 
     try {
       // Encrypt data if password is provided
@@ -4852,6 +5165,9 @@ class RestoreAccountModal {
     this.importForm = document.getElementById('importForm');
     this.fileInput = document.getElementById('importFile');
     this.passwordInput = document.getElementById('importPassword');
+    this.overwriteAccountsCheckbox = document.getElementById('overwriteAccountsCheckbox');
+    this.backupAccountLockGroup = document.getElementById('backupAccountLockGroup');
+    this.backupAccountLock = document.getElementById('backupAccountLock');
     this.developerOptionsSection = document.getElementById('developerOptionsSection');
 
     this.closeImportForm.addEventListener('click', () => this.close());
@@ -4889,10 +5205,12 @@ class RestoreAccountModal {
   }
 
   open() {
-    // have developer options toggle unchecked and clear any previous inputs
-    this.clearForm();
+    // reset any backup lock UI
+    this.backupAccountLockGroup.style.display = 'none';
+    this.backupAccountLock.value = '';
 
-    // called when the modal needs to be opened
+    // clear and show modal
+    this.clearForm();
     this.modal.classList.add('active');
   }
 
@@ -4954,6 +5272,14 @@ class RestoreAccountModal {
       }
 
       const data = parse(content);
+      // If the backup file contains a top-level lock field (accounts were locked in backup)
+      if (data.lock) {
+        // Show password input so user can provide password needed to unlock accounts
+        this.backupAccountLockGroup.style.display = 'block';
+      } else {
+        this.backupAccountLockGroup.style.display = 'none';
+        this.backupAccountLock.value = '';
+      }
       const netids = new Set();
 
       // Extract netids only from localStorage keys (username_netid format)
@@ -5000,6 +5326,130 @@ class RestoreAccountModal {
     return modifiedContent;
   }
 
+  // Merge accounts from a backup object into localStorage without clearing other keys.
+  // Handles encrypted accounts in backup (requires backup password) and re-encrypts with local lock if needed.
+  async mergeBackupAccountsToLocal(backupData) {
+    const overwrite = this.overwriteAccountsCheckbox?.checked;
+
+    // If backup has a lock, require backup password
+    let backupEncKey = null;
+    if (backupData.lock) {
+      const password = this.backupAccountLock.value || '';
+      if (!password) {
+        showToast('Backup password required to unlock accounts in the backup file', 0, 'error');
+        return false;
+      }
+      backupEncKey = await passwordToKey(password + 'liberdusData');
+      if (!backupEncKey) {
+        showToast('Invalid backup password', 0, 'error');
+        return false;
+      }
+    }
+
+    // Ensure we have local accounts registry
+    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+
+    // Merge accounts registry first
+    const backupAccountsRegistry = parse(backupData.accounts || '{"netids":{}}');
+    Object.keys(backupAccountsRegistry.netids || {}).forEach(netid => {
+      if (!existingAccounts.netids[netid]) existingAccounts.netids[netid] = { usernames: {} };
+      const usernames = backupAccountsRegistry.netids[netid].usernames || {};
+      Object.keys(usernames).forEach(username => {
+        if (overwrite || !existingAccounts.netids[netid].usernames[username]) {
+          existingAccounts.netids[netid].usernames[username] = usernames[username];
+        }
+      });
+    });
+    localStorage.setItem('accounts', stringify(existingAccounts));
+
+
+    // Helper to extract address from parsed account data
+    const extractAddress = (maybeJson) => {
+      try {
+        const obj = typeof maybeJson === 'string' ? parse(maybeJson) : maybeJson;
+        return obj?.account?.keys?.address || '';
+      } catch (e) {
+        return '';
+      }
+    };
+
+    // Iterate over keys in backupData and copy account entries
+    for (const key of Object.keys(backupData)) {
+      const parts = key.split('_');
+      if (parts.length !== 2) continue;
+      const username = parts[0];
+      const netid = parts[1];
+      // basic netid check
+      if (netid.length !== 64 || !/^[a-f0-9]+$/.test(netid)) continue;
+
+      const localKey = `${username}_${netid}`;
+      const exists = localStorage.getItem(localKey) !== null;
+      if (exists && !overwrite) {
+        // skip when not overwriting
+        showToast(`Account ${username} on ${netid.slice(0, 6)}... already exists. Not overwriting.`, 3000, 'warning');
+        continue;
+      }
+
+      let value = backupData[key];
+
+      // If backupData.lock equals localStorage.lock, we can copy directly
+      if (backupData.lock && localStorage.lock && backupData.lock === localStorage.lock) {
+        // Direct copy
+        localStorage.setItem(localKey, value);
+      } else {
+        // Need to decrypt with backupEncKey if available
+        let decrypted = value;
+        if (backupData.lock) {
+            if (!backupEncKey) {
+              showToast('Backup Account password required to unlock accounts in the backup file', 0, 'error');
+              return false;
+            }
+          try {
+            const maybe = decryptData(value, backupEncKey, true);
+            if (maybe != null) decrypted = maybe;
+            else {
+              // failed to decrypt
+              showToast(`Failed to decrypt account ${username} on ${netid}. Skipping.`, 4000, 'error');
+              continue;
+            }
+          } catch (e) {
+            showToast(`Failed to decrypt account ${username} on ${netid}. Skipping.`, 4000, 'error');
+            continue;
+          }
+        }
+
+        // Now re-encrypt with local lock if localStorage.lock exists
+        let finalValue = decrypted;
+          if (localStorage.lock) {
+          if (!lockModal?.encKey) {
+            showToast('Local lock is set but unlock state is missing. Please unlock before importing.', 0, 'error');
+            return false;
+          }
+          try {
+            finalValue = encryptData(decrypted, lockModal.encKey, true);
+          } catch (e) {
+            showToast(`Failed to re-encrypt account ${username} on ${netid}. Skipping.`, 4000, 'error');
+            continue;
+          }
+        }
+
+        // Finally store the account entry
+          localStorage.setItem(localKey, finalValue);
+
+        // Update accounts registry address if possible
+        const address = extractAddress(decrypted);
+        if (address) {
+          const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+          if (!accountsObj.netids[netid]) accountsObj.netids[netid] = { usernames: {} };
+          accountsObj.netids[netid].usernames[username] = { address };
+          localStorage.setItem('accounts', stringify(accountsObj));
+        }
+      }
+    }
+
+    return true;
+  }
+
   async handleSubmit(event) {
     event.preventDefault();
 
@@ -5029,56 +5479,33 @@ class RestoreAccountModal {
       }
 
       // We first parse to jsonData so that if the parse does not work we don't destroy myData
-      myData = parse(fileContent);
+      let backupData = parse(fileContent);
 
-      // if myData has a version key then we assume all accounts were backed up and being restored
-      if (myData.version) {
-        // Warn user about global restore and ask for confirmation
-        const confirmed = confirm('⚠️ WARNING: This will restore all accounts and clear existing data.\n\nIt is recommended to backup your current data before proceeding.\n\nDo you want to continue with the restore?');
-        
+        // Instead of clearing localStorage, we'll merge accounts from backup into localStorage
+        // Ask for confirmation (previous behavior warned about clearing; keep a similar warning)
+        const confirmed = confirm('⚠️ WARNING: This will import all accounts from the backup file.\n\nExisting local accounts will not be removed. If "Overwrite existing accounts" is checked, accounts with the same username and netid will be replaced.\n\nIt is recommended to backup your current data before proceeding.\n\nDo you want to continue with the restore?');
+
         if (!confirmed) {
           showToast('Restore cancelled by user', 2000, 'info');
           return;
         }
-        
-        localStorage.clear();
-        this.copyObjectToLocalStorage(myData);
-      }
-      // we are restoring only one account
-      else {
-        // also need to set myAccount
-        const acc = myData.account; // this could have other things which are not needed
-        myAccount = {
-          netid: acc.netid,
-          username: acc.username,
-          keys: {
-            address: acc.keys.address,
-            public: acc.keys.public,
-            secret: acc.keys.secret,
-            type: acc.keys.type,
-          },
-        };
-        // Get existing accounts or create new structure
-        const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-        // Ensure netid exists
-        if (!existingAccounts.netids[myAccount.netid]) {
-          existingAccounts.netids[myAccount.netid] = { usernames: {} };
+
+        // backwards compatibility for old single account export
+        if(typeof backupData === 'object' && 'account' in backupData) {
+          const username = backupData.account.username;
+          const netid = backupData.account.netid;
+          backupData = {
+            [`${username}_${netid}`]: stringify(backupData)
+          };
         }
-        // Store updated accounts back in localStorage
-        existingAccounts.netids[myAccount.netid].usernames[myAccount.username] = {
-          address: myAccount.keys.address,
-        };
-        localStorage.setItem('accounts', stringify(existingAccounts));
 
-        // if lock enckey exist we need to encrypt the myData
-        const updatedMyData = lockModal?.encKey ? encryptData(stringify(myData), lockModal?.encKey, true) : stringify(myData);
-
-        // Store the localStore entry for username_netid
-        localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, updatedMyData);
-      }
-
-      // Show success message using toast
-      showToast('Account restored successfully!', 2000, 'success');
+        // Merge and abort if merge failed
+        const ok = await this.mergeBackupAccountsToLocal(backupData);
+        if (!ok) {
+          return; // merge failed — keep modal open and do not proceed to reset/close
+        }
+        showToast('Accounts restored successfully!', 2000, 'success');
+      
       // handleNativeAppSubscription()
 
       // Reset form and close modal after delay
@@ -5129,8 +5556,8 @@ class TollModal {
   load() {
     this.modal = document.getElementById('tollModal');
     this.minTollDisplay = document.getElementById('minTollDisplay');
+    this.equivalentLibDisplay = document.getElementById('equivalentLibDisplay');
     this.newTollAmountInputElement = document.getElementById('newTollAmountInput');
-    this.toggleTollCurrencyElement = document.getElementById('toggleTollCurrency');
     this.warningMessageElement = document.getElementById('tollWarningMessage');
     this.saveButton = document.getElementById('saveNewTollButton');
     this.closeButton = document.getElementById('closeTollModal');
@@ -5139,32 +5566,34 @@ class TollModal {
 
     this.tollForm.addEventListener('submit', (event) => this.saveAndPostNewToll(event));
     this.closeButton.addEventListener('click', () => this.close());
-    this.toggleTollCurrencyElement.addEventListener('click', (event) => this.handleToggleTollCurrency(event));
     this.newTollAmountInputElement.addEventListener('input', () => this.newTollAmountInputElement.value = normalizeUnsignedFloat(this.newTollAmountInputElement.value));
     this.newTollAmountInputElement.addEventListener('input', () => this.updateSaveButtonState());
+    this.newTollAmountInputElement.addEventListener('input', () => this.updateEquivalentLibDisplay());
   }
 
   open() {
     this.modal.classList.add('active');
-    // set currentTollValue to the toll value in wei
+    // set currentTollValue to the toll value
     const toll = myData.settings.toll || 0n;
-    const tollUnit = myData.settings.tollUnit || 'LIB';
+    const tollUnit = myData.settings.tollUnit || 'USD';
 
     // Fetch network parameters to get minToll
     this.minToll = parameters?.current?.minToll || 1n * wei; // Default to 1 LIB if not set
 
     this.updateTollDisplay(toll, tollUnit);
 
-    this.currentCurrency = tollUnit;
-    this.tollCurrencySymbol.textContent = this.currentCurrency;
+    this.currentCurrency = 'USD';
+    if (this.tollCurrencySymbol) this.tollCurrencySymbol.textContent = 'USD';
     this.newTollAmountInputElement.value = ''; // Clear input field
     this.warningMessageElement.textContent = '';
     this.warningMessageElement.classList.remove('show');
     this.saveButton.disabled = true;
 
-    // Update min toll display under input
-    const minTollValue = parseFloat(big2str(this.minToll, 18)).toFixed(6); // Show 6 decimal places
-    this.minTollDisplay.textContent = `Minimum toll: ${minTollValue} LIB`;
+    // Update min toll display under input (USD)
+    const scalabilityFactor = getStabilityFactor();
+    const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
+    this.minTollDisplay.textContent = `Minimum toll: ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD`;
+    this.updateEquivalentLibDisplay();
   }
 
   close() {
@@ -5173,35 +5602,6 @@ class TollModal {
 
   isActive() {
     return this.modal.classList.contains('active');
-  }
-
-  /**
-   * Handle the toggle of the toll currency
-   * @param {Event} event - The event object
-   * @returns {void}
-   */
-  async handleToggleTollCurrency(event) {
-    event.preventDefault();
-
-    this.currentCurrency = this.currentCurrency === 'LIB' ? 'USD' : 'LIB';
-    this.tollCurrencySymbol.textContent = this.currentCurrency;
-
-    const scalabilityFactor = getStabilityFactor();
-    if (this.newTollAmountInputElement.value !== '') {
-      const currentValue = parseFloat(this.newTollAmountInputElement.value);
-      const convertedValue =
-        this.currentCurrency === 'USD' ? currentValue * scalabilityFactor : currentValue / scalabilityFactor;
-      this.newTollAmountInputElement.value = convertedValue.toString();
-    }
-
-    // Update min toll display with converted value
-    if (this.currentCurrency === 'USD') {
-      const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
-      this.minTollDisplay.textContent = `Minimum toll: ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD`; // Show 4 decimal places for USD
-    } else {
-      this.minTollDisplay.textContent = `Minimum toll: ${parseFloat(big2str(this.minToll, 18)).toFixed(6)} LIB`; // Show 6 decimal places for LIB
-    }
-    this.updateSaveButtonState();
   }
 
   /**
@@ -5280,22 +5680,50 @@ class TollModal {
    */
   updateTollDisplay(toll, tollUnit) {
     const scalabilityFactor = getStabilityFactor();
-    let tollValueLib = '';
     let tollValueUSD = '';
+    let tollValueLIB = '';
 
     if (tollUnit == 'LIB') {
-      tollValueLib = big2str(toll, 18);
-      tollValueUSD = (parseFloat(big2str(toll, 18)) * scalabilityFactor).toString();
+      const libFloat = parseFloat(big2str(toll, 18));
+      tollValueUSD = (libFloat * scalabilityFactor).toString();
+      tollValueLIB = libFloat.toString();
     } else {
-      tollValueUSD = big2str(toll, 18);
-      tollValueLib = (parseFloat(big2str(toll, 18)) / scalabilityFactor).toString();
+      const usdFloat = parseFloat(big2str(toll, 18));
+      tollValueUSD = usdFloat.toString();
+      tollValueLIB = (usdFloat / scalabilityFactor).toString();
     }
 
-    tollValueLib = parseFloat(tollValueLib).toString();
-    tollValueUSD = parseFloat(tollValueUSD).toString();
+    const usdDisplay = parseFloat(tollValueUSD).toFixed(6);
+    const libDisplay = scalabilityFactor > 0 ? parseFloat(tollValueLIB).toFixed(6) : 'N/A';
 
-    document.getElementById('tollAmountLIB').textContent = tollValueLib + ' LIB';
-    document.getElementById('tollAmountUSD').textContent = tollValueUSD + ' USD';
+    // USD-only UI
+    document.getElementById('tollAmountUSD').textContent = `${usdDisplay} USD (≈ ${libDisplay} LIB)`;
+  }
+
+  /**
+   * Updates the equivalent LIB display beneath the USD input
+   * @returns {void}
+   */
+  updateEquivalentLibDisplay() {
+    if (!this.equivalentLibDisplay) return;
+    const value = this.newTollAmountInputElement.value;
+    if (!value || value.trim() === '' || value.trim() === '.' || value.trim() === ',') {
+      this.equivalentLibDisplay.textContent = '';
+      return;
+    }
+    const usd = parseFloat(value);
+    if (isNaN(usd) || usd < 0) {
+      this.equivalentLibDisplay.textContent = '';
+      return;
+    }
+    const factor = getStabilityFactor();
+    if (!factor || factor <= 0) {
+      this.equivalentLibDisplay.textContent = '';
+      return;
+    }
+    const lib = usd / factor;
+    this.equivalentLibDisplay.style.display = 'block';
+    this.equivalentLibDisplay.textContent = `≈ ${lib.toFixed(6)} LIB`;
   }
 
   /**
@@ -5432,12 +5860,25 @@ class InviteModal {
     this.closeButton = document.getElementById('closeInviteModal');
     this.inviteForm = document.getElementById('inviteForm');
     this.shareButton = document.getElementById('shareInviteButton');
+    this.resetInviteButton = document.getElementById('resetInviteMessage');
 
     this.closeButton.addEventListener('click', () => this.close());
     this.inviteForm.addEventListener('submit', (event) => this.handleSubmit(event));
 
     // input listener for editable message
     this.inviteMessageInput.addEventListener('input', () => this.validateInputs());
+    // reset invite message
+    this.resetInviteButton.addEventListener('click', () => this.handleResetClick());
+  }
+
+  handleResetClick() {
+    this.inviteMessageInput.value = this.getDefaultInviteText();
+    this.validateInputs();
+    this.inviteMessageInput.focus();
+  }
+
+  getDefaultInviteText() {
+    return `Message ${myAccount?.username || ''} on Liberdus! ${this.inviteURL}`;
   }
 
   validateInputs() {
@@ -5448,11 +5889,13 @@ class InviteModal {
   open() {
     // Clear any previous values
     // Prefill the editable invite message with a useful default
-    const defaultText = `Message ${myAccount?.username || ''} on Liberdus! ${this.inviteURL}`;
+    const savedText = myData?.settings?.inviteMessage;
+    const defaultText = this.getDefaultInviteText();
+    const initialText = (savedText && savedText.trim()) ? savedText : defaultText;
     if (this.inviteMessageInput) {
       // Only set default if the user hasn't previously entered something
       if (!this.inviteMessageInput.value || !this.inviteMessageInput.value.trim()) {
-        this.inviteMessageInput.value = defaultText;
+        this.inviteMessageInput.value = initialText;
       }
     }
     this.validateInputs(); // Set initial button state
@@ -5465,22 +5908,33 @@ class InviteModal {
 
   async handleSubmit(event) {
     event.preventDefault();
-    this.submitButton.disabled = true;
 
     const message = this.inviteMessageInput.value.trim();
 
     if (!message) {
       showToast('Please enter a message to share', 0, 'error');
-      this.submitButton.disabled = false;
       return;
     }
+
+    // Save edited message to settings and persist
+    if (myData && myData.settings) {
+      myData.settings.inviteMessage = message;
+      saveState();
+    }
+
+    // 2-second cooldown on Share button
+    this.submitButton.disabled = true;
+    this.resetInviteButton.disabled = true;
+    setTimeout(() => {
+      this.validateInputs();
+      this.resetInviteButton.disabled = false;
+    }, 2000);
 
     try {
       await this.shareLiberdusInvite(message);
     } catch (err) {
-      // shareLiberdusInvite will show its own errors; if it throws, show a fallback
+      // shareLiberdusInvite will show its own errors; rely on cooldown to re-enable
       showToast('Could not share invitation. Try copying manually.', 0, 'error');
-      this.submitButton.disabled = false;
     }
   }
 
@@ -5490,7 +5944,17 @@ class InviteModal {
     const defaultText = `Message ${myAccount.username} on Liberdus! ${this.inviteURL}`;
     const text = (typeof overrideText === 'string' && overrideText.trim().length) ? overrideText.trim() : defaultText;
 
-    // 1) Try native share sheet
+    // 1) Check if running in React Native WebView
+    if (reactNativeApp.isReactNativeWebView) {
+      try {
+        reactNativeApp.shareInvite(url, text, title);
+        return; // success
+      } catch (err) {
+        // fall through to native share or clipboard on errors
+      }
+    }
+
+    // 2) Try native share sheet
     if (navigator.share) {
       try {
         await navigator.share({ url, text, title });
@@ -5505,7 +5969,7 @@ class InviteModal {
       }
     }
 
-    // 2) Clipboard fallback (no mailto)
+    // 3) Clipboard fallback (no mailto)
     try {
       await navigator.clipboard.writeText(text);
       showToast("Invite copied to clipboard!", 3000, "success");
@@ -6248,7 +6712,7 @@ class ValidatorStakingModal {
         myData.wallet.history.unshift({
           nominee: nodeAddress,
           amount: bigxnum2big(wei, '0'),
-          memo: 'unstake',
+          type: 'withdraw_stake',
           sign: 1,
           status: 'sent',
           timestamp: getCorrectedTimestamp(),
@@ -6589,7 +7053,7 @@ class StakeValidatorModal {
         myData.wallet.history.unshift({
           nominee: nodeAddress,
           amount: amount_in_wei,
-          memo: 'stake',
+          type: 'deposit_stake',
           sign: -1,
           status: 'sent',
           timestamp: getCorrectedTimestamp(),
@@ -6855,6 +7319,10 @@ class ChatModal {
 
     // Abort controller for cancelling file operations
     this.abortController = new AbortController();
+    
+    // Keyboard detection properties
+    this.isKeyboardVisible = false; // Track keyboard state
+    this.initialViewportHeight = window.innerHeight; // Store initial viewport height
   }
 
   /**
@@ -6939,6 +7407,21 @@ class ChatModal {
       this.debouncedSaveDraft(e.target.value);
     });
 
+    // Add viewport resize listener for keyboard detection
+    window.addEventListener('resize', () => {
+      const currentHeight = window.innerHeight;
+      const heightDifference = this.initialViewportHeight - currentHeight;
+      
+      // If viewport height decreased significantly, keyboard is likely open
+      if (heightDifference > 150) { // 150px threshold for keyboard detection
+        this.isKeyboardVisible = true;
+        console.log('⌨️ Keyboard detected as open (viewport height decreased by', heightDifference, 'px)');
+      } else if (heightDifference < 50) { // If height increased or stayed similar, keyboard is likely closed
+        this.isKeyboardVisible = false;
+        console.log('⌨️ Keyboard detected as closed (viewport height difference:', heightDifference, 'px)');
+      }
+    });
+
     // Add focus event listener for message input to handle scrolling
     this.messageInput.addEventListener('focus', () => {
       if (this.messagesContainer) {
@@ -7018,6 +7501,16 @@ class ChatModal {
     });
 
 
+    // Make toll info clickable: show sticky info toast and refresh toll in background
+    const tollContainer = this.modal.querySelector('.toll-container');
+    if (tollContainer) {
+      tollContainer.style.cursor = 'pointer';
+      tollContainer.addEventListener('click', () => {
+        const message = '<strong>What is a Toll?</strong><br><br>A toll is a small amount of LIB that recipients require with your message to prevent spam.<br><br><strong>How it works:</strong><br>• You must send the toll amount to send a message<br>• The toll is typically returned when they respond<br>• Tolls can change based on friend status<br>• Higher tolls = stronger spam protection';
+        showToast(message, 0, 'toll', true);
+      });
+    }
+
   }
 
   /**
@@ -7032,7 +7525,7 @@ class ChatModal {
     this.messageByteCounter.style.display = 'none';
 
     friendModal.setAddress(address);
-    footer.newChatButton.classList.remove('visible');
+    footer.closeNewChatButton();
     const contact = myData.contacts[address];
     friendModal.updateFriendButton(contact, 'addFriendButtonChat');
     // Set user info
@@ -7054,9 +7547,7 @@ class ChatModal {
     // Add data attributes to store the username and address
     this.sendMoneyButton.dataset.username = contact.username || address;
 
-    generateIdenticon(contact.address, 40).then((identicon) => {
-      this.modalAvatar.innerHTML = identicon;
-    });
+    this.modalAvatar.innerHTML = generateIdenticon(contact.address, 40);
 
     // Clear previous messages from the UI
     this.messagesList.innerHTML = '';
@@ -7142,11 +7633,11 @@ class ChatModal {
     this.modal.classList.remove('active');
     if (chatsScreen.isActive()) {
       chatsScreen.updateChatList();
-      footer.newChatButton.classList.add('visible');
+      footer.openNewChatButton();
     }
     if (contactsScreen.isActive()) {
       contactsScreen.updateContactsList();
-      footer.newChatButton.classList.add('visible');
+      footer.openNewChatButton();
     }
     this.address = null;
   }
@@ -8322,12 +8813,27 @@ console.warn('in send message', txid)
   }
 
   /**
+   * Detects if the keyboard is currently open
+   * @returns {boolean} True if keyboard is likely open
+   */
+  isKeyboardOpen() {
+    // Use the tracked state from resize listener for more reliable detection
+    return this.isKeyboardVisible;
+  }
+
+  /**
    * Handles message click events
    * @param {Event} e - Click event
    */
   handleMessageClick(e) {
     if (e.target.closest('.attachment-row')) return;
     if (e.target.closest('.voice-message-play-button')) return;
+
+    // Check if keyboard is open - if so, don't show context menu
+    if (this.isKeyboardOpen()) {
+      console.log('⌨️ Keyboard is open, preventing context menu');
+      return;
+    }
 
     if (e.target.tagName === 'A' || e.target.closest('a')) return;
     
@@ -8338,9 +8844,12 @@ console.warn('in send message', txid)
 
     if (messageEl.dataset.status === 'failed') {
       const isPayment = messageEl.classList.contains('payment-info');
-      return isPayment 
-        ? failedTransactionModal.open(messageEl.dataset.txid, messageEl)
-        : failedMessageMenu.open(e, messageEl);
+      if (isPayment) {
+        // Open main context menu but configure for failed payment
+        this.showMessageContextMenu(e, messageEl);
+        return;
+      }
+      return failedMessageMenu.open(e, messageEl);
     }
 
     this.showMessageContextMenu(e, messageEl);
@@ -8369,14 +8878,23 @@ console.warn('in send message', txid)
     const copyOption = this.contextMenu.querySelector('[data-action="copy"]');
     const joinOption = this.contextMenu.querySelector('[data-action="join"]');
     const inviteOption = this.contextMenu.querySelector('[data-action="call-invite"]');
+    const editResendOption = this.contextMenu.querySelector('[data-action="edit-resend"]');
+    const isFailedPayment = messageEl.dataset.status === 'failed' && messageEl.classList.contains('payment-info');
+    // For failed payment messages, hide copy and delete-for-all regardless of sender
+    if (isFailedPayment) {
+      if (copyOption) copyOption.style.display = 'none';
+      if (deleteForAllOption) deleteForAllOption.style.display = 'none';
+    }
     if (isCall) {
       if (copyOption) copyOption.style.display = 'none';
       if (joinOption) joinOption.style.display = 'flex';
       if (inviteOption) inviteOption.style.display = 'flex';
+      if (editResendOption) editResendOption.style.display = 'none';
     } else {
       if (copyOption) copyOption.style.display = 'flex';
       if (joinOption) joinOption.style.display = 'none';
       if (inviteOption) inviteOption.style.display = 'none';
+      if (editResendOption) editResendOption.style.display = isFailedPayment ? 'flex' : 'none';
     }
     
     this.positionContextMenu(this.contextMenu, messageEl);
@@ -8390,29 +8908,24 @@ console.warn('in send message', txid)
    */
   positionContextMenu(menu, messageEl) {
     const rect = messageEl.getBoundingClientRect();
-    const menuWidth = 200; // match CSS
+    const container = messageEl.closest('.messages-container');
+    const containerRect = container?.getBoundingClientRect() || { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+    
+    const menuWidth = 200;
     const menuHeight = 100;
-
-    let left = rect.left + (rect.width / 2) - (menuWidth / 2);
-    // If menu would overflow right, push left
-    if (left + menuWidth > window.innerWidth - 10) {
-      left = window.innerWidth - menuWidth - 10;
+    
+    // Center horizontally, clamp to container
+    let left = Math.max(containerRect.left + 10, 
+                        Math.min(containerRect.right - menuWidth - 10, 
+                                 rect.left + rect.width/2 - menuWidth/2));
+    
+    // Prefer below, fallback to above, clamp to container
+    let top = rect.bottom + 10;
+    if (top + menuHeight > containerRect.bottom) {
+      top = Math.max(containerRect.top + 10, rect.top - menuHeight - 10);
     }
-    // If menu would overflow left, push right
-    if (left < 10) {
-      left = 10;
-    }
-
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceAbove = rect.top;
-    const top = (spaceBelow >= menuHeight || spaceBelow > spaceAbove)
-      ? rect.bottom + 10
-      : rect.top - menuHeight - 10;
-
-    Object.assign(menu.style, {
-      left: `${left}px`,
-      top: `${top}px`
-    });
+    
+    Object.assign(menu.style, { left: `${left}px`, top: `${top}px` });
   }
 
   /**
@@ -8444,14 +8957,65 @@ console.warn('in send message', txid)
         callInviteModal.open(messageEl);
         break;
       case 'delete':
-        this.deleteMessage(messageEl);
+        if (messageEl.dataset.status === 'failed' && messageEl.classList.contains('payment-info')) {
+          this.deleteFailedPayment(messageEl);
+        } else {
+          this.deleteMessage(messageEl);
+        }
         break;
       case 'delete-for-all':
         this.deleteMessageForAll(messageEl);
         break;
+      case 'edit-resend':
+        this.handleFailedPaymentEditResend(messageEl);
+        break;
     }
     
     this.closeContextMenu();
+  }
+
+  /**
+   * Deletes a failed payment
+   * @param {HTMLElement} messageEl
+   */
+  deleteFailedPayment(messageEl) {
+      const txid = messageEl.dataset.txid;
+      if (txid) {
+        const currentAddress = this.address;
+        removeFailedTx(txid, currentAddress);
+        this.appendChatModal();
+      }
+  }
+
+  /**
+   * Prefill Send form for a failed payment to edit and resend
+   * @param {HTMLElement} messageEl
+   */
+  handleFailedPaymentEditResend(messageEl) {
+    const txid = messageEl.dataset.txid;
+    const address = messageEl?.dataset?.address || this.address;
+    const memo = messageEl.querySelector('.payment-memo')?.textContent || '';
+
+    if (!sendAssetFormModal?.modal || !sendAssetFormModal?.retryTxIdInput) return;
+
+    // Open send modal
+    sendAssetFormModal.open();
+
+    // Hidden retry txid input (used later to remove original failed tx on successful resend)
+    sendAssetFormModal.retryTxIdInput.value = txid || '';
+
+    // Memo
+    sendAssetFormModal.memoInput.value = memo || '';
+
+    // Recipient username (best-effort from contacts)
+    sendAssetFormModal.usernameInput.value = myData.contacts[address]?.username || '';
+    sendAssetFormModal.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    // Amount from wallet history (BigInt → string)
+    const amountBig = myData.wallet.history.find((tx) => tx.txid === txid)?.amount;
+    if (typeof amountBig === 'bigint') {
+      sendAssetFormModal.amountInput.value = big2str(amountBig, 18);
+    }
   }
 
 
@@ -8672,35 +9236,35 @@ console.warn('in send message', txid)
     let toll = contact.toll || 0n;
     const tollUnit = contact.tollUnit || 'LIB';
     const decimals = 18;
-    const mainIsUSD = tollUnit === 'USD';
-    const mainValue = parseFloat(big2str(toll, decimals));
-    // Conversion factor (USD/LIB)
     const factor = getStabilityFactor();
-    let mainString, otherString;
-    if (mainIsUSD) {
-      toll = bigxnum2big(toll, (1.0 / factor).toString());
-      mainString = mainValue.toFixed(6) + ' USD';
-      const libValue = mainValue / factor;
-      otherString = libValue.toFixed(6) + ' LIB';
-    } else {
-      mainString = mainValue.toFixed(6) + ' LIB';
-      const usdValue = mainValue * factor;
-      otherString = usdValue.toFixed(6) + ' USD';
-    }
+    const tollFloat = parseFloat(big2str(toll, decimals));
+    // Compute USD and LIB values; show USD with LIB equivalent in parentheses
+    const usdValue = tollUnit === 'USD' ? tollFloat : tollFloat * factor;
+    const libValue = factor > 0 ? (usdValue / factor) : NaN;
+    const usdString = isNaN(libValue)
+      ? `${usdValue.toFixed(6)} USD`
+      : `${usdValue.toFixed(6)} USD (≈ ${libValue.toFixed(6)} LIB)`;
     let display;
     if (contact.tollRequiredToSend == 1) {
-      display = `${mainString} = ${otherString}`;
+      display = `${usdString}`;
     } else if (contact.tollRequiredToSend == 2) {
       tollValue.style.color = 'red';
       display = `blocked`;
     } else {
       // light green used to show success
       tollValue.style.color = '#28a745';
-      display = `free; ${mainString} = ${otherString}`;
+      display = `free; ${usdString}`;
     }
     tollValue.textContent = display;
 
-    this.toll = toll;
+    // Store the toll in LIB format for message creation (chat messages expect LIB wei)
+    if (tollUnit === 'USD') {
+      // Convert USD toll to LIB wei for internal use
+      this.toll = bigxnum2big(wei, (usdValue / factor).toString());
+    } else {
+      // Already in LIB format
+      this.toll = toll;
+    }
     this.tollUnit = tollUnit;
   }
 
@@ -8774,23 +9338,40 @@ console.warn('in send message', txid)
   }
 
   /**
-   * Handles the call user action by generating a unique Jitsi Meet URL and sending it as a call message
+   * Handles the call user action by generating a unique WebRTC Meet URL and sending it as a call message
    * @returns {Promise<void>}
    */
   async handleCallUser() {
     try {
+      // Synchronous eligibility based on cached value fetched on ChatModal open
+      const contact = myData.contacts[this.address] || {};
+      const required = contact.tollRequiredToSend;
+      if (required !== 0) {
+        const username = contact.username || `${this.address.slice(0, 8)}...${this.address.slice(-6)}`;
+        if (required === 2) {
+          showToast('You are blocked by this user', 0, 'error');
+        } else {
+          showToast(
+            `You can only call people who have added you as a friend or connection. Ask ${username} to add you as a friend or connection`,
+            0,
+            'info'
+          );
+        }
+        return;
+      }
+
       // Generate a 256-bit random number and convert to base64
       const randomBytes = generateRandomBytes(32); // 32 bytes = 256 bits
       const randomHex = bin2hex(randomBytes).slice(0, 20);
 
-      // Create the Jitsi Meet URL
-      const jitsiUrl = `https://meet.jit.si/${randomHex}`;
+      // Create the Meet URL
+      const meetUrl = `https://meet.liberdus.com/${randomHex}`;
       
-      // Open the Jitsi URL in a new tab
-      window.open(jitsiUrl, '_blank');
+      // Open the URL in a new tab
+      window.open(meetUrl, '_blank');
       
       // Send a call message to the contact
-      await this.sendCallMessage(jitsiUrl);
+      await this.sendCallMessage(meetUrl);
       
     } catch (error) {
       console.error('Error handling call user:', error);
@@ -8799,11 +9380,11 @@ console.warn('in send message', txid)
   }
 
   /**
-   * Sends a call message with the Jitsi Meet URL
-   * @param {string} jitsiUrl - The Jitsi Meet URL to send
+   * Sends a call message with the Meet URL
+   * @param {string} meetUrl - The Meet URL to send
    * @returns {Promise<void>}
    */
-  async sendCallMessage(jitsiUrl) {
+  async sendCallMessage(meetUrl) {
     // if user is blocked, don't send message, show toast
     if (myData.contacts[this.address].tollRequiredToSend == 2) {
       showToast('You are blocked by this user', 0, 'error');
@@ -8849,7 +9430,7 @@ console.warn('in send message', txid)
       // Convert call message to new JSON format
       const callObj = {
         type: 'call',
-        url: jitsiUrl
+        url: meetUrl
       };
 
       // Encrypt the JSON message using shared secret
@@ -8893,7 +9474,7 @@ console.warn('in send message', txid)
 
       // Create new message object for local display immediately
       const newMessage = {
-        message: jitsiUrl,
+        message: meetUrl,
         timestamp: payload.sent_timestamp,
         sent_timestamp: payload.sent_timestamp,
         my: true,
@@ -10000,7 +10581,7 @@ class NewChatModal {
    */
   openNewChatModal() {
     this.modal.classList.add('active');
-    footer.newChatButton.classList.remove('visible');
+    footer.closeNewChatButton();
     this.usernameAvailable.style.display = 'none';
     this.submitButton.disabled = true;
 
@@ -10024,10 +10605,10 @@ class NewChatModal {
     this.modal.classList.remove('active');
     this.newChatForm.reset();
     if (chatsScreen.isActive()) {
-      footer.newChatButton.classList.add('visible');
+      footer.openNewChatButton();
     }
     if (contactsScreen.isActive()) {
-      footer.newChatButton.classList.add('visible');
+      footer.openNewChatButton();
     }
   }
 
@@ -10183,8 +10764,6 @@ class CreateAccountModal {
     this.togglePrivateKeyVisibility = document.getElementById('togglePrivateKeyVisibility');
     this.migrateAccountsSection = document.getElementById('migrateAccountsSection');
     this.migrateAccountsButton = document.getElementById('migrateAccountsButton');
-    this.launchButton = document.getElementById('launchButton');
-    this.updateButton = document.getElementById('updateButton');
     this.toggleMoreOptions = document.getElementById('toggleMoreOptions');
     this.moreOptionsSection = document.getElementById('moreOptionsSection');
 
@@ -10205,15 +10784,6 @@ class CreateAccountModal {
     });
 
     this.migrateAccountsButton.addEventListener('click', async () => await migrateAccountsModal.open());
-    if (window.ReactNativeWebView) {
-      this.launchButton.addEventListener('click', () => {
-        launchModal.open()
-      });
-      
-      this.updateButton.addEventListener('click', () => {
-        aboutModal.openStore();
-      });
-    }
   }
 
   open() {
@@ -10253,8 +10823,6 @@ class CreateAccountModal {
     this.moreOptionsSection.style.display = 'none';
     this.toggleButton.checked = false;
     this.privateKeySection.style.display = 'none';
-    this.launchButton.style.display = 'none';
-    this.updateButton.style.display = 'none';
     
     // Open the modal
     this.open();
@@ -10332,11 +10900,6 @@ class CreateAccountModal {
       this.privateKeySection.style.display = 'none';
       this.privateKeyInput.value = '';
       this.privateKeyError.style.display = 'none';
-      this.launchButton.style.display = 'none';
-      this.updateButton.style.display = 'none';
-    } else if (window.ReactNativeWebView) {
-      this.launchButton.style.display = 'block';
-      this.updateButton.style.display = 'block';
     }
   }
 
@@ -10727,7 +11290,7 @@ class SendAssetFormModal {
    * @returns {Promise<void>}
    */
   async close() {
-    await chatsScreen.updateChatList();
+    chatsScreen.updateChatList();
     this.modal.classList.remove('active');
     this.sendForm.reset();
     this.username = null;
@@ -10871,24 +11434,14 @@ class SendAssetFormModal {
     let toll = this.tollInfo.toll || 0n;
     const tollUnit = this.tollInfo.tollUnit || 'LIB';
     const decimals = 18;
-    const mainIsUSD = tollUnit === 'USD';
-    const mainValue = parseFloat(big2str(toll, decimals));
-    // Conversion factor (USD/LIB)
     const factor = getStabilityFactor();
-    let mainString, otherString;
-    if (mainIsUSD) {
-      toll = bigxnum2big(toll, (1.0 / factor).toString());
-      mainString = mainValue.toFixed(6) + ' USD';
-      const libValue = mainValue / factor;
-      otherString = libValue.toFixed(6) + ' LIB';
-    } else {
-      mainString = mainValue.toFixed(6) + ' LIB';
-      const usdValue = mainValue * factor;
-      otherString = usdValue.toFixed(6) + ' USD';
-    }
+    const mainValue = parseFloat(big2str(toll, decimals));
+    const usd = tollUnit === 'USD' ? mainValue : (mainValue * factor);
+    const lib = factor > 0 ? (usd / factor) : NaN;
+    const usdString = lib ? `${usd.toFixed(6)} USD (≈ ${lib.toFixed(6)} LIB)` : `${usd.toFixed(6)} USD`;
     let display;
     if (this.tollInfo.required == 1) {
-      display = `${mainString} = ${otherString}`;
+      display = `${usdString}`;
       if (this.memoInput.value.trim() == '') {
         display = '';
       }
@@ -10898,7 +11451,7 @@ class SendAssetFormModal {
     } else {
       // light green used to show success
       this.tollMemoSpan.style.color = '#28a745';
-      display = `free; ${mainString} = ${otherString}`;
+      display = `free; ${usdString}`;
     }
     //display the container
     if (display != '') {
@@ -11443,18 +11996,6 @@ class SendAssetConfirmModal {
     const cancelButton = this.cancelButton;
     const username = normalizeUsername(sendAssetFormModal.usernameInput.value);
 
-    // hidden input field retryOfTxId value is not an empty string
-    if (sendAssetFormModal.retryTxIdInput.value) {
-      // remove from myData use txid from hidden field retryOfPaymentTxId
-      removeFailedTx(sendAssetFormModal.retryTxIdInput.value, toAddress);
-
-      // clear the field
-      failedTransactionModal.txid = '';
-      failedTransactionModal.address = '';
-      failedTransactionModal.memo = '';
-      sendAssetFormModal.retryTxIdInput.value = '';
-    }
-
     // if it's your own username disable the send button
     if (username == myAccount.username) {
       confirmButton.disabled = true;
@@ -11641,6 +12182,18 @@ class SendAssetConfirmModal {
           await sendAssetFormModal.reopen();
         }
         throw new Error('Transaction failed');
+      }
+
+      // hidden input field retryOfTxId value is not an empty string
+      if (sendAssetFormModal.retryTxIdInput.value) {
+        // remove from myData use txid from hidden field retryOfPaymentTxId
+        removeFailedTx(sendAssetFormModal.retryTxIdInput.value, toAddress);
+
+        // clear the field
+        failedTransactionModal.txid = '';
+        failedTransactionModal.address = '';
+        failedTransactionModal.memo = '';
+        sendAssetFormModal.retryTxIdInput.value = '';
       }
 
       /* if (!response || !response.result || !response.result.success) {
@@ -12126,7 +12679,7 @@ class FailedTransactionModal {
       // find username in myData.contacts[this.address].senderInfo.username
       // enter as an input to invoke the oninput event
       sendAssetFormModal.usernameInput.value =
-        myData.contacts[this.address]?.senderInfo?.username || this.address || '';
+        myData.contacts[this.address]?.username || '';
       sendAssetFormModal.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
   
       // 4. fill in the amount input
@@ -12675,17 +13228,16 @@ console.log('    result is',result)
       // Skip the 'accounts' key itself
       if (key === 'accounts') return false;
       
-      const parts = key.split('_');
-      if (parts.length !== 2) return false;
-      
-      const netid = parts[1];
-      if (netid.length != 64) return false;
+      const match = key.match(/(.+)_(.+)$/);
+      if (!match) return false;
       
       return true;
     });
     
     for (const key of accountFileKeys) {
-      const [username, netid] = key.split('_');
+      const match = key.match(/(.+)_(.+)$/);
+      if (!match) continue;
+      const [, username, netid] = match;
       
       const isRegistered = accountsObj.netids[netid]?.usernames?.[username];
       
@@ -12908,13 +13460,18 @@ class LockModal {
     // if new password is empty, remove the password from localStorage
     // once we are here we know the old password is correct
     if (this.mode === 'remove') {
-      await encryptAllAccounts(oldPassword, newPassword)
-      delete localStorage.lock;
-      this.encKey = null;
-      // remove the loading toast
-      if (waitingToastId) hideToast(waitingToastId);
-      showToast('Password removed', 2000, 'success');
-      this.close();
+      try {
+        await encryptAllAccounts(oldPassword, newPassword)
+        delete localStorage.lock;
+        this.encKey = null;
+        // remove the loading toast
+        if (waitingToastId) hideToast(waitingToastId);
+        showToast('Password removed', 2000, 'success');
+        this.close();
+      } catch (error) {
+        console.error('Decryption failed:', error);
+        showToast('Failed to decrypt accounts. Please try again.', 0, 'error');
+      }
       return;
     }
 
@@ -13063,10 +13620,11 @@ class UnlockModal {
       lockModal.encKey = await passwordToKey(password+"liberdusData")
       this.unlock();
       this.close();
-      if (this.openButtonElementUsed === welcomeScreen.createAccountButton) {
-        createAccountModal.openWithReset();
-      } else if (this.openButtonElementUsed === welcomeScreen.importAccountButton) {
-        restoreAccountModal.open();
+      const targetElement = this.openButtonElementUsed;
+      this.openButtonElementUsed = null;
+      if (targetElement && typeof targetElement.click === 'function' && document.contains(targetElement)) {
+        // Defer click to next tick to ensure unlock modal has fully closed
+        setTimeout(() => targetElement.click(), 0);
       } else {
         signInModal.open();
       }
@@ -13748,6 +14306,15 @@ class ReactNativeApp {
       console.error('Error during unsubscribe:', err);
     }
   }
+  
+  shareInvite(url, text, title) {
+    this.postMessage({
+      type: 'SHARE_INVITE',
+      url,
+      text,
+      title
+    });
+  }
 }
 
 // Initialize and load the app
@@ -14250,7 +14817,7 @@ async function longPollResult(data) {
     try {
       const gotChats = await chatsScreen.updateChatData();
       if (gotChats > 0) {
-        await chatsScreen.updateChatList();
+        chatsScreen.updateChatList();
       }
     } catch (error) {
       console.error('Chat polling error:', error);
@@ -14262,7 +14829,7 @@ longPollResult.timestamp = 0
 function getContactDisplayName(contact) {
   return contact?.name || 
          contact?.username || 
-         `${contact?.address?.slice(0, 8)}...${contact?.address?.slice(-6)}`;
+         `${contact?.address?.slice(0, 8)}…${contact?.address?.slice(-6)}`;
 }
 
 function isMobile() {

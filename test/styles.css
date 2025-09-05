@@ -640,6 +640,17 @@ body {
   text-align: center;
   padding: 2rem;
   color: var(--secondary-text-color);
+  display: none;
+}
+
+.empty-state > div:first-child {
+  font-size: 2rem;
+  margin-bottom: 1rem;
+}
+
+.empty-state > div:nth-child(2) {
+  font-weight: bold;
+  margin-bottom: 0.5rem;
 }
 
 .empty-state::before {
@@ -1758,6 +1769,35 @@ input[type='file'].form-control::file-selector-button {
   color: var(--success-color);
 }
 
+.transaction-type.stake {
+  color: var(--warning-color); /* Orange color for stake transactions */
+}
+
+.transaction-type.unstake-positive {
+  color: var(--info-color); /* Blue color for positive unstake transactions */
+}
+
+.transaction-type.unstake-negative {
+  color: var(--danger-color); /* Red color for negative unstake transactions */
+}
+
+/* Add visual distinction for stake transactions */
+.transaction-item[data-memo="stake"] {
+  border-left: 3px solid var(--warning-color);
+  padding-left: calc(1rem - 3px); /* Adjust padding to account for border */
+}
+
+/* Add visual distinction for unstake transactions */
+.transaction-item[data-memo="unstake"] {
+  border-left: 3px solid var(--info-color); /* Default blue border for unstake */
+  padding-left: calc(1rem - 3px); /* Adjust padding to account for border */
+}
+
+/* Override border color for negative unstake transactions */
+.transaction-item[data-memo="unstake"][data-amount-negative="true"] {
+  border-left-color: var(--danger-color);
+}
+
 .transaction-amount {
   font-family: var(--font-primary);
   font-weight: var(--font-weight-semibold);
@@ -2094,6 +2134,74 @@ input[type='number'].form-control::-webkit-inner-spin-button {
   font-size: 0.9rem;
   color: var(--neutral-600);
   margin-bottom: 1rem;
+}
+
+/* Remove Accounts Modal styles */
+#removeAccountsModal .account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+#removeAccountsModal .remove-accounts-section + .remove-accounts-section {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border-color, #2d2d2d);
+  padding-top: 0.75rem;
+}
+
+#removeAccountsModal .remove-accounts-section h3 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+  opacity: 0.8;
+  letter-spacing: 0.5px;
+}
+
+#removeAccountsModal .account-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+#removeAccountsModal label.remove-account-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface-muted-alt, rgba(255,255,255,0.02));
+  border: 1px solid var(--border-color, #2d2d2d);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+#removeAccountsModal label.remove-account-row:hover {
+  background: var(--surface-hover, rgba(255,255,255,0.06));
+}
+
+#removeAccountsModal label.remove-account-row input[type="checkbox"] {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary-color, #007bff);
+}
+
+#removeAccountsModal .remove-account-username {
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+#removeAccountsModal .remove-account-stats {
+  margin-left: auto;
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+#removeAccountsModal .modal-summary {
+  font-size: 0.8rem;
+  line-height: 1.2rem;
+  opacity: 0.9;
 }
 
 /* Common label styles */
@@ -2658,6 +2766,19 @@ mark {
 
 .toast.warning {
   background: rgba(239, 108, 0, 0.9);
+}
+
+.toast.info {
+  background: rgba(0, 123, 255, 0.9);
+}
+
+.toast.toll {
+  background: rgba(0, 123, 255, 0.9);
+  text-align: left;
+  max-width: 400px;
+  width: 90%;
+  padding: 16px 20px;
+  line-height: 1.4;
 }
 
 .toast.online {
@@ -3454,6 +3575,11 @@ small {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z'%3E%3C/path%3E%3C/svg%3E"); 
 }
 
+/* Edit & Resend icon for context menu */
+.context-menu-option[data-icon="retry"] .context-menu-icon {
+  background-image: url("data:image/svg+xml,%3Csvg fill='none' stroke='currentColor' stroke-width='2' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolyline points='1 4 1 10 7 10'/%3E%3Cpath d='M3.51 15a9 9 0 1 0 2.13-9.36L1 10'/%3E%3C/svg%3E");
+}
+
 /* Styles for Payment Messages in Chat */
 
 /* Base styles for payment header (center, monospace, gap) */
@@ -3909,7 +4035,25 @@ small {
   /* width: auto; /* Overrides the default form-control width: 100% */
 }
 
-/* Styles for the toggle button */
+/* Styles for the static USD label in toll modal */
+.usd-amount {
+  height: 56px; /* Match the form-control height */
+  padding: 0 16px; /* Horizontal padding */
+  background-color: var(--button-background);
+  color: var(--button-text);
+  border-radius: 12px; /* Full border radius to match form-control */
+  font-family: var(--font-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: none;
+  white-space: nowrap; /* Prevent text like "USD" from wrapping */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 62px
+}
+
+/* Preserve interactive styling for real toggle buttons (e.g., send form) */
 .toggle-balance {
   height: 56px; /* Match the form-control height */
   padding: 0 16px; /* Horizontal padding */
@@ -3930,10 +4074,7 @@ small {
   justify-content: center;
   width: 62px
 }
-
-.toggle-balance:hover {
-  background-color: var(--button-hover-background);
-}
+.toggle-balance:hover { background-color: var(--button-hover-background); }
 
 /* Toll Modal Specific Styles */
 
@@ -4167,6 +4308,10 @@ small {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'%3E%3C/path%3E%3Cpolyline points='7,10 12,15 17,10'%3E%3C/polyline%3E%3Cline x1='12' y1='15' x2='12' y2='3'%3E%3C/line%3E%3C/svg%3E");
 }
 
+.menu-item[data-icon="rotate-ccw"]::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='1,4 1,10 7,10'%3E%3C/polyline%3E%3Cpath d='M3.51,15A9,9 0 1 0 8,5'%3E%3C/path%3E%3C/svg%3E");
+}
+
 .menu-item[data-icon="shield"]::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'%3E%3C/path%3E%3C/svg%3E");
 }
@@ -4207,6 +4352,11 @@ small {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 8l-4 4 4 4'%3E%3C/path%3E%3Cpath d='M17 8l4 4-4 4'%3E%3C/path%3E%3Cpath d='M3 12h18'%3E%3C/path%3E%3C/svg%3E");
 }
 
+/* migrate icon for menu item */
+.menu-item[data-icon="shuffle"]::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='16,3 21,3 21,8'%3E%3C/polyline%3E%3Cline x1='4' y1='20' x2='21' y2='3'%3E%3C/line%3E%3Cline x1='4' y1='4' x2='9' y2='9'%3E%3C/line%3E%3Cpolyline points='21,16 21,21 16,21'%3E%3C/polyline%3E%3Cline x1='4' y1='20' x2='9' y2='15'%3E%3C/line%3E%3C/svg%3E");
+}
+
 /* launch modal icon for menu item */
 .menu-item[data-icon="launch"]::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='7' y1='17' x2='17' y2='7'%3E%3C/line%3E%3Cpolyline points='7,7 17,7 17,17'%3E%3C/polyline%3E%3C/svg%3E");
@@ -4220,6 +4370,11 @@ small {
 /* logs modal icon for menu item */
 .menu-item[data-icon="file-text"]::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'%3E%3C/path%3E%3Cpolyline points='14,2 14,8 20,8'%3E%3C/polyline%3E%3Cline x1='16' y1='13' x2='8' y2='13'%3E%3C/line%3E%3Cline x1='16' y1='17' x2='8' y2='17'%3E%3C/line%3E%3Cpolyline points='10,9 9,9 8,9'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+/* update icon for menu item */
+.menu-item[data-icon="smartphone"]::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5' y='2' width='14' height='20' rx='2' ry='2'%3E%3C/rect%3E%3Cline x1='12' y1='18' x2='12' y2='18'%3E%3C/line%3E%3C/svg%3E");
 }
 
 #lockModal p {
