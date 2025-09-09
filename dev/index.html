@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.09.05.12.59" />
+    <link rel="stylesheet" href="./styles.css?v=2025.09.09.13.34" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.09.05.12.59" type="module"></script>
+    <script src="./app.js?v=2025.09.09.13.34" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -829,6 +829,8 @@
           </div>
           <div class="message-input-row">
             <button class="icon-button add-attachment-button" id="addAttachmentButton" aria-label="Add attachment"></button>
+            <!-- Cancel Edit button (shown only when editing a message) -->
+            <button class="icon-button cancel-edit-button" id="cancelEditButton" aria-label="Cancel edit" style="display: none;"></button>
             <div class="message-input-wrapper">
               <textarea class="message-input" placeholder="Type a message..."></textarea>
               <div class="toll-container">
@@ -837,6 +839,7 @@
               </div>
             </div>
             <input type="hidden" id="retryOfTxId" />
+            <input type="hidden" id="editOfTxId" />
             <!-- Add hidden file input for chat attachments -->
             <input type="file" id="chatFileInput" style="display:none;">
             <button class="icon-button voice-record-button" id="voiceRecordButton" aria-label="Record voice message"></button>
@@ -848,6 +851,54 @@
           </div>
         </div>
         <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Call Schedule Choice Modal -->
+      <div class="modal modal-dialog" id="callScheduleChoiceModal">
+        <div class="dialog-box-content">
+          <div class="modal-header">
+            <button class="back-button" id="closeCallScheduleChoiceModal"></button>
+            <div class="modal-title">Start a Call</div>
+          </div>
+          <div class="modal-content">
+            <div class="form-container call-invite-modal-container">
+              <p class="modal-summary">Choose to call now or schedule a future time.</p>
+              <div class="form--narrow">
+                <div class="form-actions">
+                  <button type="button" id="callScheduleNowBtn" class="btn btn--primary btn--pill btn--full">Call Now</button>
+                  <button type="button" id="openCallScheduleDateBtn" class="btn btn--primary btn--pill btn--full">Schedule</button>
+                  <button type="button" id="cancelCallScheduleChoice" class="btn btn--secondary btn--pill btn--full">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"></a>
+      </div>
+
+      <!-- Call Schedule Date Modal -->
+      <div class="modal modal-dialog" id="callScheduleDateModal">
+        <div class="dialog-box-content">
+          <div class="modal-header">
+            <button class="back-button" id="closeCallScheduleDateModal"></button>
+            <div class="modal-title">Schedule Call</div>
+          </div>
+          <div class="modal-content">
+            <div class="form-container call-invite-modal-container">
+              <form id="callScheduleDateForm" class="form--narrow">
+                <div class="form-group">
+                  <label for="callScheduleInput">Select date and time</label>
+                  <input id="callScheduleInput" type="datetime-local" class="form-control" />
+                </div>
+                <div class="form-actions">
+                  <button type="submit" id="confirmCallSchedule" class="btn btn--primary btn--pill btn--full">Submit</button>
+                  <button type="button" id="cancelCallScheduleDate" class="btn btn--secondary btn--pill btn--full">Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"></a>
       </div>
 
       <!-- Voice Recording Modal -->
@@ -899,6 +950,11 @@
         <div class="context-menu-option" data-action="copy" data-icon="copy">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Copy</span>
+        </div>
+        <!-- Edit own message option (shown only within allowed time window) -->
+        <div class="context-menu-option" data-action="edit" data-icon="edit" style="display: none;">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Edit</span>
         </div>
         <!-- Call-specific action: Join -->
         <div class="context-menu-option" data-action="join" data-icon="call" style="display: none;">

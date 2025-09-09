@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'i'
+const version = 'j'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -141,6 +141,8 @@ let getSystemNoticeIntervalId = null;
 const NETWORK_ACCOUNT_UPDATE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes in milliseconds
 const NETWORK_ACCOUNT_ID = '0'.repeat(64);
 const MAX_TOLL = 1_000_000; // 1M limit
+
+const EDIT_WINDOW_MS = 15 * 60 * 1000; // 15 minute limit for editing messages
 
 let parameters = {
   current: {
@@ -426,6 +428,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Call Invite Modal
   callInviteModal.load();
+
+  // Call Schedule Modals
+  callScheduleChoiceModal.load();
+  callScheduleDateModal.load();
 
   // Remove Accounts Modal
   removeAccountsModal.load();
@@ -3186,9 +3192,43 @@ if (mine) console.warn('txid in processChats is', txidHex)
                     // Don't process this message further - it's just a control message
                     continue;
                   }
+                } else if (parsedMessage.type === 'edit') {
+                  const txidToEdit = parsedMessage.txid;
+                  const newText = parsedMessage.text;
+                  if (txidToEdit && typeof newText === 'string') {
+                    const messageToEdit = contact.messages.find(msg => msg.txid === txidToEdit);
+                    if (messageToEdit && !messageToEdit.deleted) {
+                      // Allow editing only if original sender matches editor and it's their own message OR
+                      // we receive someone else's edit for their own message
+                      const originalSender = normalizeAddress(tx.from);
+                      const isOriginalMine = messageToEdit.my && normalizeAddress(keys.address) === originalSender;
+                      const isOriginalTheirs = !messageToEdit.my && originalSender === from;
+                      if (isOriginalMine || isOriginalTheirs) {
+                        // Update chat message memo/text
+                        messageToEdit.message = newText;
+                        messageToEdit.edited = 1;
+                        messageToEdit.edited_timestamp = tx.timestamp;
+                        // Also update wallet history entry memo if present
+                        if (myData?.wallet?.history && Array.isArray(myData.wallet.history)) {
+                          const hIdx = myData.wallet.history.findIndex((h) => h.txid === txidToEdit);
+                          if (hIdx !== -1) {
+                            myData.wallet.history[hIdx].memo = newText;
+                            myData.wallet.history[hIdx].edited = 1;
+                            myData.wallet.history[hIdx].edited_timestamp = tx.timestamp;
+                          }
+                        }
+                        if (chatModal.isActive() && chatModal.address === from) {
+                          chatModal.appendChatModal();
+                        }
+                      }
+                    }
+                  }
+                  continue; // control message, don't add
                 } else if (parsedMessage.type === 'call') {
                   payload.message = parsedMessage.url;
                   payload.type = 'call';
+                  // Use callTime when present; default to 0 (immediate)
+                  payload.callTime = Number(parsedMessage.callTime) || 0;
                 } else if (parsedMessage.type === 'vm') {
                   // Voice message format processing
                   payload.message = ''; // Voice messages don't have text
@@ -4212,6 +4252,7 @@ function markConnectivityDependentElements() {
 
     // Send asset related
     '#sendAssetForm button[type="submit"]',
+    '#toggleBalance',
 
     // Add friend related
     '#friendForm button[type="submit"]',
@@ -4231,6 +4272,7 @@ function markConnectivityDependentElements() {
 
     // stakeModal
     '#submitStake',
+    '#faucetButton',
 
     // tollModal
     '#saveNewTollButton',
@@ -4240,6 +4282,14 @@ function markConnectivityDependentElements() {
 
     //unstakeModal
     '#submitUnstake',
+
+    // Call schedule modals
+    '#callScheduleNowBtn',
+    '#openCallScheduleDateBtn',
+    '#confirmCallSchedule',
+
+    // Message context menu (disable all except 'Delete for me' and 'Copy' and 'Join')
+    '.message-context-menu .context-menu-option:not([data-action="delete"]):not([data-action="copy"]):not([data-action="join"])',
   ];
 
   // Add data attribute to all network-dependent elements
@@ -7343,6 +7393,7 @@ class ChatModal {
     this.closeButton = document.getElementById('closeChatModal');
     this.messagesList = document.querySelector('.messages-list');
     this.sendButton = document.getElementById('handleSendMessage');
+    this.cancelEditButton = document.getElementById('cancelEditButton');
     this.modalAvatar = this.modal.querySelector('.modal-avatar');
     this.modalTitle = this.modal.querySelector('.modal-title');
     this.editButton = document.getElementById('chatEditButton');
@@ -7370,6 +7421,19 @@ class ChatModal {
     
     // Add event delegation for message clicks (since messages are created dynamically)
     this.messagesList.addEventListener('click', this.handleMessageClick.bind(this));
+    // Intercept clicks on call icon to gate future calls
+    this.messagesList.addEventListener('click', (e) => {
+      const phoneAnchor = e.target.closest('.call-message-phone-button');
+      if (!phoneAnchor) return;
+      const messageEl = phoneAnchor.closest('.message');
+      if (!messageEl) return;
+      if (this.gateScheduledCall(messageEl)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      }
+      return true;
+    });
     
     // Add context menu option listeners
     this.contextMenu.addEventListener('click', (e) => {
@@ -7386,6 +7450,7 @@ class ChatModal {
       }
     });
     this.sendButton.addEventListener('click', this.handleSendMessage.bind(this));
+    this.cancelEditButton.addEventListener('click', () => this.cancelEdit());
     this.closeButton.addEventListener('click', this.close.bind(this));
     this.sendButton.addEventListener('keydown', ignoreTabKey);
 
@@ -7418,7 +7483,7 @@ class ChatModal {
         console.log('⌨️ Keyboard detected as open (viewport height decreased by', heightDifference, 'px)');
       } else if (heightDifference < 50) { // If height increased or stayed similar, keyboard is likely closed
         this.isKeyboardVisible = false;
-        console.log('⌨️ Keyboard detected as closed (viewport height difference:', heightDifference, 'px)');
+        /* console.log('⌨️ Keyboard detected as closed (viewport height difference:', heightDifference, 'px)'); */
       }
     });
 
@@ -7523,6 +7588,11 @@ class ChatModal {
     this.messageInput.value = '';
     this.messageInput.style.height = '48px';
     this.messageByteCounter.style.display = 'none';
+    // clear any edit state and hide cancel button
+    const editInputInit = document.getElementById('editOfTxId');
+    editInputInit.value = '';
+    this.cancelEditButton.style.display = 'none';
+    this.addAttachmentButton.disabled = false;
 
     friendModal.setAddress(address);
     footer.closeNewChatButton();
@@ -7805,6 +7875,13 @@ class ChatModal {
       return;
     }
 
+    // Declare edit-related state outside try so catch can access
+    let isEdit = false;
+    let originalMsg = null;
+    let originalMsgState = null;
+    let editInput = null;
+    let editTargetTxId = '';
+
     try {
       this.messageInput.focus(); // Add focus back to keep keyboard open
 
@@ -7874,11 +7951,43 @@ class ChatModal {
       const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey)
       const selfKey = encryptData(bin2hex(dhkey), keys.secret+keys.pqSeed, true)  // used to decrypt our own message
 
-      // Convert message to new JSON format with type and optional attachments
-      const messageObj = {
-        type: 'message',
-        message: message
-      };
+      // Determine if this is an edit of an existing message
+      editInput = document.getElementById('editOfTxId');
+      editTargetTxId = editInput ? editInput.value.trim() : '';
+
+      // Build message object: either normal message or edit control
+      let messageObj;
+      if (editTargetTxId) {
+        // Validate we still can edit
+        const contactMsgs = myData.contacts[currentAddress].messages;
+        originalMsg = contactMsgs.find(m => m.txid === editTargetTxId);
+        if (!originalMsg) {
+          // Original disappeared; fallback to normal send
+          console.warn('Edit target message not found locally; sending as new message');
+        } else if (!originalMsg.my) {
+          console.warn('Attempt to edit a message not owned by user');
+        } else if (originalMsg.deleted) {
+          console.warn('Attempt to edit a deleted message');
+        } else if ((Date.now() - Number(originalMsg.timestamp || 0)) > EDIT_WINDOW_MS) {
+          showToast('Edit window expired', 3000, 'info');
+        } else {
+          isEdit = true;
+        }
+      }
+
+      if (isEdit) {
+        messageObj = {
+          type: 'edit',
+            txid: editTargetTxId,
+            text: message
+        };
+      } else {
+        // Convert message to new JSON format with type and optional attachments
+        messageObj = {
+          type: 'message',
+          message: message
+        };
+      }
 
       // Handle attachments - add them to the JSON structure instead of using xattach
       if (this.fileAttachments && this.fileAttachments.length > 0) {
@@ -7939,16 +8048,53 @@ console.warn('in send message', txid)
 
       // --- Optimistic UI Update ---
       // Create new message object for local display immediately
-      const newMessage = {
-        message,
-        timestamp: payload.sent_timestamp,
-        sent_timestamp: payload.sent_timestamp,
-        my: true,
-        txid: txid,
-        status: 'sent',
-        ...(this.fileAttachments && this.fileAttachments.length > 0 && { xattach: this.fileAttachments }), // Only include if there are attachments
-      };
-      insertSorted(chatsData.contacts[currentAddress].messages, newMessage, 'timestamp');
+      let newMessage;
+      if (isEdit) {
+        // Optimistic update of original message (record original so we can revert on failure)
+        const contactMsgs = chatsData.contacts[currentAddress].messages;
+        originalMsg = contactMsgs.find(m => m.txid === editTargetTxId);
+        if (originalMsg) {
+          originalMsgState = {
+            message: originalMsg.message,
+            edited: originalMsg.edited,
+            edited_timestamp: originalMsg.edited_timestamp
+          };
+          originalMsg.message = message;
+          originalMsg.edited = 1;
+          originalMsg.edited_timestamp = payload.sent_timestamp;
+          // Also update wallet history memo if this was a payment we sent
+          if (myData?.wallet?.history && Array.isArray(myData.wallet.history)) {
+            const hIdx = myData.wallet.history.findIndex((h) => h.txid === editTargetTxId);
+            if (hIdx !== -1) {
+              // Preserve prior state for potential revert
+              if (!originalMsgState.history) originalMsgState.history = {};
+              originalMsgState.history.memo = myData.wallet.history[hIdx].memo;
+              originalMsgState.history.edited = myData.wallet.history[hIdx].edited;
+              originalMsgState.history.edited_timestamp = myData.wallet.history[hIdx].edited_timestamp;
+              myData.wallet.history[hIdx].memo = message;
+              myData.wallet.history[hIdx].edited = 1;
+              myData.wallet.history[hIdx].edited_timestamp = payload.sent_timestamp;
+            }
+          }
+          this.appendChatModal();
+        }
+        // Clear edit marker only after capturing state and hide cancel button
+        editInput.value = '';
+        this.cancelEditButton.style.display = 'none';
+        // Leaving edit mode optimistically; re-enable attachments
+        this.addAttachmentButton.disabled = false;
+      } else {
+        newMessage = {
+          message,
+          timestamp: payload.sent_timestamp,
+          sent_timestamp: payload.sent_timestamp,
+          my: true,
+          txid: txid,
+          status: 'sent',
+          ...(this.fileAttachments && this.fileAttachments.length > 0 && { xattach: this.fileAttachments }), // Only include if there are attachments
+        };
+        insertSorted(chatsData.contacts[currentAddress].messages, newMessage, 'timestamp');
+      }
 
       // clear file attachments and remove preview
       if (this.fileAttachments && this.fileAttachments.length > 0) {
@@ -7959,7 +8105,7 @@ console.warn('in send message', txid)
       // Update or add to chats list, maintaining chronological order
       const chatUpdate = {
         address: currentAddress,
-        timestamp: newMessage.sent_timestamp,
+        timestamp: (newMessage ? newMessage.sent_timestamp : getCorrectedTimestamp()),
         txid: txid,
       };
 
@@ -7972,7 +8118,7 @@ console.warn('in send message', txid)
       insertSorted(chatsData.chats, chatUpdate, 'timestamp');
 
       // Clear input and reset height, and delete any saved draft
-      this.messageInput.value = '';
+           this.messageInput.value = '';
       this.messageInput.style.height = '48px'; // original height
 
       // Hide byte counter
@@ -7983,7 +8129,7 @@ console.warn('in send message', txid)
       contact.draft = '';
 
       // Update the chat modal UI immediately
-      this.appendChatModal(); // This should now display the 'sending' message
+      if (!isEdit) this.appendChatModal(); // This should now display the 'sending' message
 
       // Scroll to bottom of chat modal
       this.messagesList.parentElement.scrollTop = this.messagesList.parentElement.scrollHeight;
@@ -8013,23 +8159,121 @@ console.warn('in send message', txid)
         //showToast(userMessage, 4000, 'error');
 
         // Update message status to 'failed' in the UI
-        updateTransactionStatus(txid, currentAddress, 'failed', 'message');
-        this.appendChatModal();
+        if (!isEdit) {
+          updateTransactionStatus(txid, currentAddress, 'failed', 'message');
+          this.appendChatModal();
+        } else {
+          showToast('Edit failed to send', 0, 'error');
+          // Revert optimistic edit
+          if (originalMsg && originalMsgState) {
+            originalMsg.message = originalMsgState.message;
+            if (originalMsgState.edited) {
+              originalMsg.edited = originalMsgState.edited;
+              originalMsg.edited_timestamp = originalMsgState.edited_timestamp;
+            } else {
+              delete originalMsg.edited;
+              delete originalMsg.edited_timestamp;
+            }
+            // Revert wallet history memo if we changed it optimistically
+            this.revertWalletHistoryEdit(editTargetTxId, originalMsgState.history);
+            this.appendChatModal();
+          }
+          // Restore edit UI state to allow user to retry or cancel
+          editInput.value = editTargetTxId;
+          this.cancelEditButton.style.display = '';
+          this.addAttachmentButton.disabled = true;
+          // Restore the attempted edit text in the input
+          this.messageInput.value = message;
+          this.messageInput.focus();
+        }
 
         // Remove from pending transactions as injectTx itself indicated failure
         /* if (myData && myData.pending) {
                     myData.pending = myData.pending.filter(pTx => pTx.txid !== txid);
                 } */
       } else {
-        // Message sent successfully (or at least accepted by gateway)
-        // The optimistic UI update for 'sent' status is already handled before injectTx.
-        // No specific action needed here for success as the UI already reflects 'sent'.
+        // Success: for normal message nothing extra; for edit we already updated locally
+        if (isEdit) {
+          showToast('Message edited', 2000, 'success');
+          this.addAttachmentButton.disabled = false;
+        }
       }
     } catch (error) {
       console.error('Message error:', error);
       showToast('Failed to send message. Please try again.', 0, 'error');
+      // Revert optimistic edit on exception
+      if (isEdit && originalMsg && originalMsgState) {
+        originalMsg.message = originalMsgState.message;
+        if (originalMsgState.edited) {
+          originalMsg.edited = originalMsgState.edited;
+          originalMsg.edited_timestamp = originalMsgState.edited_timestamp;
+        } else {
+          delete originalMsg.edited;
+          delete originalMsg.edited_timestamp;
+        }
+        // Revert wallet history memo if we changed it optimistically
+        this.revertWalletHistoryEdit(editTargetTxId, originalMsgState.history);
+        this.appendChatModal();
+      }
     } finally {
       this.sendButton.disabled = false; // Re-enable the button
+    }
+  }
+
+  /**
+   * Cancel editing mode without sending: clears hidden edit txid and restores UI state
+   */
+  cancelEdit() {
+    try {
+      const editInput = document.getElementById('editOfTxId');
+      if (editInput) editInput.value = '';
+      // Clear input text and reset height
+      this.messageInput.value = '';
+      this.messageByteCounter.style.display = 'none';
+      // Clear any saved draft
+      if (typeof this.debouncedSaveDraft === 'function') {
+        this.debouncedSaveDraft('');
+      }
+      // Hide cancel button
+      this.cancelEditButton.style.display = 'none';
+      // Re-enable attachments on cancel
+      this.addAttachmentButton.disabled = false;
+      // Give feedback
+      showToast('Edit cancelled', 1500, 'info');
+    } catch (e) {
+      console.error('Failed to cancel edit', e);
+    }
+  }
+
+  /**
+   * Revert wallet history memo/edited fields for a given txid using the provided originalHistory snapshot
+   * @param {string} txid - Transaction id to locate in myData.wallet.history
+   * @param {{memo?: string, edited?: number, edited_timestamp?: number}} originalHistory - Original values to restore
+   */
+  revertWalletHistoryEdit(txid, originalHistory) {
+    try {
+      if (!originalHistory) return; // nothing captured, nothing to revert
+      if (!(myData?.wallet?.history) || !Array.isArray(myData.wallet.history)) return;
+      const hIdx = myData.wallet.history.findIndex((h) => h.txid === txid);
+      if (hIdx === -1) return;
+
+      if (typeof originalHistory.memo !== 'undefined') {
+        myData.wallet.history[hIdx].memo = originalHistory.memo;
+      } else {
+        delete myData.wallet.history[hIdx].memo;
+      }
+      if (typeof originalHistory.edited !== 'undefined') {
+        myData.wallet.history[hIdx].edited = originalHistory.edited;
+      } else {
+        delete myData.wallet.history[hIdx].edited;
+      }
+      if (typeof originalHistory.edited_timestamp !== 'undefined') {
+        myData.wallet.history[hIdx].edited_timestamp = originalHistory.edited_timestamp;
+      } else {
+        delete myData.wallet.history[hIdx].edited_timestamp;
+      }
+    } catch (e) {
+      console.error('Failed to revert wallet history edit', e);
     }
   }
 
@@ -8128,7 +8372,7 @@ console.warn('in send message', txid)
                             <span class="payment-direction">${directionText}</span>
                             <span class="payment-amount">${amountDisplay}</span>
                         </div>
-                        ${itemMemo ? `<div class="payment-memo">${linkifyUrls(itemMemo)}</div>` : ''}
+                        ${itemMemo ? `<div class="payment-memo">${linkifyUrls(itemMemo)}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}</div>` : ''}
                         <div class="message-time">${timeString}</div>
                     </div>
                 `;
@@ -8181,14 +8425,19 @@ console.warn('in send message', txid)
           if (item.message && item.message.trim()) {
             // Check if this is a call message
             if (item.type === 'call') {
+              // Build scheduled label if in the future
+              const callTimeMs = item.callTime || 0;
+              const scheduleHTML = this.buildCallScheduleHTML(callTimeMs);
               // Render call message with a left circular phone icon (clickable) and plain text to the right
-              // Icon is an anchor so only the icon is clickable (like voice play button)
               messageTextHTML = `
                 <div class="call-message">
                   <a href="${item.message}" target="_blank" rel="noopener noreferrer" class="call-message-phone-button" aria-label="Join Video Call">
                     <span class="sr-only">Join Video Call</span>
                   </a>
-                  <div class="call-message-text">Join Video Call</div>
+                  <div>
+                    <div class="call-message-text">Join Video Call</div>
+                    ${scheduleHTML}
+                  </div>
                 </div>`;
             } else {
               // Regular message rendering
@@ -8216,11 +8465,12 @@ console.warn('in send message', txid)
               </div>`;
           }
           
+          const callTimeAttribute = item.type === 'call' && item.callTime ? `data-call-time="${item.callTime}"` : '';
           messageHTML = `
-                      <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
+                      <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute} ${callTimeAttribute}>
                           ${attachmentsHTML}
                           ${messageTextHTML}
-                          <div class="message-time">${timeString}</div>
+                          <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}</div>
                       </div>
                   `;
         }
@@ -8879,6 +9129,7 @@ console.warn('in send message', txid)
     const joinOption = this.contextMenu.querySelector('[data-action="join"]');
     const inviteOption = this.contextMenu.querySelector('[data-action="call-invite"]');
     const editResendOption = this.contextMenu.querySelector('[data-action="edit-resend"]');
+    const editOption = this.contextMenu.querySelector('[data-action="edit"]');
     const isFailedPayment = messageEl.dataset.status === 'failed' && messageEl.classList.contains('payment-info');
     // For failed payment messages, hide copy and delete-for-all regardless of sender
     if (isFailedPayment) {
@@ -8890,11 +9141,25 @@ console.warn('in send message', txid)
       if (joinOption) joinOption.style.display = 'flex';
       if (inviteOption) inviteOption.style.display = 'flex';
       if (editResendOption) editResendOption.style.display = 'none';
+      if (editOption) editOption.style.display = 'none';
     } else {
       if (copyOption) copyOption.style.display = 'flex';
       if (joinOption) joinOption.style.display = 'none';
       if (inviteOption) inviteOption.style.display = 'none';
       if (editResendOption) editResendOption.style.display = isFailedPayment ? 'flex' : 'none';
+      // Determine if edit should be shown
+      if (editOption) {
+        // Conditions: own plain message OR own payment with memo text, not deleted/failed/voice, within 15 minutes
+        const createdTs = parseInt(messageEl.dataset.messageTimestamp || messageEl.dataset.timestamp || '0', 10);
+        const ageOk = createdTs && (Date.now() - createdTs) < EDIT_WINDOW_MS;
+        const isDeleted = messageEl.classList.contains('deleted-message');
+        const isPayment = messageEl.classList.contains('payment-info');
+        const hasMemo = !!messageEl.querySelector('.payment-memo');
+        const isVoice = !!messageEl.querySelector('.voice-message');
+        const allowedType = !isPayment || (isPayment && hasMemo);
+        const show = isMine && !isDeleted && allowedType && !isVoice && !isFailedPayment && ageOk;
+        editOption.style.display = show ? 'flex' : 'none';
+      }
     }
     
     this.positionContextMenu(this.contextMenu, messageEl);
@@ -8969,9 +9234,46 @@ console.warn('in send message', txid)
       case 'edit-resend':
         this.handleFailedPaymentEditResend(messageEl);
         break;
+      case 'edit':
+        this.startEditMessage(messageEl);
+        break;
     }
     
     this.closeContextMenu();
+  }
+
+  /**
+   * Initiates editing of a message: fills input with existing text and stores txid
+   * @param {HTMLElement} messageEl
+   */
+  startEditMessage(messageEl) {
+    try {
+      const txid = messageEl.dataset.txid;
+      const timestamp = parseInt(messageEl.dataset.messageTimestamp || '0', 10);
+      if (!txid) return;
+      // Enforce edit window in case UI got out of sync
+      if (timestamp && (Date.now() - timestamp) > EDIT_WINDOW_MS) {
+        return showToast('Edit window expired', 3000, 'info');
+      }
+      // If this is a payment, edit the memo; else edit plain message content
+      const contentEl = messageEl.classList.contains('payment-info')
+        ? messageEl.querySelector('.payment-memo')
+        : messageEl.querySelector('.message-content');
+      if (!contentEl) return;
+      const text = contentEl.textContent || '';
+      this.messageInput.value = text;
+      const editInput = document.getElementById('editOfTxId');
+      if (editInput) editInput.value = txid;
+      // Show cancel edit button while editing
+      this.cancelEditButton.style.display = '';
+      // Disable attachments while editing
+      this.addAttachmentButton.disabled = true;
+      // Focus input and move caret to end
+      this.messageInput.focus();
+      this.messageInput.selectionStart = this.messageInput.selectionEnd = this.messageInput.value.length;
+    } catch (err) {
+      console.error('startEditMessage error', err);
+    }
   }
 
   /**
@@ -9058,6 +9360,11 @@ console.warn('in send message', txid)
   handleJoinCall(messageEl) {
     const callLink = messageEl.querySelector('.call-message a')?.href;
     if (!callLink) return showToast('Call link not found', 2000, 'error');
+    // Gate future scheduled calls (context menu path)
+    if (this.gateScheduledCall(messageEl)) {
+      this.closeContextMenu();
+      return;
+    }
     window.open(callLink, '_blank');
     this.closeContextMenu();
   }
@@ -9225,6 +9532,40 @@ console.warn('in send message', txid)
   }
 
   /**
+   * Formats toll amounts to display text and returns LIB wei and unit for internal use
+   * @param {bigint} tollBigInt
+   * @param {string} tollUnit
+   * @returns {{ text: string, libWei: bigint, unit: string }}
+   */
+  formatTollDisplay(tollBigInt, tollUnit) {
+    const factor = getStabilityFactor();
+    const factorValid = Number.isFinite(factor) && factor > 0;
+    const safeToll = typeof tollBigInt === 'bigint' ? tollBigInt : 0n;
+    const tollFloat = parseFloat(big2str(safeToll, weiDigits));
+
+    const usdValue = tollUnit === 'USD' ? tollFloat : (factorValid ? tollFloat * factor : NaN);
+    const libValue = factorValid ? (usdValue / factor) : NaN;
+
+    let text;
+    if (isNaN(usdValue) || isNaN(libValue)) {
+      text = `${tollFloat.toFixed(6)} USD`;
+    } else {
+      text = `${usdValue.toFixed(6)} USD (≈ ${libValue.toFixed(6)} LIB)`;
+    }
+
+    let libWei;
+    if (tollUnit === 'USD' && factorValid && !isNaN(usdValue)) {
+      libWei = bigxnum2big(wei, (usdValue / factor).toString());
+    } else if (tollUnit === 'LIB') {
+      libWei = safeToll;
+    } else {
+      libWei = 0n;
+    }
+
+    return { text, libWei };
+  }
+
+  /**
    * updateTollAmountUI updates the toll amount UI for a given contact
    * @param {string} address - the address of the contact
    * @returns {void}
@@ -9232,18 +9573,24 @@ console.warn('in send message', txid)
   updateTollAmountUI(address) {
     const tollValue = document.getElementById('tollValue');
     tollValue.style.color = 'black';
-    const contact = myData.contacts[address];
-    let toll = contact.toll || 0n;
-    const tollUnit = contact.tollUnit || 'LIB';
-    const decimals = 18;
-    const factor = getStabilityFactor();
-    const tollFloat = parseFloat(big2str(toll, decimals));
-    // Compute USD and LIB values; show USD with LIB equivalent in parentheses
-    const usdValue = tollUnit === 'USD' ? tollFloat : tollFloat * factor;
-    const libValue = factor > 0 ? (usdValue / factor) : NaN;
-    const usdString = isNaN(libValue)
-      ? `${usdValue.toFixed(6)} USD`
-      : `${usdValue.toFixed(6)} USD (≈ ${libValue.toFixed(6)} LIB)`;
+    const contact = myData.contacts[address] || {};
+    const isOffline = !isOnline;
+
+    // If offline and no cached toll, show a clear offline status and exit
+    if (isOffline && (contact.toll === undefined || contact.toll === null)) {
+      tollValue.style.color = 'black';
+      tollValue.textContent = 'offline';
+      this.toll = 0n;
+      this.tollUnit = 'LIB';
+      return;
+    }
+
+    // Format toll display
+    const { text: usdString, libWei } = this.formatTollDisplay(
+      contact.toll,
+      contact.tollUnit
+    );
+
     let display;
     if (contact.tollRequiredToSend == 1) {
       display = `${usdString}`;
@@ -9258,14 +9605,8 @@ console.warn('in send message', txid)
     tollValue.textContent = display;
 
     // Store the toll in LIB format for message creation (chat messages expect LIB wei)
-    if (tollUnit === 'USD') {
-      // Convert USD toll to LIB wei for internal use
-      this.toll = bigxnum2big(wei, (usdValue / factor).toString());
-    } else {
-      // Already in LIB format
-      this.toll = toll;
-    }
-    this.tollUnit = tollUnit;
+    this.toll = typeof libWei === 'bigint' ? libWei : 0n;
+    this.tollUnit = contact.tollUnit || 'LIB';
   }
 
   /**
@@ -9319,8 +9660,13 @@ console.warn('in send message', txid)
   async updateTollValue(address) {
     // query the contact's toll field from the network
     const contactAccountData = await queryNetwork(`/account/${longAddress(address)}`);
-    const queriedToll = contactAccountData?.account?.data?.toll; // type bigint
-    const queriedTollUnit = contactAccountData?.account?.data?.tollUnit; // type string */
+    // If invalid response, do not overwrite cached values
+    if (!contactAccountData?.account?.data) {
+      console.warn('updateTollValue: no network data available; skipping update');
+      return;
+    }
+    const queriedToll = contactAccountData.account.data.toll; // type bigint
+    const queriedTollUnit = contactAccountData.account.data.tollUnit; // type string
 
     // update the toll value in the UI if the queried toll value is different from the toll value or toll unit in localStorage
     if (myData.contacts[address].toll != queriedToll || myData.contacts[address].tollUnit != queriedTollUnit) {
@@ -9335,6 +9681,32 @@ console.warn('in send message', txid)
       // return early
       return;
     }
+  }
+
+  /**
+   * Opens a lightweight chooser to select calling now or scheduling for later.
+   * Returns 0 for immediate call or a corrected future timestamp (ms since epoch) using timeSkew.
+   * Returns null if user cancels.
+   * @returns {Promise<number|null>}
+   */
+  async openCallTimeChooser() {
+    return new Promise((resolve) => {
+      const openChoice = () => {
+        callScheduleChoiceModal.open((choice) => {
+          if (choice === null) return resolve(null);
+          if (choice === 'now') return resolve(0);
+          // schedule
+          callScheduleDateModal.open((dateTs) => {
+            if (dateTs === null) {
+              // back to choice
+              return openChoice();
+            }
+            resolve(dateTs);
+          });
+        });
+      };
+      openChoice();
+    });
   }
 
   /**
@@ -9360,6 +9732,13 @@ console.warn('in send message', txid)
         return;
       }
 
+      // Choose call time: now or scheduled
+      const chosenCallTime = await this.openCallTimeChooser();
+      if (chosenCallTime === null) {
+        // user cancelled
+        return;
+      }
+
       // Generate a 256-bit random number and convert to base64
       const randomBytes = generateRandomBytes(32); // 32 bytes = 256 bits
       const randomHex = bin2hex(randomBytes).slice(0, 20);
@@ -9367,11 +9746,18 @@ console.warn('in send message', txid)
       // Create the Meet URL
       const meetUrl = `https://meet.liberdus.com/${randomHex}`;
       
-      // Open the URL in a new tab
-      window.open(meetUrl, '_blank');
+      // Open immediately only if call is now
+      if (chosenCallTime === 0) {
+        window.open(meetUrl, '_blank');
+      }
       
-      // Send a call message to the contact
-      await this.sendCallMessage(meetUrl);
+      // Send a call message to the contact with callTime (0 or future timestamp)
+      await this.sendCallMessage(meetUrl, chosenCallTime);
+      
+      if (chosenCallTime && chosenCallTime > 0) {
+        const when = new Date(chosenCallTime - timeSkew); // convert back to local wall-clock for display
+        showToast(`Call scheduled for ${when.toLocaleString()}`, 3000, 'success');
+      }
       
     } catch (error) {
       console.error('Error handling call user:', error);
@@ -9384,7 +9770,7 @@ console.warn('in send message', txid)
    * @param {string} meetUrl - The Meet URL to send
    * @returns {Promise<void>}
    */
-  async sendCallMessage(meetUrl) {
+  async sendCallMessage(meetUrl, callTime = 0) {
     // if user is blocked, don't send message, show toast
     if (myData.contacts[this.address].tollRequiredToSend == 2) {
       showToast('You are blocked by this user', 0, 'error');
@@ -9428,9 +9814,12 @@ console.warn('in send message', txid)
       const selfKey = encryptData(bin2hex(dhkey), keys.secret+keys.pqSeed, true)  // used to decrypt our own message
 
       // Convert call message to new JSON format
+      const normalizedCallTime = Number(callTime) || 0;
       const callObj = {
         type: 'call',
-        url: meetUrl
+        url: meetUrl,
+        // callTime: 0 for immediate, or corrected future timestamp (ms since epoch)
+        callTime: normalizedCallTime
       };
 
       // Encrypt the JSON message using shared secret
@@ -9467,7 +9856,10 @@ console.warn('in send message', txid)
       // Create and send the call message transaction
       let tollInLib = myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : this.toll;
       const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
-      chatMessageObj.callType = true
+      // if there's a callobj.calltime is present and is 0 set callType to true to make recipient phone ring
+      if (callObj?.callTime === 0) {
+        chatMessageObj.callType = true;
+      }
 
       await signObj(chatMessageObj, keys);
       const txid = getTxid(chatMessageObj);
@@ -9480,7 +9872,8 @@ console.warn('in send message', txid)
         my: true,
         txid: txid,
         status: 'sent',
-        type: 'call'
+        type: 'call',
+        callTime: normalizedCallTime
       };
       insertSorted(chatsData.contacts[currentAddress].messages, newMessage, 'timestamp');
 
@@ -9812,6 +10205,31 @@ console.warn('in send message', txid)
       buttonElement.disabled = false;
     }
   }
+
+  // ---- Call scheduling helpers ----
+  isFutureCall(ts) {
+    return typeof ts === 'number' && ts > getCorrectedTimestamp();
+  }
+
+  formatLocalDateTime(ts) {
+    return new Date(ts - timeSkew).toLocaleString();
+  }
+
+  gateScheduledCall(messageEl) {
+    if (!messageEl) return false;
+    const callTime = Number(messageEl.dataset?.callTime || 0);
+    if (this.isFutureCall(callTime)) {
+      showToast(`Call scheduled for ${this.formatLocalDateTime(callTime)}`, 2500, 'info');
+      return true;
+    }
+    return false;
+  }
+
+  buildCallScheduleHTML(callTime) {
+    if (!callTime) return '';
+    callTime = Number(callTime);
+    return `<div class="call-message-schedule">Scheduled: ${this.formatLocalDateTime(callTime)}</div>`;
+  }
 }
 
 const chatModal = new ChatModal();
@@ -9936,6 +10354,7 @@ class CallInviteModal {
     const addresses = selectedBoxes.map(cb => cb.value).slice(0,10);
     // get call link from original message
     const msgCallLink = this.messageEl.querySelector('.call-message a')?.href;
+    const msgCallTime = Number(this.messageEl.getAttribute('data-call-time')) || 0;
     if (!msgCallLink) return showToast('Call link not found', 2000, 'error');
 
     this.inviteSendButton.disabled = true;
@@ -9950,7 +10369,8 @@ class CallInviteModal {
         }
 
         const contact = myData.contacts[addr];
-        const payload = { type: 'call', url: msgCallLink };
+        const payload = { type: 'call', url: msgCallLink, callTime: msgCallTime };
+        console.log('payload', payload);
 
         let messagePayload = {};
         const recipientPubKey = contact.public;
@@ -9996,7 +10416,10 @@ class CallInviteModal {
         }
 
         const messageObj = await chatModal.createChatMessage(addr, messagePayload, toll, keys);
-        messageObj.callType = true
+        // set callType to true if callTime is 0 so recipient phone rings
+        if (payload?.callTime === 0) {
+          messageObj.callType = true
+        }
         await signObj(messageObj, keys);
         const txid = getTxid(messageObj);
         await injectTx(messageObj, txid);
@@ -10009,7 +10432,8 @@ class CallInviteModal {
           my: true,
           txid: txid,
           status: 'sent',
-          type: 'call'
+          type: 'call',
+          callTime: payload.callTime
         };
         insertSorted(contact.messages, newMessage, 'timestamp');
 
@@ -10056,6 +10480,148 @@ class CallInviteModal {
 }
 
 const callInviteModal = new CallInviteModal();
+
+/**
+ * Call Schedule Choice Modal
+ * Presents: Call Now | Schedule | Cancel
+ */
+class CallScheduleChoiceModal {
+  constructor() {
+    this.modal = null;
+    this.nowBtn = null;
+    this.scheduleBtn = null;
+    this.cancelBtn = null;
+    this.closeBtn = null;
+    this.onSelect = null; // function(choice)
+  }
+
+  load() {
+    this.modal = document.getElementById('callScheduleChoiceModal');
+    if (!this.modal) return;
+    this.nowBtn = document.getElementById('callScheduleNowBtn');
+    this.scheduleBtn = document.getElementById('openCallScheduleDateBtn');
+    this.cancelBtn = document.getElementById('cancelCallScheduleChoice');
+    this.closeBtn = document.getElementById('closeCallScheduleChoiceModal');
+
+    const onNow = () => this._select('now');
+    const onSchedule = () => this._select('schedule');
+    const onCancel = () => this._select(null);
+
+    if (this.nowBtn) this.nowBtn.addEventListener('click', onNow);
+    if (this.scheduleBtn) this.scheduleBtn.addEventListener('click', onSchedule);
+    if (this.cancelBtn) this.cancelBtn.addEventListener('click', onCancel);
+    if (this.closeBtn) this.closeBtn.addEventListener('click', onCancel);
+  }
+
+  open(onSelect) {
+    this.onSelect = onSelect;
+    this.modal?.classList.add('active');
+  }
+
+  _select(value) {
+    if (this.modal) this.modal.classList.remove('active');
+    const cb = this.onSelect;
+    this.onSelect = null;
+    if (cb) cb(value);
+  }
+}
+
+/**
+ * Call Schedule Date Modal
+ * Lets user pick date/time and submit
+ */
+class CallScheduleDateModal {
+  constructor() {
+    this.modal = null;
+    this.form = null;
+    this.input = null;
+    this.submitBtn = null;
+    this.cancelBtn = null;
+    this.closeBtn = null;
+    this.onDone = null; // function(timestamp|null)
+    this._onSubmit = this._onSubmit.bind(this);
+    this._onSubmitBtn = this._onSubmitBtn.bind(this);
+    this._onCancel = this._onCancel.bind(this);
+  }
+
+  load() {
+    this.modal = document.getElementById('callScheduleDateModal');
+    if (!this.modal) return;
+    this.form = document.getElementById('callScheduleDateForm');
+    this.input = document.getElementById('callScheduleInput');
+    this.submitBtn = document.getElementById('confirmCallSchedule');
+    this.cancelBtn = document.getElementById('cancelCallScheduleDate');
+    this.closeBtn = document.getElementById('closeCallScheduleDateModal');
+
+    if (this.form) this.form.addEventListener('submit', this._onSubmit);
+    if (this.submitBtn) this.submitBtn.addEventListener('click', this._onSubmitBtn);
+    if (this.cancelBtn) this.cancelBtn.addEventListener('click', this._onCancel);
+    if (this.closeBtn) this.closeBtn.addEventListener('click', this._onCancel);
+  }
+
+  open(onDone) {
+    this.onDone = onDone;
+    // initialize min/default each time it opens
+    const toLocalInputValue = (ms) => {
+      const d = new Date(ms);
+      d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+      return d.toISOString().slice(0, 16);
+    };
+    const nowMs = Date.now();
+    const minMs = nowMs + 1 * 60 * 1000;
+    const defaultMs = nowMs + 1 * 60 * 1000;
+    if (this.input) {
+      this.input.min = toLocalInputValue(minMs);
+      if (!this.input.value || Date.parse(this.input.value) < minMs) {
+        this.input.value = toLocalInputValue(defaultMs);
+      }
+    }
+    this.modal?.classList.add('active');
+  }
+
+  _onSubmit(e) {
+    if (e) e.preventDefault();
+    this._submitValue();
+  }
+  _onSubmitBtn(e) {
+    if (e) e.preventDefault();
+    this._submitValue();
+  }
+  _onCancel() {
+    this._closeWith(null);
+  }
+
+  _submitValue() {
+    if (!this.input) return;
+    const inputVal = this.input.value;
+    if (!inputVal) {
+      showToast('Please pick a date and time', 2000, 'error');
+      return;
+    }
+    const localMs = Date.parse(inputVal);
+    if (!localMs || Number.isNaN(localMs)) {
+      showToast('Invalid date/time selected', 2000, 'error');
+      return;
+    }
+    const corrected = localMs + timeSkew;
+    const nowCorrected = getCorrectedTimestamp();
+    if (corrected <= nowCorrected) {
+      showToast('Please choose a time in the future', 2000, 'error');
+      return;
+    }
+    this._closeWith(corrected);
+  }
+
+  _closeWith(value) {
+    if (this.modal) this.modal.classList.remove('active');
+    const cb = this.onDone;
+    this.onDone = null;
+    if (cb) cb(value);
+  }
+}
+
+const callScheduleChoiceModal = new CallScheduleChoiceModal();
+const callScheduleDateModal = new CallScheduleDateModal();
 
 /**
  * Failed Message Context Menu Class
