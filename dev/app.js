@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'j'
+const version = 'k'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -118,6 +118,7 @@ import {
   debounce,
   truncateMessage,
   normalizeUnsignedFloat,
+  EthNum,
 } from './lib.js';
 
 const weiDigits = 18;
@@ -404,6 +405,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Failed Transaction Modal
   failedTransactionModal.load();
+
+  // Calls Modal
+  callsModal.load();
   
   // Friend Modal
   friendModal.load();
@@ -1474,6 +1478,9 @@ class SettingsModal {
     this.closeButton = document.getElementById('closeSettings');
     this.closeButton.addEventListener('click', () => this.close());
     
+    this.callsButton = document.getElementById('openCallsModal');
+    this.callsButton.addEventListener('click', () => callsModal.open());
+    
     this.profileButton = document.getElementById('openAccountForm');
     this.profileButton.addEventListener('click', () => myProfileModal.open());
     
@@ -1717,7 +1724,7 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
   const asset = myData.wallet.assets[assetIndex];
   
   // Check if transaction fee is available from network parameters
-  if (!parameters.current || !parameters.current.transactionFee) {
+  if (!parameters.current || !parameters.current.transactionFeeUsdStr) {
     console.error('Transaction fee not available from network parameters');
     if (balanceWarning) {
       balanceWarning.textContent = 'Network error: Cannot determine transaction fee';
@@ -1726,7 +1733,7 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
     return false;
   }
   
-  const feeInWei = parameters.current.transactionFee;
+  const feeInWei = getTransactionFeeWei();
   const totalRequired = amount + feeInWei;
   const hasInsufficientBalance = BigInt(asset.balance) < totalRequired;
 
@@ -2907,6 +2914,153 @@ class HistoryModal {
 // Create singleton instance
 const historyModal = new HistoryModal();
 
+class CallsModal {
+  constructor() {
+    this.calls = [];
+  }
+
+  load() {
+    this.modal = document.getElementById('callsModal');
+    this.list = document.getElementById('callList');
+    this.closeButton = document.getElementById('closeCallsModal');
+    this.closeButton.addEventListener('click', () => this.close());
+
+    // Click on list item: open chat
+    this.list.addEventListener('click', (e) => {
+      const li = e.target.closest('.chat-item');
+      if (!li) return;
+      const address = li.getAttribute('data-address');
+      const action = e.target.closest('.call-join');
+      if (action) {
+        this.handleJoinClick(li);
+        return;
+      }
+      chatModal.open(address);
+    });
+  }
+
+  /**
+   * Opens the calls modal
+   * @returns {void}
+   */
+  open() {
+    this.refreshCalls();
+    this.render();
+    this.modal.classList.add('active');
+  }
+
+  /**
+   * Closes the calls modal
+   * @returns {void}
+   */
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  /**
+   * Refreshes the calls list by looping through contacts and getting calls that are within last 2 hours or in future
+   * @returns {void}
+   */
+  refreshCalls() {
+    this.calls = [];
+    if (!myData?.contacts) return;
+    const now = getCorrectedTimestamp();
+    const twoHoursMs = 2 * 60 * 60 * 1000;
+    const threshold = now - twoHoursMs;
+    // loop through contacts and get calls that are within last 2 hours or in future
+    for (const [address, contact] of Object.entries(myData.contacts)) {
+      const messages = contact?.messages || [];
+      const displayName = getContactDisplayName(contact);
+      for (const msg of messages) {
+        if (msg?.type !== 'call') continue;
+        const callTime = Number(msg.callTime);
+        // Only include valid scheduled calls: positive timestamp within last 2h or in future
+        if (!Number.isFinite(callTime) || callTime <= 0) continue;
+        if (callTime >= threshold) {
+          this.calls.push({
+            address,
+            calling: displayName,
+            callTime,
+            callUrl: msg.message,
+            txid: msg.txid || ''
+          });
+        }
+      }
+    }
+    this.calls.sort((a, b) => (a.callTime || 0) - (b.callTime || 0));
+  }
+
+  /** 
+   * Handles the join click event for a call
+   * @param {HTMLElement} li - The list item element
+   * @returns {void}
+   */
+  handleJoinClick(li) {
+    const idx = Number(li.getAttribute('data-index'));
+    const item = this.calls[idx];
+    if (!item) return;
+    // Gate future calls
+    if (chatModal.isFutureCall(item.callTime)) {
+      showToast(`Call scheduled for ${chatModal.formatLocalDateTime(item.callTime)}`, 2500, 'info');
+      return;
+    }
+    if (!item.callUrl) {
+      showToast('Call link not found', 2000, 'error');
+      return;
+    }
+    window.open(item.callUrl, '_blank');
+  }
+
+  /**
+   * Renders the calls list by looping through calls and creating a list item for each call
+   * @returns {void}
+   */
+  render() {
+    const list = this.list;
+    const empty = list.querySelector('.empty-state');
+    const hasCalls = this.calls.length > 0;
+    const existingItems = list.querySelectorAll('.chat-item');
+    // if no calls, show empty state and remove existing items
+    if (!hasCalls) {
+      if (empty) empty.style.display = 'block';
+      if (existingItems.length) existingItems.forEach((el) => el.remove());
+      return;
+    }
+
+    if (empty) empty.style.display = 'none';
+    // create a fragment to append new items to
+    const fragment = document.createDocumentFragment();
+    this.calls.forEach((c, i) => {
+      const li = document.createElement('li');
+      li.className = 'chat-item';
+      li.setAttribute('data-index', String(i));
+      li.setAttribute('data-address', c.address);
+      // format the call time
+      const when = chatModal.formatLocalDateTime(c.callTime);
+      const identicon = generateIdenticon(c.address);
+      li.innerHTML = `
+        <div class="chat-avatar">${identicon}</div>
+        <div class="chat-content">
+          <div class="chat-header">
+            <div class="chat-name">${escapeHtml(c.calling)}</div>
+            <button class="call-join call-message-phone-button" aria-label="Join Call"></button>
+          </div>
+          <div class="chat-message">
+            <div class="call-time">${when}</div>
+            <span class="chat-time-chevron"></span>
+          </div>
+        </div>
+      `;
+      fragment.appendChild(li);
+    });
+    // remove previous items and append new items
+    if (existingItems.length) existingItems.forEach((el) => el.remove());
+    list.appendChild(fragment);
+  }
+}
+
+const callsModal = new CallsModal();
+
 async function updateAssetPricesIfNeeded() {
   if (!myData || !myData.wallet || !myData.wallet.assets) {
     console.error('No wallet data available to update asset prices');
@@ -3040,6 +3194,33 @@ function playTransferSound() {
   }
 }
 
+// Ensure a contact has both EC and PQ public keys in local data.
+// Returns true if both keys are available (already or fetched), false otherwise.
+async function ensureContactKeys(address) {
+  try {
+    const contact = myData.contacts[address];
+    let hasPub = !!contact.public;
+    let hasPq = !!contact.pqPublic;
+    if (hasPub && hasPq) return true;
+
+    const accountInfo = await queryNetwork(`/account/${longAddress(address)}`);
+    const netPub = accountInfo?.account?.publicKey;
+    const netPq = accountInfo?.account?.pqPublicKey;
+    if (netPub) {
+      contact.public = netPub;
+      hasPub = true;
+    }
+    if (netPq) {
+      contact.pqPublic = netPq;
+      hasPq = true;
+    }
+    return hasPub && hasPq;
+  } catch (e) {
+    console.log('ensureContactKeys error:', e);
+    return false;
+  }
+}
+
 // Actually payments also appear in the chats, so we can add these to
 async function processChats(chats, keys) {
   let newTimestamp = 0;
@@ -3081,21 +3262,12 @@ if (mine) console.warn('txid in processChats is', txidHex)
             console.warn('my message tx', tx)
           }
           else if (payload.encrypted) {
-            let senderPublic = myData.contacts[from]?.public;
-            if (!senderPublic) {
-              const senderInfo = await queryNetwork(`/account/${longAddress(from)}`);
-              // TODO for security, make sure hash of public key is same as from address; needs to be in other similar situations
-              //console.log('senderInfo.account', senderInfo.account)
-              if (!senderInfo?.account?.publicKey) {
-                console.log(`no public key found for sender ${sender}`);
-                continue;
-              }
-              senderPublic = senderInfo.account.publicKey;
-              if (myData.contacts[from]) {
-                myData.contacts[from].public = senderPublic;
-              }
+            await ensureContactKeys(from);
+            if (!myData.contacts[from]?.public) {
+              console.log(`no public key found for sender ${sender}`);
+              continue;
             }
-            payload.public = senderPublic;
+            payload.public = myData.contacts[from].public;
           }
           if (payload.xattach && typeof payload.xattach === 'string') {
             try {
@@ -3343,20 +3515,12 @@ if (mine) console.warn('txid in processChats is', txidHex)
             console.warn('my transfer tx', txx)
           }
           else if (payload.encrypted) {
-            let senderPublic = myData.contacts[from]?.public;
-            if (!senderPublic) {
-              const senderInfo = await queryNetwork(`/account/${longAddress(from)}`);
-              //console.log('senderInfo.account', senderInfo.account)
-              if (!senderInfo?.account?.publicKey) {
-                console.log(`no public key found for sender ${sender}`);
-                continue;
-              }
-              senderPublic = senderInfo.account.publicKey;
-              if (myData.contacts[from]) {
-                myData.contacts[from].public = senderPublic;
-              }
+            await ensureContactKeys(from);
+            if (!myData.contacts[from]?.public) {
+              console.log(`no public key found for sender ${sender}`);
+              continue;
             }
-            payload.public = senderPublic;
+            payload.public = myData.contacts[from].public;
           }
           //console.log("payload", payload)
           decryptMessage(payload, keys, mine); // modifies the payload object
@@ -3608,7 +3772,7 @@ async function postAssetTransfer(to, amount, memo, keys) {
     // memo: stringify(memo),
     xmemo: memo,
     timestamp: getCorrectedTimestamp(),
-    fee: parameters.current.transactionFee || 1n * wei, // This is not used by the backend
+    fee: getTransactionFeeWei(), // This is not used by the backend
     networkId: network.netid,
   };
 
@@ -7681,14 +7845,18 @@ class ChatModal {
    * @returns {void}
    */
   close() {
-    const needsToSendReadTx = this.needsToSend();
-    console.log(`[close] needsToSendReadTx: ${needsToSendReadTx}`);
-    // if newestRecevied message does not have an amount property and user has not responded, then send a read transaction
-    if (needsToSendReadTx) {
-      this.sendReadTransaction(this.address);
+    if (isOnline) {
+      const needsToSendReadTx = this.needsToSend();
+      console.log(`[close] needsToSendReadTx: ${needsToSendReadTx}`);
+      // if newestRecevied message does not have an amount property and user has not responded, then send a read transaction
+      if (needsToSendReadTx) {
+        this.sendReadTransaction(this.address);
+      }
+      
+      this.sendReclaimTollTransaction(this.address);
+    } else {
+      showToast('Offline: toll not processed', 0, 'error');
     }
-
-    this.sendReclaimTollTransaction(this.address);
 
     // Save any unsaved draft before closing
     this.debouncedSaveDraft(this.messageInput.value);
@@ -7923,20 +8091,13 @@ class ChatModal {
         return;
       }
 
-      ///yyy
-      // Get recipient's public key from contacts
+      // Ensure recipient's keys are available
+      const keysOk = await ensureContactKeys(currentAddress);
       let recipientPubKey = myData.contacts[currentAddress]?.public;
       let pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
-      if (!recipientPubKey || !pqRecPubKey) {
-        const recipientInfo = await queryNetwork(`/account/${longAddress(currentAddress)}`);
-        if (!recipientInfo?.account?.publicKey) {
-          console.log(`no public key found for recipient ${currentAddress}`);
-          return;
-        }
-        recipientPubKey = recipientInfo.account.publicKey;
-        myData.contacts[currentAddress].public = recipientPubKey;
-        pqRecPubKey = recipientInfo.account.pqPublicKey;
-        myData.contacts[currentAddress].pqPublic = pqRecPubKey;
+      if (!keysOk || !recipientPubKey || !pqRecPubKey) {
+        console.log(`no public/PQ key found for recipient ${currentAddress}`);
+        return;
       }
 
       /*
@@ -8298,7 +8459,7 @@ console.warn('in send message', txid)
       message: 'x',
       xmessage: payload,
       timestamp: getCorrectedTimestamp(),
-      fee: parameters.current.transactionFee || 1n * wei, // This is not used by the backend
+      fee: getTransactionFeeWei(), // This is not used by the backend
       networkId: network.netid,
     };
     return tx;
@@ -8864,34 +9025,6 @@ console.warn('in send message', txid)
     }
   }
 
-  /**
-   * Retrieves the recipient's public keys, caching them if not already available.
-   * @param {string} recipientAddress - The address of the recipient.
-   * @returns {Promise<{publicKey: string, pqPublicKey: string}>}
-   * @throws {Error} If recipient's public keys cannot be retrieved.
-   * */
-  async getRecipientKeys(recipientAddress) {
-    let recipientPubKey = myData.contacts[recipientAddress]?.public;
-    let pqRecPubKey = myData.contacts[recipientAddress]?.pqPublic;
-
-    if (!recipientPubKey || !pqRecPubKey) {
-      const recipientInfo = await queryNetwork(`/account/${longAddress(recipientAddress)}`);
-      recipientPubKey = recipientInfo?.account?.publicKey;
-      pqRecPubKey = recipientInfo?.account?.pqPublicKey;
-
-      if (!recipientPubKey || !pqRecPubKey) {
-        throw new Error("Could not retrieve recipient's public keys.");
-      }
-
-      myData.contacts[recipientAddress].public = recipientPubKey;
-      myData.contacts[recipientAddress].pqPublic = pqRecPubKey;
-    } 
-
-    return {
-      publicKey: recipientPubKey,
-      pqPublicKey: pqRecPubKey
-    };
-  }
 
   /**
    * Helper function to get the shared DH key for a recipient.
@@ -8899,10 +9032,12 @@ console.warn('in send message', txid)
    * @returns {Promise<{dhkey: Uint8Array, cipherText: Uint8Array}>}
    */
   async getRecipientDhKey(recipientAddress) {
-
-    const keys = await this.getRecipientKeys(recipientAddress);
-
-    return dhkeyCombined(myAccount.keys.secret, keys.publicKey, keys.pqPublicKey);
+    const ok = await ensureContactKeys(recipientAddress);
+    if (!ok) {
+      throw new Error('Recipient keys unavailable');
+    }
+    const recipient = myData.contacts[recipientAddress];
+    return dhkeyCombined(myAccount.keys.secret, recipient.public, recipient.pqPublic);
   }
 
   /**
@@ -8983,11 +9118,13 @@ console.warn('in send message', txid)
         dhkey = hex2bin(decryptData(selfKey, password, true));
       } else {
         // you are the receiver ⇒ use fields stashed on the item
-        const recipientKeys = await this.getRecipientKeys(this.address);
+        const ok = await ensureContactKeys(this.address);
+        const senderPublicKey = myData.contacts[this.address]?.public;
+        if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
         const pqEncSharedKey = linkEl.dataset.pqencsharedkey;
         dhkey = dhkeyCombined(
           myAccount.keys.secret,
-          recipientKeys.publicKey,
+          senderPublicKey,
           myAccount.keys.pqSeed,
           pqEncSharedKey
         ).dhkey;
@@ -9469,19 +9606,14 @@ console.warn('in send message', txid)
         return;
       }
 
-      // Get recipient's public key from contacts
-      let recipientPubKey = myData.contacts[this.address]?.public;
-      let pqRecPubKey = myData.contacts[this.address]?.pqPublic;
-      if (!recipientPubKey || !pqRecPubKey) {
-        const recipientInfo = await queryNetwork(`/account/${longAddress(this.address)}`);
-        if (!recipientInfo?.account?.publicKey) {
-          console.log(`No public key found for recipient ${this.address}`);
-          return showToast('Failed to get recipient key', 0, 'error');
-        }
-        recipientPubKey = recipientInfo.account.publicKey;
-        myData.contacts[this.address].public = recipientPubKey;
-        pqRecPubKey = recipientInfo.account.pqPublicKey;
-        myData.contacts[this.address].pqPublic = pqRecPubKey;
+      // Ensure recipient keys are available
+      const ok = await ensureContactKeys(this.address);
+      const recipientPubKey = myData.contacts[this.address]?.public;
+      const pqRecPubKey = myData.contacts[this.address]?.pqPublic;
+      if (!ok || !recipientPubKey || !pqRecPubKey) {
+        console.log(`No public/PQ key found for recipient ${this.address}`);
+        showToast('Failed to get recipient key', 0, 'error');
+        return;
       }
 
       const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey);
@@ -9795,19 +9927,14 @@ console.warn('in send message', txid)
         return;
       }
 
-      // Get recipient's public key from contacts
-      let recipientPubKey = myData.contacts[currentAddress]?.public;
-      let pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
-      if (!recipientPubKey || !pqRecPubKey) {
-        const recipientInfo = await queryNetwork(`/account/${longAddress(currentAddress)}`);
-        if (!recipientInfo?.account?.publicKey) {
-          console.log(`no public key found for recipient ${currentAddress}`);
-          return;
-        }
-        recipientPubKey = recipientInfo.account.publicKey;
-        myData.contacts[currentAddress].public = recipientPubKey;
-        pqRecPubKey = recipientInfo.account.pqPublicKey;
-        myData.contacts[currentAddress].pqPublic = pqRecPubKey;
+      // Ensure recipient keys are available
+      const ok = await ensureContactKeys(currentAddress);
+      const recipientPubKey = myData.contacts[currentAddress]?.public;
+      const pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
+      if (!ok || !recipientPubKey || !pqRecPubKey) {
+        console.log(`no public/PQ key found for recipient ${currentAddress}`);
+        showToast('Failed to get recipient key', 0, 'error');
+        return;
       }
 
       const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey)
@@ -9937,19 +10064,12 @@ console.warn('in send message', txid)
       duration: duration
     };
 
-    // Get recipient's public key
-    let recipientPubKey = myData.contacts[this.address]?.public;
-    let pqRecPubKey = myData.contacts[this.address]?.pqPublic;
-    
-    if (!recipientPubKey || !pqRecPubKey) {
-      const recipientInfo = await queryNetwork(`/account/${longAddress(this.address)}`);
-      if (!recipientInfo?.account?.publicKey) {
-        throw new Error(`No public key found for recipient ${this.address}`);
-      }
-      recipientPubKey = recipientInfo.account.publicKey;
-      myData.contacts[this.address].public = recipientPubKey;
-      pqRecPubKey = recipientInfo.account.pqPublicKey;
-      myData.contacts[this.address].pqPublic = pqRecPubKey;
+    // Ensure recipient keys are available
+    const ok = await ensureContactKeys(this.address);
+    const recipientPubKey = myData.contacts[this.address]?.public;
+    const pqRecPubKey = myData.contacts[this.address]?.pqPublic;
+    if (!ok || !recipientPubKey || !pqRecPubKey) {
+      throw new Error(`No public/PQ key found for recipient ${this.address}`);
     }
 
     // Encrypt message object
@@ -10111,20 +10231,13 @@ console.warn('in send message', txid)
         const password = myAccount.keys.secret + myAccount.keys.pqSeed;
         dhkey = hex2bin(decryptData(selfKey, password, true));
       } else if (pqEncSharedKey) {
-        // For received messages, use recipient's key and pqEncSharedKey
-        const contact = myData.contacts[this.address];
-        let senderPublic = contact?.public;
-        
-        if (!senderPublic) {
-          const senderInfo = await queryNetwork(`/account/${longAddress(this.address)}`);
-          if (!senderInfo?.account?.publicKey) {
-            throw new Error(`No public key found for sender ${this.address}`);
-          }
-          senderPublic = senderInfo.account.publicKey;
-          contact.public = senderPublic;
+        // For received messages, ensure keys are present and use pqEncSharedKey
+        const ok = await ensureContactKeys(this.address);
+        const senderPublicKey = myData.contacts[this.address]?.public;
+        if (!ok || !senderPublicKey) {
+          throw new Error(`No public key found for sender ${this.address}`);
         }
-        
-        dhkey = dhkeyCombined(myAccount.keys.secret, senderPublic, myAccount.keys.pqSeed, base642bin(pqEncSharedKey)).dhkey;
+        dhkey = dhkeyCombined(myAccount.keys.secret, senderPublicKey, myAccount.keys.pqSeed, base642bin(pqEncSharedKey)).dhkey;
       } else {
         throw new Error('Missing encryption keys for voice message');
       }
@@ -10212,7 +10325,16 @@ console.warn('in send message', txid)
   }
 
   formatLocalDateTime(ts) {
-    return new Date(ts - timeSkew).toLocaleString();
+    const localMs = (typeof ts === 'number' ? ts : Number(ts)) - timeSkew;
+    const minute = 60 * 1000;
+    const roundedMs = Math.round(localMs / minute) * minute;
+    return new Date(roundedMs).toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
   }
 
   gateScheduledCall(messageEl) {
@@ -10354,9 +10476,8 @@ class CallInviteModal {
     const addresses = selectedBoxes.map(cb => cb.value).slice(0,10);
     // get call link from original message
     const msgCallLink = this.messageEl.querySelector('.call-message a')?.href;
-    const msgCallTime = Number(this.messageEl.getAttribute('data-call-time')) || 0;
     if (!msgCallLink) return showToast('Call link not found', 2000, 'error');
-
+    let msgCallTime = Number(this.messageEl.getAttribute('data-call-time')) || 0;
     this.inviteSendButton.disabled = true;
     this.inviteSendButton.textContent = 'Sending...';
 
@@ -10368,17 +10489,19 @@ class CallInviteModal {
           break;
         }
 
-        const contact = myData.contacts[addr];
         const payload = { type: 'call', url: msgCallLink, callTime: msgCallTime };
         console.log('payload', payload);
 
-        let messagePayload = {};
-        const recipientPubKey = contact.public;
-        const pqRecPubKey = contact.pqPublic;
-        if (!recipientPubKey || !pqRecPubKey) {
-          showToast(`Skipping ${contact.username || addr} (missing keys)`, 2000, 'warning');
+        let messagePayload = {}
+        const contact = myData.contacts[addr];
+        const ok = await ensureContactKeys(addr);
+        if (!ok) {
+          showToast(`Skipping ${contact.username || addr} (cannot get public key)`, 2000, 'warning');
           continue;
         }
+        const recipientPubKey = myData.contacts[addr].public;
+        const pqRecPubKey = myData.contacts[addr].pqPublic;
+        
         const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey);
         const encMessage = encryptChacha(dhkey, stringify(payload));
         const selfKey = encryptData(bin2hex(dhkey), keys.secret+keys.pqSeed, true);
@@ -10416,8 +10539,8 @@ class CallInviteModal {
         }
 
         const messageObj = await chatModal.createChatMessage(addr, messagePayload, toll, keys);
-        // set callType to true if callTime is 0 so recipient phone rings
-        if (payload?.callTime === 0) {
+        // set callType to true if callTime is within 5 minutes of now or after callTime
+        if (payload?.callTime <= getCorrectedTimestamp() + 5 * 60 * 1000) {
           messageObj.callType = true
         }
         await signObj(messageObj, keys);
@@ -10534,11 +10657,15 @@ class CallScheduleDateModal {
   constructor() {
     this.modal = null;
     this.form = null;
-    this.input = null;
+    this.dateInput = null;
+    this.hourSelect = null;
+    this.minuteSelect = null;
+    this.ampmSelect = null;
     this.submitBtn = null;
     this.cancelBtn = null;
     this.closeBtn = null;
     this.onDone = null; // function(timestamp|null)
+    this.DEFAULT_OFFSET_MINUTES = 0;
     this._onSubmit = this._onSubmit.bind(this);
     this._onSubmitBtn = this._onSubmitBtn.bind(this);
     this._onCancel = this._onCancel.bind(this);
@@ -10548,7 +10675,10 @@ class CallScheduleDateModal {
     this.modal = document.getElementById('callScheduleDateModal');
     if (!this.modal) return;
     this.form = document.getElementById('callScheduleDateForm');
-    this.input = document.getElementById('callScheduleInput');
+    this.dateInput = document.getElementById('callScheduleDate');
+    this.hourSelect = document.getElementById('callScheduleHour');
+    this.minuteSelect = document.getElementById('callScheduleMinute');
+    this.ampmSelect = document.getElementById('callScheduleAmPm');
     this.submitBtn = document.getElementById('confirmCallSchedule');
     this.cancelBtn = document.getElementById('cancelCallScheduleDate');
     this.closeBtn = document.getElementById('closeCallScheduleDateModal');
@@ -10561,20 +10691,41 @@ class CallScheduleDateModal {
 
   open(onDone) {
     this.onDone = onDone;
-    // initialize min/default each time it opens
-    const toLocalInputValue = (ms) => {
-      const d = new Date(ms);
-      d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-      return d.toISOString().slice(0, 16);
-    };
-    const nowMs = Date.now();
-    const minMs = nowMs + 1 * 60 * 1000;
-    const defaultMs = nowMs + 1 * 60 * 1000;
-    if (this.input) {
-      this.input.min = toLocalInputValue(minMs);
-      if (!this.input.value || Date.parse(this.input.value) < minMs) {
-        this.input.value = toLocalInputValue(defaultMs);
+    const defaultDate = this._getDefaultDate();
+    // Populate hours 1-12 (12-hour format)
+    if (this.hourSelect) {
+      this.hourSelect.innerHTML = '';
+      for (let h = 1; h <= 12; h++) {
+        const opt = document.createElement('option');
+        opt.value = this._pad2(h);
+        opt.textContent = this._pad2(h);
+        this.hourSelect.appendChild(opt);
       }
+      const hour24 = defaultDate.getHours();
+      const hour12 = ((hour24 % 12) === 0) ? 12 : (hour24 % 12);
+      this.hourSelect.value = this._pad2(hour12);
+    }
+    // Set AM/PM
+    if (this.ampmSelect) {
+      const hour24 = defaultDate.getHours();
+      this.ampmSelect.value = hour24 >= 12 ? 'PM' : 'AM';
+    }
+    // Populate rotating 5-minute list starting at default minute
+    if (this.minuteSelect) {
+      this.minuteSelect.innerHTML = '';
+      const start = defaultDate.getMinutes();
+      for (let i = 0; i < 12; i++) {
+        const m = (start + i * 5) % 60;
+        const opt = document.createElement('option');
+        opt.value = this._pad2(m);
+        opt.textContent = this._pad2(m);
+        this.minuteSelect.appendChild(opt);
+      }
+      this.minuteSelect.value = this._pad2(start);
+    }
+    // Set local date input
+    if (this.dateInput) {
+      this.dateInput.value = this._formatDateInput(defaultDate);
     }
     this.modal?.classList.add('active');
   }
@@ -10592,17 +10743,25 @@ class CallScheduleDateModal {
   }
 
   _submitValue() {
-    if (!this.input) return;
-    const inputVal = this.input.value;
-    if (!inputVal) {
+    if (!this.dateInput || !this.hourSelect || !this.minuteSelect || !this.ampmSelect) return;
+    const dateVal = this.dateInput.value;
+    const hourVal = this.hourSelect.value;
+    const minuteVal = this.minuteSelect.value;
+    const ampmVal = this.ampmSelect.value;
+    if (!dateVal || hourVal === '' || minuteVal === '') {
       showToast('Please pick a date and time', 2000, 'error');
       return;
     }
-    const localMs = Date.parse(inputVal);
-    if (!localMs || Number.isNaN(localMs)) {
+    const parsed = this._parseDateInput(dateVal);
+    const hour12 = Number(hourVal);
+    const minute = Number(minuteVal);
+    if (!parsed || Number.isNaN(hour12) || Number.isNaN(minute)) {
       showToast('Invalid date/time selected', 2000, 'error');
       return;
     }
+    const hour24 = this._convert12To24(hour12, ampmVal);
+    const { year, month, day } = parsed;
+    const localMs = new Date(year, month - 1, day, hour24, minute, 0, 0).getTime();
     const corrected = localMs + timeSkew;
     const nowCorrected = getCorrectedTimestamp();
     if (corrected <= nowCorrected) {
@@ -10610,6 +10769,47 @@ class CallScheduleDateModal {
       return;
     }
     this._closeWith(corrected);
+  }
+
+  // Helpers
+  _pad2(n) { return n < 10 ? '0' + n : '' + n; }
+
+  _formatDateInput(d) {
+    return `${d.getFullYear()}-${this._pad2(d.getMonth() + 1)}-${this._pad2(d.getDate())}`;
+  }
+
+  _roundUpToNextFiveMinutes(ms) {
+    const d = new Date(ms);
+    d.setSeconds(0, 0);
+    const minutes = d.getMinutes();
+    const rounded = Math.ceil(minutes / 5) * 5;
+    if (rounded === 60) {
+      d.setHours(d.getHours() + 1, 0, 0, 0);
+    } else {
+      d.setMinutes(rounded, 0, 0);
+    }
+    return d.getTime();
+  }
+
+  _getDefaultDate() {
+    const nowMs = Date.now();
+    const offsetMs = this.DEFAULT_OFFSET_MINUTES * 60 * 1000;
+    const defaultMs = this._roundUpToNextFiveMinutes(nowMs + offsetMs);
+    return new Date(defaultMs);
+  }
+
+  _parseDateInput(val) {
+    const parts = val.split('-');
+    if (parts.length !== 3) return null;
+    const [yearStr, monthStr, dayStr] = parts;
+    const year = Number(yearStr), month = Number(monthStr), day = Number(dayStr);
+    if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null;
+    return { year, month, day };
+  }
+
+  _convert12To24(hour12, ampm) {
+    if (ampm === 'AM') return hour12 === 12 ? 0 : hour12;
+    return hour12 === 12 ? 12 : hour12 + 12;
   }
 
   _closeWith(value) {
@@ -12094,7 +12294,7 @@ class SendAssetFormModal {
   async fillAmount() {
     await getNetworkParams();
     const asset = myData.wallet.assets[this.assetSelectDropdown.value];
-    const feeInWei = parameters.current.transactionFee || 1n * wei;
+    const feeInWei = getTransactionFeeWei();
     const maxAmount = BigInt(asset.balance) - feeInWei;
     const maxAmountStr = big2str(maxAmount > 0n ? maxAmount : 0n, 18).slice(0, -16);
 
@@ -12102,8 +12302,8 @@ class SendAssetFormModal {
     const isUSD = this.balanceSymbol.textContent === 'USD';
 
     if (isUSD) {
-      const scalabilityFactor = getStabilityFactor();
       // Convert to USD before displaying
+      const scalabilityFactor = getStabilityFactor();
       this.amountInput.value = (parseFloat(maxAmountStr) * scalabilityFactor).toString();
     } else {
       // Display in LIB
@@ -12146,7 +12346,7 @@ class SendAssetFormModal {
     }
 
     await getNetworkParams();
-    const txFeeInLIB = parameters.current.transactionFee || 1n * wei;
+    const txFeeInLIB = getTransactionFeeWei();
     const scalabilityFactor = getStabilityFactor();
 
     // Preserve the current toggle state (LIB/USD) instead of overwriting it
@@ -12280,7 +12480,7 @@ class SendAssetFormModal {
 
     // Get the raw values in LIB format
     const asset = myData.wallet.assets[this.assetSelectDropdown.value];
-    const txFeeInWei = parameters.current.transactionFee || 1n * wei;
+    const txFeeInWei = getTransactionFeeWei();
     const balanceInLIB = big2str(BigInt(asset.balance), 18).slice(0, -12);
     const feeInLIB = big2str(txFeeInWei, 18).slice(0, -16);
 
@@ -12588,7 +12788,7 @@ class SendAssetConfirmModal {
     // Validate amount including transaction fee
     if (!(await validateBalance(amount, assetIndex))) {
       await getNetworkParams();
-      const txFeeInLIB = parameters.current.transactionFee || 1n * wei;
+      const txFeeInLIB = getTransactionFeeWei();
       const balance = BigInt(wallet.assets[assetIndex].balance);
       const amountStr = big2str(amount, 18).slice(0, -16);
       const feeStr = big2str(txFeeInLIB, 18).slice(0, -16);
@@ -12642,31 +12842,11 @@ class SendAssetConfirmModal {
       payment to any address. We might not ever use this feature though.
     */
 
-    // Get recipient's public key from contacts
-    let recipientPubKey = myData.contacts[toAddress]?.public;
-    let pqRecPubKey = myData.contacts[toAddress]?.pqPublic;
+    // Ensure recipient keys exist locally; function handles local check and network fetch.
+    await ensureContactKeys(toAddress);
+    const recipientPubKey = myData.contacts[toAddress]?.public;
+    const pqRecPubKey = myData.contacts[toAddress]?.pqPublic;
     let pqEncSharedKey = '';
-    if (!recipientPubKey || !pqRecPubKey) {
-      const recipientInfo = await queryNetwork(`/account/${longAddress(toAddress)}`);
-      if (!recipientInfo?.account?.publicKey) {
-        console.log(`no public key found for recipient ${toAddress}`);
-//        cancelButton.disabled = false;
-//        return;
-      }
-      else{
-        recipientPubKey = recipientInfo.account.publicKey;
-        myData.contacts[toAddress].public = recipientPubKey;
-      }
-      if (!recipientInfo?.account?.pqPublicKey) {
-        console.log(`no PQ public key found for recipient ${toAddress}`);
-//        cancelButton.disabled = false;
-//        return;
-      }
-      else {
-        pqRecPubKey = recipientInfo.account.pqPublicKey;
-        myData.contacts[toAddress].pqPublic = pqRecPubKey;
-      }
-    }
     let dhkey = '';
     let selfKey = '';
     let sharedKeyMethod = 'none';  // to support sending just payment to any address
@@ -15574,9 +15754,14 @@ class LocalStorageMonitor {
 const localStorageMonitor = new LocalStorageMonitor();
 
 function getStabilityFactor() {
-  return parameters.current.stabilityScaleDiv / parameters.current.stabilityScaleMul;
-// need to change this back when we change the code to multiply by stabilityFactor where it was dividing and visa-versa
-//  return parameters.current.stabilityScaleMul / parameters.current.stabilityScaleDiv;
+  parameters.current.stabilityFactorStr = '0.008'; // hardcoded since backend is using old value
+  return parseFloat(parameters.current.stabilityFactorStr);
+}
+
+// returns transaction fee in wei
+function getTransactionFeeWei() {
+  parameters.current.stabilityFactorStr = '0.008'; // hardcoded since backend is using old value
+  return EthNum.toWei(EthNum.div(parameters.current.transactionFeeUsdStr, parameters.current.stabilityFactorStr)) || 1n * wei;
 }
 
 

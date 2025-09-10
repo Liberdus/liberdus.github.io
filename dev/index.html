@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.09.09.13.34" />
+    <link rel="stylesheet" href="./styles.css?v=2025.09.10.11.22" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.09.09.13.34" type="module"></script>
+    <script src="./app.js?v=2025.09.10.11.22" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -258,6 +258,7 @@
         </div>
         <div class="modal-content">
           <ul class="menu-list">
+            <li class="menu-item" id="openCallsModal" data-icon="call">Calls</li>
             <li class="menu-item" id="openAccountForm" data-icon="user">Profile</li>
             <li class="menu-item" id="openToll" data-icon="dollar-sign">Toll</li>
             <li class="menu-item" id="openLockModal" data-icon="lock">Lock</li>
@@ -802,6 +803,26 @@
         <a class="last-item" href="#"> </a>
       </div>
 
+      <!-- Calls Modal -->
+      <div class="modal fixed-header" id="callsModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeCallsModal"></button>
+          <div class="modal-title">Calls</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <ul class="chat-list" id="callList">
+              <div class="empty-state">
+                <div></div>
+                <div>No Scheduled Calls</div>
+                <div>Scheduled calls will appear here</div>
+              </div>
+            </ul>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
       <!-- Chat Modal -->
       <div class="modal fixed-header" id="chatModal">
         <div class="modal-header">
@@ -887,8 +908,18 @@
             <div class="form-container call-invite-modal-container">
               <form id="callScheduleDateForm" class="form--narrow">
                 <div class="form-group">
-                  <label for="callScheduleInput">Select date and time</label>
-                  <input id="callScheduleInput" type="datetime-local" class="form-control" />
+                  <label for="callScheduleDate">Select date and time</label>
+                  <div class="call-schedule-form-row">
+                    <input id="callScheduleDate" type="date" class="form-control call-schedule-date-input" />
+                  </div>
+                  <div class="call-schedule-form-row">
+                    <select id="callScheduleHour" class="form-control call-schedule-time-select"></select>
+                    <select id="callScheduleMinute" class="form-control call-schedule-time-select"></select>
+                    <select id="callScheduleAmPm" class="form-control call-schedule-time-select">
+                      <option value="AM">AM</option>
+                      <option value="PM">PM</option>
+                    </select>
+                  </div>
                 </div>
                 <div class="form-actions">
                   <button type="submit" id="confirmCallSchedule" class="btn btn--primary btn--pill btn--full">Submit</button>
