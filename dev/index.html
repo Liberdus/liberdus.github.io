@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.09.10.15.38" />
+    <link rel="stylesheet" href="./styles.css?v=2025.09.10.18.07" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.09.10.15.38" type="module"></script>
+    <script src="./app.js?v=2025.09.10.18.07" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -808,6 +808,7 @@
         <div class="modal-header">
           <button class="back-button" id="closeCallsModal"></button>
           <div class="modal-title">Calls</div>
+          <div class="current-time" id="callsCurrentTime" aria-label="Current time"></div>
         </div>
         <div class="modal-content">
           <div class="form-container">
@@ -903,6 +904,7 @@
           <div class="modal-header">
             <button class="back-button" id="closeCallScheduleDateModal"></button>
             <div class="modal-title">Schedule Call</div>
+            <div class="current-time" id="callScheduleCurrentTime" aria-label="Current time"></div>
           </div>
           <div class="modal-content">
             <div class="form-container call-invite-modal-container">
@@ -970,6 +972,12 @@
                 <button class="voice-btn voice-btn-secondary" id="cancelVoiceMessageButton">Cancel</button>
                 <button class="voice-btn voice-btn-secondary" id="listenVoiceMessageButton">Listen</button>
                 <button class="voice-btn voice-btn-primary" id="sendVoiceMessageButton">Send</button>
+              </div>
+              
+              <!-- Listening state: Pause/Resume and Stop buttons -->
+              <div class="listening-controls" id="listeningControls" style="display: none;">
+                <button class="voice-btn voice-btn-secondary" id="pauseResumeButton">Pause</button>
+                <button class="voice-btn voice-btn-primary" id="stopListeningButton">Stop</button>
               </div>
             </div>
           </div>

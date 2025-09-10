@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'l'
+const version = 'm'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -505,7 +505,7 @@ async function encryptAllAccounts(oldPassword, newPassword) {
   const newEncKey = !newPassword ? null : await passwordToKey(newPassword+'liberdusData');
   // Get all accounts from localStorage
   const accountsObj = parse(localStorage.getItem('accounts') || 'null');
-  if (!accountsObj.netids) return;
+  if (!accountsObj?.netids) return;
 
   console.log('looping through all netids')
   for (const netid in accountsObj.netids) {
@@ -2026,13 +2026,19 @@ class SignInModal {
     
     // Clear notification address only if signing into account that owns the notification address and only remove that account from the array 
     if (reactNativeApp) {
-      logsModal.log('About to clear', myAccount.keys.address);
       const notifiedAddresses = reactNativeApp.getNotificationAddresses();
       if (notifiedAddresses.length > 0) {
-        logsModal.log('Clearing notification address for', myAccount.keys.address);
         // remove address if it's in the array
         reactNativeApp.clearNotificationAddress(myAccount.keys.address);
       }
+    }
+    
+    // Log storage information after successful sign-in
+    try {
+      const storageInfo = localStorageMonitor.getStorageInfo();
+      logsModal.log(`💾 Storage Status: ${storageInfo.usageMB}MB used, ${storageInfo.availableMB}MB available (${storageInfo.percentageUsed}% used)`);
+    } catch (error) {
+      logsModal.log('⚠️ Could not retrieve storage information');
     }
     
     await footer.switchView('chats'); // Default view
@@ -2914,9 +2920,89 @@ class HistoryModal {
 // Create singleton instance
 const historyModal = new HistoryModal();
 
+/**
+ * Reusable Clock Timer utility class
+ * Provides ticking clock functionality for modal headers
+ */
+class ClockTimer {
+  constructor(elementId) {
+    this.elementId = elementId;
+    this.timerInterval = null;
+    this.currentTimeElement = null;
+  }
+
+  /**
+   * Formats current time as HH:MM:SS for the ticking clock display
+   * @returns {string} Formatted current time string
+   */
+  formatCurrentTime() {
+    const now = getCorrectedTimestamp();
+    const localMs = now - timeSkew;
+    const date = new Date(localMs);
+    
+    return date.toLocaleTimeString(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true // Use 12-hour format with AM/PM
+    });
+  }
+
+  /**
+   * Starts the ticking clock timer
+   * @returns {void}
+   */
+  start() {
+    // Clear any existing timer
+    this.stop();
+    
+    // Get the current time element
+    this.currentTimeElement = document.getElementById(this.elementId);
+    if (!this.currentTimeElement) {
+      console.warn(`ClockTimer: Element with id '${this.elementId}' not found`);
+      return;
+    }
+    
+    // Update immediately
+    this.update();
+    
+    // Set up interval to update every second
+    this.timerInterval = setInterval(() => {
+      this.update();
+    }, 1000);
+  }
+
+  /**
+   * Stops the ticking clock timer
+   * @returns {void}
+   */
+  stop() {
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+      this.timerInterval = null;
+    }
+  }
+
+  /**
+   * Updates the clock display with current time
+   * @returns {void}
+   */
+  update() {
+    if (!this.currentTimeElement) return;
+    
+    try {
+      const currentTime = this.formatCurrentTime();
+      this.currentTimeElement.textContent = currentTime;
+    } catch (error) {
+      console.error(`ClockTimer: Error updating clock for '${this.elementId}':`, error);
+    }
+  }
+}
+
 class CallsModal {
   constructor() {
     this.calls = [];
+    this.clockTimer = new ClockTimer('callsCurrentTime');
   }
 
   load() {
@@ -2947,6 +3033,7 @@ class CallsModal {
     this.refreshCalls();
     this.render();
     this.modal.classList.add('active');
+    this.clockTimer.start();
   }
 
   /**
@@ -2954,6 +3041,7 @@ class CallsModal {
    * @returns {void}
    */
   close() {
+    this.clockTimer.stop();
     this.modal.classList.remove('active');
   }
 
@@ -4962,7 +5050,7 @@ class RemoveAccountsModal {
       if (!storageKey) continue;
       
       // Use regex to extract username and netid from storage key
-      const match = storageKey.match(/(.+)_(.+)$/);
+      const match = storageKey.match(/^([^_]+)_([^_]+)$/);
       if (!match) continue;
       
       const [, username, netid] = match;
@@ -6672,9 +6760,9 @@ class ValidatorStakingModal {
         // For now, we'll proceed, but nominee/user stake will be unavailable.
       }
 
-      const [userAccountData, networkAccountData] = await Promise.all([
+      const [userAccountData] = await Promise.all([
         userAddress ? queryNetwork(`/account/${longAddress(userAddress)}`) : Promise.resolve(null), // Fetch User Data if available
-        queryNetwork('/account/0000000000000000000000000000000000000000000000000000000000000000'), // Fetch Network Data
+        getNetworkParams(), // Refresh Network params
         walletScreen.updateWalletBalances(),
       ]);
 
@@ -6682,7 +6770,7 @@ class ValidatorStakingModal {
       nominee = userAccountData?.account?.operatorAccountInfo?.nominee; // string
       const userStakedBaseUnits = userAccountData?.account?.operatorAccountInfo?.stake; // BigInt object
 
-      const stakeRequiredUsd = networkAccountData?.account?.current?.stakeRequiredUsd; // BigInt object
+      const stakeRequiredUsd = EthNum.toWei(parameters.current?.stakeRequiredUsdStr); // BigInt object
 
       const marketPrice = await getMarketPrice(); // number or null
       const stabilityFactor = getStabilityFactor(); // number
@@ -6791,8 +6879,8 @@ class ValidatorStakingModal {
           this.earnMessageElement.style.display = 'none';
         }
 
-        const nodeRewardAmountUsd = networkAccountData.account.current.nodeRewardAmountUsd;
-        const nodeRewardInterval = networkAccountData?.account?.current?.nodeRewardInterval; 
+        const nodeRewardAmountUsd = EthNum.toWei(parameters.current.nodeRewardAmountUsdStr);
+        const nodeRewardInterval = parameters.current.nodeRewardInterval;
 
         // Calculate and display estimated rewards based on node's start time
         try {
@@ -7333,7 +7421,7 @@ class StakeValidatorModal {
     }
 
     await getNetworkParams();
-    const txFeeInLIB = parameters.current.transactionFee || 1n * wei;
+    const txFeeInLIB = getTransactionFeeWei();
     
     const balanceInLIB = big2str(BigInt(libAsset.balance), 18).slice(0, -12);
     const feeInLIB = big2str(txFeeInLIB, 18).slice(0, -16);
@@ -10683,6 +10771,7 @@ class CallScheduleDateModal {
     this.closeBtn = null;
     this.onDone = null; // function(timestamp|null)
     this.DEFAULT_OFFSET_MINUTES = 0;
+    this.clockTimer = new ClockTimer('callScheduleCurrentTime');
     this._onSubmit = this._onSubmit.bind(this);
     this._onSubmitBtn = this._onSubmitBtn.bind(this);
     this._onCancel = this._onCancel.bind(this);
@@ -10745,6 +10834,7 @@ class CallScheduleDateModal {
       this.dateInput.value = this._formatDateInput(defaultDate);
     }
     this.modal?.classList.add('active');
+    this.clockTimer.start();
   }
 
   _onSubmit(e) {
@@ -10830,6 +10920,7 @@ class CallScheduleDateModal {
   }
 
   _closeWith(value) {
+    this.clockTimer.stop();
     if (this.modal) this.modal.classList.remove('active');
     const cb = this.onDone;
     this.onDone = null;
@@ -10983,6 +11074,8 @@ class VoiceRecordingModal {
     this.recordingStopTime = null;
     this.actualDuration = null;
     this.recordingInterval = null;
+    this.currentAudio = null;
+    this.playbackStartTime = null;
   }
 
   load() {
@@ -10994,11 +11087,14 @@ class VoiceRecordingModal {
     this.cancelVoiceMessageButton = document.getElementById('cancelVoiceMessageButton');
     this.listenVoiceMessageButton = document.getElementById('listenVoiceMessageButton');
     this.sendVoiceMessageButton = document.getElementById('sendVoiceMessageButton');
+    this.pauseResumeButton = document.getElementById('pauseResumeButton');
+    this.stopListeningButton = document.getElementById('stopListeningButton');
     this.recordingIndicator = document.getElementById('recordingIndicator');
     this.recordingTimer = document.getElementById('recordingTimer');
     this.initialControls = document.getElementById('initialControls');
     this.recordingControls = document.getElementById('recordingControls');
     this.recordedControls = document.getElementById('recordedControls');
+    this.listeningControls = document.getElementById('listeningControls');
 
     this.startRecordingButton.addEventListener('click', () => {
       this.startVoiceRecording();
@@ -11015,15 +11111,30 @@ class VoiceRecordingModal {
     this.listenVoiceMessageButton.addEventListener('click', () => {
       this.listenVoiceMessage();
     });
+    this.pauseResumeButton.addEventListener('click', () => {
+      this.togglePauseResume();
+    });
+    this.stopListeningButton.addEventListener('click', () => {
+      this.stopListening();
+    });
     this.sendVoiceMessageButton.addEventListener('click', () => {
       this.sendVoiceMessage();
     });
-    // Close voice recording modal when clicking outside
+    // Close voice recording modal when clicking outside (only in initial state)
     this.modal.addEventListener('click', (e) => {
-      if (e.target === this.modal) {
+      if (e.target === this.modal && this.canCloseModal()) {
         this.close();
       }
     });
+  }
+
+  /**
+   * Check if the modal can be safely closed
+   * Only allow closing when in initial state
+   * @returns {boolean}
+   */
+  canCloseModal() {
+    return this.initialControls.style.display !== 'none';
   }
 
   /**
@@ -11053,6 +11164,7 @@ class VoiceRecordingModal {
     this.initialControls.style.display = 'flex';
     this.recordingControls.style.display = 'none';
     this.recordedControls.style.display = 'none';
+    this.listeningControls.style.display = 'none';
     this.recordingTimer.textContent = '00:00';
     this.recordingIndicator.classList.remove('recording');
   }
@@ -11146,11 +11258,7 @@ class VoiceRecordingModal {
     this.recordingInterval = setInterval(() => {
       const elapsed = Date.now() - this.recordingStartTime;
       const seconds = Math.floor(elapsed / 1000);
-      const minutes = Math.floor(seconds / 60);
-      const remainingSeconds = seconds % 60;
-      
-      this.recordingTimer.textContent = 
-        `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+      this.recordingTimer.textContent = this.formatDuration(seconds);
       
       // Stop recording after 5 minutes
       if (elapsed >= 5 * 60 * 1000) {
@@ -11209,24 +11317,108 @@ class VoiceRecordingModal {
    */
   listenVoiceMessage() {
     if (this.recordedBlob) {
+      
+      // Show listening controls and hide recorded controls
+      this.recordedControls.style.display = 'none';
+      this.listeningControls.style.display = 'flex';
+      
+      // Set initial button text and enable buttons
+      this.pauseResumeButton.textContent = 'Pause';
+      this.pauseResumeButton.disabled = false;
+      this.stopListeningButton.disabled = false;
+      
+      // Start playback timer
+      this.playbackStartTime = Date.now();
+      this.recordingTimer.textContent = '00:00'; // Reset to 0:00 when starting
+      this.startPlaybackTimer();
+      
       const audioUrl = URL.createObjectURL(this.recordedBlob);
       const audio = new Audio(audioUrl);
+      this.currentAudio = audio;
       
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
+        // Disable buttons and show completion message briefly
+        this.pauseResumeButton.disabled = true;
+        this.stopListeningButton.disabled = true;
+        this.pauseResumeButton.textContent = 'Done';
+        
+        // Add a small delay to prevent accidental button clicks
+        setTimeout(() => {
+          this.stopListening();
+        }, 1000);
       };
       
       audio.onerror = (error) => {
         console.error('Error playing voice message:', error);
         showToast('Error playing voice message', 3000, 'error');
         URL.revokeObjectURL(audioUrl);
+        this.stopListening();
       };
       
       audio.play().catch(error => {
         console.error('Error playing voice message:', error);
         showToast('Error playing voice message', 3000, 'error');
+        this.stopListening();
       });
     }
+  }
+
+  /**
+   * Start the playback timer (reuses recordingInterval)
+   * @returns {void}
+   */
+  startPlaybackTimer() {
+    this.recordingInterval = setInterval(() => {
+      const elapsed = Date.now() - this.playbackStartTime;
+      const seconds = Math.floor(elapsed / 1000);
+      
+      this.recordingTimer.textContent = this.formatDuration(seconds);
+    }, 1000);
+  }
+
+  /**
+   * Toggle pause/resume of voice message playback
+   * @returns {void}
+   */
+  togglePauseResume() {
+    if (!this.currentAudio) return;
+    
+    if (this.currentAudio.paused) {
+      // Resume playback
+      this.currentAudio.play();
+      this.pauseResumeButton.textContent = 'Pause';
+      // Resume timer
+      this.playbackStartTime = Date.now() - (this.currentAudio.currentTime * 1000);
+      this.startPlaybackTimer();
+    } else {
+      // Pause playback
+      this.currentAudio.pause();
+      this.pauseResumeButton.textContent = 'Resume';
+      // Stop timer
+      this.stopRecordingTimer();
+    }
+  }
+
+  /**
+   * Stop listening to voice message
+   * @returns {void}
+   */
+  stopListening() {
+    if (this.currentAudio) {
+      this.currentAudio.pause();
+      this.currentAudio = null;
+    }
+    
+    // Stop playback timer first (reuses recordingInterval)
+    this.stopRecordingTimer();
+    
+    // Reset timer to show duration immediately
+    this.recordingTimer.textContent = this.formatDuration(this.actualDuration || 0);
+    
+    // Hide listening controls and show recorded controls
+    this.listeningControls.style.display = 'none';
+    this.recordedControls.style.display = 'flex';
   }
 
   /**
@@ -11313,6 +11505,17 @@ class VoiceRecordingModal {
   }
 
   /**
+   * Format duration from seconds to mm:ss
+   * @param {number} seconds - Duration in seconds
+   * @returns {string} Formatted duration
+   */
+  formatDuration(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  /**
    * Get recording duration in seconds
    * @returns {number} Duration in seconds
    */
@@ -11333,6 +11536,12 @@ class VoiceRecordingModal {
       if (this.mediaRecorder.stream) {
         this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
       }
+    }
+    
+    // Stop any current audio playback
+    if (this.currentAudio) {
+      this.currentAudio.pause();
+      this.currentAudio = null;
     }
     
     // Clear timers
@@ -14011,14 +14220,16 @@ console.log('    result is',result)
       // Skip the 'accounts' key itself
       if (key === 'accounts') return false;
       
-      const match = key.match(/(.+)_(.+)$/);
+      // Only match keys with exactly one underscore
+      const match = key.match(/^[^_]+_[^_]+$/);
       if (!match) return false;
       
       return true;
     });
     
     for (const key of accountFileKeys) {
-      const match = key.match(/(.+)_(.+)$/);
+      // Extract username and netid ensuring only one underscore is present
+      const match = key.match(/^([^_]+)_([^_]+)$/);
       if (!match) continue;
       const [, username, netid] = match;
       
@@ -14124,7 +14335,7 @@ class LockModal {
     this.headerCloseButton.addEventListener('click', () => this.close());
     this.lockForm.addEventListener('submit', (event) => this.handleSubmit(event));
     // dynamic button state with debounce
-    this.debouncedUpdateButtonState = debounce(() => this.updateButtonState(), 250);
+    this.debouncedUpdateButtonState = debounce(() => this.updateButtonState(), 100);
     this.newPasswordInput.addEventListener('input', this.debouncedUpdateButtonState);
     this.confirmNewPasswordInput.addEventListener('input', this.debouncedUpdateButtonState);
     this.oldPasswordInput.addEventListener('input', this.debouncedUpdateButtonState);
@@ -14204,20 +14415,28 @@ class LockModal {
   async handleSubmit(event) {
     // disable the button
     this.lockButton.disabled = true;
-
-    // loading toast
-    let waitingToastId = showToast('Updating password...', 0, 'loading');
-    
     event.preventDefault();
     
     const newPassword = this.newPasswordInput.value;
     const confirmNewPassword = this.confirmNewPasswordInput.value;
     const oldPassword = this.oldPasswordInput.value;
 
+    // Check if new passwords match first (for non-remove mode)
+    if (newPassword !== confirmNewPassword) {
+      this.lockButton.disabled = true;
+      // Keep button disabled - passwords don't match
+      showToast('Passwords do not match. Please try again.', 0, 'error');
+      return;
+    }
+
+    // loading toast
+    let waitingToastId = showToast('Updating password...', 0, 'loading');
+
     // if old password is visible, check if it is correct
     if (this.oldPasswordInput.style.display !== 'none') {
       // check if old password is empty
       if (oldPassword.length === 0) {
+        if (waitingToastId) hideToast(waitingToastId);
         showToast('Please enter your old password.', 0, 'error');
         return;
       }
@@ -14253,13 +14472,9 @@ class LockModal {
         this.close();
       } catch (error) {
         console.error('Decryption failed:', error);
+        if (waitingToastId) hideToast(waitingToastId);
         showToast('Failed to decrypt accounts. Please try again.', 0, 'error');
       }
-      return;
-    }
-
-    if (newPassword !== confirmNewPassword) {
-      showToast('Passwords do not match. Please try again.', 0, 'error');
       return;
     }
     
@@ -14491,9 +14706,7 @@ class LaunchModal {
       const urlObj = new URL(url);
       const path = urlObj.pathname === '' ? '/' : (urlObj.pathname.endsWith('/') ? urlObj.pathname : urlObj.pathname + '/');
       networkJsUrl = urlObj.origin + path + 'network.js';
-      logsModal.log('Launch URL validation - URL parsed successfully', `url=${networkJsUrl}`);
     } catch (urlError) {
-      logsModal.log('Launch URL validation - URL parsing failed', `url=${url}`, `error=${urlError.message}`);
       showToast(`Invalid URL format: ${urlError.message}`, 0, 'error');
       this.launchButton.disabled = false;
       this.launchButton.textContent = 'Launch';
@@ -14503,7 +14716,6 @@ class LaunchModal {
     // Step 2: Fetch network.js
     let result;
     try {
-      logsModal.log('Launch URL validation - starting fetch', `url=${networkJsUrl}`);
 
       result = await fetch(networkJsUrl,{
         cache: 'reload',
@@ -14513,14 +14725,7 @@ class LaunchModal {
         throw new Error(`HTTP ${result.status}: ${result.statusText}`);
       }
       
-      logsModal.log('Launch URL validation - fetch successful', `url=${networkJsUrl}`, `status=${result.status}`);
     } catch (fetchError) {
-      logsModal.log('Full fetch error:', fetchError);
-      logsModal.log('Error name:', fetchError.name);
-      logsModal.log('Error message:', fetchError.message);
-      logsModal.log('Error stack:', fetchError.stack);
-      logsModal.log('fetchError full:', fetchError);
-      logsModal.log('Launch URL validation - fetch failed', `url=${networkJsUrl}`, `error=${fetchError.message}`, `errorName=${fetchError.name}`);
       showToast(`Network error: ${fetchError.message}`, 0, 'error');
       this.launchButton.disabled = false;
       this.launchButton.textContent = 'Launch';
@@ -14531,13 +14736,11 @@ class LaunchModal {
     let networkJson;
     try {
       networkJson = await result.text();
-      logsModal.log('Launch URL validation - response text parsed', `url=${networkJsUrl}`, `length=${networkJson.length}`);
       
       if (!networkJson || networkJson.length === 0) {
         throw new Error('Empty response received');
       }
     } catch (parseError) {
-      logsModal.log('Launch URL validation - response parsing failed', `url=${networkJsUrl}`, `error=${parseError.message}`);
       showToast(`Response parsing error: ${parseError.message}`, 0, 'error');
       this.launchButton.disabled = false;
       this.launchButton.textContent = 'Launch';
@@ -14553,9 +14756,7 @@ class LaunchModal {
         throw new Error(`Missing required properties: ${missingProps.join(', ')}`);
       }
       
-      logsModal.log('Launch URL validation - properties validated', `url=${networkJsUrl}`, `allPropsFound=true`);
     } catch (validationError) {
-      logsModal.log('Launch URL validation - property validation failed', `url=${networkJsUrl}`, `error=${validationError.message}`);
       showToast(`Invalid network configuration: ${validationError.message}`, 0, 'error');
       this.launchButton.disabled = false;
       this.launchButton.textContent = 'Launch';
@@ -14564,11 +14765,9 @@ class LaunchModal {
 
     // Step 5: Success - launch the app
     try {
-      logsModal.log('Launch URL validation - success, launching app', `url=${networkJsUrl}`);
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'launch', url }));
       this.close();
     } catch (launchError) {
-      logsModal.log('Launch URL validation - launch failed', `url=${networkJsUrl}`, `error=${launchError.message}`);
       showToast(`Launch error: ${launchError.message}`, 0, 'error');
     } finally {
       // Reset button state (this should always happen)
@@ -14608,7 +14807,6 @@ class ReactNativeApp {
       window.addEventListener('message', (event) => {
         try {
           const data = JSON.parse(event.data);
-          logsModal.log('📱 Received message type from React Native:', data.type);
 
           if (data.type === 'background') {
             this.handleNativeAppSubscribe();
@@ -14631,33 +14829,26 @@ class ReactNativeApp {
           }
 
           if (data.type === 'APP_PARAMS') {
-            logsModal.log('📱 Received app parameters:', data.data);
             // Handle app version
             if (data?.data?.appVersion) {
-              logsModal.log('📱 App version:', data.data.appVersion);
               this.appVersion = data.data.appVersion || `N/A`
               // Update the welcome screen to display the app version
               welcomeScreen.updateAppVersionDisplay(this.appVersion); 
-              
             }
             // Handle device tokens
             if (data.data.deviceToken) {
-              logsModal.log('📱 Device token received');
               // Store device token for push notifications
               this.deviceToken = data.data.deviceToken;
             }
             if (data.data.expoPushToken) {
-              logsModal.log('📱 Expo push token received');
               // Store expo push token for push notifications
               this.expoPushToken = data.data.expoPushToken;
             }
             if (data.data.fcmToken) {
-              logsModal.log('📱 FCM push token received');
               // Store fcm push token for call notifications
               this.fcmToken = data.data.fcmToken;
             }
             if (data.data.voipToken) {
-              logsModal.log('📱 VOIP push token received');
               // Store voip push token for call notifications
               this.voipToken = data.data.voipToken;
             }
@@ -14665,21 +14856,16 @@ class ReactNativeApp {
           }
 
           if (data.type === 'NEW_NOTIFICATION') {
-            logsModal.log('🔔 New notification received!');
-            // fetch all notifications
             this.fetchAllPanelNotifications();
           }
 
           if (data.type === 'NOTIFICATION_TAPPED') {
-            logsModal.log('🔔 Notification tapped, opening chat with:', data.to);
-
             // normalize the address
             const normalizedToAddress = normalizeAddress(data.to);
             
             // Check if user is signed in
             if (!myData || !myAccount) {
               // User is not signed in - save the notification address and open sign-in modal
-              logsModal.log('🔔 User not signed in, saving notification address for priority');
               this.saveNotificationAddress(normalizedToAddress);
               // If the user clicks on a notification and the app is already on the SignIn modal, 
               // update the display to reflect the new notification
@@ -14691,15 +14877,8 @@ class ReactNativeApp {
             
             // User is signed in - check if it's the right account
             const isCurrentAccount = this.isCurrentAccount(normalizedToAddress);
-            /* showToast('isCurrentAccount: ' + isCurrentAccount, 10000, 'success');
-            showToast('data.to: ' + normalizedToAddress, 10000, 'success');
-            showToast('myData.account.keys.address: ' + myData.account.keys.address, 10000, 'success'); */
             if (isCurrentAccount) {
-              // We're signed in to the account that received the notification
-              logsModal.log('🔔 You are signed in to the account that received the message');
-              // TODO: Open chat modal when z-index issue is resolved
-              // chatModal.open(data.from);
-              /* showToast('You are signed in to the account that received the message', 5000, 'success'); */
+              console.log('🔔 You are signed in to the account that received the message');
             } else {
               // We're signed in to a different account, ask user what to do
               const shouldSignOut = confirm('You received a message for a different account. Would you like to sign out to switch to that account?');
@@ -14708,15 +14887,12 @@ class ReactNativeApp {
                 // Sign out and save the notification address for priority
                 menuModal.handleSignOut();
               } else {
-                // User chose to stay signed in, just save the address for next time
-                logsModal.log('User chose to stay signed in - notified account will appear first next time');
+                console.log('User chose to stay signed in - notified account will appear first next time');
               }
             }
           }
 
           if (data.type === 'ALL_NOTIFICATIONS_IN_PANEL') {
-            logsModal.log('📋 Received all panel notifications:', JSON.stringify(data.notifications));
-            
             if (data.notifications && Array.isArray(data.notifications) && data.notifications.length > 0) {
               let processedCount = 0;
               data.notifications.forEach((notification, index) => {
@@ -14730,21 +14906,18 @@ class ReactNativeApp {
                       const normalizedToAddress = normalizeAddress(addressMatch[1]);
                       this.saveNotificationAddress(normalizedToAddress);
                       processedCount++;
-                      logsModal.log(`📋 Extracted address from notification ${index}: ${normalizedToAddress}`);
                     }
                   }
                 } catch (error) {
                   console.warn(`📋 Error processing notification ${index}:`, error);
                 }
               });
-              logsModal.log(`📋 Processed ${processedCount}/${data.notifications.length} notifications`);
-              
               // If the sign in modal is open, update the display to show new notifications
               if (signInModal.isActive()) {
                 signInModal.updateNotificationDisplay();
               }
             } else {
-              logsModal.log('📋 No valid notifications received');
+              console.log('📋 No valid notifications received');
             }
           }
         } catch (error) {
@@ -14785,7 +14958,6 @@ class ReactNativeApp {
 
   // fetch all panel notifications
   fetchAllPanelNotifications() {
-    logsModal.log('Sending message `GetAllPanelNotifications` to React Native');
     this.postMessage({
       type: 'GetAllPanelNotifications',
     });

@@ -1128,6 +1128,22 @@ button:disabled {
   max-width: 100%; /* Allow full width when possible */
 }
 
+/* Current time display in modal headers */
+.current-time {
+  position: absolute;
+  right: 16px;
+  font-family: var(--font-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--secondary-text-color);
+  white-space: nowrap;
+  user-select: none;
+  /* Ensure it doesn't overlap with back button on smaller screens */
+  max-width: calc(100% - 80px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .menu-list {
   list-style: none;
   padding: 0;
@@ -4826,7 +4842,8 @@ small {
   font-family: 'Courier New', monospace;
 }
 
-.voice-recording-controls {
+.voice-recording-controls,
+.listening-controls {
   display: flex;
   justify-content: center;
   gap: 1rem;
@@ -4841,6 +4858,10 @@ small {
   font-weight: 600;
   transition: all 0.2s ease;
   min-width: 100px;
+}
+
+#pauseResumeButton {
+  width: 120px;
 }
 
 .voice-btn-primary {
