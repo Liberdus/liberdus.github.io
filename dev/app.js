@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -3207,8 +3207,20 @@ async function ensureContactKeys(address) {
     const netPub = accountInfo?.account?.publicKey;
     const netPq = accountInfo?.account?.pqPublicKey;
     if (netPub) {
-      contact.public = netPub;
-      hasPub = true;
+      try {
+        const derivedHex = bin2hex(generateAddress(hex2bin(netPub)));
+        const expected = normalizeAddress(address);
+        if (derivedHex === expected) {
+          contact.public = netPub;
+          hasPub = true;
+        } else {
+          console.error('ensureContactKeys: public key/address mismatch', { address: expected, derivedHex });
+          return false;
+        }
+      } catch (verr) {
+        console.error('ensureContactKeys: failed to verify public key', verr);
+        return false;
+      }
     }
     if (netPq) {
       contact.pqPublic = netPq;
@@ -3216,7 +3228,7 @@ async function ensureContactKeys(address) {
     }
     return hasPub && hasPq;
   } catch (e) {
-    console.log('ensureContactKeys error:', e);
+    console.error('ensureContactKeys error:', e);
     return false;
   }
 }
@@ -3255,7 +3267,7 @@ async function processChats(chats, keys) {
 
         newTimestamp = tx.timestamp > newTimestamp ? tx.timestamp : newTimestamp;
         mine = tx.from == longAddress(keys.address) ? true : false;
-if (mine) console.warn('txid in processChats is', txidHex)
+        if (mine) console.warn('txid in processChats is', txidHex)
         if (tx.type == 'message') {
           const payload = tx.xmessage; // changed to use .message
           if (mine){
@@ -6373,6 +6385,11 @@ class LogsModal {
     const s = args.join(' ');
     try {
       this.data += s + '\n\n';
+      // if length of data is more than 100k; remove some of the old lines from data to keep only the most recent 100k of lines
+      if (this.data.length > 100000) {
+        this.data = this.data.slice(this.data.length - 100000);
+        this.data += s + '\n\n';
+      }
       localStorage.setItem('logs', this.data);
     } catch (e) {
       console.error('Error saving logs to localStorage:', e);
@@ -10865,6 +10882,16 @@ class FailedMessageMenu {
     event.stopPropagation();
     this.currentMessageEl = messageEl;
 
+    // Check if this is a video call message and hide retry option
+    const isVideoCall = !!messageEl.querySelector('.call-message');
+    const retryOption = this.menu.querySelector('[data-action="retry"]');
+    
+    if (isVideoCall) {
+      retryOption.style.display = 'none';
+    } else {
+      retryOption.style.display = 'flex';
+    }
+
     // Use shared positioning utility
     chatModal.positionContextMenu(this.menu, messageEl);
     this.menu.style.display = 'block';
@@ -10953,6 +10980,8 @@ class VoiceRecordingModal {
     this.mediaRecorder = null;
     this.recordedBlob = null;
     this.recordingStartTime = null;
+    this.recordingStopTime = null;
+    this.actualDuration = null;
     this.recordingInterval = null;
   }
 
@@ -11099,6 +11128,11 @@ class VoiceRecordingModal {
   stopVoiceRecording() {
     if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
       this.mediaRecorder.stop();
+      this.recordingStopTime = Date.now();
+      // Calculate actual recording duration (excluding processing time)
+      if (this.recordingStartTime) {
+        this.actualDuration = Math.floor((this.recordingStopTime - this.recordingStartTime) / 1000);
+      }
       this.stopRecordingTimer();
       this.recordingIndicator.classList.remove('recording');
     }
@@ -11283,8 +11317,9 @@ class VoiceRecordingModal {
    * @returns {number} Duration in seconds
    */
   getRecordingDuration() {
-    if (!this.recordingStartTime) return 0;
-    return Math.floor((Date.now() - this.recordingStartTime) / 1000);
+    // Use the actual duration calculated when recording stopped
+    // This excludes processing time between stop and send
+    return this.actualDuration || 0;
   }
 
   /**
@@ -11307,6 +11342,8 @@ class VoiceRecordingModal {
     this.mediaRecorder = null;
     this.recordedBlob = null;
     this.recordingStartTime = null;
+    this.recordingStopTime = null;
+    this.actualDuration = null;
   }
 }
 
