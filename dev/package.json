@@ -1,0 +1,14 @@
+{
+  "name": "web-client-v2",
+  "version": "1.0.0",
+  "description": "A transparent, end-to-end encrypted web-based messaging application with a decentralized backend that prioritizes user privacy and security.",
+  "main": "app.js",
+  "keywords": [
+    "messaging",
+    "encryption",
+    "privacy",
+    "decentralized"
+  ],
+  "author": "",
+  "license": "ISC"
+}

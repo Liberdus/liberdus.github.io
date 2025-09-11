@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.09.10.18.07" />
+    <link rel="stylesheet" href="./styles.css?v=2025.09.11.15.09" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.09.10.18.07" type="module"></script>
+    <script src="./app.js?v=2025.09.11.15.09" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -279,13 +279,13 @@
         </div>
         <div class="modal-content">
           <ul class="menu-list">
+            <li class="menu-item" id="welcomeOpenUpdate" data-icon="smartphone" style="display: none;">Update</li>
             <li class="menu-item" id="welcomeOpenBackup" data-icon="download">Backup</li>
             <li class="menu-item" id="welcomeOpenRestore" data-icon="rotate-ccw">Restore</li>
+            <li class="menu-item" id="welcomeOpenLockModal" data-icon="lock">Lock</li>
             <li class="menu-item" id="welcomeOpenRemove" data-icon="trash-2">Remove</li>
             <li class="menu-item" id="welcomeOpenMigrate" data-icon="shuffle">Migrate</li>
             <li class="menu-item" id="welcomeOpenLaunch" data-icon="launch" style="display: none;">Launch</li>
-            <li class="menu-item" id="welcomeOpenUpdate" data-icon="smartphone" style="display: none;">Update</li>
-            <li class="menu-item" id="welcomeOpenLockModal" data-icon="lock">Lock</li>
           </ul>
         </div>
         <a class="last-item" href="#"> </a>
@@ -1053,6 +1053,22 @@
         </div>
         <a class="last-item" href="#"> </a>
       </div>
+
+      <!-- Template for toll info message -->
+      <template id="tollInfoMessageTemplate">
+        <div class="toll-info-message">
+          <h4>What is a Toll?</h4>
+          <p>A toll is a small amount of LIB that recipients require with your message to prevent spam.</p>
+          
+          <h5>How it works:</h5>
+          <ul>
+            <li>You must send the toll amount to send a message</li>
+            <li>The toll amount is typically collected when the recipient responds to your message</li>
+            <li>Tolls can change based on friend status</li>
+            <li>Higher tolls = stronger spam protection</li>
+          </ul>
+        </div>
+      </template>
 
       <!-- Failed Message Context Menu -->
       <div class="failed-message-context-menu" id="failedMessageContextMenu" style="display: none;">

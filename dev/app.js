@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'm'
+const version = 'n'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -2360,6 +2360,7 @@ class FriendModal {
   constructor() {
     this.currentContactAddress = null;
     this.needsContactListUpdate = false; // track if we need to update the contact list
+    this.lastChangeTimeStamp = 0; // track the last time the friend status was changed
   }
 
   load() {
@@ -2443,21 +2444,33 @@ class FriendModal {
       return;
     }
 
-    // send transaction to update chat toll
-    const res = await this.postUpdateTollRequired(this.currentContactAddress, Number(selectedStatus));
-    if (res?.result?.success === false) {
-      console.log(
-        `[handleFriendSubmit] update_toll_required transaction failed: ${res?.result?.reason}. Did not update contact status.`
-      );
-      showToast('Failed to update friend status. Please try again.', 0, 'error');
-      return;
+    if (contact.friend in [2,3] && Number(selectedStatus) in [2, 3]){
+      console.log('no need to post a change to the network since toll required would be 0 for both cases')
     }
-
+    else{
+      try {
+        // send transaction to update chat toll
+        const res = await this.postUpdateTollRequired(this.currentContactAddress, Number(selectedStatus));
+        if (res?.result?.success !== true) {
+          console.log(
+            `[handleFriendSubmit] update_toll_required transaction failed: ${res?.result?.reason}. Did not update contact status.`
+          );
+          showToast('Failed to update friend status. Please try again.', 0, 'error');
+          return;
+        }
+      } catch (error) {
+        console.error('Error sending transaction to update chat toll:', error);
+        showToast('Failed to update friend status. Please try again.', 0, 'error');
+        return;
+      }
+    }
     // store the old friend status
     contact.friendOld = contact.friend;
 
     // Update friend status based on selected value
     contact.friend = Number(selectedStatus);
+
+    this.lastChangeTimeStamp = Date.now();
 
     // Show appropriate toast message depending value 0,1,2,3
     showToast(
@@ -2516,9 +2529,15 @@ class FriendModal {
 
     // If there's already a pending tx (friend != friendOld) keep disabled
     if (contact.friend !== contact.friendOld) {
-      this.submitButton.disabled = true;
-      showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'error');
-      return;
+      const SIXTY_SECONDS = 60 * 1000;
+      // if the last change was more than 60 seconds ago, reset the friend status so user does not get stuck
+      if (this.lastChangeTimeStamp < (Date.now - SIXTY_SECONDS)) {
+        contact.friend = contact.friendOld
+      } else {
+        this.submitButton.disabled = true;
+        showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'error');
+        return;
+      }
     }
 
     const selectedStatus = this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value;
@@ -3476,6 +3495,15 @@ async function processChats(chats, keys) {
                       const isOriginalMine = messageToEdit.my && normalizeAddress(keys.address) === originalSender;
                       const isOriginalTheirs = !messageToEdit.my && originalSender === from;
                       if (isOriginalMine || isOriginalTheirs) {
+                        // Enforce client-side edit window with 5 min slack (20 minutes total)
+                        const originalTs = Number(messageToEdit.sent_timestamp || 0);
+                        const editTs = Number(tx.timestamp || 0);
+                        const CLIENT_EDIT_ACCEPT_MS = EDIT_WINDOW_MS + (5 * 60 * 1000);
+                        // Ignore invalid/missing timestamps, edits older than window, or edits that predate the original
+                        if ( editTs < originalTs || (editTs - originalTs) >= CLIENT_EDIT_ACCEPT_MS) {
+                          console.warn('Ignoring edit outside allowed time window', { originalTs, editTs, txid: txidToEdit });
+                          continue; // too old or invalid edit; skip processing this control message
+                        }
                         // Update chat message memo/text
                         messageToEdit.message = newText;
                         messageToEdit.edited = 1;
@@ -5049,8 +5077,8 @@ class RemoveAccountsModal {
       const storageKey = localStorage.key(i);
       if (!storageKey) continue;
       
-      // Use regex to extract username and netid from storage key
-      const match = storageKey.match(/^([^_]+)_([^_]+)$/);
+  // Use regex to extract username and netid from storage key: username_<64-hex>
+  const match = storageKey.match(/^([^_]+)_([0-9a-fA-F]{64})$/);
       if (!match) continue;
       
       const [, username, netid] = match;
@@ -7645,6 +7673,18 @@ class ChatModal {
   }
 
   /**
+   * Gets toll info message from HTML template
+   * @returns {string} The toll info message HTML
+   */
+  getTollInfoMessage() {
+    if (this.tollTemplate) {
+      return this.tollTemplate.innerHTML;
+    }
+    // Fallback message if template not found
+    return '<strong>What is a Toll?</strong><br><br>A toll is a payment in LIB that recipients can require with messages to prevent spam.';
+  }
+
+  /**
    * Cancels all ongoing file operations and creates a new abort controller
    * @returns {void}
    */
@@ -7672,6 +7712,7 @@ class ChatModal {
     this.messageInput = document.querySelector('.message-input');
     this.chatSendMoneyButton = document.getElementById('chatSendMoneyButton');
     this.messageByteCounter = document.querySelector('.message-byte-counter');
+    this.tollTemplate = document.getElementById('tollInfoMessageTemplate');
     this.messagesContainer = document.querySelector('.messages-container');
     this.addFriendButtonChat = document.getElementById('addFriendButtonChat');
     this.addAttachmentButton = document.getElementById('addAttachmentButton');
@@ -7840,7 +7881,14 @@ class ChatModal {
     if (tollContainer) {
       tollContainer.style.cursor = 'pointer';
       tollContainer.addEventListener('click', () => {
-        const message = '<strong>What is a Toll?</strong><br><br>A toll is a small amount of LIB that recipients require with your message to prevent spam.<br><br><strong>How it works:</strong><br>• You must send the toll amount to send a message<br>• The toll is typically returned when they respond<br>• Tolls can change based on friend status<br>• Higher tolls = stronger spam protection';
+        // Check if there's already a toll info toast visible and close it
+        const existingTollToast = document.querySelector('.toast.toll');
+        if (existingTollToast && existingTollToast.id) {
+          hideToast(existingTollToast.id);
+          return; // Don't show a new one immediately after closing
+        }
+        
+        const message = this.getTollInfoMessage();
         showToast(message, 0, 'toll', true);
       });
     }
@@ -8638,8 +8686,8 @@ console.warn('in send message', txid)
                             <span class="payment-direction">${directionText}</span>
                             <span class="payment-amount">${amountDisplay}</span>
                         </div>
-                        ${itemMemo ? `<div class="payment-memo">${linkifyUrls(itemMemo)}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}</div>` : ''}
-                        <div class="message-time">${timeString}</div>
+                        ${itemMemo ? `<div class="payment-memo">${linkifyUrls(itemMemo)}</div>` : ''}
+                        <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}</div>
                     </div>
                 `;
       } else {
@@ -14215,21 +14263,21 @@ console.log('    result is',result)
 
     const allKeys = Object.keys(localStorage);
     
-    // Filter keys that match the pattern username_netid
+    // Filter keys that match the pattern username_<64-hex netid>
     const accountFileKeys = allKeys.filter(key => {
       // Skip the 'accounts' key itself
       if (key === 'accounts') return false;
       
-      // Only match keys with exactly one underscore
-      const match = key.match(/^[^_]+_[^_]+$/);
+      // Only match keys with exactly one underscore and 64 hex chars after underscore
+      const match = key.match(/^[^_]+_[0-9a-fA-F]{64}$/);
       if (!match) return false;
       
       return true;
     });
     
     for (const key of accountFileKeys) {
-      // Extract username and netid ensuring only one underscore is present
-      const match = key.match(/^([^_]+)_([^_]+)$/);
+      // Extract username and 64-hex netid ensuring only one underscore is present
+      const match = key.match(/^([^_]+)_([0-9a-fA-F]{64})$/);
       if (!match) continue;
       const [, username, netid] = match;
       
