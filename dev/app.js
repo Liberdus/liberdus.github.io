@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'n'
+const version = 'o'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -3213,12 +3213,14 @@ async function queryNetwork(url) {
   if (!isOnline) {
     //TODO: show user we are not online
     console.warn('not online');
+    showToast('queryNetwork: not online', 0, 'error')
     //alert('not online')
     return null;
   }
   const selectedGateway = getGatewayForRequest();
   if (!selectedGateway) {
     console.error('No gateway available for network query');
+    showToast('queryNetwork: no gateway', 0, 'error')
     return null;
   }
 
@@ -3230,6 +3232,7 @@ async function queryNetwork(url) {
     return data;
   } catch (error) {
     console.error(`queryNetwork ERROR: ${error}`);
+    showToast(`queryNetwork: error: ${error}`, 0, 'error')
     return null;
   }
 }
@@ -3344,7 +3347,7 @@ async function ensureContactKeys(address) {
 async function processChats(chats, keys) {
   let newTimestamp = 0;
   const timestamp = myAccount.chatTimestamp || 0;
-  const messageQueryTimestamp = Math.max(0, timestamp);
+  const messageQueryTimestamp = Math.max(0, timestamp+1);
   let hasAnyTransfer = false;
 
   for (let sender in chats) {
@@ -3361,6 +3364,8 @@ async function processChats(chats, keys) {
       let added = 0;
       let hasNewTransfer = false;
       let mine = false;
+      // Count of edits (from the other party) applied while user not viewing this chat
+      let editIncrements = 0;
 
       // This check determines if we're currently chatting with the sender
       // We ONLY want to avoid notifications if we're actively viewing this exact chat
@@ -3375,6 +3380,16 @@ async function processChats(chats, keys) {
         newTimestamp = tx.timestamp > newTimestamp ? tx.timestamp : newTimestamp;
         mine = tx.from == longAddress(keys.address) ? true : false;
         if (mine) console.warn('txid in processChats is', txidHex)
+        // timestamp-skew check for incoming messages/transfers (ensures we don't use out of range sent_timestamp)
+        if (!mine && (tx.type === 'message' || tx.type === 'transfer')) {
+          const sentTs = Number(((tx.type === 'message' ? tx.xmessage : tx.xmemo) || {}).sent_timestamp || 0);
+          const txTs = Number(tx.timestamp || 0);
+          const MAX_TS_SKEW_MS = 10 * 1000;
+          if ((txTs - sentTs) < 0 || (txTs - sentTs) > MAX_TS_SKEW_MS) {
+            // ensures we don't use out of range sent_timestamp
+            payload.sent_timestamp = tx.timestamp;
+          }
+        }
         if (tx.type == 'message') {
           const payload = tx.xmessage; // changed to use .message
           if (mine){
@@ -3516,6 +3531,9 @@ async function processChats(chats, keys) {
                             myData.wallet.history[hIdx].edited = 1;
                             myData.wallet.history[hIdx].edited_timestamp = tx.timestamp;
                           }
+                        }
+                        if (!messageToEdit.my && !inActiveChatWithSender) {
+                          editIncrements += 1;
                         }
                         if (chatModal.isActive() && chatModal.address === from) {
                           chatModal.appendChatModal();
@@ -3798,6 +3816,27 @@ async function processChats(chats, keys) {
         }
         // Add bubble to the wallet history button
         walletScreen.openHistoryModalButton.classList.add('has-notification');
+      }
+
+      // Handle edit-only (or edit + message) unread increments.
+      if (editIncrements > 0) {
+        // If the chat is not active, increment unread for edits.
+        if (!inActiveChatWithSender) {
+          contact.unread = (contact.unread || 0) + editIncrements;
+          // Add notification bubble if chats screen not active
+          if (!chatsScreen.isActive()) {
+            footer.chatButton.classList.add('has-notification');
+          }
+          // Refresh list if user is currently viewing chat list so unread counts update
+          if (chatsScreen.isActive()) {
+            chatsScreen.updateChatList();
+          }
+        } else {
+          // If user is in the chat while edits arrive, just re-render to show edited markers
+          if (chatModal.isActive() && chatModal.address === from) {
+            chatModal.appendChatModal();
+          }
+        }
       }
     }
   }
@@ -4402,8 +4441,18 @@ function createDisplayInfo(contact) {
 }
 
 // Add this function before the ContactInfoModal class
-function showToast(message, duration = 2000, type = 'default', isHTML = false) {
+function showToast(message, duration = 2000, type = 'default', isHTML = false, deduplicateKey = null) {
   const toastContainer = document.getElementById('toastContainer');
+  
+  // Check for duplicate toasts if deduplicateKey is provided
+  if (deduplicateKey) {
+    const existingToast = document.querySelector(`[data-deduplicate-key="${deduplicateKey}"]`);
+    if (existingToast) {
+      // Toast with this key already exists, don't create another one
+      return existingToast.id;
+    }
+  }
+  
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
   
@@ -4416,6 +4465,11 @@ function showToast(message, duration = 2000, type = 'default', isHTML = false) {
   // Generate a unique ID for this toast
   const toastId = 'toast-' + getCorrectedTimestamp() + '-' + Math.floor(Math.random() * 1000);
   toast.id = toastId;
+  
+  // Add deduplication key if provided
+  if (deduplicateKey) {
+    toast.setAttribute('data-deduplicate-key', deduplicateKey);
+  }
 
   toastContainer.appendChild(toast);
 
@@ -7982,6 +8036,7 @@ class ChatModal {
 
     // Setup state for appendChatModal and perform initial render
     this.address = address;
+
     this.appendChatModal(false); // Call appendChatModal to render messages, ensure highlight=false
   }
 
@@ -8030,6 +8085,12 @@ class ChatModal {
       contactsScreen.updateContactsList();
       footer.openNewChatButton();
     }
+
+    // Record the time user last viewed this chat for edit notification purposes
+    if (this.address && myData.contacts[this.address]) {
+      myData.contacts[this.address].lastChatOpenTs = getCorrectedTimestamp();
+    }
+
     this.address = null;
   }
 
@@ -8636,6 +8697,8 @@ console.warn('in send message', txid)
       return;
     }
     const messages = contact.messages; // Already sorted descending
+    // Last time user previously had this chat open (used to mark newly edited messages)
+    const lastReadTs = contact.lastChatOpenTs || 0;
 
     if (!this.modal) return;
     if (!this.messagesList) return;
@@ -8680,16 +8743,17 @@ console.warn('in send message', txid)
         // --- Render Payment Transaction ---
         const directionText = item.my ? '-' : '+';
         const messageClass = item.my ? 'sent' : 'received';
-        messageHTML = `
-                    <div class="message ${messageClass} payment-info" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
-                        <div class="payment-header">
-                            <span class="payment-direction">${directionText}</span>
-                            <span class="payment-amount">${amountDisplay}</span>
-                        </div>
-                        ${itemMemo ? `<div class="payment-memo">${linkifyUrls(itemMemo)}</div>` : ''}
-                        <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}</div>
-                    </div>
-                `;
+    const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !item.deleted;
+    messageHTML = `
+          <div class="message ${messageClass} payment-info" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
+            <div class="payment-header">
+              <span class="payment-direction">${directionText}</span>
+              <span class="payment-amount">${amountDisplay}</span>
+            </div>
+            ${itemMemo ? `<div class="payment-memo">${linkifyUrls(itemMemo)}</div>` : ''}
+            <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}${showEditedDot ? ' <span class="edited-new-dot" title="Edited since last read"></span>' : ''}</div>
+          </div>
+        `;
       } else {
         // --- Render Chat Message ---
         const messageClass = item.my ? 'sent' : 'received'; // Use item.my directly
@@ -8780,13 +8844,14 @@ console.warn('in send message', txid)
           }
           
           const callTimeAttribute = item.type === 'call' && item.callTime ? `data-call-time="${item.callTime}"` : '';
-          messageHTML = `
-                      <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute} ${callTimeAttribute}>
-                          ${attachmentsHTML}
-                          ${messageTextHTML}
-                          <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}</div>
-                      </div>
-                  `;
+      const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !item.deleted;
+      messageHTML = `
+            <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute} ${callTimeAttribute}>
+              ${attachmentsHTML}
+              ${messageTextHTML}
+              <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}${showEditedDot ? ' <span class="edited-new-dot" title="Edited since last read"></span>' : ''}</div>
+            </div>
+          `;
         }
       }
 
@@ -10919,8 +10984,9 @@ class CallScheduleDateModal {
     const localMs = new Date(year, month - 1, day, hour24, minute, 0, 0).getTime();
     const corrected = localMs + timeSkew;
     const nowCorrected = getCorrectedTimestamp();
-    if (corrected <= nowCorrected) {
-      showToast('Please choose a time in the future', 2000, 'error');
+    const minAllowed = nowCorrected - 5 * 60 * 1000;
+    if (corrected < minAllowed) {
+      showToast('Please choose a time in the future', 2000, 'error', false, 'call-schedule-date-modal-future-time');
       return;
     }
     this._closeWith(corrected);
@@ -11277,7 +11343,7 @@ class VoiceRecordingModal {
       
     } catch (error) {
       console.error('Error starting voice recording:', error);
-      showToast('Could not access microphone. Please check permissions.', 0, 'error');
+      showToast('Could not access microphone. Please check permissions.', 0, 'error', false, 'microphone-permission-error');
     }
   }
 
