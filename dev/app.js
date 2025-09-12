@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'o'
+const version = 'p'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -2444,7 +2444,7 @@ class FriendModal {
       return;
     }
 
-    if (contact.friend in [2,3] && Number(selectedStatus) in [2, 3]){
+    if ([2,3].includes(contact.friend) && [2,3].includes(Number(selectedStatus))){
       console.log('no need to post a change to the network since toll required would be 0 for both cases')
     }
     else{
@@ -3547,6 +3547,12 @@ async function processChats(chats, keys) {
                   payload.type = 'call';
                   // Use callTime when present; default to 0 (immediate)
                   payload.callTime = Number(parsedMessage.callTime) || 0;
+                  if (reactNativeApp.isReactNativeWebView) {
+                    // If callTime is greater than the current time, send it to the native app
+                    if (payload.callTime && payload.callTime > Date.now()) {
+                      reactNativeApp.sendScheduledCall(contact.username, payload.callTime)
+                    }
+                  }
                 } else if (parsedMessage.type === 'vm') {
                   // Voice message format processing
                   payload.message = ''; // Voice messages don't have text
@@ -15382,6 +15388,14 @@ class ReactNativeApp {
       url,
       text,
       title
+    });
+  }
+
+  sendScheduledCall(username, timestamp){
+    this.postMessage({
+      type: 'SCHEDULE_CALL',
+      username,
+      timestamp
     });
   }
 }
