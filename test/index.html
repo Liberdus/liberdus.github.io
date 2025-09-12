@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.09.05.13.00" />
+    <link rel="stylesheet" href="./styles.css?v=2025.09.12.12.59" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.09.05.13.00" type="module"></script>
+    <script src="./app.js?v=2025.09.12.12.59" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -258,6 +258,7 @@
         </div>
         <div class="modal-content">
           <ul class="menu-list">
+            <li class="menu-item" id="openCallsModal" data-icon="call">Calls</li>
             <li class="menu-item" id="openAccountForm" data-icon="user">Profile</li>
             <li class="menu-item" id="openToll" data-icon="dollar-sign">Toll</li>
             <li class="menu-item" id="openLockModal" data-icon="lock">Lock</li>
@@ -278,13 +279,13 @@
         </div>
         <div class="modal-content">
           <ul class="menu-list">
+            <li class="menu-item" id="welcomeOpenUpdate" data-icon="smartphone" style="display: none;">Update</li>
             <li class="menu-item" id="welcomeOpenBackup" data-icon="download">Backup</li>
             <li class="menu-item" id="welcomeOpenRestore" data-icon="rotate-ccw">Restore</li>
+            <li class="menu-item" id="welcomeOpenLockModal" data-icon="lock">Lock</li>
             <li class="menu-item" id="welcomeOpenRemove" data-icon="trash-2">Remove</li>
             <li class="menu-item" id="welcomeOpenMigrate" data-icon="shuffle">Migrate</li>
             <li class="menu-item" id="welcomeOpenLaunch" data-icon="launch" style="display: none;">Launch</li>
-            <li class="menu-item" id="welcomeOpenUpdate" data-icon="smartphone" style="display: none;">Update</li>
-            <li class="menu-item" id="welcomeOpenLockModal" data-icon="lock">Lock</li>
           </ul>
         </div>
         <a class="last-item" href="#"> </a>
@@ -385,8 +386,8 @@
                 <a class="about-link" href="styles.css" target="_blank">styles.css</a>
                 <a class="about-link" href="app.js" target="_blank">app.js</a>
                 <br>
-                <a class="about-link" href="crypto.js?v=2025.09.05.13.00" target="_blank">crypto.js</a>
-                <a class="about-link" href="lib.js?v=2025.09.05.13.00" target="_blank">lib.js</a>
+                <a class="about-link" href="crypto.js?v=2025.09.12.12.59" target="_blank">crypto.js</a>
+                <a class="about-link" href="lib.js?v=2025.09.12.12.59" target="_blank">lib.js</a>
                 <a class="about-link" href="network.js" target="_blank">network.js</a>
               </div>
 
@@ -802,6 +803,89 @@
         <a class="last-item" href="#"> </a>
       </div>
 
+      <!-- Calls Modal -->
+      <div class="modal fixed-header" id="callsModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeCallsModal"></button>
+          <div class="modal-title">Calls</div>
+          <div class="current-time" id="callsCurrentTime" aria-label="Current time"></div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <ul class="chat-list" id="callList">
+              <div class="empty-state">
+                <div></div>
+                <div>No Scheduled Calls</div>
+                <div>Scheduled calls will appear here</div>
+              </div>
+            </ul>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Templates for call list items -->
+      <template id="singleCallTemplate">
+        <li class="chat-item" data-index="" data-address="">
+          <div class="chat-avatar"></div>
+          <div class="chat-content">
+            <div class="chat-header">
+              <div class="chat-name"></div>
+              <button class="call-join call-message-phone-button" aria-label="Join Call"></button>
+            </div>
+            <div class="chat-message">
+              <div class="call-time"></div>
+              <span class="chat-time-chevron"></span>
+            </div>
+          </div>
+        </li>
+      </template>
+
+      <template id="groupCallTemplate">
+        <li class="chat-item group-call" data-index="">
+          <div class="chat-avatar call-group-avatars"></div>
+          <div class="chat-content">
+            <div class="chat-header">
+              <div class="chat-name"></div>
+              <button class="call-join call-message-phone-button" aria-label="Join Call"></button>
+            </div>
+            <div class="chat-message">
+              <div class="call-time"></div>
+              <span class="chat-time-chevron"></span>
+            </div>
+          </div>
+        </li>
+      </template>
+
+      <!-- Group Call Participants Modal -->
+      <div class="modal modal-dialog" id="groupCallParticipantsModal">
+        <div class="dialog-box-content">
+          <div class="modal-header">
+            <button class="back-button" id="closeGroupCallParticipantsModal"></button>
+            <div class="modal-title">Call Participants</div>
+          </div>
+          <div class="modal-content">
+            <div class="form-container call-invite-modal-container">
+              <p class="modal-summary">Choose a participant to open their chat, or join the call.</p>
+              <div class="participants-list" id="groupCallParticipantsList">
+                <!-- Participants will be populated here -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"></a>
+      </div>
+
+      <!-- Template for participant items -->
+      <template id="groupCallParticipantTemplate">
+        <div class="participant-item" data-address="">
+          <div class="participant-avatar"></div>
+          <div class="participant-info">
+            <div class="participant-name"></div>
+          </div>
+        </div>
+      </template>
+
       <!-- Chat Modal -->
       <div class="modal fixed-header" id="chatModal">
         <div class="modal-header">
@@ -829,6 +913,8 @@
           </div>
           <div class="message-input-row">
             <button class="icon-button add-attachment-button" id="addAttachmentButton" aria-label="Add attachment"></button>
+            <!-- Cancel Edit button (shown only when editing a message) -->
+            <button class="icon-button cancel-edit-button" id="cancelEditButton" aria-label="Cancel edit" style="display: none;"></button>
             <div class="message-input-wrapper">
               <textarea class="message-input" placeholder="Type a message..."></textarea>
               <div class="toll-container">
@@ -837,6 +923,7 @@
               </div>
             </div>
             <input type="hidden" id="retryOfTxId" />
+            <input type="hidden" id="editOfTxId" />
             <!-- Add hidden file input for chat attachments -->
             <input type="file" id="chatFileInput" style="display:none;">
             <button class="icon-button voice-record-button" id="voiceRecordButton" aria-label="Record voice message"></button>
@@ -848,6 +935,65 @@
           </div>
         </div>
         <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Call Schedule Choice Modal -->
+      <div class="modal modal-dialog" id="callScheduleChoiceModal">
+        <div class="dialog-box-content">
+          <div class="modal-header">
+            <button class="back-button" id="closeCallScheduleChoiceModal"></button>
+            <div class="modal-title">Start a Call</div>
+          </div>
+          <div class="modal-content">
+            <div class="form-container call-invite-modal-container">
+              <p class="modal-summary">Choose to call now or schedule a future time.</p>
+              <div class="form--narrow">
+                <div class="form-actions">
+                  <button type="button" id="callScheduleNowBtn" class="btn btn--primary btn--pill btn--full">Call Now</button>
+                  <button type="button" id="openCallScheduleDateBtn" class="btn btn--primary btn--pill btn--full">Schedule</button>
+                  <button type="button" id="cancelCallScheduleChoice" class="btn btn--secondary btn--pill btn--full">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"></a>
+      </div>
+
+      <!-- Call Schedule Date Modal -->
+      <div class="modal modal-dialog" id="callScheduleDateModal">
+        <div class="dialog-box-content">
+          <div class="modal-header">
+            <button class="back-button" id="closeCallScheduleDateModal"></button>
+            <div class="modal-title">Schedule Call</div>
+            <div class="current-time" id="callScheduleCurrentTime" aria-label="Current time"></div>
+          </div>
+          <div class="modal-content">
+            <div class="form-container call-invite-modal-container">
+              <form id="callScheduleDateForm" class="form--narrow">
+                <div class="form-group">
+                  <label for="callScheduleDate">Select date and time</label>
+                  <div class="call-schedule-form-row">
+                    <input id="callScheduleDate" type="date" class="form-control call-schedule-date-input" />
+                  </div>
+                  <div class="call-schedule-form-row">
+                    <select id="callScheduleHour" class="form-control call-schedule-time-select"></select>
+                    <select id="callScheduleMinute" class="form-control call-schedule-time-select"></select>
+                    <select id="callScheduleAmPm" class="form-control call-schedule-time-select">
+                      <option value="AM">AM</option>
+                      <option value="PM">PM</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" id="confirmCallSchedule" class="btn btn--primary btn--pill btn--full">Submit</button>
+                  <button type="button" id="cancelCallScheduleDate" class="btn btn--secondary btn--pill btn--full">Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"></a>
       </div>
 
       <!-- Voice Recording Modal -->
@@ -889,6 +1035,12 @@
                 <button class="voice-btn voice-btn-secondary" id="listenVoiceMessageButton">Listen</button>
                 <button class="voice-btn voice-btn-primary" id="sendVoiceMessageButton">Send</button>
               </div>
+              
+              <!-- Listening state: Pause/Resume and Stop buttons -->
+              <div class="listening-controls" id="listeningControls" style="display: none;">
+                <button class="voice-btn voice-btn-secondary" id="pauseResumeButton">Pause</button>
+                <button class="voice-btn voice-btn-primary" id="stopListeningButton">Stop</button>
+              </div>
             </div>
           </div>
         </div>
@@ -899,6 +1051,11 @@
         <div class="context-menu-option" data-action="copy" data-icon="copy">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Copy</span>
+        </div>
+        <!-- Edit own message option (shown only within allowed time window) -->
+        <div class="context-menu-option" data-action="edit" data-icon="edit" style="display: none;">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Edit</span>
         </div>
         <!-- Call-specific action: Join -->
         <div class="context-menu-option" data-action="join" data-icon="call" style="display: none;">
@@ -958,6 +1115,26 @@
         </div>
         <a class="last-item" href="#"> </a>
       </div>
+
+      <!-- Template for toll info message -->
+      <template id="tollInfoMessageTemplate">
+        <div class="toll-info-message">
+          <h4>What is a Toll?</h4>
+          <p>A toll is a payment included with messages to prevent spam and make it worthwhile for the recipient to read and reply back to you</p>
+          
+          <h5>How it works:</h5>
+          <ul>
+            <li>If the toll line is green, you don't need to pay the toll</li>
+            <li>The recipient sets the toll amount</li>
+            <li>No toll required if the recipent has set you as a friend or connection</li>
+            <li>Half the toll is given to the recipient if they read your message</li>
+            <li>Half the toll is given to the recipient if they reply to your message</li>
+            <li>Any toll that was not given to the recipient can be reclaimed</li>
+            <li>To reclaim the toll you must not send more messages to the recipient for 7 days</li>
+            <li>After 7 days just open and close the chat session with the recipient to reclaim any remaining toll</li>
+          </ul>
+        </div>
+      </template>
 
       <!-- Failed Message Context Menu -->
       <div class="failed-message-context-menu" id="failedMessageContextMenu" style="display: none;">
