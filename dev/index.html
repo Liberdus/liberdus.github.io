@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.09.12.09.20" />
+    <link rel="stylesheet" href="./styles.css?v=2025.09.12.12.42" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.09.12.09.20" type="module"></script>
+    <script src="./app.js?v=2025.09.12.12.42" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -823,6 +823,68 @@
         </div>
         <a class="last-item" href="#"> </a>
       </div>
+
+      <!-- Templates for call list items -->
+      <template id="singleCallTemplate">
+        <li class="chat-item" data-index="" data-address="">
+          <div class="chat-avatar"></div>
+          <div class="chat-content">
+            <div class="chat-header">
+              <div class="chat-name"></div>
+              <button class="call-join call-message-phone-button" aria-label="Join Call"></button>
+            </div>
+            <div class="chat-message">
+              <div class="call-time"></div>
+              <span class="chat-time-chevron"></span>
+            </div>
+          </div>
+        </li>
+      </template>
+
+      <template id="groupCallTemplate">
+        <li class="chat-item group-call" data-index="">
+          <div class="chat-avatar call-group-avatars"></div>
+          <div class="chat-content">
+            <div class="chat-header">
+              <div class="chat-name"></div>
+              <button class="call-join call-message-phone-button" aria-label="Join Call"></button>
+            </div>
+            <div class="chat-message">
+              <div class="call-time"></div>
+              <span class="chat-time-chevron"></span>
+            </div>
+          </div>
+        </li>
+      </template>
+
+      <!-- Group Call Participants Modal -->
+      <div class="modal modal-dialog" id="groupCallParticipantsModal">
+        <div class="dialog-box-content">
+          <div class="modal-header">
+            <button class="back-button" id="closeGroupCallParticipantsModal"></button>
+            <div class="modal-title">Call Participants</div>
+          </div>
+          <div class="modal-content">
+            <div class="form-container call-invite-modal-container">
+              <p class="modal-summary">Choose a participant to open their chat, or join the call.</p>
+              <div class="participants-list" id="groupCallParticipantsList">
+                <!-- Participants will be populated here -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"></a>
+      </div>
+
+      <!-- Template for participant items -->
+      <template id="groupCallParticipantTemplate">
+        <div class="participant-item" data-address="">
+          <div class="participant-avatar"></div>
+          <div class="participant-info">
+            <div class="participant-name"></div>
+          </div>
+        </div>
+      </template>
 
       <!-- Chat Modal -->
       <div class="modal fixed-header" id="chatModal">
