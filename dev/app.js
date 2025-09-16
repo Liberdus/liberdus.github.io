@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -15738,16 +15738,8 @@ class ReactNativeApp {
     }
 
     // Determine platform (iOS or Android)
-    const userAgent = navigator.userAgent.toLowerCase();
-    let platform;
-    if (userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ios')) {
-      platform = 'ios';
-    } else if (userAgent.includes('android')) {
-      platform = 'android';
-    } else {
-      // Default to android for unknown platforms
-      platform = 'android';
-    }
+    const ua = navigator.userAgent.toLowerCase();
+    const platform = /android/.test(ua) ? 'android' : (/iphone|ipad|ios/.test(ua) ? 'ios' : 'android');
 
     const requiredVersion = network.app_version[platform];
     if (!requiredVersion) {
@@ -15761,7 +15753,7 @@ class ReactNativeApp {
 
     if (isUpdateNeeded) {
       // Show toast notification on welcome page
-      this.showUpdateNotification(platform);
+      this.showUpdateNotification();
     }
   }
 
@@ -15784,24 +15776,16 @@ class ReactNativeApp {
 
   /**
    * Show update notification toast on the welcome screen
-   * @param {string} platform - 'ios' or 'android'
    */
-  showUpdateNotification(platform) {
+  showUpdateNotification() {
     // Only show notification if we're on the welcome screen
     if (!welcomeScreen.screen || welcomeScreen.screen.style.display === 'none') {
       console.warn('❌ Update toast skipped – welcome not visible');
       return;
     }
 
-    let storeUrl;
-    if (platform === 'ios') {
-      storeUrl = 'https://testflight.apple.com/join/zSRCWyxy';
-    } else {
-      storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
-    }
-
-    const message = `<div style="text-align: center; line-height: 1.4; font-size: 16px; font-weight: 700; margin-bottom: 6px;">New App Update Available</div>
-<a href="${storeUrl}" target="_blank" style="display: block; margin-top: 6px; padding: 8px 12px; background: #ffffff; color: #0056b3; border-radius: 16px; text-align: center; text-decoration: none; font-weight: 600;">Update now</a>`;
+    const message = `<div style="text-align: center; line-height: 1.4; font-size: 16px; font-weight: 700; margin-bottom: 12px;">New App Update Available</div>
+<a href="#" onclick="updateWarningModal.open(); return false;" style="display: block; margin-top: 6px; padding: 8px 12px; background: #ffffff; color: #0056b3; border-radius: 16px; text-align: center; text-decoration: none; font-weight: 600;">Update now</a>`;
     showToast(message, 0, 'info', true);
   }
 }
