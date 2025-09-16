@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -6634,20 +6634,8 @@ class AboutModal {
   }
 
   openStore() {
-    // This method only runs when user is in React Native app
-    const userAgent = navigator.userAgent.toLowerCase();
-    let storeUrl;
-
-    if (userAgent.includes('android')) {
-      storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
-    } else if (userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ios')) {
-      storeUrl = 'https://testflight.apple.com/join/zSRCWyxy';
-    } else {
-      storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
-    }
-
     // Show update warning modal
-    updateWarningModal.open(storeUrl);
+    updateWarningModal.open();
   }
 }
 const aboutModal = new AboutModal();
@@ -6665,11 +6653,28 @@ class UpdateWarningModal {
     this.closeButton.addEventListener('click', () => this.close());
     this.backupFirstBtn.addEventListener('click', () => backupAccountModal.open());
     this.proceedToStoreBtn.addEventListener('click', () => this.proceedToStore());
+
+    // Event delegation for dynamically created update toast button
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target && (target.id === 'updateToastButton' || target.classList.contains('toast-update-button'))) {
+        event.preventDefault();
+        this.open();
+      }
+    }, { capture: true });
   }
 
-  open(storeUrl) {
-    // Store the URL for later use
-    this.storeUrl = storeUrl;
+  open() {
+    // This method only runs when user is in React Native app
+    const userAgent = navigator.userAgent.toLowerCase();
+
+    if (userAgent.includes('android')) {
+      this.storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
+    } else if (userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ios')) {
+      this.storeUrl = 'https://testflight.apple.com/join/zSRCWyxy';
+    } else {
+      this.storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
+    }
     this.modal.classList.add('active');
   }
 
@@ -15784,8 +15789,10 @@ class ReactNativeApp {
       return;
     }
 
-    const message = `<div style="text-align: center; line-height: 1.4; font-size: 16px; font-weight: 700; margin-bottom: 12px;">New App Update Available</div>
-<a href="#" onclick="updateWarningModal.open(); return false;" style="display: block; margin-top: 6px; padding: 8px 12px; background: #ffffff; color: #0056b3; border-radius: 16px; text-align: center; text-decoration: none; font-weight: 600;">Update now</a>`;
+    // Use template from index.html if available; fallback to inline HTML
+    const tpl = document.getElementById('updateToastTemplate');
+    const message = tpl ? tpl.innerHTML : `<div class="toast-update-title">New App Update Available</div>
+<a href="#" class="toast-update-button">Update now</a>`;
     showToast(message, 0, 'info', true);
   }
 }

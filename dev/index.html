@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.09.16.15.29" />
+    <link rel="stylesheet" href="./styles.css?v=2025.09.16.16.04" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.09.16.15.29" type="module"></script>
+    <script src="./app.js?v=2025.09.16.16.04" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -2120,5 +2120,10 @@
     <audio id="transferSound" src="media/paymentSound.mp3" preload="auto"></audio>
     <!-- Toast container -->
     <div class="toast-container" id="toastContainer"></div>
+    <!-- Update toast template -->
+    <template id="updateToastTemplate">
+      <div class="toast-update-title">New App Update Available</div>
+      <a href="#" class="toast-update-button" id="updateToastButton">Update now</a>
+    </template>
   </body>
 </html>
