@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -318,23 +318,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Welcome Menu Modal
   welcomeMenuModal.load();
 
-  // Check for app version update after a delay to ensure everything is loaded
-  setTimeout(() => {
-    logsModal.log('🔄 Running version check...');
-    
-    if (reactNativeApp?.appVersion && network?.app_version) {
-      reactNativeApp.checkAppVersionUpdate();
-    } else {
-      logsModal.log('❌ Version check skipped - missing dependencies');
-      if (!reactNativeApp?.appVersion) {
-        logsModal.log('  - Missing: app version');
-      }
-      if (!network?.app_version) {
-        logsModal.log('  - Missing: network.app_version');
-      }
-    }
-  }, 2000);
-
   // Footer
   footer.load();
 
@@ -650,14 +633,6 @@ class WelcomeScreen {
     this.screen.style.display = 'flex';
     // Show the navigation bar on the native app
     reactNativeApp.sendNavigationBarVisibility(true);
-    
-    // Check for app version update when welcome screen is opened
-    // Use setTimeout to ensure this runs after the screen is fully displayed
-    setTimeout(() => {
-      if (reactNativeApp?.appVersion) {
-        reactNativeApp.checkAppVersionUpdate();
-      }
-    }, 100);
   }
 
   close() {
@@ -15757,11 +15732,8 @@ class ReactNativeApp {
    * Compares the native app version with the required version from network.js
    */
   checkAppVersionUpdate() {
-    logsModal.log('🔍 Checking app version update...');
-    logsModal.log('Current: ' + this.appVersion + ' | Network has app_version: ' + Boolean(network?.app_version));
-    
     if (!this.appVersion || !network?.app_version) {
-      logsModal.log('❌ Missing required data for version check');
+      console.warn('❌ Version check skipped – missing data');
       return;
     }
 
@@ -15779,21 +15751,15 @@ class ReactNativeApp {
 
     const requiredVersion = network.app_version[platform];
     if (!requiredVersion) {
-      logsModal.log('❌ No required version for platform: ' + platform);
+      console.warn('❌ No required version for platform: ' + platform);
       return;
     }
-
-    logsModal.log('Platform: ' + platform);
-    logsModal.log('Required version: ' + requiredVersion);
 
     // Compare versions (format: YYYY.MMDD.HHmm)
     const currentVersion = this.appVersion;
     const isUpdateNeeded = this.compareVersions(currentVersion, requiredVersion) < 0;
 
-    logsModal.log('Version comparison result: ' + (isUpdateNeeded ? 'UPDATE NEEDED' : 'UP TO DATE'));
-
     if (isUpdateNeeded) {
-      logsModal.log('🚨 Showing update notification');
       // Show toast notification on welcome page
       this.showUpdateNotification(platform);
     }
@@ -15821,13 +15787,9 @@ class ReactNativeApp {
    * @param {string} platform - 'ios' or 'android'
    */
   showUpdateNotification(platform) {
-    logsModal.log('🎯 showUpdateNotification called for platform: ' + platform);
-    logsModal.log('Welcome screen element: ' + (welcomeScreen.screen ? 'found' : 'not found'));
-    logsModal.log('Welcome screen display: ' + (welcomeScreen.screen?.style.display || 'undefined'));
-    
     // Only show notification if we're on the welcome screen
     if (!welcomeScreen.screen || welcomeScreen.screen.style.display === 'none') {
-      logsModal.log('❌ Not showing toast - welcome screen not visible');
+      console.warn('❌ Update toast skipped – welcome not visible');
       return;
     }
 
@@ -15838,9 +15800,9 @@ class ReactNativeApp {
       storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
     }
 
-    const message = `New app update available! <a href="${storeUrl}" target="_blank" style="color: #007bff; text-decoration: underline;">Update now</a>`;
-    logsModal.log('✅ Showing toast with message: ' + message);
-    showToast(message, 0, 'info', true); // 0 duration = sticky toast
+    const message = `<div style="text-align: left; line-height: 1.4;">New app update available.</div>
+<a href="${storeUrl}" target="_blank" style="display: block; margin-top: 10px; padding: 8px 12px; background: #ffffff; color: #0056b3; border-radius: 16px; text-align: center; text-decoration: none; font-weight: 600;">Update now</a>`;
+    showToast(message, 0, 'toll', true); // 0 duration = sticky toast, use toll style for better layout
   }
 }
 
