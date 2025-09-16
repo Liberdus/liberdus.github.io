@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.09.16.16.21" />
+    <link rel="stylesheet" href="./styles.css?v=2025.09.16.16.55" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.09.16.16.21" type="module"></script>
+    <script src="./app.js?v=2025.09.16.16.55" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -286,6 +286,7 @@
             <li class="menu-item" id="welcomeOpenRemove" data-icon="trash-2">Remove</li>
             <li class="menu-item" id="welcomeOpenMigrate" data-icon="shuffle">Migrate</li>
             <li class="menu-item" id="welcomeOpenLaunch" data-icon="launch" style="display: none;">Launch</li>
+            <li class="menu-item" id="welcomeOpenAbout" data-icon="info">About</li>
           </ul>
         </div>
         <a class="last-item" href="#"> </a>
@@ -378,7 +379,6 @@
               <div class="about-links-section">
                 <a class="about-link" href="https://liberdus.com" target="_blank">Liberdus.com</a>
                 <a class="about-link" href="https://github.com/Liberdus/web-client-v2" target="_blank">GitHub Repo</a>
-                <button class="about-link" id="checkForUpdatesBtn">Check for Updates</button>
               </div>
 
               <div class="about-source-links">
@@ -920,6 +920,14 @@
               <div class="toll-container">
                 <span class="toll-label">Toll:</span>
                 <span class="toll-value" id="tollValue"></span>
+                <span class="toll-info-icon">
+                  <svg viewBox="0 0 24 24" width="16" height="16">
+                    <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/>
+                    <path d="M9,9 h6 v6 h-6 z" fill="none" stroke="currentColor" stroke-width="0"/>
+                    <line x1="12" y1="9" x2="12" y2="13" stroke="currentColor" stroke-width="2"/>
+                    <circle cx="12" cy="16" r="1" fill="currentColor"/>
+                  </svg>
+                </span>
               </div>
             </div>
             <input type="hidden" id="retryOfTxId" />

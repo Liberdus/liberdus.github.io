@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'c'
+const version = 'd'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -693,6 +693,7 @@ class WelcomeMenuModal {
     this.restoreButton = document.getElementById('welcomeOpenRestore');
     this.removeButton = document.getElementById('welcomeOpenRemove');
     this.migrateButton = document.getElementById('welcomeOpenMigrate');
+    this.aboutButton = document.getElementById('welcomeOpenAbout');
     this.launchButton = document.getElementById('welcomeOpenLaunch');
     this.lockButton = document.getElementById('welcomeOpenLockModal');
     this.updateButton = document.getElementById('welcomeOpenUpdate');
@@ -702,6 +703,7 @@ class WelcomeMenuModal {
     this.restoreButton.addEventListener('click', () => restoreAccountModal.open());
     this.removeButton.addEventListener('click', () => removeAccountsModal.open());
     this.migrateButton.addEventListener('click', () => migrateAccountsModal.open());
+    this.aboutButton.addEventListener('click', () => aboutModal.open());
     this.lockButton.addEventListener('click', () => lockModal.open());
 
     // Show launch button if ReactNativeWebView is available
@@ -5539,11 +5541,9 @@ class BackupAccountModal {
     document.getElementById('backupForm').addEventListener('submit', (event) => {
       this.handleSubmit(event);
     });
-    
-    // Add password validation on input with debounce
-    this.debouncedUpdateButtonState = debounce(() => this.updateButtonState(), 250);
-    this.passwordInput.addEventListener('input', this.debouncedUpdateButtonState);
-    this.passwordConfirmInput.addEventListener('input', this.debouncedUpdateButtonState);
+
+    this.passwordInput.addEventListener('input', this.updateButtonState());
+    this.passwordConfirmInput.addEventListener('input', this.updateButtonState());
   }
 
   open() {
@@ -5602,6 +5602,14 @@ class BackupAccountModal {
    */
   async handleSubmit(event) {
     event.preventDefault();
+
+    // Enforce confirmation match when a password is provided
+    const password = this.passwordInput.value || '';
+    const confirmPassword = this.passwordConfirmInput.value || '';
+    if (password.length > 0 && confirmPassword !== password) {
+      this.updateButtonState();
+      return;
+    }
 
     // Determine which backup method to use
     if (myData && !this.backupAllAccountsCheckbox.checked) {
@@ -6636,18 +6644,9 @@ class AboutModal {
     this.versionDisplay = document.getElementById('versionDisplayAbout');
     this.networkName = document.getElementById('networkNameAbout');
     this.netId = document.getElementById('netIdAbout');
-    this.checkForUpdatesBtn = document.getElementById('checkForUpdatesBtn');
 
     // Set up event listeners
     this.closeButton.addEventListener('click', () => this.close());
-
-    // Only show "Check for Updates" button if user is in React Native app
-    if (window.ReactNativeWebView) {
-      this.checkForUpdatesBtn.style.display = 'inline-block';
-      this.checkForUpdatesBtn.addEventListener('click', () => this.openStore());
-    } else {
-      this.checkForUpdatesBtn.style.display = 'none';
-    }
 
     // Set version and network information once during initialization
     this.versionDisplay.textContent = myVersion + ' ' + version;
@@ -16347,6 +16346,7 @@ function isMobile() {
 }
 
 function enterFullscreen() {
+  return
   if (isMobile()) {
   console.log('in enterFullscreen');
     if (document.documentElement.requestFullscreen) {
