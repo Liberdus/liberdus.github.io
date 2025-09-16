@@ -30,4 +30,16 @@ const network = {
   "farmUrl": "https://liberdus.com/farm",
   "validatorUrl": "https://liberdus.com/validator",
   "bridgeUrl": "./bridge",
+  // App version requirements for native apps (format: YYYY.MMDD.HHmm)
+  "app_version": {
+    "ios": "2025.1016.1730",
+    "android": "2025.1016.1730"
+  }
+}
+;
+// Ensure the network config is available to ES modules (app.js) by attaching
+// it to the global window object. Top-level const bindings from classic
+// scripts are not properties on window and may not be visible to modules.
+if (typeof window !== 'undefined') {
+  window.network = network;
 }

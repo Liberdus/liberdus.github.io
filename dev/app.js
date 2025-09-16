@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'
+const version = 'u'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -318,6 +318,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Welcome Menu Modal
   welcomeMenuModal.load();
 
+  // Check for app version update after a delay to ensure everything is loaded
+  setTimeout(() => {
+    logsModal.log('🔄 Running version check...');
+    
+    if (reactNativeApp?.appVersion && network?.app_version) {
+      reactNativeApp.checkAppVersionUpdate();
+    } else {
+      logsModal.log('❌ Version check skipped - missing dependencies');
+      if (!reactNativeApp?.appVersion) {
+        logsModal.log('  - Missing: app version');
+      }
+      if (!network?.app_version) {
+        logsModal.log('  - Missing: network.app_version');
+      }
+    }
+  }, 2000);
+
   // Footer
   footer.load();
 
@@ -633,6 +650,14 @@ class WelcomeScreen {
     this.screen.style.display = 'flex';
     // Show the navigation bar on the native app
     reactNativeApp.sendNavigationBarVisibility(true);
+    
+    // Check for app version update when welcome screen is opened
+    // Use setTimeout to ensure this runs after the screen is fully displayed
+    setTimeout(() => {
+      if (reactNativeApp?.appVersion) {
+        reactNativeApp.checkAppVersionUpdate();
+      }
+    }, 100);
   }
 
   close() {
@@ -3074,6 +3099,13 @@ class CallsModal {
     this.render();
     this.modal.classList.add('active');
     this.clockTimer.start();
+    // start periodic refresh to update call button states every 5s
+    this._stateInterval = setInterval(() => {
+      if (this.modal.classList.contains('active')) {
+        this.refreshCalls();
+        this.render();
+      }
+    }, 5000); 
   }
 
   /**
@@ -3083,6 +3115,10 @@ class CallsModal {
   close() {
     this.clockTimer.stop();
     this.modal.classList.remove('active');
+    if (this._stateInterval) {
+      clearInterval(this._stateInterval);
+      this._stateInterval = null;
+    }
   }
 
   /**
@@ -3228,12 +3264,35 @@ class CallsModal {
         li.querySelector('.chat-name').textContent = participant.calling;
         li.querySelector('.call-time').textContent = when;
       }
+      // annotate scheduled time for state updates
+      li.setAttribute('data-call-time', String(callGroup.callTime));
       
       fragment.appendChild(li);
     });
     // remove previous items and append new items
     if (existingItems.length) existingItems.forEach((el) => el.remove());
     list.appendChild(fragment);
+    // After rendering, update button states
+    this.updateJoinButtonStates();
+  }
+
+  /**
+   * Updates the color of join buttons based on current time
+   */
+  updateJoinButtonStates() {
+    if (!this.list) return;
+      this.list.querySelectorAll('.chat-item').forEach(li => {
+        const callTime = Number(li.getAttribute('data-call-time'));
+        const joinBtn = li.querySelector('.call-join');
+        if (!joinBtn || !Number.isFinite(callTime)) return;
+        const isFuture = chatModal.isFutureCall(callTime);
+        joinBtn.classList.remove('call-join--future', 'call-join--active');
+        if (isFuture) {
+          joinBtn.classList.add('call-join--future');
+        } else {
+          joinBtn.classList.add('call-join--active');
+        }
+    });
   }
 }
 
@@ -3658,7 +3717,7 @@ async function processChats(chats, keys) {
                     }
 
                     if (reactNativeApp.isReactNativeWebView && messageToDelete.type === 'call' && Number(messageToDelete.callTime) > 0) {
-                      reactNativeApp.sendUnscheduledCall(contact?.username, Number(messageToDelete.callTime));
+                      reactNativeApp.sendCancelScheduledCall(contact?.username, Number(messageToDelete.callTime));
                     }
                     
                     if (chatModal.isActive() && chatModal.address === from) {
@@ -9940,7 +9999,7 @@ console.warn('in send message', txid)
       if (reactNativeApp.isReactNativeWebView && message.type === 'call') {
         const callTimeNum = Number(message.callTime) || 0;
         if (callTimeNum > 0) {
-          reactNativeApp.sendUnscheduledCall(contact?.username, callTimeNum);
+          reactNativeApp.sendCancelScheduledCall(contact?.username, callTimeNum);
         }
       }
 
@@ -10273,9 +10332,7 @@ console.warn('in send message', txid)
           showToast(
             `You can only call people who have added you as a friend or connection. Ask ${username} to add you as a friend or connection`,
             0,
-            'info',
-            false,
-            'call-permission-required'
+            'info'
           );
         }
         return;
@@ -11013,22 +11070,19 @@ class CallInviteModal {
         const chatId = hashBytes(sortedAddresses.join(''));
         const chatIdAccount = await queryNetwork(`/messages/${chatId}/toll`);
         const toIndex = sortedAddresses.indexOf(longAddress(addr));
-        const tollRequiredToSend = chatIdAccount.toll?.required?.[toIndex] ?? 1;
+        const tollRequiredToSend = chatIdAccount?.toll?.required?.[toIndex] ?? 1;
         let toll = 0n;
+        // 0 => no toll required (recipient added you as friend/connection)
+        // 1 => toll required (recipient has NOT added you)
+        // 2 => blocked
+        if (tollRequiredToSend === 2) {
+          showToast(`You cannot invite ${contact.username || addr} (you are blocked)`, 0, 'warning');
+          continue;
+        }
         if (tollRequiredToSend === 1) {
-          const contactData = await queryNetwork(`/account/${longAddress(addr)}`);
-          if (!contactData || !contactData.account) {
-            showToast(`Skipping ${contact.username || addr} (account not found)`, 2000, 'warning');
-            continue;
-          }
-          const tollUnit = contactData.account?.data?.tollUnit || 'LIB';
-          const factor = getStabilityFactor();
-          if (tollUnit === 'USD') {
-            // Convert toll to LIB
-            toll = bigxnum2big(contactData.account.data.toll, (1.0 / factor).toString());
-          } else {
-            toll = contactData.account.data.toll;
-          }
+          const username = (contact?.username) || `${addr.slice(0, 8)}...${addr.slice(-6)}`;
+          showToast(`You can only invite people who have added you as a friend or connection. Ask ${username} to add you as a friend or connection`, 0, 'info');
+          continue;
         }
 
         const messageObj = await chatModal.createChatMessage(addr, messagePayload, toll, keys);
@@ -15242,7 +15296,9 @@ class ReactNativeApp {
             if (data?.data?.appVersion) {
               this.appVersion = data.data.appVersion || `N/A`
               // Update the welcome screen to display the app version
-              welcomeScreen.updateAppVersionDisplay(this.appVersion); 
+              welcomeScreen.updateAppVersionDisplay(this.appVersion);
+              // Check if app version needs update
+              this.checkAppVersionUpdate();
             }
             // Handle device tokens
             if (data.data.deviceToken) {
@@ -15688,12 +15744,103 @@ class ReactNativeApp {
     });
   }
   
-  sendUnscheduledCall(username, timestamp){
+  sendCancelScheduledCall(username, timestamp){
     this.postMessage({
-      type: 'UNSCHEDULE_CALL',
+      type: 'CANCEL_SCHEDULE_CALL',
       username,
       timestamp
     });
+  }
+
+  /**
+   * Check if the current app version needs to be updated
+   * Compares the native app version with the required version from network.js
+   */
+  checkAppVersionUpdate() {
+    logsModal.log('🔍 Checking app version update...');
+    logsModal.log('Current: ' + this.appVersion + ' | Network has app_version: ' + Boolean(network?.app_version));
+    
+    if (!this.appVersion || !network?.app_version) {
+      logsModal.log('❌ Missing required data for version check');
+      return;
+    }
+
+    // Determine platform (iOS or Android)
+    const userAgent = navigator.userAgent.toLowerCase();
+    let platform;
+    if (userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ios')) {
+      platform = 'ios';
+    } else if (userAgent.includes('android')) {
+      platform = 'android';
+    } else {
+      // Default to android for unknown platforms
+      platform = 'android';
+    }
+
+    const requiredVersion = network.app_version[platform];
+    if (!requiredVersion) {
+      logsModal.log('❌ No required version for platform: ' + platform);
+      return;
+    }
+
+    logsModal.log('Platform: ' + platform);
+    logsModal.log('Required version: ' + requiredVersion);
+
+    // Compare versions (format: YYYY.MMDD.HHmm)
+    const currentVersion = this.appVersion;
+    const isUpdateNeeded = this.compareVersions(currentVersion, requiredVersion) < 0;
+
+    logsModal.log('Version comparison result: ' + (isUpdateNeeded ? 'UPDATE NEEDED' : 'UP TO DATE'));
+
+    if (isUpdateNeeded) {
+      logsModal.log('🚨 Showing update notification');
+      // Show toast notification on welcome page
+      this.showUpdateNotification(platform);
+    }
+  }
+
+  /**
+   * Compare two version strings in format YYYY.MMDD.HHmm
+   * @param {string} version1 - Current version
+   * @param {string} version2 - Required version
+   * @returns {number} -1 if version1 is older, 1 if newer, 0 if equal
+   */
+  compareVersions(version1, version2) {
+    // Convert version strings to comparable numbers
+    // Format: YYYY.MMDD.HHmm -> YYYYMMDDHHmm
+    const v1 = parseInt(version1.replace(/\D/g, ''));
+    const v2 = parseInt(version2.replace(/\D/g, ''));
+    
+    if (v1 < v2) return -1;  // version1 is older
+    if (v1 > v2) return 1;   // version1 is newer
+    return 0;                // versions are equal
+  }
+
+  /**
+   * Show update notification toast on the welcome screen
+   * @param {string} platform - 'ios' or 'android'
+   */
+  showUpdateNotification(platform) {
+    logsModal.log('🎯 showUpdateNotification called for platform: ' + platform);
+    logsModal.log('Welcome screen element: ' + (welcomeScreen.screen ? 'found' : 'not found'));
+    logsModal.log('Welcome screen display: ' + (welcomeScreen.screen?.style.display || 'undefined'));
+    
+    // Only show notification if we're on the welcome screen
+    if (!welcomeScreen.screen || welcomeScreen.screen.style.display === 'none') {
+      logsModal.log('❌ Not showing toast - welcome screen not visible');
+      return;
+    }
+
+    let storeUrl;
+    if (platform === 'ios') {
+      storeUrl = 'https://testflight.apple.com/join/zSRCWyxy';
+    } else {
+      storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
+    }
+
+    const message = `New app update available! <a href="${storeUrl}" target="_blank" style="color: #007bff; text-decoration: underline;">Update now</a>`;
+    logsModal.log('✅ Showing toast with message: ' + message);
+    showToast(message, 0, 'info', true); // 0 duration = sticky toast
   }
 }
 
