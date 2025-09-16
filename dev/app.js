@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1454,6 +1454,11 @@ class MenuModal {
       screen.classList.remove('active');
     });
 
+    // Clear notifications for this account
+    if (reactNativeApp.isReactNativeWebView) {
+      reactNativeApp.clearNotificationAddress(myAccount.keys.address);
+    }
+
     // Show welcome screen
     welcomeScreen.open();
 
@@ -2038,7 +2043,7 @@ class SignInModal {
     welcomeScreen.close();
     
     // Clear notification address only if signing into account that owns the notification address and only remove that account from the array 
-    if (reactNativeApp) {
+    if (reactNativeApp.isReactNativeWebView) {
       const notifiedAddresses = reactNativeApp.getNotificationAddresses();
       if (notifiedAddresses.length > 0) {
         // remove address if it's in the array
@@ -2073,7 +2078,33 @@ class SignInModal {
     }
     //        const address = netidAccounts.usernames[username].keys.address;
     const address = netidAccounts.usernames[username].address;
-    const availability = await checkUsernameAvailability(username, address);
+    let availability = await checkUsernameAvailability(username, address);
+    // Retry logic: if availability reported as 'available' but we have local account data
+    // (meaning the account previously existed locally), we suspect propagation delay.
+    if (availability === 'available' && netidAccounts?.usernames?.[username]) {
+      const localStateKey = `${username}_${netid}`;
+      const hasLocalState = !!localStorage.getItem(localStateKey);
+      if (hasLocalState) {
+        const maxAttempts = 3; // total attempts including initial (so 2 more re-tries)
+        const delayMs = 200;
+        let attempt = 1;
+        while (attempt < maxAttempts && availability === 'available') {
+          attempt++;
+          logsModal.log(`[SignInModal] Retry ${attempt}/${maxAttempts} username availability for '${username}' because local data exists but network returned 'available'.`);
+          try {
+            await new Promise(res => setTimeout(res, delayMs));
+            availability = await checkUsernameAvailability(username, address);
+          } catch (err) {
+            break; // break on explicit error; will treat as network error below if availability not set
+          }
+        }
+        if (availability === 'available') {
+          logsModal.log(`[SignInModal] After ${maxAttempts} attempts username '${username}' still reported as available. Assuming account deleted on network; offering recreate/delete options.`);
+        } else {
+          logsModal.log(`[SignInModal] Availability resolved to '${availability}' after retries for '${username}'.`);
+        }
+      }
+    }
     //console.log('usernames.length', usernames.length);
     //console.log('availability', availability);
 
