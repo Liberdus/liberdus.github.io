@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'w'
+const version = 'x'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -15800,9 +15800,9 @@ class ReactNativeApp {
       storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
     }
 
-    const message = `<div style="text-align: left; line-height: 1.4;">New app update available.</div>
-<a href="${storeUrl}" target="_blank" style="display: block; margin-top: 10px; padding: 8px 12px; background: #ffffff; color: #0056b3; border-radius: 16px; text-align: center; text-decoration: none; font-weight: 600;">Update now</a>`;
-    showToast(message, 0, 'toll', true); // 0 duration = sticky toast, use toll style for better layout
+    const message = `<div style="text-align: center; line-height: 1.4; font-size: 16px; font-weight: 700; margin-bottom: 6px;">New App Update Available</div>
+<a href="${storeUrl}" target="_blank" style="display: block; margin-top: 6px; padding: 8px 12px; background: #ffffff; color: #0056b3; border-radius: 16px; text-align: center; text-decoration: none; font-weight: 600;">Update now</a>`;
+    showToast(message, 0, 'info', true);
   }
 }
 
