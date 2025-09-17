@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'e'
+const version = 'f'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -2405,7 +2405,6 @@ const contactInfoModal = new ContactInfoModal();
 class FriendModal {
   constructor() {
     this.currentContactAddress = null;
-    this.needsContactListUpdate = false; // track if we need to update the contact list
     this.lastChangeTimeStamp = 0; // track the last time the friend status was changed
   }
 
@@ -2434,7 +2433,7 @@ class FriendModal {
     if (!contact) return;
 
     // Set the current friend status
-    const status = contact?.friend.toString();
+    const status = contact.friend.toString();
     const radio = this.friendForm.querySelector(`input[value="${status}"]`);
     if (radio) radio.checked = true;
 
@@ -2510,9 +2509,14 @@ class FriendModal {
         return;
       }
     }
-    // store the old friend status
-    contact.friendOld = contact.friend;
 
+    if ([2,3].includes(contact.friend) && [2,3].includes(Number(selectedStatus))) {
+      // set friend and friendold the same since no transaction is needed
+      contact.friendOld = Number(selectedStatus);
+    } else {
+      // store the old friend status
+      contact.friendOld = contact.friend;
+    }
     // Update friend status based on selected value
     contact.friend = Number(selectedStatus);
 
@@ -2530,9 +2534,6 @@ class FriendModal {
               ? 'Added as Friend'
               : 'Error updating friend status'
     );
-
-    // Mark that we need to update the contact list
-    this.needsContactListUpdate = true;
 
     // Update the friend button
     this.updateFriendButton(contact, 'addFriendButtonContactInfo');
@@ -3420,8 +3421,6 @@ async function updateAssetPricesIfNeeded() {
       const data = await response.json();
       if (data.pairs && data.pairs.length > 0 && data.pairs[0].priceUsd) {
         asset.price = parseFloat(data.pairs[0].priceUsd);
-        // asset.lastPriceUpdate = now;
-        // myData.wallet.assets[i] = asset; // Update the asset in the array
         myData.wallet.priceTimestamp = now;
         console.log(`Updated price of ${asset.symbol} to ${asset.price}`);
         console.log(JSON.stringify(data, null, 4));
@@ -3437,10 +3436,8 @@ async function updateAssetPricesIfNeeded() {
 async function queryNetwork(url) {
   //console.log('queryNetwork', url)
   if (!isOnline) {
-    //TODO: show user we are not online
     console.warn('not online');
     showToast('queryNetwork: not online', 0, 'error')
-    //alert('not online')
     return null;
   }
   const selectedGateway = getGatewayForRequest();
@@ -3499,7 +3496,6 @@ async function getChats(keys, retry = 1) {
     senders === undefined ? 'undefined' : JSON.stringify(senders)
   );
   if (senders && senders.chats && chatCount) {
-    // TODO check if above is working
     await processChats(senders.chats, keys);
   } else {
     console.error('getChats: no senders found')
@@ -8116,7 +8112,8 @@ class ChatModal {
           // Wait for keyboard to appear and viewport to adjust
           setTimeout(() => {
             this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
-            this.messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); // To provide smoother, more reliable scrolling on mobile.
+            // removed for now since RN android causing extra scroll behavior
+            /* this.messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); // To provide smoother, more reliable scrolling on mobile. */
           }, 500); // Increased delay to ensure keyboard is fully shown
         }
       }
@@ -8150,7 +8147,14 @@ class ChatModal {
 
     // Voice recording event listeners
     if (this.voiceRecordButton) {
-      this.voiceRecordButton.addEventListener('click', () => {
+      this.voiceRecordButton.addEventListener('click', async () => {
+        const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
+        const sufficientBalance = await validateBalance(tollInLib);
+        if (!sufficientBalance) {
+          const msg = `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}`;
+          showToast(msg, 0, 'error');
+          return;
+        }
         voiceRecordingModal.open();
       });
     }
@@ -8524,7 +8528,8 @@ class ChatModal {
       const amount = this.tollRequiredToSend ? this.toll : 0n;
       const sufficientBalance = await validateBalance(amount);
       if (!sufficientBalance) {
-        showToast('Insufficient balance for toll and fee', 0, 'error');
+        const msg = `Insufficient balance for fee${amount > 0n ? ' and toll' : ''}`;
+        showToast(msg, 0, 'error');
         this.sendButton.disabled = false;
         return;
       }
@@ -10090,6 +10095,15 @@ console.warn('in send message', txid)
         return;
       }
 
+      const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
+
+      const sufficientBalance = await validateBalance(tollInLib);
+      if (!sufficientBalance) {
+        const msg = `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}`;
+        showToast(msg, 0, 'error');
+        return;
+      }
+
       // Ensure recipient keys are available
       const ok = await ensureContactKeys(this.address);
       const recipientPubKey = myData.contacts[this.address]?.public;
@@ -10123,7 +10137,6 @@ console.warn('in send message', txid)
       };
 
       // Prepare and send the delete message transaction
-      let tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
       const deleteMessageObj = await this.createChatMessage(this.address, payload, tollInLib, keys);
       await signObj(deleteMessageObj, keys);
       const deleteTxid = getTxid(deleteMessageObj);
@@ -10348,6 +10361,12 @@ console.warn('in send message', txid)
         return;
       }
 
+      const sufficientBalance = await validateBalance(0n);
+      if (!sufficientBalance) {
+        showToast('Insufficient balance for fee', 0, 'error');
+        return;
+      }
+
       // Choose call time: now or scheduled
       const chosenCallTime = await this.openCallTimeChooser();
       if (chosenCallTime === null) {
@@ -10465,7 +10484,7 @@ console.warn('in send message', txid)
       payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
 
       // Create and send the call message transaction
-      let tollInLib = myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : this.toll;
+      const tollInLib = myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : this.toll;
       const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
       // if there's a callobj.calltime is present and is 0 set callType to true to make recipient phone ring
       if (callObj?.callTime === 0) {
@@ -10590,7 +10609,7 @@ console.warn('in send message', txid)
     payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
 
     // Calculate toll
-    let tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
+    const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
 
     // Create and send transaction
     const chatMessageObj = await this.createChatMessage(this.address, payload, tollInLib, myAccount.keys);
@@ -16006,6 +16025,8 @@ async function checkPendingTransactions() {
             showToast(`Update contact status failed: ${failureReason}. Reverting contact to old status.`, 0, 'error');
             // revert the local myData.contacts[toAddress].friend to the old value
             myData.contacts[pendingTxInfo.to].friend = myData.contacts[pendingTxInfo.to].friendOld;
+            // update contact list since friend status was reverted
+            contactsScreen.updateContactsList();
           } else if (type === 'read') {
             showToast(`Read transaction failed: ${failureReason}`, 0, 'error');
             // revert the local myData.contacts[toAddress].timestamp to the old value
