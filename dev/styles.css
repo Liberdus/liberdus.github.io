@@ -496,6 +496,10 @@ body {
   background-size: var(--icon-size-20);
 }
 
+.icon-button:active {
+  transform: translateY(1px);
+}
+
 /* Shared sizing/layout for standard icon buttons used in chat/contact contexts */
 .icon-button.chat-icon,
 .icon-button.add-friend-icon,
@@ -869,6 +873,15 @@ body {
   background-repeat: no-repeat;
   background-size: contain;
   opacity: 0.5;
+}
+
+#callInviteModal .empty-state {
+  display: none; /* Hidden by default */
+  padding: 0;
+}
+#callInviteModal .empty-state::before {
+  width: 0;
+  height: 0;
 }
 
 /* Chats empty state - using chat bubble SVG */
@@ -1586,7 +1599,6 @@ input[type='file'].form-control::file-selector-button {
 
 .message-input-row {
   display: flex;
-  gap: 8px;
   align-items: center;
   width: 100%;
 }
@@ -2618,7 +2630,7 @@ button.about-link {
 
 /* Contact Info Modal Styles */
 .contact-info-list {
-  padding: 1rem;
+  padding: 0 1rem;
   overflow-y: auto;
   max-height: 100%;
   -webkit-overflow-scrolling: touch;
@@ -2687,7 +2699,6 @@ button.about-link {
   word-wrap: break-word;
   max-width: 100%;
   text-align: center;
-  padding: 0 8px;
 }
 
 .contact-info-item {
@@ -2933,10 +2944,13 @@ mark {
   align-items: center;
   gap: 8px;
   flex-direction: row;
+  min-width: 0; /* Allow flex items to shrink below their content size */
+  width: 100%; /* Ensure it takes full width of parent */
 }
 
 .edit-field-input {
   flex: 1;
+  min-width: 0; /* Allow input to shrink below its content size */
   font-family: var(--font-primary);
   font-size: var(--font-size-base);
   padding: 8px 12px;
@@ -3307,12 +3321,13 @@ mark {
 
 /* Add attachment button */
 .icon-button.add-attachment-button {
-  width: 20px;
+  width: 44px;
   height: 48px;
   padding: 0;
   flex-shrink: 0;
   pointer-events: auto;
   opacity: 0.7;
+  min-width: 44px; /* iOS recommended minimum touch target */
 }
 
 /* Cancel edit button - appears to the left of message input when editing */
@@ -3386,6 +3401,21 @@ mark {
 }
 
 #scanQRButton svg {
+  display: block;
+}
+
+/* Match New Chat QR buttons to Send Asset styles */
+#newChatScanQRButton,
+#newChatUploadQRButton {
+  color: var(--info-color);
+}
+
+#newChatScanQRButton::before,
+#newChatUploadQRButton::before {
+  content: '';
+  width: 24px;
+  height: 24px;
+  background-color: currentColor;
   display: block;
 }
 
@@ -3597,7 +3627,44 @@ mark {
 #canvas {
   display: none;
 }
-/* end of additions by Omar */
+
+/* ========= MyInfo: Username QR ========= */
+#myInfoQR {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#myInfoQR img {
+  display: block;
+  width: 160px;
+  height: 160px;
+  image-rendering: pixelated;
+}
+
+/* ========= New Chat: QR Scan/Upload icons next to input ========= */
+.input-append-icons {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+#newChatForm #chatRecipient {
+  padding-right: 0.5rem;
+}
+
+#newChatScanQRButton::before {
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='%23000'%3E%3Cpath d='M3,3 L10,3 L10,10 L3,10 Z M5,5 L5,8 L8,8 L8,5 Z M14,3 L21,3 L21,10 L14,10 Z M16,5 L16,8 L19,8 L19,5 Z M3,14 L10,14 L10,21 L3,21 Z M5,16 L5,19 L8,19 L8,16 Z M14,14 L21,14 L21,21 L14,21 Z M16,16 L16,19 L19,19 L19,16 Z M11,3 L13,3 L13,10 L11,10 Z M11,14 L13,14 L13,21 L11,21 Z M3,11 L10,11 L10,13 L3,13 Z M14,11 L21,11 L21,13 L14,13 Z'/%3E%3C/svg%3E") no-repeat center / contain;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='%23000'%3E%3Cpath d='M3,3 L10,3 L10,10 L3,10 Z M5,5 L5,8 L8,8 L8,5 Z M14,3 L21,3 L21,10 L14,10 Z M16,5 L16,8 L19,8 L19,5 Z M3,14 L10,14 L10,21 L3,21 Z M5,16 L5,19 L8,19 L8,16 Z M14,14 L21,14 L21,21 L14,21 Z M16,16 L16,19 L19,19 L19,16 Z M11,3 L13,3 L13,10 L11,10 Z M11,14 L13,14 L13,21 L11,21 Z M3,11 L10,11 L10,13 L3,13 Z M14,11 L21,11 L21,13 L14,13 Z'/%3E%3C/svg%3E") no-repeat center / contain;
+}
+
+#newChatUploadQRButton::before {
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='%23000'%3E%3Cpath d='M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z'/%3E%3C/svg%3E") no-repeat center / contain;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='%23000'%3E%3Cpath d='M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z'/%3E%3C/svg%3E") no-repeat center / contain;
+}
 
 small {
   font-size: 0.8rem;
@@ -4954,7 +5021,7 @@ small {
 
 /* Voice record button */
 .icon-button.voice-record-button {
-  width: 20px;
+  width: 32px;
   height: 48px;
   padding: 0;
   flex-shrink: 0;
@@ -5076,15 +5143,33 @@ small {
   font-family: 'Courier New', monospace;
 }
 
+/* Base styles for all voice recording control containers */
 .voice-recording-controls,
-.listening-controls {
+.listening-controls,
+.recorded-controls,
+.initial-controls {
   display: flex;
   justify-content: center;
+  min-width: 0;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+/* Two-button layouts (Start Recording + Cancel, Pause/Resume + Stop) */
+.initial-controls,
+.listening-controls {
   gap: 1rem;
 }
 
-.voice-recording-controls button{
-  margin: 0 5px;
+/* Three-button layout (Cancel + Listen + Send) */
+.recorded-controls {
+  gap: 0.5rem; /* Smaller gap for three buttons */
+}
+
+.recorded-controls .voice-btn {
+  max-width: 100px; /* Smaller max-width for three buttons */
+  font-size: 0.9rem; /* Slightly smaller font for better fit */
+  padding: 10px 16px; /* Slightly smaller padding */
 }
 
 .voice-btn {
@@ -5095,13 +5180,16 @@ small {
   font-size: 1rem;
   font-weight: 600;
   transition: all 0.2s ease;
-  min-width: 100px;
+  min-width: 0; /* Allow buttons to shrink below 100px on narrow screens */
+  flex: 1; /* Allow buttons to grow/shrink equally */
+  max-width: 120px; /* Base max-width for most buttons */
+  text-align: center; /* Center text within the button */
+  display: flex; /* Use flexbox for better centering */
+  align-items: center; /* Vertical centering */
+  justify-content: center; /* Horizontal centering */
+  overflow: hidden; /* Prevent text from overflowing button */
+  text-overflow: ellipsis; /* Show ... if text is too long */
 }
-
-#pauseResumeButton {
-  min-width: 120px;
-}
-
 .voice-btn-primary {
   background: var(--primary-color);
   color: white;
@@ -5139,6 +5227,18 @@ small {
   background: var(--bg-secondary);
   border-radius: 12px;
   margin: 4px 0;
+  min-width: 0; /* Allow shrinking */
+  overflow: hidden; /* Prevent overflow */
+}
+
+/* Voice message controls container */
+.voice-message-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0; /* Allow shrinking */
+  width: 100%; /* Take full width of parent */
+  overflow: hidden; /* Prevent overflow */
 }
 
 .voice-message-play-button {
@@ -5257,11 +5357,38 @@ small {
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
+  overflow: hidden; /* Prevent content from overflowing */
+  width: 100%; /* Take full available width */
+  max-width: 100%; /* Don't exceed parent width */
+}
+
+/* Voice message header row - make it wrap on small screens */
+.voice-message-info > div:first-child {
+  flex-wrap: wrap !important; /* Override inline style */
+  gap: 8px !important; /* Reduce gap when wrapping */
+  min-width: 0;
+  overflow: hidden;
+  width: 100%;
 }
 
 .voice-message-text {
   color: var(--text-color);
   margin-bottom: 4px;
+  flex: 1 1 auto; /* Allow text to grow and shrink */
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-message-info > div:first-child .voice-message-time-display {
+  flex: 0 0 auto; /* Don't grow or shrink */
+  margin-top: 0; /* Remove top margin when on same line */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Make duration text white on sent messages */
@@ -5275,6 +5402,10 @@ small {
   font-family: 'Courier New', monospace;
   margin-top: 4px;
   width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Make time display white on sent messages */

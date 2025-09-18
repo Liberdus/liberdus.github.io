@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'f'
+const version = 'g'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1211,7 +1211,7 @@ const contactsScreen = new ContactsScreen();
 
 class WalletScreen {
   constructor() {
-
+    this.firstTimeLoad = true;
   }
 
   load() {
@@ -1270,7 +1270,24 @@ class WalletScreen {
   async updateWalletView() {
     const walletData = myData.wallet;
 
-    await this.updateWalletBalances();
+    // Show loading toast if we're about to fetch fresh data
+    let loadingToastId = null;
+    // only show toast if myData.wallet.timestamp is not 0
+    if (this.firstTimeLoad && isOnline) {
+      loadingToastId = showToast('Loading wallet balance...', 0, 'loading');
+      this.firstTimeLoad = false;
+    }
+
+    try {
+      await this.updateWalletBalances();
+    } catch (error) {
+      console.error('Error updating wallet balances:', error);
+    } finally {
+      // Always hide loading toast if it was shown, regardless of success or failure
+      if (loadingToastId) {
+        hideToast(loadingToastId);
+      }
+    }
 
     // Update total networth
     this.totalBalance.textContent = (walletData.networth || 0).toFixed(2);
@@ -1398,6 +1415,10 @@ class MenuModal {
       this.launchButton = document.getElementById('openLaunchUrl');
       this.launchButton.addEventListener('click', () => launchModal.open());
       this.launchButton.style.display = 'block';
+
+      this.updateButton = document.getElementById('openUpdate');
+      this.updateButton.addEventListener('click', () => updateWarningModal.open());
+      this.updateButton.style.display = 'block';
     }
   }
 
@@ -2175,6 +2196,7 @@ class MyInfoModal {
     this.avatarDiv = this.avatarSection.querySelector('.avatar');
     this.nameDiv = this.avatarSection.querySelector('.name');
     this.subtitleDiv = this.avatarSection.querySelector('.subtitle');
+    this.qrContainer = this.modal.querySelector('#myInfoQR');
 
     this.backButton.addEventListener('click', () => this.close());
     this.editButton.addEventListener('click', () => myProfileModal.open());
@@ -2221,6 +2243,7 @@ class MyInfoModal {
       el.textContent = val;
       if (cfg.href) el.href = cfg.href(val);
     }
+    this.renderUsernameQR();
   }
 
   async open() {
@@ -2234,6 +2257,35 @@ class MyInfoModal {
 
   isActive() {
     return this.modal.classList.contains('active');
+  }
+
+  // Generate a QR code that contains ONLY the username as raw text
+  renderUsernameQR() {
+    try {
+      if (!this.qrContainer) return;
+      this.qrContainer.innerHTML = '';
+      const username = myAccount?.username || '';
+      if (!username) return;
+
+      // Build minimal payload and encode as liberdus://<base64(JSON)>
+      const payload = { u: username };
+      const jsonData = JSON.stringify(payload);
+      const base64Data = bin2base64(utf82bin(jsonData));
+      const qrText = `liberdus://${base64Data}`;
+
+      // Generate QR using the global qr library as GIF (consistent with other QRs)
+      const gifBytes = qr.encodeQR(qrText, 'gif', { scale: 4 });
+      const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
+      const dataUrl = 'data:image/gif;base64,' + base64;
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.width = 160;
+      img.height = 160;
+      img.alt = 'Username QR code';
+      this.qrContainer.appendChild(img);
+    } catch (e) {
+      console.error('Failed to render username QR:', e);
+    }
   }
 }
 
@@ -3812,24 +3864,22 @@ async function processChats(chats, keys) {
           if (payload.senderInfo && !mine){
             contact.senderInfo = cleanSenderInfo(payload.senderInfo)
             delete payload.senderInfo;
-            if (!contact.username && contact.senderInfo.username) {
+            if (contact.username) {
+              // if we already have the username, we can use it
+              contact.senderInfo.username = contact.username;
+            } else if (contact.senderInfo.username) {
               // check if the username given with the message maps to the address of this contact
               const usernameAddress = await getUsernameAddress(contact.senderInfo.username);
-                if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
-                  contact.username = contact.senderInfo.username;
-                } else {
-                  // username doesn't match address so skipping this message
-                  console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
-                  continue;
-                }
-            } else {
-              if(contact.username) {
-                // if we already have the username, we can use it
-                contact.senderInfo.username = contact.username;
+              if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
+                contact.username = contact.senderInfo.username;
               } else {
-                console.error(`Username not provided in senderInfo.`)
-                continue
+                // username doesn't match address so skipping this message
+                console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
+                continue;
               }
+            } else {
+              console.error(`Username not provided in senderInfo.`)
+              continue
             }
           }
           //  skip if this tx was processed before and is already in contact.messages;
@@ -3929,24 +3979,22 @@ async function processChats(chats, keys) {
           if (payload.senderInfo && !mine) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
-            if (!contact.username && contact.senderInfo.username) {
+            if (contact.username) {
+              // if we already have the username, we can use it
+              contact.senderInfo.username = contact.username;
+            } else if (contact.senderInfo.username) {
               // check if the username given with the message maps to the address of this contact
               const usernameAddress = await getUsernameAddress(contact.senderInfo.username);
-                if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
-                  contact.username = contact.senderInfo.username;
-                } else {
-                  // username doesn't match address so skipping this message
-                  console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
-                  continue;
-                }
-            } else {
-              if(contact.username) {
-                // if we already have the username, we can use it
-                contact.senderInfo.username = contact.username;
+              if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
+                contact.username = contact.senderInfo.username;
               } else {
-                console.error(`Username not provided in senderInfo.`)
-                continue
+                // username doesn't match address so skipping this message
+                console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
+                continue;
               }
+            } else {
+              console.error(`Username not provided in senderInfo.`)
+              continue
             }
           }
 
@@ -4340,7 +4388,10 @@ console.warn('tx is', txo)
 }
 
 class SearchMessagesModal {
-  constructor() {}
+  constructor() {
+    // memoized debounced search function
+    this._debouncedSearch = null;
+  }
 
   load() {
     this.modal = document.getElementById('searchModal');
@@ -4378,6 +4429,7 @@ class SearchMessagesModal {
       if (!contact.messages) return;
 
       contact.messages.forEach((message) => {
+        if (!message.message) return; // some messages like calls have no message field
         if (message.message.toLowerCase().includes(searchLower)) {
           // Highlight matching text
           const messageText = escapeHtml(message.message);
@@ -4403,7 +4455,7 @@ class SearchMessagesModal {
   displayEmptyState(containerId, message = 'No results found') {
     const resultsContainer = document.getElementById(containerId);
     resultsContainer.innerHTML = `
-          <div class="empty-state">
+          <div class="empty-state" style="display: block">
               <div class="empty-state-message">${message}</div>
           </div>
       `;
@@ -4488,27 +4540,36 @@ class SearchMessagesModal {
   }
 
   handleMessageSearchInput(e) {
-    // debounced search
-    const debouncedSearch = debounce(
-      (searchText) => {
-        const trimmedText = searchText.trim();
+    // Create the debounced function once and reuse it so earlier keypress timers are cleared
+    if (!this._debouncedSearch) {
+      this._debouncedSearch = debounce(
+        (searchText) => {
+          const trimmedText = (searchText || '').trim();
 
-        if (!trimmedText) {
-          this.searchResults.innerHTML = '';
-          return;
-        }
+          // If input is empty, clear results
+          if (!trimmedText) {
+            this.searchResults.innerHTML = '';
+            return;
+          }
 
-        const results = this.searchMessages(trimmedText);
-        if (results.length === 0) {
-          this.displayEmptyState('searchResults', 'No messages found');
-        } else {
-          this.displaySearchResults(results);
-        }
-      },
-      (searchText) => (searchText.length === 1 ? 600 : 300)
-    );
+          // Guard against stale callbacks after further typing or modal close
+          const currentText = (this.searchInput?.value || '').trim();
+          if (!this.isActive() || currentText !== trimmedText) {
+            return;
+          }
 
-    debouncedSearch(e.target.value);
+          const results = this.searchMessages(trimmedText);
+          if (results.length === 0) {
+            this.displayEmptyState('searchResults', 'No messages found');
+          } else {
+            this.displaySearchResults(results);
+          }
+        },
+        (searchText) => ((searchText || '').length === 1 ? 600 : 300)
+      );
+    }
+
+    this._debouncedSearch(e.target.value);
   }
 }
 
@@ -10984,6 +11045,13 @@ class CallInviteModal {
       others: allContacts.filter(c => ![2,3,0].includes(c.friend)).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
     };
 
+    if (allContacts.length === 0) {
+      this.modal.querySelector('.empty-state').style.display = 'block';
+      // initial counter update to ensure Invite button is disabled
+      this.updateCounter();
+      return;
+    }
+
     const sectionMeta = [
       { key: 'friends', label: 'Friends' },
       { key: 'acquaintances', label: 'Connections' },
@@ -12073,6 +12141,14 @@ class NewChatModal {
     this.closeNewChatModalButton.addEventListener('click', this.closeNewChatModal.bind(this));
     this.newChatForm.addEventListener('submit', this.handleNewChat.bind(this));
     this.recipientInput.addEventListener('input', debounce(this.handleUsernameInput.bind(this), 300));
+
+    this.scanButton = document.getElementById('newChatScanQRButton');
+    this.uploadButton = document.getElementById('newChatUploadQRButton');
+    this.hiddenFileInput = document.getElementById('newChatQRFileInput');
+
+    this.scanButton.addEventListener('click', () => this.scanUsernameFromQR());
+    this.uploadButton.addEventListener('click', () => this.hiddenFileInput.click());
+    this.hiddenFileInput.addEventListener('change', (e) => this.handleQRImageUpload(e.target.files?.[0] || null));
   }
 
   /**
@@ -12173,6 +12249,89 @@ class NewChatModal {
     // Close new chat modal and open chat modal
     this.closeNewChatModal();
     chatModal.open(recipientAddress);
+  }
+
+  // Open camera scanner and fill username from scanned QR
+  scanUsernameFromQR() {
+    try {
+      scanQRModal.fillFunction = (data) => {
+        const user = this.parseUsernameFromQRData(data);
+        if (user) {
+          this.recipientInput.value = normalizeUsername(user);
+          this.recipientInput.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+          showToast('QR does not contain a username', 0, 'error');
+        }
+      };
+      scanQRModal.open();
+    } catch (e) {
+      console.error('Error starting QR scan:', e);
+      showToast('Unable to start camera for scanning.', 0, 'error');
+    }
+  }
+
+  // Handle uploaded image; decode QR and fill username
+  async handleQRImageUpload(file) {
+    try {
+      if (!file) return;
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = objectUrl;
+      });
+      // Draw to a temporary canvas to get pixel data
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const maxDim = 1024; // avoid huge images
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      canvas.width = Math.floor(img.width * scale);
+      canvas.height = Math.floor(img.height * scale);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let decodedText = '';
+      try {
+        decodedText = qr.decodeQR({ data: imageData.data, width: imageData.width, height: imageData.height });
+      } catch (err) {
+        console.error('QR decode failed:', err);
+        showToast('Could not decode QR from image.', 0, 'error');
+        URL.revokeObjectURL(objectUrl);
+        this.hiddenFileInput.value = '';
+        return;
+      }
+      URL.revokeObjectURL(objectUrl);
+
+      const user = this.parseUsernameFromQRData(decodedText);
+      if (user) {
+        this.recipientInput.value = normalizeUsername(user);
+        this.recipientInput.dispatchEvent(new Event('input', { bubbles: true }));
+      } else {
+        showToast('QR does not contain a username.', 0, 'error');
+      }
+    } catch (e) {
+      console.error('Error processing uploaded QR image:', e);
+      showToast('Failed to process image.', 0, 'error');
+    } finally {
+      if (this.hiddenFileInput) this.hiddenFileInput.value = '';
+    }
+  }
+
+  // Extract username from common QR payloads
+  parseUsernameFromQRData(data) {
+    if (!data || typeof data !== 'string') return null;
+    // Expect strict format: liberdus://<base64(JSON)>
+    if (!data.startsWith('liberdus://')) return null;
+    try {
+      const b64 = data.substring('liberdus://'.length);
+      const json = bin2utf8(base642bin(b64));
+      const obj = JSON.parse(json);
+      const uname = normalizeUsername(String(obj?.u || ''));
+      return uname && uname.length >= 3 ? uname : null;
+    } catch (e) {
+      console.error('Invalid liberdus QR format:', e);
+      return null;
+    }
   }
 
   /**
@@ -15077,6 +15236,7 @@ class UnlockModal {
 
   open() {
     this.modal.classList.add('active');
+    setTimeout(() => this.updateButtonState(), 100);
   }
 
   close() {
