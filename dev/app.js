@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -3500,16 +3500,22 @@ async function queryNetwork(url) {
   }
 
   try {
+    const now = new Date().toLocaleTimeString();
+    console.log(`${now} query`, `${selectedGateway.web}${url}`);
+    if (network.name != 'Testnet'){
+      showToast(`${now} query ${selectedGateway.web}${url}`, 0, 'info')
+    }
     const response = await fetch(`${selectedGateway.web}${url}`);
-    console.log('query', `${selectedGateway.web}${url}`);
     const data = parse(await response.text());
     console.log('response', data);
     return data;
   } catch (error) {
     // log local hh:mm:ss
     const now = new Date().toLocaleTimeString();
-    console.error(`queryNetwork ERROR: ${error} ${url} ${now}`);
-    showToast(`queryNetwork: error: ${error} ${url} ${now}`, 0, 'error')
+    console.error(`${now} queryNetwork ERROR: ${error} ${url} `);
+    if (network.name != 'Testnet'){
+      showToast(`queryNetwork: error: ${error} ${url} ${now}`, 0, 'error')
+    }
     return null;
   }
 }
@@ -16488,7 +16494,10 @@ function longPoll() {
     // if the promise is resolved, call the longPollResult function with the data
     longPollPromise.then(data => longPollResult(data));
   } catch (error) {
-    console.error('Chat polling error:', error);
+    now = new Date().toLocaleTimeString();
+    if(network.name != 'Testnet'){
+      showToast(`chat poll error: ${error} ${now}`)
+    }
   }
 }
 longPoll.start = 0;
