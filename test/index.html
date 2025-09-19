@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.09.12.12.59" />
+    <link rel="stylesheet" href="./styles.css?v=2025.09.19.14.36" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.09.12.12.59" type="module"></script>
+    <script src="./app.js?v=2025.09.19.14.36" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -154,7 +154,7 @@
         <div class="wallet-balance">
           <div class="balance-label">Total Balance</div>
           <div class="balance-amount">
-            <span id="walletTotalBalance">0.00</span>
+            <span id="walletTotalBalance">-.--</span>
             <button class="refresh-button" id="refreshBalance">↻</button>
           </div>
         </div>
@@ -208,15 +208,23 @@
                 <label for="recipient"
                   >Recipient <span id="chatRecipientError" style="color: #dc3545; display: none"></span
                 ></label>
-                <input
-                  type="text"
-                  id="chatRecipient"
-                  class="form-control"
-                  placeholder="Enter username"
-                  required
-                  pattern="[a-zA-Z0-9]*"
-                  inputmode="text"
-                />
+                <div style="display: flex; align-items: center; gap: 0.5rem">
+                  <input
+                    type="text"
+                    id="chatRecipient"
+                    class="form-control"
+                    placeholder="Enter username"
+                    required
+                    pattern="[a-zA-Z0-9]*"
+                    inputmode="text"
+                    style="flex: 1"
+                  />
+                  <span class="input-append-icons">
+                    <button type="button" id="newChatUploadQRButton" class="icon-button" title="Upload QR image"></button>
+                    <button type="button" id="newChatScanQRButton" class="icon-button" title="Scan QR"></button>
+                  </span>
+                  <input type="file" id="newChatQRFileInput" accept="image/*" style="display: none" />
+                </div>
               </div>
               <div class="form-actions">
                 <button type="submit" class="btn btn--primary btn--pill btn--full">Continue</button>
@@ -243,6 +251,7 @@
             <li class="menu-item" id="openMonitor" data-icon="globe">Network</li>
             <li class="menu-item" id="openLogs" data-icon="file-text">Logs</li>
             <li class="menu-item" id="openHelp" data-icon="github">Help</li>
+            <li class="menu-item" id="openUpdate" data-icon="smartphone" style="display: none;">Update</li>
             <li class="menu-item" id="openAbout" data-icon="info">About</li>
             <li class="menu-item sign-out" id="handleSignOut" data-icon="log-out">Sign Out</li>
           </ul>
@@ -279,13 +288,14 @@
         </div>
         <div class="modal-content">
           <ul class="menu-list">
-            <li class="menu-item" id="welcomeOpenUpdate" data-icon="smartphone" style="display: none;">Update</li>
             <li class="menu-item" id="welcomeOpenBackup" data-icon="download">Backup</li>
             <li class="menu-item" id="welcomeOpenRestore" data-icon="rotate-ccw">Restore</li>
             <li class="menu-item" id="welcomeOpenLockModal" data-icon="lock">Lock</li>
             <li class="menu-item" id="welcomeOpenRemove" data-icon="trash-2">Remove</li>
             <li class="menu-item" id="welcomeOpenMigrate" data-icon="shuffle">Migrate</li>
             <li class="menu-item" id="welcomeOpenLaunch" data-icon="launch" style="display: none;">Launch</li>
+            <li class="menu-item" id="welcomeOpenUpdate" data-icon="smartphone" style="display: none;">Update</li>
+            <li class="menu-item" id="welcomeOpenAbout" data-icon="info">About</li>
           </ul>
         </div>
         <a class="last-item" href="#"> </a>
@@ -378,7 +388,6 @@
               <div class="about-links-section">
                 <a class="about-link" href="https://liberdus.com" target="_blank">Liberdus.com</a>
                 <a class="about-link" href="https://github.com/Liberdus/web-client-v2" target="_blank">GitHub Repo</a>
-                <button class="about-link" id="checkForUpdatesBtn">Check for Updates</button>
               </div>
 
               <div class="about-source-links">
@@ -386,8 +395,8 @@
                 <a class="about-link" href="styles.css" target="_blank">styles.css</a>
                 <a class="about-link" href="app.js" target="_blank">app.js</a>
                 <br>
-                <a class="about-link" href="crypto.js?v=2025.09.12.12.59" target="_blank">crypto.js</a>
-                <a class="about-link" href="lib.js?v=2025.09.12.12.59" target="_blank">lib.js</a>
+                <a class="about-link" href="crypto.js?v=2025.09.19.14.36" target="_blank">crypto.js</a>
+                <a class="about-link" href="lib.js?v=2025.09.19.14.36" target="_blank">lib.js</a>
                 <a class="about-link" href="network.js" target="_blank">network.js</a>
               </div>
 
@@ -655,9 +664,10 @@
                 <div class="avatar" id="myInfoAvatar"></div>
                 <div class="name" id="myInfoDisplayName"></div>
                 <div class="subtitle" id="myInfoDisplayUsername"></div>
+                <div id="myInfoQR" class="myinfo-qr"></div>
               </div>
               <!-- My info fields -->
-              <div class="contact-info-item">
+              <div class="contact-info-item" style="display: none">
                 <div class="contact-info-label">Name</div>
                 <div class="contact-info-value-container">
                   <div class="contact-info-value" id="myInfoName"></div>
@@ -920,6 +930,7 @@
               <div class="toll-container">
                 <span class="toll-label">Toll:</span>
                 <span class="toll-value" id="tollValue"></span>
+                <span class="toll-info-icon" data-icon="info"></span>
               </div>
             </div>
             <input type="hidden" id="retryOfTxId" />
@@ -1092,6 +1103,11 @@
         <div class="modal-content">
           <div class="form-container call-invite-modal-container">
             <div class="call-invite-contacts-scroll">
+                <div class="empty-state">
+                  <div></div>
+                  <div>No Contacts Found</div>
+                  <div>Add contacts to invite them to calls</div>
+                </div>
               <div class="contacts-list" id="callInviteContactsList">
                 <!-- Contacts will be populated here -->
               </div>
@@ -2120,5 +2136,10 @@
     <audio id="transferSound" src="media/paymentSound.mp3" preload="auto"></audio>
     <!-- Toast container -->
     <div class="toast-container" id="toastContainer"></div>
+    <!-- Update toast template -->
+    <template id="updateToastTemplate">
+      <div class="toast-update-title">New App Update Available</div>
+      <a href="#" class="toast-update-button" id="updateToastButton">Update now</a>
+    </template>
   </body>
 </html>

@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'p'
+const version = 'q'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -14,7 +14,7 @@ async function checkVersion() {
     newVersion = await response.text();
   } catch (error) {
     console.error('Version check failed:', error);
-    showToast('Version check failed. Your Internet connection may be down.', 0, 'error', false, 'version-check-failed');
+    showToast('Version check failed. Your Internet connection may be down.', 0, 'error');
     // Only trigger offline UI if it's a network error
     if (!navigator.onLine || error instanceof TypeError) {
       isOnline = false;
@@ -138,6 +138,9 @@ let checkPendingTransactionsIntervalId = null;
 let getSystemNoticeIntervalId = null;
 //let checkConnectivityIntervalId = null;
 
+// parameters to add to the call URL when opening the page
+const callUrlParams = `#config.toolbarButtons=["camera","microphone","desktop","hangup"]&config.disableDeepLinking=true&config.prejoinPageEnabled=false&config.startWithAudioMuted=false&startWithVideoMuted=false&userInfo.displayName=`
+
 // Used in getNetworkParams function
 const NETWORK_ACCOUNT_UPDATE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes in milliseconds
 const NETWORK_ACCOUNT_ID = '0'.repeat(64);
@@ -221,6 +224,8 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
     if (!data) {
       return 'error';
     }
+    // log username and response to logs modal for debugging
+    logsModal.log(`Checked username returned available: ${username}, response: ${JSON.stringify(data)}`);
     return 'available';
   } catch (error) {
     console.log('Error checking username:', error);
@@ -480,7 +485,10 @@ function handleVisibilityChange() {
     // if chatModal was opened, save the last message count
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
-      chatModal.lastMessageCount = contact?.messages?.length || 0;
+      // Take a one-time snapshot for this hidden session; don't overwrite if more background events fire
+      if (chatModal.lastMessageCount === null) {
+        chatModal.lastMessageCount = contact?.messages?.length || 0;
+      }
     }
     // save state when app is put into background
     saveState();
@@ -492,9 +500,11 @@ function handleVisibilityChange() {
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
       const currentCount = contact?.messages?.length || 0;
-      if (currentCount !== chatModal.lastMessageCount) {
+      if (chatModal.lastMessageCount !== null && currentCount !== chatModal.lastMessageCount) {
         chatModal.appendChatModal(true);
       }
+      // Clear lastMessageCount at the end of a hidden session
+      chatModal.lastMessageCount = null;
     }
     // send message `GetAllPanelNotifications` to React Native when app is brought back to foreground
     if (window?.ReactNativeWebView) {
@@ -683,6 +693,7 @@ class WelcomeMenuModal {
     this.restoreButton = document.getElementById('welcomeOpenRestore');
     this.removeButton = document.getElementById('welcomeOpenRemove');
     this.migrateButton = document.getElementById('welcomeOpenMigrate');
+    this.aboutButton = document.getElementById('welcomeOpenAbout');
     this.launchButton = document.getElementById('welcomeOpenLaunch');
     this.lockButton = document.getElementById('welcomeOpenLockModal');
     this.updateButton = document.getElementById('welcomeOpenUpdate');
@@ -692,6 +703,7 @@ class WelcomeMenuModal {
     this.restoreButton.addEventListener('click', () => restoreAccountModal.open());
     this.removeButton.addEventListener('click', () => removeAccountsModal.open());
     this.migrateButton.addEventListener('click', () => migrateAccountsModal.open());
+    this.aboutButton.addEventListener('click', () => aboutModal.open());
     this.lockButton.addEventListener('click', () => lockModal.open());
 
     // Show launch button if ReactNativeWebView is available
@@ -901,7 +913,7 @@ class Footer {
         }
   
         // Display error toast to user
-        showToast(`Failed to switch to ${view} view`, 0, 'error', false, `switch-view-failed-${view}`);
+        showToast(`Failed to switch to ${view} view`, 0, 'error');
       }
     }
   }
@@ -1004,7 +1016,9 @@ class ChatsScreen {
         const latestItemTimestamp = latestActivity.timestamp;
 
         // Check if the latest activity is a payment/transfer message
-        if (typeof latestActivity.amount === 'bigint') {
+        if (latestActivity.deleted === 1) {
+          previewHTML = `<span><i>${latestActivity.message}</i></span>`;
+        } else if (typeof latestActivity.amount === 'bigint') {
           // Latest item is a payment/transfer
           const amountStr = parseFloat(big2str(latestActivity.amount, 18)).toFixed(6);
           const amountDisplay = `${amountStr} ${latestActivity.symbol || 'LIB'}`;
@@ -1027,9 +1041,7 @@ class ChatsScreen {
         } else {
           // Latest item is a regular message
           const messageText = escapeHtml(latestActivity.message);
-          // Add "You:" prefix for sent messages
-          const prefix = latestActivity.my ? 'You: ' : '';
-          previewHTML = `${prefix}${truncateMessage(messageText, 50)}`; // Truncate for preview
+          previewHTML = `${truncateMessage(messageText, 50)}`; // Truncate for preview
         }
 
         // Use the determined latest timestamp for display
@@ -1050,7 +1062,7 @@ class ChatsScreen {
                 </div>
                 <div class="chat-message">
                     ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : ''}
-                    ${previewHTML}
+                    ${latestActivity.my ? 'You: ' : ''}${previewHTML}
                 </div>
             </div>
         `;
@@ -1199,7 +1211,7 @@ const contactsScreen = new ContactsScreen();
 
 class WalletScreen {
   constructor() {
-
+    this.firstTimeLoad = true;
   }
 
   load() {
@@ -1258,7 +1270,24 @@ class WalletScreen {
   async updateWalletView() {
     const walletData = myData.wallet;
 
-    await this.updateWalletBalances();
+    // Show loading toast if we're about to fetch fresh data
+    let loadingToastId = null;
+    // only show toast if myData.wallet.timestamp is not 0
+    if (this.firstTimeLoad && isOnline) {
+      loadingToastId = showToast('Loading wallet balance...', 0, 'loading');
+      this.firstTimeLoad = false;
+    }
+
+    try {
+      await this.updateWalletBalances();
+    } catch (error) {
+      console.error('Error updating wallet balances:', error);
+    } finally {
+      // Always hide loading toast if it was shown, regardless of success or failure
+      if (loadingToastId) {
+        hideToast(loadingToastId);
+      }
+    }
 
     // Update total networth
     this.totalBalance.textContent = (walletData.networth || 0).toFixed(2);
@@ -1338,7 +1367,7 @@ class WalletScreen {
     }
 
     if (failedToGetBalance) {
-      showToast(`Error fetching balance. Try again later.`, 0, 'error', false, 'balance-fetch-error');
+      showToast(`Error fetching balance. Try again later.`, 0, 'error');
       console.error('Failed to get balance for some addresses');
     }
 
@@ -1386,6 +1415,10 @@ class MenuModal {
       this.launchButton = document.getElementById('openLaunchUrl');
       this.launchButton.addEventListener('click', () => launchModal.open());
       this.launchButton.style.display = 'block';
+
+      this.updateButton = document.getElementById('openUpdate');
+      this.updateButton.addEventListener('click', () => updateWarningModal.open());
+      this.updateButton.style.display = 'block';
     }
   }
 
@@ -1443,6 +1476,11 @@ class MenuModal {
     document.querySelectorAll('.app-screen').forEach((screen) => {
       screen.classList.remove('active');
     });
+
+    // Clear notifications for this account
+    if (reactNativeApp.isReactNativeWebView) {
+      reactNativeApp.clearNotificationAddress(myAccount.keys.address);
+    }
 
     // Show welcome screen
     welcomeScreen.open();
@@ -2028,7 +2066,7 @@ class SignInModal {
     welcomeScreen.close();
     
     // Clear notification address only if signing into account that owns the notification address and only remove that account from the array 
-    if (reactNativeApp) {
+    if (reactNativeApp.isReactNativeWebView) {
       const notifiedAddresses = reactNativeApp.getNotificationAddresses();
       if (notifiedAddresses.length > 0) {
         // remove address if it's in the array
@@ -2063,7 +2101,33 @@ class SignInModal {
     }
     //        const address = netidAccounts.usernames[username].keys.address;
     const address = netidAccounts.usernames[username].address;
-    const availability = await checkUsernameAvailability(username, address);
+    let availability = await checkUsernameAvailability(username, address);
+    // Retry logic: if availability reported as 'available' but we have local account data
+    // (meaning the account previously existed locally), we suspect propagation delay.
+    if (availability === 'available' && netidAccounts?.usernames?.[username]) {
+      const localStateKey = `${username}_${netid}`;
+      const hasLocalState = !!localStorage.getItem(localStateKey);
+      if (hasLocalState) {
+        const maxAttempts = 3; // total attempts including initial (so 2 more re-tries)
+        const delayMs = 200;
+        let attempt = 1;
+        while (attempt < maxAttempts && availability === 'available') {
+          attempt++;
+          logsModal.log(`[SignInModal] Retry ${attempt}/${maxAttempts} username availability for '${username}' because local data exists but network returned 'available'.`);
+          try {
+            await new Promise(res => setTimeout(res, delayMs));
+            availability = await checkUsernameAvailability(username, address);
+          } catch (err) {
+            break; // break on explicit error; will treat as network error below if availability not set
+          }
+        }
+        if (availability === 'available') {
+          logsModal.log(`[SignInModal] After ${maxAttempts} attempts username '${username}' still reported as available. Assuming account deleted on network; offering recreate/delete options.`);
+        } else {
+          logsModal.log(`[SignInModal] Availability resolved to '${availability}' after retries for '${username}'.`);
+        }
+      }
+    }
     //console.log('usernames.length', usernames.length);
     //console.log('availability', availability);
 
@@ -2132,6 +2196,7 @@ class MyInfoModal {
     this.avatarDiv = this.avatarSection.querySelector('.avatar');
     this.nameDiv = this.avatarSection.querySelector('.name');
     this.subtitleDiv = this.avatarSection.querySelector('.subtitle');
+    this.qrContainer = this.modal.querySelector('#myInfoQR');
 
     this.backButton.addEventListener('click', () => this.close());
     this.editButton.addEventListener('click', () => myProfileModal.open());
@@ -2178,6 +2243,7 @@ class MyInfoModal {
       el.textContent = val;
       if (cfg.href) el.href = cfg.href(val);
     }
+    this.renderUsernameQR();
   }
 
   async open() {
@@ -2191,6 +2257,35 @@ class MyInfoModal {
 
   isActive() {
     return this.modal.classList.contains('active');
+  }
+
+  // Generate a QR code that contains ONLY the username as raw text
+  renderUsernameQR() {
+    try {
+      if (!this.qrContainer) return;
+      this.qrContainer.innerHTML = '';
+      const username = myAccount?.username || '';
+      if (!username) return;
+
+      // Build minimal payload and encode as liberdus://<base64(JSON)>
+      const payload = { u: username };
+      const jsonData = JSON.stringify(payload);
+      const base64Data = bin2base64(utf82bin(jsonData));
+      const qrText = `liberdus://${base64Data}`;
+
+      // Generate QR using the global qr library as GIF (consistent with other QRs)
+      const gifBytes = qr.encodeQR(qrText, 'gif', { scale: 4 });
+      const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
+      const dataUrl = 'data:image/gif;base64,' + base64;
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.width = 160;
+      img.height = 160;
+      img.alt = 'Username QR code';
+      this.qrContainer.appendChild(img);
+    } catch (e) {
+      console.error('Failed to render username QR:', e);
+    }
   }
 }
 
@@ -2362,7 +2457,6 @@ const contactInfoModal = new ContactInfoModal();
 class FriendModal {
   constructor() {
     this.currentContactAddress = null;
-    this.needsContactListUpdate = false; // track if we need to update the contact list
     this.lastChangeTimeStamp = 0; // track the last time the friend status was changed
   }
 
@@ -2391,7 +2485,7 @@ class FriendModal {
     if (!contact) return;
 
     // Set the current friend status
-    const status = contact?.friend.toString();
+    const status = contact.friend.toString();
     const radio = this.friendForm.querySelector(`input[value="${status}"]`);
     if (radio) radio.checked = true;
 
@@ -2458,18 +2552,23 @@ class FriendModal {
           console.log(
             `[handleFriendSubmit] update_toll_required transaction failed: ${res?.result?.reason}. Did not update contact status.`
           );
-          showToast('Failed to update friend status. Please try again.', 0, 'error', false, 'update-friend-status-failed');
+          showToast('Failed to update friend status. Please try again.', 0, 'error');
           return;
         }
       } catch (error) {
         console.error('Error sending transaction to update chat toll:', error);
-        showToast('Failed to update friend status. Please try again.', 0, 'error', false, 'update-friend-status-failed');
+        showToast('Failed to update friend status. Please try again.', 0, 'error');
         return;
       }
     }
-    // store the old friend status
-    contact.friendOld = contact.friend;
 
+    if ([2,3].includes(contact.friend) && [2,3].includes(Number(selectedStatus))) {
+      // set friend and friendold the same since no transaction is needed
+      contact.friendOld = Number(selectedStatus);
+    } else {
+      // store the old friend status
+      contact.friendOld = contact.friend;
+    }
     // Update friend status based on selected value
     contact.friend = Number(selectedStatus);
 
@@ -2487,9 +2586,6 @@ class FriendModal {
               ? 'Added as Friend'
               : 'Error updating friend status'
     );
-
-    // Mark that we need to update the contact list
-    this.needsContactListUpdate = true;
 
     // Update the friend button
     this.updateFriendButton(contact, 'addFriendButtonContactInfo');
@@ -2534,11 +2630,11 @@ class FriendModal {
     if (contact.friend !== contact.friendOld) {
       const SIXTY_SECONDS = 60 * 1000;
       // if the last change was more than 60 seconds ago, reset the friend status so user does not get stuck
-      if (this.lastChangeTimeStamp < (Date.now - SIXTY_SECONDS)) {
+      if (this.lastChangeTimeStamp < (Date.now() - SIXTY_SECONDS)) {
         contact.friend = contact.friendOld
       } else {
         this.submitButton.disabled = true;
-        showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'error', false, 'pending-friend-status-tx');
+        showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'error');
         return;
       }
     }
@@ -3064,6 +3160,13 @@ class CallsModal {
     this.render();
     this.modal.classList.add('active');
     this.clockTimer.start();
+    // start periodic refresh to update call button states every 5s
+    this._stateInterval = setInterval(() => {
+      if (this.modal.classList.contains('active')) {
+        this.refreshCalls();
+        this.render();
+      }
+    }, 5000); 
   }
 
   /**
@@ -3073,6 +3176,10 @@ class CallsModal {
   close() {
     this.clockTimer.stop();
     this.modal.classList.remove('active');
+    if (this._stateInterval) {
+      clearInterval(this._stateInterval);
+      this._stateInterval = null;
+    }
   }
 
   /**
@@ -3137,14 +3244,14 @@ class CallsModal {
     // Gate future calls
     if (chatModal.isFutureCall(callGroup.callTime)) {
       // have id be with call time so we don't repeat same toast for same call
-      showToast(`Call scheduled for ${chatModal.formatLocalDateTime(callGroup.callTime)}`, 2500, 'info', false, `call-scheduled-${callGroup.callTime}`);
+      showToast(`Call scheduled for ${chatModal.formatLocalDateTime(callGroup.callTime)}`, 2500, 'info');
       return;
     }
     if (!callGroup.callUrl) {
-      showToast('Call link not found', 0, 'error', false, 'call-link-not-found');
+      showToast('Call link not found', 0, 'error');
       return;
     }
-    window.open(callGroup.callUrl, '_blank');
+    window.open(callGroup.callUrl+`${callUrlParams}"${myAccount.username}"`, '_blank');
   }
 
   /**
@@ -3218,12 +3325,35 @@ class CallsModal {
         li.querySelector('.chat-name').textContent = participant.calling;
         li.querySelector('.call-time').textContent = when;
       }
+      // annotate scheduled time for state updates
+      li.setAttribute('data-call-time', String(callGroup.callTime));
       
       fragment.appendChild(li);
     });
     // remove previous items and append new items
     if (existingItems.length) existingItems.forEach((el) => el.remove());
     list.appendChild(fragment);
+    // After rendering, update button states
+    this.updateJoinButtonStates();
+  }
+
+  /**
+   * Updates the color of join buttons based on current time
+   */
+  updateJoinButtonStates() {
+    if (!this.list) return;
+      this.list.querySelectorAll('.chat-item').forEach(li => {
+        const callTime = Number(li.getAttribute('data-call-time'));
+        const joinBtn = li.querySelector('.call-join');
+        if (!joinBtn || !Number.isFinite(callTime)) return;
+        const isFuture = chatModal.isFutureCall(callTime);
+        joinBtn.classList.remove('call-join--future', 'call-join--active');
+        if (isFuture) {
+          joinBtn.classList.add('call-join--future');
+        } else {
+          joinBtn.classList.add('call-join--active');
+        }
+    });
   }
 }
 
@@ -3343,8 +3473,6 @@ async function updateAssetPricesIfNeeded() {
       const data = await response.json();
       if (data.pairs && data.pairs.length > 0 && data.pairs[0].priceUsd) {
         asset.price = parseFloat(data.pairs[0].priceUsd);
-        // asset.lastPriceUpdate = now;
-        // myData.wallet.assets[i] = asset; // Update the asset in the array
         myData.wallet.priceTimestamp = now;
         console.log(`Updated price of ${asset.symbol} to ${asset.price}`);
         console.log(JSON.stringify(data, null, 4));
@@ -3360,28 +3488,34 @@ async function updateAssetPricesIfNeeded() {
 async function queryNetwork(url) {
   //console.log('queryNetwork', url)
   if (!isOnline) {
-    //TODO: show user we are not online
     console.warn('not online');
-    showToast('queryNetwork: not online', 0, 'error', false, 'network-not-online')
-    //alert('not online')
+    showToast('queryNetwork: not online', 0, 'error')
     return null;
   }
   const selectedGateway = getGatewayForRequest();
   if (!selectedGateway) {
     console.error('No gateway available for network query');
-    showToast('queryNetwork: no gateway', 0, 'error', false, 'network-no-gateway')
+    showToast('queryNetwork: no gateway', 0, 'error')
     return null;
   }
 
   try {
+    const now = new Date().toLocaleTimeString();
+    console.log(`${now} query`, `${selectedGateway.web}${url}`);
+    if (network.name != 'Testnet'){
+      showToast(`${now} query ${selectedGateway.web}${url}`, 0, 'info')
+    }
     const response = await fetch(`${selectedGateway.web}${url}`);
-    console.log('query', `${selectedGateway.web}${url}`);
     const data = parse(await response.text());
     console.log('response', data);
     return data;
   } catch (error) {
-    console.error(`queryNetwork ERROR: ${error}`);
-    showToast(`queryNetwork: error: ${error}`, 0, 'error')
+    // log local hh:mm:ss
+    const now = new Date().toLocaleTimeString();
+    console.error(`${now} queryNetwork ERROR: ${error} ${url} `);
+    if (network.name != 'Testnet'){
+      showToast(`queryNetwork: error: ${error} ${url} ${now}`, 0, 'error')
+    }
     return null;
   }
 }
@@ -3420,7 +3554,6 @@ async function getChats(keys, retry = 1) {
     senders === undefined ? 'undefined' : JSON.stringify(senders)
   );
   if (senders && senders.chats && chatCount) {
-    // TODO check if above is working
     await processChats(senders.chats, keys);
   } else {
     console.error('getChats: no senders found')
@@ -3644,6 +3777,10 @@ async function processChats(chats, keys) {
                         }
                       }
                     }
+
+                    if (reactNativeApp.isReactNativeWebView && messageToDelete.type === 'call' && Number(messageToDelete.callTime) > 0) {
+                      reactNativeApp.sendCancelScheduledCall(contact?.username, Number(messageToDelete.callTime));
+                    }
                     
                     if (chatModal.isActive() && chatModal.address === from) {
                       chatModal.appendChatModal();
@@ -3733,24 +3870,22 @@ async function processChats(chats, keys) {
           if (payload.senderInfo && !mine){
             contact.senderInfo = cleanSenderInfo(payload.senderInfo)
             delete payload.senderInfo;
-            if (!contact.username && contact.senderInfo.username) {
+            if (contact.username) {
+              // if we already have the username, we can use it
+              contact.senderInfo.username = contact.username;
+            } else if (contact.senderInfo.username) {
               // check if the username given with the message maps to the address of this contact
               const usernameAddress = await getUsernameAddress(contact.senderInfo.username);
-                if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
-                  contact.username = contact.senderInfo.username;
-                } else {
-                  // username doesn't match address so skipping this message
-                  console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
-                  continue;
-                }
-            } else {
-              if(contact.username) {
-                // if we already have the username, we can use it
-                contact.senderInfo.username = contact.username;
+              if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
+                contact.username = contact.senderInfo.username;
               } else {
-                console.error(`Username not provided in senderInfo.`)
-                continue
+                // username doesn't match address so skipping this message
+                console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
+                continue;
               }
+            } else {
+              console.error(`Username not provided in senderInfo.`)
+              continue
             }
           }
           //  skip if this tx was processed before and is already in contact.messages;
@@ -3850,24 +3985,22 @@ async function processChats(chats, keys) {
           if (payload.senderInfo && !mine) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
-            if (!contact.username && contact.senderInfo.username) {
+            if (contact.username) {
+              // if we already have the username, we can use it
+              contact.senderInfo.username = contact.username;
+            } else if (contact.senderInfo.username) {
               // check if the username given with the message maps to the address of this contact
               const usernameAddress = await getUsernameAddress(contact.senderInfo.username);
-                if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
-                  contact.username = contact.senderInfo.username;
-                } else {
-                  // username doesn't match address so skipping this message
-                  console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
-                  continue;
-                }
-            } else {
-              if(contact.username) {
-                // if we already have the username, we can use it
-                contact.senderInfo.username = contact.username;
+              if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
+                contact.username = contact.senderInfo.username;
               } else {
-                console.error(`Username not provided in senderInfo.`)
-                continue
+                // username doesn't match address so skipping this message
+                console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
+                continue;
               }
+            } else {
+              console.error(`Username not provided in senderInfo.`)
+              continue
             }
           }
 
@@ -4261,7 +4394,10 @@ console.warn('tx is', txo)
 }
 
 class SearchMessagesModal {
-  constructor() {}
+  constructor() {
+    // memoized debounced search function
+    this._debouncedSearch = null;
+  }
 
   load() {
     this.modal = document.getElementById('searchModal');
@@ -4299,6 +4435,7 @@ class SearchMessagesModal {
       if (!contact.messages) return;
 
       contact.messages.forEach((message) => {
+        if (!message.message) return; // some messages like calls have no message field
         if (message.message.toLowerCase().includes(searchLower)) {
           // Highlight matching text
           const messageText = escapeHtml(message.message);
@@ -4324,7 +4461,7 @@ class SearchMessagesModal {
   displayEmptyState(containerId, message = 'No results found') {
     const resultsContainer = document.getElementById(containerId);
     resultsContainer.innerHTML = `
-          <div class="empty-state">
+          <div class="empty-state" style="display: block">
               <div class="empty-state-message">${message}</div>
           </div>
       `;
@@ -4409,27 +4546,36 @@ class SearchMessagesModal {
   }
 
   handleMessageSearchInput(e) {
-    // debounced search
-    const debouncedSearch = debounce(
-      (searchText) => {
-        const trimmedText = searchText.trim();
+    // Create the debounced function once and reuse it so earlier keypress timers are cleared
+    if (!this._debouncedSearch) {
+      this._debouncedSearch = debounce(
+        (searchText) => {
+          const trimmedText = (searchText || '').trim();
 
-        if (!trimmedText) {
-          this.searchResults.innerHTML = '';
-          return;
-        }
+          // If input is empty, clear results
+          if (!trimmedText) {
+            this.searchResults.innerHTML = '';
+            return;
+          }
 
-        const results = this.searchMessages(trimmedText);
-        if (results.length === 0) {
-          this.displayEmptyState('searchResults', 'No messages found');
-        } else {
-          this.displaySearchResults(results);
-        }
-      },
-      (searchText) => (searchText.length === 1 ? 600 : 300)
-    );
+          // Guard against stale callbacks after further typing or modal close
+          const currentText = (this.searchInput?.value || '').trim();
+          if (!this.isActive() || currentText !== trimmedText) {
+            return;
+          }
 
-    debouncedSearch(e.target.value);
+          const results = this.searchMessages(trimmedText);
+          if (results.length === 0) {
+            this.displayEmptyState('searchResults', 'No messages found');
+          } else {
+            this.displaySearchResults(results);
+          }
+        },
+        (searchText) => ((searchText || '').length === 1 ? 600 : 300)
+      );
+    }
+
+    this._debouncedSearch(e.target.value);
   }
 }
 
@@ -4602,17 +4748,29 @@ function createDisplayInfo(contact) {
   };
 }
 
+// Helper function to generate a hash-based deduplication key from message content
+function generateMessageHash(message) {
+  if(!message) return '';
+  if (typeof message !== 'string') {
+    console.error('Message is not a string', message);
+    return '';
+  }
+  const hex = hashBytes(message);
+  return hex.slice(0, 20);
+}
+
 // Add this function before the ContactInfoModal class
-function showToast(message, duration = 2000, type = 'default', isHTML = false, deduplicateKey = null) {
+function showToast(message, duration = 2000, type = 'default', isHTML = false) {
   const toastContainer = document.getElementById('toastContainer');
   
-  // Check for duplicate toasts if deduplicateKey is provided
-  if (deduplicateKey) {
-    const existingToast = document.querySelector(`[data-deduplicate-key="${deduplicateKey}"]`);
-    if (existingToast) {
-      // Toast with this key already exists, don't create another one
-      return existingToast.id;
-    }
+  // Generate deduplication key from message hash
+  const deduplicateKey = generateMessageHash(message);
+  
+  // Check for duplicate toasts using the deduplication key
+  const existingToast = document.querySelector(`[data-deduplicate-key="${deduplicateKey}"]`);
+  if (existingToast) {
+    // Toast with this key already exists, don't create another one
+    return existingToast.id;
   }
   
   const toast = document.createElement('div');
@@ -4628,10 +4786,8 @@ function showToast(message, duration = 2000, type = 'default', isHTML = false, d
   const toastId = 'toast-' + getCorrectedTimestamp() + '-' + Math.floor(Math.random() * 1000);
   toast.id = toastId;
   
-  // Add deduplication key if provided
-  if (deduplicateKey) {
-    toast.setAttribute('data-deduplicate-key', deduplicateKey);
-  }
+  // Add deduplication key (always set since we generate one if not provided)
+  toast.setAttribute('data-deduplicate-key', deduplicateKey);
 
   toastContainer.appendChild(toast);
 
@@ -4641,9 +4797,11 @@ function showToast(message, duration = 2000, type = 'default', isHTML = false, d
   // Show with a slight delay to ensure rendering
   setTimeout(() => {
     toast.classList.add('show');
-    // For error toasts, keep it up until the user clicks somewhere to make it go away
-    if (type === 'error') {
-      // Add a close button to error toasts
+    
+    // Duration determines behavior: <= 0 = sticky (requires close button), > 0 = auto-dismiss
+    // Exception: loading toasts are never manually closable by user
+    if (duration <= 0 && type !== 'loading') {
+      // Sticky toast - add close button and click handler (but not for loading toasts)
       toast.style.pointerEvents = 'auto';
       const closeBtn = document.createElement('button');
       closeBtn.className = 'toast-close-btn';
@@ -4651,27 +4809,17 @@ function showToast(message, duration = 2000, type = 'default', isHTML = false, d
       closeBtn.innerHTML = '&times;';
       toast.appendChild(closeBtn);
 
-      // Make the whole toast clickable
+      // Make the whole toast clickable to close
       toast.onclick = () => {
         hideToast(toastId);
       };
-    } else if (duration <= 0) {
-      // Sticky non-error toast (e.g., info) with close button
-      toast.style.pointerEvents = 'auto';
-      const closeBtn = document.createElement('button');
-      closeBtn.className = 'toast-close-btn';
-      closeBtn.setAttribute('aria-label', 'Close');
-      closeBtn.innerHTML = '&times;';
-      toast.appendChild(closeBtn);
-
-      toast.onclick = () => {
-        hideToast(toastId);
-      };
-    } else {
+    } else if (duration > 0) {
+      // Auto-dismiss toast - no close button needed
       setTimeout(() => {
         hideToast(toastId);
       }, duration);
     }
+    // If duration <= 0 and type === 'loading', do nothing - toast stays until programmatically removed
   }, 10);
 
   return toastId;
@@ -4867,7 +5015,7 @@ function updateUIForConnectivity() {
 function preventOfflineSubmit(event) {
   if (!isOnline) {
     event.preventDefault();
-    showToast('This action requires an internet connection', 0, 'error', false, 'action-requires-internet');
+    showToast('This action requires an internet connection', 0, 'error');
   }
 }
 
@@ -4940,7 +5088,7 @@ function initializeGatewayConfig() {
     myData.network = parse(stringify(network))
   }
   else if (myData.network.gateway.length <= 0){
-    showToast("No gateway server available; edit network.js file", 0, "error", false, "no-gateway-server")
+    showToast("No gateway server available; edit network.js file", 0, "error")
     return;
   }
 
@@ -5195,7 +5343,7 @@ class RemoveAccountModal {
       if(myAccount && this.isActive()) {
         username = myAccount.username;
       } else {
-        showToast('No account selected for removal', 0, 'error', false, 'no-account-selected-removal');
+        showToast('No account selected for removal', 0, 'error');
         return;
       }
     }
@@ -5456,11 +5604,9 @@ class BackupAccountModal {
     document.getElementById('backupForm').addEventListener('submit', (event) => {
       this.handleSubmit(event);
     });
-    
-    // Add password validation on input with debounce
-    this.debouncedUpdateButtonState = debounce(() => this.updateButtonState(), 250);
-    this.passwordInput.addEventListener('input', this.debouncedUpdateButtonState);
-    this.passwordConfirmInput.addEventListener('input', this.debouncedUpdateButtonState);
+
+    this.passwordInput.addEventListener('input', () => this.updateButtonState());
+    this.passwordConfirmInput.addEventListener('input', () => this.updateButtonState());
   }
 
   open() {
@@ -5519,6 +5665,14 @@ class BackupAccountModal {
    */
   async handleSubmit(event) {
     event.preventDefault();
+
+    // Enforce confirmation match when a password is provided
+    const password = this.passwordInput.value || '';
+    const confirmPassword = this.passwordConfirmInput.value || '';
+    if (password.length > 0 && confirmPassword !== password) {
+      this.updateButtonState();
+      return;
+    }
 
     // Determine which backup method to use
     if (myData && !this.backupAllAccountsCheckbox.checked) {
@@ -5597,7 +5751,7 @@ class BackupAccountModal {
       this.close();
     } catch (error) {
       console.error('Encryption failed:', error);
-      showToast('Failed to encrypt data. Please try again.', 0, 'error', false, 'encrypt-data-failed');
+      showToast('Failed to encrypt data. Please try again.', 0, 'error');
       // Re-enable button so user can try again
       this.updateButtonState();
     }
@@ -5654,7 +5808,7 @@ class BackupAccountModal {
       this.close();
     } catch (error) {
       console.error('Encryption failed:', error);
-      showToast('Failed to encrypt data. Please try again.', 0, 'error', false, 'encrypt-data-failed');
+      showToast('Failed to encrypt data. Please try again.', 0, 'error');
       // Re-enable button so user can try again
       this.updateButtonState();
     }
@@ -5897,12 +6051,12 @@ class RestoreAccountModal {
     if (backupData.lock) {
       const password = this.backupAccountLock.value || '';
       if (!password) {
-        showToast('Backup password required to unlock accounts in the backup file', 0, 'error', false, 'backup-password-required');
+        showToast('Backup password required to unlock accounts in the backup file', 0, 'error');
         return false;
       }
       backupEncKey = await passwordToKey(password + 'liberdusData');
       if (!backupEncKey) {
-        showToast('Invalid backup password', 0, 'error', false, 'invalid-backup-password');
+        showToast('Invalid backup password', 0, 'error');
         return false;
       }
     }
@@ -5964,7 +6118,7 @@ class RestoreAccountModal {
         let decrypted = value;
         if (backupData.lock) {
             if (!backupEncKey) {
-              showToast('Backup Account password required to unlock accounts in the backup file', 0, 'error', false, 'backup-account-password-required');
+              showToast('Backup Account password required to unlock accounts in the backup file', 0, 'error');
               return false;
             }
           try {
@@ -5985,7 +6139,7 @@ class RestoreAccountModal {
         let finalValue = decrypted;
           if (localStorage.lock) {
           if (!lockModal?.encKey) {
-            showToast('Local lock is set but unlock state is missing. Please unlock before importing.', 0, 'error', false, 'local-lock-missing-unlock');
+            showToast('Local lock is set but unlock state is missing. Please unlock before importing.', 0, 'error');
             return false;
           }
           try {
@@ -6026,7 +6180,7 @@ class RestoreAccountModal {
       // Check if data is encrypted and decrypt if necessary
       if (!isNotEncryptedData) {
         if (!this.passwordInput.value.trim()) {
-          showToast('Password required for encrypted data', 0, 'error', false, 'password-required-encrypted-data');
+          showToast('Password required for encrypted data', 0, 'error');
           return;
         }
         fileContent = decryptData(fileContent, this.passwordInput.value.trim());
@@ -6181,7 +6335,7 @@ class TollModal {
     this.saveButton.disabled = true;
 
     if (isNaN(newTollValue) || newTollValue < 0) {
-      showToast('Invalid toll amount entered.', 0, 'error', false, 'invalid-toll-amount');
+      showToast('Invalid toll amount entered.', 0, 'error');
       return;
     }
 
@@ -6190,7 +6344,7 @@ class TollModal {
     // Check if the toll is non-zero but less than minimum
     if (newToll > 0n) {
       if (this.currentCurrency === 'LIB' && newToll < this.minToll) {
-        showToast(`Toll must be at least ${parseFloat(big2str(this.minToll, 18)).toFixed(6)} LIB or 0 LIB`, 0, 'error', false, 'toll-too-low-lib');
+        showToast(`Toll must be at least ${parseFloat(big2str(this.minToll, 18)).toFixed(6)} LIB or 0 LIB`, 0, 'error');
         return;
       }
       if (this.currentCurrency === 'USD') {
@@ -6198,7 +6352,7 @@ class TollModal {
         const newTollLIB = bigxnum2big(newToll, (1 / scalabilityFactor).toString());
         if (newTollLIB < this.minToll) {
           const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
-          showToast(`Toll must be at least ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD or 0 USD`, 0, 'error', false, 'toll-too-low-usd');
+          showToast(`Toll must be at least ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD or 0 USD`, 0, 'error');
           return;
         }
       }
@@ -6207,7 +6361,7 @@ class TollModal {
     // Add maximum toll validation
     if (this.currentCurrency === 'LIB') {
       if (newTollValue > MAX_TOLL) {
-        showToast(`Toll cannot exceed ${MAX_TOLL} LIB`, 0, 'error', false, 'toll-too-high-lib');
+        showToast(`Toll cannot exceed ${MAX_TOLL} LIB`, 0, 'error');
         return;
       }
     } else {
@@ -6215,7 +6369,7 @@ class TollModal {
       const scalabilityFactor = getStabilityFactor();
       const maxTollUSD = MAX_TOLL * scalabilityFactor;
       if (newTollValue > maxTollUSD) {
-        showToast(`Toll cannot exceed ${maxTollUSD.toFixed(2)} USD`, 0, 'error', false, 'toll-too-high-usd');
+        showToast(`Toll cannot exceed ${maxTollUSD.toFixed(2)} USD`, 0, 'error');
         return;
       }
     }
@@ -6476,7 +6630,7 @@ class InviteModal {
     const message = this.inviteMessageInput.value.trim();
 
     if (!message) {
-      showToast('Please enter a message to share', 0, 'error', false, 'message-required-to-share');
+      showToast('Please enter a message to share', 0, 'error');
       return;
     }
 
@@ -6498,7 +6652,7 @@ class InviteModal {
       await this.shareLiberdusInvite(message);
     } catch (err) {
       // shareLiberdusInvite will show its own errors; rely on cooldown to re-enable
-      showToast('Could not share invitation. Try copying manually.', 0, 'error', false, 'could-not-share-invitation');
+      showToast('Could not share invitation. Try copying manually.', 0, 'error');
     }
   }
 
@@ -6538,7 +6692,7 @@ class InviteModal {
       await navigator.clipboard.writeText(text);
       showToast("Invite copied to clipboard!", 3000, "success");
     } catch {
-      showToast("Could not copy invite link.", 0, "error", false, "could-not-copy-invite-link");
+      showToast("Could not copy invite link.", 0, "error");
     }
   }
 }
@@ -6553,18 +6707,9 @@ class AboutModal {
     this.versionDisplay = document.getElementById('versionDisplayAbout');
     this.networkName = document.getElementById('networkNameAbout');
     this.netId = document.getElementById('netIdAbout');
-    this.checkForUpdatesBtn = document.getElementById('checkForUpdatesBtn');
 
     // Set up event listeners
     this.closeButton.addEventListener('click', () => this.close());
-
-    // Only show "Check for Updates" button if user is in React Native app
-    if (window.ReactNativeWebView) {
-      this.checkForUpdatesBtn.style.display = 'inline-block';
-      this.checkForUpdatesBtn.addEventListener('click', () => this.openStore());
-    } else {
-      this.checkForUpdatesBtn.style.display = 'none';
-    }
 
     // Set version and network information once during initialization
     this.versionDisplay.textContent = myVersion + ' ' + version;
@@ -6582,20 +6727,8 @@ class AboutModal {
   }
 
   openStore() {
-    // This method only runs when user is in React Native app
-    const userAgent = navigator.userAgent.toLowerCase();
-    let storeUrl;
-
-    if (userAgent.includes('android')) {
-      storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
-    } else if (userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ios')) {
-      storeUrl = 'https://testflight.apple.com/join/zSRCWyxy';
-    } else {
-      storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
-    }
-
     // Show update warning modal
-    updateWarningModal.open(storeUrl);
+    updateWarningModal.open();
   }
 }
 const aboutModal = new AboutModal();
@@ -6613,11 +6746,28 @@ class UpdateWarningModal {
     this.closeButton.addEventListener('click', () => this.close());
     this.backupFirstBtn.addEventListener('click', () => backupAccountModal.open());
     this.proceedToStoreBtn.addEventListener('click', () => this.proceedToStore());
+
+    // Event delegation for dynamically created update toast button
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target && (target.id === 'updateToastButton' || target.classList.contains('toast-update-button'))) {
+        event.preventDefault();
+        this.open();
+      }
+    }, { capture: true });
   }
 
-  open(storeUrl) {
-    // Store the URL for later use
-    this.storeUrl = storeUrl;
+  open() {
+    // This method only runs when user is in React Native app
+    const userAgent = navigator.userAgent.toLowerCase();
+
+    if (userAgent.includes('android')) {
+      this.storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
+    } else if (userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ios')) {
+      this.storeUrl = 'https://testflight.apple.com/join/zSRCWyxy';
+    } else {
+      this.storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
+    }
     this.modal.classList.add('active');
   }
 
@@ -7233,7 +7383,7 @@ class ValidatorStakingModal {
     // Check if we successfully retrieved a nominee address from the DOM
     if (!nominee || nominee.length < 10) {
       // Add a basic sanity check for length
-      showToast('Could not find nominated validator.', 0, 'error', false, 'could-not-find-nominated-validator');
+      showToast('Could not find nominated validator.', 0, 'error');
       console.warn('ValidatorStakingModal: Nominee not found or invalid in DOM element #validator-nominee.');
       return;
     }
@@ -7250,7 +7400,7 @@ class ValidatorStakingModal {
     if (info) {
       const { remainingMs, remainingReason } = info;
       if (remainingReason === 'validator active') {
-        showToast(`Unstake unavailable (validator active).`, 0, 'error', false, 'unstake-unavailable-validator-active');
+        showToast(`Unstake unavailable (validator active).`, 0, 'error');
         return;
       } else if (remainingMs > 0) {
         const durationInWords = this.formatDuration(remainingMs);
@@ -7297,7 +7447,7 @@ class ValidatorStakingModal {
     } catch (error) {
       console.error('Error submitting unstake transaction:', error);
       // Provide a user-friendly error message
-      showToast('Unstake transaction failed. Network or server error.', 0, 'error', false, 'unstake-tx-failed');
+      showToast('Unstake transaction failed. Network or server error.', 0, 'error');
     } finally {
       this.unstakeButton.disabled = false;
       this.backButton.disabled = false;
@@ -7598,7 +7748,7 @@ class StakeValidatorModal {
 
     // Basic Validation
     if (!nodeAddress || !amountStr) {
-      showToast('Please fill in all fields.', 0, 'error', false, 'please-fill-all-fields');
+      showToast('Please fill in all fields.', 0, 'error');
       this.submitButton.disabled = false;
       return;
     }
@@ -7607,7 +7757,7 @@ class StakeValidatorModal {
     try {
       amount_in_wei = bigxnum2big(wei, amountStr);
     } catch (error) {
-      showToast('Invalid amount entered.', 0, 'error', false, 'invalid-amount-entered');
+      showToast('Invalid amount entered.', 0, 'error');
       this.submitButton.disabled = false;
       return;
     }
@@ -7639,7 +7789,7 @@ class StakeValidatorModal {
       }
     } catch (error) {
       console.error('Stake transaction error:', error);
-      showToast('Stake transaction failed. See console for details.', 0, 'error', false, 'stake-tx-failed');
+      showToast('Stake transaction failed. See console for details.', 0, 'error');
     } finally {
       this.submitButton.disabled = false;
       this.backButton.disabled = false;
@@ -7796,7 +7946,7 @@ class StakeValidatorModal {
       this.nodeAddressInput.dispatchEvent(new Event('input'));
     } else {
       console.error('Stake node address input field not found!');
-      showToast('Could not find stake address field.', 0, 'error', false, 'could-not-find-stake-address-field');
+      showToast('Could not find stake address field.', 0, 'error');
     }
   }
 
@@ -7871,7 +8021,7 @@ class ChatModal {
   constructor() {
     this.newestReceivedMessage = null;
     this.newestSentMessage = null;
-    this.lastMessageCount = 0;
+    this.lastMessageCount = null;
 
     // used by updateTollValue and updateTollRequired
     this.toll = null;
@@ -7892,6 +8042,10 @@ class ChatModal {
     // Keyboard detection properties
     this.isKeyboardVisible = false; // Track keyboard state
     this.initialViewportHeight = window.innerHeight; // Store initial viewport height
+    
+    // Track whether we've locked background/modal scroll
+    this.scrollLocked = false;
+    this._touchMoveBlocker = null; // blocks touch outside messages container
   }
 
   /**
@@ -8013,14 +8167,18 @@ class ChatModal {
       if (heightDifference > 150) { // 150px threshold for keyboard detection
         this.isKeyboardVisible = true;
         console.log('⌨️ Keyboard detected as open (viewport height decreased by', heightDifference, 'px)');
+        this.lockBackgroundScroll();
       } else if (heightDifference < 50) { // If height increased or stayed similar, keyboard is likely closed
         this.isKeyboardVisible = false;
         /* console.log('⌨️ Keyboard detected as closed (viewport height difference:', heightDifference, 'px)'); */
+        this.unlockBackgroundScroll();
       }
     });
 
     // Add focus event listener for message input to handle scrolling
     this.messageInput.addEventListener('focus', () => {
+      // Extra guard: immediately lock background/modal scroll when focusing input
+      this.lockBackgroundScroll();
       if (this.messagesContainer) {
         // Check if we're already at the bottom (within 50px threshold)
         const isAtBottom =
@@ -8029,10 +8187,16 @@ class ChatModal {
           // Wait for keyboard to appear and viewport to adjust
           setTimeout(() => {
             this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
-            this.messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); // To provide smoother, more reliable scrolling on mobile.
+            // removed for now since RN android causing extra scroll behavior
+            /* this.messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); // To provide smoother, more reliable scrolling on mobile. */
           }, 500); // Increased delay to ensure keyboard is fully shown
         }
       }
+    });
+
+    // Unlock when input loses focus (keyboard likely dismissed)
+    this.messageInput.addEventListener('blur', () => {
+      this.unlockBackgroundScroll();
     });
 
     this.chatSendMoneyButton.addEventListener('click', () => {
@@ -8063,7 +8227,14 @@ class ChatModal {
 
     // Voice recording event listeners
     if (this.voiceRecordButton) {
-      this.voiceRecordButton.addEventListener('click', () => {
+      this.voiceRecordButton.addEventListener('click', async () => {
+        const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
+        const sufficientBalance = await validateBalance(tollInLib);
+        if (!sufficientBalance) {
+          const msg = `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}`;
+          showToast(msg, 0, 'error');
+          return;
+        }
         voiceRecordingModal.open();
       });
     }
@@ -8104,7 +8275,7 @@ class ChatModal {
       tollContainer.style.cursor = 'pointer';
       tollContainer.addEventListener('click', () => {
         const message = this.getTollInfoMessage();
-        showToast(message, 0, 'toll', true, 'toll-info-modal');
+        showToast(message, 0, 'toll', true);
       });
     }
 
@@ -8214,6 +8385,8 @@ class ChatModal {
    * @returns {void}
    */
   close() {
+    // Ensure scroll is unlocked when closing
+    this.unlockBackgroundScroll();
     if (isOnline) {
       const needsToSendReadTx = this.needsToSend();
       console.log(`[close] needsToSendReadTx: ${needsToSendReadTx}`);
@@ -8224,7 +8397,7 @@ class ChatModal {
       
       this.sendReclaimTollTransaction(this.address);
     } else {
-      showToast('Offline: toll not processed', 0, 'error', false, 'offline-toll-not-processed');
+      showToast('Offline: toll not processed', 0, 'error');
     }
 
     // Save any unsaved draft before closing
@@ -8413,7 +8586,7 @@ class ChatModal {
 
     // if user is blocked, don't send message, show toast
     if (myData.contacts[this.address].tollRequiredToSend == 2) {
-      showToast('You are blocked by this user', 0, 'error', false, 'user-blocked');
+      showToast('You are blocked by this user', 0, 'error');
       this.sendButton.disabled = false;
       return;
     }
@@ -8437,7 +8610,8 @@ class ChatModal {
       const amount = this.tollRequiredToSend ? this.toll : 0n;
       const sufficientBalance = await validateBalance(amount);
       if (!sufficientBalance) {
-        showToast('Insufficient balance for toll and fee', 0, 'error', false, 'insufficient-balance-toll');
+        const msg = `Insufficient balance for fee${amount > 0n ? ' and toll' : ''}`;
+        showToast(msg, 0, 'error');
         this.sendButton.disabled = false;
         return;
       }
@@ -8462,7 +8636,7 @@ class ChatModal {
       // Get sender's keys from wallet
       const keys = myAccount.keys;
       if (!keys) {
-        showToast('Keys not found for sender address', 0, 'error', false, 'keys-not-found-sender');
+        showToast('Keys not found for sender address', 0, 'error');
         return;
       }
 
@@ -8699,7 +8873,7 @@ console.warn('in send message', txid)
           updateTransactionStatus(txid, currentAddress, 'failed', 'message');
           this.appendChatModal();
         } else {
-          showToast('Edit failed to send', 0, 'error', false, 'edit-failed-send');
+          showToast('Edit failed to send', 0, 'error');
           // Revert optimistic edit
           if (originalMsg && originalMsgState) {
             originalMsg.message = originalMsgState.message;
@@ -8736,7 +8910,7 @@ console.warn('in send message', txid)
       }
     } catch (error) {
       console.error('Message error:', error);
-      showToast('Failed to send message. Please try again.', 0, 'error', false, 'message-send-failed');
+      showToast('Failed to send message. Please try again.', 0, 'error');
       // Revert optimistic edit on exception
       if (isEdit && originalMsg && originalMsgState) {
         originalMsg.message = originalMsgState.message;
@@ -8968,9 +9142,10 @@ console.warn('in send message', txid)
               const callTimeMs = item.callTime || 0;
               const scheduleHTML = this.buildCallScheduleHTML(callTimeMs);
               // Render call message with a left circular phone icon (clickable) and plain text to the right
+              // TODO - remove the href and instead have it call a function which will open the URL and at the time of opening it adds the callUrlParam and username
               messageTextHTML = `
                 <div class="call-message">
-                  <a href="${item.message}" target="_blank" rel="noopener noreferrer" class="call-message-phone-button" aria-label="Join Video Call">
+                  <a href='${item.message}${callUrlParams}"${myAccount.username}"' target="_blank" rel="noopener noreferrer" class="call-message-phone-button" aria-label="Join Video Call">
                     <span class="sr-only">Join Video Call</span>
                   </a>
                   <div>
@@ -9218,7 +9393,7 @@ console.warn('in send message', txid)
 
     // limit to 5 files
     if (this.fileAttachments.length >= 5) {
-      showToast('You can only attach up to 5 files.', 0, 'error', false, 'too-many-files');
+      showToast('You can only attach up to 5 files.', 0, 'error');
       event.target.value = ''; // Reset file input
       return;
     }
@@ -9226,7 +9401,7 @@ console.warn('in send message', txid)
     // File size limit (e.g., 10MB)
     const maxSize = 10 * 1024 * 1024; // 10MB in bytes
     if (file.size > maxSize) {
-      showToast('File size too large. Maximum size is 10MB.', 0, 'error', false, 'file-too-large');
+      showToast('File size too large. Maximum size is 10MB.', 0, 'error');
       event.target.value = ''; // Reset file input
       return;
     }
@@ -9325,7 +9500,7 @@ console.warn('in send message', txid)
       if (error.name === 'AbortError') {
         hideToast(loadingToastId);
       } else {
-        showToast('Error processing file attachment', 0, 'error', false, 'file-processing-error');
+        showToast('Error processing file attachment', 0, 'error');
       }
       
       // Re-enable buttons
@@ -9578,7 +9753,7 @@ console.warn('in send message', txid)
       if (err.name === 'AbortError') {
         hideToast(loadingToastId);
       } else {
-        showToast(`Decryption failed.`, 0, 'error', false, 'message-decryption-failed');
+        showToast(`Decryption failed.`, 0, 'error');
       }
     }
   }
@@ -9590,6 +9765,52 @@ console.warn('in send message', txid)
   isKeyboardOpen() {
     // Use the tracked state from resize listener for more reliable detection
     return this.isKeyboardVisible;
+  }
+
+  /**
+   * Lock background and modal-level scrolling so only the messages container can scroll
+   */
+  lockBackgroundScroll() {
+    if (this.scrollLocked) return;
+    this.scrollLocked = true;
+    try {
+      // Prevent page/body scrolling
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.overflow = 'hidden';
+      // Prevent modal container from scrolling; keep messages container scrollable
+      if (this.modal) {
+        this.modal.dataset.prevOverflowY = this.modal.style.overflowY || '';
+        this.modal.style.overflowY = 'hidden';
+      }
+      // Allow vertical pan only within messages container; block elsewhere
+      const allowEl = this.messagesContainer;
+      this._touchMoveBlocker = (e) => {
+        if (!allowEl || !e.target.closest('.messages-container')) {
+          e.preventDefault();
+        }
+      };
+      document.addEventListener('touchmove', this._touchMoveBlocker, { passive: false });
+    } catch (_) {}
+  }
+
+  /**
+   * Unlock background and modal-level scrolling after keyboard is hidden
+   */
+  unlockBackgroundScroll() {
+    if (!this.scrollLocked) return;
+    this.scrollLocked = false;
+    try {
+      document.documentElement.style.overflow = '';
+      document.body.style.overflow = '';
+      if (this.modal) {
+        this.modal.style.overflowY = this.modal.dataset.prevOverflowY || '';
+        delete this.modal.dataset.prevOverflowY;
+      }
+      if (this._touchMoveBlocker) {
+        document.removeEventListener('touchmove', this._touchMoveBlocker, { passive: false });
+        this._touchMoveBlocker = null;
+      }
+    } catch (_) {}
   }
 
   /**
@@ -9883,14 +10104,14 @@ console.warn('in send message', txid)
    * @param {HTMLElement} messageEl
    */
   handleJoinCall(messageEl) {
-    const callLink = messageEl.querySelector('.call-message a')?.href;
-    if (!callLink) return showToast('Call link not found', 2000, 'error');
+    const callUrl = messageEl.querySelector('.call-message a')?.href;
+    if (!callUrl) return showToast('Call link not found', 2000, 'error');
     // Gate future scheduled calls (context menu path)
     if (this.gateScheduledCall(messageEl)) {
       this.closeContextMenu();
       return;
     }
-    window.open(callLink, '_blank');
+    window.open(callUrl+`${callUrlParams}"${myAccount.username}"`, '_blank');
     this.closeContextMenu();
   }
 
@@ -9917,6 +10138,14 @@ console.warn('in send message', txid)
         return showToast('Message already deleted', 2000, 'info');
       }
       
+
+      if (reactNativeApp.isReactNativeWebView && message.type === 'call') {
+        const callTimeNum = Number(message.callTime) || 0;
+        if (callTimeNum > 0) {
+          reactNativeApp.sendCancelScheduledCall(contact?.username, callTimeNum);
+        }
+      }
+
       // Mark as deleted and clear payment info if present
       Object.assign(message, {
         deleted: 1,
@@ -9954,7 +10183,7 @@ console.warn('in send message', txid)
       }, 300);
     } catch (error) {
       console.error('Error deleting message:', error);
-      showToast('Failed to delete message', 0, 'error', false, 'delete-message-failed');
+      showToast('Failed to delete message', 0, 'error');
     }
   }
 
@@ -9984,13 +10213,22 @@ console.warn('in send message', txid)
 
       // Check if the message was sent by the current user
       if (!message.my) {
-        return showToast('You can only delete your own messages for all', 0, 'error', false, 'can-only-delete-own-messages');
+        return showToast('You can only delete your own messages for all', 0, 'error');
       }
 
       // Create and send a "delete" message
       const keys = myAccount.keys;
       if (!keys) {
-        showToast('Keys not found', 0, 'error', false, 'keys-not-found-delete');
+        showToast('Keys not found', 0, 'error');
+        return;
+      }
+
+      const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
+
+      const sufficientBalance = await validateBalance(tollInLib);
+      if (!sufficientBalance) {
+        const msg = `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}`;
+        showToast(msg, 0, 'error');
         return;
       }
 
@@ -10000,7 +10238,7 @@ console.warn('in send message', txid)
       const pqRecPubKey = myData.contacts[this.address]?.pqPublic;
       if (!ok || !recipientPubKey || !pqRecPubKey) {
         console.log(`No public/PQ key found for recipient ${this.address}`);
-        showToast('Failed to get recipient key', 0, 'error', false, 'failed-to-get-recipient-key-delete');
+        showToast('Failed to get recipient key', 0, 'error');
         return;
       }
 
@@ -10027,7 +10265,6 @@ console.warn('in send message', txid)
       };
 
       // Prepare and send the delete message transaction
-      let tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
       const deleteMessageObj = await this.createChatMessage(this.address, payload, tollInLib, keys);
       await signObj(deleteMessageObj, keys);
       const deleteTxid = getTxid(deleteMessageObj);
@@ -10047,7 +10284,7 @@ console.warn('in send message', txid)
       
     } catch (error) {
       console.error('Delete for all error:', error);
-      showToast('Failed to delete message. Please try again.', 0, 'error', false, 'delete-message-retry-failed');
+      showToast('Failed to delete message. Please try again.', 0, 'error');
     }
   }
 
@@ -10241,16 +10478,20 @@ console.warn('in send message', txid)
       if (required !== 0) {
         const username = contact.username || `${this.address.slice(0, 8)}...${this.address.slice(-6)}`;
         if (required === 2) {
-          showToast('You are blocked by this user', 0, 'error', false, 'user-blocked');
+          showToast('You are blocked by this user', 0, 'error');
         } else {
           showToast(
             `You can only call people who have added you as a friend or connection. Ask ${username} to add you as a friend or connection`,
             0,
-            'info',
-            false,
-            'call-permission-required'
+            'info'
           );
         }
+        return;
+      }
+
+      const sufficientBalance = await validateBalance(0n);
+      if (!sufficientBalance) {
+        showToast('Insufficient balance for fee', 0, 'error');
         return;
       }
 
@@ -10266,15 +10507,15 @@ console.warn('in send message', txid)
       const randomHex = bin2hex(randomBytes).slice(0, 20);
 
       // Create the Meet URL
-      const meetUrl = `https://meet.liberdus.com/${randomHex}`;
+      const callUrl = `https://meet.liberdus.com/${randomHex}`;
       
       // Open immediately only if call is now
       if (chosenCallTime === 0) {
-        window.open(meetUrl, '_blank');
+        window.open(callUrl+`${callUrlParams}"${myAccount.username}"`, '_blank');
       }
       
       // Send a call message to the contact with callTime (0 or future timestamp)
-      await this.sendCallMessage(meetUrl, chosenCallTime);
+      await this.sendCallMessage(callUrl, chosenCallTime);
       
       if (chosenCallTime && chosenCallTime > 0) {
         const when = new Date(chosenCallTime - timeSkew); // convert back to local wall-clock for display
@@ -10283,7 +10524,7 @@ console.warn('in send message', txid)
       
     } catch (error) {
       console.error('Error handling call user:', error);
-      showToast('Failed to start call. Please try again.', 0, 'error', false, 'call-start-failed');
+      showToast('Failed to start call. Please try again.', 0, 'error');
     }
   }
 
@@ -10295,7 +10536,7 @@ console.warn('in send message', txid)
   async sendCallMessage(meetUrl, callTime = 0) {
     // if user is blocked, don't send message, show toast
     if (myData.contacts[this.address].tollRequiredToSend == 2) {
-      showToast('You are blocked by this user', 0, 'error', false, 'user-blocked');
+      showToast('You are blocked by this user', 0, 'error');
       return;
     }
 
@@ -10313,7 +10554,7 @@ console.warn('in send message', txid)
       // Get sender's keys from wallet
       const keys = myAccount.keys;
       if (!keys) {
-        showToast('Keys not found for sender address', 0, 'error', false, 'keys-not-found-sender');
+        showToast('Keys not found for sender address', 0, 'error');
         return;
       }
 
@@ -10323,7 +10564,7 @@ console.warn('in send message', txid)
       const pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
       if (!ok || !recipientPubKey || !pqRecPubKey) {
         console.log(`no public/PQ key found for recipient ${currentAddress}`);
-        showToast('Failed to get recipient key', 0, 'error', false, 'failed-to-get-recipient-key-call');
+        showToast('Failed to get recipient key', 0, 'error');
         return;
       }
 
@@ -10371,7 +10612,7 @@ console.warn('in send message', txid)
       payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
 
       // Create and send the call message transaction
-      let tollInLib = myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : this.toll;
+      const tollInLib = myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : this.toll;
       const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
       // if there's a callobj.calltime is present and is 0 set callType to true to make recipient phone ring
       if (callObj?.callTime === 0) {
@@ -10421,7 +10662,7 @@ console.warn('in send message', txid)
       
     } catch (error) {
       console.error('Call message error:', error);
-      showToast('Failed to send call invitation. Please try again.', 0, 'error', false, 'failed-to-send-call-invitation');
+      showToast('Failed to send call invitation. Please try again.', 0, 'error');
     }
   }
 
@@ -10496,7 +10737,7 @@ console.warn('in send message', txid)
     payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
 
     // Calculate toll
-    let tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
+    const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
 
     // Create and send transaction
     const chatMessageObj = await this.createChatMessage(this.address, payload, tollInLib, myAccount.keys);
@@ -10549,7 +10790,7 @@ console.warn('in send message', txid)
     } catch (error) {
       console.error('Failed to send voice message to network:', error);
       newMessage.status = 'failed';
-      showToast('Voice message failed to send', 0, 'error', false, 'voice-message-failed-to-send');
+      showToast('Voice message failed to send', 0, 'error');
     }
 
     this.appendChatModal();
@@ -10603,7 +10844,7 @@ console.warn('in send message', txid)
     const msgIdx = voiceMessageElement.dataset.msgIdx;
 
     if (!voiceUrl) {
-      showToast('Voice message URL not found', 0, 'error', false, 'voice-message-url-not-found');
+      showToast('Voice message URL not found', 0, 'error');
       return;
     }
 
@@ -10764,7 +11005,7 @@ console.warn('in send message', txid)
       
       audio.onerror = (error) => {
         console.error('Error playing voice message:', error);
-        showToast('Error playing voice message', 0, 'error', false, 'error-playing-voice-message');
+        showToast('Error playing voice message', 0, 'error');
         buttonElement.disabled = false;
         if (seekEl) seekEl.value = 0;
         // Clean up on error
@@ -10871,6 +11112,13 @@ class CallInviteModal {
       others: allContacts.filter(c => ![2,3,0].includes(c.friend)).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
     };
 
+    if (allContacts.length === 0) {
+      this.modal.querySelector('.empty-state').style.display = 'block';
+      // initial counter update to ensure Invite button is disabled
+      this.updateCounter();
+      return;
+    }
+
     const sectionMeta = [
       { key: 'friends', label: 'Friends' },
       { key: 'acquaintances', label: 'Connections' },
@@ -10951,7 +11199,7 @@ class CallInviteModal {
       for (const addr of addresses) {
         const keys = myAccount.keys;
         if (!keys) {
-          showToast('Keys not found', 0, 'error', false, 'keys-not-found-call-invite');
+          showToast('Keys not found', 0, 'error');
           break;
         }
 
@@ -10986,22 +11234,19 @@ class CallInviteModal {
         const chatId = hashBytes(sortedAddresses.join(''));
         const chatIdAccount = await queryNetwork(`/messages/${chatId}/toll`);
         const toIndex = sortedAddresses.indexOf(longAddress(addr));
-        const tollRequiredToSend = chatIdAccount.toll?.required?.[toIndex] ?? 1;
+        const tollRequiredToSend = chatIdAccount?.toll?.required?.[toIndex] ?? 1;
         let toll = 0n;
+        // 0 => no toll required (recipient added you as friend/connection)
+        // 1 => toll required (recipient has NOT added you)
+        // 2 => blocked
+        if (tollRequiredToSend === 2) {
+          showToast(`You cannot invite ${contact.username || addr} (you are blocked)`, 0, 'warning');
+          continue;
+        }
         if (tollRequiredToSend === 1) {
-          const contactData = await queryNetwork(`/account/${longAddress(addr)}`);
-          if (!contactData || !contactData.account) {
-            showToast(`Skipping ${contact.username || addr} (account not found)`, 2000, 'warning');
-            continue;
-          }
-          const tollUnit = contactData.account?.data?.tollUnit || 'LIB';
-          const factor = getStabilityFactor();
-          if (tollUnit === 'USD') {
-            // Convert toll to LIB
-            toll = bigxnum2big(contactData.account.data.toll, (1.0 / factor).toString());
-          } else {
-            toll = contactData.account.data.toll;
-          }
+          const username = (contact?.username) || `${addr.slice(0, 8)}...${addr.slice(-6)}`;
+          showToast(`You can only invite people who have added you as a friend or connection. Ask ${username} to add you as a friend or connection`, 0, 'info');
+          continue;
         }
 
         const messageObj = await chatModal.createChatMessage(addr, messagePayload, toll, keys);
@@ -11235,14 +11480,14 @@ class CallScheduleDateModal {
     const minuteVal = this.minuteSelect.value;
     const ampmVal = this.ampmSelect.value;
     if (!dateVal || hourVal === '' || minuteVal === '') {
-      showToast('Please pick a date and time', 0, 'error', false, 'please-pick-a-date-and-time');
+      showToast('Please pick a date and time', 0, 'error');
       return;
     }
     const parsed = this._parseDateInput(dateVal);
     const hour12 = Number(hourVal);
     const minute = Number(minuteVal);
     if (!parsed || Number.isNaN(hour12) || Number.isNaN(minute)) {
-      showToast('Invalid date/time selected', 0, 'error', false, 'invalid-date-time-selected');
+      showToast('Invalid date/time selected', 0, 'error');
       return;
     }
     const hour24 = this._convert12To24(hour12, ampmVal);
@@ -11252,7 +11497,7 @@ class CallScheduleDateModal {
     const nowCorrected = getCorrectedTimestamp();
     const minAllowed = nowCorrected - 5 * 60 * 1000;
     if (corrected < minAllowed) {
-      showToast('Please choose a date or time in the future', 0, 'error', false, 'call-schedule-date-modal-future-time');
+      showToast('Please choose a date or time in the future', 0, 'error');
       return;
     }
     this._closeWith(corrected);
@@ -11609,7 +11854,7 @@ class VoiceRecordingModal {
       
     } catch (error) {
       console.error('Error starting voice recording:', error);
-      showToast('Could not access microphone. Please check permissions.', 0, 'error', false, 'microphone-permission-error');
+      showToast('Could not access microphone. Please check permissions.', 0, 'error');
     }
   }
 
@@ -11730,14 +11975,14 @@ class VoiceRecordingModal {
       
       audio.onerror = (error) => {
         console.error('Error playing voice message:', error);
-        showToast('Error playing voice message', 0, 'error', false, 'error-playing-voice-message');
+        showToast('Error playing voice message', 0, 'error');
         URL.revokeObjectURL(audioUrl);
         this.stopListening();
       };
       
       audio.play().catch(error => {
         console.error('Error playing voice message:', error);
-        showToast('Error playing voice message', 0, 'error', false, 'error-playing-voice-message');
+        showToast('Error playing voice message', 0, 'error');
         this.stopListening();
       });
     }
@@ -11963,6 +12208,14 @@ class NewChatModal {
     this.closeNewChatModalButton.addEventListener('click', this.closeNewChatModal.bind(this));
     this.newChatForm.addEventListener('submit', this.handleNewChat.bind(this));
     this.recipientInput.addEventListener('input', debounce(this.handleUsernameInput.bind(this), 300));
+
+    this.scanButton = document.getElementById('newChatScanQRButton');
+    this.uploadButton = document.getElementById('newChatUploadQRButton');
+    this.hiddenFileInput = document.getElementById('newChatQRFileInput');
+
+    this.scanButton.addEventListener('click', () => this.scanUsernameFromQR());
+    this.uploadButton.addEventListener('click', () => this.hiddenFileInput.click());
+    this.hiddenFileInput.addEventListener('change', (e) => this.handleQRImageUpload(e.target.files?.[0] || null));
   }
 
   /**
@@ -12063,6 +12316,89 @@ class NewChatModal {
     // Close new chat modal and open chat modal
     this.closeNewChatModal();
     chatModal.open(recipientAddress);
+  }
+
+  // Open camera scanner and fill username from scanned QR
+  scanUsernameFromQR() {
+    try {
+      scanQRModal.fillFunction = (data) => {
+        const user = this.parseUsernameFromQRData(data);
+        if (user) {
+          this.recipientInput.value = normalizeUsername(user);
+          this.recipientInput.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+          showToast('QR does not contain a username', 0, 'error');
+        }
+      };
+      scanQRModal.open();
+    } catch (e) {
+      console.error('Error starting QR scan:', e);
+      showToast('Unable to start camera for scanning.', 0, 'error');
+    }
+  }
+
+  // Handle uploaded image; decode QR and fill username
+  async handleQRImageUpload(file) {
+    try {
+      if (!file) return;
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = objectUrl;
+      });
+      // Draw to a temporary canvas to get pixel data
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const maxDim = 1024; // avoid huge images
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      canvas.width = Math.floor(img.width * scale);
+      canvas.height = Math.floor(img.height * scale);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let decodedText = '';
+      try {
+        decodedText = qr.decodeQR({ data: imageData.data, width: imageData.width, height: imageData.height });
+      } catch (err) {
+        console.error('QR decode failed:', err);
+        showToast('Could not decode QR from image.', 0, 'error');
+        URL.revokeObjectURL(objectUrl);
+        this.hiddenFileInput.value = '';
+        return;
+      }
+      URL.revokeObjectURL(objectUrl);
+
+      const user = this.parseUsernameFromQRData(decodedText);
+      if (user) {
+        this.recipientInput.value = normalizeUsername(user);
+        this.recipientInput.dispatchEvent(new Event('input', { bubbles: true }));
+      } else {
+        showToast('QR does not contain a username.', 0, 'error');
+      }
+    } catch (e) {
+      console.error('Error processing uploaded QR image:', e);
+      showToast('Failed to process image.', 0, 'error');
+    } finally {
+      if (this.hiddenFileInput) this.hiddenFileInput.value = '';
+    }
+  }
+
+  // Extract username from common QR payloads
+  parseUsernameFromQRData(data) {
+    if (!data || typeof data !== 'string') return null;
+    // Expect strict format: liberdus://<base64(JSON)>
+    if (!data.startsWith('liberdus://')) return null;
+    try {
+      const b64 = data.substring('liberdus://'.length);
+      const json = bin2utf8(base642bin(b64));
+      const obj = JSON.parse(json);
+      const uname = normalizeUsername(String(obj?.u || ''));
+      return uname && uname.length >= 3 ? uname : null;
+    } catch (e) {
+      console.error('Invalid liberdus QR format:', e);
+      return null;
+    }
   }
 
   /**
@@ -12462,7 +12798,7 @@ class CreateAccountModal {
     } catch (error) {
       this.reEnableControls();
       if (waitingToastId) hideToast(waitingToastId);
-      showToast(`Failed to fetch network parameters, try again later.`, 0, 'error', false, 'failed-to-fetch-network-parameters');
+      showToast(`Failed to fetch network parameters, try again later.`, 0, 'error');
       console.error('Failed to fetch network parameters, using defaults:', error);
       return;
     }
@@ -12999,7 +13335,7 @@ class SendAssetFormModal {
 
     // Check if we have any assets
     if (!walletData.assets || walletData.assets.length === 0) {
-      showToast('No addresses available', 0, 'error', false, 'no-addresses-available');
+      showToast('No addresses available', 0, 'error');
       return;
     }
 
@@ -13205,7 +13541,7 @@ class SendAssetFormModal {
         const context = canvas.getContext('2d');
         if (!context) {
           console.error('Could not get 2d context from canvas');
-          showToast('Error processing image', 0, 'error', false, 'error-processing-image');
+          showToast('Error processing image', 0, 'error');
           event.target.value = ''; // Reset file input
           return;
         }
@@ -13228,20 +13564,20 @@ class SendAssetFormModal {
             } else {
               console.error('No valid fill function provided for QR file select');
               // Fallback or default behavior if needed, e.g., show generic error
-              showToast('Internal error handling QR data', 0, 'error', false, 'internal-error-handling-qr-data');
+              showToast('Internal error handling QR data', 0, 'error');
             }
           } else {
             // qr.decodeQR might throw an error instead of returning null/undefined
             // This else block might not be reached if errors are always thrown
             console.error('No QR code found in image (qr.js)');
-            showToast('No QR code found in image', 0, 'error', false, 'no-qr-code-found-in-image');
+            showToast('No QR code found in image', 0, 'error');
             // Clear the form fields in case of failure to find QR code
             targetModal.resetForm();
           }
         } catch (error) {
           console.error('Error processing QR code image with qr.js:', error);
           // Assume error means no QR code found or decoding failed
-          showToast('Could not read QR code from image', 0, 'error', false, 'could-not-read-qr-code-from-image');
+          showToast('Could not read QR code from image', 0, 'error');
           // Clear the form fields in case of error
           targetModal.resetForm();
 
@@ -13251,7 +13587,7 @@ class SendAssetFormModal {
       };
       img.onerror = function () {
         console.error('Error loading image');
-        showToast('Error loading image file', 0, 'error', false, 'error-loading-image-file');
+        showToast('Error loading image file', 0, 'error');
         event.target.value = ''; // Reset the file input value
         // Clear the form fields in case of image loading error
         targetModal.resetForm();
@@ -13261,7 +13597,7 @@ class SendAssetFormModal {
 
     reader.onerror = function () {
       console.error('Error reading file');
-      showToast('Error reading file', 0, 'error', false, 'error-reading-file');
+      showToast('Error reading file', 0, 'error');
       event.target.value = ''; // Reset the file input value
     };
 
@@ -13279,7 +13615,7 @@ class SendAssetFormModal {
     // Explicitly check for the required prefix
     if (!data || !data.startsWith('liberdus://')) {
       console.error("Invalid payment QR code format. Missing 'liberdus://' prefix.", data);
-      showToast('Invalid payment QR code format.', 0, 'error', false, 'invalid-payment-qr-format');
+      showToast('Invalid payment QR code format.', 0, 'error');
       // Optionally clear fields or leave them as they were
       this.usernameInput.value = '';
       this.amountInput.value = '';
@@ -13329,7 +13665,7 @@ class SendAssetFormModal {
       this.amountInput.dispatchEvent(new Event('input'));
     } catch (error) {
       console.error('Error parsing payment QR data:', error, data);
-      showToast('Failed to parse payment QR data.', 0, 'error', false, 'failed-to-parse-payment-qr-data');
+      showToast('Failed to parse payment QR data.', 0, 'error');
       // Clear fields on error
       this.usernameInput.value = '';
       this.amountInput.value = '';
@@ -13390,7 +13726,7 @@ class SendAssetConfirmModal {
     // if it's your own username disable the send button
     if (username == myAccount.username) {
       confirmButton.disabled = true;
-      showToast('You cannot send assets to yourself', 0, 'error', false, 'you-cannot-send-assets-to-yourself');
+      showToast('You cannot send assets to yourself', 0, 'error');
       return;
     }
 
@@ -13418,19 +13754,19 @@ class SendAssetConfirmModal {
       const amountStr = big2str(amount, 18).slice(0, -16);
       const feeStr = big2str(txFeeInLIB, 18).slice(0, -16);
       const balanceStr = big2str(balance, 18).slice(0, -16);
-      showToast(`Insufficient balance: ${amountStr} + ${feeStr} (fee) > ${balanceStr} LIB`, 0, 'error', false, `insufficient-balance-${amountStr}-${feeStr}-${balanceStr}`);
+      showToast(`Insufficient balance: ${amountStr} + ${feeStr} (fee) > ${balanceStr} LIB`, 0, 'error');
       cancelButton.disabled = false;
       return;
     }
 
     // Validate username - must be username; address not supported
     if (username.startsWith('0x')) {
-      showToast('Address not supported; enter username instead.', 0, 'error', false, 'address-not-supported-enter-username-instead');
+      showToast('Address not supported; enter username instead.', 0, 'error');
       cancelButton.disabled = false;
       return;
     }
     if (username.length < 3) {
-      showToast('Username too short', 0, 'error', false, 'username-too-short');
+      showToast('Username too short', 0, 'error');
       cancelButton.disabled = false;
       return;
     }
@@ -13445,14 +13781,14 @@ class SendAssetConfirmModal {
   */
       const data = await queryNetwork(`/address/${usernameHash}`);
       if (!data || !data.address) {
-        showToast('Username not found', 0, 'error', false, 'username-not-found');
+        showToast('Username not found', 0, 'error');
         cancelButton.disabled = false;
         return;
       }
       toAddress = normalizeAddress(data.address);
     } catch (error) {
       console.error('Error looking up username:', error);
-      showToast('Error looking up username', 0, 'error', false, 'error-looking-up-username');
+      showToast('Error looking up username', 0, 'error');
       cancelButton.disabled = false;
       return;
     }
@@ -14804,7 +15140,7 @@ class LockModal {
     if (newPassword !== confirmNewPassword) {
       this.lockButton.disabled = true;
       // Keep button disabled - passwords don't match
-      showToast('Passwords do not match. Please try again.', 0, 'error', false, 'passwords-do-not-match');
+      showToast('Passwords do not match. Please try again.', 0, 'error');
       return;
     }
 
@@ -14816,7 +15152,7 @@ class LockModal {
       // check if old password is empty
       if (oldPassword.length === 0) {
         if (waitingToastId) hideToast(waitingToastId);
-        showToast('Please enter your old password.', 0, 'error', false, 'please-enter-your-old-password');
+        showToast('Please enter your old password.', 0, 'error');
         return;
       }
 
@@ -14825,7 +15161,7 @@ class LockModal {
       if (!key) {
         // remove the loading toast
         if (waitingToastId) hideToast(waitingToastId);
-        showToast('Invalid password. Please try again.', 0, 'error', false, 'invalid-password');
+        showToast('Invalid password. Please try again.', 0, 'error');
         return;
       }
       if (key !== localStorage.lock) {
@@ -14833,7 +15169,7 @@ class LockModal {
         if (waitingToastId) hideToast(waitingToastId);
         // clear the old password input
         this.oldPasswordInput.value = '';
-        showToast('Invalid password. Please try again.', 0, 'error', false, 'invalid-password');
+        showToast('Invalid password. Please try again.', 0, 'error');
         return;
       }
     }
@@ -14863,7 +15199,7 @@ class LockModal {
       if (!key) {
         // remove the loading toast
         if (waitingToastId) hideToast(waitingToastId);
-        showToast('Invalid password. Please try again.', 0, 'error', false, 'invalid-password');
+        showToast('Invalid password. Please try again.', 0, 'error');
         return;
       }
 
@@ -14885,7 +15221,7 @@ class LockModal {
       this.close();
     } catch (error) {
       console.error('Encryption failed:', error);
-      showToast('Failed to encrypt password. Please try again.', 0, 'error', false, 'failed-to-encrypt-password');
+      showToast('Failed to encrypt password. Please try again.', 0, 'error');
       // remove the loading toast
       if (waitingToastId) hideToast(waitingToastId);
     }
@@ -14967,6 +15303,7 @@ class UnlockModal {
 
   open() {
     this.modal.classList.add('active');
+    setTimeout(() => this.updateButtonState(), 100);
   }
 
   close() {
@@ -14987,7 +15324,7 @@ class UnlockModal {
     if (!key) {
       // remove the loading toast
       if (waitingToastId) hideToast(waitingToastId);
-      showToast('Invalid password. Please try again.', 0, 'error', false, 'invalid-password');
+      showToast('Invalid password. Please try again.', 0, 'error');
       return;
     }
     if (key === localStorage.lock) {
@@ -15007,7 +15344,7 @@ class UnlockModal {
       }
     } else {
       if (waitingToastId) hideToast(waitingToastId);
-      showToast('Invalid password. Please try again.', 0, 'error', false, 'invalid-password');
+      showToast('Invalid password. Please try again.', 0, 'error');
     }
 
     // remove the loading toast
@@ -15070,7 +15407,7 @@ class LaunchModal {
     event.preventDefault();
     const url = this.urlInput.value;
     if (!url) {
-      showToast('Please enter a URL', 0, 'error', false, 'please-enter-a-url');
+      showToast('Please enter a URL', 0, 'error');
       return;
     }
     
@@ -15192,7 +15529,10 @@ class ReactNativeApp {
             // if chatModal was opened, save the last message count
             if (chatModal.isActive() && chatModal.address) {
               const contact = myData.contacts[chatModal.address];
-              chatModal.lastMessageCount = contact?.messages?.length || 0;
+              // Set snapshot only once during a hidden session to avoid Android overwriting
+              if (chatModal.lastMessageCount === null) {
+                chatModal.lastMessageCount = contact?.messages?.length || 0;
+              }
             }
             saveState();
           }
@@ -15212,7 +15552,9 @@ class ReactNativeApp {
             if (data?.data?.appVersion) {
               this.appVersion = data.data.appVersion || `N/A`
               // Update the welcome screen to display the app version
-              welcomeScreen.updateAppVersionDisplay(this.appVersion); 
+              welcomeScreen.updateAppVersionDisplay(this.appVersion);
+              // Check if app version needs update
+              this.checkAppVersionUpdate();
             }
             // Handle device tokens
             if (data.data.deviceToken) {
@@ -15519,7 +15861,7 @@ class ReactNativeApp {
         const selectedGateway = getGatewayForRequest();
         if (!selectedGateway) {
           console.error('No gateway available for subscription request');
-          showToast('No gateway available', 0, 'error', false, 'no-gateway-available');
+          showToast('No gateway available', 0, 'error');
           return;
         }
 
@@ -15656,6 +15998,77 @@ class ReactNativeApp {
       username,
       timestamp
     });
+  }
+  
+  sendCancelScheduledCall(username, timestamp){
+    this.postMessage({
+      type: 'CANCEL_SCHEDULE_CALL',
+      username,
+      timestamp
+    });
+  }
+
+  /**
+   * Check if the current app version needs to be updated
+   * Compares the native app version with the required version from network.js
+   */
+  checkAppVersionUpdate() {
+    if (!this.appVersion || !network?.app_version) {
+      console.warn('❌ Version check skipped – missing data');
+      return;
+    }
+
+    // Determine platform (iOS or Android)
+    const ua = navigator.userAgent.toLowerCase();
+    const platform = /android/.test(ua) ? 'android' : (/iphone|ipad|ios/.test(ua) ? 'ios' : 'android');
+
+    const requiredVersion = network.app_version[platform];
+    if (!requiredVersion) {
+      console.warn('❌ No required version for platform: ' + platform);
+      return;
+    }
+
+    // Compare versions (format: YYYY.MMDD.HHmm)
+    const currentVersion = this.appVersion;
+    const isUpdateNeeded = this.compareVersions(currentVersion, requiredVersion) < 0;
+
+    if (isUpdateNeeded) {
+      // Show toast notification on welcome page
+      this.showUpdateNotification();
+    }
+  }
+
+  /**
+   * Compare two version strings in format YYYY.MMDD.HHmm
+   * @param {string} version1 - Current version
+   * @param {string} version2 - Required version
+   * @returns {number} -1 if version1 is older, 1 if newer, 0 if equal
+   */
+  compareVersions(version1, version2) {
+    // Convert version strings to comparable numbers
+    // Format: YYYY.MMDD.HHmm -> YYYYMMDDHHmm
+    const v1 = parseInt(version1.replace(/\D/g, ''));
+    const v2 = parseInt(version2.replace(/\D/g, ''));
+    
+    if (v1 < v2) return -1;  // version1 is older
+    if (v1 > v2) return 1;   // version1 is newer
+    return 0;                // versions are equal
+  }
+
+  /**
+   * Show update notification toast on the welcome screen
+   */
+  showUpdateNotification() {
+    // Only show notification if we're on the welcome screen
+    if (!welcomeScreen.screen || welcomeScreen.screen.style.display === 'none') {
+      console.warn('❌ Update toast skipped – welcome not visible');
+      return;
+    }
+
+    // Use template from index.html if available; fallback to inline HTML
+    const tpl = document.getElementById('updateToastTemplate');
+    const message = tpl.innerHTML 
+    showToast(message, 0, 'info', true);
   }
 }
 
@@ -15839,6 +16252,8 @@ async function checkPendingTransactions() {
             showToast(`Update contact status failed: ${failureReason}. Reverting contact to old status.`, 0, 'error');
             // revert the local myData.contacts[toAddress].friend to the old value
             myData.contacts[pendingTxInfo.to].friend = myData.contacts[pendingTxInfo.to].friendOld;
+            // update contact list since friend status was reverted
+            contactsScreen.updateContactsList();
           } else if (type === 'read') {
             showToast(`Read transaction failed: ${failureReason}`, 0, 'error');
             // revert the local myData.contacts[toAddress].timestamp to the old value
@@ -15994,7 +16409,7 @@ async function getNetworkParams() {
         console.error(`getNetworkParams: Network ID mismatch. Network ID from network.js: ${network.netid}, Network ID from parameters: ${parameters.networkId}`);
         console.log(parameters)
         // show toast notification with the error message
-        showToast(`Network ID mismatch. Check network configuration in network.js.`, 0, 'error', false, 'network-id-mismatch');
+        showToast(`Network ID mismatch. Check network configuration in network.js.`, 0, 'error');
       }
       return;
     } else {
@@ -16140,7 +16555,10 @@ function longPoll() {
     // if the promise is resolved, call the longPollResult function with the data
     longPollPromise.then(data => longPollResult(data));
   } catch (error) {
-    console.error('Chat polling error:', error);
+    const now = new Date().toLocaleTimeString();
+    if(network.name != 'Testnet'){
+      showToast(`chat poll error: ${error} ${now}`)
+    }
   }
 }
 longPoll.start = 0;
