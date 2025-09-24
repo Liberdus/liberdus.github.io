@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -334,6 +334,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   walletScreen.load();
 
   // About and Contact Modals
+  sourceModal.load();
   aboutModal.load();
   updateWarningModal.load();
   helpModal.load();
@@ -1014,6 +1015,7 @@ class ChatsScreen {
 
         let previewHTML = ''; // Default
         const latestItemTimestamp = latestActivity.timestamp;
+        const contactName = getContactDisplayName(contact);
 
         // Check if the latest activity is a payment/transfer message
         if (latestActivity.deleted === 1) {
@@ -1031,7 +1033,20 @@ class ChatsScreen {
             previewHTML += ` <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 50)}</span>`;
           }
         } else if (latestActivity.type === 'call') {
-          previewHTML = `<span><i>Join call</i></span>`;
+          const callStartForPreview = Number(latestActivity.callTime || 0) > 0
+            ? Number(latestActivity.callTime)
+            : Number(latestActivity.timestamp || latestActivity.sent_timestamp || 0);
+          const isExpired = chatModal.isCallExpired(callStartForPreview);
+
+          if (isExpired) {
+            // Over 2 hours since call time: show as plain text without join button
+            const label = latestActivity.my
+              ? `You called ${escapeHtml(contactName)}`
+              : `${escapeHtml(contactName)} called you`;
+            previewHTML = `<span><i>${label}</i></span>`;
+          } else {
+            previewHTML = `<span><i>Join call</i></span>`;
+          }
         } else if (latestActivity.type === 'vm') {
           previewHTML = `<span><i>Voice message</i></span>`;
         } else if ((!latestActivity.message || String(latestActivity.message).trim() === '') && latestActivity.xattach) {
@@ -1046,7 +1061,6 @@ class ChatsScreen {
 
         // Use the determined latest timestamp for display
         const timeDisplay = formatTime(latestItemTimestamp);
-        const contactName = getContactDisplayName(contact);
 
         // Create the list item element
         const li = document.createElement('li');
@@ -1061,8 +1075,8 @@ class ChatsScreen {
                     <div class="chat-time">${timeDisplay} <span class="chat-time-chevron"></span></div>
                 </div>
                 <div class="chat-message">
-                    ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : ''}
-                    ${latestActivity.my ? 'You: ' : ''}${previewHTML}
+                  ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : (contact.draft ? `<span class="chat-draft" title="Draft"></span>` : '')}
+                  ${latestActivity.my ? 'You: ' : ''}${previewHTML}
                 </div>
             </div>
         `;
@@ -1477,10 +1491,6 @@ class MenuModal {
       screen.classList.remove('active');
     });
 
-    // Clear notifications for this account
-    if (reactNativeApp.isReactNativeWebView) {
-      reactNativeApp.clearNotificationAddress(myAccount.keys.address);
-    }
 
     // Show welcome screen
     welcomeScreen.open();
@@ -1498,7 +1508,6 @@ class MenuModal {
     }
 
     await reactNativeApp.handleNativeAppSubscribe();
-    reactNativeApp.sendClearNotifications();
     await checkVersion();
 
     // checkVersion() may update online status
@@ -1903,7 +1912,7 @@ class SignInModal {
     const netidAccounts = signInData.netidAccounts || { usernames: {} };
 
     // Get the notified addresses and sort usernames to prioritize them
-    const notifiedAddresses = reactNativeApp ? reactNativeApp.getNotificationAddresses() : [];
+    const notifiedAddresses = reactNativeApp.isReactNativeWebView ? reactNativeApp.getNotificationAddresses() : [];
     const notifiedAddressSet = new Set(Array.isArray(notifiedAddresses) ? notifiedAddresses : []);
     let sortedUsernames = [...usernames];
     const notifiedUsernameSet = new Set();
@@ -2064,15 +2073,6 @@ class SignInModal {
     // Close modal and proceed to app
     this.close();
     welcomeScreen.close();
-    
-    // Clear notification address only if signing into account that owns the notification address and only remove that account from the array 
-    if (reactNativeApp.isReactNativeWebView) {
-      const notifiedAddresses = reactNativeApp.getNotificationAddresses();
-      if (notifiedAddresses.length > 0) {
-        // remove address if it's in the array
-        reactNativeApp.clearNotificationAddress(myAccount.keys.address);
-      }
-    }
     
     // Log storage information after successful sign-in
     try {
@@ -3264,7 +3264,7 @@ class CallsModal {
     const callGroup = this.calls[idx];
     if (!callGroup) return;
 
-    groupCallParticipantsModal.open(callGroup, li);
+    groupCallParticipantsModal.open(callGroup);
   }
 
   /**
@@ -3360,33 +3360,17 @@ class CallsModal {
 const callsModal = new CallsModal();
 
 class GroupCallParticipantsModal {
-  constructor() {
-    this.modal = null;
-    this.participantsList = null;
-    this.closeButton = null;
-    this.currentCallGroup = null;
-    this.currentListItem = null;
-    this._onParticipantClick = this._onParticipantClick.bind(this);
-    this._onJoinClick = this._onJoinClick.bind(this);
-    this._onCancel = this._onCancel.bind(this);
-  }
+  constructor() {}
 
   load() {
     this.modal = document.getElementById('groupCallParticipantsModal');
-    if (!this.modal) return;
     this.participantsList = document.getElementById('groupCallParticipantsList');
     this.closeButton = document.getElementById('closeGroupCallParticipantsModal');
-
-    [this.participantsList, this.closeButton]
-      .forEach((el, i) => {
-        if (el) el.addEventListener('click', [this._onParticipantClick, this._onJoinClick, this._onCancel, this._onCancel][i]);
-      });
+    this.participantsList.addEventListener('click', (e) => this.onParticipantClick(e));
+    this.closeButton.addEventListener('click', () => this.close());
   }
 
-  open(callGroup, listItem) {
-    this.currentCallGroup = callGroup;
-    this.currentListItem = listItem;
-    
+  open(callGroup) {
     // Clear existing participants
     if (this.participantsList) {
       this.participantsList.innerHTML = '';
@@ -3414,34 +3398,20 @@ class GroupCallParticipantsModal {
     this.modal?.classList.add('active');
   }
 
-  _onParticipantClick(e) {
+  onParticipantClick(e) {
     const participantItem = e.target.closest('.participant-item');
     if (!participantItem) return;
     
     const address = participantItem.getAttribute('data-address');
     if (address) {
+      this.close();
       // Directly open the chat modal for the selected participant
       chatModal.open(address);
-      this.close();
     }
-  }
-
-  _onJoinClick() {
-    // Directly call the join function from callsModal
-    if (this.currentListItem) {
-      callsModal.handleJoinClick(this.currentListItem);
-    }
-    this.close();
-  }
-
-  _onCancel() {
-    this.close();
   }
 
   close() {
-    this.modal?.classList.remove('active');
-    this.currentCallGroup = null;
-    this.currentListItem = null;
+    this.modal.classList.remove('active');
   }
 }
 
@@ -3837,10 +3807,10 @@ async function processChats(chats, keys) {
                   payload.type = 'call';
                   // Use callTime when present; default to 0 (immediate)
                   payload.callTime = Number(parsedMessage.callTime) || 0;
-                  if (reactNativeApp.isReactNativeWebView) {
-                    // If callTime is greater than the current time, send it to the native app
-                    if (payload.callTime && payload.callTime > Date.now()) {
-                      reactNativeApp.sendScheduledCall(contact.username, payload.callTime)
+                  if (payload.callTime && reactNativeApp.isReactNativeWebView) {
+                    // Send it to the native app to display the scheduled call notification
+                    if (!chatModal.isCallExpired(payload.callTime) || chatModal.isFutureCall(payload.callTime)) {
+                      reactNativeApp.sendScheduledCall(contact.username, payload.callTime);
                     }
                   }
                 } else if (parsedMessage.type === 'vm') {
@@ -6698,6 +6668,25 @@ class InviteModal {
 }
 const inviteModal = new InviteModal();
 
+class SourceModal {
+  constructor() {}
+
+  load() {
+    this.modal = document.getElementById('sourceModal');
+    this.closeButton = document.getElementById('closeSourceModal');
+    this.closeButton.addEventListener('click', () => this.close());
+  }
+
+  open() {
+    this.modal.classList.add('active');
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+  }
+}
+const sourceModal = new SourceModal();
+
 class AboutModal {
   constructor() {}
 
@@ -6707,9 +6696,14 @@ class AboutModal {
     this.versionDisplay = document.getElementById('versionDisplayAbout');
     this.networkName = document.getElementById('networkNameAbout');
     this.netId = document.getElementById('netIdAbout');
+    this.openSourceLink = document.getElementById('openSourceModal');
 
     // Set up event listeners
     this.closeButton.addEventListener('click', () => this.close());
+    this.openSourceLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      sourceModal.open();
+    });
 
     // Set version and network information once during initialization
     this.versionDisplay.textContent = myVersion + ' ' + version;
@@ -8362,6 +8356,23 @@ class ChatModal {
       chatsScreen.updateChatList();
     }
 
+    if(reactNativeApp.isReactNativeWebView) {
+      // --- Bell and app icon clearing logic ---
+      // 1. Check if all contacts for signed-in account have unread == 0
+      const allRead = Object.values(myData.contacts).every(c => c.unread === 0);
+      if (allRead) {
+        // Clear bell icon for signed-in account
+        logsModal.log('Clearing notification address for', myAccount.keys.address);
+        reactNativeApp.clearNotificationAddress(myAccount.keys.address);
+      }
+      // 2. Check if all bell icons are cleared local storage notification addresses empty
+      const notificationAddresses = reactNativeApp.getNotificationAddresses();
+      if (notificationAddresses.length === 0) {
+        // Clear bubble on app icon
+        reactNativeApp.sendClearNotifications();
+      }
+    }
+
     // clear file attachments
     this.fileAttachments = [];
     this.showAttachmentPreview(); // Hide preview
@@ -9138,21 +9149,35 @@ console.warn('in send message', txid)
           if (item.message && item.message.trim()) {
             // Check if this is a call message
             if (item.type === 'call') {
-              // Build scheduled label if in the future
-              const callTimeMs = item.callTime || 0;
-              const scheduleHTML = this.buildCallScheduleHTML(callTimeMs);
-              // Render call message with a left circular phone icon (clickable) and plain text to the right
-              // TODO - remove the href and instead have it call a function which will open the URL and at the time of opening it adds the callUrlParam and username
-              messageTextHTML = `
-                <div class="call-message">
-                  <a href='${item.message}${callUrlParams}"${myAccount.username}"' target="_blank" rel="noopener noreferrer" class="call-message-phone-button" aria-label="Join Video Call">
-                    <span class="sr-only">Join Video Call</span>
-                  </a>
-                  <div>
-                    <div class="call-message-text">Join Video Call</div>
-                    ${scheduleHTML}
-                  </div>
-                </div>`;
+              // Determine call timing and whether join should be allowed
+              const callTimeMs = Number(item.callTime || 0);
+              const callStart = callTimeMs > 0 ? callTimeMs : Number(item.timestamp || item.sent_timestamp || 0);
+              const isExpired = this.isCallExpired(callStart);
+
+              if (isExpired) {
+                // Over 2 hours since call time: show as plain text without join button
+                const theirName = getContactDisplayName(contact);
+                const label = item.my ? `You called ${escapeHtml(theirName)}` : `${escapeHtml(theirName)} called you`;
+                messageTextHTML = `
+                  <div class="call-message">
+                    <div class="call-message-text"><i>${label}</i></div>
+                  </div>`;
+              } else {
+                // Build scheduled label if in the future
+                const scheduleHTML = this.buildCallScheduleHTML(callTimeMs);
+                // Render call message with a left circular phone icon (clickable) and plain text to the right
+                // TODO - remove the href and instead have it call a function which will open the URL and at the time of opening it adds the callUrlParam and username
+                messageTextHTML = `
+                  <div class="call-message">
+                    <a href='${item.message}${callUrlParams}"${myAccount.username}"' target="_blank" rel="noopener noreferrer" class="call-message-phone-button" aria-label="Join Video Call">
+                      <span class="sr-only">Join Video Call</span>
+                    </a>
+                    <div>
+                      <div class="call-message-text">Join Video Call</div>
+                      ${scheduleHTML}
+                    </div>
+                  </div>`;
+              }
             } else {
               // Regular message rendering
               messageTextHTML = `<div class="message-content" style="white-space: pre-wrap; margin-top: ${attachmentsHTML ? '2px' : '0'};">${linkifyUrls(item.message)}</div>`;
@@ -9882,8 +9907,15 @@ console.warn('in send message', txid)
     }
     if (isCall) {
       if (copyOption) copyOption.style.display = 'none';
-      if (joinOption) joinOption.style.display = 'flex';
-      if (inviteOption) inviteOption.style.display = 'flex';
+      // Determine if join is allowed (not future, not expired > 2h)
+      const callTimeAttr = Number(messageEl.getAttribute('data-call-time') || 0);
+      const msgTs = Number(messageEl.dataset.messageTimestamp || 0);
+      const callStart = callTimeAttr > 0 ? callTimeAttr : msgTs;
+      const isExpired = this.isCallExpired(callStart);
+      const isFuture = callTimeAttr > 0 ? this.isFutureCall(callTimeAttr) : false;
+      const allowJoin = !isFuture && !isExpired;
+      if (joinOption) joinOption.style.display = allowJoin ? 'flex' : 'none';
+      if (inviteOption) inviteOption.style.display = isExpired ? 'none' : 'flex';
       if (editResendOption) editResendOption.style.display = 'none';
       if (editOption) editOption.style.display = 'none';
     } else if (isVoice) {
@@ -11031,6 +11063,16 @@ console.warn('in send message', txid)
     return typeof ts === 'number' && ts > getCorrectedTimestamp();
   }
 
+  // Returns true if more than 2 hours have elapsed since the call started
+  // callStart: the effective call start time in ms (either scheduled callTime or message timestamp for immediate calls)
+  isCallExpired(callStart) {
+    const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+    const cs = Number(callStart || 0);
+    if (!(cs > 0)) return false;
+    const now = getCorrectedTimestamp();
+    return (now - cs) > TWO_HOURS_MS;
+  }
+
   formatLocalDateTime(ts) {
     const localMs = (typeof ts === 'number' ? ts : Number(ts)) - timeSkew;
     const minute = 60 * 1000;
@@ -11188,8 +11230,9 @@ class CallInviteModal {
   async sendInvites() {
     const selectedBoxes = Array.from(this.contactsList.querySelectorAll('.call-invite-contact-checkbox:checked'));
     const addresses = selectedBoxes.map(cb => cb.value).slice(0,10);
-    // get call link from original message
-    const msgCallLink = this.messageEl.querySelector('.call-message a')?.href;
+    // get call link from original message up to the first # so we don't duplicate callUrlParams
+    const anchorHref = this.messageEl.querySelector('.call-message a')?.href || '';
+    const msgCallLink = anchorHref.split('#')[0];
     if (!msgCallLink) return showToast('Call link not found', 2000, 'error');
     let msgCallTime = Number(this.messageEl.getAttribute('data-call-time')) || 0;
     this.inviteSendButton.disabled = true;
