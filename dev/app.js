@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'n'
+const version = 'o'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -483,6 +483,9 @@ function handleVisibilityChange() {
 
   if (document.visibilityState === 'hidden') {
     reactNativeApp.handleNativeAppSubscribe();
+    if (reactNativeApp.isReactNativeWebView) {
+      useLongPolling = false;
+    }
     // if chatModal was opened, save the last message count
     if (chatModal.isActive() && chatModal.address) {
       const contact = myData.contacts[chatModal.address];
@@ -496,6 +499,10 @@ function handleVisibilityChange() {
   } else if (document.visibilityState === 'visible') {
     if (myAccount) {
       reactNativeApp.handleNativeAppUnsubscribe();
+    }
+    if (reactNativeApp.isReactNativeWebView) {
+      useLongPolling = true;
+      setTimeout(longPoll, 10);
     }
     // if chatModal was opened, check if message count changed while hidden
     if (chatModal.isActive() && chatModal.address) {
@@ -6694,6 +6701,8 @@ class AboutModal {
     this.modal = document.getElementById('aboutModal');
     this.closeButton = document.getElementById('closeAboutModal');
     this.versionDisplay = document.getElementById('versionDisplayAbout');
+    this.appVersionDisplay = document.getElementById('appVersionAbout');
+    this.appVersionText = document.getElementById('appVersionTextAbout');
     this.networkName = document.getElementById('networkNameAbout');
     this.netId = document.getElementById('netIdAbout');
     this.openSourceLink = document.getElementById('openSourceModal');
@@ -6709,6 +6718,11 @@ class AboutModal {
     this.versionDisplay.textContent = myVersion + ' ' + version;
     this.networkName.textContent = network.name;
     this.netId.textContent = network.netid;
+
+    // Set up app version display if available
+    if (reactNativeApp?.appVersion) {
+      this.updateAppVersionDisplay(reactNativeApp.appVersion);
+    }
   }
 
   open() {
@@ -6723,6 +6737,13 @@ class AboutModal {
   openStore() {
     // Show update warning modal
     updateWarningModal.open();
+  }
+
+  updateAppVersionDisplay(appVersion) {
+    if (appVersion) {
+      this.appVersionText.textContent = appVersion;
+      this.appVersionDisplay.style.display = 'block';
+    }
   }
 }
 const aboutModal = new AboutModal();
@@ -15598,6 +15619,8 @@ class ReactNativeApp {
               this.appVersion = data.data.appVersion || `N/A`
               // Update the welcome screen to display the app version
               welcomeScreen.updateAppVersionDisplay(this.appVersion);
+              // Update the about modal to display the app version
+              aboutModal.updateAppVersionDisplay(this.appVersion);
               // Check if app version needs update
               this.checkAppVersionUpdate();
             }
@@ -16688,6 +16711,9 @@ function cleanSenderInfo(si) {
 }
 
 function longPoll() {
+  if (!useLongPolling) {
+    return;
+  }
   if (!isOnline) {
     console.log('Poll skipped: Not online');
     return;
