@@ -28,4 +28,9 @@ const network = {
   "farmUrl": "https://liberdus.com/farm",
   "validatorUrl": "https://liberdus.com/validator",
   "bridgeUrl": "./bridge",
+  // App version requirements for native apps (format: YYYY.MMDD.HHmm)
+  "app_version": {
+    "ios": "2025.0925.1537",
+    "android": "2025.0925.1537"
+  }
 }

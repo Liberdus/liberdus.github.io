@@ -55,11 +55,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.09.19.14.36" />
+    <link rel="stylesheet" href="./styles.css?v=2025.09.26.11.47" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.09.19.14.36" type="module"></script>
+    <script src="./app.js?v=2025.09.26.11.47" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -243,9 +243,9 @@
         </div>
         <div class="modal-content">
           <ul class="menu-list">
+            <li class="menu-item" id="openInvite" data-icon="mail">Invite</li>
             <li class="menu-item" id="openFarm" data-icon="trending-up">Farm</li>
             <li class="menu-item" id="openValidator" data-icon="shield">Validator</li>
-            <li class="menu-item" id="openInvite" data-icon="mail">Invite</li>
             <li class="menu-item" id="openBridge" data-icon="arrow-right-arrow-left">Bridge</li>
             <li class="menu-item" id="openExplorer" data-icon="search">Explorer</li>
             <li class="menu-item" id="openMonitor" data-icon="globe">Network</li>
@@ -378,6 +378,7 @@
 
               <div class="about-info-section">
                 <div class="about-info-item">Version <span id="versionDisplayAbout"></span></div>
+                <div class="about-info-item" id="appVersionAbout" style="display: none;">App Version: <span id="appVersionTextAbout"></span></div>
                 <div class="about-info-item">Network Name: <span id="networkNameAbout"></span></div>
                 <div class="about-info-item">
                   Net ID:<br />
@@ -387,6 +388,28 @@
 
               <div class="about-links-section">
                 <a class="about-link" href="https://liberdus.com" target="_blank">Liberdus.com</a>
+                <a class="about-link" href="#" id="openSourceModal">Source</a>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Source Modal -->
+      <div class="modal fixed-header" id="sourceModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeSourceModal"></button>
+          <div class="modal-title">Source</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <div class="about-content">
+              <p class="about-description">
+                You can use the links below to view the actual code running on your device. The code is human readable and not minified so it can be audited to ensure that the code on your device is the same as the code in the Github repo.
+              </p>
+
+              <div class="about-links-section">
                 <a class="about-link" href="https://github.com/Liberdus/web-client-v2" target="_blank">GitHub Repo</a>
               </div>
 
@@ -395,8 +418,8 @@
                 <a class="about-link" href="styles.css" target="_blank">styles.css</a>
                 <a class="about-link" href="app.js" target="_blank">app.js</a>
                 <br>
-                <a class="about-link" href="crypto.js?v=2025.09.19.14.36" target="_blank">crypto.js</a>
-                <a class="about-link" href="lib.js?v=2025.09.19.14.36" target="_blank">lib.js</a>
+                <a class="about-link" href="crypto.js?v=2025.09.26.11.47" target="_blank">crypto.js</a>
+                <a class="about-link" href="lib.js?v=2025.09.26.11.47" target="_blank">lib.js</a>
                 <a class="about-link" href="network.js" target="_blank">network.js</a>
               </div>
 
@@ -876,7 +899,7 @@
           </div>
           <div class="modal-content">
             <div class="form-container call-invite-modal-container">
-              <p class="modal-summary">Choose a participant to open their chat, or join the call.</p>
+              <p class="modal-summary">Choose a participant to open their chat.</p>
               <div class="participants-list" id="groupCallParticipantsList">
                 <!-- Participants will be populated here -->
               </div>
