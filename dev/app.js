@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'p'
+const version = 'q'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -3483,7 +3483,7 @@ async function queryNetwork(url, abortSignal = null) {
     const now = new Date().toLocaleTimeString();
     console.log(`${now} query`, `${selectedGateway.web}${url}`);
     if (network.name != 'Testnet'){
-      showToast(`${now} query ${selectedGateway.web}${url}`, 0, 'info')
+//      showToast(`${now} query ${selectedGateway.web}${url}`, 0, 'info')
     }
     const response = await fetch(`${selectedGateway.web}${url}`, { signal: abortSignal });
     const data = parse(await response.text());
@@ -3499,7 +3499,7 @@ async function queryNetwork(url, abortSignal = null) {
     const now = new Date().toLocaleTimeString();
     console.error(`${now} queryNetwork ERROR: ${error} ${url} `);
     if (network.name != 'Testnet'){
-      showToast(`queryNetwork: error: ${error} ${url} ${now}`, 0, 'error')
+  //    showToast(`queryNetwork: error: ${error} ${url} ${now}`, 0, 'error')
     }
     return null;
   }
@@ -8388,23 +8388,7 @@ class ChatModal {
       chatsScreen.updateChatList();
     }
 
-    if(reactNativeApp.isReactNativeWebView) {
-      // --- Bell and app icon clearing logic ---
-      // 1. Check if all contacts for signed-in account have unread == 0
-      const allRead = Object.values(myData.contacts).every(c => c.unread === 0);
-      if (allRead) {
-        // Clear bell icon for signed-in account
-        logsModal.log('Clearing notification address for', myAccount.keys.address);
-        reactNativeApp.clearNotificationAddress(myAccount.keys.address);
-        reactNativeApp.sendClearNotifications(myAccount.keys.address);
-      }
-      // 2. Check if all bell icons are cleared local storage notification addresses empty
-      const notificationAddresses = reactNativeApp.getNotificationAddresses();
-      if (notificationAddresses.length === 0) {
-        // Clear bubble on app icon
-        reactNativeApp.sendClearNotifications();
-      }
-    }
+    this.clearNotificationsIfAllRead();
 
     // clear file attachments
     this.fileAttachments = [];
@@ -8454,6 +8438,8 @@ class ChatModal {
     this.fileAttachments = [];
     this.showAttachmentPreview(); // clear listeners
 
+    this.clearNotificationsIfAllRead();
+
     this.modal.classList.remove('active');
     if (chatsScreen.isActive()) {
       chatsScreen.updateChatList();
@@ -8470,6 +8456,24 @@ class ChatModal {
     }
 
     this.address = null;
+  }
+
+  clearNotificationsIfAllRead() {
+    if (!reactNativeApp.isReactNativeWebView) {
+      return;
+    }
+
+    const allRead = Object.values(myData.contacts).every((c) => c.unread === 0);
+    if (allRead) {
+      logsModal.log('Clearing notification address for', myAccount.keys.address);
+      reactNativeApp.clearNotificationAddress(myAccount.keys.address);
+      reactNativeApp.sendClearNotifications(myAccount.keys.address);
+    }
+
+    const notificationAddresses = reactNativeApp.getNotificationAddresses();
+    if (notificationAddresses.length === 0) {
+      reactNativeApp.sendClearNotifications();
+    }
   }
 
   /**
@@ -16781,7 +16785,7 @@ function longPoll() {
     const now = new Date().toLocaleTimeString();
     console.error('Synchronous longPoll error:', error);
     if(network.name != 'Testnet'){
-      showToast(`chat poll error: ${error} ${now}`)
+//      showToast(`chat poll error: ${error} ${now}`)
     }
     // Reset polling state and schedule next poll even on synchronous error
     isLongPolling = false;
