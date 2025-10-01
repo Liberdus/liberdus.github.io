@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'r'
+const version = 's'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -9978,10 +9978,10 @@ console.warn('in send message', txid)
         this.modal.dataset.prevOverflowY = this.modal.style.overflowY || '';
         this.modal.style.overflowY = 'hidden';
       }
-      // Allow vertical pan only within messages container; block elsewhere
+      // Allow vertical pan only within messages container and message input; block elsewhere
       const allowEl = this.messagesContainer;
       this._touchMoveBlocker = (e) => {
-        if (!allowEl || !e.target.closest('.messages-container')) {
+        if (!allowEl || (!e.target.closest('.messages-container') && !e.target.closest('.message-input'))) {
           e.preventDefault();
         }
       };
