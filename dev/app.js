@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'
+const version = 'u'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -4425,7 +4425,17 @@ class SearchMessagesModal {
         if (message.message.toLowerCase().includes(searchLower)) {
           // Highlight matching text
           const messageText = escapeHtml(message.message);
-          const highlightedText = messageText.replace(new RegExp(searchText, 'gi'), (match) => `<mark>${match}</mark>`);
+          // Escape search text for safe regex usage
+          const escapedSearch = escapeRegExp(searchText);
+          const highlightedText = messageText.replace(new RegExp(escapedSearch, 'gi'), (match) => `<mark>${match}</mark>`);
+          
+          const maxDisplayLength = 100;
+          
+          // Adjust maxLength to account for <mark> tags (add 13 chars per highlight)
+          // This ensures truncateMessage gets enough characters to display ~100 chars of actual text
+          const highlightCount = (highlightedText.match(/<mark>/g) || []).length;
+          const adjustedMaxLength = maxDisplayLength + (highlightCount * 13); // <mark> + </mark> = 13 chars
+          
           const displayedName = getContactDisplayName(contact);
           results.push({
             contactAddress: address,
@@ -4433,7 +4443,7 @@ class SearchMessagesModal {
             messageId: message.txid,
             message: message, // Pass the entire message object
             timestamp: message.timestamp,
-            preview: truncateMessage(highlightedText, 100),
+            preview: truncateMessage(highlightedText, adjustedMaxLength),
             my: message.my, // Include the my property
           });
         }
@@ -4536,21 +4546,22 @@ class SearchMessagesModal {
     if (!this._debouncedSearch) {
       this._debouncedSearch = debounce(
         (searchText) => {
-          const trimmedText = (searchText || '').trim();
+          // Only trim leading whitespace; preserve trailing spaces for exact matches
+          const processedText = (searchText || '').trimStart();
 
           // If input is empty, clear results
-          if (!trimmedText) {
+          if (!processedText) {
             this.searchResults.innerHTML = '';
             return;
           }
 
           // Guard against stale callbacks after further typing or modal close
-          const currentText = (this.searchInput?.value || '').trim();
-          if (!this.isActive() || currentText !== trimmedText) {
+          const currentText = (this.searchInput?.value || '').trimStart();
+          if (!this.isActive() || currentText !== processedText) {
             return;
           }
 
-          const results = this.searchMessages(trimmedText);
+          const results = this.searchMessages(processedText);
           if (results.length === 0) {
             this.displayEmptyState('searchResults', 'No messages found');
           } else {
@@ -5750,23 +5761,21 @@ class BackupAccountModal {
     // Determine which backup method to use
     if (myData && !this.backupAllAccountsCheckbox.checked) {
       // User is signed in and wants to backup only current account
-      await this.handleSubmitOne(event);
+      await this.handleSubmitOne();
     } else {
       // User wants to backup all accounts (either not signed in or checkbox checked)
-      await this.handleSubmitAll(event);
+      await this.handleSubmitAll();
     }
   }
 
   /**
    * Handle the submission of a single account backup.
-   * @param {Event} event - The event object.
    */
-  async handleSubmitOne(event) {
-    event.preventDefault();
-    saveState();
-
+  async handleSubmitOne() {
     // Disable button to prevent multiple submissions
     this.submitButton.disabled = true;
+
+    saveState();
 
     const password = this.passwordInput.value;
     // Build new structured backup object
@@ -5794,7 +5803,6 @@ class BackupAccountModal {
 
       // Create and trigger download
       const blob = new Blob([finalData], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
       const filename = this.generateBackupFilename(myAccount.username);
       // Detect if running inside React Native WebView
       if (window.ReactNativeWebView?.postMessage) {
@@ -5811,6 +5819,7 @@ class BackupAccountModal {
         reader.readAsDataURL(blob);
       } else {
         // Regular browser download
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = filename;
@@ -5832,10 +5841,8 @@ class BackupAccountModal {
 
   /**
    * Handle the submission of a backup for all accounts.
-   * @param {Event} event - The event object.
    */
-  async handleSubmitAll(event) {
-    event.preventDefault();
+  async handleSubmitAll() {
 
     // Disable button to prevent multiple submissions
     this.submitButton.disabled = true;
@@ -6645,6 +6652,14 @@ class TollModal {
       }
     }
 
+    // Check if the new toll is the same as the current toll
+    const currentToll = myData.settings.toll;
+    const currentTollUnit = myData.settings.tollUnit;
+    
+    if (currentTollUnit === this.currentCurrency && newToll === currentToll) {
+      return 'Toll amount is the same as current toll';
+    }
+
     return null;
   }
 
@@ -6657,22 +6672,6 @@ class TollModal {
 
     // Update save button state
     this.saveButton.disabled = !isValid;
-
-    // Additional check: disable if the new toll is the same as the current toll
-    if (isValid) {
-      const newTollValue = parseFloat(this.newTollAmountInputElement.value);
-      const newTollBigInt = bigxnum2big(wei, this.newTollAmountInputElement.value);
-      const currentToll = myData.settings.toll;
-      const currentTollUnit = myData.settings.tollUnit;
-
-      if (!isNaN(newTollValue)) {
-        if (currentTollUnit === this.currentCurrency) {
-          if (newTollBigInt === currentToll) {
-            this.saveButton.disabled = true;
-          }
-        } 
-      }
-    }
 
     // Update warning message
     if (warningMessage) {
@@ -6780,15 +6779,13 @@ class InviteModal {
   }
 
   async shareLiberdusInvite(overrideText) {
-    const url = "https://liberdus.com/download";
     const title = "Join me on Liberdus";
-    const defaultText = `Message ${myAccount.username} on Liberdus! ${this.inviteURL}`;
-    const text = (typeof overrideText === 'string' && overrideText.trim().length) ? overrideText.trim() : defaultText;
+    const text = (typeof overrideText === 'string' && overrideText.trim().length) ? overrideText.trim() : this.getDefaultInviteText();
 
     // 1) Check if running in React Native WebView
     if (reactNativeApp.isReactNativeWebView) {
       try {
-        reactNativeApp.shareInvite(url, text, title);
+        reactNativeApp.shareInvite(this.inviteURL, text, title);
         return; // success
       } catch (err) {
         // fall through to native share or clipboard on errors
@@ -6798,7 +6795,7 @@ class InviteModal {
     // 2) Try native share sheet
     if (navigator.share) {
       try {
-        await navigator.share({ url, text, title });
+        await navigator.share({ url: this.inviteURL, text, title });
         return; // success
       } catch (err) {
         // iOS Safari/WKWebView: cancel → AbortError / "Share canceled"
@@ -6812,7 +6809,9 @@ class InviteModal {
 
     // 3) Clipboard fallback (no mailto)
     try {
-      await navigator.clipboard.writeText(text);
+      // Ensure URL is in the text
+      const clipboardText = text.includes(this.inviteURL) ? text : `${text} ${this.inviteURL}`;
+      await navigator.clipboard.writeText(clipboardText);
       showToast("Invite copied to clipboard!", 3000, "success");
     } catch {
       showToast("Could not copy invite link.", 0, "error");
@@ -9981,7 +9980,7 @@ console.warn('in send message', txid)
       // Allow vertical pan only within messages container and message input; block elsewhere
       const allowEl = this.messagesContainer;
       this._touchMoveBlocker = (e) => {
-        if (!allowEl || (!e.target.closest('.messages-container') && !e.target.closest('.message-input'))) {
+        if (!allowEl || (!e.target.closest('.messages-container') && !e.target.closest('.message-input') && !e.target.closest('.form-container'))) {
           e.preventDefault();
         }
       };
@@ -16575,7 +16574,7 @@ async function checkPendingTransactions() {
               'error'
             );
             // revert the local myData.settings.toll to the old value
-            tollModal.editMyDataToll(tollModal.oldToll);
+            tollModal.editMyDataToll(tollModal.oldToll, tollModal.currentCurrency);
             // check if the toll modal is open
             if (tollModal.isActive()) {
               // change the tollAmountLIB and tollAmountUSD to the old value
