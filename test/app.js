@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'r'
+const version = 's'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -278,8 +278,8 @@ function newDataRecord(myAccount) {
     },
     settings: {
       encrypt: true,
-      toll: parameters?.current?.defaultToll || 1n * wei,
-      tollUnit: parameters?.current?.defaultTollUnit || 'LIB',
+      toll: EthNum.toWei(parameters?.current?.defaultTollUsdStr) || 1n * wei,
+      tollUnit: 'USD',
       noticets: 0,
     },
   };
@@ -638,6 +638,11 @@ class WelcomeScreen {
     });
 
     this.orderButtons();
+
+    // Show Apple Safari backup reminder toast after welcome screen has rendered
+    setTimeout(() => {
+      this.showAppleSafariBackupToast();
+    }, 500);
   }
 
   open() {
@@ -648,6 +653,32 @@ class WelcomeScreen {
 
   close() {
     this.screen.style.display = 'none';
+  }
+
+  /**
+   * Detect if user is on Apple device using Safari browser
+   */
+  isAppleSafari() {
+    const userAgent = navigator.userAgent;
+    const isSafari = /Safari/.test(userAgent) && !/Chrome/.test(userAgent) && !/Chromium/.test(userAgent);
+    const isAppleDevice = /iPhone|iPad|iPod|Macintosh/.test(userAgent);
+    const result = isSafari && isAppleDevice;
+    
+    return result;
+  }
+
+  /**
+   * Show backup reminder toast for Apple Safari users
+   */
+  showAppleSafariBackupToast() {
+    // Only show if user is on Apple Safari
+    if (!this.isAppleSafari()) {
+      return;
+    }
+
+    // Show the toast
+    const message = '<strong>Important:</strong> Apple will delete your data if you don\'t visit this site for a week. Please backup your account data regularly.';
+    showToast(message, 0, 'warning', true);
   }
 
   isActive() {
@@ -2235,23 +2266,29 @@ class MyInfoModal {
       Object.values(fields).map(({ id }) => [id, document.getElementById(id)])
     );
 
-    for (const [key, cfg] of Object.entries(fields)) {
-      const el = elements[cfg.id];
-      if (!el) continue; // skip if element not found
+    // Iterate through each profile field to populate or hide it based on whether data exists
+    // For fields with values: display the container, set the text content, and set href if applicable
+    // For fields without values: hide the container
+    for (const [fieldKey, fieldConfig] of Object.entries(fields)) {
+      const element = elements[fieldConfig.id];
+      if (!element) continue; // skip if element not found in DOM
+      
+      // For clickable links (email, linkedin, x), the element is nested deeper in the DOM
       const container =
-        key === 'email' || key === 'linkedin' || key === 'x'
-          ? el.parentElement.parentElement // label + anchor live two levels up
-          : el.parentElement;
+        fieldKey === 'email' || fieldKey === 'linkedin' || fieldKey === 'x'
+          ? element.parentElement.parentElement // label + anchor live two levels up
+          : element.parentElement;
 
-      const val = account[key] ?? ''; // empty string if undefined / null
-      const empty = !val;
+      const value = account[fieldKey] ?? ''; // empty string if undefined / null
+      const isEmpty = !value;
 
       // Show / hide container with inline style (per your constraint)
-      container.style.display = empty ? 'none' : 'block';
-      if (empty) continue;
+      container.style.display = isEmpty ? 'none' : 'block';
+      if (isEmpty) continue;
 
-      el.textContent = val;
-      if (cfg.href) el.href = cfg.href(val);
+      // Populate the field with data
+      element.textContent = value;
+      if (fieldConfig.href) element.href = fieldConfig.href(value);
     }
     this.renderUsernameQR();
   }
@@ -2585,7 +2622,7 @@ class FriendModal {
     this.lastChangeTimeStamp = Date.now();
 
     // Show appropriate toast message depending value 0,1,2,3
-    showToast(
+    const toastMessage =
       contact.friend === 0
         ? 'Blocked'
         : contact.friend === 1
@@ -2594,8 +2631,9 @@ class FriendModal {
             ? 'Added as Connection'
             : contact.friend === 3
               ? 'Added as Friend'
-              : 'Error updating friend status'
-    );
+              : 'Error updating friend status';
+    const toastType = toastMessage === 'Error updating friend status' ? 'error' : 'success';
+    showToast(toastMessage, 2000, toastType);
 
     // Update the friend button
     this.updateFriendButton(contact, 'addFriendButtonContactInfo');
@@ -4424,7 +4462,17 @@ class SearchMessagesModal {
         if (message.message.toLowerCase().includes(searchLower)) {
           // Highlight matching text
           const messageText = escapeHtml(message.message);
-          const highlightedText = messageText.replace(new RegExp(searchText, 'gi'), (match) => `<mark>${match}</mark>`);
+          // Escape search text for safe regex usage
+          const escapedSearch = escapeRegExp(searchText);
+          const highlightedText = messageText.replace(new RegExp(escapedSearch, 'gi'), (match) => `<mark>${match}</mark>`);
+          
+          const maxDisplayLength = 100;
+          
+          // Adjust maxLength to account for <mark> tags (add 13 chars per highlight)
+          // This ensures truncateMessage gets enough characters to display ~100 chars of actual text
+          const highlightCount = (highlightedText.match(/<mark>/g) || []).length;
+          const adjustedMaxLength = maxDisplayLength + (highlightCount * 13); // <mark> + </mark> = 13 chars
+          
           const displayedName = getContactDisplayName(contact);
           results.push({
             contactAddress: address,
@@ -4432,7 +4480,7 @@ class SearchMessagesModal {
             messageId: message.txid,
             message: message, // Pass the entire message object
             timestamp: message.timestamp,
-            preview: truncateMessage(highlightedText, 100),
+            preview: truncateMessage(highlightedText, adjustedMaxLength),
             my: message.my, // Include the my property
           });
         }
@@ -4535,21 +4583,22 @@ class SearchMessagesModal {
     if (!this._debouncedSearch) {
       this._debouncedSearch = debounce(
         (searchText) => {
-          const trimmedText = (searchText || '').trim();
+          // Only trim leading whitespace; preserve trailing spaces for exact matches
+          const processedText = (searchText || '').trimStart();
 
           // If input is empty, clear results
-          if (!trimmedText) {
+          if (!processedText) {
             this.searchResults.innerHTML = '';
             return;
           }
 
           // Guard against stale callbacks after further typing or modal close
-          const currentText = (this.searchInput?.value || '').trim();
-          if (!this.isActive() || currentText !== trimmedText) {
+          const currentText = (this.searchInput?.value || '').trimStart();
+          if (!this.isActive() || currentText !== processedText) {
             return;
           }
 
-          const results = this.searchMessages(trimmedText);
+          const results = this.searchMessages(processedText);
           if (results.length === 0) {
             this.displayEmptyState('searchResults', 'No messages found');
           } else {
@@ -4595,7 +4644,10 @@ class SearchContactsModal {
             this.displayContactResults(results, searchText);
           }
         },
-        (searchText) => (searchText.length === 1 ? 600 : 300)
+        (event) => {
+          const searchText = event?.target?.value ?? '';
+          return searchText.trim().length === 1 ? 600 : 300;
+        }
       )
     );
   }
@@ -4615,6 +4667,62 @@ class SearchContactsModal {
     return this.modal.classList.contains('active');
   }
 
+  getSearchableFields(contact) {
+    const fields = [];
+    const seenValues = new Set();
+
+    const fieldDefinitions = [
+      { key: 'username', label: 'username' },
+      { key: 'name', label: 'name' },
+      { key: 'email', label: 'email' },
+      { key: 'phone', label: 'phone' },
+      { key: 'linkedin', label: 'linkedin' },
+      { key: 'x', label: 'x' },
+    ];
+    const knownSenderInfoKeys = new Set(fieldDefinitions.map(({ key }) => key));
+    const senderInfo = contact.senderInfo || null;
+
+    const normalize = (value) =>
+      value === undefined || value === null ? '' : String(value).trim();
+
+    const addField = (fieldLabel, value) => {
+      const stringValue = normalize(value);
+      if (!stringValue) {
+        return;
+      }
+
+      const lowerValue = stringValue.toLowerCase();
+      if (seenValues.has(lowerValue)) {
+        return;
+      }
+
+      seenValues.add(lowerValue);
+      fields.push({ field: fieldLabel, value: stringValue });
+    };
+
+    fieldDefinitions.forEach(({ key, label }) => {
+      const primaryValue = normalize(contact[key]);
+      const senderValue = senderInfo ? normalize(senderInfo[key]) : '';
+
+      addField(label, primaryValue);
+
+      if (senderValue && senderValue !== primaryValue) {
+        addField(`${label}`, senderValue);
+      }
+    });
+
+    if (senderInfo) {
+      Object.entries(senderInfo).forEach(([key, value]) => {
+        if (knownSenderInfoKeys.has(key)) {
+          return;
+        }
+        addField(`${key}`, value);
+      });
+    }
+
+    return fields;
+  }
+
   searchContacts(searchText) {
     if (!searchText || !myData?.contacts) return [];
 
@@ -4624,14 +4732,8 @@ class SearchContactsModal {
     // Search through all contacts
     Object.entries(myData.contacts).forEach(([address, contact]) => {
       // Fields to search through
-      const searchFields = [
-        contact.username,
-        contact.name,
-        contact.email,
-        contact.phone,
-        contact.linkedin,
-        contact.x,
-      ].filter(Boolean); // Remove null/undefined values
+      const searchableFields = this.getSearchableFields(contact);
+      const searchFields = searchableFields.map((f) => f.value);
 
       // Check if any field matches
       const matches = searchFields.some((field) => field.toLowerCase().includes(searchLower));
@@ -4658,6 +4760,47 @@ class SearchContactsModal {
     });
   }
 
+  createMatchPreview(contact, searchText) {
+    if (!searchText) {
+      return '';
+    }
+
+    const searchLower = searchText.toLowerCase();
+    const searchableFields = this.getSearchableFields(contact);
+
+    const matchBuckets = {
+      exact: [],
+      startsWith: [],
+      includes: [],
+    };
+
+    searchableFields.forEach((field) => {
+      const valueLower = field.value.toLowerCase();
+      if (valueLower === searchLower) {
+        matchBuckets.exact.push(field);
+      } else if (valueLower.startsWith(searchLower)) {
+        matchBuckets.startsWith.push(field);
+      } else if (valueLower.includes(searchLower)) {
+        matchBuckets.includes.push(field);
+      }
+    });
+
+    const prioritizedField =
+      matchBuckets.exact[0] || matchBuckets.startsWith[0] || matchBuckets.includes[0];
+
+    if (!prioritizedField) {
+      return '';
+    }
+
+    const highlightRegex = new RegExp(escapeRegExp(searchText), 'gi');
+    const highlightedValue = prioritizedField.value.replace(
+      highlightRegex,
+      (match) => `<mark>${match}</mark>`
+    );
+
+    return `${prioritizedField.field}: ${highlightedValue}`;
+  }
+
   displayContactResults(results, searchText) {
     this.resultsContainer.innerHTML = '';
 
@@ -4668,23 +4811,8 @@ class SearchContactsModal {
       // Generate identicon for the contact
       const identicon = generateIdenticon(contact.address);
 
-      // Determine which field matched for display
-      const matchedField = [
-        { field: 'username', value: contact.username },
-        { field: 'name', value: contact.name },
-        { field: 'email', value: contact.email },
-        { field: 'phone', value: contact.phone },
-        { field: 'linkedin', value: contact.linkedin },
-        { field: 'x', value: contact.x },
-      ].find((f) => f.value && f.value.toLowerCase().includes(searchText.toLowerCase()));
-
-      // Create match preview with label and highlighted matched value
-      const matchPreview = matchedField
-        ? `${matchedField.field}: ${matchedField.value.replace(
-            new RegExp(searchText, 'gi'),
-            (match) => `<mark>${match}</mark>`
-          )}`
-        : '';
+      // Create match preview with label and highlighted matched value prioritizing exact and starts-with matches
+      const matchPreview = this.createMatchPreview(contact, searchText);
       const displayedName = getContactDisplayName(contact);
 
       contactElement.innerHTML = `
@@ -4731,6 +4859,11 @@ function createDisplayInfo(contact) {
     x: contact.senderInfo?.x || 'Not provided',
     address: contact.address,
   };
+}
+
+// Safely escape user-entered search text before building regex-based highlights.
+function escapeRegExp(string = '') {
+  return String(string).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // Helper function to generate a hash-based deduplication key from message content
@@ -4907,7 +5040,6 @@ function markConnectivityDependentElements() {
     '#addFriendButton',
 
     // Profile related
-    '#accountForm button[type="submit"]',
     '#createAccountForm button[type="submit"]',
     '#importForm button[type="submit"]',
 
@@ -5396,6 +5528,35 @@ class RemoveAccountsModal {
     return this.modal?.classList.contains('active'); 
   }
 
+  /**
+   * Helper function to count contacts and messages from an account state.
+   * Returns { contactsCount, messagesCount } or { contactsCount: -1, messagesCount: -1 } on error.
+   */
+  getContactsAndMessagesCount(state, contextKey) {
+    let contactsCount = 0;
+    let messagesCount = 0;
+    
+    if (state) {
+      try {
+        contactsCount = Object.keys(state.contacts || {}).length;
+        // Sum messages arrays lengths per contact
+        if (state.contacts) {
+          for (const addr in state.contacts) {
+            messagesCount += (state.contacts[addr].messages?.length || 0);
+          }
+        }
+      } catch (e) {
+        console.warn('Error counting contacts/messages for', contextKey, e);
+        return { contactsCount: -1, messagesCount: -1 };
+      }
+    } else {
+      // State is null - could be decryption failure or no data
+      return { contactsCount: -1, messagesCount: -1 };
+    }
+    
+    return { contactsCount, messagesCount };
+  }
+
   getAllAccountsData() {
     const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
     const result = [];
@@ -5404,22 +5565,24 @@ class RemoveAccountsModal {
       const usernamesObj = accountsObj.netids[netid]?.usernames || {};
       for (const username in usernamesObj) {
         const key = `${username}_${netid}`;
-        const state = loadState(key); // decrypted & parsed
-        let contactsCount = 0;
-        let messagesCount = 0;
-        if (state) {
-          try {
-            contactsCount = Object.keys(state.contacts || {}).length;
-            // Sum messages arrays lengths per contact
-            if (state.contacts) {
-              for (const addr in state.contacts) {
-                messagesCount += (state.contacts[addr].messages?.length || 0);
-              }
-            }
-          } catch (e) {
-            console.warn('Error counting contacts/messages for', key, e);
+        
+        // Check if account data exists in storage
+        const hasStorageData = localStorage.getItem(key) !== null;
+        
+        let state = null;
+        try {
+          state = loadState(key); // decrypted & parsed
+          
+          // If loadState returned null, it could be decryption failure
+          if (hasStorageData && !state) {
+            console.warn('Decryption failed for account', key, '- data exists but could not be decrypted');
           }
+        } catch (e) {
+          console.warn('Error loading account', key, e);
+          // Continue processing - we'll still add it to the list with error counts
         }
+        
+        const { contactsCount, messagesCount } = this.getContactsAndMessagesCount(state, key);
         result.push({ username, netid, contactsCount, messagesCount });
       }
     }
@@ -5429,8 +5592,8 @@ class RemoveAccountsModal {
       const storageKey = localStorage.key(i);
       if (!storageKey) continue;
       
-  // Use regex to extract username and netid from storage key: username_<64-hex>
-  const match = storageKey.match(/^([^_]+)_([0-9a-fA-F]{64})$/);
+      // Use regex to extract username and netid from storage key: username_<64-hex>
+      const match = storageKey.match(/^([^_]+)_([0-9a-fA-F]{64})$/);
       if (!match) continue;
       
       const [, username, netid] = match;
@@ -5438,35 +5601,24 @@ class RemoveAccountsModal {
       // Validate username and netid
       if (!username || !netid) continue;
       
-      // Check if this account is already in our result list
-      const already = result.find(r => r.username === username && r.netid === netid);
-      if (already) continue;
-      
       // Check if this account is registered in the accounts object
       const isRegistered = accountsObj.netids[netid]?.usernames?.[username];
       if (isRegistered) continue;
       let state = null;
-      try{
+      try {
         state = loadState(storageKey);
+        
+        // If loadState returned null, it could be decryption failure
+        if (!state) {
+          console.warn('Failed to load orphaned account', storageKey, '- likely decryption failure');
+        }
       } catch (e) {
-        console.warn('Error loading orphan account', storageKey, e);
+        console.warn('Error loading orphaned account', storageKey, e);
         result.push({ username, netid, contactsCount: -1, messagesCount: -1, orphan: true });
         continue;
       }
-      let contactsCount = 0; let messagesCount = 0;
-      if (state) {
-        try {
-          contactsCount = Object.keys(state.contacts || {}).length;
-          // Sum messages arrays lengths per contact
-          if (state.contacts) {
-            for (const addr in state.contacts) {
-              messagesCount += (state.contacts[addr].messages?.length || 0);
-            }
-          }
-        } catch (e) {
-          console.warn('Error counting orphan account', storageKey, e);
-        }
-      }
+      
+      const { contactsCount, messagesCount } = this.getContactsAndMessagesCount(state, storageKey);
       result.push({ username, netid, contactsCount, messagesCount, orphan: true });
     }
     return result;
@@ -5516,10 +5668,21 @@ class RemoveAccountsModal {
       accountsForNet.forEach(acc => {
         const label = document.createElement('label');
         label.className = 'remove-account-row';
+        
+        // Handle display of account stats
+        let statsText;
+        if (acc.contactsCount === -1 || acc.messagesCount === -1) {
+          // Error loading/decrypting account data
+          statsText = 'unable to load data';
+        } else {
+          statsText = `${acc.contactsCount} contacts, ${acc.messagesCount} messages`;
+        }
+        statsText += acc.orphan ? ' (orphan)' : '';
+        
         label.innerHTML = `
           <input type="checkbox" data-username="${acc.username}" data-netid="${acc.netid}" />
           <span class="remove-account-username">${acc.username}</span>
-          <span class="remove-account-stats">${acc.contactsCount} contacts, ${acc.messagesCount} messages${acc.orphan ? ' (orphan)' : ''}</span>
+          <span class="remove-account-stats">${statsText}</span>
         `;
         list.appendChild(label);
       });
@@ -5665,23 +5828,21 @@ class BackupAccountModal {
     // Determine which backup method to use
     if (myData && !this.backupAllAccountsCheckbox.checked) {
       // User is signed in and wants to backup only current account
-      await this.handleSubmitOne(event);
+      await this.handleSubmitOne();
     } else {
       // User wants to backup all accounts (either not signed in or checkbox checked)
-      await this.handleSubmitAll(event);
+      await this.handleSubmitAll();
     }
   }
 
   /**
    * Handle the submission of a single account backup.
-   * @param {Event} event - The event object.
    */
-  async handleSubmitOne(event) {
-    event.preventDefault();
-    saveState();
-
+  async handleSubmitOne() {
     // Disable button to prevent multiple submissions
     this.submitButton.disabled = true;
+
+    saveState();
 
     const password = this.passwordInput.value;
     // Build new structured backup object
@@ -5709,7 +5870,6 @@ class BackupAccountModal {
 
       // Create and trigger download
       const blob = new Blob([finalData], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
       const filename = this.generateBackupFilename(myAccount.username);
       // Detect if running inside React Native WebView
       if (window.ReactNativeWebView?.postMessage) {
@@ -5726,6 +5886,7 @@ class BackupAccountModal {
         reader.readAsDataURL(blob);
       } else {
         // Regular browser download
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = filename;
@@ -5747,10 +5908,8 @@ class BackupAccountModal {
 
   /**
    * Handle the submission of a backup for all accounts.
-   * @param {Event} event - The event object.
    */
-  async handleSubmitAll(event) {
-    event.preventDefault();
+  async handleSubmitAll() {
 
     // Disable button to prevent multiple submissions
     this.submitButton.disabled = true;
@@ -5872,19 +6031,20 @@ class RestoreAccountModal {
 
     this.closeImportForm.addEventListener('click', () => this.close());
     this.importForm.addEventListener('submit', (event) => this.handleSubmit(event));
-    
+
     // Add new event listeners for developer options
-    this.developerOptionsToggle.addEventListener('change', (e) => this.toggleDeveloperOptions(e));
+    this.developerOptionsToggle.addEventListener('change', () => this.toggleDeveloperOptions());
     // setup mutual exclusion for the developer options
     this.setupMutualExclusion(this.oldStringSelect, this.oldStringCustom);
     this.setupMutualExclusion(this.newStringSelect, this.newStringCustom);
     
     // Add listeners to extract netids from selected file
     this.fileInput.addEventListener('change', () => this.extractNetidsFromFile());
-    this.passwordInput.addEventListener('input', debounce(() => this.extractNetidsFromFile(), 500));
-    
-    // Populate netid dropdowns
-    this.populateNetidDropdowns();
+    this.debouncedExtractNetidsFromFile = debounce(() => this.extractNetidsFromFile(), 500);
+    this.passwordInput.addEventListener('input', this.debouncedExtractNetidsFromFile);
+
+    // Reset form state
+    this.clearForm();
   }
 
   setupMutualExclusion(selectElement, inputElement) {
@@ -5906,8 +6066,7 @@ class RestoreAccountModal {
 
   open() {
     // reset any backup lock UI
-    this.backupAccountLockGroup.style.display = 'none';
-    this.backupAccountLock.value = '';
+    this.resetBackupLockPrompt();
 
     // clear and show modal
     this.clearForm();
@@ -5921,8 +6080,8 @@ class RestoreAccountModal {
   }
 
   // toggle the developer options section
-  toggleDeveloperOptions(event) {
-    this.developerOptionsEnabled = event.target.checked;
+  toggleDeveloperOptions() {
+    this.developerOptionsEnabled = !!this.developerOptionsToggle?.checked;
     this.developerOptionsSection.style.display = this.developerOptionsEnabled ? 'block' : 'none';
   }
 
@@ -5955,7 +6114,11 @@ class RestoreAccountModal {
   // extract netids from selected file and add to dropdowns
   async extractNetidsFromFile() {
     const file = this.fileInput.files[0];
-    if (!file) return;
+    if (!file) {
+      this.resetBackupLockPrompt();
+      this.removeFileInjectedNetids();
+      return;
+    }
 
     console.log('extractNetidsFromFile');
 
@@ -5965,20 +6128,26 @@ class RestoreAccountModal {
       if (!content.match('{')) {
         console.log('decrypting file');
         const password = this.passwordInput.value.trim();
-        if (!password) return;
+        if (!password) {
+          this.resetBackupLockPrompt();
+          return;
+        }
         try {
           content = decryptData(content, password);
-        } catch { return; } // Invalid password, skip silently
+        } catch (error) {
+          this.resetBackupLockPrompt();
+          return; // Invalid password, skip silently
+        }
       }
 
       const data = parse(content);
       // If the backup file contains a top-level lock field (accounts were locked in backup)
-      if (data.lock) {
+      const requiresBackupPassword = data.lock && !(localStorage.lock && data.lock === localStorage.lock);
+      if (requiresBackupPassword) {
         // Show password input so user can provide password needed to unlock accounts
         this.backupAccountLockGroup.style.display = 'block';
       } else {
-        this.backupAccountLockGroup.style.display = 'none';
-        this.backupAccountLock.value = '';
+        this.resetBackupLockPrompt();
       }
       const netids = new Set();
 
@@ -5996,15 +6165,23 @@ class RestoreAccountModal {
       });
 
       // Add new netids to dropdowns
+      this.removeFileInjectedNetids();
       const existing = Array.from(this.oldStringSelect.options).map(opt => opt.value);
       [...netids].filter(netid => !existing.includes(netid)).forEach(netid => {
         const label = `${netid} (from file)`;
-        this.oldStringSelect.add(new Option(label, netid));
-        this.newStringSelect.add(new Option(label, netid));
+        const oldOption = new Option(label, netid);
+        oldOption.dataset.source = 'file';
+        this.oldStringSelect.add(oldOption);
+        const newOption = new Option(label, netid);
+        newOption.dataset.source = 'file';
+        this.newStringSelect.add(newOption);
       });
 
       if (netids.size > 0) console.log(`Found ${netids.size} netids from file`);
-    } catch { /* Ignore file/parse errors */ }
+    } catch (error) {
+      this.resetBackupLockPrompt();
+      // Ignore file/parse errors silently
+    }
   }
 
   /**
@@ -6033,10 +6210,11 @@ class RestoreAccountModal {
    */
   async mergeBackupAccountsToLocal(backupData) {
     const overwrite = this.overwriteAccountsCheckbox?.checked;
+    const locksMatch = !!(backupData.lock && localStorage.lock && backupData.lock === localStorage.lock);
 
     // If backup has a lock, require backup password
     let backupEncKey = null;
-    if (backupData.lock) {
+    if (backupData.lock && !locksMatch) {
       const password = this.backupAccountLock.value || '';
       if (!password) {
         showToast('Backup password required to unlock accounts in the backup file', 0, 'error');
@@ -6066,16 +6244,6 @@ class RestoreAccountModal {
     localStorage.setItem('accounts', stringify(existingAccounts));
 
 
-    // Helper to extract address from parsed account data
-    const extractAddress = (maybeJson) => {
-      try {
-        const obj = typeof maybeJson === 'string' ? parse(maybeJson) : maybeJson;
-        return obj?.account?.keys?.address || '';
-      } catch (e) {
-        return '';
-      }
-    };
-
     // Iterate over keys in backupData and copy account entries
     let restoredCount = 0;
     for (const key of Object.keys(backupData)) {
@@ -6095,25 +6263,21 @@ class RestoreAccountModal {
       }
 
       let value = backupData[key];
+      let decryptedAccount = null;
 
-      // If backupData.lock equals localStorage.lock, we can copy directly
-      if (backupData.lock && localStorage.lock && backupData.lock === localStorage.lock) {
-        // Direct copy
+      if (locksMatch) {
         localStorage.setItem(localKey, value);
         restoredCount++;
+        decryptedAccount = this.tryDecryptWithLocalLock(value);
       } else {
         // Need to decrypt with backupEncKey if available
         let decrypted = value;
         if (backupData.lock) {
-            if (!backupEncKey) {
-              showToast('Backup Account password required to unlock accounts in the backup file', 0, 'error');
-              return false;
-            }
           try {
             const maybe = decryptData(value, backupEncKey, true);
-            if (maybe != null) decrypted = maybe;
-            else {
-              // failed to decrypt
+            if (maybe != null) {
+              decrypted = maybe;
+            } else {
               showToast(`Failed to decrypt account ${username} on ${netid}. Skipping.`, 0, 'error');
               continue;
             }
@@ -6123,9 +6287,11 @@ class RestoreAccountModal {
           }
         }
 
+        decryptedAccount = decrypted;
+
         // Now re-encrypt with local lock if localStorage.lock exists
         let finalValue = decrypted;
-          if (localStorage.lock) {
+        if (localStorage.lock) {
           if (!lockModal?.encKey) {
             showToast('Local lock is set but unlock state is missing. Please unlock before importing.', 0, 'error');
             return false;
@@ -6138,18 +6304,12 @@ class RestoreAccountModal {
           }
         }
 
-        // Finally store the account entry
-          localStorage.setItem(localKey, finalValue);
-          restoredCount++;
+        localStorage.setItem(localKey, finalValue);
+        restoredCount++;
+      }
 
-        // Update accounts registry address if possible
-        const address = extractAddress(decrypted);
-        if (address) {
-          const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-          if (!accountsObj.netids[netid]) accountsObj.netids[netid] = { usernames: {} };
-          accountsObj.netids[netid].usernames[username] = { address };
-          localStorage.setItem('accounts', stringify(accountsObj));
-        }
+      if (decryptedAccount) {
+        this.updateAccountRegistryAddress(netid, username, decryptedAccount);
       }
     }
 
@@ -6187,30 +6347,30 @@ class RestoreAccountModal {
       // We first parse to jsonData so that if the parse does not work we don't destroy myData
       let backupData = parse(fileContent);
 
-        // Instead of clearing localStorage, we'll merge accounts from backup into localStorage
-        // Ask for confirmation (previous behavior warned about clearing; keep a similar warning)
-        const confirmed = confirm('⚠️ WARNING: This will import all accounts from the backup file.\n\nExisting local accounts will not be removed. If "Overwrite existing accounts" is checked, accounts with the same username and netid will be replaced.\n\nIt is recommended to backup your current data before proceeding.\n\nDo you want to continue with the restore?');
+      // Instead of clearing localStorage, we'll merge accounts from backup into localStorage
+      // Ask for confirmation (previous behavior warned about clearing; keep a similar warning)
+      const confirmed = confirm('⚠️ WARNING: This will import all accounts from the backup file.\n\nExisting local accounts will not be removed. If "Overwrite existing accounts" is checked, accounts with the same username and netid will be replaced.\n\nIt is recommended to backup your current data before proceeding.\n\nDo you want to continue with the restore?');
 
-        if (!confirmed) {
-          showToast('Restore cancelled by user', 2000, 'info');
-          return;
-        }
+      if (!confirmed) {
+        showToast('Restore cancelled by user', 2000, 'info');
+        return;
+      }
 
-        // backwards compatibility for old single account export
-        if(typeof backupData === 'object' && 'account' in backupData) {
-          const username = backupData.account.username;
-          const netid = backupData.account.netid;
-          backupData = {
-            [`${username}_${netid}`]: stringify(backupData)
-          };
-        }
+      // backwards compatibility for old single account export
+      if (typeof backupData === 'object' && 'account' in backupData) {
+        const username = backupData.account.username;
+        const netid = backupData.account.netid;
+        backupData = {
+          [`${username}_${netid}`]: stringify(backupData)
+        };
+      }
 
-        // Merge and abort if merge failed
-        const restoredCount = await this.mergeBackupAccountsToLocal(backupData);
-        if (restoredCount === false) {
-          return; // merge failed — keep modal open and do not proceed to reset/close
-        }
-        showToast(`${restoredCount} account${restoredCount === 1 ? '' : 's'} restored`, 3000, 'success');
+      // Merge and abort if merge failed
+      const restoredCount = await this.mergeBackupAccountsToLocal(backupData);
+      if (restoredCount === false) {
+        return; // merge failed — keep modal open and do not proceed to reset/close
+      }
+      showToast(`${restoredCount} account${restoredCount === 1 ? '' : 's'} restored`, 3000, 'success');
       
       // handleNativeAppSubscription()
 
@@ -6219,7 +6379,6 @@ class RestoreAccountModal {
         this.close();
         clearMyData(); // since we already saved to localStore, we want to make sure beforeunload calling saveState does not also save
         window.location.reload(); // need to go through Sign In to make sure imported account exists on network
-        this.clearForm();
       }, 2000);
     } catch (error) {
       showToast(error.message || 'Import failed. Please check file and password.', 0, 'error');
@@ -6234,21 +6393,65 @@ class RestoreAccountModal {
     this.newStringCustom.value = '';
     this.oldStringSelect.value = '';
     this.newStringSelect.value = '';
-    // hide the developer options section
-    this.developerOptionsSection.style.display = 'none';
+    // hide the developer options section and sync state
+    this.toggleDeveloperOptions();
     // reset dropdowns to original state
     this.oldStringSelect.length = 1;
     this.newStringSelect.length = 1;
     this.populateNetidDropdowns();
+    this.resetBackupLockPrompt();
   }
 
-  copyObjectToLocalStorage(obj) {
-    for (const key in obj) {
-      if (Object.prototype.hasOwnProperty.call(obj, key)) {
-        localStorage.setItem(key, obj[key]);
-      }
+  resetBackupLockPrompt() {
+    if (this.backupAccountLockGroup) {
+      this.backupAccountLockGroup.style.display = 'none';
     }
-  }  
+    if (this.backupAccountLock) {
+      this.backupAccountLock.value = '';
+    }
+  }
+
+  removeFileInjectedNetids() {
+    const cleanup = (selectElement) => {
+      if (!selectElement) return;
+      Array.from(selectElement.options)
+        .filter(option => option.dataset?.source === 'file')
+        .forEach(option => option.remove());
+    };
+
+    cleanup(this.oldStringSelect);
+    cleanup(this.newStringSelect);
+  }
+
+  extractAddress(maybeJson) {
+    try {
+      const obj = typeof maybeJson === 'string' ? parse(maybeJson) : maybeJson;
+      return obj?.account?.keys?.address || '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  updateAccountRegistryAddress(netid, username, accountData) {
+    const address = this.extractAddress(accountData);
+    if (!address) return;
+
+    const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    if (!accountsObj.netids[netid]) accountsObj.netids[netid] = { usernames: {} };
+    accountsObj.netids[netid].usernames[username] = { address };
+    localStorage.setItem('accounts', stringify(accountsObj));
+  }
+
+  tryDecryptWithLocalLock(value) {
+    if (!localStorage.lock) return value;
+    if (!lockModal?.encKey) return null;
+
+    try {
+      return decryptData(value, lockModal.encKey, true);
+    } catch (e) {
+      return null;
+    }
+  }
 }
 const restoreAccountModal = new RestoreAccountModal();
 
@@ -6283,9 +6486,6 @@ class TollModal {
     const toll = myData.settings.toll || 0n;
     const tollUnit = myData.settings.tollUnit || 'USD';
 
-    // Fetch network parameters to get minToll
-    this.minToll = parameters?.current?.minToll || 1n * wei; // Default to 1 LIB if not set
-
     this.updateTollDisplay(toll, tollUnit);
 
     this.currentCurrency = 'USD';
@@ -6295,10 +6495,19 @@ class TollModal {
     this.warningMessageElement.classList.remove('show');
     this.saveButton.disabled = true;
 
-    // Update min toll display under input (USD)
+        // Fetch network parameters to get minToll
     const scalabilityFactor = getStabilityFactor();
-    const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
-    this.minTollDisplay.textContent = `Minimum toll: ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD`;
+    try {
+      const minTollUsdStr = parameters?.current?.minTollUsdStr;
+      this.minToll = EthNum.toWei(EthNum.div(minTollUsdStr, scalabilityFactor.toString()));
+      // Update min toll display under input (USD)
+      const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
+      this.minTollDisplay.textContent = `Minimum toll: ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD`;
+    } catch (e) {
+      this.minTollDisplay.textContent = `Minimum toll: error`;
+      console.error('Failed to fetch minToll from network parameters:', e);
+      showToast('Failed to fetch minimum toll from network.', 0, 'error');
+    }
     this.updateEquivalentLibDisplay();
   }
 
@@ -6510,6 +6719,14 @@ class TollModal {
       }
     }
 
+    // Check if the new toll is the same as the current toll
+    const currentToll = myData.settings.toll;
+    const currentTollUnit = myData.settings.tollUnit;
+    
+    if (currentTollUnit === this.currentCurrency && newToll === currentToll) {
+      return 'Toll amount is the same as current toll';
+    }
+
     return null;
   }
 
@@ -6522,22 +6739,6 @@ class TollModal {
 
     // Update save button state
     this.saveButton.disabled = !isValid;
-
-    // Additional check: disable if the new toll is the same as the current toll
-    if (isValid) {
-      const newTollValue = parseFloat(this.newTollAmountInputElement.value);
-      const newTollBigInt = bigxnum2big(wei, this.newTollAmountInputElement.value);
-      const currentToll = myData.settings.toll;
-      const currentTollUnit = myData.settings.tollUnit;
-
-      if (!isNaN(newTollValue)) {
-        if (currentTollUnit === this.currentCurrency) {
-          if (newTollBigInt === currentToll) {
-            this.saveButton.disabled = true;
-          }
-        } 
-      }
-    }
 
     // Update warning message
     if (warningMessage) {
@@ -6645,15 +6846,13 @@ class InviteModal {
   }
 
   async shareLiberdusInvite(overrideText) {
-    const url = "https://liberdus.com/download";
     const title = "Join me on Liberdus";
-    const defaultText = `Message ${myAccount.username} on Liberdus! ${this.inviteURL}`;
-    const text = (typeof overrideText === 'string' && overrideText.trim().length) ? overrideText.trim() : defaultText;
+    const text = (typeof overrideText === 'string' && overrideText.trim().length) ? overrideText.trim() : this.getDefaultInviteText();
 
     // 1) Check if running in React Native WebView
     if (reactNativeApp.isReactNativeWebView) {
       try {
-        reactNativeApp.shareInvite(url, text, title);
+        reactNativeApp.shareInvite(this.inviteURL, text, title);
         return; // success
       } catch (err) {
         // fall through to native share or clipboard on errors
@@ -6663,7 +6862,7 @@ class InviteModal {
     // 2) Try native share sheet
     if (navigator.share) {
       try {
-        await navigator.share({ url, text, title });
+        await navigator.share({ url: this.inviteURL, text, title });
         return; // success
       } catch (err) {
         // iOS Safari/WKWebView: cancel → AbortError / "Share canceled"
@@ -6677,7 +6876,9 @@ class InviteModal {
 
     // 3) Clipboard fallback (no mailto)
     try {
-      await navigator.clipboard.writeText(text);
+      // Ensure URL is in the text
+      const clipboardText = text.includes(this.inviteURL) ? text : `${text} ${this.inviteURL}`;
+      await navigator.clipboard.writeText(clipboardText);
       showToast("Invite copied to clipboard!", 3000, "success");
     } catch {
       showToast("Could not copy invite link.", 0, "error");
@@ -9558,10 +9759,9 @@ console.warn('in send message', txid)
     } catch (error) {
       console.error('Error handling file attachment:', error);
       
-      // Hide loading toast if it was an abort error
-      if (error.name === 'AbortError') {
-        hideToast(loadingToastId);
-      } else {
+      hideToast(loadingToastId);
+
+      if (error.name !== 'AbortError') {
         showToast('Error processing file attachment', 0, 'error');
       }
       
@@ -9570,6 +9770,7 @@ console.warn('in send message', txid)
       this.addAttachmentButton.disabled = false;
       this.isEncrypting = false;
     } finally {
+      hideToast(loadingToastId);
       event.target.value = ''; // Reset the file input value
     }
   }
@@ -9811,10 +10012,9 @@ console.warn('in send message', txid)
     } catch (err) {
       console.error('Attachment decrypt failed:', err);
       
-      // Hide loading toast if it was an abort error
-      if (err.name === 'AbortError') {
-        hideToast(loadingToastId);
-      } else {
+      hideToast(loadingToastId);
+
+      if (err.name !== 'AbortError') {
         showToast(`Decryption failed.`, 0, 'error');
       }
     }
@@ -9844,10 +10044,10 @@ console.warn('in send message', txid)
         this.modal.dataset.prevOverflowY = this.modal.style.overflowY || '';
         this.modal.style.overflowY = 'hidden';
       }
-      // Allow vertical pan only within messages container; block elsewhere
+      // Allow vertical pan only within messages container and message input; block elsewhere
       const allowEl = this.messagesContainer;
       this._touchMoveBlocker = (e) => {
-        if (!allowEl || !e.target.closest('.messages-container')) {
+        if (!allowEl || (!e.target.closest('.messages-container') && !e.target.closest('.message-input') && !e.target.closest('.form-container'))) {
           e.preventDefault();
         }
       };
@@ -16441,7 +16641,7 @@ async function checkPendingTransactions() {
               'error'
             );
             // revert the local myData.settings.toll to the old value
-            tollModal.editMyDataToll(tollModal.oldToll);
+            tollModal.editMyDataToll(tollModal.oldToll, tollModal.currentCurrency);
             // check if the toll modal is open
             if (tollModal.isActive()) {
               // change the tollAmountLIB and tollAmountUSD to the old value
@@ -16838,7 +17038,10 @@ function enterFullscreen() {
   if (isMobile()) {
   console.log('in enterFullscreen');
     if (document.documentElement.requestFullscreen) {
-      document.documentElement.requestFullscreen();
+      // on android 15 using chrome without delay caused issues with input field on ChatModal to be positioned below visual viewport
+      setTimeout(() => {
+        document.documentElement.requestFullscreen();
+      }, 100);
     } 
   }
 }
