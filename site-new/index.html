@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liberdus - The First Quantum Secure, Decentralized Messaging App</title>
+    <meta name="description" content="The future of decentralized communication. Send secure messages and payments in a single transaction with quantum-resistant encryption.">
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" as="style">
+    
+    <link rel="stylesheet" href="src/styles/main.css">
+    <link rel="icon" type="image/png" href="src/assets/images/liberdus-favicon.png">
+    <link rel="shortcut icon" type="image/png" href="src/assets/images/liberdus-favicon.png">
+    
+    <!-- Prevent theme flashing by setting theme immediately -->
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        })();
+    </script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <a href="/">
+                    <img src="https://liberdus.com/img/logo.png" alt="Liberdus" class="nav-logo">
+                </a>
+            </div>
+            
+            <div class="nav-menu">
+                <a href="#features">Features</a>
+                <a href="#technology">Technology</a>
+                <a href="#earn">Earn</a>
+                <a href="#faq">FAQ</a>
+                <a href="#community">Community</a>
+                <a href="/download.html" class="mobile-only">Download</a>
+                <a href="/roadmap.html" class="mobile-only">Roadmap</a>
+                <a href="/funding.html" class="mobile-only">Funding</a>
+                <a href="/docs/" class="mobile-only">Documentation</a>
+                <a href="https://liberdus.com/Liberdus-Litepaper.pdf" class="mobile-only" target="_blank">Litepaper</a>
+                <div class="nav-dropdown">
+                    <a href="#" class="dropdown-toggle">More <span class="dropdown-arrow">▾</span></a>
+                    <div class="dropdown-menu">
+                        <a href="/download.html">Download</a>
+                        <a href="/roadmap.html">Roadmap</a>
+                        <a href="/funding.html">Funding</a>
+                        <a href="/docs/">Documentation</a>
+                        <a href="https://liberdus.com/Liberdus-Litepaper.pdf" target="_blank">Litepaper</a>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="nav-actions">
+                <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+                    <span class="theme-icon">🌙</span>
+                </button>
+                <a href="/download.html" class="btn btn-primary">
+                    Download App
+                </a>
+                <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Toggle mobile menu">
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-container">
+            <div class="hero-content">
+                <div class="hero-badge">
+                    🚀 Testnet 2025 • Mainnet 2026
+                </div>
+                
+                <h1 class="hero-title">
+                    The first <span class="gradient-text">quantum&nbsp;secure</span>,<br>decentralized messaging&nbsp;app 💬
+                </h1>
+                
+                <p class="hero-subtitle">
+                    Experience the future of decentralized communication. Send secure messages and payments in a single transaction with quantum-resistant encryption and maximum privacy.
+                </p>
+                
+                <div class="hero-stats">
+                    <div class="stat">
+                        <div class="stat-number">100%</div>
+                        <div class="stat-label">E2E Encrypted</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-number">100%</div>
+                        <div class="stat-label">Decentralized</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-number">100%</div>
+                        <div class="stat-label">Open Source</div>
+                    </div>
+                </div>
+                
+                <div class="hero-actions">
+                    <a href="#features" class="btn btn-primary btn-large">
+                        Explore Features
+                    </a>
+                    <a href="https://discord.gg/2cpJzFnwCR" class="btn btn-secondary btn-large" target="_blank">
+                        Join Discord
+                    </a>
+                </div>
+            </div>
+            
+            <div class="hero-visual">
+                <div class="phone-screenshot">
+                    <img src="src/assets/images/liberdus-chat-screenshot.png" alt="Liberdus Chat Interface showing crypto payments" class="chat-screenshot">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="section">
+        <div class="container">
+            <div class="section-header">
+                <div class="section-badge">Core Features</div>
+                <h2 class="section-title">Why Liberdus is Different</h2>
+                <p class="section-subtitle">
+                    Combining the best of messaging apps with the power of cryptocurrency, 
+                    all while maintaining true decentralization and privacy.
+                </p>
+            </div>
+            
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🔒</div>
+                    <h3>Quantum Encryption</h3>
+                    <p>All messages are E2E encrypted by default using both classic and quantum cryptography.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">🚫</div>
+                    <h3>No KYC</h3>
+                    <p>No Phone. Create multiple accounts without phone numbers, email or any other personal identifiers.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">🌐</div>
+                    <h3>Global Decentralization</h3>
+                    <p>No central authority, no single point of failure, censorship resistant by design.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">💰</div>
+                    <h3>Messaging Monetization</h3>
+                    <p>Users can set a price so that messages from unknown parties are charged once read and responded.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3>Scalability</h3>
+                    <p>The network grows with usage, maintaining fast, reliable messaging for all users, with low transaction fees and energy-efficient operation.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">📖</div>
+                    <h3>Open Source</h3>
+                    <p>Most messengers rely on trust in the company. Liberdus relies on code you can inspect.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Technology Section -->
+    <section id="technology" class="section section-dark">
+        <div class="container">
+            <div class="section-header">
+                <div class="section-badge">Technology</div>
+                <h2 class="section-title">Built for the Future</h2>
+                <p class="section-subtitle">
+                    Leveraging years of research and development to solve the biggest challenges in decentralized communication.
+                </p>
+            </div>
+            
+            <div class="tech-comparison">
+                <div class="comparison-side liberdus">
+                    <h3>Liberdus</h3>
+                    <div class="comparison-items">
+                        <div class="comparison-item positive">
+                            <span>Double-encrypted, classical + quantum-resistant</span>
+                        </div>
+                        <div class="comparison-item positive">
+                            <span>Decentralized, public utility</span>
+                        </div>
+                        <div class="comparison-item positive">
+                            <span>Send messages and payments in same transaction</span>
+                        </div>
+                        <div class="comparison-item positive">
+                            <span>Open-source, view code on any device</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="vs-badge">VS</div>
+                
+                <div class="comparison-side traditional">
+                    <h3>Traditional Messengers</h3>
+                    <div class="comparison-items">
+                        <div class="comparison-item negative">
+                            <span>Standard encryption; centralized servers</span>
+                        </div>
+                        <div class="comparison-item negative">
+                            <span>Centralized owned by single entity</span>
+                        </div>
+                        <div class="comparison-item negative">
+                            <span>Messages and payments are separate</span>
+                        </div>
+                        <div class="comparison-item negative">
+                            <span>Closed-source apps</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Earn Section -->
+    <section id="earn" class="section">
+        <div class="container">
+            <div class="section-header">
+                <div class="section-badge">Earn LIB</div>
+                <h2 class="section-title">Interested in earning Liberdus rewards?</h2>
+                <p class="section-subtitle">
+                    Liberdus is only distributed when it is earned. There are many ways you can help and earn Liberdus (LIB) as reward.
+                </p>
+            </div>
+            
+            <div class="earn-content">
+                <div class="earn-list">
+                    <div class="earn-item">
+                        <div class="earn-bullet">•</div>
+                        <div class="earn-text"><a href="https://github.com/Liberdus/validator-dashboard" target="_blank">Run a validator node</a></div>
+                    </div>
+                    
+                    <div class="earn-item">
+                        <div class="earn-bullet">•</div>
+                        <div class="earn-text">Farm liquidity</div>
+                    </div>
+                    
+                    <div class="earn-item">
+                        <div class="earn-bullet">•</div>
+                        <div class="earn-text">Help with code development, testing and code reviews</div>
+                    </div>
+                    
+                    <div class="earn-item">
+                        <div class="earn-bullet">•</div>
+                        <div class="earn-text">Become an ambassador to spread awareness of Liberdus</div>
+                    </div>
+                    
+                    <div class="earn-item">
+                        <div class="earn-bullet">•</div>
+                        <div class="earn-text">Join our Discord server and tell us how you would like to help!</div>
+                    </div>
+                </div>
+                
+                <div class="earn-actions">
+                    <a href="https://discord.gg/2cpJzFnwCR" class="btn btn-primary btn-large" target="_blank">
+                        Join Discord Community
+                    </a>
+                    <a href="https://github.com/Liberdus" class="btn btn-secondary btn-large" target="_blank">
+                        View GitHub
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+
+    <!-- FAQ Section -->
+    <section id="faq" class="section section-dark">
+        <div class="container">
+            <div class="section-header">
+                <div class="section-badge">FAQ</div>
+                <h2 class="section-title">Frequently Asked Questions</h2>
+                <p class="section-subtitle">
+                    Here are some common questions asked about Liberdus.
+                </p>
+            </div>
+            
+            <div class="faq-container">
+                <div class="faq-list">
+                    <div class="faq-item">
+                        <div class="faq-question">
+                            <h3>What is Liberdus?</h3>
+                            <span class="faq-toggle">+</span>
+                        </div>
+                        <div class="faq-answer">
+                            <p>Liberdus is a decentralized messaging and payment platform that allows users to send secure messages and cryptocurrency payments in a single transaction. It combines the convenience of messaging apps with the power of blockchain technology.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="faq-item">
+                        <div class="faq-question">
+                            <h3>What is Shardus?</h3>
+                            <span class="faq-toggle">+</span>
+                        </div>
+                        <div class="faq-answer">
+                            <p>Shardus is a distributed ledger technology that uses dynamic sharding to solve the blockchain trilemma of scalability, security, and decentralization. Liberdus is built on the Shardus protocol to achieve linear scalability.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="faq-item">
+                        <div class="faq-question">
+                            <h3>What are the tokenomics for Liberdus?</h3>
+                            <span class="faq-toggle">+</span>
+                        </div>
+                        <div class="faq-answer">
+                            <p>LIB has a fixed supply of 210 million tokens with 18 decimals, following Bitcoin's proven economic model. The token is used for network fees, governance, and incentivizing network participants. No inflation, no dilution.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="faq-item">
+                        <div class="faq-question">
+                            <h3>How can I run a node to earn rewards?</h3>
+                            <span class="faq-toggle">+</span>
+                        </div>
+                        <div class="faq-answer">
+                            <p>Node operators help secure the network and earn LIB rewards. During testnet, you can run validator nodes and earn rewards for participating in network consensus and validation. More details will be available when testnet launches.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="faq-item">
+                        <div class="faq-question">
+                            <h3>How can I add liquidity to earn rewards?</h3>
+                            <span class="faq-toggle">+</span>
+                        </div>
+                        <div class="faq-answer">
+                            <p>You can provide liquidity to LIB trading pairs on decentralized exchanges like Uniswap. Liquidity providers earn trading fees and may receive additional LIB rewards through liquidity mining programs.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="faq-item">
+                        <div class="faq-question">
+                            <h3>How do I support the project?</h3>
+                            <span class="faq-toggle">+</span>
+                        </div>
+                        <div class="faq-answer">
+                            <p>You can support Liberdus by contributing code on GitHub, joining our Discord community, providing feedback during testnet, creating educational content, or helping with translations and documentation.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Community Section -->
+    <section id="community" class="section">
+        <div class="container">
+            <div class="section-header">
+                <div class="section-badge">Community</div>
+                <h2 class="section-title">Join Our Journey</h2>
+                <p class="section-subtitle">
+                    Be part of building the future of decentralized communication.
+                </p>
+            </div>
+            
+            <div class="community-links">
+                <a href="https://discord.gg/2cpJzFnwCR" class="community-link" target="_blank">
+                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/discord.svg" alt="Discord" class="community-logo">
+                    <span class="community-text">Discord</span>
+                </a>
+                
+                <a href="https://x.com/liberdus" class="community-link" target="_blank">
+                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/x.svg" alt="X (Twitter)" class="community-logo">
+                    <span class="community-text">X (Twitter)</span>
+                </a>
+                
+                <a href="https://www.youtube.com/@Liberdus" class="community-link" target="_blank">
+                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/youtube.svg" alt="YouTube" class="community-logo">
+                    <span class="community-text">YouTube</span>
+                </a>
+                
+                <a href="https://t.me/LiberdusOfficial" class="community-link" target="_blank">
+                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/telegram.svg" alt="Telegram" class="community-logo">
+                    <span class="community-text">Telegram</span>
+                </a>
+                
+                <a href="https://linkedin.com/company/Liberdus" class="community-link" target="_blank">
+                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/linkedin.svg" alt="LinkedIn" class="community-logo">
+                    <span class="community-text">LinkedIn</span>
+                </a>
+                
+                <a href="https://github.com/Liberdus" class="community-link" target="_blank">
+                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/github.svg" alt="GitHub" class="community-logo">
+                    <span class="community-text">GitHub</span>
+                </a>
+                
+                <a href="https://liberdus.substack.com" class="community-link" target="_blank">
+                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/substack.svg" alt="Substack" class="community-logo">
+                    <span class="community-text">Substack</span>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <img src="https://liberdus.com/img/logo.png" alt="Liberdus" class="footer-logo">
+                    <p>The first quantum secure, decentralized messaging app</p>
+                </div>
+                
+                <div class="footer-links">
+                    <div class="footer-column">
+                        <h4>Product</h4>
+                        <a href="#features">Features</a>
+                        <a href="#technology">Technology</a>
+                        <a href="/roadmap.html">Roadmap</a>
+                        <a href="https://liberdus.com/docs" target="_blank">Documentation</a>
+                        <a href="https://liberdus.com/Liberdus-Litepaper.pdf" target="_blank">Litepaper</a>
+                    </div>
+                    
+                    <div class="footer-column">
+                        <h4>Community</h4>
+                        <a href="https://discord.gg/2cpJzFnwCR" target="_blank">Discord</a>
+                        <a href="https://x.com/liberdus" target="_blank">X (Twitter)</a>
+                        <a href="https://www.youtube.com/@Liberdus" target="_blank">YouTube</a>
+                        <a href="https://t.me/LiberdusOfficial" target="_blank">Telegram</a>
+                        <a href="https://linkedin.com/company/Liberdus" target="_blank">LinkedIn</a>
+                        <a href="https://github.com/Liberdus" target="_blank">GitHub</a>
+                        <a href="https://liberdus.substack.com" target="_blank">Substack</a>
+                    </div>
+                    
+                    <div class="footer-column">
+                        <h4>Developers</h4>
+                        <a href="https://github.com/Liberdus" target="_blank">GitHub</a>
+                        <a href="https://discord.gg/2cpJzFnwCR" target="_blank">Developer Chat</a>
+                        <a href="#earn">Contribute</a>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="footer-bottom">
+                <p>&copy; 2019 - Present Liberdus. Decentralized and unstoppable.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="src/scripts/main.js"></script>
+</body>
+</html>
