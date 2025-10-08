@@ -1,307 +1,454 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Download Liberdus - Get the App</title>
-    <meta name="description" content="Download Liberdus mobile app for iOS and Android, or use the browser version. Secure messaging and payments with quantum-resistant encryption.">
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-    
-    <link rel="stylesheet" href="src/styles/main.css">
-    <link rel="icon" type="image/png" href="src/assets/images/liberdus-favicon.png">
-    <link rel="shortcut icon" type="image/png" href="src/assets/images/liberdus-favicon.png">
-    
+    <meta
+      name="description"
+      content="Download Liberdus mobile app for iOS and Android, or use the browser version. Secure messaging and payments with quantum-resistant encryption."
+    />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="src/styles/main.css" />
+    <link
+      rel="icon"
+      type="image/png"
+      href="src/assets/images/liberdus-favicon.png"
+    />
+    <link
+      rel="shortcut icon"
+      type="image/png"
+      href="src/assets/images/liberdus-favicon.png"
+    />
+
     <!-- Prevent theme flashing by setting theme immediately -->
     <script>
-        (function() {
-            const savedTheme = localStorage.getItem('theme') || 'dark';
-            document.documentElement.setAttribute('data-theme', savedTheme);
-        })();
+      (function () {
+        const savedTheme = localStorage.getItem("theme") || "dark";
+        document.documentElement.setAttribute("data-theme", savedTheme);
+      })();
     </script>
-</head>
-<body>
+  </head>
+  <body>
     <!-- Navigation -->
     <nav class="nav">
-        <div class="nav-container">
-            <div class="nav-brand">
-                <a href="/">
-                    <img src="https://liberdus.com/img/logo.png" alt="Liberdus" class="nav-logo">
-                </a>
-            </div>
-            
-            <div class="nav-menu">
-                <a href="/#features">Features</a>
-                <a href="/#technology">Technology</a>
-                <a href="/#earn">Earn</a>
-                <a href="/#faq">FAQ</a>
-                <a href="/#community">Community</a>
-                <a href="/download.html" class="mobile-only active">Download</a>
-                <a href="/roadmap.html" class="mobile-only">Roadmap</a>
-                <a href="/funding.html" class="mobile-only">Funding</a>
-                <a href="/docs/" class="mobile-only">Documentation</a>
-                <a href="https://liberdus.com/Liberdus-Litepaper.pdf" class="mobile-only" target="_blank">Litepaper</a>
-                <div class="nav-dropdown">
-                    <a href="#" class="dropdown-toggle">More <span class="dropdown-arrow">▾</span></a>
-                    <div class="dropdown-menu">
-                        <a href="/download.html" class="active">Download</a>
-                        <a href="/roadmap.html">Roadmap</a>
-                        <a href="/funding.html">Funding</a>
-                        <a href="/docs/">Documentation</a>
-                        <a href="https://liberdus.com/Liberdus-Litepaper.pdf" target="_blank">Litepaper</a>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="nav-actions">
-                <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
-                    <span class="theme-icon">🌙</span>
-                </button>
-                <a href="download.html" class="btn btn-primary">
-                    Download App
-                </a>
-                <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Toggle mobile menu">
-                    <span class="hamburger-line"></span>
-                    <span class="hamburger-line"></span>
-                    <span class="hamburger-line"></span>
-                </button>
-            </div>
+      <div class="nav-container">
+        <div class="nav-brand">
+          <a href="/">
+            <img
+              src="https://liberdus.com/img/logo.png"
+              alt="Liberdus"
+              class="nav-logo"
+            />
+          </a>
         </div>
+
+        <div class="nav-menu">
+          <a href="/#features">Features</a>
+          <a href="/#technology">Technology</a>
+          <a href="/#earn">Earn</a>
+          <a href="/#faq">FAQ</a>
+          <a href="/#community">Community</a>
+          <a href="download.html" class="mobile-only active">Download</a>
+          <a href="roadmap.html" class="mobile-only">Roadmap</a>
+          <a href="funding.html" class="mobile-only">Funding</a>
+          <a href="docs/" class="mobile-only">Documentation</a>
+          <a
+            href="https://liberdus.com/Liberdus-Litepaper.pdf"
+            class="mobile-only"
+            target="_blank"
+            >Litepaper</a
+          >
+          <div class="nav-dropdown">
+            <a href="#" class="dropdown-toggle"
+              >More <span class="dropdown-arrow">▾</span></a
+            >
+            <div class="dropdown-menu">
+              <a href="download.html" class="active">Download</a>
+              <a href="roadmap.html">Roadmap</a>
+              <a href="funding.html">Funding</a>
+              <a href="docs/">Documentation</a>
+              <a
+                href="https://liberdus.com/Liberdus-Litepaper.pdf"
+                target="_blank"
+                >Litepaper</a
+              >
+            </div>
+          </div>
+        </div>
+
+        <div class="nav-actions">
+          <button
+            class="theme-toggle"
+            id="themeToggle"
+            aria-label="Toggle theme"
+          >
+            <span class="theme-icon">🌙</span>
+          </button>
+          <a href="download.html" class="btn btn-primary"> Download App </a>
+          <button
+            class="mobile-menu-toggle"
+            id="mobileMenuToggle"
+            aria-label="Toggle mobile menu"
+          >
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+          </button>
+        </div>
+      </div>
     </nav>
 
     <!-- Download Hero Section -->
     <section class="download-hero">
-        <div class="container">
-            <div class="download-hero-content">
-                <div class="download-badge">
-                    Available Now
-                </div>
-                
-                <h1 class="download-title">
-                    Download <span class="gradient-text">Liberdus</span>
-                </h1>
-                
-                <p class="download-subtitle">
-                    Install the mobile app or launch the browser version. Easily migrate accounts between devices with secure, quantum-resistant encryption.
-                </p>
-            </div>
+      <div class="container">
+        <div class="download-hero-content">
+          <div class="download-badge">Available Now</div>
+
+          <h1 class="download-title">
+            Download <span class="gradient-text">Liberdus</span>
+          </h1>
+
+          <p class="download-subtitle">
+            Install the mobile app or launch the browser version. Easily migrate
+            accounts between devices with secure, quantum-resistant encryption.
+          </p>
         </div>
+      </div>
     </section>
 
     <!-- Download Options Section -->
     <section class="download-section">
-        <div class="container">
-            <div class="section-header">
-                <div class="section-badge">Download Options</div>
-                <h2 class="section-title">Choose Your Platform</h2>
-                <p class="section-subtitle">
-                    Get Liberdus on your preferred device or platform
-                </p>
-            </div>
-            
-            <div class="download-options-grid">
-                <!-- iOS Card -->
-                <div class="download-option-card">
-                    <div class="option-header">
-                        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/apple.svg" alt="Apple iOS" class="platform-logo">
-                        <h3>iOS TestFlight</h3>
-                        <p>Beta testing on iPhone & iPad</p>
-                    </div>
-                    <div class="option-content">
-                        <div class="option-middle">
-                            <p class="beta-note">Install TestFlight from App Store, open it to get Liberdus and share feedback</p>
-                        </div>
-                        <div class="option-bottom">
-                            <a href="https://testflight.apple.com/join/zSRCWyxy" class="btn btn-primary btn-large" target="_blank">
-                                Join TestFlight
-                            </a>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Android Card -->
-                <div class="download-option-card">
-                    <div class="option-header">
-                        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/android.svg" alt="Android" class="platform-logo">
-                        <h3>Android</h3>
-                        <p>Available on Google Play Store</p>
-                    </div>
-                    <div class="option-content">
-                        <div class="option-middle">
-                            <p class="beta-note">Become a beta tester and give us feedback</p>
-                        </div>
-                        <div class="option-bottom">
-                            <div class="android-buttons">
-                                <a href="https://play.google.com/apps/testing/com.jairaj.liberdus" class="btn btn-secondary" target="_blank">
-                                    Beta Version
-                                </a>
-                                <a href="https://play.google.com/store/apps/details?id=com.jairaj.liberdus" class="btn btn-primary btn-large" target="_blank">
-                                    Public Release
-                                </a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Browser Card -->
-                <div class="download-option-card">
-                    <div class="option-header">
-                        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/googlechrome.svg" alt="Browser" class="platform-logo">
-                        <h3>Browser Version</h3>
-                        <p>No download required</p>
-                    </div>
-                    <div class="option-content">
-                        <div class="option-middle">
-                            <p class="beta-note">Become a beta tester and give us feedback</p>
-                        </div>
-                        <div class="option-bottom">
-                            <a href="https://liberdus.com/test" class="btn btn-primary btn-large" target="_blank">
-                                Launch Browser App
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            </div>
+      <div class="container">
+        <div class="section-header">
+          <div class="section-badge">Download Options</div>
+          <h2 class="section-title">Choose Your Platform</h2>
+          <p class="section-subtitle">
+            Get Liberdus on your preferred device or platform
+          </p>
         </div>
+
+        <div class="download-options-grid">
+          <!-- iOS Card -->
+          <div class="download-option-card">
+            <div class="option-header">
+              <img
+                src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/apple.svg"
+                alt="Apple iOS"
+                class="platform-logo"
+              />
+              <h3>iOS TestFlight</h3>
+              <p>Beta testing on iPhone & iPad</p>
+            </div>
+            <div class="option-content">
+              <div class="option-middle">
+                <p class="beta-note">
+                  Install TestFlight from App Store, open it to get Liberdus and
+                  share feedback
+                </p>
+              </div>
+              <div class="option-bottom">
+                <a
+                  href="https://testflight.apple.com/join/zSRCWyxy"
+                  class="btn btn-primary btn-large"
+                  target="_blank"
+                >
+                  Join TestFlight
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Android Card -->
+          <div class="download-option-card">
+            <div class="option-header">
+              <img
+                src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/android.svg"
+                alt="Android"
+                class="platform-logo"
+              />
+              <h3>Android</h3>
+              <p>Available on Google Play Store</p>
+            </div>
+            <div class="option-content">
+              <div class="option-middle">
+                <p class="beta-note">
+                  Become a beta tester and give us feedback
+                </p>
+              </div>
+              <div class="option-bottom">
+                <div class="android-buttons">
+                  <a
+                    href="https://play.google.com/apps/testing/com.jairaj.liberdus"
+                    class="btn btn-secondary"
+                    target="_blank"
+                  >
+                    Beta Version
+                  </a>
+                  <a
+                    href="https://play.google.com/store/apps/details?id=com.jairaj.liberdus"
+                    class="btn btn-primary btn-large"
+                    target="_blank"
+                  >
+                    Public Release
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Browser Card -->
+          <div class="download-option-card">
+            <div class="option-header">
+              <img
+                src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/googlechrome.svg"
+                alt="Browser"
+                class="platform-logo"
+              />
+              <h3>Browser Version</h3>
+              <p>No download required</p>
+            </div>
+            <div class="option-content">
+              <div class="option-middle">
+                <p class="beta-note">
+                  Become a beta tester and give us feedback
+                </p>
+              </div>
+              <div class="option-bottom">
+                <a
+                  href="https://liberdus.com/test"
+                  class="btn btn-primary btn-large"
+                  target="_blank"
+                >
+                  Launch Browser App
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Account Migration Section -->
     <section class="migration-section section-dark">
-        <div class="container">
-            <div class="section-header">
-                <div class="section-badge">Account Migration</div>
-                <h2 class="section-title">Seamless Account Transfer</h2>
-                <p class="section-subtitle">
-                    Backup your accounts from browser or app and restore them on different platforms.
-                </p>
-            </div>
-            
-            <div class="migration-steps">
-                <div class="migration-step">
-                    <div class="step-number">1</div>
-                    <div class="step-content">
-                        <h3>Backup Account</h3>
-                        <p>Export your account data from any Liberdus platform</p>
-                    </div>
-                </div>
-                
-                <div class="migration-step">
-                    <div class="step-number">2</div>
-                    <div class="step-content">
-                        <h3>Install on New Device</h3>
-                        <p>Download Liberdus on your target device or platform</p>
-                    </div>
-                </div>
-                
-                <div class="migration-step">
-                    <div class="step-number">3</div>
-                    <div class="step-content">
-                        <h3>Restore Account</h3>
-                        <p>Import your backup to continue with all your data intact</p>
-                    </div>
-                </div>
-            </div>
-            
+      <div class="container">
+        <div class="section-header">
+          <div class="section-badge">Account Migration</div>
+          <h2 class="section-title">Seamless Account Transfer</h2>
+          <p class="section-subtitle">
+            Backup your accounts from browser or app and restore them on
+            different platforms.
+          </p>
         </div>
+
+        <div class="migration-steps">
+          <div class="migration-step">
+            <div class="step-number">1</div>
+            <div class="step-content">
+              <h3>Backup Account</h3>
+              <p>Export your account data from any Liberdus platform</p>
+            </div>
+          </div>
+
+          <div class="migration-step">
+            <div class="step-number">2</div>
+            <div class="step-content">
+              <h3>Install on New Device</h3>
+              <p>Download Liberdus on your target device or platform</p>
+            </div>
+          </div>
+
+          <div class="migration-step">
+            <div class="step-number">3</div>
+            <div class="step-content">
+              <h3>Restore Account</h3>
+              <p>Import your backup to continue with all your data intact</p>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Community Section -->
     <section class="community-section section">
-        <div class="container">
-            <div class="section-header">
-                <div class="section-badge">Community</div>
-                <h2 class="section-title">Join Our Journey</h2>
-                <p class="section-subtitle">
-                    Be part of building the future of decentralized communication.
-                </p>
-            </div>
-            
-            <div class="community-links">
-                <a href="https://discord.gg/2cpJzFnwCR" class="community-link" target="_blank">
-                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/discord.svg" alt="Discord" class="community-logo">
-                    <span class="community-text">Discord</span>
-                </a>
-                
-                <a href="https://x.com/liberdus" class="community-link" target="_blank">
-                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/x.svg" alt="X (Twitter)" class="community-logo">
-                    <span class="community-text">X (Twitter)</span>
-                </a>
-                
-                <a href="https://www.youtube.com/@Liberdus" class="community-link" target="_blank">
-                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/youtube.svg" alt="YouTube" class="community-logo">
-                    <span class="community-text">YouTube</span>
-                </a>
-                
-                <a href="https://t.me/LiberdusOfficial" class="community-link" target="_blank">
-                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/telegram.svg" alt="Telegram" class="community-logo">
-                    <span class="community-text">Telegram</span>
-                </a>
-                
-                <a href="https://linkedin.com/company/Liberdus" class="community-link" target="_blank">
-                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/linkedin.svg" alt="LinkedIn" class="community-logo">
-                    <span class="community-text">LinkedIn</span>
-                </a>
-                
-                <a href="https://github.com/Liberdus" class="community-link" target="_blank">
-                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/github.svg" alt="GitHub" class="community-logo">
-                    <span class="community-text">GitHub</span>
-                </a>
-                
-                <a href="https://liberdus.substack.com" class="community-link" target="_blank">
-                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/substack.svg" alt="Substack" class="community-logo">
-                    <span class="community-text">Substack</span>
-                </a>
-            </div>
+      <div class="container">
+        <div class="section-header">
+          <div class="section-badge">Community</div>
+          <h2 class="section-title">Join Our Journey</h2>
+          <p class="section-subtitle">
+            Be part of building the future of decentralized communication.
+          </p>
         </div>
+
+        <div class="community-links">
+          <a
+            href="https://discord.gg/2cpJzFnwCR"
+            class="community-link"
+            target="_blank"
+          >
+            <img
+              src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/discord.svg"
+              alt="Discord"
+              class="community-logo"
+            />
+            <span class="community-text">Discord</span>
+          </a>
+
+          <a
+            href="https://x.com/liberdus"
+            class="community-link"
+            target="_blank"
+          >
+            <img
+              src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/x.svg"
+              alt="X (Twitter)"
+              class="community-logo"
+            />
+            <span class="community-text">X (Twitter)</span>
+          </a>
+
+          <a
+            href="https://www.youtube.com/@Liberdus"
+            class="community-link"
+            target="_blank"
+          >
+            <img
+              src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/youtube.svg"
+              alt="YouTube"
+              class="community-logo"
+            />
+            <span class="community-text">YouTube</span>
+          </a>
+
+          <a
+            href="https://t.me/LiberdusOfficial"
+            class="community-link"
+            target="_blank"
+          >
+            <img
+              src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/telegram.svg"
+              alt="Telegram"
+              class="community-logo"
+            />
+            <span class="community-text">Telegram</span>
+          </a>
+
+          <a
+            href="https://linkedin.com/company/Liberdus"
+            class="community-link"
+            target="_blank"
+          >
+            <img
+              src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/linkedin.svg"
+              alt="LinkedIn"
+              class="community-logo"
+            />
+            <span class="community-text">LinkedIn</span>
+          </a>
+
+          <a
+            href="https://github.com/Liberdus"
+            class="community-link"
+            target="_blank"
+          >
+            <img
+              src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/github.svg"
+              alt="GitHub"
+              class="community-logo"
+            />
+            <span class="community-text">GitHub</span>
+          </a>
+
+          <a
+            href="https://liberdus.substack.com"
+            class="community-link"
+            target="_blank"
+          >
+            <img
+              src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/substack.svg"
+              alt="Substack"
+              class="community-logo"
+            />
+            <span class="community-text">Substack</span>
+          </a>
+        </div>
+      </div>
     </section>
 
     <!-- Footer -->
     <footer class="footer">
-        <div class="container">
-            <div class="footer-content">
-                <div class="footer-brand">
-                    <img src="https://liberdus.com/img/logo.png" alt="Liberdus" class="footer-logo">
-                    <p>The first quantum secure, decentralized messaging app</p>
-                </div>
-                
-                <div class="footer-links">
-                    <div class="footer-column">
-                        <h4>Product</h4>
-                        <a href="/#features">Features</a>
-                        <a href="/#technology">Technology</a>
-                        <a href="/roadmap.html">Roadmap</a>
-                        <a href="https://liberdus.com/docs" target="_blank">Documentation</a>
-                        <a href="https://liberdus.com/Liberdus-Litepaper.pdf" target="_blank">Litepaper</a>
-                    </div>
-                    
-                    <div class="footer-column">
-                        <h4>Community</h4>
-                        <a href="https://discord.gg/2cpJzFnwCR" target="_blank">Discord</a>
-                        <a href="https://x.com/liberdus" target="_blank">X (Twitter)</a>
-                        <a href="https://www.youtube.com/@Liberdus" target="_blank">YouTube</a>
-                        <a href="https://t.me/LiberdusOfficial" target="_blank">Telegram</a>
-                        <a href="https://linkedin.com/company/Liberdus" target="_blank">LinkedIn</a>
-                        <a href="https://github.com/Liberdus" target="_blank">GitHub</a>
-                        <a href="https://liberdus.substack.com" target="_blank">Substack</a>
-                    </div>
-                    
-                    <div class="footer-column">
-                        <h4>Developers</h4>
-                        <a href="https://github.com/Liberdus" target="_blank">GitHub</a>
-                        <a href="https://discord.gg/2cpJzFnwCR" target="_blank">Developer Chat</a>
-                        <a href="/#earn">Contribute</a>
-                    </div>
-                </div>
+      <div class="container">
+        <div class="footer-content">
+          <div class="footer-brand">
+            <img
+              src="https://liberdus.com/img/logo.png"
+              alt="Liberdus"
+              class="footer-logo"
+            />
+            <p>The first quantum secure, decentralized messaging app</p>
+          </div>
+
+          <div class="footer-links">
+            <div class="footer-column">
+              <h4>Product</h4>
+              <a href="/#features">Features</a>
+              <a href="/#technology">Technology</a>
+              <a href="roadmap.html">Roadmap</a>
+              <a href="https://liberdus.com/docs" target="_blank"
+                >Documentation</a
+              >
+              <a
+                href="https://liberdus.com/Liberdus-Litepaper.pdf"
+                target="_blank"
+                >Litepaper</a
+              >
             </div>
-            
-            <div class="footer-bottom">
-                <p>&copy; 2019 - Present Liberdus. Decentralized and unstoppable.</p>
+
+            <div class="footer-column">
+              <h4>Community</h4>
+              <a href="https://discord.gg/2cpJzFnwCR" target="_blank"
+                >Discord</a
+              >
+              <a href="https://x.com/liberdus" target="_blank">X (Twitter)</a>
+              <a href="https://www.youtube.com/@Liberdus" target="_blank"
+                >YouTube</a
+              >
+              <a href="https://t.me/LiberdusOfficial" target="_blank"
+                >Telegram</a
+              >
+              <a href="https://linkedin.com/company/Liberdus" target="_blank"
+                >LinkedIn</a
+              >
+              <a href="https://github.com/Liberdus" target="_blank">GitHub</a>
+              <a href="https://liberdus.substack.com" target="_blank"
+                >Substack</a
+              >
             </div>
+
+            <div class="footer-column">
+              <h4>Developers</h4>
+              <a href="https://github.com/Liberdus" target="_blank">GitHub</a>
+              <a href="https://discord.gg/2cpJzFnwCR" target="_blank"
+                >Developer Chat</a
+              >
+              <a href="/#earn">Contribute</a>
+            </div>
+          </div>
         </div>
+
+        <div class="footer-bottom">
+          <p>&copy; 2019 - Present Liberdus. Decentralized and unstoppable.</p>
+        </div>
+      </div>
     </footer>
 
     <script src="src/scripts/main.js"></script>
-</body>
+  </body>
 </html>
