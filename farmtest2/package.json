@@ -1,0 +1,28 @@
+{
+  "name": "lp-staking-vanilla",
+  "version": "1.0.0",
+  "description": "LP Staking Protocol - Vanilla JavaScript Implementation",
+  "main": "index.html",
+  "scripts": {
+    "start": "node cors-server.js",
+    "dev": "node cors-server.js",
+    "serve": "python -m http.server 5500",
+    "serve-cors": "npx http-server -p 5500 --cors"
+  },
+  "keywords": [
+    "defi",
+    "staking",
+    "liquidity-provider",
+    "ethereum",
+    "polygon",
+    "vanilla-javascript"
+  ],
+  "author": "LP Staking Team",
+  "license": "MIT",
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

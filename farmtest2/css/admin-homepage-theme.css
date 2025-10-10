@@ -1,0 +1,1436 @@
+/**
+ * Admin Panel Homepage Theme Override
+ * Applies exact homepage color scheme to entire admin panel
+ * Including modals, notifications, cards, tables, and all UI elements
+ * ENHANCED: Full theme switching support for light/dark modes
+ */
+
+/* ========================================
+   ADMIN PANEL MAIN LAYOUT - HOMEPAGE COLORS
+   ======================================== */
+.admin-panel,
+body.admin-page {
+    background: var(--background-default) !important;
+    color: var(--text-primary) !important;
+    transition: background-color 0.3s ease, color 0.3s ease !important;
+}
+
+.admin-content {
+    background: var(--background-default) !important;
+    color: var(--text-primary) !important;
+    transition: background-color 0.3s ease, color 0.3s ease !important;
+}
+
+/* Ensure body element also gets theme */
+body {
+    background: var(--background-default) !important;
+    color: var(--text-primary) !important;
+    transition: background-color 0.3s ease, color 0.3s ease !important;
+}
+
+/* ========================================
+   CARDS & CONTAINERS - HOMEPAGE STYLE
+   ======================================== */
+.admin-grid-main,
+.admin-grid-sidebar,
+.info-card,
+.info-card-section,
+.recent-activity,
+.connect-card,
+.unauthorized-card {
+    background: var(--background-paper) !important;
+    border: none !important;
+    box-shadow: var(--shadow-4) !important;
+    color: var(--text-primary) !important;
+}
+
+.info-card h3,
+.admin-grid-sidebar h3,
+.recent-activity h3 {
+    color: var(--text-primary) !important;
+}
+
+.info-value {
+    color: var(--text-primary) !important;
+}
+
+.info-label {
+    color: var(--text-secondary) !important;
+}
+
+/* ========================================
+   TABLES - HOMEPAGE STYLE
+   ======================================== */
+.admin-table {
+    background: transparent !important;
+}
+
+.admin-table th {
+    background: var(--background-default) !important;
+    color: var(--text-primary) !important;
+    font-weight: 600 !important;
+    border-bottom: 1px solid var(--divider) !important;
+}
+
+.admin-table td {
+    color: var(--text-primary) !important;
+    border-bottom: 1px solid var(--divider) !important;
+}
+
+.admin-table tbody tr:hover {
+    background: var(--surface-hover) !important;
+}
+
+.table-container {
+    background: var(--background-paper) !important;
+    box-shadow: var(--shadow-4) !important;
+}
+
+/* ========================================
+   BUTTONS - HOMEPAGE STYLE
+   ======================================== */
+.btn-primary,
+.proposal-btn,
+.connect-wallet-btn {
+    background: var(--primary-main) !important;
+    color: white !important;
+    border: none !important;
+}
+
+.btn-primary:hover,
+.proposal-btn:hover,
+.connect-wallet-btn:hover {
+    background: var(--primary-hover) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: var(--shadow-4) !important;
+}
+
+.btn-secondary {
+    background: var(--secondary-main) !important;
+    color: white !important;
+}
+
+.btn-secondary:hover {
+    background: var(--secondary-hover) !important;
+}
+
+/* ========================================
+   MODALS - HOMEPAGE STYLE
+   ======================================== */
+.modal-overlay {
+    background: rgba(0, 0, 0, 0.5) !important;
+    backdrop-filter: blur(4px) !important;
+}
+
+[data-theme="dark"] .modal-overlay {
+    background: rgba(0, 0, 0, 0.7) !important;
+}
+
+.modal-content {
+    background: var(--background-paper) !important;
+    color: var(--text-primary) !important;
+    border-radius: 12px !important;
+    box-shadow: var(--shadow-8) !important;
+}
+
+.modal-header {
+    background: var(--background-paper) !important;
+    color: var(--text-primary) !important;
+    border-bottom: 1px solid var(--divider) !important;
+}
+
+.modal-header h2,
+.modal-header h3 {
+    color: var(--text-primary) !important;
+}
+
+.modal-body {
+    background: var(--background-paper) !important;
+    color: var(--text-primary) !important;
+}
+
+.modal-body label {
+    color: var(--text-primary) !important;
+}
+
+.modal-body input,
+.modal-body select,
+.modal-body textarea {
+    background: var(--background-paper) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--divider) !important;
+}
+
+.modal-body input:focus,
+.modal-body select:focus,
+.modal-body textarea:focus {
+    border-color: var(--primary-main) !important;
+    outline: none !important;
+}
+
+.modal-body select option {
+    background: var(--background-paper) !important;
+    color: var(--text-primary) !important;
+}
+
+.modal-body small,
+.modal-body .form-help {
+    color: var(--text-secondary) !important;
+}
+
+.modal-footer {
+    background: var(--background-paper) !important;
+    border-top: 1px solid var(--divider) !important;
+}
+
+.modal-close {
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+    border: none !important;
+}
+
+.modal-close:hover {
+    background: var(--action-hover) !important;
+    color: var(--text-primary) !important;
+}
+
+/* ========================================
+   NOTIFICATIONS - HOMEPAGE STYLE
+   ======================================== */
+.notification {
+    background: var(--background-paper) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--divider) !important;
+    box-shadow: var(--shadow-8) !important;
+}
+
+[data-theme="dark"] .notification {
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98)) !important;
+    border: 1px solid rgba(71, 85, 105, 0.5) !important;
+}
+
+.notification-title {
+    color: var(--text-primary) !important;
+}
+
+.notification-message {
+    color: var(--text-secondary) !important;
+}
+
+.notification-close {
+    background: var(--action-hover) !important;
+    color: var(--text-secondary) !important;
+}
+
+.notification-close:hover {
+    background: var(--surface-hover) !important;
+    color: var(--text-primary) !important;
+}
+
+/* ========================================
+   STATUS BADGES - HOMEPAGE COLORS
+   ======================================== */
+.status-badge.executed,
+.status.executed {
+    background: rgba(76, 175, 80, 0.1) !important;
+    color: var(--success-main) !important;
+    border: 1px solid var(--success-main) !important;
+}
+
+.status-badge.pending,
+.status.pending {
+    background: rgba(255, 152, 0, 0.1) !important;
+    color: var(--warning-main) !important;
+    border: 1px solid var(--warning-main) !important;
+}
+
+.status-badge.rejected,
+.status.rejected {
+    background: rgba(244, 67, 54, 0.1) !important;
+    color: var(--error-main) !important;
+    border: 1px solid var(--error-main) !important;
+}
+
+.status-badge.ready,
+.status.ready {
+    background: rgba(33, 150, 243, 0.1) !important;
+    color: var(--info-main) !important;
+    border: 1px solid var(--info-main) !important;
+}
+
+/* ========================================
+   ACTION TYPE BADGES - HOMEPAGE COLORS
+   ======================================== */
+.action-type {
+    background: rgba(25, 118, 210, 0.1) !important;
+    color: var(--primary-main) !important;
+    border: 1px solid var(--primary-main) !important;
+}
+
+.action-type.add_pair {
+    background: rgba(76, 175, 80, 0.1) !important;
+    color: var(--success-main) !important;
+    border: 1px solid var(--success-main) !important;
+}
+
+.action-type.remove_pair {
+    background: rgba(244, 67, 54, 0.1) !important;
+    color: var(--error-main) !important;
+    border: 1px solid var(--error-main) !important;
+}
+
+.action-type.set_hourly_reward_rate,
+.action-type.update_pair_weights {
+    background: rgba(255, 152, 0, 0.1) !important;
+    color: var(--warning-main) !important;
+    border: 1px solid var(--warning-main) !important;
+}
+
+.action-type.change_signer,
+.action-type.withdraw_rewards {
+    background: rgba(33, 150, 243, 0.1) !important;
+    color: var(--info-main) !important;
+    border: 1px solid var(--info-main) !important;
+}
+
+/* ========================================
+   EMPTY STATES - HOMEPAGE STYLE
+   ======================================== */
+.empty-state {
+    background: var(--background-paper) !important;
+    color: var(--text-secondary) !important;
+    border: 1px solid var(--divider) !important;
+}
+
+/* ========================================
+   PROPOSAL INFO BOXES - HOMEPAGE STYLE
+   ======================================== */
+.proposal-info,
+.modal-body .proposal-info {
+    background: rgba(25, 118, 210, 0.05) !important;
+    border: 1px solid rgba(25, 118, 210, 0.2) !important;
+    color: var(--text-primary) !important;
+}
+
+.info-item {
+    border-bottom: 1px solid var(--divider) !important;
+}
+
+.info-label {
+    color: var(--text-secondary) !important;
+}
+
+.info-value {
+    color: var(--primary-main) !important;
+}
+
+/* ========================================
+   HEADER & NAVIGATION - HOMEPAGE STYLE
+   ======================================== */
+.admin-header {
+    background: rgba(255, 255, 255, 0.8) !important;
+    backdrop-filter: blur(8px) !important;
+    border-bottom: 1px solid var(--divider) !important;
+}
+
+[data-theme="dark"] .admin-header {
+    background: rgba(0, 0, 0, 0.8) !important;
+}
+
+.admin-title {
+    color: var(--text-primary) !important;
+}
+
+.nav-section {
+    background: transparent !important;
+}
+
+.nav-btn {
+    color: var(--text-secondary) !important;
+    background: transparent !important;
+}
+
+.nav-btn:hover {
+    color: var(--text-primary) !important;
+    background: var(--action-hover) !important;
+}
+
+.nav-btn.active {
+    color: var(--primary-main) !important;
+    background: var(--action-selected) !important;
+}
+
+/* ========================================
+   FOOTER - HOMEPAGE STYLE
+   ======================================== */
+.admin-footer {
+    background: var(--background-paper) !important;
+    border-top: 1px solid var(--divider) !important;
+    color: var(--text-secondary) !important;
+}
+
+/* ========================================
+   FORM ELEMENTS - HOMEPAGE STYLE - FIXED TEXT VISIBILITY
+   ======================================== */
+input[type="text"],
+input[type="number"],
+input[type="email"],
+input[type="password"],
+textarea,
+select,
+.form-input,
+input.form-input,
+textarea.form-input {
+    background: var(--background-paper) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--divider) !important;
+    padding: 12px 16px !important;
+    font-size: 15px !important;
+    line-height: 1.5 !important;
+    font-family: var(--font-family) !important;
+    transition: all 0.2s ease !important;
+}
+
+/* CRITICAL: Force text visibility in dark mode - HIGHEST PRIORITY */
+[data-theme="dark"] input[type="text"],
+[data-theme="dark"] input[type="number"],
+[data-theme="dark"] input[type="email"],
+[data-theme="dark"] input[type="password"],
+[data-theme="dark"] textarea,
+[data-theme="dark"] select,
+[data-theme="dark"] .form-input,
+[data-theme="dark"] input.form-input,
+[data-theme="dark"] textarea.form-input {
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, 0.23) !important;
+    -webkit-text-fill-color: #ffffff !important;
+    caret-color: #ffffff !important;
+}
+
+/* CRITICAL: Force text visibility in light mode - HIGHEST PRIORITY */
+[data-theme="light"] input[type="text"],
+[data-theme="light"] input[type="number"],
+[data-theme="light"] input[type="email"],
+[data-theme="light"] input[type="password"],
+[data-theme="light"] textarea,
+[data-theme="light"] select,
+[data-theme="light"] .form-input,
+[data-theme="light"] input.form-input,
+[data-theme="light"] textarea.form-input {
+    background: #ffffff !important;
+    color: #000000 !important;
+    border-color: rgba(0, 0, 0, 0.23) !important;
+    -webkit-text-fill-color: #000000 !important;
+    caret-color: #000000 !important;
+}
+
+/* Placeholder styling */
+input::placeholder,
+textarea::placeholder {
+    color: var(--text-secondary) !important;
+    opacity: 0.6 !important;
+}
+
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+    color: rgba(255, 255, 255, 0.5) !important;
+}
+
+[data-theme="light"] input::placeholder,
+[data-theme="light"] textarea::placeholder {
+    color: rgba(0, 0, 0, 0.4) !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus,
+.form-input:focus {
+    border-color: var(--primary-main) !important;
+    outline: none !important;
+    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--text-disabled) !important;
+}
+
+/* ========================================
+   CHECKBOX & RADIO - HOMEPAGE STYLE
+   ======================================== */
+.checkbox-container input[type="checkbox"]:checked + .checkmark {
+    background-color: var(--primary-main) !important;
+    border-color: var(--primary-main) !important;
+}
+
+/* ========================================
+   WARNING BOXES - HOMEPAGE STYLE
+   ======================================== */
+.warning-box {
+    background: rgba(255, 152, 0, 0.1) !important;
+    border: 1px solid var(--warning-main) !important;
+    color: var(--text-primary) !important;
+}
+
+.warning-box .material-icons {
+    color: var(--warning-main) !important;
+}
+
+/* ========================================
+   ERROR STATES - HOMEPAGE STYLE
+   ======================================== */
+.error-state,
+.error-message {
+    background: rgba(244, 67, 54, 0.1) !important;
+    border: 1px solid var(--error-main) !important;
+    color: var(--error-main) !important;
+}
+
+/* ========================================
+   LOADING STATES - HOMEPAGE STYLE
+   ======================================== */
+.loading-spinner,
+.spinner {
+    border-color: rgba(0, 0, 0, 0.1) !important;
+    border-top-color: var(--primary-main) !important;
+}
+
+[data-theme="dark"] .loading-spinner,
+[data-theme="dark"] .spinner {
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    border-top-color: var(--primary-main) !important;
+}
+
+/* ========================================
+   CHIPS & BADGES - HOMEPAGE STYLE
+   ======================================== */
+.chip,
+.stat-chip {
+    background: var(--primary-light) !important;
+    color: var(--primary-main) !important;
+    border: 1px solid var(--primary-main) !important;
+}
+
+.proposal-id {
+    background: rgba(0, 0, 0, 0.1) !important;
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .proposal-id {
+    background: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* ========================================
+   APPROVAL PROGRESS - HOMEPAGE STYLE
+   ======================================== */
+.approval-bar {
+    background: rgba(0, 0, 0, 0.1) !important;
+}
+
+[data-theme="dark"] .approval-bar {
+    background: rgba(255, 255, 255, 0.1) !important;
+}
+
+.approval-fill {
+    background: linear-gradient(90deg, var(--primary-main), var(--success-main)) !important;
+}
+
+/* ========================================
+   ACTIVITY ITEMS - HOMEPAGE STYLE
+   ======================================== */
+.activity-item {
+    background: var(--background-paper) !important;
+    border-left: 3px solid var(--primary-main) !important;
+    color: var(--text-primary) !important;
+}
+
+.activity-item:hover {
+    background: var(--surface-hover) !important;
+}
+
+/* ========================================
+   ACCESS DETAILS - HOMEPAGE STYLE
+   ======================================== */
+.access-details {
+    background: rgba(25, 118, 210, 0.05) !important;
+    border: 1px solid rgba(25, 118, 210, 0.2) !important;
+    color: var(--text-primary) !important;
+}
+
+/* ========================================
+   SCROLLBAR - HOMEPAGE STYLE
+   ======================================== */
+.modal-content::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.05) !important;
+}
+
+[data-theme="dark"] .modal-content::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+    background: var(--primary-main) !important;
+}
+
+.modal-content::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-hover) !important;
+}
+
+/* ========================================
+   BUTTON VARIANTS - HOMEPAGE STYLE
+   ======================================== */
+.btn-success {
+    background: var(--success-main) !important;
+    color: white !important;
+}
+
+.btn-success:hover {
+    background: #43a047 !important;
+}
+
+.btn-danger,
+.btn-error {
+    background: var(--error-main) !important;
+    color: white !important;
+}
+
+.btn-danger:hover,
+.btn-error:hover {
+    background: #e53935 !important;
+}
+
+.btn-warning {
+    background: var(--warning-main) !important;
+    color: white !important;
+}
+
+.btn-warning:hover {
+    background: #fb8c00 !important;
+}
+
+.btn-outline {
+    background: transparent !important;
+    border: 1px solid var(--primary-main) !important;
+    color: var(--primary-main) !important;
+}
+
+.btn-outline:hover {
+    background: var(--primary-main) !important;
+    color: white !important;
+}
+
+/* ========================================
+   PROPOSAL ROWS - HOMEPAGE STYLE
+   ======================================== */
+.proposal-row {
+    background: transparent !important;
+}
+
+.proposal-row:hover {
+    background: var(--surface-hover) !important;
+}
+
+.proposal-row.ready {
+    background: rgba(76, 175, 80, 0.05) !important;
+}
+
+.proposal-row.pending {
+    background: rgba(255, 152, 0, 0.05) !important;
+}
+
+.proposal-row.rejected {
+    background: rgba(244, 67, 54, 0.05) !important;
+}
+
+/* ========================================
+   CONNECT WALLET STATES - HOMEPAGE STYLE
+   ======================================== */
+.connect-wallet-btn.connected {
+    background: var(--success-main) !important;
+    color: white !important;
+}
+
+.connect-wallet-btn.connected:hover {
+    background: var(--success-main) !important;
+}
+
+/* ========================================
+   DARK MODE SPECIFIC OVERRIDES
+   ======================================== */
+[data-theme="dark"] .admin-panel {
+    background: var(--background-default) !important;
+}
+
+[data-theme="dark"] .admin-grid-main,
+[data-theme="dark"] .admin-grid-sidebar,
+[data-theme="dark"] .info-card,
+[data-theme="dark"] .table-container {
+    background: var(--background-paper) !important;
+}
+
+[data-theme="dark"] .modal-content {
+    background: var(--background-paper) !important;
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] textarea,
+[data-theme="dark"] select {
+    background: var(--background-paper) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--divider) !important;
+}
+
+/* ========================================
+   ENHANCED DROPDOWN STYLES - MODERN UI - CLEAN SINGLE ARROW
+   ======================================== */
+select,
+.form-input select,
+#remove-pair-select,
+select.form-input,
+#current-signer-select {
+    /* Remove ALL default styling */
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+
+    /* Base styling */
+    background-color: var(--background-paper) !important;
+    background-image: none !important;
+    background-repeat: no-repeat !important;
+    background-position: right 12px center !important;
+    background-size: 16px !important;
+    padding: 12px 40px 12px 16px !important;
+    font-size: 15px !important;
+    line-height: 1.5 !important;
+    border-radius: 8px !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--divider) !important;
+
+    /* Position for custom arrow */
+    position: relative !important;
+}
+
+select:hover,
+.form-input select:hover,
+#remove-pair-select:hover {
+    border-color: var(--primary-main) !important;
+    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1) !important;
+}
+
+select:focus,
+.form-input select:focus,
+#remove-pair-select:focus {
+    border-color: var(--primary-main) !important;
+    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.15) !important;
+    outline: none !important;
+}
+
+/* Remove ALL default select styling that might cause multiple arrows */
+select::-ms-expand {
+    display: none !important;
+}
+
+/* Remove any pseudo-elements that might add arrows */
+select::before,
+select::after {
+    display: none !important;
+    content: none !important;
+}
+
+/* Custom dropdown arrow using wrapper approach */
+.form-group {
+    position: relative !important;
+}
+
+.form-group::after {
+    content: '▼' !important;
+    position: absolute !important;
+    right: 16px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    pointer-events: none !important;
+    font-size: 12px !important;
+    color: var(--text-secondary) !important;
+}
+
+select option,
+.form-input select option,
+#remove-pair-select option {
+    padding: 12px 16px !important;
+    font-size: 15px !important;
+    background: var(--background-paper) !important;
+    color: var(--text-primary) !important;
+}
+
+select option:hover,
+.form-input select option:hover,
+#remove-pair-select option:hover {
+    background: var(--surface-hover) !important;
+}
+
+select option:disabled,
+.form-input select option:disabled,
+#remove-pair-select option:disabled {
+    color: var(--text-disabled) !important;
+    opacity: 0.5 !important;
+}
+
+/* Dark mode option colors */
+[data-theme="dark"] select option,
+[data-theme="dark"] .form-input select option,
+[data-theme="dark"] #remove-pair-select option {
+    background: #1e1e1e !important;
+    color: #ffffff !important;
+}
+
+/* Light mode option colors */
+[data-theme="light"] select option,
+[data-theme="light"] .form-input select option,
+[data-theme="light"] #remove-pair-select option {
+    background: #ffffff !important;
+    color: #000000 !important;
+}
+
+/* Dark mode dropdown colors - NO BACKGROUND IMAGE */
+[data-theme="dark"] select,
+[data-theme="dark"] .form-input select,
+[data-theme="dark"] #remove-pair-select,
+[data-theme="dark"] select.form-input,
+[data-theme="dark"] #current-signer-select {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+    background-image: none !important;
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, 0.23) !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+
+/* Light mode dropdown colors - NO BACKGROUND IMAGE */
+[data-theme="light"] select,
+[data-theme="light"] .form-input select,
+[data-theme="light"] #remove-pair-select,
+[data-theme="light"] select.form-input,
+[data-theme="light"] #current-signer-select {
+    background-color: #ffffff !important;
+    background-image: none !important;
+    color: #000000 !important;
+    border-color: rgba(0, 0, 0, 0.23) !important;
+    -webkit-text-fill-color: #000000 !important;
+}
+
+/* ========================================
+   LOADING STATES - SKELETON & SHIMMER
+   ======================================== */
+.loading-skeleton {
+    background: linear-gradient(
+        90deg,
+        var(--surface-hover) 0%,
+        rgba(0, 0, 0, 0.08) 50%,
+        var(--surface-hover) 100%
+    ) !important;
+    background-size: 200% 100% !important;
+    animation: shimmer 1.5s infinite !important;
+    border-radius: 8px !important;
+    height: 20px !important;
+    margin: 8px 0 !important;
+}
+
+[data-theme="dark"] .loading-skeleton {
+    background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.05) 0%,
+        rgba(255, 255, 255, 0.1) 50%,
+        rgba(255, 255, 255, 0.05) 100%
+    ) !important;
+}
+
+@keyframes shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+.loading-spinner-container {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 40px !important;
+    color: var(--text-secondary) !important;
+}
+
+.loading-spinner-container .spinner {
+    width: 40px !important;
+    height: 40px !important;
+    border: 4px solid var(--divider) !important;
+    border-top-color: var(--primary-main) !important;
+    border-radius: 50% !important;
+    animation: spin 0.8s linear infinite !important;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.loading-text {
+    margin-left: 12px !important;
+    font-size: 14px !important;
+    color: var(--text-secondary) !important;
+}
+
+/* Contract data loading states */
+.contract-info-loading {
+    opacity: 0.6 !important;
+    pointer-events: none !important;
+    position: relative !important;
+}
+
+.contract-info-loading::after {
+    content: '' !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    background: var(--background-paper) !important;
+    opacity: 0.7 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+/* ========================================
+   ENHANCED BUTTON STATES
+   ======================================== */
+.proposal-btn,
+.btn-primary,
+#remove-pair-btn {
+    position: relative !important;
+    overflow: hidden !important;
+    transition: all 0.2s ease !important;
+}
+
+.proposal-btn:disabled,
+.btn-primary:disabled,
+#remove-pair-btn:disabled {
+    opacity: 0.5 !important;
+    cursor: not-allowed !important;
+    background: var(--action-disabled) !important;
+    color: var(--text-disabled) !important;
+}
+
+.proposal-btn:disabled:hover,
+.btn-primary:disabled:hover,
+#remove-pair-btn:disabled:hover {
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+/* Button tooltip for disabled state */
+.proposal-btn[data-tooltip]:disabled::before,
+.btn-primary[data-tooltip]:disabled::before {
+    content: attr(data-tooltip) !important;
+    position: absolute !important;
+    bottom: 100% !important;
+    left: 50% !important;
+    transform: translateX(-50%) translateY(-8px) !important;
+    background: rgba(0, 0, 0, 0.9) !important;
+    color: white !important;
+    padding: 8px 12px !important;
+    border-radius: 6px !important;
+    font-size: 13px !important;
+    white-space: nowrap !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transition: opacity 0.2s ease !important;
+    z-index: 1000 !important;
+}
+
+.proposal-btn[data-tooltip]:disabled:hover::before,
+.btn-primary[data-tooltip]:disabled:hover::before {
+    opacity: 1 !important;
+}
+
+[data-theme="dark"] .proposal-btn[data-tooltip]:disabled::before,
+[data-theme="dark"] .btn-primary[data-tooltip]:disabled::before {
+    background: rgba(255, 255, 255, 0.95) !important;
+    color: #000 !important;
+}
+
+/* ========================================
+   IMPROVED BUTTON STYLING - FIXED OVERFLOW
+   ======================================== */
+.btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    font-weight: 500 !important;
+    transition: all 0.2s ease !important;
+    padding: 10px 20px !important;
+    font-size: 14px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    min-width: fit-content !important;
+}
+
+.btn-icon {
+    font-size: 16px !important;
+    line-height: 1 !important;
+    flex-shrink: 0 !important;
+}
+
+.btn-text {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+.btn-danger {
+    background: var(--error-main) !important;
+    color: white !important;
+    border: none !important;
+    padding: 10px 16px !important;
+    font-size: 14px !important;
+    max-width: 100% !important;
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: var(--error-dark) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 12px rgba(244, 67, 54, 0.3) !important;
+}
+
+.btn-danger:active:not(:disabled) {
+    transform: translateY(0) !important;
+}
+
+.btn-primary {
+    background: var(--primary-main) !important;
+    color: white !important;
+    padding: 10px 16px !important;
+    border-radius: 8px !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    border: none !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    max-width: 100% !important;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: var(--primary-dark) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3) !important;
+}
+
+.proposal-btn {
+    background: var(--primary-main) !important;
+    color: white !important;
+    padding: 10px 20px !important;
+    border-radius: 8px !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    border: none !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    white-space: nowrap !important;
+    max-width: 100% !important;
+}
+
+.proposal-btn:hover:not(:disabled) {
+    background: var(--primary-dark) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3) !important;
+}
+
+.proposal-btn:active:not(:disabled) {
+    transform: translateY(0) !important;
+}
+
+/* ========================================
+   ENHANCED MODAL STYLING - FIXED BUTTONS
+   ======================================== */
+.modal-header h3 {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    font-size: 20px !important;
+    font-weight: 600 !important;
+    color: var(--text-primary) !important;
+}
+
+.modal-footer {
+    display: flex !important;
+    gap: 12px !important;
+    justify-content: flex-end !important;
+    padding: 16px 24px !important;
+    flex-wrap: wrap !important;
+}
+
+.modal-footer .btn {
+    flex: 0 1 auto !important;
+    min-width: 120px !important;
+    max-width: 200px !important;
+    padding: 10px 16px !important;
+    font-size: 14px !important;
+}
+
+.modal-footer .btn-text {
+    display: inline-block !important;
+    max-width: 150px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+.form-help {
+    display: block !important;
+    margin-top: 6px !important;
+    font-size: 13px !important;
+    color: var(--text-secondary) !important;
+    line-height: 1.4 !important;
+}
+
+.field-error {
+    display: block !important;
+    margin-top: 6px !important;
+    font-size: 13px !important;
+    color: var(--error-main) !important;
+    min-height: 18px !important;
+}
+
+/* ========================================
+   SPINNER ANIMATION
+   ======================================== */
+.spinner {
+    display: inline-block !important;
+    width: 16px !important;
+    height: 16px !important;
+    border: 2px solid rgba(255, 255, 255, 0.3) !important;
+    border-top-color: white !important;
+    border-radius: 50% !important;
+    animation: spin 0.6s linear infinite !important;
+}
+
+/* ========================================
+   BUTTON TEXT OVERFLOW FIXES - COMPREHENSIVE
+   ======================================== */
+button[type="submit"],
+button.btn,
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.btn-warning {
+    max-width: 100% !important;
+    overflow: hidden !important;
+}
+
+button[type="submit"] span,
+button.btn span,
+.btn-primary span,
+.btn-secondary span,
+.btn-danger span,
+.btn-warning span {
+    display: inline-block !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+/* Specific fix for long button texts */
+#remove-pair-btn,
+#add-pair-btn,
+#update-weights-btn,
+#change-signer-btn,
+#withdraw-btn,
+#submit-removal-btn,
+#submit-add-pair-btn,
+#submit-change-signer-btn {
+    font-size: 13px !important;
+    padding: 10px 16px !important;
+    min-width: 140px !important;
+    max-width: 180px !important;
+}
+
+#remove-pair-btn .btn-text,
+#add-pair-btn .btn-text,
+#update-weights-btn .btn-text,
+#change-signer-btn .btn-text,
+#withdraw-btn .btn-text,
+#submit-removal-btn .btn-text,
+#submit-add-pair-btn .btn-text,
+#submit-change-signer-btn .btn-text {
+    max-width: 130px !important;
+    font-size: 13px !important;
+}
+
+/* Improve removal proposal button specifically */
+#submit-removal-btn {
+    background: var(--error-main) !important;
+    color: white !important;
+    font-weight: 500 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+}
+
+#submit-removal-btn:hover:not(:disabled) {
+    background: var(--error-dark) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 12px rgba(244, 67, 54, 0.3) !important;
+}
+
+#submit-removal-btn .btn-icon {
+    font-size: 16px !important;
+}
+
+#submit-removal-btn .btn-text {
+    white-space: nowrap !important;
+}
+
+/* ========================================
+   NETWORK INDICATOR
+   ======================================== */
+.network-indicator {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 8px 16px !important;
+    border-radius: 8px !important;
+    border: 1px solid var(--divider) !important;
+    background: var(--background-paper) !important;
+    margin-right: 16px !important;
+}
+
+.network-indicator .network-icon {
+    font-size: 16px !important;
+}
+
+.network-indicator .network-info {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 2px !important;
+}
+
+.network-indicator .network-name {
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: var(--text-primary) !important;
+}
+
+.network-indicator .network-id {
+    font-size: 11px !important;
+    color: var(--text-secondary) !important;
+}
+
+/* Correct network styling */
+.network-indicator.network-correct {
+    border-color: rgba(76, 175, 80, 0.3) !important;
+    background: rgba(76, 175, 80, 0.05) !important;
+}
+
+.network-indicator.network-correct .network-name {
+    color: #4caf50 !important;
+}
+
+/* Wrong network styling */
+.network-indicator.network-wrong {
+    border-color: rgba(244, 67, 54, 0.3) !important;
+    background: rgba(244, 67, 54, 0.05) !important;
+}
+
+.network-indicator.network-wrong .network-name {
+    color: #f44336 !important;
+}
+
+/* Admin header layout adjustments */
+.admin-header-content {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    width: 100% !important;
+}
+
+.admin-header-left {
+    display: flex !important;
+    align-items: center !important;
+    gap: 16px !important;
+}
+
+.admin-header-right {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+}
+
+.back-btn {
+    padding: 8px 16px !important;
+    font-size: 14px !important;
+    white-space: nowrap !important;
+}
+
+/* ========================================
+   NETWORK ERROR CARD
+   ======================================== */
+.network-error-card {
+    max-width: 500px !important;
+    text-align: center !important;
+}
+
+.network-error-card .error-icon {
+    font-size: 64px !important;
+    margin-bottom: 16px !important;
+}
+
+.network-error-card h2 {
+    color: var(--error-main) !important;
+    margin-bottom: 16px !important;
+}
+
+.network-error-card .error-message {
+    font-size: 16px !important;
+    color: var(--text-primary) !important;
+    margin-bottom: 8px !important;
+}
+
+.network-error-card .error-detail {
+    font-size: 14px !important;
+    color: var(--text-secondary) !important;
+    margin-bottom: 24px !important;
+}
+
+.network-error-card .network-requirement {
+    background: var(--background-default) !important;
+    border: 1px solid var(--divider) !important;
+    border-radius: 8px !important;
+    padding: 16px !important;
+    margin: 24px 0 !important;
+}
+
+.network-error-card .required-network {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    margin-top: 12px !important;
+}
+
+.network-error-card .network-badge {
+    display: inline-block !important;
+    padding: 8px 16px !important;
+    background: rgba(76, 175, 80, 0.1) !important;
+    color: #4caf50 !important;
+    border-radius: 6px !important;
+    font-weight: 600 !important;
+}
+
+.network-error-card .chain-id-badge {
+    display: inline-block !important;
+    padding: 6px 12px !important;
+    background: var(--background-paper) !important;
+    color: var(--text-secondary) !important;
+    border-radius: 4px !important;
+    font-size: 13px !important;
+    font-family: monospace !important;
+}
+
+.network-error-card .action-buttons {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    margin-top: 24px !important;
+}
+
+.network-error-card .help-text {
+    margin-top: 24px !important;
+    padding-top: 16px !important;
+    border-top: 1px solid var(--divider) !important;
+}
+
+.network-error-card .help-text p {
+    color: var(--text-secondary) !important;
+    margin: 0 !important;
+}
+
+/* ========================================
+   OWN PROPOSAL STYLING
+   ======================================== */
+.action-buttons .btn.disabled {
+    opacity: 0.5 !important;
+    cursor: not-allowed !important;
+    pointer-events: none !important;
+}
+
+.own-proposal-notice {
+    margin-top: 8px !important;
+    padding: 4px 8px !important;
+    background: rgba(255, 152, 0, 0.1) !important;
+    border: 1px solid rgba(255, 152, 0, 0.3) !important;
+    border-radius: 4px !important;
+    display: inline-block !important;
+}
+
+.own-proposal-notice small {
+    color: #ff9800 !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+}
+
+/* ========================================
+   TOAST/NOTIFICATION POSITIONING FIX
+   ======================================== */
+/* Ensure toasts are ALWAYS above modals and never blurred */
+.notification-container,
+#notification-container {
+    position: fixed !important;
+    top: 20px !important;
+    right: 20px !important;
+    left: auto !important;
+    bottom: auto !important;
+    z-index: 1000000 !important; /* Way above everything */
+    pointer-events: none !important;
+    max-width: 420px !important;
+}
+
+.notification {
+    pointer-events: auto !important;
+    backdrop-filter: none !important; /* Remove blur effect */
+    -webkit-backdrop-filter: none !important;
+    filter: none !important; /* Ensure no filters applied */
+}
+
+/* Ensure modal backdrop doesn't affect toasts */
+.modal-overlay,
+.modal-backdrop {
+    z-index: 999999 !important; /* Below toasts */
+}
+
+#modal-container {
+    z-index: 999999 !important; /* Below toasts */
+}
+
+.modal-content {
+    z-index: 999999 !important; /* Below toasts */
+}
+
+/* ========================================
+   THEME TRANSITION SMOOTHNESS
+   ======================================== */
+* {
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease !important;
+}
+
+/* Exclude animations and transforms from theme transition */
+*:not(.spinner):not(.loading-skeleton) {
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease !important;
+}
+

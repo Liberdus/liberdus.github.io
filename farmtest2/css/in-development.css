@@ -1,0 +1,361 @@
+/**
+ * In Development System - Consistent feedback for unimplemented features
+ * Provides hover tooltips, click prevention, and mobile support
+ * Easy to maintain with simple class-based system
+ */
+
+/* ==================== CORE IN-DEVELOPMENT STYLES ==================== */
+
+.in-development {
+    position: relative;
+    cursor: not-allowed !important;
+    opacity: 0.7;
+    transition: all 0.3s ease;
+}
+
+.in-development:hover {
+    opacity: 0.8;
+}
+
+/* Prevent all interactions for in-development items */
+.in-development {
+    pointer-events: none;
+}
+
+.in-development::before {
+    pointer-events: auto; /* Allow tooltip to show */
+}
+
+/* ==================== TOOLTIP STYLES ==================== */
+
+.in-development::before {
+    content: "In Development";
+    position: absolute;
+    top: -45px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.in-development::after {
+    content: "";
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid #ff6b6b;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    z-index: 1000;
+}
+
+/* Show tooltip on hover (desktop) */
+.in-development:hover::before,
+.in-development:hover::after {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* ==================== POSITION VARIANTS ==================== */
+
+/* Bottom tooltip */
+.in-development.tooltip-bottom::before {
+    top: calc(100% + 10px);
+    border-top: none;
+}
+
+.in-development.tooltip-bottom::after {
+    top: calc(100% + 4px);
+    border-top: none;
+    border-bottom: 6px solid #ff6b6b;
+}
+
+/* Left tooltip */
+.in-development.tooltip-left::before {
+    top: 50%;
+    left: -10px;
+    transform: translate(-100%, -50%);
+}
+
+.in-development.tooltip-left::after {
+    top: 50%;
+    left: -4px;
+    transform: translateY(-50%);
+    border-left: 6px solid #ff6b6b;
+    border-top: 6px solid transparent;
+    border-bottom: 6px solid transparent;
+    border-right: none;
+}
+
+/* Right tooltip */
+.in-development.tooltip-right::before {
+    top: 50%;
+    left: calc(100% + 10px);
+    transform: translateY(-50%);
+}
+
+.in-development.tooltip-right::after {
+    top: 50%;
+    left: calc(100% + 4px);
+    transform: translateY(-50%);
+    border-right: 6px solid #ff6b6b;
+    border-top: 6px solid transparent;
+    border-bottom: 6px solid transparent;
+    border-left: none;
+}
+
+/* ==================== ELEMENT-SPECIFIC STYLES ==================== */
+
+/* Buttons */
+button.in-development,
+.btn.in-development {
+    background: linear-gradient(135deg, #ddd, #bbb) !important;
+    color: #666 !important;
+    border-color: #ccc !important;
+}
+
+button.in-development:hover,
+.btn.in-development:hover {
+    background: linear-gradient(135deg, #e0e0e0, #c0c0c0) !important;
+}
+
+/* Links */
+a.in-development {
+    color: #999 !important;
+    text-decoration: none !important;
+}
+
+a.in-development:hover {
+    color: #777 !important;
+}
+
+/* Form inputs */
+input.in-development,
+select.in-development,
+textarea.in-development {
+    background-color: #f5f5f5 !important;
+    border-color: #ddd !important;
+    color: #999 !important;
+}
+
+/* Navigation items */
+.nav-item.in-development,
+.menu-item.in-development {
+    opacity: 0.6;
+}
+
+/* Cards and panels */
+.card.in-development,
+.panel.in-development {
+    border: 2px dashed #ddd;
+    background: repeating-linear-gradient(
+        45deg,
+        transparent,
+        transparent 10px,
+        rgba(0, 0, 0, 0.02) 10px,
+        rgba(0, 0, 0, 0.02) 20px
+    );
+}
+
+/* ==================== MOBILE SUPPORT ==================== */
+
+/* Mobile tap/touch support */
+@media (max-width: 768px) {
+    .in-development {
+        -webkit-tap-highlight-color: transparent;
+    }
+    
+    /* Show tooltip on tap for mobile */
+    .in-development.mobile-tapped::before,
+    .in-development.mobile-tapped::after {
+        opacity: 1;
+        visibility: visible;
+    }
+    
+    /* Adjust tooltip positioning for mobile */
+    .in-development::before {
+        font-size: 14px;
+        padding: 10px 14px;
+        top: -50px;
+    }
+    
+    .in-development::after {
+        top: -12px;
+    }
+}
+
+/* ==================== BADGE VARIANT ==================== */
+
+.in-development.badge-style {
+    overflow: visible;
+}
+
+.in-development.badge-style::before {
+    content: "DEV";
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background: #ff6b6b;
+    color: white;
+    font-size: 10px;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 10px;
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    left: auto;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    border: 2px solid white;
+}
+
+.in-development.badge-style::after {
+    display: none;
+}
+
+/* ==================== OVERLAY VARIANT ==================== */
+
+.in-development.overlay-style {
+    overflow: hidden;
+}
+
+.in-development.overlay-style::before {
+    content: "🚧 In Development";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 107, 107, 0.9);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 14px;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    transform: none;
+    border-radius: inherit;
+}
+
+.in-development.overlay-style:hover::before {
+    opacity: 1;
+    visibility: visible;
+}
+
+.in-development.overlay-style::after {
+    display: none;
+}
+
+/* ==================== ANIMATION VARIANTS ==================== */
+
+/* Pulse animation */
+.in-development.pulse {
+    animation: devPulse 2s infinite;
+}
+
+@keyframes devPulse {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 0.9; }
+}
+
+/* Shake animation on click attempt */
+.in-development.shake {
+    animation: devShake 0.5s ease-in-out;
+}
+
+@keyframes devShake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+}
+
+/* ==================== ACCESSIBILITY ==================== */
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .in-development::before {
+        background: #000;
+        border: 2px solid #fff;
+    }
+    
+    .in-development::after {
+        border-top-color: #000;
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    .in-development,
+    .in-development::before,
+    .in-development::after {
+        transition: none;
+    }
+    
+    .in-development.pulse {
+        animation: none;
+    }
+}
+
+/* Focus styles for keyboard navigation */
+.in-development:focus {
+    outline: 2px solid #ff6b6b;
+    outline-offset: 2px;
+}
+
+.in-development:focus::before,
+.in-development:focus::after {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* ==================== UTILITY CLASSES ==================== */
+
+/* Hide tooltip completely */
+.in-development.no-tooltip::before,
+.in-development.no-tooltip::after {
+    display: none !important;
+}
+
+/* Custom tooltip text */
+.in-development[data-dev-message]::before {
+    content: attr(data-dev-message);
+}
+
+/* Different severity levels */
+.in-development.coming-soon::before {
+    content: "Coming Soon";
+    background: linear-gradient(135deg, #3498db, #2980b9);
+}
+
+.in-development.coming-soon::after {
+    border-top-color: #3498db;
+}
+
+.in-development.under-review::before {
+    content: "Under Review";
+    background: linear-gradient(135deg, #f39c12, #e67e22);
+}
+
+.in-development.under-review::after {
+    border-top-color: #f39c12;
+}

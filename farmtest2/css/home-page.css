@@ -1,0 +1,946 @@
+/**
+ * HomePage Styles - Day 7 Enhanced
+ * Complete styling for home page with pairs table, portfolio, and responsive design
+ */
+
+/* ==================== HOME PAGE LAYOUT ==================== */
+
+.home-page {
+    padding: 2rem 0;
+    min-height: 100vh;
+}
+
+.page-header {
+    margin-bottom: 2rem;
+}
+
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 2rem;
+}
+
+.header-text h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, var(--liberdus-accent-primary), var(--liberdus-accent-secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.header-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+}
+
+.refresh-info {
+    font-size: 0.875rem;
+    color: var(--liberdus-text-tertiary);
+}
+
+.refresh-icon.spinning {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* ==================== GLOBAL STATS ==================== */
+
+.global-stats {
+    margin-bottom: 3rem;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+}
+
+.stat-card {
+    background: var(--liberdus-bg-card);
+    border: 1px solid var(--liberdus-border-primary);
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    transition: all 0.3s ease;
+}
+
+.stat-card:hover {
+    background: var(--liberdus-bg-hover);
+    border-color: var(--liberdus-border-accent);
+    transform: translateY(-2px);
+}
+
+.stat-icon {
+    font-size: 2rem;
+    width: 3rem;
+    height: 3rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--liberdus-bg-secondary);
+    border-radius: 8px;
+}
+
+.stat-content {
+    flex: 1;
+}
+
+.stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--liberdus-text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.stat-label {
+    font-size: 0.875rem;
+    color: var(--liberdus-text-secondary);
+}
+
+/* ==================== USER PORTFOLIO ==================== */
+
+.user-portfolio {
+    margin-bottom: 3rem;
+}
+
+.portfolio-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.portfolio-header h2 {
+    font-size: 1.75rem;
+    font-weight: 600;
+}
+
+.portfolio-address {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+}
+
+.address-label {
+    color: var(--liberdus-text-secondary);
+}
+
+.address-value {
+    font-family: 'Courier New', monospace;
+    color: var(--liberdus-text-primary);
+}
+
+.copy-address-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+}
+
+.copy-address-btn:hover {
+    background: var(--liberdus-bg-hover);
+}
+
+.portfolio-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+}
+
+.portfolio-card {
+    background: var(--liberdus-bg-card);
+    border: 1px solid var(--liberdus-border-primary);
+    border-radius: 12px;
+    padding: 1.5rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.portfolio-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--gradient-primary);
+}
+
+.portfolio-card.primary::before {
+    background: linear-gradient(90deg, #3b82f6, #1d4ed8);
+}
+
+.portfolio-card.success::before {
+    background: linear-gradient(90deg, #10b981, #059669);
+}
+
+.portfolio-card.warning::before {
+    background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
+.portfolio-card.info::before {
+    background: linear-gradient(90deg, #8b5cf6, #7c3aed);
+}
+
+.card-icon {
+    font-size: 2rem;
+    margin-bottom: 1rem;
+}
+
+.card-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--liberdus-text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.card-label {
+    font-size: 0.875rem;
+    color: var(--liberdus-text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+.card-change {
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.card-change.positive {
+    color: var(--liberdus-success);
+}
+
+.card-change.negative {
+    color: var(--liberdus-error);
+}
+
+.card-action {
+    margin-top: 1rem;
+}
+
+.card-detail {
+    font-size: 0.75rem;
+    color: var(--liberdus-text-tertiary);
+}
+
+/* ==================== STAKING PAIRS SECTION ==================== */
+
+.staking-pairs-section {
+    margin-bottom: 2rem;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.header-left h2 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.pairs-count {
+    font-size: 0.875rem;
+    color: var(--liberdus-text-secondary);
+    background: var(--liberdus-bg-secondary);
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* ==================== SORT CONTROLS ==================== */
+
+.sort-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.sort-label {
+    font-size: 0.875rem;
+    color: var(--liberdus-text-secondary);
+}
+
+.sort-select {
+    background: var(--liberdus-bg-input);
+    border: 1px solid var(--liberdus-border-primary);
+    border-radius: 6px;
+    padding: 0.5rem;
+    color: var(--liberdus-text-primary);
+    font-size: 0.875rem;
+}
+
+.sort-order-btn {
+    background: var(--liberdus-bg-secondary);
+    border: 1px solid var(--liberdus-border-primary);
+    border-radius: 6px;
+    padding: 0.5rem;
+    color: var(--liberdus-text-primary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sort-order-btn:hover {
+    background: var(--liberdus-bg-hover);
+    border-color: var(--liberdus-border-accent);
+}
+
+.sort-order-btn.desc {
+    color: var(--liberdus-accent-primary);
+}
+
+/* ==================== PAIRS TABLE ==================== */
+
+.pairs-table-container {
+    background: var(--liberdus-bg-card);
+    border: 1px solid var(--liberdus-border-primary);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.responsive-table {
+    overflow-x: auto;
+}
+
+.pairs-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.pairs-table th {
+    background: var(--liberdus-bg-secondary);
+    padding: 1rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--liberdus-text-secondary);
+    border-bottom: 1px solid var(--liberdus-border-primary);
+    white-space: nowrap;
+}
+
+.th-content {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.sort-indicator {
+    font-size: 0.75rem;
+    opacity: 0.5;
+}
+
+.sort-indicator.active {
+    opacity: 1;
+    color: var(--liberdus-accent-primary);
+}
+
+.pairs-table td {
+    padding: 1rem;
+    border-bottom: 1px solid var(--liberdus-border-primary);
+    vertical-align: top;
+}
+
+.pair-row {
+    transition: background-color 0.2s ease;
+    cursor: pointer;
+}
+
+.pair-row:hover {
+    background: var(--liberdus-bg-hover);
+}
+
+.pair-row.user-staking {
+    background: rgba(59, 130, 246, 0.05);
+    border-left: 3px solid var(--liberdus-accent-primary);
+}
+
+/* ==================== PAIR INFO STYLES ==================== */
+
+.pair-info {
+    min-width: 200px;
+}
+
+.pair-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.5rem;
+}
+
+.pair-name-container {
+    flex: 1;
+}
+
+.pair-name {
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--liberdus-text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.pair-badges {
+    display: flex;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+}
+
+.badge {
+    font-size: 0.625rem;
+    padding: 0.125rem 0.375rem;
+    border-radius: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.badge.new {
+    background: var(--liberdus-success);
+    color: white;
+}
+
+.badge.hot {
+    background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+    color: white;
+}
+
+.badge.inactive {
+    background: var(--liberdus-text-muted);
+    color: white;
+}
+
+.uniswap-link {
+    background: none;
+    border: 1px solid var(--liberdus-border-secondary);
+    border-radius: 6px;
+    padding: 0.25rem 0.5rem;
+    color: var(--liberdus-text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.uniswap-link:hover {
+    border-color: var(--liberdus-accent-primary);
+    color: var(--liberdus-accent-primary);
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.pair-details {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.75rem;
+    color: var(--liberdus-text-tertiary);
+}
+
+.pair-address {
+    font-family: 'Courier New', monospace;
+}
+
+.pair-network {
+    background: var(--liberdus-bg-secondary);
+    padding: 0.125rem 0.375rem;
+    border-radius: 4px;
+}
+
+/* ==================== APR DISPLAY ==================== */
+
+.apr-display {
+    text-align: center;
+    min-width: 100px;
+}
+
+.apr-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
+
+.apr-value.inactive {
+    color: var(--liberdus-text-muted);
+}
+
+.apr-value.low {
+    color: var(--liberdus-warning);
+}
+
+.apr-value.moderate {
+    color: var(--liberdus-info);
+}
+
+.apr-value.high {
+    color: var(--liberdus-success);
+}
+
+.apr-value.very-high {
+    color: var(--liberdus-accent-primary);
+}
+
+.apr-status {
+    font-size: 0.75rem;
+    color: var(--liberdus-text-secondary);
+    margin-bottom: 0.25rem;
+}
+
+.apr-change {
+    font-size: 0.625rem;
+    font-weight: 500;
+}
+
+.apr-change.positive {
+    color: var(--liberdus-success);
+}
+
+.apr-change.negative {
+    color: var(--liberdus-error);
+}
+
+/* ==================== TVL DISPLAY ==================== */
+
+.tvl-display {
+    text-align: right;
+    min-width: 120px;
+}
+
+.tvl-value {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--liberdus-text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.tvl-tokens {
+    font-size: 0.75rem;
+    color: var(--liberdus-text-secondary);
+    margin-bottom: 0.25rem;
+}
+
+.tvl-change {
+    font-size: 0.625rem;
+    font-weight: 500;
+}
+
+.tvl-change.positive {
+    color: var(--liberdus-success);
+}
+
+.tvl-change.negative {
+    color: var(--liberdus-error);
+}
+
+/* ==================== WEIGHT DISPLAY ==================== */
+
+.weight-display {
+    min-width: 80px;
+}
+
+.weight-value {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--liberdus-text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.weight-bar {
+    width: 100%;
+    height: 4px;
+    background: var(--liberdus-bg-secondary);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.weight-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--liberdus-accent-primary), var(--liberdus-accent-secondary));
+    transition: width 0.3s ease;
+}
+
+/* ==================== STAKE AND REWARDS DISPLAY ==================== */
+
+.stake-display,
+.rewards-display {
+    text-align: right;
+    min-width: 100px;
+}
+
+.stake-amount,
+.rewards-amount {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--liberdus-text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.stake-usd,
+.rewards-usd {
+    font-size: 0.75rem;
+    color: var(--liberdus-text-secondary);
+}
+
+.no-stake,
+.no-rewards {
+    font-size: 0.875rem;
+    color: var(--liberdus-text-muted);
+    font-style: italic;
+}
+
+/* ==================== PAIR ACTIONS ==================== */
+
+.pair-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    min-width: 200px;
+}
+
+.pair-actions .btn {
+    font-size: 0.75rem;
+    padding: 0.375rem 0.75rem;
+    white-space: nowrap;
+}
+
+/* ==================== LOADING STATES ==================== */
+
+.loading-skeleton {
+    background: linear-gradient(90deg, var(--liberdus-bg-secondary) 25%, var(--liberdus-bg-hover) 50%, var(--liberdus-bg-secondary) 75%);
+    background-size: 200% 100%;
+    animation: loading 1.5s infinite;
+    border-radius: 4px;
+}
+
+@keyframes loading {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+.skeleton-row td {
+    padding: 1rem;
+}
+
+.skeleton-pair {
+    height: 40px;
+    width: 150px;
+}
+
+.skeleton-apr {
+    height: 30px;
+    width: 60px;
+}
+
+.skeleton-tvl {
+    height: 30px;
+    width: 80px;
+}
+
+.skeleton-weight {
+    height: 20px;
+    width: 60px;
+}
+
+.skeleton-stake {
+    height: 30px;
+    width: 70px;
+}
+
+.skeleton-rewards {
+    height: 30px;
+    width: 70px;
+}
+
+.skeleton-actions {
+    height: 30px;
+    width: 120px;
+}
+
+.skeleton-button {
+    height: 36px;
+    width: 100px;
+}
+
+/* ==================== REFRESH INDICATOR ==================== */
+
+.refresh-indicator {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    background: var(--liberdus-bg-card);
+    border: 1px solid var(--liberdus-border-primary);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    z-index: 100;
+}
+
+.refresh-indicator.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.refresh-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--liberdus-border-primary);
+    border-top: 2px solid var(--liberdus-accent-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.refresh-indicator span {
+    font-size: 0.875rem;
+    color: var(--liberdus-text-secondary);
+}
+
+/* ==================== EMPTY STATE ==================== */
+
+.empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+}
+
+.empty-content {
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.empty-icon {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+}
+
+.empty-content h3 {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+    color: var(--liberdus-text-primary);
+}
+
+.empty-content p {
+    color: var(--liberdus-text-secondary);
+    margin-bottom: 2rem;
+    line-height: 1.6;
+}
+
+.empty-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin-bottom: 2rem;
+}
+
+.empty-help {
+    background: var(--liberdus-bg-secondary);
+    border-radius: 8px;
+    padding: 1.5rem;
+    text-align: left;
+}
+
+.empty-help h4 {
+    margin-bottom: 1rem;
+    color: var(--liberdus-text-primary);
+}
+
+.empty-help ol {
+    color: var(--liberdus-text-secondary);
+    line-height: 1.6;
+}
+
+.empty-help li {
+    margin-bottom: 0.5rem;
+}
+
+/* ==================== RESPONSIVE DESIGN ==================== */
+
+@media (max-width: 1024px) {
+    .header-content {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .header-actions {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .portfolio-grid {
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    }
+    
+    .section-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .header-right {
+        justify-content: space-between;
+    }
+}
+
+@media (max-width: 768px) {
+    .home-page {
+        padding: 1rem 0;
+    }
+    
+    .header-text h1 {
+        font-size: 2rem;
+    }
+    
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .portfolio-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .pairs-table th,
+    .pairs-table td {
+        padding: 0.75rem 0.5rem;
+    }
+    
+    .pair-info {
+        min-width: 150px;
+    }
+    
+    .pair-header {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .pair-actions {
+        flex-direction: column;
+        min-width: 120px;
+    }
+    
+    .refresh-indicator {
+        bottom: 1rem;
+        right: 1rem;
+        left: 1rem;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 480px) {
+    .responsive-table {
+        font-size: 0.875rem;
+    }
+    
+    .pairs-table th,
+    .pairs-table td {
+        padding: 0.5rem 0.25rem;
+    }
+    
+    .empty-actions {
+        flex-direction: column;
+        align-items: center;
+    }
+}
+
+/* ==================== ACTIONS COLUMN STYLES ==================== */
+
+.actions-col {
+    min-width: 280px;
+    text-align: center;
+}
+
+.pair-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.pair-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.pair-actions .btn .material-icons-outlined {
+    font-size: 14px;
+}
+
+.pair-actions .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Share and Earnings columns */
+.share-col,
+.earnings-col {
+    text-align: center;
+    min-width: 100px;
+}
+
+@media (max-width: 1200px) {
+    .actions-col {
+        min-width: 240px;
+    }
+
+    .pair-actions {
+        gap: 6px;
+    }
+
+    .pair-actions .btn {
+        padding: 5px 10px;
+        font-size: 12px;
+    }
+}
+
+@media (max-width: 768px) {
+    .actions-col {
+        min-width: 200px;
+    }
+
+    .pair-actions {
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .pair-actions .btn {
+        width: 100%;
+        justify-content: center;
+    }
+}

@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liberdus LP Staking - Earn Rewards by Staking LP Tokens</title>
+    <meta name="description" content="Stake your liquidity provider tokens and earn rewards on our secure DeFi platform">
+
+    <!-- Prevent caching for development -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+
+    <link rel="icon" type="image/x-icon" href="/farmtest2/favicon.ico">
+    <link href="https://fonts.googleapis.com/css?family=Exo:400,500,600,700,800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
+
+    <!-- Day 10 Enhanced CSS -->
+    <link rel="stylesheet" href="/farmtest2/css/day10-enhancements.css">
+    <style>
+        :root {
+
+            --primary-main: #1976d2;
+            --primary-hover: #1565c0;
+            --primary-light: #e3f2fd;
+            --secondary-main: #dc004e;
+            --secondary-hover: #c5003e;
+
+            /* Status colors */
+            --success-main: #4caf50;
+            --error-main: #f44336;
+            --warning-main: #ff9800;
+            --info-main: #2196f3;
+
+            /* Background colors - light theme */
+            --background-default: #ffffff;
+            --background-paper: #ffffff;
+            --surface-hover: rgba(0, 0, 0, 0.04);
+            --action-selected: rgba(25, 118, 210, 0.08);
+            --action-hover: rgba(0, 0, 0, 0.04);
+
+            /* Text colors - light theme */
+            --text-primary: rgba(0, 0, 0, 0.87);
+            --text-secondary: rgba(0, 0, 0, 0.6);
+            --text-disabled: rgba(0, 0, 0, 0.38);
+
+            /* Border and divider */
+            --divider: rgba(0, 0, 0, 0.12);
+
+            /* Shadows */
+            --shadow-1: 0px 2px 1px -1px rgba(0,0,0,0.2), 0px 1px 1px 0px rgba(0,0,0,0.14), 0px 1px 3px 0px rgba(0,0,0,0.12);
+            --shadow-4: 0px 2px 4px -1px rgba(0,0,0,0.2), 0px 4px 5px 0px rgba(0,0,0,0.14), 0px 1px 10px 0px rgba(0,0,0,0.12);
+            --shadow-8: 0px 5px 5px -3px rgba(0,0,0,0.2), 0px 8px 10px 1px rgba(0,0,0,0.14), 0px 3px 14px 2px rgba(0,0,0,0.12);
+
+        /* ========================================
+           HOMEPAGE TOAST NOTIFICATIONS - ISOLATED
+           ======================================== */
+
+        /* Hide old notification container at bottom */
+        #notification-container {
+            display: none !important;
+        }
+
+        /* Container - Fixed position, top-right, no layout impact */
+        #homepage-notification-container {
+            position: fixed !important;
+            top: 20px !important;
+            right: 20px !important;
+            z-index: 10000 !important;
+            max-width: 380px;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        /* Individual notification toast */
+        .homepage-notification {
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98)) !important;
+            backdrop-filter: blur(16px) !important;
+            border: 1px solid rgba(71, 85, 105, 0.5);
+            border-radius: 14px !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05) inset !important;
+            padding: 16px 18px;
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            pointer-events: auto !important;
+            min-width: 320px !important;
+            max-width: 380px;
+            position: relative;
+            overflow: hidden;
+            transform: translateX(120%);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* Show animation */
+        .homepage-notification.show {
+            transform: translateX(0);
+            opacity: 1;
+        }
+
+        /* Hide animation */
+        .homepage-notification.hide {
+            transform: translateX(120%);
+            opacity: 0;
+        }
+
+        /* Left accent border */
+        .homepage-notification::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: currentColor;
+            border-radius: 14px 0 0 14px;
+        }
+
+        /* Icon */
+        .homepage-notification-icon {
+            font-size: 22px;
+            flex-shrink: 0;
+            line-height: 1;
+            opacity: 0.95;
+            margin-top: 2px;
+        }
+
+        /* Content */
+        .homepage-notification-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .homepage-notification-title {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 4px;
+            color: #f1f5f9;
+            line-height: 1.4;
+        }
+
+        .homepage-notification-message {
+            font-size: 13px;
+            color: #cbd5e1;
+            line-height: 1.5;
+        }
+
+        /* Close button */
+        .homepage-notification-close {
+            background: rgba(71, 85, 105, 0.4);
+            border: none;
+            font-size: 18px;
+            cursor: pointer;
+            color: #94a3b8;
+            padding: 6px;
+            line-height: 1;
+            border-radius: 8px;
+            transition: all 0.2s;
+            flex-shrink: 0;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: -2px;
+        }
+
+        .homepage-notification-close:hover {
+            background: rgba(100, 116, 139, 0.6);
+            color: #e2e8f0;
+            transform: scale(1.05);
+        }
+
+        .homepage-notification-close:focus {
+            outline: 2px solid rgba(59, 130, 246, 0.5);
+            outline-offset: 2px;
+        }
+
+        /* Type-specific colors */
+        .homepage-notification-success {
+            color: #10b981;
+        }
+
+        .homepage-notification-error {
+            color: #ef4444;
+        }
+
+        .homepage-notification-warning {
+            color: #f59e0b;
+        }
+
+        .homepage-notification-info {
+            color: #3b82f6;
+        }
+
+        /* Progress bar */
+        .homepage-notification-progress {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 3px;
+            background: currentColor;
+            opacity: 0.6;
+            transition: width linear;
+            border-radius: 0 0 0 14px;
+        }
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            #homepage-notification-container {
+                left: 10px;
+                right: 10px;
+                top: 10px;
+                max-width: none;
+            }
+
+            .homepage-notification {
+                min-width: auto;
+                max-width: none;
+                padding: 14px 16px;
+            }
+        }
+
+        /* Accessibility - Screen reader only */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+            
+            /* Typography */
+            --font-family: "Exo", "Helvetica", "Arial", sans-serif;
+            --font-size: 15px;
+            
+            /* Spacing */
+            --spacing-1: 8px;
+            --spacing-2: 16px;
+            --spacing-3: 24px;
+            --spacing-4: 32px;
+            --spacing-6: 48px;
+            
+            /* Border radius */
+            --border-radius: 4px;
+            --border-radius-lg: 8px;
+        }
+        
+        /* Dark theme */
+        [data-theme="dark"] {
+            --background-default: #121212;
+            --background-paper: #1e1e1e;
+            --surface-hover: rgba(255, 255, 255, 0.08);
+            --action-selected: rgba(144, 202, 249, 0.16);
+            --action-hover: rgba(255, 255, 255, 0.08);
+            
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.7);
+            --text-disabled: rgba(255, 255, 255, 0.5);
+            
+            --divider: rgba(255, 255, 255, 0.12);
+        }
+        
+        /* Reset and base styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: var(--font-family);
+            font-size: var(--font-size);
+            line-height: 1.5;
+            color: var(--text-primary);
+            background-color: var(--background-default);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            font-synthesis: none;
+            text-rendering: optimizeLegibility;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        /* Container matching MUI Container */
+        .container-lg {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 var(--spacing-3);
+        }
+        
+        .container-xl {
+            max-width: 1536px;
+            margin: 0 auto;
+            padding: 0 var(--spacing-3);
+        }
+        
+        /* Header matching MUI AppBar */
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 1100;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(8px);
+            border-bottom: 1px solid var(--divider);
+            transition: all 0.3s ease;
+        }
+        
+        [data-theme="dark"] .header {
+            background: rgba(0, 0, 0, 0.8);
+        }
+        
+        .header-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: var(--spacing-2) 0;
+            min-height: 64px;
+        }
+        
+        /* Logo section */
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: inherit;
+            transition: opacity 0.2s;
+        }
+        
+        .logo-section:hover {
+            opacity: 0.8;
+        }
+        
+        .logo {
+            width: 44px;
+            height: 44px;
+            transition: transform 0.2s ease-in-out;
+        }
+        
+        .logo:hover {
+            transform: scale(1.05);
+        }
+        
+        .logo-text {
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(45deg, #2196F3 30%, #21CBF3 90%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            white-space: nowrap;
+        }
+        
+        [data-theme="dark"] .logo-text {
+            background: linear-gradient(45deg, #fff 30%, #ccc 90%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        /* Navigation */
+        .nav-section {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-2);
+        }
+        
+        .nav-button {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-1);
+            padding: var(--spacing-1) var(--spacing-2);
+            border: none;
+            border-radius: var(--border-radius-lg);
+            background: transparent;
+            color: var(--text-primary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s;
+            cursor: pointer;
+            font-size: var(--font-size);
+        }
+        
+        .nav-button:hover {
+            background: var(--action-hover);
+            transform: translateY(-2px);
+        }
+        
+        .nav-button.active {
+            background: var(--action-selected);
+            color: var(--primary-main);
+        }
+        
+        /* Theme toggle */
+        .theme-toggle {
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
+            color: var(--text-primary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.3s ease-in-out;
+        }
+        
+        .theme-toggle:hover {
+            transform: rotate(180deg);
+            background: var(--action-hover);
+        }
+        
+        /* Connect wallet button */
+        .connect-wallet-btn {
+            background: var(--primary-main);
+            color: white;
+            border: none;
+            padding: var(--spacing-1) var(--spacing-3);
+            border-radius: var(--border-radius);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-1);
+            font-size: var(--font-size);
+        }
+        
+        .connect-wallet-btn:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-4);
+        }
+        
+        /* Main content */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: var(--spacing-6) var(--spacing-3);
+        }
+        
+        /* Page title */
+        .page-title {
+            text-align: center;
+            margin-bottom: var(--spacing-4);
+        }
+        
+        .page-title h1 {
+            font-size: 48px;
+            font-weight: 700;
+            margin-bottom: var(--spacing-2);
+            color: var(--text-primary);
+        }
+        
+        .reward-info {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--spacing-2);
+            margin-bottom: var(--spacing-2);
+        }
+        
+        .reward-info .material-icons {
+            color: var(--primary-main);
+        }
+        
+        .reward-rate {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        /* Refresh button */
+        .refresh-button {
+            background: transparent;
+            border: none;
+            color: var(--primary-main);
+            cursor: pointer;
+            padding: var(--spacing-1);
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+        
+        .refresh-button:hover {
+            background: var(--action-hover);
+            transform: rotate(180deg);
+        }
+        
+        /* Table container */
+        .table-container {
+            width: 100%;
+            background: var(--background-paper);
+            border-radius: 12px;
+            box-shadow: var(--shadow-4);
+            overflow: hidden;
+        }
+        
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .table th,
+        .table td {
+            padding: var(--spacing-2);
+            text-align: left;
+            border-bottom: 1px solid var(--divider);
+        }
+        
+        .table th {
+            background: var(--background-default);
+            font-weight: 600;
+            color: var(--text-primary);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .table th .material-icons {
+            vertical-align: middle;
+            margin-right: var(--spacing-1);
+            color: var(--primary-main);
+        }
+        
+        .table tbody tr:hover {
+            background: var(--surface-hover);
+        }
+        
+        .table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* Button styles matching MUI */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-1);
+            padding: var(--spacing-1) var(--spacing-2);
+            border: none;
+            border-radius: var(--border-radius);
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            min-width: 64px;
+            justify-content: center;
+        }
+
+        .btn-primary {
+            background: var(--primary-main);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-4);
+        }
+
+        .btn-secondary {
+            background: var(--secondary-main);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: var(--secondary-hover);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-4);
+        }
+
+        .btn-text {
+            background: transparent;
+            color: var(--primary-main);
+            font-weight: bold;
+        }
+
+        .btn-text:hover {
+            background: var(--action-hover);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        /* Small button variant */
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 13px;
+            min-width: 80px;
+        }
+
+        /* Share and Earnings buttons in table */
+        .btn-share,
+        .btn-earnings {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .btn-share .material-icons,
+        .btn-earnings .material-icons {
+            font-size: 16px;
+        }
+
+        /* Chip styles matching MUI */
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 600;
+            border: 1px solid;
+        }
+
+        .chip-primary {
+            background: var(--primary-light);
+            color: var(--primary-main);
+            border-color: var(--primary-main);
+        }
+
+        .chip-secondary {
+            background: rgba(220, 0, 78, 0.1);
+            color: var(--secondary-main);
+            border-color: var(--secondary-main);
+        }
+
+        /* Success color for APR */
+        .success-text {
+            color: var(--success-main);
+            font-weight: bold;
+        }
+
+        /* Loading skeleton */
+        .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+            border-radius: var(--border-radius);
+        }
+
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        [data-theme="dark"] .skeleton {
+            background: linear-gradient(90deg, #2a2a2a 25%, #3a3a3a 50%, #2a2a2a 75%);
+            background-size: 200% 100%;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: auto;
+            padding: var(--spacing-3) 0;
+            border-top: 1px solid var(--divider);
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(8px);
+        }
+
+        [data-theme="dark"] .footer {
+            background: rgba(0, 0, 0, 0.8);
+        }
+
+        .footer-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: var(--spacing-2);
+        }
+
+        .footer-text {
+            color: var(--text-secondary);
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        .social-links {
+            display: flex;
+            gap: var(--spacing-2);
+        }
+
+        .social-link {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: transform 0.2s;
+        }
+
+        .social-link:hover {
+            transform: translateY(-2px);
+            color: var(--primary-main);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .logo-text {
+                display: none;
+            }
+
+            .nav-section {
+                gap: var(--spacing-1);
+            }
+
+            .nav-button span:not(.material-icons) {
+                display: none;
+            }
+
+            .page-title h1 {
+                font-size: 32px;
+            }
+
+            .reward-info {
+                flex-direction: column;
+                gap: var(--spacing-1);
+            }
+
+            .table th,
+            .table td {
+                padding: 12px 8px;
+                font-size: 14px;
+            }
+
+            .footer-content {
+                flex-direction: column;
+                text-align: center;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .container-lg,
+            .container-xl {
+                padding: 0 var(--spacing-2);
+            }
+
+            .main-content {
+                padding: var(--spacing-3) var(--spacing-2);
+            }
+
+            .table-container {
+                overflow-x: auto;
+            }
+
+            .table {
+                min-width: 600px;
+            }
+        }
+
+        /* Utility Classes */
+        .hidden {
+            display: none !important;
+        }
+
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .mb-4 {
+            margin-bottom: var(--spacing-4);
+        }
+
+        .mt-4 {
+            margin-top: var(--spacing-4);
+        }
+
+        .flex {
+            display: flex;
+        }
+
+        .items-center {
+            align-items: center;
+        }
+
+        .justify-center {
+            justify-content: center;
+        }
+
+        .gap-2 {
+            gap: var(--spacing-2);
+        }
+    </style>
+</head>
+<body>
+
+    <header class="header" role="banner">
+        <div class="container-lg">
+            <div class="header-toolbar">
+
+                <a href="/" class="logo-section" aria-label="Liberdus LP Staking - Home">
+                    <img src="/farmtest2/assets/logo.png" alt="Liberdus LP Staking" class="logo">
+                    <span class="logo-text">Liberdus LP Staking</span>
+                </a>
+
+
+                <nav class="nav-section" role="navigation" aria-label="Main navigation">
+                    <a href="/" class="nav-button active" aria-current="page">
+                        <span class="material-icons" aria-hidden="true">home</span>
+                        <span>Home</span>
+                    </a>
+                    <a href="/farmtest2/admin.html" class="nav-button">
+                        <span class="material-icons" aria-hidden="true">admin_panel_settings</span>
+                        <span>Admin Panel</span>
+                    </a>
+
+
+                    <button id="connect-wallet-btn" class="connect-wallet-btn" aria-describedby="wallet-status">
+                        <span class="material-icons" aria-hidden="true">account_balance_wallet</span>
+                        <span>Connect Wallet</span>
+                    </button>
+
+
+                    <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark/light theme">
+                        <span class="material-icons-outlined" aria-hidden="true">light_mode</span>
+                    </button>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+
+    <main class="main-content" role="main" id="main-content">
+        <div class="container-xl">
+
+            <div class="page-title">
+                <h1>LP Staking</h1>
+                <div class="reward-info">
+                    <span class="material-icons" aria-hidden="true">access_time</span>
+                    <span class="reward-rate">Hourly Reward Rate: <span id="hourly-rate" aria-live="polite">0.00</span> LIB</span>
+                    <button id="refresh-button" class="refresh-button" aria-label="Refresh data">
+                        <span class="material-icons" aria-hidden="true">refresh</span>
+                    </button>
+                </div>
+            </div>
+
+
+            <div id="content-container" class="animate-fade-in">
+            </div>
+        </div>
+    </main>
+
+
+    <footer class="footer">
+        <div class="container-lg">
+            <div class="footer-content">
+                <span class="footer-text">© 2024 Liberdus LP Stake. All rights reserved.</span>
+                <div class="social-links">
+                    <a href="https://github.com" target="_blank" rel="noopener" class="social-link" title="Visit our GitHub">
+                        <span class="material-icons">code</span>
+                    </a>
+                    <a href="https://twitter.com" target="_blank" rel="noopener" class="social-link" title="Follow us on Twitter">
+                        <span class="material-icons">alternate_email</span>
+                    </a>
+                    <a href="https://telegram.org" target="_blank" rel="noopener" class="social-link" title="Join our Telegram">
+                        <span class="material-icons">send</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Homepage Toast Notification Container - Overlay, No Layout Impact -->
+    <div id="homepage-notification-container" role="status" aria-live="polite" aria-atomic="false"></div>
+
+    <div id="modal-container"></div>
+    <div id="notification-container"></div>
+
+    <!-- Theme System (load early to prevent flash) -->
+    <script src="/farmtest2/js/core/unified-theme-manager.js"></script>
+
+    <script src="/farmtest2/libs/ethers.umd.min.js"></script>
+    <script src="/farmtest2/js/master-initializer.js"></script>
+
+    <!-- Homepage Notification System - Isolated Implementation -->
+    <script>
+    (function() {
+        'use strict';
+
+        // Homepage-specific notification manager - completely isolated
+        class HomepageNotificationManager {
+            constructor() {
+                this.container = null;
+                this.notifications = new Map();
+                this.defaultDuration = 5000;
+                this.maxNotifications = 5;
+                this.init();
+            }
+
+            init() {
+                this.container = document.getElementById('homepage-notification-container');
+                if (!this.container) {
+                    console.warn('Homepage notification container not found');
+                    return;
+                }
+
+                // Setup keyboard shortcuts for accessibility
+                document.addEventListener('keydown', (e) => {
+                    // Escape key to dismiss all notifications
+                    if (e.key === 'Escape' && this.notifications.size > 0) {
+                        this.dismissAll();
+                    }
+                });
+
+                console.log('✅ Homepage notification system initialized');
+            }
+
+            show(type, title, message, duration = this.defaultDuration) {
+                if (!this.container) return null;
+
+                // Remove oldest if at capacity
+                if (this.notifications.size >= this.maxNotifications) {
+                    const oldestId = Array.from(this.notifications.keys())[0];
+                    this.dismiss(oldestId);
+                }
+
+                const id = this.generateId();
+                const notification = this.createNotification(id, type, title, message, duration);
+
+                this.container.appendChild(notification.element);
+                this.notifications.set(id, notification);
+
+                // Trigger show animation
+                requestAnimationFrame(() => {
+                    notification.element.classList.add('show');
+                });
+
+                // Setup auto-dismiss
+                if (duration > 0) {
+                    this.setupAutoDismiss(id, duration, notification.element);
+                }
+
+                // Announce to screen readers for urgent notifications
+                if (type === 'error') {
+                    this.announceToScreenReader(`${type}: ${title}. ${message}`);
+                }
+
+                return id;
+            }
+
+            createNotification(id, type, title, message, duration) {
+                const element = document.createElement('div');
+                element.className = `homepage-notification homepage-notification-${type}`;
+                element.setAttribute('data-notification-id', id);
+                element.setAttribute('role', 'alert');
+                element.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
+
+                const icon = this.getIcon(type);
+
+                element.innerHTML = `
+                    <div class="homepage-notification-icon" aria-hidden="true">${icon}</div>
+                    <div class="homepage-notification-content">
+                        <div class="homepage-notification-title">${this.escapeHtml(title)}</div>
+                        <div class="homepage-notification-message">${this.escapeHtml(message)}</div>
+                    </div>
+                    <button class="homepage-notification-close"
+                            aria-label="Close notification"
+                            tabindex="0">×</button>
+                    ${duration > 0 ? '<div class="homepage-notification-progress"></div>' : ''}
+                `;
+
+                // Close button event
+                const closeBtn = element.querySelector('.homepage-notification-close');
+                closeBtn.addEventListener('click', () => this.dismiss(id));
+                closeBtn.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        this.dismiss(id);
+                    }
+                });
+
+                return { element, timeoutId: null, progressInterval: null };
+            }
+
+            setupAutoDismiss(id, duration, element) {
+                const notification = this.notifications.get(id);
+                if (!notification) return;
+
+                let remainingTime = duration;
+                let startTime = Date.now();
+
+                // Progress bar animation
+                const progressBar = element.querySelector('.homepage-notification-progress');
+                if (progressBar) {
+                    progressBar.style.width = '100%';
+                    progressBar.style.transitionDuration = `${duration}ms`;
+
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            progressBar.style.width = '0%';
+                        }, 50);
+                    });
+                }
+
+                const startTimer = () => {
+                    notification.timeoutId = setTimeout(() => {
+                        this.dismiss(id);
+                    }, remainingTime);
+                };
+
+                const pauseTimer = () => {
+                    if (notification.timeoutId) {
+                        clearTimeout(notification.timeoutId);
+                        remainingTime -= (Date.now() - startTime);
+                        notification.timeoutId = null;
+
+                        // Pause progress bar
+                        if (progressBar) {
+                            progressBar.style.transitionDuration = '0s';
+                        }
+                    }
+                };
+
+                const resumeTimer = () => {
+                    startTime = Date.now();
+                    startTimer();
+
+                    // Resume progress bar
+                    if (progressBar) {
+                        const currentWidth = parseFloat(progressBar.style.width) || 0;
+                        progressBar.style.transitionDuration = `${remainingTime}ms`;
+                        progressBar.style.width = '0%';
+                    }
+                };
+
+                // Pause on hover/focus
+                element.addEventListener('mouseenter', pauseTimer);
+                element.addEventListener('mouseleave', resumeTimer);
+                element.addEventListener('focus', pauseTimer, true);
+                element.addEventListener('blur', resumeTimer, true);
+
+                // Start timer
+                startTimer();
+            }
+
+            dismiss(id) {
+                const notification = this.notifications.get(id);
+                if (!notification) return;
+
+                // Clear timers
+                if (notification.timeoutId) {
+                    clearTimeout(notification.timeoutId);
+                }
+                if (notification.progressInterval) {
+                    clearInterval(notification.progressInterval);
+                }
+
+                // Trigger exit animation
+                notification.element.classList.remove('show');
+                notification.element.classList.add('hide');
+
+                setTimeout(() => {
+                    if (notification.element.parentNode) {
+                        notification.element.parentNode.removeChild(notification.element);
+                    }
+                    this.notifications.delete(id);
+                }, 300);
+            }
+
+            dismissAll() {
+                const ids = Array.from(this.notifications.keys());
+                ids.forEach(id => this.dismiss(id));
+            }
+
+            success(title, message, duration) {
+                return this.show('success', title, message, duration);
+            }
+
+            error(title, message, duration = 8000) {
+                return this.show('error', title, message, duration);
+            }
+
+            warning(title, message, duration = 6000) {
+                return this.show('warning', title, message, duration);
+            }
+
+            info(title, message, duration) {
+                return this.show('info', title, message, duration);
+            }
+
+            getIcon(type) {
+                const icons = {
+                    success: '✅',
+                    error: '❌',
+                    warning: '⚠️',
+                    info: 'ℹ️'
+                };
+                return icons[type] || icons.info;
+            }
+
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            generateId() {
+                return `homepage-notification-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            }
+
+            announceToScreenReader(message) {
+                const announcement = document.createElement('div');
+                announcement.setAttribute('aria-live', 'assertive');
+                announcement.setAttribute('aria-atomic', 'true');
+                announcement.className = 'sr-only';
+                announcement.textContent = message;
+
+                document.body.appendChild(announcement);
+
+                setTimeout(() => {
+                    if (announcement.parentNode) {
+                        announcement.parentNode.removeChild(announcement);
+                    }
+                }, 1000);
+            }
+        }
+
+        // Initialize homepage notification manager immediately
+        window.homepageNotificationManager = new HomepageNotificationManager();
+        console.log('✅ Homepage notification manager created');
+
+        // Override the global notification manager for homepage only
+        // Wait for master-initializer to load, then override
+        function setupNotificationOverride() {
+            console.log('🔄 Setting up notification override...');
+            console.log('   Current notificationManager:', !!window.notificationManager);
+
+            // Store reference to original if it exists
+            const originalNotificationManager = window.notificationManager;
+
+            // Create a proxy that redirects to homepage notification manager
+            const homepageProxy = {
+                success: (title, message, options = {}) => {
+                    console.log('📢 Notification (success):', title, message);
+                    return window.homepageNotificationManager.success(title, message, options?.duration);
+                },
+                error: (title, message, options = {}) => {
+                    console.log('📢 Notification (error):', title, message);
+                    return window.homepageNotificationManager.error(title, message, options?.duration);
+                },
+                warning: (title, message, options = {}) => {
+                    console.log('📢 Notification (warning):', title, message);
+                    return window.homepageNotificationManager.warning(title, message, options?.duration);
+                },
+                info: (title, message, options = {}) => {
+                    console.log('📢 Notification (info):', title, message);
+                    return window.homepageNotificationManager.info(title, message, options?.duration);
+                },
+                show: (type, title, message, options = {}) => {
+                    console.log('📢 Notification (show):', type, title, message);
+                    return window.homepageNotificationManager.show(type, title, message, options?.duration);
+                },
+                // Keep reference to original for fallback
+                _original: originalNotificationManager,
+                _isHomepageProxy: true
+            };
+
+            // Override global notification manager
+            window.notificationManager = homepageProxy;
+            console.log('✅ Homepage notification manager override active');
+        }
+
+        // Try to override immediately
+        setupNotificationOverride();
+
+        // Also override after a short delay to catch late initialization
+        setTimeout(setupNotificationOverride, 100);
+        setTimeout(setupNotificationOverride, 500);
+        setTimeout(setupNotificationOverride, 1000);
+
+        // Override on DOMContentLoaded as well
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', setupNotificationOverride);
+        }
+
+        // Override on window load as final fallback
+        window.addEventListener('load', setupNotificationOverride);
+    })();
+    </script>
+</body>
+</html>
