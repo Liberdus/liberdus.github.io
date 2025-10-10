@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'c'
+const version = 'd'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1107,7 +1107,7 @@ class ChatsScreen {
         }
 
         // Use the determined latest timestamp for display
-        const timeDisplay = formatTime(latestItemTimestamp);
+        const timeDisplay = formatTime(latestItemTimestamp, false);
 
         // Create the list item element
         const li = document.createElement('li');
@@ -2715,6 +2715,10 @@ class FriendModal {
   // get the current contact address
   getCurrentContactAddress() {
     return this.currentContactAddress || false;
+  }
+
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
   }
 }
 
@@ -5156,6 +5160,39 @@ function updateUIForConnectivity() {
     // Update aria-disabled state
     element.setAttribute('aria-disabled', !isOnline);
   });
+
+  // When coming back online, re-validate buttons that may be disabled for reasons other than connectivity
+  if (isOnline) {
+    revalidateButtonStates();
+  }
+}
+
+/**
+ * Re-validates button states for modals/forms that have buttons disabled for multiple reasons
+ * (not just offline status). This should be called when coming back online to ensure
+ * buttons aren't incorrectly enabled if they should remain disabled for other reasons.
+ */
+function revalidateButtonStates() {
+  // Check if validator modal is open and refresh it to re-validate all button states
+  if (typeof validatorStakingModal !== 'undefined' && validatorStakingModal.isActive()) {
+    validatorStakingModal.close();
+    validatorStakingModal.open();
+  }
+
+  // Check if friend modal is open and re-validate submit button
+  if (typeof friendModal !== 'undefined' && friendModal.isActive()) {
+    friendModal.updateSubmitButtonState();
+  }
+
+  // Check if toll modal is open and re-validate save button
+  if (typeof tollModal !== 'undefined' && tollModal.isActive()) {
+    tollModal.updateSaveButtonState();
+  }
+
+  // Check if send asset form modal is open and re-validate send button
+  if (typeof sendAssetFormModal !== 'undefined' && sendAssetFormModal.isActive()) {
+    sendAssetFormModal.refreshSendButtonDisabledState();
+  }
 }
 
 // Prevent form submissions when offline
@@ -8422,6 +8459,16 @@ class ChatModal {
       this.debouncedSaveDraft(e.target.value);
     });
 
+    // allow ctlr+enter or cmd+enter to send message
+    this.messageInput.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (!this.sendButton.disabled) {
+          this.handleSendMessage();
+        }
+      }
+    });
+
     // Add viewport resize listener for keyboard detection
     window.addEventListener('resize', () => {
       const currentHeight = window.innerHeight;
@@ -8541,6 +8588,18 @@ class ChatModal {
       }
     });
 
+    // live updates while dragging the slider thumb
+    this.messagesList.addEventListener('input', (e) => {
+      const seekEl = e.target.closest('.voice-message-seek');
+      if (seekEl) this.updateVmTimeFromSeek(seekEl);
+    });
+
+    // ensures click-to-seek updates on mouse/touch release
+    this.messagesList.addEventListener('change', (e) => {
+      const seekEl = e.target.closest('.voice-message-seek');
+      if (seekEl) this.updateVmTimeFromSeek(seekEl);
+    });
+
 
     // Make toll info clickable: show sticky info toast and refresh toll in background
     const tollContainer = this.modal.querySelector('.toll-container');
@@ -8553,6 +8612,26 @@ class ChatModal {
     }
 
   }
+
+    // Voice message seek slider live time display (works even before playback)
+    updateVmTimeFromSeek (seekEl) {
+      const voiceMessageElement = seekEl.closest('.voice-message');
+      if (!voiceMessageElement) return;
+
+      const timeDisplayElement = voiceMessageElement.querySelector('.voice-message-time-display');
+
+      const newTime = Number(seekEl.value || 0);
+
+      const totalSeconds = Math.floor(Number(seekEl.max) || Number(voiceMessageElement.dataset.duration) || 0);
+      // updates the on-screen "current / total" label
+      if (timeDisplayElement) {
+        const currentTime = this.formatDuration(newTime);
+        const totalTime = this.formatDuration(totalSeconds);
+        timeDisplayElement.textContent = `${currentTime} / ${totalTime}`;
+      }
+      // ensures playback starts at the chosen position when audio is ready
+      voiceMessageElement.pendingSeekTime = newTime;
+    };
 
   /**
    * Opens the chat modal for the given address.
@@ -10180,7 +10259,8 @@ console.warn('in send message', txid)
     const isMine = messageEl.classList.contains('sent');
     const deleteForAllOption = this.contextMenu.querySelector('[data-action="delete-for-all"]');
     if (deleteForAllOption) {
-      deleteForAllOption.style.display = isMine ? 'flex' : 'none';
+      const canDeleteForAll = isMine && myData.contacts[this.address]?.tollRequiredToSend == 0;
+      deleteForAllOption.style.display = canDeleteForAll ? 'flex' : 'none';
     }
 
     // If this is a call message, show call-specific options and hide copy
@@ -10212,6 +10292,8 @@ console.warn('in send message', txid)
       if (editOption) editOption.style.display = 'none';
     } else if (isVoice) {
       if (copyOption) copyOption.style.display = 'none';
+      if (inviteOption) inviteOption.style.display = 'none';
+      if (joinOption) joinOption.style.display = 'none';
     } else {
       if (copyOption) copyOption.style.display = 'flex';
       if (joinOption) joinOption.style.display = 'none';
@@ -10230,6 +10312,14 @@ console.warn('in send message', txid)
         const show = isMine && !isDeleted && allowedType && !isVoice && !isFailedPayment && ageOk;
         editOption.style.display = show ? 'flex' : 'none';
       }
+    }
+    
+    // Hide copy and edit for attachment/payment without text content
+    const hasTextContent = messageEl.querySelector('.message-content')?.textContent.trim() || 
+                           messageEl.querySelector('.payment-memo')?.textContent.trim();
+    if ((messageEl.querySelector('.attachment-row') || messageEl.classList.contains('payment-info')) && !hasTextContent) {
+      if (copyOption) copyOption.style.display = 'none';
+      if (editOption) editOption.style.display = 'none';
     }
     
     this.positionContextMenu(this.contextMenu, messageEl);
@@ -11229,26 +11319,22 @@ console.warn('in send message', txid)
       }
       const seekEl = voiceMessageElement.querySelector('.voice-message-seek');
       const timeDisplayElement = voiceMessageElement.querySelector('.voice-message-time-display');
-      const totalDurationSeconds = message.duration || Math.floor(audio.duration) || 0;
-      if (seekEl) {
-        // Ensure max reflects known duration; fall back to audio.metadata once loaded
-        seekEl.max = totalDurationSeconds;
-      }
-      // If user set a seek position before playback, honor it after metadata loads
+      // Use stored duration from message object
+      const totalDurationSeconds = (Number.isFinite(message.duration) && message.duration > 0)
+        ? Math.floor(message.duration)
+        : 0;
+      
+      // Set max immediately so slider is seekable before playback
+      if (seekEl) seekEl.max = totalDurationSeconds || 0;
+      
+      // Handle pending seeks (if user moved slider before clicking play)
       audio.addEventListener('loadedmetadata', () => {
-        const metaDuration = Math.floor(audio.duration) || totalDurationSeconds;
-        if (seekEl) {
-          seekEl.max = metaDuration;
-          const preVal = Number(seekEl.value || 0);
-          if (preVal > 0 && preVal < metaDuration) {
-            try { audio.currentTime = preVal; } catch (e) { /* ignore */ }
-          } else if (voiceMessageElement.pendingSeekTime !== undefined) {
-            const pst = voiceMessageElement.pendingSeekTime;
-            if (pst >= 0 && pst < metaDuration) {
-              try { audio.currentTime = pst; } catch (e) { /* ignore */ }
-            }
-            delete voiceMessageElement.pendingSeekTime;
+        if (voiceMessageElement.pendingSeekTime !== undefined) {
+          const pst = voiceMessageElement.pendingSeekTime;
+          if (pst >= 0 && pst < totalDurationSeconds) {
+            try { audio.currentTime = pst; } catch (e) { /* ignore */ }
           }
+          delete voiceMessageElement.pendingSeekTime;
         }
       }, { once: true });
       
@@ -11279,11 +11365,6 @@ console.warn('in send message', txid)
         voiceMessageElement.seekSetup = true;
         const updateFromSeekValue = (commit) => {
           const newTime = Number(seekEl.value || 0);
-          if (timeDisplayElement) {
-            const currentTime = this.formatDuration(newTime);
-            const totalTime = this.formatDuration(totalDurationSeconds);
-            timeDisplayElement.textContent = `${currentTime} / ${totalTime}`;
-          }
           if (audio && !isNaN(newTime)) {
             // If metadata not yet loaded, store pending seek
             if (audio.readyState < 1) { // HAVE_METADATA
@@ -11367,13 +11448,17 @@ console.warn('in send message', txid)
     if (!voiceMessageElement) return;
 
     const currentSpeed = parseFloat(speedButton.dataset.speed || '1');
-    const newSpeed = currentSpeed === 1 ? 2 : 1;
+    const speedOptions = [1, 1.5, 2];
+    const currentIndex = speedOptions.indexOf(currentSpeed);
+    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % speedOptions.length;
+    const newSpeed = speedOptions[nextIndex];
     
     speedButton.dataset.speed = newSpeed.toString();
-    speedButton.textContent = `${newSpeed}x`;
+    const displaySpeed = Number.isInteger(newSpeed) ? newSpeed.toString() : newSpeed.toFixed(1);
+    speedButton.textContent = `${displaySpeed}x`;
     
     // Update button appearance
-    if (newSpeed === 2) {
+    if (newSpeed > 1) {
       speedButton.classList.add('active');
     } else {
       speedButton.classList.remove('active');
@@ -13719,6 +13804,12 @@ class SendAssetFormModal {
    * @returns {Promise<void>}
    */
   async refreshSendButtonDisabledState() {
+    // If offline, keep button disabled
+    if (!isOnline) {
+      this.submitButton.disabled = true;
+      return;
+    }
+
     // Address is valid if its error/status message is visible and set to 'found'.
     const isAddressConsideredValid =
       this.usernameAvailable.style.display === 'inline' && this.usernameAvailable.textContent === 'found';
