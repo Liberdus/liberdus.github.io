@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -19,7 +19,6 @@ async function checkVersion() {
     if (!navigator.onLine || error instanceof TypeError) {
       isOnline = false;
       updateUIForConnectivity();
-      markConnectivityDependentElements();
       console.log(`DEBUG: about to invoke showToast in checkVersion`);
     }
     newVersion = myVersion; // Allow continuing with the old version
@@ -300,6 +299,7 @@ function clearMyData() {
 
 // Load saved account data and update chat list on page load
 document.addEventListener('DOMContentLoaded', async () => {
+  markConnectivityDependentElements();
   await checkVersion(); // version needs to be checked before anything else happens
   timeDifference(); // Calculate and log time difference early
 
@@ -744,7 +744,7 @@ class WelcomeMenuModal {
     this.launchButton = document.getElementById('welcomeOpenLaunch');
     this.lockButton = document.getElementById('welcomeOpenLockModal');
     this.updateButton = document.getElementById('welcomeOpenUpdate');
-    
+    this.helpButton = document.getElementById('welcomeOpenHelp');
 
     this.backupButton.addEventListener('click', () => backupAccountModal.open());
     this.restoreButton.addEventListener('click', () => restoreAccountModal.open());
@@ -752,6 +752,7 @@ class WelcomeMenuModal {
     this.migrateButton.addEventListener('click', () => migrateAccountsModal.open());
     this.aboutButton.addEventListener('click', () => aboutModal.open());
     this.lockButton.addEventListener('click', () => lockModal.open());
+    this.helpButton.addEventListener('click', () => helpModal.open());
 
     // Show launch button if ReactNativeWebView is available
     if (window?.ReactNativeWebView) {
@@ -1106,7 +1107,7 @@ class ChatsScreen {
         }
 
         // Use the determined latest timestamp for display
-        const timeDisplay = formatTime(latestItemTimestamp);
+        const timeDisplay = formatTime(latestItemTimestamp, false);
 
         // Create the list item element
         const li = document.createElement('li');
@@ -1453,9 +1454,9 @@ class MenuModal {
     this.inviteButton = document.getElementById('openInvite');
     this.inviteButton.addEventListener('click', () => inviteModal.open());
     this.explorerButton = document.getElementById('openExplorer');
-    this.explorerButton.addEventListener('click', () => {window.open('./explorer', '_blank');});
+    this.explorerButton.addEventListener('click', () => this.handleExternalClick('./explorer', 'explorer'));
     this.networkButton = document.getElementById('openMonitor');
-    this.networkButton.addEventListener('click', () => {window.open('./network', '_blank');});
+    this.networkButton.addEventListener('click', () => this.handleExternalClick('./network', 'network'));
     this.helpButton = document.getElementById('openHelp');
     this.helpButton.addEventListener('click', () => helpModal.open());
     this.aboutButton = document.getElementById('openAbout');
@@ -1494,6 +1495,14 @@ class MenuModal {
 
   isActive() {
     return this.modal.classList.contains('active');
+  }
+
+  handleExternalClick(url, pageName) {
+    if (!isOnline) {
+      showToast(`Require internet connection to access the ${pageName} page`, 0, 'warning');
+      return;
+    }
+    window.open(url, '_blank');
   }
   
   async handleSignOut() {
@@ -2674,7 +2683,8 @@ class FriendModal {
   // Update the submit button's enabled state based on current and selected status
   updateSubmitButtonState() {
     const contact = myData?.contacts?.[this.currentContactAddress];
-    if (!contact) {
+    // return early if contact is not found or offline
+    if (!contact || !isOnline) {
       this.submitButton.disabled = true;
       return;
     }
@@ -2705,6 +2715,10 @@ class FriendModal {
   // get the current contact address
   getCurrentContactAddress() {
     return this.currentContactAddress || false;
+  }
+
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
   }
 }
 
@@ -3511,8 +3525,7 @@ async function updateAssetPricesIfNeeded() {
 async function queryNetwork(url, abortSignal = null) {
   //console.log('queryNetwork', url)
   if (!isOnline) {
-    console.warn('not online');
-    showToast('queryNetwork: not online', 0, 'error')
+    console.warn('QueryNetwork: not online');
     return null;
   }
   const selectedGateway = getGatewayForRequest();
@@ -5038,6 +5051,7 @@ function markConnectivityDependentElements() {
 
     // Add friend related
     '#friendForm button[type="submit"]',
+    '#friendForm input[name="friendStatus"]',
 
     // Contact related
     '#chatRecipient',
@@ -5048,9 +5062,6 @@ function markConnectivityDependentElements() {
     '#createAccountForm button[type="submit"]',
     '#importForm button[type="submit"]',
 
-    // submitFeedback button
-    '#submitFeedback',
-
     // stakeModal
     '#submitStake',
     '#faucetButton',
@@ -5058,11 +5069,13 @@ function markConnectivityDependentElements() {
     // tollModal
     '#saveNewTollButton',
 
-    //inviteModal
-    '#inviteForm button[type="submit"]',
 
-    //unstakeModal
+    //validatorModal
+    '#validator-learn-more',
     '#submitUnstake',
+
+    //farmModal
+    '#continueToFarm',
 
     // Call schedule modals
     '#callScheduleNowBtn',
@@ -5071,6 +5084,19 @@ function markConnectivityDependentElements() {
 
     // Message context menu (disable all except 'Delete for me' and 'Copy' and 'Join')
     '.message-context-menu .context-menu-option:not([data-action="delete"]):not([data-action="copy"]):not([data-action="join"])',
+
+    // bridgeModal
+    '#bridgeForm button[type="submit"]',
+
+    // helpModal
+    '#joinDiscord',
+    '#submitFeedback',
+
+    // updateWarningModal
+    '#proceedToStoreBtn',
+
+    // launchModal
+    '#launchForm button[type="submit"]',    
   ];
 
   // Add data attribute to all network-dependent elements
@@ -5111,7 +5137,7 @@ function updateUIForConnectivity() {
   }
 
   networkDependentElements.forEach((element) => {
-    if (!isOnline || netIdMismatch) {
+    if (!isOnline) {
       // Disable element
       element.disabled = true;
       element.classList.add('offline-disabled');
@@ -5134,6 +5160,39 @@ function updateUIForConnectivity() {
     // Update aria-disabled state
     element.setAttribute('aria-disabled', !isOnline);
   });
+
+  // When coming back online, re-validate buttons that may be disabled for reasons other than connectivity
+  if (isOnline) {
+    revalidateButtonStates();
+  }
+}
+
+/**
+ * Re-validates button states for modals/forms that have buttons disabled for multiple reasons
+ * (not just offline status). This should be called when coming back online to ensure
+ * buttons aren't incorrectly enabled if they should remain disabled for other reasons.
+ */
+function revalidateButtonStates() {
+  // Check if validator modal is open and refresh it to re-validate all button states
+  if (typeof validatorStakingModal !== 'undefined' && validatorStakingModal.isActive()) {
+    validatorStakingModal.close();
+    validatorStakingModal.open();
+  }
+
+  // Check if friend modal is open and re-validate submit button
+  if (typeof friendModal !== 'undefined' && friendModal.isActive()) {
+    friendModal.updateSubmitButtonState();
+  }
+
+  // Check if toll modal is open and re-validate save button
+  if (typeof tollModal !== 'undefined' && tollModal.isActive()) {
+    tollModal.updateSaveButtonState();
+  }
+
+  // Check if send asset form modal is open and re-validate send button
+  if (typeof sendAssetFormModal !== 'undefined' && sendAssetFormModal.isActive()) {
+    sendAssetFormModal.refreshSendButtonDisabledState();
+  }
 }
 
 // Prevent form submissions when offline
@@ -5152,6 +5211,10 @@ let netIdMismatch = false; // Will be updated by checkConnectivity
 async function checkConnectivity() {
   const wasOnline = isOnline;
   isOnline = navigator.onLine;
+
+  if (netIdMismatch) {
+    isOnline = false;
+  }
 
   if (isOnline !== wasOnline) {
     // Only trigger change handler if state actually changed
@@ -6501,12 +6564,12 @@ class TollModal {
     this.saveButton.disabled = true;
 
         // Fetch network parameters to get minToll
-    const scalabilityFactor = getStabilityFactor();
+    const stabilityFactor = getStabilityFactor();
     try {
       const minTollUsdStr = parameters?.current?.minTollUsdStr;
-      this.minToll = EthNum.toWei(EthNum.div(minTollUsdStr, scalabilityFactor.toString()));
+      this.minToll = EthNum.toWei(EthNum.div(minTollUsdStr, stabilityFactor.toString()));
       // Update min toll display under input (USD)
-      const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
+      const minTollUSD = bigxnum2big(this.minToll, stabilityFactor.toString());
       this.minTollDisplay.textContent = `Minimum toll: ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD`;
     } catch (e) {
       this.minTollDisplay.textContent = `Minimum toll: error`;
@@ -6550,10 +6613,10 @@ class TollModal {
         return;
       }
       if (this.currentCurrency === 'USD') {
-        const scalabilityFactor = getStabilityFactor();
-        const newTollLIB = bigxnum2big(newToll, (1 / scalabilityFactor).toString());
+        const stabilityFactor = getStabilityFactor();
+        const newTollLIB = bigxnum2big(newToll, (1 / stabilityFactor).toString());
         if (newTollLIB < this.minToll) {
-          const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
+          const minTollUSD = bigxnum2big(this.minToll, stabilityFactor.toString());
           showToast(`Toll must be at least ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD or 0 USD`, 0, 'error');
           return;
         }
@@ -6568,8 +6631,8 @@ class TollModal {
       }
     } else {
       // For USD, convert the max toll to USD for comparison
-      const scalabilityFactor = getStabilityFactor();
-      const maxTollUSD = MAX_TOLL * scalabilityFactor;
+      const stabilityFactor = getStabilityFactor();
+      const maxTollUSD = MAX_TOLL * stabilityFactor;
       if (newTollValue > maxTollUSD) {
         showToast(`Toll cannot exceed ${maxTollUSD.toFixed(2)} USD`, 0, 'error');
         return;
@@ -6599,22 +6662,22 @@ class TollModal {
    * @returns {void}
    */
   updateTollDisplay(toll, tollUnit) {
-    const scalabilityFactor = getStabilityFactor();
+    const stabilityFactor = getStabilityFactor();
     let tollValueUSD = '';
     let tollValueLIB = '';
 
     if (tollUnit == 'LIB') {
       const libFloat = parseFloat(big2str(toll, 18));
-      tollValueUSD = (libFloat * scalabilityFactor).toString();
+      tollValueUSD = (libFloat * stabilityFactor).toString();
       tollValueLIB = libFloat.toString();
     } else {
       const usdFloat = parseFloat(big2str(toll, 18));
       tollValueUSD = usdFloat.toString();
-      tollValueLIB = (usdFloat / scalabilityFactor).toString();
+      tollValueLIB = (usdFloat / stabilityFactor).toString();
     }
 
     const usdDisplay = parseFloat(tollValueUSD).toFixed(6);
-    const libDisplay = scalabilityFactor > 0 ? parseFloat(tollValueLIB).toFixed(6) : 'N/A';
+    const libDisplay = stabilityFactor > 0 ? parseFloat(tollValueLIB).toFixed(6) : 'N/A';
 
     // USD-only UI
     document.getElementById('tollAmountUSD').textContent = `${usdDisplay} USD (≈ ${libDisplay} LIB)`;
@@ -6716,10 +6779,10 @@ class TollModal {
         return `Toll must be at least ${parseFloat(big2str(this.minToll, 18)).toFixed(6)} LIB or 0 LIB`;
       }
     } else {
-      const scalabilityFactor = getStabilityFactor();
-      const newTollLIB = bigxnum2big(newToll, (1 / scalabilityFactor).toString());
+      const stabilityFactor = getStabilityFactor();
+      const newTollLIB = bigxnum2big(newToll, (1 / stabilityFactor).toString());
       if (newTollLIB < this.minToll) {
-        const minTollUSD = bigxnum2big(this.minToll, scalabilityFactor.toString());
+        const minTollUSD = bigxnum2big(this.minToll, stabilityFactor.toString());
         return `Toll must be at least ${parseFloat(big2str(minTollUSD, 18)).toFixed(4)} USD or 0 USD`;
       }
     }
@@ -6739,6 +6802,12 @@ class TollModal {
    * Updates the save button state and warning message based on input validation
    */
   updateSaveButtonState() {
+    // If offline, keep button disabled
+    if (!isOnline) {
+      this.saveButton.disabled = true;
+      return;
+    }
+
     const warningMessage = this.getWarningMessage();
     const isValid = !warningMessage;
 
@@ -8390,6 +8459,16 @@ class ChatModal {
       this.debouncedSaveDraft(e.target.value);
     });
 
+    // allow ctlr+enter or cmd+enter to send message
+    this.messageInput.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (!this.sendButton.disabled) {
+          this.handleSendMessage();
+        }
+      }
+    });
+
     // Add viewport resize listener for keyboard detection
     window.addEventListener('resize', () => {
       const currentHeight = window.innerHeight;
@@ -8500,6 +8579,27 @@ class ChatModal {
       }
     });
 
+    // Voice message speed button event delegation
+    this.messagesList.addEventListener('click', (e) => {
+      const speedButton = e.target.closest('.voice-message-speed-button');
+      if (speedButton) {
+        e.preventDefault();
+        this.togglePlaybackSpeed(speedButton);
+      }
+    });
+
+    // live updates while dragging the slider thumb
+    this.messagesList.addEventListener('input', (e) => {
+      const seekEl = e.target.closest('.voice-message-seek');
+      if (seekEl) this.updateVmTimeFromSeek(seekEl);
+    });
+
+    // ensures click-to-seek updates on mouse/touch release
+    this.messagesList.addEventListener('change', (e) => {
+      const seekEl = e.target.closest('.voice-message-seek');
+      if (seekEl) this.updateVmTimeFromSeek(seekEl);
+    });
+
 
     // Make toll info clickable: show sticky info toast and refresh toll in background
     const tollContainer = this.modal.querySelector('.toll-container');
@@ -8512,6 +8612,26 @@ class ChatModal {
     }
 
   }
+
+    // Voice message seek slider live time display (works even before playback)
+    updateVmTimeFromSeek (seekEl) {
+      const voiceMessageElement = seekEl.closest('.voice-message');
+      if (!voiceMessageElement) return;
+
+      const timeDisplayElement = voiceMessageElement.querySelector('.voice-message-time-display');
+
+      const newTime = Number(seekEl.value || 0);
+
+      const totalSeconds = Math.floor(Number(seekEl.max) || Number(voiceMessageElement.dataset.duration) || 0);
+      // updates the on-screen "current / total" label
+      if (timeDisplayElement) {
+        const currentTime = this.formatDuration(newTime);
+        const totalTime = this.formatDuration(totalSeconds);
+        timeDisplayElement.textContent = `${currentTime} / ${totalTime}`;
+      }
+      // ensures playback starts at the chosen position when audio is ready
+      voiceMessageElement.pendingSeekTime = newTime;
+    };
 
   /**
    * Opens the chat modal for the given address.
@@ -8631,7 +8751,7 @@ class ChatModal {
       
       this.sendReclaimTollTransaction(this.address);
     } else {
-      showToast('Offline: toll not processed', 0, 'error');
+      console.warn('Offline: toll not processed');
     }
 
     // Save any unsaved draft before closing
@@ -8837,6 +8957,12 @@ class ChatModal {
    */
   async handleSendMessage() {
     this.sendButton.disabled = true; // Disable the button
+
+    // Check if user is offline - prevent sending messages when offline
+    if (!isOnline) {
+      showToast('You are offline. Please check your internet connection.', 3000, 'error');
+      return;
+    }
 
     // if user is blocked, don't send message, show toast
     if (myData.contacts[this.address].tollRequiredToSend == 2) {
@@ -9435,18 +9561,19 @@ console.warn('in send message', txid)
             const audioSelfKey = item.audioSelfKey || item.selfKey || '';
             messageTextHTML = `
               <div class="voice-message" data-voice-url="${item.url || ''}" data-pqEncSharedKey="${audioEncKey}" data-selfKey="${audioSelfKey}" data-msg-idx="${i}" data-duration="${item.duration || 0}">
-                <div class="voice-message-controls" style="display:flex;align-items:center;gap:10px;">
-                  <button class="voice-message-play-button" aria-label="Play voice message" style="flex:0 0 auto;">
-                    <svg viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z"/>
-                    </svg>
-                  </button>
-                  <div class="voice-message-info" style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-                      <div class="voice-message-text" style="font-weight:500;">Voice message</div>
-                      <div class="voice-message-time-display" style="font-size:0.85em;white-space:nowrap;">0:00 / ${duration}</div>
-                    </div>
-                    <input type="range" class="voice-message-seek" min="0" max="${item.duration || 0}" value="0" step="1" aria-label="Seek voice message" style="width:100%;cursor:pointer;">
+                <div class="voice-message-controls">
+                  <div class="voice-message-top-row">
+                    <button class="voice-message-play-button" aria-label="Play voice message">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z"/>
+                      </svg>
+                    </button>
+                    <div class="voice-message-text">Voice message</div>
+                    <div class="voice-message-time-display">0:00 / ${duration}</div>
+                  </div>
+                  <div class="voice-message-bottom-row">
+                    <input type="range" class="voice-message-seek" min="0" max="${item.duration || 0}" value="0" step="1" aria-label="Seek voice message">
+                    <button class="voice-message-speed-button" aria-label="Toggle playback speed" data-speed="1">1x</button>
                   </div>
                 </div>
               </div>`;
@@ -9639,12 +9766,13 @@ console.warn('in send message', txid)
       } else if (validation.percentage >= 90) {
         this.messageByteCounter.style.color = '#ffa726';
         this.messageByteCounter.textContent = `${validation.remainingBytes} bytes - left`;
-        this.sendButton.disabled = false;
+        if (isOnline) this.sendButton.disabled = false;
       }
       this.messageByteCounter.style.display = 'block';
     } else {
       this.messageByteCounter.style.display = 'none';
-      this.sendButton.disabled = false;
+      // Only enable if online
+      if (isOnline) this.sendButton.disabled = false;
     }
   }
 
@@ -10087,6 +10215,7 @@ console.warn('in send message', txid)
   handleMessageClick(e) {
     if (e.target.closest('.attachment-row')) return;
     if (e.target.closest('.voice-message-play-button')) return;
+    if (e.target.closest('.voice-message-speed-button')) return;
     if (e.target.closest('.voice-message-seek')) return;
 
     // Check if keyboard is open - if so, don't show context menu
@@ -10130,7 +10259,8 @@ console.warn('in send message', txid)
     const isMine = messageEl.classList.contains('sent');
     const deleteForAllOption = this.contextMenu.querySelector('[data-action="delete-for-all"]');
     if (deleteForAllOption) {
-      deleteForAllOption.style.display = isMine ? 'flex' : 'none';
+      const canDeleteForAll = isMine && myData.contacts[this.address]?.tollRequiredToSend == 0;
+      deleteForAllOption.style.display = canDeleteForAll ? 'flex' : 'none';
     }
 
     // If this is a call message, show call-specific options and hide copy
@@ -10162,6 +10292,8 @@ console.warn('in send message', txid)
       if (editOption) editOption.style.display = 'none';
     } else if (isVoice) {
       if (copyOption) copyOption.style.display = 'none';
+      if (inviteOption) inviteOption.style.display = 'none';
+      if (joinOption) joinOption.style.display = 'none';
     } else {
       if (copyOption) copyOption.style.display = 'flex';
       if (joinOption) joinOption.style.display = 'none';
@@ -10180,6 +10312,14 @@ console.warn('in send message', txid)
         const show = isMine && !isDeleted && allowedType && !isVoice && !isFailedPayment && ageOk;
         editOption.style.display = show ? 'flex' : 'none';
       }
+    }
+    
+    // Hide copy and edit for attachment/payment without text content
+    const hasTextContent = messageEl.querySelector('.message-content')?.textContent.trim() || 
+                           messageEl.querySelector('.payment-memo')?.textContent.trim();
+    if ((messageEl.querySelector('.attachment-row') || messageEl.classList.contains('payment-info')) && !hasTextContent) {
+      if (copyOption) copyOption.style.display = 'none';
+      if (editOption) editOption.style.display = 'none';
     }
     
     this.positionContextMenu(this.contextMenu, messageEl);
@@ -11170,28 +11310,31 @@ console.warn('in send message', txid)
       // Store audio element reference for pause/resume functionality
       voiceMessageElement.audioElement = audio;
       voiceMessageElement.audioUrl = audioUrl;
+      
+      // Set initial playback speed based on button state
+      const speedButton = voiceMessageElement.querySelector('.voice-message-speed-button');
+      if (speedButton) {
+        const speed = parseFloat(speedButton.dataset.speed || '1');
+        audio.playbackRate = speed;
+      }
       const seekEl = voiceMessageElement.querySelector('.voice-message-seek');
       const timeDisplayElement = voiceMessageElement.querySelector('.voice-message-time-display');
-      const totalDurationSeconds = message.duration || Math.floor(audio.duration) || 0;
-      if (seekEl) {
-        // Ensure max reflects known duration; fall back to audio.metadata once loaded
-        seekEl.max = totalDurationSeconds;
-      }
-      // If user set a seek position before playback, honor it after metadata loads
+      // Use stored duration from message object
+      const totalDurationSeconds = (Number.isFinite(message.duration) && message.duration > 0)
+        ? Math.floor(message.duration)
+        : 0;
+      
+      // Set max immediately so slider is seekable before playback
+      if (seekEl) seekEl.max = totalDurationSeconds || 0;
+      
+      // Handle pending seeks (if user moved slider before clicking play)
       audio.addEventListener('loadedmetadata', () => {
-        const metaDuration = Math.floor(audio.duration) || totalDurationSeconds;
-        if (seekEl) {
-          seekEl.max = metaDuration;
-          const preVal = Number(seekEl.value || 0);
-          if (preVal > 0 && preVal < metaDuration) {
-            try { audio.currentTime = preVal; } catch (e) { /* ignore */ }
-          } else if (voiceMessageElement.pendingSeekTime !== undefined) {
-            const pst = voiceMessageElement.pendingSeekTime;
-            if (pst >= 0 && pst < metaDuration) {
-              try { audio.currentTime = pst; } catch (e) { /* ignore */ }
-            }
-            delete voiceMessageElement.pendingSeekTime;
+        if (voiceMessageElement.pendingSeekTime !== undefined) {
+          const pst = voiceMessageElement.pendingSeekTime;
+          if (pst >= 0 && pst < totalDurationSeconds) {
+            try { audio.currentTime = pst; } catch (e) { /* ignore */ }
           }
+          delete voiceMessageElement.pendingSeekTime;
         }
       }, { once: true });
       
@@ -11222,11 +11365,6 @@ console.warn('in send message', txid)
         voiceMessageElement.seekSetup = true;
         const updateFromSeekValue = (commit) => {
           const newTime = Number(seekEl.value || 0);
-          if (timeDisplayElement) {
-            const currentTime = this.formatDuration(newTime);
-            const totalTime = this.formatDuration(totalDurationSeconds);
-            timeDisplayElement.textContent = `${currentTime} / ${totalTime}`;
-          }
           if (audio && !isNaN(newTime)) {
             // If metadata not yet loaded, store pending seek
             if (audio.readyState < 1) { // HAVE_METADATA
@@ -11297,6 +11435,39 @@ console.warn('in send message', txid)
       console.error('Error playing voice message:', error);
       showToast(`Error playing voice message: ${error.message}`, 0, 'error');
       buttonElement.disabled = false;
+    }
+  }
+
+  /**
+   * Toggle playback speed between 1x and 2x
+   * @param {HTMLElement} speedButton - Speed button element
+   * @returns {void}
+   */
+  togglePlaybackSpeed(speedButton) {
+    const voiceMessageElement = speedButton.closest('.voice-message');
+    if (!voiceMessageElement) return;
+
+    const currentSpeed = parseFloat(speedButton.dataset.speed || '1');
+    const speedOptions = [1, 1.5, 2];
+    const currentIndex = speedOptions.indexOf(currentSpeed);
+    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % speedOptions.length;
+    const newSpeed = speedOptions[nextIndex];
+    
+    speedButton.dataset.speed = newSpeed.toString();
+    const displaySpeed = Number.isInteger(newSpeed) ? newSpeed.toString() : newSpeed.toFixed(1);
+    speedButton.textContent = `${displaySpeed}x`;
+    
+    // Update button appearance
+    if (newSpeed > 1) {
+      speedButton.classList.add('active');
+    } else {
+      speedButton.classList.remove('active');
+    }
+    
+    // Update audio playback speed if audio is playing
+    const audio = voiceMessageElement.audioElement;
+    if (audio) {
+      audio.playbackRate = newSpeed;
     }
   }
 
@@ -13499,7 +13670,7 @@ class SendAssetFormModal {
     const cancelButton = sendAssetConfirmModal.cancelButton;
 
     await getNetworkParams();
-    const scalabilityFactor = getStabilityFactor();
+    const stabilityFactor = getStabilityFactor();
 
     // get `usdAmount` and `libAmount`
     let usdAmount;
@@ -13507,9 +13678,9 @@ class SendAssetFormModal {
     const isLib = this.balanceSymbol.textContent === 'LIB';
     if (!isLib) {
       usdAmount = this.amountInput.value;
-      libAmount = amount / scalabilityFactor;
+      libAmount = amount / stabilityFactor;
     } else {
-      usdAmount = amount * scalabilityFactor;
+      usdAmount = amount * stabilityFactor;
       libAmount = amount;
     }
 
@@ -13549,8 +13720,8 @@ class SendAssetFormModal {
 
     if (isUSD) {
       // Convert to USD before displaying
-      const scalabilityFactor = getStabilityFactor();
-      this.amountInput.value = (parseFloat(maxAmountStr) * scalabilityFactor).toString();
+      const stabilityFactor = getStabilityFactor();
+      this.amountInput.value = (parseFloat(maxAmountStr) * stabilityFactor).toString();
     } else {
       // Display in LIB
       this.amountInput.value = maxAmountStr;
@@ -13593,7 +13764,7 @@ class SendAssetFormModal {
 
     await getNetworkParams();
     const txFeeInLIB = getTransactionFeeWei();
-    const scalabilityFactor = getStabilityFactor();
+    const stabilityFactor = getStabilityFactor();
 
     // Preserve the current toggle state (LIB/USD) instead of overwriting it
     const currentSymbol = this.balanceSymbol.textContent;
@@ -13607,7 +13778,7 @@ class SendAssetFormModal {
     const balanceInLIB = big2str(BigInt(asset.balance), 18).slice(0, -12);
     const feeInLIB = big2str(txFeeInLIB, 18).slice(0, -16);
 
-    this.updateBalanceAndFeeDisplay(balanceInLIB, feeInLIB, isCurrentlyUSD, scalabilityFactor);
+    this.updateBalanceAndFeeDisplay(balanceInLIB, feeInLIB, isCurrentlyUSD, stabilityFactor);
   }
 
   /**
@@ -13633,6 +13804,12 @@ class SendAssetFormModal {
    * @returns {Promise<void>}
    */
   async refreshSendButtonDisabledState() {
+    // If offline, keep button disabled
+    if (!isOnline) {
+      this.submitButton.disabled = true;
+      return;
+    }
+
     // Address is valid if its error/status message is visible and set to 'found'.
     const isAddressConsideredValid =
       this.usernameAvailable.style.display === 'inline' && this.usernameAvailable.textContent === 'found';
@@ -13653,8 +13830,8 @@ class SendAssetFormModal {
     let amountForValidation = amount;
     if (isUSD && amount) {
       await getNetworkParams();
-      const scalabilityFactor = getStabilityFactor();
-      amountForValidation = parseFloat(amount) / scalabilityFactor;
+      const stabilityFactor = getStabilityFactor();
+      amountForValidation = parseFloat(amount) / stabilityFactor;
     }
 
     // convert amount to bigint
@@ -13722,7 +13899,7 @@ class SendAssetFormModal {
 
     // get the scalability factor for LIB/USD conversion
     await getNetworkParams();
-    const scalabilityFactor = getStabilityFactor();
+    const stabilityFactor = getStabilityFactor();
 
     // Get the raw values in LIB format
     const asset = myData.wallet.assets[this.assetSelectDropdown.value];
@@ -13732,12 +13909,12 @@ class SendAssetFormModal {
 
     // if isLib is false, convert the sendAmount to USD
     if (!isLib) {
-      this.amountInput.value = this.amountInput.value * scalabilityFactor;
+      this.amountInput.value = this.amountInput.value * stabilityFactor;
     } else {
-      this.amountInput.value = this.amountInput.value / scalabilityFactor;
+      this.amountInput.value = this.amountInput.value / stabilityFactor;
     }
 
-    this.updateBalanceAndFeeDisplay(balanceInLIB, feeInLIB, !isLib, scalabilityFactor);
+    this.updateBalanceAndFeeDisplay(balanceInLIB, feeInLIB, !isLib, stabilityFactor);
   }
 
   /**
@@ -13761,12 +13938,12 @@ class SendAssetFormModal {
    * @param {string} balanceInLIB - The balance amount in LIB
    * @param {string} feeInLIB - The fee amount in LIB
    * @param {boolean} isUSD - Whether to display in USD format
-   * @param {number} scalabilityFactor - The factor to convert between LIB and USD
+   * @param {number} stabilityFactor - The factor to convert between LIB and USD
    */
-  updateBalanceAndFeeDisplay(balanceInLIB, feeInLIB, isUSD, scalabilityFactor) {
+  updateBalanceAndFeeDisplay(balanceInLIB, feeInLIB, isUSD, stabilityFactor) {
     if (isUSD) {
-      this.balanceAmount.textContent = '$' + (parseFloat(balanceInLIB) * scalabilityFactor).toPrecision(6);
-      this.transactionFee.textContent = '$' + (parseFloat(feeInLIB) * scalabilityFactor).toPrecision(2);
+      this.balanceAmount.textContent = '$' + (parseFloat(balanceInLIB) * stabilityFactor).toPrecision(6);
+      this.transactionFee.textContent = '$' + (parseFloat(feeInLIB) * stabilityFactor).toPrecision(2);
     } else {
       this.balanceAmount.textContent = balanceInLIB + ' LIB';
       this.transactionFee.textContent = feeInLIB + ' LIB';
@@ -14527,17 +14704,17 @@ class ReceiveModal {
       const isLib = this.receiveBalanceSymbol.textContent === 'LIB';
 
       await getNetworkParams();
-      const scalabilityFactor = getStabilityFactor();
+      const stabilityFactor = getStabilityFactor();
 
       if (this.amountInput && this.amountInput.value.trim() !== '') {
         const currentValue = parseFloat(this.amountInput.value);
         if (!isNaN(currentValue)) {
           if (!isLib) {
             // now showing USD, convert LIB -> USD
-            this.amountInput.value = (currentValue * scalabilityFactor).toString();
+            this.amountInput.value = (currentValue * stabilityFactor).toString();
           } else {
             // now showing LIB, convert USD -> LIB
-            this.amountInput.value = (currentValue / scalabilityFactor).toString();
+            this.amountInput.value = (currentValue / stabilityFactor).toString();
           }
         }
       }
@@ -16799,6 +16976,22 @@ async function getNetworkParams() {
     return;
   }
 
+  // If offline, try to use cached parameters
+  if (!isOnline) {
+    const cachedParams = localStorage.getItem('cachedNetworkParams');
+    if (cachedParams) {
+      try {
+        parameters = parse(cachedParams);
+        console.log('Using cached network parameters (offline)');
+        return;
+      } catch (e) {
+        console.warn('Failed to parse cached network parameters:', e);
+      }
+    }
+    console.log('No cached network parameters available (offline)');
+    return;
+  }
+
   console.log(`getNetworkParams: Data for account ${NETWORK_ACCOUNT_ID} is stale or missing. Attempting to fetch...`);
   try {
     const fetchedData = await queryNetwork(`/account/${NETWORK_ACCOUNT_ID}`);
@@ -16806,10 +16999,15 @@ async function getNetworkParams() {
     if (fetchedData !== undefined && fetchedData !== null) {
       parameters = fetchedData.account;
       getNetworkParams.timestamp = now;
+      
+      // Cache all network parameters for offline use
+      localStorage.setItem('cachedNetworkParams', stringify(parameters));
+      
       // if network id from network.js is not the same as the parameters.current.networkId
       if (network.netid !== parameters.networkId) {
         // treat as offline
         netIdMismatch = true;
+        isOnline = false;
         updateUIForConnectivity();
         console.error(`getNetworkParams: Network ID mismatch. Network ID from network.js: ${network.netid}, Network ID from parameters: ${parameters.networkId}`);
         console.log(parameters)
