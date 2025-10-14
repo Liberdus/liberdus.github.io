@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'e'
+const version = 'f'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -8347,6 +8347,9 @@ class ChatModal {
     // Track whether we've locked background/modal scroll
     this.scrollLocked = false;
     this._touchMoveBlocker = null; // blocks touch outside messages container
+
+    // Track which voice message element is playing
+    this.playingVoiceMessageElement = null;
   }
 
   /**
@@ -8511,15 +8514,18 @@ class ChatModal {
     });
 
     this.chatSendMoneyButton.addEventListener('click', () => {
+      this.pauseVoiceMessages();
       sendAssetFormModal.username = this.chatSendMoneyButton.dataset.username;
       sendAssetFormModal.open();
     });
 
     this.callButton.addEventListener('click', () => {
+      this.pauseVoiceMessages();
       this.handleCallUser();
     });
 
     this.addFriendButtonChat.addEventListener('click', () => {
+      this.pauseVoiceMessages();
       if (!friendModal.getCurrentContactAddress()) return;
       friendModal.open();
     });
@@ -8667,7 +8673,16 @@ class ChatModal {
    */
   cleanupVoiceMessageResources(voiceMessageElement) {
     if (!voiceMessageElement) return;
+    // Revoke blob URL to prevent memory leak (critical - blobs aren't auto-cleaned)
     if (voiceMessageElement.audioUrl) URL.revokeObjectURL(voiceMessageElement.audioUrl);
+    // TODO: delete these when we set up listeners properly since we don't have to remove them manually and will be set up during load()
+    // Remove event listeners from seekEl by cloning (removes all listeners at once)
+    const seekEl = voiceMessageElement.querySelector('.voice-message-seek');
+    if (seekEl && voiceMessageElement.seekSetup) {
+      const newSeekEl = seekEl.cloneNode(true);
+      seekEl.parentNode?.replaceChild(newSeekEl, seekEl);
+    }
+    // Delete references to help GC
     delete voiceMessageElement.audioElement;
     delete voiceMessageElement.audioUrl;
     delete voiceMessageElement.pendingSeekTime;
@@ -8684,6 +8699,18 @@ class ChatModal {
     if (audio && !audio.paused) {
       audio.pause();
       this.setVoiceMessageButton(voiceMessageElement, false);
+      if (this.playingVoiceMessageElement === voiceMessageElement) {
+        this.playingVoiceMessageElement = null;
+      }
+    }
+  }
+
+  /**
+   * Pause voice messages when clicking any header action button
+   */
+  pauseVoiceMessages() {
+    if (this.playingVoiceMessageElement) {
+      this.pauseVoiceMessage(this.playingVoiceMessageElement);
     }
   }
 
@@ -8695,6 +8722,9 @@ class ChatModal {
     if (voiceMessageElement.audioElement) voiceMessageElement.audioElement.pause();
     this.resetVoiceMessageUI(voiceMessageElement);
     this.cleanupVoiceMessageResources(voiceMessageElement);
+    if (this.playingVoiceMessageElement === voiceMessageElement) {
+      this.playingVoiceMessageElement = null;
+    }
   }
 
   /**
@@ -8739,10 +8769,7 @@ class ChatModal {
     this.modalAvatar.innerHTML = generateIdenticon(contact.address, 40);
 
     // Stop and cleanup all voice messages from previous conversation
-    const oldVoiceMessages = this.messagesList?.querySelectorAll('.voice-message');
-    if (oldVoiceMessages) {
-      oldVoiceMessages.forEach(vm => this.stopVoiceMessage(vm));
-    }
+    this.messagesList?.querySelectorAll('.voice-message').forEach(vm => this.stopVoiceMessage(vm));
 
     // Clear previous messages from the UI
     this.messagesList.innerHTML = '';
@@ -8756,6 +8783,7 @@ class ChatModal {
     // TODO: create event listener instead of onclick here
     const userInfo = this.modal.querySelector('.chat-user-info');
     userInfo.onclick = () => {
+      this.pauseVoiceMessages();
       const contact = myData.contacts[address];
       if (contact) {
         contactInfoModal.open(createDisplayInfo(contact));
@@ -8765,6 +8793,7 @@ class ChatModal {
     // Add click handler for edit button
     // TODO: create event listener instead of onclick here
     this.editButton.onclick = () => {
+      this.pauseVoiceMessages();
       const contact = myData.contacts[address];
       if (contact) {
         contactInfoModal.open(createDisplayInfo(contact));
@@ -8831,10 +8860,7 @@ class ChatModal {
     this.cancelAllOperations();
 
     // Stop all playing voice messages
-    const playingVoiceMessages = this.messagesList?.querySelectorAll('.voice-message');
-    if (playingVoiceMessages) {
-      playingVoiceMessages.forEach(vm => this.stopVoiceMessage(vm));
-    }
+    this.messagesList?.querySelectorAll('.voice-message').forEach(vm => this.stopVoiceMessage(vm));
 
     // clear file attachments
     this.fileAttachments = [];
@@ -11296,15 +11322,9 @@ console.warn('in send message', txid)
   async playVoiceMessage(buttonElement) {
     const voiceMessageElement = buttonElement.closest('.voice-message');
     if (!voiceMessageElement) return;
-
-    // Pause all other playing voice messages (keeps audio cached for quick resume)
-    const allVoiceMessages = this.messagesList?.querySelectorAll('.voice-message');
-    if (allVoiceMessages) {
-      allVoiceMessages.forEach(vm => {
-        if (vm !== voiceMessageElement) {
-          this.pauseVoiceMessage(vm);
-        }
-      });
+    // Pause only if playing a different voice message
+    if (this.playingVoiceMessageElement !== voiceMessageElement) {
+      this.pauseVoiceMessages();
     }
 
     // Check if audio is already playing/paused
@@ -11322,10 +11342,12 @@ console.warn('in send message', txid)
         }
         existingAudio.play();
         this.setVoiceMessageButton(voiceMessageElement, true);
+        this.playingVoiceMessageElement = voiceMessageElement;
       } else {
         // Pause playback
         existingAudio.pause();
         this.setVoiceMessageButton(voiceMessageElement, false);
+        this.playingVoiceMessageElement = null;
       }
       return;
     }
@@ -11419,6 +11441,9 @@ console.warn('in send message', txid)
       // Update UI to show playing state and enable button for pause functionality
       this.setVoiceMessageButton(voiceMessageElement, true);
       
+      // Track this as the currently playing voice message
+      this.playingVoiceMessageElement = voiceMessageElement;
+      
       // Time & progress tracking
       audio.ontimeupdate = () => {
         if (!voiceMessageElement.isScrubbing) {
@@ -11471,6 +11496,7 @@ console.warn('in send message', txid)
       audio.onended = () => {
         this.resetVoiceMessageUI(voiceMessageElement);
         this.cleanupVoiceMessageResources(voiceMessageElement);
+        this.playingVoiceMessageElement = null;
       };
       
       audio.onerror = (error) => {
@@ -11478,6 +11504,7 @@ console.warn('in send message', txid)
         showToast('Error playing voice message', 0, 'error');
         this.resetVoiceMessageUI(voiceMessageElement);
         this.cleanupVoiceMessageResources(voiceMessageElement);
+        this.playingVoiceMessageElement = null;
       };
       
       // Start playing
