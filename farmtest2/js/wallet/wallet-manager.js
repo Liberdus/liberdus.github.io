@@ -497,11 +497,35 @@ class WalletManager {
             const { walletType, address } = JSON.parse(connectionInfo);
             
             if (walletType === 'metamask' && window.ethereum) {
-                // Check if MetaMask is still connected
+                // Check if MetaMask is still connected (use eth_accounts to avoid popup)
+                try {
                 const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-                if (accounts && accounts.length > 0 && accounts[0] === address) {
-                    await this.connectMetaMask();
+                    if (accounts && accounts.length > 0 && accounts[0].toLowerCase() === address.toLowerCase()) {
+                        console.log('✅ Previous MetaMask connection found, restoring...');
+                        
+                        // Restore connection without triggering new request
+                        this.provider = new ethers.providers.Web3Provider(window.ethereum);
+                        this.signer = this.provider.getSigner();
+                        this.address = accounts[0];
+                        this.walletType = 'metamask';
+                        
+                        // Get network information
+                        const network = await this.provider.getNetwork();
+                        this.chainId = network.chainId;
+                        
+                        // Notify listeners about restored connection
+                        this.notifyListeners('connected', {
+                            address: this.address,
+                            chainId: this.chainId,
+                            walletType: this.walletType,
+                            restored: true
+                        });
+                        
+                        console.log('✅ MetaMask connection restored successfully:', this.address);
                     return true;
+                    }
+                } catch (error) {
+                    console.warn('Could not check previous connection:', error);
                 }
             }
 

@@ -6,18 +6,16 @@
     <title>Liberdus LP Staking - Earn Rewards by Staking LP Tokens</title>
     <meta name="description" content="Stake your liquidity provider tokens and earn rewards on our secure DeFi platform">
 
-    <!-- Prevent caching for development -->
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="assets/favicon.ico">
 
-    <link rel="icon" type="image/x-icon" href="/farmtest2/favicon.ico">
-    <link href="https://fonts.googleapis.com/css?family=Exo:400,500,600,700,800&display=swap" rel="stylesheet">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Exo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
 
-    <!-- Day 10 Enhanced CSS -->
-    <link rel="stylesheet" href="/farmtest2/css/day10-enhancements.css">
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="css/day10-enhancements.css">
     <style>
         :root {
 
@@ -33,20 +31,7 @@
             --warning-main: #ff9800;
             --info-main: #2196f3;
 
-            /* Background colors - light theme */
-            --background-default: #ffffff;
-            --background-paper: #ffffff;
-            --surface-hover: rgba(0, 0, 0, 0.04);
-            --action-selected: rgba(25, 118, 210, 0.08);
-            --action-hover: rgba(0, 0, 0, 0.04);
-
-            /* Text colors - light theme */
-            --text-primary: rgba(0, 0, 0, 0.87);
-            --text-secondary: rgba(0, 0, 0, 0.6);
-            --text-disabled: rgba(0, 0, 0, 0.38);
-
-            /* Border and divider */
-            --divider: rgba(0, 0, 0, 0.12);
+            /* Theme-specific variables are defined in [data-theme] selectors below */
 
             /* Shadows */
             --shadow-1: 0px 2px 1px -1px rgba(0,0,0,0.2), 0px 1px 1px 0px rgba(0,0,0,0.14), 0px 1px 3px 0px rgba(0,0,0,0.12);
@@ -254,19 +239,34 @@
             --border-radius-lg: 8px;
         }
         
-        /* Dark theme */
-        [data-theme="dark"] {
-            --background-default: #121212;
-            --background-paper: #1e1e1e;
-            --surface-hover: rgba(255, 255, 255, 0.08);
-            --action-selected: rgba(144, 202, 249, 0.16);
-            --action-hover: rgba(255, 255, 255, 0.08);
+        /* Light theme - Higher specificity to override external CSS */
+        html[data-theme="light"] {
+            --background-default: #ffffff !important;
+            --background-paper: #ffffff !important;
+            --surface-hover: rgba(0, 0, 0, 0.04) !important;
+            --action-selected: rgba(25, 118, 210, 0.08) !important;
+            --action-hover: rgba(0, 0, 0, 0.04) !important;
             
-            --text-primary: #ffffff;
-            --text-secondary: rgba(255, 255, 255, 0.7);
-            --text-disabled: rgba(255, 255, 255, 0.5);
+            --text-primary: rgba(0, 0, 0, 0.87) !important;
+            --text-secondary: rgba(0, 0, 0, 0.6) !important;
+            --text-disabled: rgba(0, 0, 0, 0.38) !important;
             
-            --divider: rgba(255, 255, 255, 0.12);
+            --divider: rgba(0, 0, 0, 0.12) !important;
+        }
+
+        /* Dark theme - Higher specificity to override external CSS */
+        html[data-theme="dark"] {
+            --background-default: #121212 !important;
+            --background-paper: #1e1e1e !important;
+            --surface-hover: rgba(255, 255, 255, 0.08) !important;
+            --action-selected: rgba(144, 202, 249, 0.16) !important;
+            --action-hover: rgba(255, 255, 255, 0.08) !important;
+            
+            --text-primary: #ffffff !important;
+            --text-secondary: rgba(255, 255, 255, 0.7) !important;
+            --text-disabled: rgba(255, 255, 255, 0.5) !important;
+            
+            --divider: rgba(255, 255, 255, 0.12) !important;
         }
         
         /* Reset and base styles */
@@ -309,14 +309,10 @@
             position: sticky;
             top: 0;
             z-index: 1100;
-            background: rgba(255, 255, 255, 0.8);
+            background: var(--background-paper) !important;
             backdrop-filter: blur(8px);
             border-bottom: 1px solid var(--divider);
             transition: all 0.3s ease;
-        }
-        
-        [data-theme="dark"] .header {
-            background: rgba(0, 0, 0, 0.8);
         }
         
         .header-toolbar {
@@ -354,18 +350,8 @@
         .logo-text {
             font-size: 24px;
             font-weight: 700;
-            background: linear-gradient(45deg, #2196F3 30%, #21CBF3 90%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            color: var(--text-primary);
             white-space: nowrap;
-        }
-        
-        [data-theme="dark"] .logo-text {
-            background: linear-gradient(45deg, #fff 30%, #ccc 90%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
         }
         
         /* Navigation */
@@ -673,12 +659,8 @@
             margin-top: auto;
             padding: var(--spacing-3) 0;
             border-top: 1px solid var(--divider);
-            background: rgba(255, 255, 255, 0.8);
+            background: var(--background-paper) !important;
             backdrop-filter: blur(8px);
-        }
-
-        [data-theme="dark"] .footer {
-            background: rgba(0, 0, 0, 0.8);
         }
 
         .footer-content {
@@ -810,18 +792,18 @@
         <div class="container-lg">
             <div class="header-toolbar">
 
-                <a href="/" class="logo-section" aria-label="Liberdus LP Staking - Home">
-                    <img src="/farmtest2/assets/logo.png" alt="Liberdus LP Staking" class="logo">
+                <a href="index.html" class="logo-section" aria-label="Liberdus LP Staking - Home">
+                    <img src="assets/logo.png" alt="Liberdus LP Staking" class="logo">
                     <span class="logo-text">Liberdus LP Staking</span>
                 </a>
 
 
                 <nav class="nav-section" role="navigation" aria-label="Main navigation">
-                    <a href="/" class="nav-button active" aria-current="page">
+                    <a href="index.html" class="nav-button active" aria-current="page">
                         <span class="material-icons" aria-hidden="true">home</span>
                         <span>Home</span>
                     </a>
-                    <a href="/farmtest2/admin.html" class="nav-button">
+                    <a href="admin.html" class="nav-button">
                         <span class="material-icons" aria-hidden="true">admin_panel_settings</span>
                         <span>Admin Panel</span>
                     </a>
@@ -889,10 +871,10 @@
     <div id="notification-container"></div>
 
     <!-- Theme System (load early to prevent flash) -->
-    <script src="/farmtest2/js/core/unified-theme-manager.js"></script>
+    <script src="js/core/unified-theme-manager.js"></script>
 
-    <script src="/farmtest2/libs/ethers.umd.min.js"></script>
-    <script src="/farmtest2/js/master-initializer.js"></script>
+    <script src="libs/ethers.umd.min.js"></script>
+    <script src="js/master-initializer.js"></script>
 
     <!-- Homepage Notification System - Isolated Implementation -->
     <script>
@@ -1198,6 +1180,21 @@
         // Override on window load as final fallback
         window.addEventListener('load', setupNotificationOverride);
     })();
+
+    // Initialize theme toggle button
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('🎨 Setting up theme toggle button...');
+        
+        // Wait for unified theme manager to be ready
+        setTimeout(function() {
+            if (window.unifiedThemeManager) {
+                window.unifiedThemeManager.setupToggleButton('theme-toggle');
+                console.log('✅ Theme toggle button initialized');
+            } else {
+                console.error('❌ UnifiedThemeManager not found');
+            }
+        }, 100);
+    });
     </script>
 </body>
 </html>

@@ -428,13 +428,9 @@ class HomePage extends BaseComponent {
 
         return `
             <tr class="${rowClass}" data-pair-id="${pair.id}" ${rowStyle} ${rowTitle}>
-                <!-- Pair Name (clickable to Uniswap) -->
+                <!-- Pair Name (with token avatars and Uniswap link) -->
                 <td class="pair-col">
-                    <button class="pair-link" onclick="window.open('https://app.uniswap.org/explore/pools/polygon/${pair.lpToken}', '_blank')"
-                            style="background: none; border: none; color: var(--primary-main); cursor: pointer; font-weight: bold; display: flex; align-items: center; gap: 8px;">
-                        ${this.formatPairName(pair.name)}
-                        <span class="material-icons-outlined" style="font-size: 16px;">open_in_new</span>
-                    </button>
+                    ${this.formatPairName(pair.name, pair.lpToken)}
                 </td>
 
                 <!-- Platform -->
@@ -531,17 +527,13 @@ class HomePage extends BaseComponent {
                     <div class="pair-info">
                         <div class="pair-header">
                             <div class="pair-name-container">
-                                <span class="pair-name">${this.formatPairName(pair.name)}</span>
-                                <div class="pair-badges">
+                                ${this.formatPairName(pair.name, pair.lpToken)}
+                                <div class="pair-badges" style="margin-top: 6px;">
                                     ${pair.isNew ? '<span class="badge new">NEW</span>' : ''}
                                     ${pair.isHot ? '<span class="badge hot">🔥 HOT</span>' : ''}
                                     ${!pair.isActive ? '<span class="badge inactive">INACTIVE</span>' : ''}
                                 </div>
                             </div>
-                            <button class="uniswap-link" data-pair="${pair.name}" title="Add liquidity on Uniswap">
-                                <span class="uniswap-icon">🦄</span>
-                                <span class="link-text">Add Liquidity</span>
-                            </button>
                         </div>
                         <div class="pair-details">
                             <span class="pair-address">${window.Formatter?.formatAddress(pair.lpToken) || pair.lpToken}</span>
@@ -653,18 +645,26 @@ class HomePage extends BaseComponent {
 
         // React-style multi-level sorting
         pairs.sort((a, b) => {
+            // Convert to numbers to ensure proper comparison
+            const weightA = parseFloat(a.weight) || 0;
+            const weightB = parseFloat(b.weight) || 0;
+            const tvlA = parseFloat(a.tvl) || 0;
+            const tvlB = parseFloat(b.tvl) || 0;
+            const aprA = parseFloat(a.apr) || 0;
+            const aprB = parseFloat(b.apr) || 0;
+
             // Primary sort: Weight (descending)
-            if (a.weight !== b.weight) {
-                return b.weight - a.weight;
+            if (weightA !== weightB) {
+                return weightB - weightA;
             }
 
             // Secondary sort: TVL (descending)
-            if (a.tvl !== b.tvl) {
-                return b.tvl - a.tvl;
+            if (tvlA !== tvlB) {
+                return tvlB - tvlA;
             }
 
             // Tertiary sort: APR (descending)
-            return b.apr - a.apr;
+            return aprB - aprA;
         });
 
         return pairs;
@@ -913,10 +913,11 @@ class HomePage extends BaseComponent {
             });
         });
 
-        // Pair row clicks for details
+        // Pair row clicks for details (but not on buttons or links)
         this.$$('.pair-row').forEach(row => {
             this.addEventListener(row, 'click', (e) => {
-                if (!e.target.closest('button')) {
+                // Don't trigger on buttons, links, or pair name links
+                if (!e.target.closest('button') && !e.target.closest('a') && !e.target.closest('.pair-name-link')) {
                     const pairId = row.getAttribute('data-pair-id');
                     this.showPairDetails(pairId);
                 }
@@ -1210,22 +1211,36 @@ class HomePage extends BaseComponent {
             const pairsData = [];
 
             try {
-                // Get all pairs info from the staking contract
-                const allPairsInfo = await window.contractManager.getAllPairsInfo();
+                // Get all pairs info and hourly reward rate in parallel (optimize common data)
+                const [allPairsInfo, hourlyRewardRate, rewardTokenPrice] = await Promise.all([
+                    window.contractManager.getAllPairsInfo(),
+                    window.contractManager.getHourlyRewardRate().catch(() => '0'),
+                    window.priceFeeds?.fetchTokenPrice(window.CONFIG?.CONTRACTS?.REWARD_TOKEN).catch(() => 0) || Promise.resolve(0)
+                ]);
+                
                 this.log('Retrieved pairs from contract:', allPairsInfo);
 
-                for (const pairInfo of allPairsInfo) {
+                // Cache common values for all pairs
+                this.cachedHourlyRate = parseFloat(window.ethers.formatEther(hourlyRewardRate || '0'));
+                this.cachedRewardTokenPrice = rewardTokenPrice || 0;
+
+                // Process all pairs in parallel for faster loading
+                const pairPromises = allPairsInfo.map(async (pairInfo) => {
                     try {
-                        // Get additional data for each pair
                         const pairData = await this.buildPairData(pairInfo);
-                        if (pairData) {
-                            pairsData.push(pairData);
-                        }
+                        return pairData;
                     } catch (pairError) {
                         this.logError(`Failed to build data for pair ${pairInfo.address}:`, pairError);
-                        continue;
+                        return null;
                     }
-                }
+                });
+
+                // Wait for all pairs to be processed
+                const results = await Promise.all(pairPromises);
+                
+                // Filter out null values
+                const validPairs = results.filter(pair => pair !== null);
+                pairsData.push(...validPairs);
 
                 if (pairsData.length === 0) {
                     this.log('No valid pairs found, using fallback data');
@@ -1268,46 +1283,20 @@ class HomePage extends BaseComponent {
             let rewardTokenPrice = 0;
 
             try {
-                console.log(`🔍 Fetching data for pair: ${pairName}`);
+                // Use cached hourly rate and reward price (same for all pairs)
+                const hourlyRate = this.cachedHourlyRate || 0;
+                rewardTokenPrice = this.cachedRewardTokenPrice || 0;
 
-                // Get hourly reward rate from contract
-                const hourlyRewardRate = await window.contractManager.getHourlyRewardRate();
-                const hourlyRate = parseFloat(window.ethers.formatEther(hourlyRewardRate || '0'));
-                console.log(`  ⏰ Hourly rate: ${hourlyRate}`);
+                // Make only pair-specific calls in parallel for faster loading
+                const [tvlWei, lpPriceResult] = await Promise.all([
+                    window.contractManager.getTVL(pairInfo.address).catch(() => '0'),
+                    window.priceFeeds?.fetchTokenPrice(pairInfo.address).catch(() => 0) || Promise.resolve(0)
+                ]);
 
-                // Get TVL from contract
-                const tvlWei = await window.contractManager.getTVL(pairInfo.address);
                 tvlInTokens = parseFloat(window.ethers.formatEther(tvlWei || '0'));
-                console.log(`  📊 TVL in tokens: ${tvlInTokens}`);
-
-                // Fetch token prices using DexScreener (React implementation)
-                console.log(`  💰 Checking price feeds availability:`, {
-                    priceFeeds: !!window.priceFeeds,
-                    fetchTokenPrice: !!window.priceFeeds?.fetchTokenPrice
-                });
-
-                if (window.priceFeeds && window.priceFeeds.fetchTokenPrice) {
-                    console.log(`  🔍 Fetching LP token price for: ${pairInfo.address}`);
-                    lpTokenPrice = await window.priceFeeds.fetchTokenPrice(pairInfo.address);
-                    console.log(`  💵 LP token price: $${lpTokenPrice}`);
-
-                    // Get reward token address from config
-                    const rewardTokenAddress = window.CONFIG?.CONTRACTS?.REWARD_TOKEN;
-                    if (rewardTokenAddress) {
-                        console.log(`  🔍 Fetching reward token price for: ${rewardTokenAddress}`);
-                        rewardTokenPrice = await window.priceFeeds.fetchTokenPrice(rewardTokenAddress);
-                        console.log(`  💵 Reward token price: $${rewardTokenPrice}`);
-                    }
-                } else {
-                    console.warn(`  ⚠️ Price feeds not available!`);
-                }
+                lpTokenPrice = lpPriceResult || 0;
 
                 // Calculate APR using React formula
-                console.log(`  🧮 Checking rewards calculator:`, {
-                    rewardsCalculator: !!window.rewardsCalculator,
-                    calcAPR: !!window.rewardsCalculator?.calcAPR
-                });
-
                 if (window.rewardsCalculator && window.rewardsCalculator.calcAPR) {
                     apr = window.rewardsCalculator.calcAPR(
                         hourlyRate,
@@ -1315,21 +1304,21 @@ class HomePage extends BaseComponent {
                         lpTokenPrice,
                         rewardTokenPrice
                     );
-                    console.log(`  📈 Calculated APR: ${apr}%`);
-                } else {
-                    console.warn(`  ⚠️ Rewards calculator not available!`);
                 }
 
                 // Calculate TVL in USD
                 tvl = tvlInTokens * lpTokenPrice;
-                console.log(`  💰 TVL in USD: $${tvl}`);
 
                 // Get user-specific data if wallet is connected
                 const walletAddress = this.getState('wallet.address');
                 if (walletAddress && window.contractManager) {
                     try {
-                        // Get user stake info
-                        const userStake = await window.contractManager.getUserStake(walletAddress, pairInfo.address);
+                        // Get user data in parallel
+                        const [userStake, pendingRewards] = await Promise.all([
+                            window.contractManager.getUserStake(walletAddress, pairInfo.address).catch(() => ({ amount: '0' })),
+                            window.contractManager.getPendingRewards(walletAddress, pairInfo.address).catch(() => '0')
+                        ]);
+
                         const userStakeAmount = parseFloat(window.ethers.formatEther(userStake.amount || '0'));
 
                         // Calculate my share percentage
@@ -1337,17 +1326,14 @@ class HomePage extends BaseComponent {
                             myShare = (userStakeAmount / tvlInTokens) * 100;
                         }
 
-                        // Get pending rewards
-                        const pendingRewards = await window.contractManager.getPendingRewards(walletAddress, pairInfo.address);
                         myEarnings = parseFloat(window.ethers.formatEther(pendingRewards || '0'));
                     } catch (userError) {
-                        this.log(`Could not get user data for ${pairName}:`, userError.message);
+                        // Silent fail for user data
                     }
                 }
 
             } catch (dataError) {
-                console.error(`Could not get additional data for ${pairName}:`, dataError);
-                this.log(`Could not get additional data for ${pairName}:`, dataError.message);
+                // Silent fail - will use default values
             }
 
             const pairData = {
@@ -1355,17 +1341,17 @@ class HomePage extends BaseComponent {
                 name: pairName,
                 lpToken: pairInfo.address,
                 platform: pairInfo.platform || 'Unknown',
-                weight: parseInt(pairInfo.weight) || 0,
+                weight: parseFloat(pairInfo.weight) || 0,  // Ensure it's a number
                 isActive: pairInfo.isActive,
-                apr: apr,
+                apr: parseFloat(apr) || 0,  // Ensure it's a number
                 aprFormatted: `${apr.toFixed(1)}%`,
-                tvl: tvl,
-                tvlInTokens: tvlInTokens,
-                totalStaked: tvlInTokens,
-                lpTokenPrice: lpTokenPrice,
-                rewardTokenPrice: rewardTokenPrice,
-                myShare: myShare,
-                myEarnings: myEarnings,
+                tvl: parseFloat(tvl) || 0,  // Ensure it's a number
+                tvlInTokens: parseFloat(tvlInTokens) || 0,  // Ensure it's a number
+                totalStaked: parseFloat(tvlInTokens) || 0,  // Ensure it's a number
+                lpTokenPrice: parseFloat(lpTokenPrice) || 0,  // Ensure it's a number
+                rewardTokenPrice: parseFloat(rewardTokenPrice) || 0,  // Ensure it's a number
+                myShare: parseFloat(myShare) || 0,  // Ensure it's a number
+                myEarnings: parseFloat(myEarnings) || 0,  // Ensure it's a number
                 isNew: false,
                 isHot: apr > 100,
                 stakersCount: 0, // Would need additional contract call
@@ -1384,18 +1370,76 @@ class HomePage extends BaseComponent {
     }
 
     /**
-     * Format pair name for display (e.g., "LPLIBETH" -> "LIB/ETH LP")
+     * Get token color for avatar
      */
-    formatPairName(pairName) {
+    getTokenColor(tokenSymbol) {
+        const colors = {
+            'LIB': '#3B82F6',      // Blue
+            'USDT': '#26A17B',     // Tether Green
+            'USDC': '#2775CA',     // USDC Blue
+            'DAI': '#F5AC37',      // DAI Gold
+            'WETH': '#627EEA',     // Ethereum Purple
+            'ETH': '#627EEA',      // Ethereum Purple
+            'WBTC': '#F7931A',     // Bitcoin Orange
+            'BTC': '#F7931A',      // Bitcoin Orange
+            'MATIC': '#8247E5',    // Polygon Purple
+            'TOKEN': '#FF9800'     // Default Orange
+        };
+        return colors[tokenSymbol.toUpperCase()] || '#6B7280';
+    }
+
+    /**
+     * Create token avatar HTML
+     */
+    createTokenAvatar(tokenSymbol) {
+        const symbol = tokenSymbol.toUpperCase();
+        const color = this.getTokenColor(symbol);
+        const initial = symbol.substring(0, 3);
+        
+        return `
+            <div class="token-avatar" style="
+                width: 32px;
+                height: 32px;
+                border-radius: 50%;
+                background: ${color};
+                color: white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: -0.5px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            ">${initial}</div>
+        `;
+    }
+
+    /**
+     * Format pair name for display with token avatars
+     */
+    formatPairName(pairName, lpTokenAddress = '') {
         if (!pairName) return pairName;
 
-        // If already formatted (contains /), return as is
-        if (pairName.includes('/')) {
-            return pairName;
-        }
+        let token1 = '';
+        let token2 = '';
+        let formattedName = pairName;
 
-        // Handle LP prefix format: "LPLIBETH" -> "LIB/ETH LP"
-        if (pairName.startsWith('LP') && pairName.length > 4) {
+        // If already formatted (contains /), extract tokens
+        if (pairName.includes('/')) {
+            const parts = pairName.split('/');
+            token1 = parts[0].trim();
+            token2 = parts[1].replace('LP', '').trim();
+            formattedName = `${token1}/${token2}`;
+        }
+        // Handle "LIB-USDT" format
+        else if (pairName.includes('-')) {
+            const parts = pairName.split('-');
+            token1 = parts[0].trim();
+            token2 = parts[1].trim();
+            formattedName = `${token1}/${token2}`;
+        }
+        // Handle LP prefix format: "LPLIBETH" -> "LIB/ETH"
+        else if (pairName.startsWith('LP') && pairName.length > 4) {
             const tokens = pairName.substring(2); // Remove "LP"
 
             // Try to split into two tokens
@@ -1403,30 +1447,66 @@ class HomePage extends BaseComponent {
 
             for (const token of commonTokens) {
                 if (tokens.endsWith(token)) {
-                    const token1 = tokens.substring(0, tokens.length - token.length);
-                    const token2 = token;
+                    token1 = tokens.substring(0, tokens.length - token.length);
+                    token2 = token;
                     if (token1.length > 0) {
-                        return `${token1}/${token2} LP`;
+                        formattedName = `${token1}/${token2}`;
+                        break;
                     }
                 }
                 if (tokens.startsWith(token)) {
-                    const token1 = token;
-                    const token2 = tokens.substring(token.length);
+                    token1 = token;
+                    token2 = tokens.substring(token.length);
                     if (token2.length > 0) {
-                        return `${token1}/${token2} LP`;
+                        formattedName = `${token1}/${token2}`;
+                        break;
                     }
                 }
             }
 
-            // Fallback: split in half
+            // Fallback: split in half if tokens not found
+            if (!token1 || !token2) {
             const mid = Math.floor(tokens.length / 2);
-            const token1 = tokens.substring(0, mid);
-            const token2 = tokens.substring(mid);
-            return `${token1}/${token2} LP`;
+                token1 = tokens.substring(0, mid);
+                token2 = tokens.substring(mid);
+                formattedName = `${token1}/${token2}`;
+            }
+        }
+
+        // Create pair display with avatars and Uniswap link
+        if (token1 && token2) {
+            const avatar1 = this.createTokenAvatar(token1);
+            const avatar2 = this.createTokenAvatar(token2);
+            const uniswapUrl = lpTokenAddress ? 
+                `https://app.uniswap.org/explore/pools/polygon/${lpTokenAddress}` : 
+                `https://app.uniswap.org/explore/pools`;
+            
+            return `
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="display: flex; align-items: center;">
+                        ${avatar1}
+                        <div style="margin-left: -8px; z-index: 1;">${avatar2}</div>
+                    </div>
+                    <a href="${uniswapUrl}" target="_blank" rel="noopener noreferrer" 
+                       class="pair-name-link"
+                       style="display: inline-flex; align-items: center; gap: 8px; text-decoration: none; cursor: pointer; transition: all 0.2s ease; padding: 4px 0;"
+                       onmouseover="this.style.opacity='0.8'"
+                       onmouseout="this.style.opacity='1'"
+                       title="View pool on Uniswap">
+                        <span style="font-weight: 700; color: var(--primary-main); font-size: 14px;">${formattedName}</span>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary-main)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; transition: all 0.2s ease; min-width: 20px;">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                            <polyline points="15 3 21 3 21 9"></polyline>
+                            <line x1="10" y1="14" x2="21" y2="3"></line>
+                        </svg>
+                    </a>
+                    <span style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${pairName}</span>
+                </div>
+            `;
         }
 
         // Return original if no pattern matched
-        return pairName;
+        return formattedName;
     }
 
     /**

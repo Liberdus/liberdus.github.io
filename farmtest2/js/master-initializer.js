@@ -47,23 +47,26 @@ class MasterInitializer {
     async loadConfiguration() {
         console.log('⚙️ Loading application configuration...');
 
-        // Load SES-safe handler first
-        await this.loadScript('/farmtest2/js/utils/ses-safe-handler.js');
+        // Load production logger first
+        await this.loadScript('js/utils/production-logger.js');
+
+        // Load SES-safe handler
+        await this.loadScript('js/utils/ses-safe-handler.js');
 
         // Load demo configuration first (if available)
         try {
-            await this.loadScript('/farmtest2/js/config/demo-config.js');
+            await this.loadScript('js/config/demo-config.js');
         } catch (error) {
             console.log('Demo config not found - running in production mode');
         }
 
         // Load main configuration
-        await this.loadScript('/farmtest2/js/config/app-config.js');
+        await this.loadScript('js/config/app-config.js');
 
         // Load mock service if demo mode is enabled
         if (window.DEMO_CONFIG && window.DEMO_CONFIG.ENABLED) {
             try {
-                await this.loadScript('/farmtest2/js/services/mock-blockchain-service.js');
+                await this.loadScript('js/services/mock-blockchain-service.js');
                 console.log('🎭 Demo mode active - Mock blockchain service loaded');
             } catch (error) {
                 console.warn('Failed to load mock blockchain service:', error);
@@ -80,13 +83,16 @@ class MasterInitializer {
 
     async loadCoreUtilities() {
         const coreScripts = [
-            '/farmtest2/js/core/theme-manager-new.js',
-            '/farmtest2/js/core/notification-manager-new.js',
-            '/farmtest2/js/core/loading-manager.js',
-            '/farmtest2/js/core/accessibility-manager.js',
-            '/farmtest2/js/core/animation-manager.js',
-            '/farmtest2/js/utils/rpc-test.js',
-            '/farmtest2/js/utils/admin-test.js'
+            'js/utils/unified-cache.js',        // Load cache system first
+            'js/utils/cache-integration.js',    // Then cache integration
+            'js/core/unified-theme-manager.js', // Unified theme manager
+            'js/core/theme-manager-new.js',
+            'js/core/notification-manager-new.js',
+            'js/core/loading-manager.js',
+            'js/core/accessibility-manager.js',
+            'js/core/animation-manager.js',
+            'js/utils/rpc-test.js',
+            'js/utils/admin-test.js'
         ];
 
         for (const script of coreScripts) {
@@ -96,10 +102,10 @@ class MasterInitializer {
 
     async loadWalletSystems() {
         const walletScripts = [
-            '/farmtest2/js/wallet/wallet-manager.js',
-            '/farmtest2/js/contracts/contract-manager.js',
-            '/farmtest2/js/utils/price-feeds.js',
-            '/farmtest2/js/utils/rewards-calculator.js'
+            'js/wallet/wallet-manager.js',
+            'js/contracts/contract-manager.js',
+            'js/utils/price-feeds.js',
+            'js/utils/rewards-calculator.js'
         ];
 
         for (const script of walletScripts) {
@@ -109,12 +115,12 @@ class MasterInitializer {
 
     async loadUIComponents() {
         // Load CSS for wallet popup
-        await this.loadCSS('/farmtest2/css/wallet-popup.css');
+        await this.loadCSS('css/wallet-popup.css');
 
         const uiScripts = [
-            '/farmtest2/js/components/wallet-popup.js',
-            '/farmtest2/js/components/home-page.js',
-            '/farmtest2/js/components/staking-modal-new.js'
+            'js/components/wallet-popup.js',
+            'js/components/home-page.js',
+            'js/components/staking-modal-new.js'
         ];
 
         for (const script of uiScripts) {
@@ -125,7 +131,30 @@ class MasterInitializer {
     async initializeComponents() {
         console.log('🔧 Initializing components...');
 
-        // Initialize error handler first (critical for other systems)
+        // Initialize unified cache system first (needed by other components)
+        if (window.unifiedCache) {
+            try {
+                window.unifiedCache.initialize();
+                this.components.set('unifiedCache', window.unifiedCache);
+                console.log('✅ Unified Cache initialized');
+            } catch (error) {
+                console.error('❌ Failed to initialize UnifiedCache:', error);
+            }
+        }
+
+        // Initialize unified theme manager
+        if (window.UnifiedThemeManager) {
+            try {
+                window.unifiedThemeManager = new window.UnifiedThemeManager();
+                window.unifiedThemeManager.initialize();
+                this.components.set('unifiedThemeManager', window.unifiedThemeManager);
+                console.log('✅ Unified Theme Manager initialized');
+            } catch (error) {
+                console.error('❌ Failed to initialize UnifiedThemeManager:', error);
+            }
+        }
+
+        // Initialize error handler (critical for other systems)
         if (window.ErrorHandler && !window.errorHandler) {
             try {
                 window.errorHandler = new window.ErrorHandler();
@@ -225,6 +254,17 @@ class MasterInitializer {
                 console.log('🔄 Initializing ContractManager with read-only provider...');
                 await window.contractManager.initializeReadOnly();
                 console.log('✅ ContractManager initialized with read-only provider');
+
+                // Initialize cache integration with contract manager
+                if (window.cacheIntegration && window.unifiedCache) {
+                    try {
+                        window.cacheIntegration.initialize(window.unifiedCache, window.contractManager);
+                        this.components.set('cacheIntegration', window.cacheIntegration);
+                        console.log('✅ Cache Integration initialized with ContractManager');
+                    } catch (error) {
+                        console.error('❌ Failed to initialize CacheIntegration:', error);
+                    }
+                }
 
                 // Dispatch event for components waiting for contract manager
                 document.dispatchEvent(new CustomEvent('contractManagerReady', {

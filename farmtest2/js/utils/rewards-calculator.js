@@ -290,7 +290,15 @@
             try {
                 const lpTokenAddress = this.contractManager.contractAddresses.get(`LP_${pairName}`);
                 if (!lpTokenAddress) {
-                    throw new Error(`LP token address not found for ${pairName}`);
+                    // Silent return - this is expected for unconfigured pairs
+                    return null;
+                }
+                
+                // Check if method exists before calling
+                if (!this.contractManager.stakingContract || 
+                    typeof this.contractManager.stakingContract.getPoolInfo !== 'function') {
+                    // Silent return - method not available
+                    return null;
                 }
                 
                 // Get pool info from staking contract
@@ -304,15 +312,8 @@
                 };
                 
             } catch (error) {
-                console.error(`Failed to get pool info for ${pairName}:`, error);
-                
-                // Return fallback data
-                return {
-                    totalStaked: '0',
-                    rewardRate: '0',
-                    lastUpdateTime: '0',
-                    lpTokenAddress: null
-                };
+                // Silent return - these errors are expected when LP tokens don't exist
+                return null;
             }
         }
 
@@ -405,7 +406,7 @@
         async refreshAllPoolData() {
             try {
                 if (!this.contractManager || !this.contractManager.isReady()) {
-                    console.warn('ContractManager not ready, skipping pool data refresh');
+                    // Silent skip - this is expected on initial load
                     return;
                 }
 
@@ -413,22 +414,28 @@
                 const supportedTokens = await this.getSupportedTokens();
 
                 // Refresh data for each pool
+                let successCount = 0;
                 for (const pairName of supportedTokens) {
                     try {
                         const poolInfo = await this.getPoolInfo(pairName);
+                        if (poolInfo) {
                         this.poolData.set(pairName, {
                             ...poolInfo,
                             lastUpdated: Date.now()
                         });
+                            successCount++;
+                        }
                     } catch (error) {
-                        console.error(`Failed to refresh pool data for ${pairName}:`, error);
+                        // Silent skip - expected for unconfigured pairs
                     }
                 }
 
-                console.log(`🔄 Pool data refreshed for ${supportedTokens.length} pools`);
+                if (successCount > 0) {
+                    console.log(`🔄 Pool data refreshed for ${successCount}/${supportedTokens.length} pools`);
+                }
 
             } catch (error) {
-                console.error('Failed to refresh pool data:', error);
+                // Silent skip - errors are expected during initialization
             }
         }
 
@@ -438,17 +445,27 @@
         async getSupportedTokens() {
             try {
                 if (this.contractManager && this.contractManager.stakingContract) {
+                    // Check if method exists before calling
+                    if (typeof this.contractManager.stakingContract.getSupportedTokens === 'function') {
                     const tokens = await this.contractManager.stakingContract.getSupportedTokens();
                     // Convert addresses to pair names
                     return this.convertAddressesToPairNames(tokens);
+                    } else {
+                        console.log('ℹ️ getSupportedTokens method not available, using configured pairs');
+                    }
                 }
 
                 // Fallback to configured pairs
+                if (window.CONFIG && window.CONFIG.CONTRACTS && window.CONFIG.CONTRACTS.LP_TOKENS) {
                 return Object.keys(window.CONFIG.CONTRACTS.LP_TOKENS);
+                }
+                
+                return ['LPLIBETH', 'LPLIBUSDC', 'LPLIBUSDT']; // Default fallback pairs
 
             } catch (error) {
-                console.error('Failed to get supported tokens:', error);
-                return ['LIB-USDT', 'LIB-WETH', 'LIB-MATIC']; // Fallback pairs
+                // Silent fallback - no need to spam console
+                console.log('ℹ️ Using fallback supported tokens');
+                return ['LPLIBETH', 'LPLIBUSDC', 'LPLIBUSDT']; // Fallback pairs
             }
         }
 

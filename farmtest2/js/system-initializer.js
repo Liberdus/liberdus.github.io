@@ -18,43 +18,43 @@
             // Script loading order with dependencies
             this.scriptOrder = [
                 // Core utilities first
-                { path: '/farmtest2/js/utils/constants.js', name: 'Constants', critical: true },
-                { path: '/farmtest2/js/utils/helpers.js', name: 'Helpers', critical: true },
+                { path: 'js/utils/constants.js', name: 'Constants', critical: true },
+                { path: 'js/utils/helpers.js', name: 'Helpers', critical: true },
                 
                 // Base classes
-                { path: '/farmtest2/js/core/base-component.js', name: 'BaseComponent', critical: true },
+                { path: 'js/core/base-component.js', name: 'BaseComponent', critical: true },
                 
                 // Core systems (order matters!)
-                { path: '/farmtest2/js/core/error-handler.js', name: 'ErrorHandler', critical: true, instance: 'errorHandler' },
-                { path: '/farmtest2/js/core/notification-manager.js', name: 'NotificationManager', critical: true, instance: 'notificationManager' },
-                { path: '/farmtest2/js/core/theme-manager.js', name: 'ThemeManager', critical: false, instance: 'themeManager' },
-                { path: '/farmtest2/js/core/state-manager.js', name: 'StateManager', critical: true, instance: 'stateManager' },
-                { path: '/farmtest2/js/contracts/contract-manager.js', name: 'ContractManager', critical: true, instance: 'contractManager' },
-                { path: '/farmtest2/js/core/data-fetcher.js', name: 'DataFetcher', critical: false, instance: 'dataFetcher' },
-                { path: '/farmtest2/js/core/transaction-tracker.js', name: 'TransactionTracker', critical: false, instance: 'transactionTracker' },
-                { path: '/farmtest2/js/core/event-manager.js', name: 'EventManager', critical: false, instance: 'eventManager' },
+                { path: 'js/core/error-handler.js', name: 'ErrorHandler', critical: true, instance: 'errorHandler' },
+                { path: 'js/core/notification-manager.js', name: 'NotificationManager', critical: true, instance: 'notificationManager' },
+                { path: 'js/core/theme-manager.js', name: 'ThemeManager', critical: false, instance: 'themeManager' },
+                { path: 'js/core/state-manager.js', name: 'StateManager', critical: true, instance: 'stateManager' },
+                { path: 'js/contracts/contract-manager.js', name: 'ContractManager', critical: true, instance: 'contractManager' },
+                { path: 'js/core/data-fetcher.js', name: 'DataFetcher', critical: false, instance: 'dataFetcher' },
+                { path: 'js/core/transaction-tracker.js', name: 'TransactionTracker', critical: false, instance: 'transactionTracker' },
+                { path: 'js/core/event-manager.js', name: 'EventManager', critical: false, instance: 'eventManager' },
                 
                 // Wallet and Network Integration
-                { path: '/farmtest2/js/wallet/network-manager.js', name: 'NetworkManager', critical: false, instance: 'networkManager' },
-                { path: '/farmtest2/js/wallet/wallet-manager.js', name: 'WalletManager', critical: false, instance: 'walletManager' },
+                { path: 'js/wallet/network-manager.js', name: 'NetworkManager', critical: false, instance: 'networkManager' },
+                { path: 'js/wallet/wallet-manager.js', name: 'WalletManager', critical: false, instance: 'walletManager' },
 
                 // Component systems
-                { path: '/farmtest2/js/core/component-registry.js', name: 'ComponentRegistry', critical: false, instance: 'componentRegistry' },
-                { path: '/farmtest2/js/core/event-delegation.js', name: 'EventDelegation', critical: false, instance: 'eventDelegation' },
-                { path: '/farmtest2/js/core/router.js', name: 'Router', critical: true, instance: 'router' },
+                { path: 'js/core/component-registry.js', name: 'ComponentRegistry', critical: false, instance: 'componentRegistry' },
+                { path: 'js/core/event-delegation.js', name: 'EventDelegation', critical: false, instance: 'eventDelegation' },
+                { path: 'js/core/router.js', name: 'Router', critical: true, instance: 'router' },
                 
                 // UI Components
-                { path: '/farmtest2/js/components/staking-modal.js', name: 'StakingModal', critical: false, instance: 'stakingModal' },
+                { path: 'js/components/staking-modal.js', name: 'StakingModal', critical: false, instance: 'stakingModal' },
                 
                 // Page components
-                { path: '/farmtest2/js/pages/home.js', name: 'HomePage', critical: true },
-                { path: '/farmtest2/js/pages/admin.js', name: 'AdminPage', critical: false },
+                { path: 'js/pages/home.js', name: 'HomePage', critical: true },
+                { path: 'js/pages/admin.js', name: 'AdminPage', critical: false },
 
                 // Main application
-                { path: '/farmtest2/js/core/app.js', name: 'App', critical: true, instance: 'app' },
+                { path: 'js/core/app.js', name: 'App', critical: true, instance: 'app' },
 
                 // System manager last
-                { path: '/farmtest2/js/core/system-manager.js', name: 'SystemManager', critical: true, instance: 'systemManager' }
+                { path: 'js/core/system-manager.js', name: 'SystemManager', critical: true, instance: 'systemManager' }
             ];
             
             this.log('SystemInitializer created - ready for comprehensive initialization');

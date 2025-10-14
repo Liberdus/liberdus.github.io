@@ -25,6 +25,8 @@ DAY7-HOMEPAGE-DASHBOARD-COMPLETE.md
 
 # Test files
 test-admin.html
+test-cache.html
+test-subdirectory-deployment.html
 *-test.html
 debug*.html
 temp*.html
@@ -34,6 +36,8 @@ quick-contract-test.html
 fixed-contract-test.html
 debug-dashboard.html
 rpc-test.html
+index-clean.html
+setup-subdirectory-test.ps1
 
 # Build and distribution files
 dist/
@@ -46,6 +50,8 @@ build/
 .tmp/
 tmp/
 temp/
+test-deployment/
+test-server/
 
 # OS generated files
 *.tmp
@@ -73,6 +79,11 @@ cors-server.js
 ADMIN_PANEL_DOCUMENTATION.md
 DEVELOPMENT_MODE_GUIDE.md
 milestones.md
+CACHING_*.md
+SUBDIRECTORY_*.md
+CLEANUP_*.md
+*_PLAN.md
+*_RESULTS.md
 
 # Development configuration backups
 *-config-backup.js

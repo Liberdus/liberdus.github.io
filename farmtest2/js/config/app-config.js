@@ -107,9 +107,9 @@ window.CONFIG = {
 
     // Development Configuration
     DEV: {
-        DEBUG: true,
-        CONSOLE_LOGS: true,
-        PERFORMANCE_MONITORING: true
+        DEBUG: false,
+        CONSOLE_LOGS: false,
+        PERFORMANCE_MONITORING: false
     },
 
     // Feature Flags

@@ -40,12 +40,12 @@ class SystemInitializerNew {
 
     async loadCoreComponents() {
         const components = [
-            '/farmtest2/js/core/theme-manager-new.js',
-            '/farmtest2/js/core/notification-manager-new.js',
-            '/farmtest2/js/core/error-handler.js',
-            '/farmtest2/js/core/data-fetcher.js',
-            '/farmtest2/js/wallet/wallet-manager.js',
-            '/farmtest2/js/contracts/contract-manager.js'
+            'js/core/theme-manager-new.js',
+            'js/core/notification-manager-new.js',
+            'js/core/error-handler.js',
+            'js/core/data-fetcher.js',
+            'js/wallet/wallet-manager.js',
+            'js/contracts/contract-manager.js'
         ];
 
         for (const component of components) {
@@ -55,11 +55,11 @@ class SystemInitializerNew {
 
     async loadUIComponents() {
         const components = [
-            '/farmtest2/js/components/home-page.js',
-            '/farmtest2/js/components/staking-modal-new.js',
-            '/farmtest2/js/components/transaction-status.js',
-            '/farmtest2/js/components/apr-display.js',
-            '/farmtest2/js/components/pending-rewards-display.js'
+            'js/components/home-page.js',
+            'js/components/staking-modal-new.js',
+            'js/components/transaction-status.js',
+            'js/components/apr-display.js',
+            'js/components/pending-rewards-display.js'
         ];
 
         for (const component of components) {

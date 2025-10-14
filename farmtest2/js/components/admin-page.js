@@ -18,8 +18,7 @@ class AdminPage {
         this.ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000'; // DEFAULT_ADMIN_ROLE
 
         // Development mode from centralized config
-        this.DEVELOPMENT_MODE = window.DEV_CONFIG?.ADMIN_DEVELOPMENT_MODE ?? false;
-        console.log('🔧 AdminPage DEVELOPMENT_MODE:', this.DEVELOPMENT_MODE, 'DEV_CONFIG:', window.DEV_CONFIG);
+        this.DEVELOPMENT_MODE = window.DEV_CONFIG?.ADMIN_DEVELOPMENT_MODE ?? true;
 
         // Professional Mock Data System
         this.mockProposals = new Map();
@@ -970,8 +969,11 @@ class AdminPage {
             // Add Another Pair button in Update Weights modal
             if (e.target.id === 'add-weight-pair') {
                 e.preventDefault();
-                console.log('🔘 Add Another Pair button clicked');
-                this.addAnotherPairRow();
+                console.log('🔘 Add Another Pair button clicked - opening Add Pair modal');
+                this.closeModal(); // Close current modal
+                setTimeout(() => {
+                    this.showAddPairModal(); // Open Add Pair modal
+                }, 100);
                 return;
             }
 
@@ -1478,7 +1480,7 @@ class AdminPage {
                 <header class="admin-header">
                     <div class="admin-header-content">
                         <div class="admin-header-left">
-                            <button class="btn btn-secondary back-btn" onclick="window.location.href='index.html'" title="Back to Staking Page">
+                            <button class="btn btn-secondary back-btn" onclick="navigateToHome()" title="Back to Staking Page">
                                 ← Back to Staking
                             </button>
                             <h1 class="admin-title">Admin Panel</h1>
@@ -2045,47 +2047,52 @@ class AdminPage {
     }
 
     /**
-     * Render action buttons for proposal with own-proposal check
+     * Render action buttons for proposal with already-voted check
+     * Matches React implementation: Disables voting for users who have already approved
      */
     renderProposalActionButtons(proposal, canExecute = false) {
         if (proposal.isOptimistic) {
             return '<span class="text-muted">Processing...</span>';
         }
 
-        // Check if current user is the proposal creator
+        // Check if current user has already approved this proposal
         const userAddress = this.userAddress?.toLowerCase();
-        const proposerAddress = proposal.proposer?.toLowerCase();
-        const isOwnProposal = userAddress && proposerAddress && userAddress === proposerAddress;
+        const approvedBy = (proposal.approvedBy || []).map(addr => addr.toLowerCase());
+        const hasAlreadyApproved = userAddress && approvedBy.includes(userAddress);
+
+        // The first approver is the proposer (auto-approved when created)
+        const proposerAddress = approvedBy.length > 0 ? approvedBy[0] : null;
+        const isProposer = userAddress && proposerAddress && userAddress === proposerAddress;
 
         // Debug logging
-        console.log(`🔍 Proposal #${proposal.id} ownership check:`, {
+        console.log(`🔍 Proposal #${proposal.id} voting check:`, {
             userAddress,
             proposerAddress,
-            isOwnProposal,
+            isProposer,
+            hasAlreadyApproved,
+            approvedBy,
             proposalId: proposal.id
         });
 
-        // Disable buttons if user is the proposer
-        const approveDisabled = isOwnProposal;
-        const rejectDisabled = isOwnProposal;
-        const disabledClass = isOwnProposal ? 'disabled' : '';
-        const disabledAttr = isOwnProposal ? 'disabled' : '';
-        const ownProposalTitle = isOwnProposal ? 'Cannot vote on your own proposal' : '';
+        // Disable approve button if user has already approved
+        const approveDisabled = hasAlreadyApproved;
+        const approveDisabledClass = hasAlreadyApproved ? 'disabled' : '';
+        const approveDisabledAttr = hasAlreadyApproved ? 'disabled' : '';
+        const approveTitle = hasAlreadyApproved ? 'You have already approved this proposal' : 'Approve Proposal';
 
         return `
             <button
-                class="btn btn-sm btn-success ${disabledClass}"
+                class="btn btn-sm btn-success ${approveDisabledClass}"
                 onclick="adminPage.approveAction('${proposal.id}')"
-                title="${isOwnProposal ? ownProposalTitle : 'Approve Proposal'}"
-                ${disabledAttr}
+                title="${approveTitle}"
+                ${approveDisabledAttr}
             >
                 Approve
             </button>
             <button
-                class="btn btn-sm btn-danger ${disabledClass}"
+                class="btn btn-sm btn-danger"
                 onclick="adminPage.rejectAction('${proposal.id}')"
-                title="${isOwnProposal ? ownProposalTitle : 'Reject Proposal'}"
-                ${disabledAttr}
+                title="Reject Proposal"
             >
                 Reject
             </button>
@@ -2098,9 +2105,9 @@ class AdminPage {
                     Execute
                 </button>
             ` : ''}
-            ${isOwnProposal ? `
+            ${hasAlreadyApproved ? `
                 <div class="own-proposal-notice">
-                    <small>ℹ️ Your proposal</small>
+                    <small>✅ You ${isProposer ? 'created and ' : ''}approved this</small>
                 </div>
             ` : ''}
         `;
@@ -5500,56 +5507,63 @@ class AdminPage {
 
         modalContainer.innerHTML = `
             <div class="modal-overlay">
-                <div class="modal-content" onclick="event.stopPropagation()">
-                    <div class="modal-header">
-                        <h3>Update Pair Weights</h3>
-                        <button class="modal-close" type="button">×</button>
+                <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 700px;">
+                    <div class="modal-header" style="padding: 24px; border-bottom: 1px solid var(--divider);">
+                        <h3 style="margin: 0; font-size: 24px; font-weight: 600; display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 28px;">⚖️</span>
+                            Update Pair Weights
+                        </h3>
+                        <button class="modal-close" type="button" style="font-size: 28px; color: var(--text-secondary);">×</button>
                     </div>
 
-                    <div class="modal-body">
+                    <div class="modal-body" style="padding: 24px; max-height: 600px; overflow-y: auto;">
                         <div id="validation-messages" class="validation-messages"></div>
                         <form id="update-weights-form" class="admin-form">
                             <div class="form-group">
-                                <label>Pair Weight Updates</label>
-                                <div id="weights-list">
-                                    <div class="modal-loading-container">
-                                        <div class="modal-loading-spinner"></div>
+                                <label style="display: block; margin-bottom: 12px; font-weight: 600; font-size: 16px;">Pair Weight Updates</label>
+                                <div id="weights-list" style="margin-bottom: 16px;">
+                                    <div class="modal-loading-container" style="padding: 40px; text-align: center;">
+                                        <div class="modal-loading-spinner" style="width: 40px; height: 40px; border: 4px solid rgba(33, 150, 243, 0.3); border-top-color: var(--primary-main); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto;"></div>
+                                        <p style="margin-top: 16px; color: var(--text-secondary);">Loading pairs...</p>
                                     </div>
                                 </div>
-                                <button type="button" class="btn btn-outline btn-sm" id="add-weight-pair" style="margin-top: 10px;">
+                                <button type="button" class="btn btn-outline btn-sm" id="add-weight-pair" style="margin-top: 10px; padding: 8px 16px; border: 1px dashed var(--primary-main); background: transparent; color: var(--primary-main);">
                                     + Add Another Pair
                                 </button>
                             </div>
 
-                            <div class="form-group">
-                                <label for="weights-description">Description *</label>
-                                <textarea id="weights-description" class="form-input" rows="3" required
-                                          placeholder="Explain the reason for these weight changes..." maxlength="500"></textarea>
-                                <small class="form-help">Describe why these weight changes are needed</small>
+                            <div class="form-group" style="margin-top: 24px;">
+                                <label for="weights-description" style="display: block; margin-bottom: 8px; font-weight: 500;">Description *</label>
+                                <textarea id="weights-description" class="form-input" rows="4" required
+                                          placeholder="Explain the reason for these weight changes..." maxlength="500"
+                                          style="width: 100%; padding: 12px; border: 1px solid var(--divider); border-radius: 6px; background: var(--background-paper); color: var(--text-primary); font-family: inherit; resize: vertical;"></textarea>
+                                <small class="form-help" style="display: block; margin-top: 6px; color: var(--text-secondary); font-size: 13px;">Describe why these weight changes are needed</small>
                                 <div class="field-error" id="weights-description-error"></div>
                             </div>
 
-                            <div class="proposal-info">
-                                <div class="info-item">
-                                    <span class="info-label">Required Approvals:</span>
-                                    <span class="info-value">3 of 4 signers</span>
+                            <div class="proposal-info" style="background: rgba(33, 150, 243, 0.05); border: 1px solid rgba(33, 150, 243, 0.2); border-radius: 8px; padding: 16px; margin-top: 24px;">
+                                <div class="info-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0;">
+                                    <span class="info-label" style="color: var(--text-secondary); font-size: 14px;">Required Approvals:</span>
+                                    <span class="info-value" style="color: var(--primary-main); font-weight: 600; font-size: 14px;">3 of 4 signers</span>
                                 </div>
-                                <div class="info-item">
-                                    <span class="info-label">Proposal Expiry:</span>
-                                    <span class="info-value">7 days from creation</span>
+                                <div class="info-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-top: 1px solid var(--divider);">
+                                    <span class="info-label" style="color: var(--text-secondary); font-size: 14px;">Proposal Expiry:</span>
+                                    <span class="info-value" style="color: var(--text-primary); font-weight: 600; font-size: 14px;">7 days from creation</span>
                                 </div>
                             </div>
                         </form>
                     </div>
 
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary modal-cancel">
+                    <div class="modal-footer" style="display: flex; gap: 12px; justify-content: flex-end; padding: 20px 24px; border-top: 1px solid var(--divider);">
+                        <button type="button" class="btn btn-secondary modal-cancel" style="padding: 10px 24px; min-width: 100px;">
                             Cancel
                         </button>
-                        <button type="submit" form="update-weights-form" class="btn btn-primary" id="update-weights-btn">
+                        <button type="submit" form="update-weights-form" class="btn btn-primary" id="update-weights-btn"
+                                style="padding: 10px 24px; min-width: 180px; display: flex; align-items: center; justify-content: center; gap: 8px;">
                             <span class="btn-text">Create Proposal</span>
                             <span class="btn-loading" style="display: none;">
-                                <span class="spinner"></span> Creating...
+                                <span class="spinner" style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block;"></span>
+                                Creating...
                             </span>
                         </button>
                     </div>
@@ -5607,46 +5621,46 @@ class AdminPage {
                                 <div class="field-error" id="remove-description-error"></div>
                             </div>
 
-                            <div class="warning-box">
-                                <div class="warning-icon">⚠️</div>
-                                <div class="warning-text">
-                                    <strong>Warning:</strong> Removing a pair will stop all reward distributions for that pair.
-                                    Existing stakers will need to unstake before removal can be completed.
+                            <div class="warning-box" style="background: rgba(255, 152, 0, 0.1); border: 1px solid rgba(255, 152, 0, 0.3); border-radius: 8px; padding: 16px; display: flex; gap: 12px; margin: 20px 0;">
+                                <div class="warning-icon" style="font-size: 24px; flex-shrink: 0;">⚠️</div>
+                                <div class="warning-text" style="flex: 1; color: var(--text-primary);">
+                                    <strong style="display: block; margin-bottom: 6px;">Warning:</strong>
+                                    <p style="margin: 0; font-size: 14px; line-height: 1.5;">Removing a pair will stop all reward distributions for that pair. Existing stakers will need to unstake before removal can be completed.</p>
                                 </div>
                             </div>
 
-                            <div class="form-group">
-                                <label class="checkbox-container">
-                                    <input type="checkbox" id="confirm-removal" required>
-                                    <span class="checkmark"></span>
-                                    I understand the consequences of removing this pair
+                            <div class="form-group" style="margin: 20px 0;">
+                                <label class="checkbox-container" style="display: flex; align-items: flex-start; cursor: pointer; user-select: none; padding: 12px; background: rgba(33, 150, 243, 0.05); border-radius: 8px; border: 1px solid rgba(33, 150, 243, 0.2); transition: all 0.2s;">
+                                    <input type="checkbox" id="confirm-removal" required style="width: 20px; height: 20px; margin-right: 12px; margin-top: 2px; cursor: pointer; accent-color: var(--primary-main);">
+                                    <span style="flex: 1; font-size: 14px; line-height: 1.5; font-weight: 500;">I understand the consequences of removing this pair</span>
                                 </label>
                                 <div class="field-error" id="confirm-removal-error"></div>
                             </div>
 
-                            <div class="proposal-info">
-                                <div class="info-item">
-                                    <span class="info-label">Required Approvals:</span>
-                                    <span class="info-value">3 of 4 signers</span>
+                            <div class="proposal-info" style="background: rgba(33, 150, 243, 0.05); border: 1px solid rgba(33, 150, 243, 0.2); border-radius: 8px; padding: 16px; margin-top: 20px;">
+                                <div class="info-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0;">
+                                    <span class="info-label" style="color: var(--text-secondary); font-size: 14px;">Required Approvals:</span>
+                                    <span class="info-value" style="color: var(--primary-main); font-weight: 600; font-size: 14px;">3 of 4 signers</span>
                                 </div>
-                                <div class="info-item">
-                                    <span class="info-label">Proposal Expiry:</span>
-                                    <span class="info-value">7 days from creation</span>
+                                <div class="info-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-top: 1px solid var(--divider);">
+                                    <span class="info-label" style="color: var(--text-secondary); font-size: 14px;">Proposal Expiry:</span>
+                                    <span class="info-value" style="color: var(--text-primary); font-weight: 600; font-size: 14px;">7 days from creation</span>
                                 </div>
                             </div>
                         </form>
                     </div>
 
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary modal-cancel">
+                    <div class="modal-footer" style="display: flex; gap: 12px; justify-content: flex-end; padding: 20px 24px; border-top: 1px solid var(--divider);">
+                        <button type="button" class="btn btn-secondary modal-cancel" style="padding: 10px 24px; min-width: 100px;">
                             Cancel
                         </button>
                         <button type="submit" form="remove-pair-form" class="btn btn-danger" id="remove-pair-btn"
-                                data-tooltip="Please select a pair to remove">
-                            <span class="btn-icon">🗑️</span>
-                            <span class="btn-text">Create Removal Proposal</span>
+                                title="Please select a pair and confirm to enable"
+                                style="padding: 10px 24px; min-width: 220px; background: #dc3545; color: white; border: none; font-weight: 600; border-radius: 6px; transition: background 0.2s;">
+                            <span class="btn-text">Submit Removal Proposal</span>
                             <span class="btn-loading" style="display: none;">
-                                <span class="spinner"></span> Creating...
+                                <span class="spinner" style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; margin-right: 8px;"></span>
+                                Creating...
                             </span>
                         </button>
                     </div>
@@ -5686,17 +5700,23 @@ class AdminPage {
 
         const updateButtonState = () => {
             const hasSelection = select.value && select.value !== '';
-            const isConfirmed = checkbox ? checkbox.checked : true;
+            const isConfirmed = checkbox ? checkbox.checked : false;
             const isEnabled = hasSelection && isConfirmed;
 
             button.disabled = !isEnabled;
 
             if (!hasSelection) {
-                button.setAttribute('data-tooltip', 'Please select a pair to remove');
+                button.setAttribute('title', 'Please select a pair to remove');
+                button.style.opacity = '0.6';
+                button.style.cursor = 'not-allowed';
             } else if (!isConfirmed) {
-                button.setAttribute('data-tooltip', 'Please confirm you understand the consequences');
+                button.setAttribute('title', 'Please check the confirmation box');
+                button.style.opacity = '0.6';
+                button.style.cursor = 'not-allowed';
             } else {
-                button.removeAttribute('data-tooltip');
+                button.setAttribute('title', 'Click to create removal proposal');
+                button.style.opacity = '1';
+                button.style.cursor = 'pointer';
             }
         };
 
@@ -6563,7 +6583,8 @@ class AdminPage {
         if (!container) return;
 
         try {
-            container.innerHTML = '<div class="modal-loading-container"><div class="modal-loading-spinner"></div></div>';
+            // Show loading spinner
+            container.innerHTML = '<div class="modal-loading-container" style="padding: 20px; text-align: center;"><div class="modal-loading-spinner"></div><p style="margin-top: 10px; color: var(--text-secondary);">Loading pairs...</p></div>';
 
             // Get pairs from contract
             const contractManager = await this.ensureContractReady();
@@ -6573,27 +6594,36 @@ class AdminPage {
                 let html = '';
                 pairs.forEach((pair, index) => {
                     html += `
-                        <div class="weight-pair-item" data-pair="${pair.address}">
-                            <div class="pair-info">
-                                <strong>${pair.name}</strong>
-                                <small>${pair.address}</small>
+                        <div class="weight-pair-item" data-pair="${pair.address}" style="margin-bottom: 16px; padding: 16px; border: 1px solid var(--divider); border-radius: 8px; background: var(--background-paper); overflow: hidden;">
+                            <div style="display: flex; flex-direction: column; gap: 12px;">
+                                <div class="pair-info" style="overflow: hidden;">
+                                    <div style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">${pair.name}</div>
+                                    <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace; word-break: break-all; line-height: 1.4;">${pair.address}</div>
                             </div>
-                            <div class="weight-input-group">
-                                <label>Current: ${this.formatWeight(pair.weight)}</label>
+                                <div style="display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;">
+                                    <div style="display: flex; flex-direction: column; min-width: 100px;">
+                                        <span style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">Current</span>
+                                        <span style="font-size: 20px; font-weight: 600; color: var(--primary-main);">${this.formatWeight(pair.weight)}</span>
+                                    </div>
+                                    <div style="display: flex; flex-direction: column; flex: 1; min-width: 180px;">
+                                        <label for="weight-${index}" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">New Weight</label>
                                 <input type="number"
                                        class="form-input weight-input"
                                        id="weight-${index}"
-                                       placeholder="New weight"
+                                               placeholder="Enter new weight"
                                        min="1" max="10000"
+                                               style="padding: 10px 12px; border: 1px solid var(--divider); border-radius: 6px; background: var(--background-default); color: var(--text-primary); font-size: 16px; font-weight: 500; width: 100%; box-sizing: border-box;"
                                        data-pair="${pair.address}"
                                        data-current="${this.formatWeight(pair.weight)}">
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     `;
                 });
                 container.innerHTML = html;
             } else {
-                container.innerHTML = '<p class="no-data">No pairs available for weight updates</p>';
+                container.innerHTML = '<p class="no-data" style="text-align: center; padding: 20px; color: var(--text-secondary);">No pairs available for weight updates</p>';
             }
         } catch (error) {
             console.error('Failed to load pairs for weight update:', error);
@@ -7735,7 +7765,37 @@ class AdminPage {
             return "0.000";
         }
     }
+
+    /**
+     * Navigate to home page with optimized loading
+     */
+    navigateToHome() {
+        console.log('🏠 Navigating to home page...');
+        
+        // Show loading indicator
+        if (window.notificationManager) {
+            window.notificationManager.info('Navigating', 'Loading homepage...');
+        }
+        
+        // Use history API for faster navigation if possible
+        if (window.history && window.history.length > 1) {
+            window.history.back();
+        } else {
+            // Fallback to direct navigation
+            window.location.href = 'index.html';
+        }
+    }
 }
 
 // Export for global access
 window.AdminPage = AdminPage;
+
+// Make navigateToHome globally available
+window.navigateToHome = function() {
+    if (window.adminPage && window.adminPage.navigateToHome) {
+        window.adminPage.navigateToHome();
+    } else {
+        // Fallback navigation
+        window.location.href = 'index.html';
+    }
+};

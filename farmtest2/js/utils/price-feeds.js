@@ -40,16 +40,16 @@
                 ],
                 
                 // Cache settings
-                CACHE_DURATION: 300000, // 5 minutes
-                PRICE_UPDATE_INTERVAL: 60000, // 1 minute
+                CACHE_DURATION: 600000, // 10 minutes (increased to reduce API calls)
+                PRICE_UPDATE_INTERVAL: 300000, // 5 minutes (increased from 1 minute)
                 
                 // Retry settings
-                MAX_RETRIES: 3,
-                RETRY_DELAY: 2000, // 2 seconds
+                MAX_RETRIES: 1, // Reduced from 3 to avoid spam
+                RETRY_DELAY: 3000, // 3 seconds
                 
                 // Rate limiting
-                RATE_LIMIT_DELAY: 1000, // 1 second between requests
-                MAX_CONCURRENT_REQUESTS: 5
+                RATE_LIMIT_DELAY: 2000, // 2 seconds between requests
+                MAX_CONCURRENT_REQUESTS: 2 // Reduced from 5 to avoid rate limiting
             };
             
             // Price cache
@@ -170,19 +170,21 @@
          * Preload common token prices
          */
         async preloadCommonPrices() {
+            // Use fallback prices immediately to avoid API spam
             const commonTokens = ['USDT', 'WETH', 'MATIC', 'USDC'];
             
-            console.log('📥 Preloading common token prices...');
+            console.log('📥 Initializing common token prices with fallback values...');
             
             for (const token of commonTokens) {
                 try {
-                    await this.getTokenPrice(token);
+                    // Use fallback directly instead of calling API
+                    await this.getFallbackTokenPrice(token);
                 } catch (error) {
-                    console.warn(`Failed to preload price for ${token}:`, error);
+                    // Silently fail - fallback will be used
                 }
             }
             
-            console.log('✅ Common token prices preloaded');
+            console.log('✅ Common token prices initialized');
         }
 
         /**
@@ -254,8 +256,6 @@
                     return this.priceCache.get(cacheKey).price;
                 }
 
-                console.log(`💰 Fetching price for ${tokenSymbol}...`);
-
                 // Rate limiting
                 await this.enforceRateLimit();
 
@@ -275,13 +275,10 @@
                     source: 'coingecko'
                 });
 
-                console.log(`✅ Price fetched for ${tokenSymbol}: $${price}`);
                 return price;
 
             } catch (error) {
-                console.error(`❌ Failed to get price for ${tokenSymbol}:`, error);
-
-                // Try fallback methods
+                // Silently use fallback - don't spam console
                 return await this.getFallbackTokenPrice(tokenSymbol);
             }
         }
@@ -432,7 +429,7 @@
                 source: 'fallback'
             });
 
-            console.log(`⚠️ Using fallback price for ${tokenSymbol}: $${price}`);
+            // Only log once per token (check if it's already in cache)
             return price;
         }
 
@@ -451,7 +448,10 @@
 
             for (let attempt = 1; attempt <= this.config.MAX_RETRIES; attempt++) {
                 try {
-                    console.log(`📡 Making request to: ${url} (attempt ${attempt})`);
+                    // Only log on first attempt to reduce console spam
+                    if (attempt === 1) {
+                        console.log(`📡 Making request to: ${url}`);
+                    }
 
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), this.config.COINGECKO_TIMEOUT);
@@ -463,16 +463,27 @@
 
                     clearTimeout(timeoutId);
 
+                    // Handle rate limiting silently
+                    if (response.status === 429) {
+                        if (attempt === 1) {
+                            console.warn(`⚠️ Rate limited by API, using cached/fallback data`);
+                        }
+                        throw new Error('RATE_LIMITED');
+                    }
+
                     if (!response.ok) {
                         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
 
                     const data = await response.json();
-                    console.log(`✅ Request successful: ${url}`);
                     return data;
 
                 } catch (error) {
-                    console.warn(`⚠️ Request failed (attempt ${attempt}): ${error.message}`);
+                    // Suppress console spam for rate limit errors
+                    if (error.message === 'RATE_LIMITED' && attempt === this.config.MAX_RETRIES) {
+                        // Silent fail for rate limits - will use fallback
+                        throw error;
+                    }
 
                     if (attempt === this.config.MAX_RETRIES) {
                         throw error;
