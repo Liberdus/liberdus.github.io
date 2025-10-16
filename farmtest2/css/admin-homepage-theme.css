@@ -912,7 +912,6 @@ select option:disabled,
 .btn-primary,
 #remove-pair-btn {
     position: relative !important;
-    overflow: hidden !important;
     transition: all 0.2s ease !important;
 }
 
@@ -976,8 +975,6 @@ select option:disabled,
     padding: 10px 20px !important;
     font-size: 14px !important;
     white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
     min-width: fit-content !important;
 }
 
@@ -989,8 +986,6 @@ select option:disabled,
 
 .btn-text {
     white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
 }
 
 .btn-danger {
@@ -1078,16 +1073,12 @@ select option:disabled,
 .modal-footer .btn {
     flex: 0 1 auto !important;
     min-width: 120px !important;
-    max-width: 200px !important;
     padding: 10px 16px !important;
     font-size: 14px !important;
 }
 
 .modal-footer .btn-text {
     display: inline-block !important;
-    max-width: 150px !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
     white-space: nowrap !important;
 }
 
@@ -1130,19 +1121,15 @@ button.btn,
 .btn-danger,
 .btn-warning {
     max-width: 100% !important;
-    overflow: hidden !important;
 }
 
-button[type="submit"] span,
-button.btn span,
-.btn-primary span,
-.btn-secondary span,
-.btn-danger span,
-.btn-warning span {
+button[type="submit"] span:not(.btn-loading),
+button.btn span:not(.btn-loading),
+.btn-primary span:not(.btn-loading),
+.btn-secondary span:not(.btn-loading),
+.btn-danger span:not(.btn-loading),
+.btn-warning span:not(.btn-loading) {
     display: inline-block !important;
-    max-width: 100% !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
     white-space: nowrap !important;
 }
 
@@ -1158,7 +1145,6 @@ button.btn span,
     font-size: 13px !important;
     padding: 10px 16px !important;
     min-width: 140px !important;
-    max-width: 180px !important;
 }
 
 #remove-pair-btn .btn-text,
@@ -1169,7 +1155,6 @@ button.btn span,
 #submit-removal-btn .btn-text,
 #submit-add-pair-btn .btn-text,
 #submit-change-signer-btn .btn-text {
-    max-width: 130px !important;
     font-size: 13px !important;
 }
 

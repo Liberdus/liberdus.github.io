@@ -3576,7 +3576,7 @@ class AdminPage {
         const actionTypes = {
             'ADD_PAIR': '➕ Add Pair',
             'REMOVE_PAIR': '➖ Remove Pair',
-            'UPDATE_WEIGHTS': '⚖️ Update Weights',
+            'UPDATE_PAIR_WEIGHTS': '⚖️ Update Weights',
             'CHANGE_SIGNER': '🔑 Change Signer',
             'UPDATE_HOURLY_RATE': '💰 Update Rate',
             'SET_HOURLY_REWARD_RATE': '💰 Set Reward Rate',
@@ -3628,7 +3628,7 @@ class AdminPage {
                     }
                     return 'Remove LP trading pair';
 
-                case 'UPDATE_WEIGHTS':
+                case 'UPDATE_PAIR_WEIGHTS':
                     if (proposal.pairs && proposal.weights && proposal.pairs.length > 0) {
                         const pairCount = proposal.pairs.length;
                         if (pairCount === 1) {
@@ -4961,6 +4961,7 @@ class AdminPage {
             case 'update-weights':
             case 'update-pair-weight':
             case 'update_weights':
+            case 'update_pair_weights':
                 if (proposal.pairs && proposal.weights && proposal.pairs.length > 0) {
                     const pairCards = proposal.pairs.map((pairAddress, index) => {
                         const pairName = this.getPairNameByAddress(pairAddress);

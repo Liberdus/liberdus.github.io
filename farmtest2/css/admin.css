@@ -1843,7 +1843,8 @@
 .modal-body textarea:focus {
     outline: none;
     border-color: #00d4ff !important;
-    background: #000000 !important;
+    background: var(--background-paper) !important;
+    color: var(--text-primary) !important;
     box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.12);
 }
 

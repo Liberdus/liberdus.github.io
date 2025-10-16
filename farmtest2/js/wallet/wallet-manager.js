@@ -607,15 +607,36 @@ class WalletManager {
     /**
      * Handle accounts changed event
      */
-    handleAccountsChanged(accounts) {
+    async handleAccountsChanged(accounts) {
         this.log('Accounts changed:', accounts);
 
         if (!accounts || accounts.length === 0) {
             // User disconnected
             this.disconnect();
         } else if (accounts[0] !== this.address) {
-            // User switched accounts
+            const wasDisconnected = !this.address;
+            
+            // User switched accounts or reconnected
             this.address = accounts[0];
+            
+            // Re-initialize provider/signer if reconnecting after disconnect
+            if (wasDisconnected && window.ethereum) {
+                this.log('Re-initializing provider and signer after reconnection');
+                try {
+                    this.provider = new ethers.providers.Web3Provider(window.ethereum);
+                    this.signer = this.provider.getSigner();
+                    this.chainId = (await this.provider.getNetwork()).chainId;
+                    
+                    // Detect wallet type: prioritize specific wallet flags, fallback to metamask/injected
+                    this.walletType = window.ethereum.isTrust ? 'trust' : 
+                                     window.ethereum.isCoinbaseWallet ? 'coinbase' :
+                                     window.ethereum.isBraveWallet ? 'brave' :
+                                     window.ethereum.isMetaMask ? 'metamask' : 'injected';
+                } catch (error) {
+                    this.logError('Failed to re-initialize provider/signer:', error);
+                }
+            }
+            
             this.storeConnectionInfo();
             
             this.notifyListeners('accountChanged', {

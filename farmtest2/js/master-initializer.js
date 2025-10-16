@@ -641,27 +641,6 @@ class MasterInitializer {
             }
         });
 
-        // Wallet account change handler
-        if (window.ethereum) {
-            window.ethereum.on('accountsChanged', (accounts) => {
-                if (window.walletManager) {
-                    if (accounts.length === 0) {
-                        window.walletManager.disconnect();
-                    } else {
-                        window.walletManager.account = accounts[0];
-                        window.walletManager.updateUI();
-                    }
-                }
-            });
-
-            window.ethereum.on('chainChanged', (chainId) => {
-                console.log('Chain changed:', chainId);
-                if (window.notificationManager) {
-                    window.notificationManager.info('Network Changed', 'Please refresh the page if needed');
-                }
-            });
-        }
-
         // Set up wallet connection event listeners for contract manager initialization
         this.setupContractManagerIntegration();
     }
@@ -676,9 +655,9 @@ class MasterInitializer {
             this.handleWalletConnection(event.detail);
         });
 
-        document.addEventListener('walletDisconnected', (event) => {
+        document.addEventListener('walletDisconnected', async (event) => {
             console.log('🔌 Wallet disconnected event received');
-            this.handleWalletDisconnection();
+            await this.handleWalletDisconnection();
         });
     }
 
@@ -727,14 +706,22 @@ class MasterInitializer {
     /**
      * Handle wallet disconnection
      */
-    handleWalletDisconnection() {
+    async handleWalletDisconnection() {
         try {
             console.log('🔌 Handling wallet disconnection...');
 
             if (window.contractManager) {
-                // Reset contract manager state
-                window.contractManager.cleanup();
-                console.log('✅ ContractManager cleaned up');
+                // Downgrade to read-only mode: recreate provider and contracts
+                window.contractManager.signer = null;
+                
+                if (window.ethereum) {
+                    // Create fresh provider to clear cached account references
+                    window.contractManager.provider = new ethers.providers.Web3Provider(window.ethereum);
+                    // Reinitialize all contracts with fresh provider
+                    await window.contractManager.initializeContracts();
+                }
+                
+                console.log('✅ ContractManager downgraded to read-only mode');
             }
 
             // Dispatch event for components
