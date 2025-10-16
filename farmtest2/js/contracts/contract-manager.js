@@ -1303,16 +1303,6 @@ class ContractManager {
     // ============ ADMIN CONTRACT FUNCTIONS ============
 
     /**
-     * Check if an address has admin role
-     */
-    async hasAdminRole(address) {
-        return await this.executeWithRetry(async () => {
-            const ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000'; // DEFAULT_ADMIN_ROLE
-            return await this.stakingContract.hasRole(ADMIN_ROLE, address);
-        }, 'hasAdminRole');
-    }
-
-    /**
      * Get action counter for multi-signature proposals with RPC failover
      */
     async getActionCounter() {
@@ -1905,9 +1895,7 @@ class ContractManager {
             if (!userAddress) {
                 throw new Error('No address provided and no signer available');
             }
-
-            // DEFAULT_ADMIN_ROLE is bytes32(0)
-            const ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000';
+            const ADMIN_ROLE = await window.contractManager.stakingContract.ADMIN_ROLE();
             return await this.stakingContract.hasRole(ADMIN_ROLE, userAddress);
         }, 'hasAdminRole');
     }
