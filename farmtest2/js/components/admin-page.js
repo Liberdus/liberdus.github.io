@@ -19,7 +19,7 @@ class AdminPage {
 
         // Development mode from centralized config
         // SECURITY: Default to false (production mode) if DEV_CONFIG is not loaded
-        this.DEVELOPMENT_MODE = window.DEV_CONFIG?.ADMIN_DEVELOPMENT_MODE ?? false;
+        this.DEVELOPMENT_MODE = false;
 
         // Professional Mock Data System
         this.mockProposals = new Map();
