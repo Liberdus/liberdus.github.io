@@ -40,8 +40,13 @@ class AdminPage {
         this.lastKnownProposalCount = 0; // Track last known total proposal count
         this.isSelectiveUpdateEnabled = true; // Enable selective update system
 
-        // Initialize mock system immediately
-        this.initializeMockSystem();
+        // Initialize mock system only in development mode
+        if (this.DEVELOPMENT_MODE) {
+            console.log('🚧 Development mode: Initializing mock system');
+            this.initializeMockSystem();
+        } else {
+            console.log('🚀 Production mode: Skipping mock system');
+        }
 
         // Initialize asynchronously (don't await in constructor)
         this.init().catch(error => {
@@ -320,6 +325,9 @@ class AdminPage {
                 return; // Stop initialization
             }
             console.log('✅ Correct network (Polygon Amoy)');
+            
+            // Setup wallet listeners to handle account changes
+            this.setupWalletListeners();
 
             // Verify admin access
             console.log('🔍 Verifying admin access...');
@@ -666,9 +674,6 @@ class AdminPage {
             // Navigation event listeners
             this.setupNavigationListeners();
 
-            // Wallet connection event listeners
-            this.setupWalletListeners();
-
             // Contract interaction event listeners
             this.setupContractListeners();
 
@@ -829,9 +834,14 @@ class AdminPage {
 
         // Listen for account changes
         if (window.ethereum) {
-            window.ethereum.on('accountsChanged', (accounts) => {
+            window.ethereum.on('accountsChanged', async (accounts) => {
                 console.log('🔄 Accounts changed:', accounts);
-                this.handleAccountsChanged(accounts);
+                try {
+                    await this.handleAccountsChanged(accounts);
+                } catch (error) {
+                    console.error('❌ Error handling account change:', error);
+                    this.showError('Account Switch Error', 'Failed to switch accounts. Please refresh the page.');
+                }
             });
 
             window.ethereum.on('chainChanged', (chainId) => {
@@ -1149,12 +1159,13 @@ class AdminPage {
         this.showConnectWalletPrompt();
     }
 
-    handleAccountsChanged(accounts) {
+    async handleAccountsChanged(accounts) {
         console.log('🔄 Handling accounts changed:', accounts);
 
         if (accounts.length === 0) {
             // No accounts connected
             this.handleWalletDisconnected();
+            this.stopAutoRefresh();
         } else {
             // Account switched
             const newAddress = accounts[0];
@@ -1166,7 +1177,18 @@ class AdminPage {
             }
 
             // Re-verify admin access with new account
-            this.verifyAdminAccess();
+            await this.verifyAdminAccess();
+            
+            // Stop auto-refresh and update UI based on authorization
+            this.stopAutoRefresh();
+            if (this.isAuthorized) {
+                console.log('✅ New account authorized, reloading interface...');
+                await this.loadAdminInterface();
+                this.startAutoRefresh();
+            } else {
+                console.log('❌ New account unauthorized, access denied');
+                this.showUnauthorizedAccess();
+            }
         }
     }
 
@@ -1978,6 +2000,7 @@ class AdminPage {
         proposal.executed = proposal.executed || false;
         proposal.rejected = proposal.rejected || false;
         proposal.id = proposal.id || 'unknown';
+        proposal.approvedBy = proposal.approvedBy || [];
 
         const canExecute = proposal.approvals >= proposal.requiredApprovals && !proposal.executed && !proposal.rejected;
         const statusClass = proposal.executed ? 'executed' : proposal.rejected ? 'rejected' : canExecute ? 'ready' : 'pending';
@@ -3483,6 +3506,7 @@ class AdminPage {
             proposal.executed = proposal.executed || false;
             proposal.rejected = proposal.rejected || false;
             proposal.id = proposal.id || 'unknown';
+            proposal.approvedBy = proposal.approvedBy || [];
 
             const canExecute = proposal.approvals >= proposal.requiredApprovals && !proposal.executed && !proposal.rejected;
             const statusClass = proposal.executed ? 'executed' : proposal.rejected ? 'rejected' : canExecute ? 'ready' : 'pending';
@@ -3532,19 +3556,7 @@ class AdminPage {
                     </td>
                     <td>
                         <div class="action-buttons">
-                            ${!proposal.executed && !proposal.rejected ? `
-                                <button class="btn btn-sm btn-success" onclick="adminPage.approveAction('${proposal.id}')" title="Approve Proposal">
-                                    Approve
-                                </button>
-                                <button class="btn btn-sm btn-danger" onclick="adminPage.rejectAction('${proposal.id}')" title="Reject Proposal">
-                                    Reject
-                                </button>
-                                ${canExecute ? `
-                                    <button class="btn btn-sm btn-primary" onclick="adminPage.executeAction('${proposal.id}')" title="Execute Proposal">
-                                        Execute
-                                    </button>
-                                ` : ''}
-                            ` : ''}
+                            ${!proposal.executed && !proposal.rejected ? this.renderProposalActionButtons(proposal, canExecute) : ''}
                         </div>
                     </td>
                 </tr>

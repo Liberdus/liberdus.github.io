@@ -700,6 +700,7 @@ class ContractManager {
                     "function totalWeight() external view returns (uint256)",
                     "function getActionPairs(uint256 actionId) external view returns (address[])",
                     "function getActionWeights(uint256 actionId) external view returns (uint256[])",
+                    "function getActionApproval(uint256 actionId) external view returns (address[])",
                     "function actions(uint256 actionId) external view returns (uint8 actionType, uint256 newHourlyRewardRate, address pairToAdd, string memory pairNameToAdd, string memory platformToAdd, uint256 weightToAdd, address pairToRemove, address recipient, uint256 withdrawAmount, bool executed, bool expired, uint8 approvals, uint256 proposedTime, bool rejected)",
                     "function stake(address lpToken, uint256 amount) external",
                     "function unstake(address lpToken, uint256 amount) external",
@@ -1430,7 +1431,10 @@ class ContractManager {
      */
     async getAction(actionId) {
         return await this.executeWithRetry(async () => {
-            const action = await this.stakingContract.actions(actionId);
+            const [action, approvals] = await Promise.all([
+                this.stakingContract.actions(actionId),
+                this.stakingContract.getActionApproval(actionId)
+            ]);
             return {
                 actionType: action.actionType,
                 newHourlyRewardRate: action.newHourlyRewardRate.toString(),
@@ -1446,7 +1450,7 @@ class ContractManager {
                 executed: action.executed,
                 expired: action.expired,
                 approvals: action.approvals,
-                approvedBy: action.approvedBy,
+                approvedBy: approvals,
                 proposedTime: action.proposedTime.toNumber(),
                 rejected: action.rejected
             };
@@ -1466,11 +1470,12 @@ class ContractManager {
                 throw new Error(`Invalid action ID: ${actionId}`);
             }
 
-            // Fetch action details, pairs, and weights in parallel for efficiency
-            const [action, pairs, weights] = await Promise.all([
+            // Fetch action details, pairs, weights, and approvals in parallel for efficiency
+            const [action, pairs, weights, approvedBy] = await Promise.all([
                 this.stakingContract.actions(BigInt(numericActionId)),
                 this.stakingContract.getActionPairs(numericActionId),
-                this.stakingContract.getActionWeights(numericActionId)
+                this.stakingContract.getActionWeights(numericActionId),
+                this.stakingContract.getActionApproval(numericActionId)
             ]);
 
             console.log(`[SINGLE ACTION] ✅ Successfully fetched action ${actionId}:`, {
@@ -1500,6 +1505,7 @@ class ContractManager {
                 pairToRemove: action.pairToRemove,
                 recipient: action.recipient,
                 withdrawAmount: action.withdrawAmount ? action.withdrawAmount.toString() : null,
+                approvedBy: approvedBy,
                 // Additional UI-specific fields
                 status: this.determineActionStatus(action),
                 approvalCount: action.approvals,
@@ -1705,8 +1711,8 @@ class ContractManager {
                 }
 
                 try {
-                    // Load action, pairs, and weights in parallel
-                    const [action, pairs, weights] = await Promise.all([
+                    // Load action, pairs, weights, and approvals in parallel
+                    const [action, pairs, weights, approvedBy] = await Promise.all([
                         blockTag
                             ? contract.actions(BigInt(actionId), { blockTag })
                             : contract.actions(BigInt(actionId)),
@@ -1715,7 +1721,10 @@ class ContractManager {
                             : contract.getActionPairs(actionId),
                         blockTag
                             ? contract.getActionWeights(actionId, { blockTag })
-                            : contract.getActionWeights(actionId)
+                            : contract.getActionWeights(actionId),
+                        blockTag
+                            ? contract.getActionApproval(actionId, { blockTag })
+                            : contract.getActionApproval(actionId)
                     ]);
 
                     const formattedAction = {
@@ -1734,7 +1743,7 @@ class ContractManager {
                         executed: action.executed,
                         expired: action.expired,
                         approvals: action.approvals,
-                        approvedBy: action.approvedBy,
+                        approvedBy: approvedBy,
                         proposedTime: action.proposedTime.toNumber(),
                         rejected: action.rejected
                     };
@@ -1834,8 +1843,8 @@ class ContractManager {
 
             const batchPromises = batchIds.map(async (actionId) => {
                 try {
-                    // Load action, pairs, and weights in parallel
-                    const [action, pairs, weights] = await Promise.all([
+                    // Load action, pairs, weights, and approvals in parallel
+                    const [action, pairs, weights, approvedBy] = await Promise.all([
                         blockTag
                             ? contract.actions(BigInt(actionId), { blockTag })
                             : contract.actions(BigInt(actionId)),
@@ -1844,7 +1853,10 @@ class ContractManager {
                             : contract.getActionPairs(actionId),
                         blockTag
                             ? contract.getActionWeights(actionId, { blockTag })
-                            : contract.getActionWeights(actionId)
+                            : contract.getActionWeights(actionId),
+                        blockTag
+                            ? contract.getActionApproval(actionId, { blockTag })
+                            : contract.getActionApproval(actionId)
                     ]);
 
                     return {
@@ -1863,7 +1875,7 @@ class ContractManager {
                         executed: action.executed,
                         expired: action.expired,
                         approvals: action.approvals,
-                        approvedBy: action.approvedBy,
+                        approvedBy: approvedBy,
                         proposedTime: action.proposedTime.toNumber(),
                         rejected: action.rejected
                     };
@@ -3742,7 +3754,10 @@ class ContractManager {
      */
     async getAction(actionId) {
         try {
-            const action = await this.stakingContract.actions(actionId);
+            const [action, approvedBy] = await Promise.all([
+                this.stakingContract.actions(actionId),
+                this.stakingContract.getActionApproval(actionId)
+            ]);
             return {
                 actionType: action.actionType,
                 newHourlyRewardRate: action.newHourlyRewardRate,
@@ -3758,7 +3773,7 @@ class ContractManager {
                 executed: action.executed,
                 expired: action.expired,
                 approvals: action.approvals,
-                approvedBy: action.approvedBy,
+                approvedBy: approvedBy,
                 proposedTime: action.proposedTime,
                 rejected: action.rejected
             };

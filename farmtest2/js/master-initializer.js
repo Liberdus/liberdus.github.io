@@ -7,10 +7,13 @@ class MasterInitializer {
         this.initializationPromise = null;
         this.isReady = false;
 
+        // Detect which page we're on to conditionally load components
+        this.isAdminPage = window.location.pathname.includes('admin.html');
+        
         // Make instance globally available for testing
         window.masterInitializer = this;
 
-        console.log('🔧 MasterInitializer created (waiting for manual init)');
+        console.log(`🔧 MasterInitializer created (${this.isAdminPage ? 'admin mode' : 'homepage mode'})`);
         // Note: init() will be called manually from DOMContentLoaded event
     }
 
@@ -90,10 +93,17 @@ class MasterInitializer {
             'js/core/notification-manager-new.js',
             'js/core/loading-manager.js',
             'js/core/accessibility-manager.js',
-            'js/core/animation-manager.js',
-            'js/utils/rpc-test.js',
-            'js/utils/admin-test.js'
+            'js/core/animation-manager.js'
         ];
+
+        // Only load dev/test utilities if in development mode
+        if (window.DEV_CONFIG?.ADMIN_DEVELOPMENT_MODE) {
+            console.log('🚧 Development mode: Loading test utilities');
+            coreScripts.push('js/utils/rpc-test.js');
+            coreScripts.push('js/utils/admin-test.js');
+        } else {
+            console.log('🚀 Production mode: Skipping test utilities');
+        }
 
         for (const script of coreScripts) {
             await this.loadScript(script);
@@ -103,10 +113,17 @@ class MasterInitializer {
     async loadWalletSystems() {
         const walletScripts = [
             'js/wallet/wallet-manager.js',
-            'js/contracts/contract-manager.js',
-            'js/utils/price-feeds.js',
-            'js/utils/rewards-calculator.js'
+            'js/contracts/contract-manager.js'
         ];
+
+        // Only load price feeds and rewards calculator on homepage
+        if (!this.isAdminPage) {
+            walletScripts.push('js/utils/price-feeds.js');
+            walletScripts.push('js/utils/rewards-calculator.js');
+            console.log('📊 Loading homepage-specific utilities (price feeds, rewards calculator)');
+        } else {
+            console.log('⏭️ Skipping homepage utilities (admin mode)');
+        }
 
         for (const script of walletScripts) {
             await this.loadScript(script);
@@ -114,7 +131,13 @@ class MasterInitializer {
     }
 
     async loadUIComponents() {
-        // Load CSS for wallet popup
+        // Skip homepage UI components on admin page
+        if (this.isAdminPage) {
+            console.log('⏭️ Skipping homepage UI components (admin mode)');
+            return;
+        }
+
+        // Homepage only: Load CSS for wallet popup
         await this.loadCSS('css/wallet-popup.css');
 
         const uiScripts = [
@@ -123,6 +146,7 @@ class MasterInitializer {
             'js/components/staking-modal-new.js'
         ];
 
+        console.log('🏠 Loading homepage UI components');
         for (const script of uiScripts) {
             await this.loadScript(script);
         }
@@ -275,89 +299,102 @@ class MasterInitializer {
             }
         }
 
-        // Initialize price feeds system
-        console.log('🔍 Checking PriceFeeds availability:', {
-            PriceFeedsClass: !!window.PriceFeeds,
-            priceFeedsInstance: !!window.priceFeeds
-        });
+        // Initialize price feeds system (homepage only)
+        if (!this.isAdminPage) {
+            console.log('🔍 Checking PriceFeeds availability:', {
+                PriceFeedsClass: !!window.PriceFeeds,
+                priceFeedsInstance: !!window.priceFeeds
+            });
 
-        if (window.PriceFeeds && !window.priceFeeds) {
-            try {
-                console.log('🔄 Creating PriceFeeds instance...');
-                window.priceFeeds = new window.PriceFeeds();
+            if (window.PriceFeeds && !window.priceFeeds) {
+                try {
+                    console.log('🔄 Creating PriceFeeds instance...');
+                    window.priceFeeds = new window.PriceFeeds();
 
-                console.log('🔄 Initializing PriceFeeds...');
-                const initResult = await window.priceFeeds.initialize();
+                    console.log('🔄 Initializing PriceFeeds...');
+                    const initResult = await window.priceFeeds.initialize();
 
-                this.components.set('priceFeeds', window.priceFeeds);
-                console.log('✅ Price Feeds initialized successfully:', {
-                    isInitialized: window.priceFeeds.isInitialized,
-                    initResult: initResult
-                });
-            } catch (error) {
-                console.error('❌ Failed to initialize PriceFeeds:', error);
-                console.error('   Error stack:', error.stack);
+                    this.components.set('priceFeeds', window.priceFeeds);
+                    console.log('✅ Price Feeds initialized successfully:', {
+                        isInitialized: window.priceFeeds.isInitialized,
+                        initResult: initResult
+                    });
+                } catch (error) {
+                    console.error('❌ Failed to initialize PriceFeeds:', error);
+                    console.error('   Error stack:', error.stack);
+                }
+            } else if (window.priceFeeds) {
+                console.log('ℹ️ PriceFeeds instance already exists');
+            } else {
+                console.error('❌ PriceFeeds class not found!');
             }
-        } else if (window.priceFeeds) {
-            console.log('ℹ️ PriceFeeds instance already exists');
         } else {
-            console.error('❌ PriceFeeds class not found!');
+            console.log('⏭️ Skipping PriceFeeds initialization (admin mode)');
         }
 
-        // Initialize rewards calculator
-        console.log('🔍 Checking RewardsCalculator availability:', {
-            RewardsCalculatorClass: !!window.RewardsCalculator,
-            rewardsCalculatorInstance: !!window.rewardsCalculator,
-            contractManager: !!window.contractManager,
-            priceFeeds: !!window.priceFeeds
-        });
+        // Initialize rewards calculator (homepage only)
+        if (!this.isAdminPage) {
+            console.log('🔍 Checking RewardsCalculator availability:', {
+                RewardsCalculatorClass: !!window.RewardsCalculator,
+                rewardsCalculatorInstance: !!window.rewardsCalculator,
+                contractManager: !!window.contractManager,
+                priceFeeds: !!window.priceFeeds
+            });
 
-        if (window.RewardsCalculator && !window.rewardsCalculator && window.contractManager && window.priceFeeds) {
-            try {
-                console.log('🔄 Creating RewardsCalculator instance...');
-                window.rewardsCalculator = new window.RewardsCalculator();
+            if (window.RewardsCalculator && !window.rewardsCalculator && window.contractManager && window.priceFeeds) {
+                try {
+                    console.log('🔄 Creating RewardsCalculator instance...');
+                    window.rewardsCalculator = new window.RewardsCalculator();
 
-                console.log('🔄 Initializing RewardsCalculator...');
-                const initResult = await window.rewardsCalculator.initialize(window.contractManager, window.priceFeeds);
+                    console.log('🔄 Initializing RewardsCalculator...');
+                    const initResult = await window.rewardsCalculator.initialize(window.contractManager, window.priceFeeds);
 
-                this.components.set('rewardsCalculator', window.rewardsCalculator);
-                console.log('✅ Rewards Calculator initialized successfully:', {
-                    isInitialized: window.rewardsCalculator.isInitialized,
-                    initResult: initResult
-                });
-            } catch (error) {
-                console.error('❌ Failed to initialize RewardsCalculator:', error);
-                console.error('   Error stack:', error.stack);
+                    this.components.set('rewardsCalculator', window.rewardsCalculator);
+                    console.log('✅ Rewards Calculator initialized successfully:', {
+                        isInitialized: window.rewardsCalculator.isInitialized,
+                        initResult: initResult
+                    });
+                } catch (error) {
+                    console.error('❌ Failed to initialize RewardsCalculator:', error);
+                    console.error('   Error stack:', error.stack);
+                }
+            } else if (window.rewardsCalculator) {
+                console.log('ℹ️ RewardsCalculator instance already exists');
+            } else {
+                console.error('❌ RewardsCalculator prerequisites not met!');
             }
-        } else if (window.rewardsCalculator) {
-            console.log('ℹ️ RewardsCalculator instance already exists');
         } else {
-            console.error('❌ RewardsCalculator prerequisites not met!');
+            console.log('⏭️ Skipping RewardsCalculator initialization (admin mode)');
         }
 
-        // Initialize home page with contract manager awareness
-        if (window.HomePage) {
-            window.homePage = new window.HomePage();
-            this.components.set('homePage', window.homePage);
-            console.log('✅ Home Page initialized');
-        }
-
-        // Initialize staking modal
-        if (window.StakingModalNew) {
-            window.stakingModal = new window.StakingModalNew();
-            this.components.set('stakingModal', window.stakingModal);
-            console.log('✅ Staking Modal initialized');
-        }
-
-        // Initialize wallet popup
-        if (window.WalletPopup && !window.walletPopup) {
-            try {
-                window.walletPopup = new window.WalletPopup();
-                this.components.set('walletPopup', window.walletPopup);
-                console.log('✅ Wallet Popup initialized');
-            } catch (error) {
-                console.error('❌ Failed to initialize WalletPopup:', error);
+        // Initialize homepage UI components (homepage only)
+        if (!this.isAdminPage) {
+            // Initialize home page with contract manager awareness
+            if (window.HomePage) {
+                window.homePage = new window.HomePage();
+                this.components.set('homePage', window.homePage);
+                console.log('✅ Home Page initialized');
             }
+
+            // Initialize staking modal
+            if (window.StakingModalNew) {
+                window.stakingModal = new window.StakingModalNew();
+                this.components.set('stakingModal', window.stakingModal);
+                console.log('✅ Staking Modal initialized');
+            }
+
+            // Initialize wallet popup
+            if (window.WalletPopup && !window.walletPopup) {
+                try {
+                    window.walletPopup = new window.WalletPopup();
+                    this.components.set('walletPopup', window.walletPopup);
+                    console.log('✅ Wallet Popup initialized');
+                } catch (error) {
+                    console.error('❌ Failed to initialize WalletPopup:', error);
+                }
+            }
+        } else {
+            console.log('⏭️ Skipping homepage UI components initialization (admin mode)');
         }
 
         // Ensure wallet connection is properly set up

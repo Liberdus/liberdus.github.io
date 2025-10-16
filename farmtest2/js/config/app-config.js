@@ -191,6 +191,7 @@ window.CONFIG.ABIS = {
         'function actions(uint256 actionId) external view returns (uint8 actionType, uint256 newHourlyRewardRate, address pairToAdd, string memory pairNameToAdd, string memory platformToAdd, uint256 weightToAdd, address pairToRemove, address recipient, uint256 withdrawAmount, bool executed, bool expired, uint8 approvals, uint256 proposedTime, bool rejected)',
         'function getActionPairs(uint256 actionId) external view returns (address[] memory)',
         'function getActionWeights(uint256 actionId) external view returns (uint256[] memory)',
+        'function getActionApproval(uint256 actionId) external view returns (address[] memory)',
         'function isActionExpired(uint256 actionId) external view returns (bool)'
     ],
 
