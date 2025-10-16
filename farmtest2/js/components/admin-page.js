@@ -18,7 +18,8 @@ class AdminPage {
         this.ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000'; // DEFAULT_ADMIN_ROLE
 
         // Development mode from centralized config
-        this.DEVELOPMENT_MODE = window.DEV_CONFIG?.ADMIN_DEVELOPMENT_MODE ?? true;
+        // SECURITY: Default to false (production mode) if DEV_CONFIG is not loaded
+        this.DEVELOPMENT_MODE = window.DEV_CONFIG?.ADMIN_DEVELOPMENT_MODE ?? false;
 
         // Professional Mock Data System
         this.mockProposals = new Map();
