@@ -511,9 +511,9 @@ body {
 }
 
 .hero-title {
-  font-size: 5.5rem;
+  font-size: 4.5rem;
   font-weight: 900;
-  line-height: 1.1;
+  line-height: 1.0;
   margin-bottom: var(--space-8);
   color: var(--text-primary);
   letter-spacing: -0.02em;
