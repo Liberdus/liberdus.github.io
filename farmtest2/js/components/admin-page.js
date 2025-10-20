@@ -314,18 +314,6 @@ class AdminPage {
             }
             console.log('✅ Wallet is connected');
 
-            // CRITICAL: Check network BEFORE authorization
-            console.log('🌐 Checking network...');
-            const chainId = window.walletManager.getChainId();
-            console.log('🌐 Current chain ID:', chainId);
-
-            if (chainId && chainId !== 80002) {
-                console.log('❌ Wrong network detected:', chainId);
-                this.showWrongNetworkError(chainId);
-                return; // Stop initialization
-            }
-            console.log('✅ Correct network (Polygon Amoy)');
-            
             // Setup wallet listeners to handle account changes
             this.setupWalletListeners();
 
@@ -534,39 +522,6 @@ class AdminPage {
         `;
     }
 
-    showWrongNetworkError(currentChainId) {
-        const container = document.getElementById('admin-content') || document.body;
-        const networkName = this.getNetworkName(currentChainId);
-
-        container.innerHTML = `
-            <div class="admin-connect-prompt">
-                <div class="connect-card network-error-card">
-                    <div class="error-icon">🔴</div>
-                    <h2>Wrong Network</h2>
-                    <p class="error-message">You are connected to <strong>${networkName}</strong></p>
-                    <p class="error-detail">Chain ID: ${currentChainId}</p>
-                    <div class="network-requirement">
-                        <p>This admin panel requires:</p>
-                        <div class="required-network">
-                            <span class="network-badge">Polygon Amoy Testnet</span>
-                            <span class="chain-id-badge">Chain ID: 80002</span>
-                        </div>
-                    </div>
-                    <div class="action-buttons">
-                        <button class="btn btn-primary" onclick="adminPage.switchToAmoy()">
-                            🔄 Switch to Polygon Amoy
-                        </button>
-                        <button class="btn btn-secondary" onclick="window.location.href='index.html'">
-                            ← Back to Home
-                        </button>
-                    </div>
-                    <div class="help-text">
-                        <p><small>💡 Tip: Make sure MetaMask has permission to access this site</small></p>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
 
     showUnauthorizedAccess() {
         const container = document.getElementById('admin-content') || document.body;
@@ -574,14 +529,11 @@ class AdminPage {
             <div class="admin-unauthorized">
                 <div class="unauthorized-card">
                     <h2>🚫 Access Denied</h2>
-                    <p>You don't have administrator privileges for this contract.</p>
+                    <p>Switch to an account with admin privileges for this contract.</p>
                     <div class="access-details">
                         <p><strong>Your Address:</strong> ${this.userAddress}</p>
                         <p><strong>Required Role:</strong> ADMIN_ROLE or Contract Owner</p>
                     </div>
-                    <button class="btn btn-secondary" onclick="connectWallet()">
-                        Try Different Wallet
-                    </button>
                 </div>
             </div>
         `;
@@ -602,11 +554,8 @@ class AdminPage {
         // Load main components
         await this.loadMultiSignPanel();
 
-        // Load info card (creates HTML structure with mock data first)
+        // Load info card (initializes layout and pulls live contract data)
         await this.loadInfoCard();
-
-        // Then load real contract information (updates the HTML with real data)
-        await this.loadContractInformation();
 
         // Setup event listeners
         this.setupEventListeners();
@@ -1195,15 +1144,20 @@ class AdminPage {
     handleChainChanged(chainId) {
         console.log('🌐 Handling chain changed:', chainId);
 
-        const expectedChainId = '0x13882'; // Polygon Amoy (80002 in hex)
+        // Update network indicator when chain changes
+        const indicator = document.getElementById('network-indicator');
+        if (indicator) {
+            const chainIdDecimal = parseInt(chainId, 16);
+            const expectedChainId = window.CONFIG.NETWORK.CHAIN_ID;
 
-        if (chainId !== expectedChainId) {
-            console.warn('⚠️ Wrong network detected');
-            this.showError('Wrong Network', 'Please switch to Polygon Amoy Testnet');
-        } else {
-            console.log('✅ Correct network detected');
-            // Refresh data after network change
-            this.refreshData();
+            // Check permission asynchronously and update
+            if (window.networkManager) {
+                window.networkManager.hasRequiredNetworkPermission().then(hasPermission => {
+                    this.updateNetworkIndicatorWithPermission(hasPermission, chainIdDecimal);
+                }).catch(error => {
+                    console.error('Error checking permission after chain change:', error);
+                });
+            }
         }
     }
 
@@ -1384,22 +1338,37 @@ class AdminPage {
 
     /**
      * Create network indicator component
+     * Modern approach: Shows permission status instead of blocking on active network
      */
     createNetworkIndicator() {
         const chainId = window.walletManager?.getChainId();
-        const isCorrectNetwork = chainId === 80002;
-        const networkName = this.getNetworkName(chainId);
+        const expectedChainId = window.CONFIG.NETWORK.CHAIN_ID;
+        const networkName = window.networkManager?.getNetworkName(chainId) || 'Unknown';
+        const expectedNetworkName = window.CONFIG?.NETWORK?.NAME || 'Unknown';
+
+        // We'll check permission asynchronously and update the indicator
+        // For now, show current network status
+        const onExpectedNetwork = chainId === expectedChainId;
+
+        // Schedule async permission check to update indicator
+        if (window.networkManager) {
+            window.networkManager.hasRequiredNetworkPermission().then(hasPermission => {
+                this.updateNetworkIndicatorWithPermission(hasPermission, chainId);
+            }).catch(error => {
+                console.error('Error checking network permission:', error);
+            });
+        }
 
         return `
-            <div class="network-indicator ${isCorrectNetwork ? 'network-correct' : 'network-wrong'}" id="network-indicator">
-                <span class="network-icon">${isCorrectNetwork ? '🟢' : '🔴'}</span>
+            <div class="network-indicator ${onExpectedNetwork ? 'network-correct' : 'network-wrong'}" id="network-indicator">
+                <span class="network-icon">${onExpectedNetwork ? '🟢' : '⚠️'}</span>
                 <div class="network-info">
-                    <span class="network-name">${networkName}</span>
-                    <span class="network-id">Chain ID: ${chainId || 'Not Connected'}</span>
+                    <span class="network-name">${onExpectedNetwork ? networkName : 'No permission'}</span>
+                    <span class="network-id">${onExpectedNetwork ? `Chain ID: ${chainId}` : ''}</span>
                 </div>
-                ${!isCorrectNetwork && chainId ? `
-                    <button class="btn btn-sm btn-warning" onclick="adminPage.switchToAmoy()" title="Switch to Polygon Amoy">
-                        Switch Network
+                ${!onExpectedNetwork ? `
+                    <button class="btn btn-sm btn-warning" onclick="window.networkManager.requestPermissionWithUIUpdate('admin')" title="Grant permission for ${expectedNetworkName}">
+                        Grant ${expectedNetworkName} Permission
                     </button>
                 ` : ''}
             </div>
@@ -1407,78 +1376,50 @@ class AdminPage {
     }
 
     /**
-     * Get network name from chain ID
+     * Update network indicator with permission information
      */
-    getNetworkName(chainId) {
-        const networks = {
-            1: 'Ethereum Mainnet',
-            5: 'Goerli Testnet',
-            137: 'Polygon Mainnet',
-            80001: 'Mumbai Testnet',
-            80002: 'Polygon Amoy',
-            11155111: 'Sepolia Testnet'
-        };
+    updateNetworkIndicatorWithPermission(hasPermission, chainIdDecimal) {
+        const indicator = document.getElementById('network-indicator');
+        const expectedNetworkName = window.CONFIG?.NETWORK?.NAME || 'Unknown';
+        const expectedChainId = window.CONFIG?.NETWORK?.CHAIN_ID;
 
-        if (!chainId) return 'Not Connected';
-        return networks[chainId] || `Unknown Network`;
-    }
+        if (indicator) {
+            const networkIcon = indicator.querySelector('.network-icon');
+            const networkNameEl = indicator.querySelector('.network-name');
+            const networkIdEl = indicator.querySelector('.network-id');
 
-    /**
-     * Switch to Polygon Amoy network
-     */
-    async switchToAmoy() {
-        try {
-            console.log('🔄 Switching to Polygon Amoy...');
-
-            if (!window.ethereum) {
-                throw new Error('MetaMask not found');
-            }
-
-            // Request network switch
-            await window.ethereum.request({
-                method: 'wallet_switchEthereumChain',
-                params: [{ chainId: '0x13882' }], // 80002 in hex
-            });
-
-            console.log('✅ Switched to Polygon Amoy');
-
-            // Reload admin page after switch
-            setTimeout(() => {
-                window.location.reload();
-            }, 1000);
-
-        } catch (error) {
-            console.error('❌ Failed to switch network:', error);
-
-            // If network doesn't exist, try to add it
-            if (error.code === 4902) {
-                try {
-                    await window.ethereum.request({
-                        method: 'wallet_addEthereumChain',
-                        params: [{
-                            chainId: '0x13882',
-                            chainName: 'Polygon Amoy Testnet',
-                            nativeCurrency: {
-                                name: 'MATIC',
-                                symbol: 'MATIC',
-                                decimals: 18
-                            },
-                            rpcUrls: ['https://rpc-amoy.polygon.technology'],
-                            blockExplorerUrls: ['https://amoy.polygonscan.com']
-                        }]
-                    });
-
-                    console.log('✅ Added and switched to Polygon Amoy');
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 1000);
-
-                } catch (addError) {
-                    console.error('❌ Failed to add network:', addError);
-                    alert('Please manually add Polygon Amoy network in MetaMask');
+            if (hasPermission) {
+                indicator.className = 'network-indicator network-correct';
+                if (networkIcon) networkIcon.textContent = '🟢';
+                
+                // Show correct network name and chain ID
+                const networkName = window.networkManager?.getNetworkName(chainIdDecimal) || expectedNetworkName;
+                if (networkNameEl) networkNameEl.textContent = networkName;
+                if (networkIdEl) networkIdEl.textContent = `Chain ID: ${chainIdDecimal}`;
+                
+                // Remove any existing permission button
+                const existingButton = indicator.querySelector('button');
+                if (existingButton) {
+                    existingButton.remove();
                 }
             } else {
-                alert('Failed to switch network. Please switch manually in MetaMask.');
+                indicator.className = 'network-indicator network-wrong';
+                if (networkIcon) networkIcon.textContent = '⚠️';
+                
+                // Show "No permission" instead of wrong network name/chain ID
+                if (networkNameEl) networkNameEl.textContent = 'No permission';
+                if (networkIdEl) networkIdEl.textContent = '';
+                
+                // Add permission button if not present
+                const existingButton = indicator.querySelector('button');
+                if (!existingButton) {
+                    const button = document.createElement('button');
+                    button.className = 'btn btn-sm btn-warning';
+                    button.textContent = `Grant ${expectedNetworkName} Permission`;
+                    button.onclick = () => window.networkManager.requestPermissionWithUIUpdate('admin');
+                    button.title = `Grant permission for ${expectedNetworkName}`;
+                    indicator.appendChild(button);
+                }
             }
         }
     }
@@ -1501,6 +1442,7 @@ class AdminPage {
                                 ← Back to Staking
                             </button>
                             <h1 class="admin-title">Admin Panel</h1>
+                            <span class="version-badge" id="admin-version">v0.0.0</span>
                         </div>
                         <div class="admin-header-right">
                             ${this.createNetworkIndicator()}
@@ -1573,6 +1515,16 @@ class AdminPage {
                 </div>
             </div>
         `;
+        
+        // Display version in header
+        if (window.getCurrentVersion) {
+            window.getCurrentVersion().then(version => {
+                const versionElement = document.getElementById('admin-version');
+                if (versionElement) {
+                    versionElement.textContent = 'v' + version;
+                }
+            });
+        }
     }
 
     async loadMultiSignPanel() {
@@ -1722,56 +1674,76 @@ class AdminPage {
         }
     }
 
+    getInfoCardSkeleton() {
+        return `
+            <div class="info-card">
+                <div class="card-header">
+                    <h3>Contract Information</h3>
+                    <button class="btn btn-sm" onclick="adminPage.refreshContractInfo()">
+                        🔄 Refresh
+                    </button>
+                </div>
+
+                <div class="card-content">
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <div class="info-label">💰 Reward Balance</div>
+                            <div class="info-value" data-info="reward-balance">Loading...</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">⏰ Hourly Rate</div>
+                            <div class="info-value" data-info="hourly-rate">Loading...</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">⚖️ Total Weight</div>
+                            <div class="info-value" data-info="total-weight">Loading...</div>
+                        </div>
+                    </div>
+
+                    <div class="pairs-section">
+                        <h4>🔗 LP Pairs</h4>
+                        <div class="pairs-list" data-info="lp-pairs">
+                            <div class="info-value">Loading pairs...</div>
+                        </div>
+                    </div>
+
+                    <div class="signers-section">
+                        <h4>👥 Current Signers</h4>
+                        <div class="signers-list" data-info="signers">
+                            <div class="info-value">Loading signers...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     async loadInfoCard() {
         console.log('📊 Loading Info Card...');
         const cardDiv = document.getElementById('info-card');
 
-        try {
-            // Load contract info
-            const contractInfo = await this.loadContractInfo();
+        if (!cardDiv) {
+            console.warn('⚠️ Info card container not found.');
+            return;
+        }
 
-            cardDiv.innerHTML = `
-                <div class="info-card">
-                    <div class="card-header">
-                        <h3>Contract Information</h3>
-                        <button class="btn btn-sm" onclick="adminPage.refreshContractInfo()">
-                            🔄 Refresh
+        // Render layout with loading placeholders so the UI stays responsive while data loads
+        cardDiv.innerHTML = this.getInfoCardSkeleton();
+
+        try {
+            const result = await this.loadContractInformation();
+            if (!result || result.success === false) {
+                const errorMessage = (result && result.error && result.error.message) || 'An unknown error occurred.';
+                cardDiv.innerHTML = `
+                    <div class="error-panel">
+                        <h3>⚠️ Failed to load contract info</h3>
+                        <p>${errorMessage}</p>
+                        <button class="btn btn-secondary" onclick="adminPage.loadInfoCard()">
+                            🔄 Retry
                         </button>
                     </div>
-
-                    <div class="card-content">
-                        <div class="info-grid">
-                            <div class="info-item">
-                                <div class="info-label">💰 Reward Balance</div>
-                                <div class="info-value" data-info="reward-balance">${contractInfo.rewardBalance}</div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">⏰ Hourly Rate</div>
-                                <div class="info-value" data-info="hourly-rate">${contractInfo.hourlyRate}</div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">⚖️ Total Weight</div>
-                                <div class="info-value" data-info="total-weight">${contractInfo.totalWeight}</div>
-                            </div>
-                        </div>
-
-                        <div class="pairs-section">
-                            <h4>🔗 LP Pairs</h4>
-                            <div class="pairs-list" data-info="lp-pairs">
-                                ${this.renderPairsList(contractInfo.pairs)}
-                            </div>
-                        </div>
-
-                        <div class="signers-section">
-                            <h4>👥 Current Signers</h4>
-                            <div class="signers-list" data-info="signers">
-                                ${this.renderSignersList(contractInfo.signers)}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-
+                `;
+            }
         } catch (error) {
             console.error('❌ Failed to load Info Card:', error);
             cardDiv.innerHTML = `
@@ -2092,25 +2064,20 @@ class AdminPage {
             proposalId: proposal.id
         });
 
-        // Disable approve button if user has already approved
-        const approveDisabled = hasAlreadyApproved;
-        const approveDisabledClass = hasAlreadyApproved ? 'disabled' : '';
-        const approveDisabledAttr = hasAlreadyApproved ? 'disabled' : '';
-        const approveTitle = hasAlreadyApproved ? 'You have already approved this proposal' : 'Approve Proposal';
-
         return `
             <button
-                class="btn btn-sm btn-success ${approveDisabledClass}"
+                class="btn btn-sm btn-success ${hasAlreadyApproved ? 'disabled' : ''}"
                 onclick="adminPage.approveAction('${proposal.id}')"
-                title="${approveTitle}"
-                ${approveDisabledAttr}
+                title="${hasAlreadyApproved ? 'You have already approved this proposal' : 'Approve Proposal'}"
+                ${hasAlreadyApproved ? 'disabled' : ''}
             >
                 Approve
             </button>
             <button
-                class="btn btn-sm btn-danger"
+                class="btn btn-sm btn-danger ${hasAlreadyApproved ? 'disabled' : ''}"
                 onclick="adminPage.rejectAction('${proposal.id}')"
-                title="Reject Proposal"
+                title="${hasAlreadyApproved ? 'You cannot reject after approving this proposal' : 'Reject Proposal'}"
+                ${hasAlreadyApproved ? 'disabled' : ''}
             >
                 Reject
             </button>
@@ -2853,50 +2820,6 @@ class AdminPage {
             return false; // Fall back to full refresh
         }
     }
-
-    /**
-     * Check network connectivity and wallet connection
-     */
-    async checkNetworkConnectivity() {
-        console.log('🌐 Checking network connectivity...');
-
-        try {
-            // Check if wallet is connected
-            if (!window.walletManager || !window.walletManager.isConnected()) {
-                throw new Error('Wallet not connected');
-            }
-
-            // Check if we're on the correct network
-            const currentChainId = await window.walletManager.getCurrentChainId();
-            const expectedChainId = window.CONFIG.NETWORK.CHAIN_ID;
-
-            console.log('🔗 Network check:', {
-                currentChainId,
-                expectedChainId,
-                match: currentChainId === expectedChainId
-            });
-
-            if (currentChainId !== expectedChainId) {
-                throw new Error(`Wrong network. Expected ${expectedChainId}, got ${currentChainId}`);
-            }
-
-            // Try a simple contract call to test connectivity
-            const contractManager = await this.ensureContractReady();
-            if (contractManager && contractManager.stakingContract) {
-                // Try to get action counter (simple read operation)
-                await contractManager.stakingContract.actionCounter();
-                console.log('✅ Network connectivity check passed');
-                return true;
-            } else {
-                throw new Error('Contract manager not available');
-            }
-
-        } catch (error) {
-            console.error('❌ Network connectivity check failed:', error);
-            return false;
-        }
-    }
-
     /**
      * Force attempt to load real proposals (for manual retry)
      */
@@ -2909,10 +2832,9 @@ class AdminPage {
                 window.notificationManager.info('Loading Real Data', 'Checking network connectivity...');
             }
 
-            // First check network connectivity
-            const networkOk = await this.checkNetworkConnectivity();
-            if (!networkOk) {
-                throw new Error('Network connectivity check failed - please check wallet connection and network');
+            // Check if wallet is connected
+            if (!window.walletManager || !window.walletManager.isConnected()) {
+                throw new Error('Wallet not connected');
             }
 
             if (window.notificationManager) {
@@ -3140,30 +3062,6 @@ class AdminPage {
                 };
             default:
                 return {};
-        }
-    }
-
-    async loadContractInfo() {
-        console.log('📊 Loading contract info...');
-
-        try {
-            // Mock data for now - replace with actual contract calls
-            return {
-                rewardBalance: '50,000',
-                hourlyRate: '100',
-                totalWeight: '1000',
-                pairs: [
-                    { address: '0x1234...5678', name: 'USDC/ETH', weight: 500 },
-                    { address: '0x8765...4321', name: 'USDC/MATIC', weight: 500 }
-                ],
-                signers: [
-                    '0x0B046B290C50f3FDf1C61ecE442d42D9D79BD814',
-                    '0x742d35Cc6634C0532925a3b8D0C9C0E5C5F0E5E5'
-                ]
-            };
-        } catch (error) {
-            console.error('❌ Failed to load contract info:', error);
-            throw error;
         }
     }
 
@@ -3773,13 +3671,25 @@ class AdminPage {
             return '<div class="no-data">No pairs configured</div>';
         }
 
-        return pairs.map(pair => `
-            <div class="pair-item">
-                <div class="pair-name">${this.formatPairName(pair.name)}</div>
-                <div class="pair-address">${this.formatAddress(pair.address)}</div>
-                <div class="pair-weight">Weight: ${this.formatWeight(pair.weight)}</div>
-            </div>
-        `).join('');
+        return pairs.map(pair => {
+            const displayName = pair && pair.name
+                ? this.formatPairName(pair.name)
+                : (pair && pair.address ? this.getPairNameByAddress(pair.address) : null) || 'Unknown Pair';
+            const displayAddress = pair && pair.address
+                ? this.formatAddress(pair.address)
+                : 'Unknown';
+            const displayWeight = (pair && typeof pair.weight !== 'undefined' && pair.weight !== null)
+                ? this.formatWeight(pair.weight)
+                : '0';
+
+            return `
+                <div class="pair-item">
+                    <div class="pair-name">${displayName}</div>
+                    <div class="pair-address">${displayAddress}</div>
+                    <div class="pair-weight">Weight: ${displayWeight}</div>
+                </div>
+            `;
+        }).join('');
     }
 
     renderSignersList(signers) {
@@ -4094,19 +4004,6 @@ class AdminPage {
         }
     }
 
-    showError(title, message) {
-        const container = document.getElementById('admin-section-content') || document.body;
-        container.innerHTML = `
-            <div class="error-display">
-                <h3>❌ ${title}</h3>
-                <p>${message}</p>
-                <button class="btn btn-primary" onclick="adminPage.init()">
-                    Retry
-                </button>
-            </div>
-        `;
-    }
-
     startAutoRefresh() {
         // Prevent multiple auto-refresh timers
         if (this.autoRefreshActive) {
@@ -4184,192 +4081,6 @@ class AdminPage {
                 </ul>
                 <p><em>Implementation coming in next phase...</em></p>
             </div>
-        `;
-    }
-
-    // Modal and Action Methods
-    openModal(modalType) {
-        console.log(`🔧 Opening modal: ${modalType}`);
-
-        // Create modal overlay
-        const modalOverlay = document.createElement('div');
-        modalOverlay.className = 'modal-overlay';
-        modalOverlay.id = 'modal-overlay';
-
-        let modalContent = '';
-
-        switch (modalType) {
-            case 'hourly-rate':
-                modalContent = this.createHourlyRateModal();
-                break;
-            case 'add-pair':
-                modalContent = this.createAddPairModal();
-                break;
-            case 'remove-pair':
-                modalContent = this.createRemovePairModal();
-                break;
-            case 'update-weights':
-                modalContent = this.createUpdateWeightsModal();
-                break;
-            case 'change-signer':
-                modalContent = this.createChangeSignerModal();
-                break;
-            case 'withdraw-rewards':
-                modalContent = this.createWithdrawRewardsModal();
-                break;
-            default:
-                console.error('Unknown modal type:', modalType);
-                return;
-        }
-
-        modalOverlay.innerHTML = `
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3>${this.getModalTitle(modalType)}</h3>
-                    <button class="modal-close" onclick="adminPage.closeModal()">×</button>
-                </div>
-                <div class="modal-body">
-                    ${modalContent}
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(modalOverlay);
-
-        // Close modal when clicking overlay
-        modalOverlay.addEventListener('click', (e) => {
-            if (e.target === modalOverlay) {
-                this.closeModal();
-            }
-        });
-    }
-
-    closeModal() {
-        const modalOverlay = document.getElementById('modal-overlay');
-        if (modalOverlay) {
-            modalOverlay.remove();
-        }
-    }
-
-    getModalTitle(modalType) {
-        const titles = {
-            'hourly-rate': 'Update Hourly Rate',
-            'add-pair': 'Add LP Pair',
-            'remove-pair': 'Remove LP Pair',
-            'update-weights': 'Update Pair Weights',
-            'change-signer': 'Change Signer',
-            'withdraw-rewards': 'Withdraw Rewards'
-        };
-        return titles[modalType] || 'Admin Action';
-    }
-
-    createHourlyRateModal() {
-        const tokenSymbol = this.rewardTokenSymbol || 'USDC';
-        return `
-            <form onsubmit="adminPage.submitHourlyRate(event)">
-                <div class="form-group">
-                    <label for="hourly-rate-input">New Hourly Rate (${tokenSymbol})</label>
-                    <input type="number" id="hourly-rate-input" step="0.01" min="0" required>
-                    <small>Current rate: ${this.contractStats.hourlyRate || 'Loading...'}</small>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="adminPage.closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Create Proposal</button>
-                </div>
-            </form>
-        `;
-    }
-
-    createAddPairModal() {
-        return `
-            <form onsubmit="adminPage.submitAddPair(event)">
-                <div class="form-group">
-                    <label for="pair-address-input">LP Pair Address</label>
-                    <input type="text" id="pair-address-input" placeholder="0x..." required>
-                </div>
-                <div class="form-group">
-                    <label for="pair-weight-input">Weight</label>
-                    <input type="number" id="pair-weight-input" min="1" required>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="adminPage.closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Create Proposal</button>
-                </div>
-            </form>
-        `;
-    }
-
-    createRemovePairModal() {
-        return `
-            <form onsubmit="adminPage.submitRemovePair(event)">
-                <div class="form-group">
-                    <label for="remove-pair-select">Select Pair to Remove</label>
-                    <select id="remove-pair-select" required>
-                        <option value="">Select a pair...</option>
-                    </select>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="adminPage.closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-danger">Create Removal Proposal</button>
-                </div>
-            </form>
-        `;
-    }
-
-    createUpdateWeightsModal() {
-        return `
-            <form onsubmit="adminPage.submitUpdateWeights(event)">
-                <div class="form-group">
-                    <label>Update Pair Weights</label>
-                    <div id="weights-inputs">
-                        <p>Weight inputs will be loaded dynamically</p>
-                    </div>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="adminPage.closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Create Proposal</button>
-                </div>
-            </form>
-        `;
-    }
-
-    createChangeSignerModal() {
-        return `
-            <form onsubmit="adminPage.submitChangeSigner(event)">
-                <div class="form-group">
-                    <label for="old-signer-input">Old Signer Address</label>
-                    <input type="text" id="old-signer-input" placeholder="0x..." required>
-                </div>
-                <div class="form-group">
-                    <label for="new-signer-input">New Signer Address</label>
-                    <input type="text" id="new-signer-input" placeholder="0x..." required>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="adminPage.closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-warning">Create Proposal</button>
-                </div>
-            </form>
-        `;
-    }
-
-    createWithdrawRewardsModal() {
-        const tokenSymbol = this.rewardTokenSymbol || 'USDC';
-        return `
-            <form onsubmit="adminPage.submitWithdrawRewards(event)">
-                <div class="form-group">
-                    <label for="withdraw-amount-input">Amount to Withdraw (${tokenSymbol})</label>
-                    <input type="number" id="withdraw-amount-input" step="0.01" min="0" required>
-                    <small>Available balance: ${this.contractStats.rewardBalance || 'Loading...'}</small>
-                </div>
-                <div class="form-group">
-                    <label for="withdraw-to-input">Withdraw to Address</label>
-                    <input type="text" id="withdraw-to-input" placeholder="0x..." required>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="adminPage.closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-warning">Create Withdrawal Proposal</button>
-                </div>
-            </form>
         `;
     }
 
@@ -4706,14 +4417,8 @@ class AdminPage {
             }
 
             const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-            const expectedChainId = '0x13882'; // Polygon Amoy
-
-            if (chainId !== expectedChainId) {
-                console.warn(`⚠️ Wrong network: ${chainId}, expected: ${expectedChainId}`);
-                return false;
-            }
-
-            return true;
+            const expectedChainId = window.networkManager?.getChainIdHex() || ('0x' + window.CONFIG.NETWORK.CHAIN_ID.toString(16));
+            return chainId === expectedChainId;
         } catch (error) {
             console.error('❌ Network status check failed:', error);
             return false;
@@ -4787,22 +4492,6 @@ class AdminPage {
         } else {
             return { expired: false, text: `${minutes}m remaining` };
         }
-    }
-
-    renderSignersList(signers, signatures) {
-        if (!signers || signers.length === 0) {
-            return '<div class="no-signers">No signers</div>';
-        }
-
-        return signers.map(signer => {
-            const hasSigned = signatures && signatures.includes(signer);
-            return `
-                <div class="signer-item ${hasSigned ? 'signed' : 'pending'}">
-                    <span class="signer-address">${this.formatAddress(signer)}</span>
-                    <span class="signature-status">${hasSigned ? '✓' : '○'}</span>
-                </div>
-            `;
-        }).join('');
     }
 
     renderDetailedSignatures(signers, signatures) {
@@ -5892,8 +5581,13 @@ class AdminPage {
     async refreshContractInfo() {
         console.log('🔄 Refreshing contract info...');
         try {
-            await this.loadContractInformation();
-            console.log('✅ Contract info refreshed');
+            const result = await this.loadContractInformation();
+            if (result && result.success) {
+                console.log('✅ Contract info refreshed');
+            } else {
+                const errorMessage = (result && result.error && result.error.message) || 'Unknown issue';
+                console.warn('⚠️ Contract info refresh completed with warnings:', errorMessage);
+            }
         } catch (error) {
             console.error('❌ Failed to refresh contract info:', error);
         }
@@ -6107,25 +5801,6 @@ class AdminPage {
         return /^0x[a-fA-F0-9]{40}$/.test(address);
     }
 
-    // Helper methods for error and success handling
-    showError(message) {
-        console.error('❌ Error:', message);
-        if (window.notificationManager) {
-            window.notificationManager.error('Error', message);
-        } else {
-            alert('❌ Error: ' + message);
-        }
-    }
-
-    showSuccess(message) {
-        console.log('✅ Success:', message);
-        if (window.notificationManager) {
-            window.notificationManager.success('Success', message);
-        } else {
-            alert('✅ ' + message);
-        }
-    }
-
     // Refresh admin data once without causing infinite loops
     refreshAdminDataOnce() {
         // Use a flag to prevent multiple simultaneous refreshes
@@ -6337,6 +6012,11 @@ class AdminPage {
     async loadContractInformation() {
         console.log('📊 Loading contract information from smart contract...');
 
+        const cardDiv = document.getElementById('info-card');
+        if (cardDiv && !cardDiv.querySelector('[data-info="reward-balance"]')) {
+            cardDiv.innerHTML = this.getInfoCardSkeleton();
+        }
+
         try {
             const contractManager = await this.ensureContractReady();
 
@@ -6414,6 +6094,7 @@ class AdminPage {
 
             console.log('✅ Contract information loaded:', contractInfo);
             this.displayContractInfo(contractInfo);
+            return { success: true, data: contractInfo };
 
         } catch (error) {
             console.error('❌ Failed to load contract information:', error);
@@ -6425,79 +6106,47 @@ class AdminPage {
                 pairs: [],
                 signers: []
             });
+            return { success: false, error };
         }
     }
 
     // Display contract information in the UI
-    displayContractInfo(info) {
+    displayContractInfo(info = {}) {
         console.log('🎭 Displaying contract information in UI...');
 
         // Update reward balance (already includes token symbol)
         const rewardBalanceEl = document.querySelector('[data-info="reward-balance"]');
         if (rewardBalanceEl) {
-            rewardBalanceEl.textContent = info.rewardBalance;
+            rewardBalanceEl.textContent = info.rewardBalance || 'N/A';
         }
 
         // Update hourly rate (already includes token symbol)
         const hourlyRateEl = document.querySelector('[data-info="hourly-rate"]');
         if (hourlyRateEl) {
-            hourlyRateEl.textContent = info.hourlyRate;
+            hourlyRateEl.textContent = info.hourlyRate || 'N/A';
         }
 
         // Update total weight
         const totalWeightEl = document.querySelector('[data-info="total-weight"]');
         if (totalWeightEl) {
-            totalWeightEl.textContent = info.totalWeight;
+            totalWeightEl.textContent = info.totalWeight || 'N/A';
         }
 
         // Update LP pairs with real contract data
         const pairsContainer = document.querySelector('[data-info="lp-pairs"]');
         if (pairsContainer) {
-            if (info.pairs && info.pairs.length > 0) {
-                pairsContainer.innerHTML = info.pairs.map(pair => `
-                    <div class="pair-item">
-                        <div class="pair-name">${pair.name || 'Unknown Pair'}</div>
-                        <div class="pair-address">${pair.address ? pair.address.substring(0, 6) + '...' + pair.address.substring(38) : 'N/A'}</div>
-                        <div class="pair-weight">Weight: ${pair.weight || '0'}</div>
-                    </div>
-                `).join('');
-            } else {
-                pairsContainer.innerHTML = '<div class="no-data">No LP pairs configured</div>';
-            }
+            pairsContainer.innerHTML = (info.pairs && info.pairs.length > 0)
+                ? this.renderPairsList(info.pairs)
+                : '<div class="no-data">No LP pairs configured</div>';
         }
 
         // Update signers with real contract data
         const signersContainer = document.querySelector('[data-info="signers"]');
         if (signersContainer) {
-            if (info.signers && info.signers.length > 0) {
-                signersContainer.innerHTML = info.signers.map(signer => `
-                    <div class="signer-item">
-                        ${signer.substring(0, 6)}...${signer.substring(38)}
-                    </div>
-                `).join('');
-            } else {
-                signersContainer.innerHTML = '<div class="no-data">No signers configured</div>';
-            }
+            signersContainer.innerHTML = this.renderSignersList(info.signers);
         }
 
         console.log('✅ Contract information displayed in UI');
-    }
-
-    // Helper methods for user feedback
-    showSuccess(message) {
-        if (window.notificationManager) {
-            window.notificationManager.success('Success', message);
-        } else {
-            alert('✅ ' + message);
-        }
-    }
-
-    showError(message) {
-        if (window.notificationManager) {
-            window.notificationManager.error('Error', message);
-        } else {
-            alert('❌ ' + message);
-        }
     }
 
     // Refresh admin data once (prevent multiple refreshes)
@@ -6725,12 +6374,63 @@ class AdminPage {
         button.disabled = false;
     }
 
+    // Helper methods for user feedback
     showSuccess(message) {
-        this.showMessage(message, 'success');
+        const text = message || 'Action completed successfully';
+        const canShowInline = typeof this.showMessage === 'function' && !!document.querySelector('.modal-body');
+
+        // Show inline feedback when a modal is open
+        if (canShowInline) {
+            this.showMessage(text, 'success');
+        }
+
+        // Surface toast-style feedback when the notification manager exists
+        if (window.notificationManager) {
+            window.notificationManager.success(text);
+        } else if (!canShowInline) {
+            alert('✅ ' + text);
+        }
     }
 
-    showError(message) {
-        this.showMessage(message, 'error');
+    showError(titleOrMessage, detail) {
+        const hasDetail = typeof detail === 'string' && detail.trim().length > 0;
+
+        if (hasDetail) {
+            const title = titleOrMessage || 'Error';
+            const message = detail;
+
+            console.error('❌ Error:', title, '-', message);
+
+            const container = document.getElementById('admin-section-content') || document.body;
+            container.innerHTML = `
+                <div class="error-display">
+                    <h3>❌ ${title}</h3>
+                    <p>${message}</p>
+                    <button class="btn btn-primary" onclick="adminPage.init()">
+                        Retry
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        const message = typeof titleOrMessage === 'string' && titleOrMessage.trim().length > 0
+            ? titleOrMessage
+            : 'An unexpected error occurred';
+
+        console.error('❌ Error:', message);
+
+        const canShowInline = typeof this.showMessage === 'function' && !!document.querySelector('.modal-body');
+
+        if (canShowInline) {
+            this.showMessage(message, 'error');
+        }
+
+        if (window.notificationManager) {
+            window.notificationManager.error(message);
+        } else if (!canShowInline) {
+            alert('❌ ' + message);
+        }
     }
 
     showMessage(message, type = 'info') {

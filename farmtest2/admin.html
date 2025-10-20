@@ -63,6 +63,9 @@
         </div>
     </div>
 
+    <!-- Version Check System (runs first to ensure fresh cache) -->
+    <script src="js/utils/version-check.js"></script>
+
     <!-- Scripts -->
     <!-- Configuration (load first) -->
     <script src="js/config/app-config.js"></script>
@@ -191,7 +194,7 @@
         }
 
         // Start checking after a short delay
-        setTimeout(checkDependencies, 1000);
+        setTimeout(checkDependencies, 500);
 
         // Prevent duplicate script loading and initialization
         if (window.adminPanelLoaded) {
@@ -386,7 +389,7 @@
         // Auto-initialize when DOM is ready
         document.addEventListener('DOMContentLoaded', () => {
             console.log('📄 DOM loaded, waiting for system initialization...');
-            // Wait a bit for master initializer to complete
+            // Allow master initializer microtasks to complete
             setTimeout(() => {
                 console.log('🔐 Starting admin panel initialization...');
 
@@ -417,50 +420,8 @@
                     sessionStorage.removeItem('adminInitRetryCount');
                     initializeAdminPanel();
                 }
-            }, 3000); // Give master initializer time to complete
+            }, 0); // Kick off on next tick
         });
-
-        // Network switcher function
-        window.switchToPolygonAmoy = async function() {
-            console.log('🔄 Switching to Polygon Amoy...');
-
-            try {
-                await window.ethereum.request({
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: '0x13882' }], // 80002 in hex
-                });
-                console.log('✅ Switched to Polygon Amoy');
-                setTimeout(() => window.location.reload(), 1000);
-            } catch (switchError) {
-                if (switchError.code === 4902) {
-                    // Network not added, add it
-                    try {
-                        await window.ethereum.request({
-                            method: 'wallet_addEthereumChain',
-                            params: [{
-                                chainId: '0x13882',
-                                chainName: 'Polygon Amoy Testnet',
-                                nativeCurrency: {
-                                    name: 'MATIC',
-                                    symbol: 'MATIC',
-                                    decimals: 18
-                                },
-                                rpcUrls: ['https://rpc-amoy.polygon.technology'],
-                                blockExplorerUrls: ['https://amoy.polygonscan.com']
-                            }]
-                        });
-                        console.log('✅ Added and switched to Polygon Amoy');
-                        setTimeout(() => window.location.reload(), 1000);
-                    } catch (addError) {
-                        console.error('❌ Failed to add network:', addError);
-                        alert('❌ Failed to add Polygon Amoy network');
-                    }
-                } else {
-                    console.error('❌ Failed to switch network:', switchError);
-                    alert('❌ Failed to switch to Polygon Amoy');
-                }
-            }
-        };
 
         // Z-index debugging function
         window.debugZIndex = function() {
@@ -679,67 +640,6 @@
             });
         };
 
-        // Add Polygon Amoy network to MetaMask
-        window.addPolygonAmoyNetwork = async function() {
-            console.log('🔧 Adding Polygon Amoy network to MetaMask...');
-
-            try {
-                // First try to switch to existing network
-                await window.ethereum.request({
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: '0x13882' }] // 80002 in hex
-                });
-                console.log('✅ Switched to existing Polygon Amoy network');
-            } catch (switchError) {
-                // If network doesn't exist, add it
-                if (switchError.code === 4902) {
-                    try {
-                        await window.ethereum.request({
-                            method: 'wallet_addEthereumChain',
-                            params: [{
-                                chainId: '0x13882', // 80002 in hex
-                                chainName: 'Polygon Amoy Testnet',
-                                nativeCurrency: {
-                                    name: 'MATIC',
-                                    symbol: 'MATIC',
-                                    decimals: 18
-                                },
-                                rpcUrls: [
-                                    'https://rpc-amoy.polygon.technology',
-                                    'https://polygon-amoy-bor-rpc.publicnode.com'
-                                ],
-                                blockExplorerUrls: ['https://amoy.polygonscan.com']
-                            }]
-                        });
-                        console.log('✅ Polygon Amoy network added successfully');
-                    } catch (addError) {
-                        console.error('❌ Failed to add Polygon Amoy network:', addError);
-                    }
-                } else {
-                    console.log('✅ Network already exists, switch successful');
-                }
-            }
-        };
-
-        // Switch to Polygon Amoy network
-        window.switchToPolygonAmoy = async function() {
-            console.log('🔧 Switching to Polygon Amoy network...');
-
-            try {
-                await window.ethereum.request({
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: '0x13882' }] // 80002 in hex
-                });
-                console.log('✅ Switched to Polygon Amoy network');
-            } catch (error) {
-                if (error.code === 4902) {
-                    // Network not added, add it first
-                    await addPolygonAmoyNetwork();
-                } else {
-                    console.error('❌ Failed to switch network:', error);
-                }
-            }
-        };
 
         // Debug form validation directly
         window.debugFormValidation = function() {

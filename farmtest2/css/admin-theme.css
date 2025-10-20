@@ -163,6 +163,31 @@ body {
     background-clip: text;
 }
 
+.version-badge {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-left: 12px;
+    padding: 2px 8px;
+    background: var(--action-hover);
+    border-radius: 12px;
+    white-space: nowrap;
+}
+
+.admin-header-left {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+}
+
+@media (max-width: 768px) {
+    .version-badge {
+        font-size: 10px;
+        margin-left: 8px;
+        padding: 2px 6px;
+    }
+}
+
 .admin-nav {
     display: flex;
     align-items: center;

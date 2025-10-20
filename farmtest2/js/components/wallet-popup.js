@@ -383,15 +383,6 @@ class WalletPopup {
         return names[walletType] || names.default;
     }
 
-    getNetworkName(chainId) {
-        const networks = {
-            1: 'Ethereum',
-            137: 'Polygon',
-            80002: 'Polygon Amoy',
-            default: 'Unknown Network'
-        };
-        return networks[chainId] || networks.default;
-    }
 }
 
 // Initialize wallet popup

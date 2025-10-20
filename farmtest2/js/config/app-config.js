@@ -9,7 +9,7 @@ window.CONFIG = {
     // Network Configuration
     NETWORK: {
         CHAIN_ID: 80002, // Polygon Amoy Testnet
-        NAME: 'Polygon Amoy Testnet',
+        NAME: 'Amoy',
         // ✅ USING ALCHEMY - Best reliability and performance!
         // Using existing Alchemy API key for Polygon Amoy testnet
         RPC_URL: 'https://polygon-amoy.g.alchemy.com/v2/CjcioLVYYWW0tsHWorEfC',

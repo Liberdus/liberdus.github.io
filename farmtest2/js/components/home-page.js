@@ -17,7 +17,7 @@ class HomePage {
         this.totalWeight = '0';
         this.lastWalletAddress = null;
         this.lastNetworkId = null;
-
+        this.refreshDebounceTimer = null; // Prevent overlapping refreshes during rapid network changes
         // OPTIMIZATION: Simple caching for contract data that doesn't change frequently
         this.cache = {
             hourlyRewardRate: { value: null, timestamp: 0, ttl: 300000 }, // 5 minutes
@@ -36,6 +36,7 @@ class HomePage {
         this.attachEventListeners();
         this.setupContractManagerListeners();
         this.setupWalletChangeDetection();
+        this.setupNetworkIndicator();
         this.loadDataWhenReady();
         this.isInitialized = true;
 
@@ -79,11 +80,13 @@ class HomePage {
         // Listen for wallet connection changes
         document.addEventListener('walletConnected', (event) => {
             console.log('🏠 HomePage: Wallet connected, refreshing data...');
+            this.updateNetworkIndicator();
             this.refreshDataAfterWalletChange();
         });
 
         document.addEventListener('walletDisconnected', () => {
             console.log('🏠 HomePage: Wallet disconnected, refreshing data...');
+            this.updateNetworkIndicator();
             this.refreshDataAfterWalletChange();
         });
 
@@ -96,22 +99,28 @@ class HomePage {
 
             window.ethereum.on('chainChanged', (chainId) => {
                 console.log('🏠 HomePage: Chain changed:', chainId);
+                this.updateNetworkIndicator();
                 this.refreshDataAfterWalletChange();
             });
         }
     }
 
     /**
-     * Refresh data after wallet connection/disconnection
+     * Refresh data after wallet/network changes (debounced to prevent overlapping loads)
      */
-    async refreshDataAfterWalletChange() {
-        console.log('🔄 Wallet changed, refreshing data...');
-
-        // Small delay to ensure wallet manager is updated
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Reload data to show user-specific information
-        await this.loadData();
+    refreshDataAfterWalletChange() {
+        // Cancel any pending refresh
+        clearTimeout(this.refreshDebounceTimer);
+        
+        // Schedule new refresh after 500ms (waits for rapid events + network transition to settle)
+        this.refreshDebounceTimer = setTimeout(async () => {
+            console.log('🔄 Wallet/network changed, clearing cache and refreshing data...');
+            // Clear cache to remove stale provider references
+            this.cache.hourlyRewardRate = { value: null, timestamp: 0, ttl: this.cache.hourlyRewardRate.ttl };
+            this.cache.totalWeight = { value: null, timestamp: 0, ttl: this.cache.totalWeight.ttl };
+            this.cache.pairsInfo = { value: null, timestamp: 0, ttl: this.cache.pairsInfo.ttl };
+            await this.loadData();
+        }, 1000);
     }
 
     /**
@@ -292,6 +301,7 @@ class HomePage {
 
     renderPairRow(pair) {
         const isConnected = this.isWalletConnected();
+        const canTransact = isConnected && (window.networkManager?.isOnRequiredNetwork() || false);
         const userShares = pair.userShares || '0.00';
         const userEarnings = pair.userEarnings || '0.00';
         
@@ -319,7 +329,7 @@ class HomePage {
                             data-pair-id="${pair.id}"
                             data-pair-address="${pair.address}"
                             data-tab="0"
-                            ${!isConnected ? 'disabled' : ''}
+                            ${!canTransact ? 'disabled' : ''}
                             style="min-width: 100px;">
                         <span class="material-icons" style="font-size: 16px;">share</span>
                         ${userShares}%
@@ -330,7 +340,7 @@ class HomePage {
                             data-pair-id="${pair.id}"
                             data-pair-address="${pair.address}"
                             data-tab="2"
-                            ${!isConnected ? 'disabled' : ''}
+                            ${!canTransact ? 'disabled' : ''}
                             style="min-width: 120px;">
                         <span class="material-icons" style="font-size: 16px;">redeem</span>
                         ${userEarnings} LIB
@@ -338,15 +348,15 @@ class HomePage {
                 </td>
                 <td>
                     <div style="display: flex; gap: 8px;">
-                        <button class="btn btn-primary btn-stake" data-pair-id="${pair.id}" data-pair-address="${pair.address}" ${!isConnected || !pair.stakingEnabled ? 'disabled' : ''}>
+                        <button class="btn btn-primary btn-stake" data-pair-id="${pair.id}" data-pair-address="${pair.address}" ${!canTransact || !pair.stakingEnabled ? 'disabled' : ''}>
                             <span class="material-icons">add</span>
                             Stake
                         </button>
-                        <button class="btn btn-secondary btn-unstake" data-pair-id="${pair.id}" data-pair-address="${pair.address}" ${!isConnected || parseFloat(userShares) === 0 ? 'disabled' : ''}>
+                        <button class="btn btn-secondary btn-unstake" data-pair-id="${pair.id}" data-pair-address="${pair.address}" ${!canTransact || parseFloat(userShares) === 0 ? 'disabled' : ''}>
                             <span class="material-icons">remove</span>
                             Unstake
                         </button>
-                        <button class="btn btn-text btn-claim" data-pair-id="${pair.id}" data-pair-address="${pair.address}" ${!isConnected || parseFloat(userEarnings) === 0 ? 'disabled' : ''}>
+                        <button class="btn btn-text btn-claim" data-pair-id="${pair.id}" data-pair-address="${pair.address}" ${!canTransact || parseFloat(userEarnings) === 0 ? 'disabled' : ''}>
                             <span class="material-icons">redeem</span>
                             Claim
                         </button>
@@ -380,6 +390,19 @@ class HomePage {
                         }
                         return; // Don't open modal
                     }
+                    
+                    // Check if wallet is on configured network
+                    if (!(window.networkManager?.isOnRequiredNetwork() || false)) {
+                        const networkName = window.CONFIG?.NETWORK?.NAME || 'configured network';
+                        if (window.notificationManager) {
+                            window.notificationManager.warning(
+                                `${networkName} Network Required`,
+                                `Please switch to ${networkName} network to make transactions`
+                            );
+                        }
+                        return; // Don't open modal
+                    }
+                    
                     this.openStakingModal(pairId);
                 }
             }
@@ -622,9 +645,21 @@ class HomePage {
                 this.render(); // Re-render with TVL and APR data
 
                 // OPTIMIZATION 3: Load user data in parallel if wallet connected
-                if (this.isWalletConnected() && window.walletManager?.currentAccount) {
+                // Read-only provider can query user data from ANY network!
+                const isWalletConnected = this.isWalletConnected() && window.walletManager?.currentAccount;
+                const isOnCorrectNetwork = window.networkManager?.isOnRequiredNetwork() || false;
+                
+                if (isWalletConnected) {
                     console.log('⚡ Loading user stake data in parallel...');
                     console.log('👛 Using wallet address:', window.walletManager.currentAccount);
+                    
+                    if (!isOnCorrectNetwork) {
+                        const networkName = window.CONFIG?.NETWORK?.NAME || 'configured network';
+                        const currentChainId = window.walletManager?.getChainId();
+                        const currentNetworkName = window.networkManager?.getNetworkName(currentChainId) || 'Unknown';
+                        console.log(`📊 Read-only mode: Wallet on ${currentNetworkName}, viewing ${networkName} data`);
+                        console.log(`💡 Switch to ${networkName} to make transactions`);
+                    }
 
                     const userDataPromises = allPairsInfo.map(async (pairInfo, i) => {
                         if (pairInfo.address === '0x0000000000000000000000000000000000000000') {
@@ -686,6 +721,14 @@ class HomePage {
             console.log(`📊 Performance improvement: ~${Math.max(0, 100 - (totalTime / 100)).toFixed(0)}% faster than sequential loading`);
         } catch (error) {
             console.error('❌ Failed to load blockchain data:', error);
+            
+            // Network switched mid-load - gracefully show empty state, next refresh will fix
+            if (error.code === 'NETWORK_ERROR' || error.message?.includes('underlying network changed')) {
+                console.log('🔄 Network changed during load, skipping (will retry on next refresh)');
+                this.pairs = [];
+                return;
+            }
+            
             throw error;
         }
     }
@@ -1073,11 +1116,16 @@ class HomePage {
                 console.log(`Could not get additional data for ${pairName}:`, dataError.message);
             }
 
-            // Get user-specific data if wallet is connected
+            // Get user-specific data if wallet is connected AND on correct network
             let userSharesPercentage = '0.00';
             let userEarnings = '0.00';
 
-            if (this.isWalletConnected() && window.walletManager?.currentAccount) {
+            // Check if we're on configured network before querying user data
+            const isOnCorrectNetwork = this.isWalletConnected() && 
+                                        window.walletManager?.currentAccount && 
+                                        (window.networkManager?.isOnRequiredNetwork() || false);
+
+            if (isOnCorrectNetwork) {
                 try {
                     const userStake = await window.contractManager.getUserStake(
                         window.walletManager.currentAccount,
@@ -1351,8 +1399,88 @@ class HomePage {
         }
     }
 
+    /**
+     * Setup network indicator and listeners
+     */
+    setupNetworkIndicator() {
+        // Update indicator initially
+        this.updateNetworkIndicator();
+
+        // Update on wallet connection/disconnection
+        document.addEventListener('walletConnected', () => {
+            this.updateNetworkIndicator();
+        });
+
+        document.addEventListener('walletDisconnected', () => {
+            const indicator = document.getElementById('network-indicator-home');
+            if (indicator) {
+                indicator.style.display = 'none';
+            }
+        });
+
+        // Update on network change
+        if (window.ethereum) {
+            window.ethereum.on('chainChanged', () => {
+                this.updateNetworkIndicator();
+            });
+        }
+    }
+
+    /**
+     * Update network indicator with current status
+     */
+    async updateNetworkIndicator() {
+        const indicator = document.getElementById('network-indicator-home');
+        if (!indicator) return;
+
+        // Only show if wallet is connected
+        if (!window.walletManager || !window.walletManager.isConnected()) {
+            indicator.style.display = 'none';
+            return;
+        }
+
+        const chainId = window.walletManager.getChainId();
+        const networkName = window.networkManager?.getNetworkName(chainId) || 'Unknown';
+        const expectedNetworkName = window.CONFIG?.NETWORK?.NAME || 'Unknown';
+
+        // Check permission asynchronously
+        if (window.networkManager) {
+            try {
+                const hasPermission = await window.networkManager.hasRequiredNetworkPermission();
+
+                indicator.style.display = 'flex';
+
+                if (hasPermission) {
+                    // Green indicator - has permission
+                    indicator.innerHTML = `
+                        <span class="network-status-dot green"></span>
+                        <span class="network-name">${expectedNetworkName}</span>
+                    `;
+                    indicator.className = 'network-indicator-home has-permission';
+                } else {
+                    // Red indicator - missing permission, show "No permission"
+                    indicator.innerHTML = `
+                        <span class="network-status-dot red"></span>
+                        <span class="network-name">No permission</span>
+                        <button class="btn-grant-permission" onclick="window.networkManager.requestPermissionWithUIUpdate('home')">
+                            Grant ${expectedNetworkName} Permission
+                        </button>
+                    `;
+                    indicator.className = 'network-indicator-home missing-permission';
+                }
+            } catch (error) {
+                console.error('Error checking network permission:', error);
+                indicator.style.display = 'none';
+            }
+        } else {
+            // Fallback if networkManager not available
+            indicator.style.display = 'none';
+        }
+    }
+
     destroy() {
         this.stopAutoRefresh();
+        clearTimeout(this.refreshDebounceTimer);
     }
 }
 

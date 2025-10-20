@@ -53,7 +53,9 @@ class NetworkHealthCheck {
     /**
      * Check if a contract is deployed at the given address
      */
-    async checkContractDeployment(contractAddress, rpcUrl = 'https://rpc-amoy.polygon.technology') {
+    async checkContractDeployment(contractAddress, rpcUrl = null) {
+        // Use centralized RPC URL from config
+        rpcUrl = rpcUrl || window.CONFIG?.NETWORK?.RPC_URL || 'https://rpc-amoy.polygon.technology';
         console.log(`🔍 Checking contract deployment at ${contractAddress}...`);
 
         try {
@@ -95,7 +97,7 @@ class NetworkHealthCheck {
         results.hardhatNode = {
             success: true,
             message: 'Using Polygon Amoy Testnet - Local Hardhat check skipped',
-            chainId: 80002
+            chainId: window.CONFIG?.NETWORK?.CHAIN_ID || 80002
         };
 
         // Skip Hardhat dependency check - using Polygon Amoy
@@ -106,10 +108,7 @@ class NetworkHealthCheck {
             for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
                 console.log(`🔄 Contract deployment check attempt ${attempt}/${this.maxRetries}...`);
                 
-                results.contractDeployment = await this.checkContractDeployment(
-                    contractAddress,
-                    'https://rpc-amoy.polygon.technology'
-                );
+                results.contractDeployment = await this.checkContractDeployment(contractAddress);
                 
                 if (results.contractDeployment.success) {
                     break;

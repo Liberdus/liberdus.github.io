@@ -354,6 +354,17 @@
             white-space: nowrap;
         }
         
+        .version-badge {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-left: 12px;
+            padding: 2px 8px;
+            background: var(--action-hover);
+            border-radius: 12px;
+            white-space: nowrap;
+        }
+        
         /* Navigation */
         .nav-section {
             display: flex;
@@ -698,6 +709,12 @@
             .logo-text {
                 display: none;
             }
+            
+            .version-badge {
+                font-size: 10px;
+                margin-left: 8px;
+                padding: 2px 6px;
+            }
 
             .nav-section {
                 gap: var(--spacing-1);
@@ -784,6 +801,72 @@
         .gap-2 {
             gap: var(--spacing-2);
         }
+
+        /* Network Indicator Styles */
+        .network-indicator-home {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            transition: all 0.2s ease;
+        }
+
+        .network-indicator-home.has-permission {
+            background: rgba(76, 175, 80, 0.1);
+            border: 1px solid rgba(76, 175, 80, 0.3);
+        }
+
+        .network-indicator-home.missing-permission {
+            background: rgba(244, 67, 54, 0.1);
+            border: 1px solid rgba(244, 67, 54, 0.3);
+        }
+
+        .network-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .network-status-dot.green {
+            background-color: #4caf50;
+            box-shadow: 0 0 8px rgba(76, 175, 80, 0.6);
+        }
+
+        .network-status-dot.red {
+            background-color: #f44336;
+            box-shadow: 0 0 8px rgba(244, 67, 54, 0.6);
+            animation: pulse-red 2s infinite;
+        }
+
+        @keyframes pulse-red {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .network-name {
+            font-weight: 500;
+            color: var(--text-color);
+        }
+
+        .btn-grant-permission {
+            margin-left: 8px;
+            padding: 4px 8px;
+            font-size: 0.75rem;
+            background: var(--warning-main);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+
+        .btn-grant-permission:hover {
+            background: var(--secondary-hover);
+            opacity: 0.9;
+        }
     </style>
 </head>
 <body>
@@ -795,6 +878,7 @@
                 <a href="index.html" class="logo-section" aria-label="Liberdus LP Staking - Home">
                     <img src="assets/logo.png" alt="Liberdus LP Staking" class="logo">
                     <span class="logo-text">Liberdus LP Staking</span>
+                    <span class="version-badge" id="app-version">v0.0.0</span>
                 </a>
 
 
@@ -808,6 +892,10 @@
                         <span>Admin Panel</span>
                     </a>
 
+                    <!-- Network indicator -->
+                    <div id="network-indicator-home" class="network-indicator-home" style="display:none;">
+                        <!-- Populated by JavaScript -->
+                    </div>
 
                     <button id="connect-wallet-btn" class="connect-wallet-btn" aria-describedby="wallet-status">
                         <span class="material-icons" aria-hidden="true">account_balance_wallet</span>
@@ -850,13 +938,13 @@
             <div class="footer-content">
                 <span class="footer-text">© 2024 Liberdus LP Stake. All rights reserved.</span>
                 <div class="social-links">
-                    <a href="https://github.com" target="_blank" rel="noopener" class="social-link" title="Visit our GitHub">
+                    <a href="https://github.com/Liberdus/lib-lp-staking-frontend" target="_blank" rel="noopener" class="social-link" title="Visit our GitHub">
                         <span class="material-icons">code</span>
                     </a>
-                    <a href="https://twitter.com" target="_blank" rel="noopener" class="social-link" title="Follow us on Twitter">
+                    <a href="https://x.com/liberdus" target="_blank" rel="noopener" class="social-link" title="Follow us on X">
                         <span class="material-icons">alternate_email</span>
                     </a>
-                    <a href="https://telegram.org" target="_blank" rel="noopener" class="social-link" title="Join our Telegram">
+                    <a href="https://telegram.me/liberdus" target="_blank" rel="noopener" class="social-link" title="Join our Telegram">
                         <span class="material-icons">send</span>
                     </a>
                 </div>
@@ -869,6 +957,9 @@
 
     <div id="modal-container"></div>
     <div id="notification-container"></div>
+
+    <!-- Version Check System (runs first to ensure fresh cache) -->
+    <script src="js/utils/version-check.js"></script>
 
     <!-- Theme System (load early to prevent flash) -->
     <script src="js/core/unified-theme-manager.js"></script>
@@ -1194,6 +1285,16 @@
                 console.error('❌ UnifiedThemeManager not found');
             }
         }, 100);
+        
+        // Display version in header
+        if (window.getCurrentVersion) {
+            window.getCurrentVersion().then(function(version) {
+                const versionElement = document.getElementById('app-version');
+                if (versionElement) {
+                    versionElement.textContent = 'v' + version;
+                }
+            });
+        }
     });
     </script>
 </body>

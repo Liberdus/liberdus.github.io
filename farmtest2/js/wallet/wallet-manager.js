@@ -611,6 +611,13 @@ class WalletManager {
         this.log('Accounts changed:', accounts);
 
         if (!accounts || accounts.length === 0) {
+            // Check if this is a network change (we have a stored address)
+            // MetaMask sometimes sends empty accounts during network switches
+            if (this.address) {
+                this.log('Empty accounts during network change - ignoring');
+                return; // Don't disconnect during network changes
+            }
+            
             // User disconnected
             this.disconnect();
         } else if (accounts[0] !== this.address) {
@@ -666,7 +673,15 @@ class WalletManager {
      * Handle disconnect event
      */
     handleDisconnect(code, reason) {
-        this.log('Wallet disconnected:', code, reason);
+        this.log('Disconnect event - code:', code, 'reason:', reason);
+        
+        // Don't disconnect if we still have an address (likely a network change)
+        // MetaMask sometimes fires disconnect during network switches
+        if (this.address) {
+            this.log('Disconnect during network change - ignoring');
+            return;
+        }
+        
         this.disconnect();
     }
 
