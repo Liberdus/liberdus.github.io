@@ -786,28 +786,6 @@
     font-weight: 500;
 }
 
-/* Admin Footer */
-.admin-footer {
-    padding: 20px 30px;
-    background: rgba(0, 0, 0, 0.2);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.refresh-status {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-}
-
-#last-refresh {
-    font-size: 14px;
-    color: #a0a0a0;
-    font-family: 'Courier New', monospace;
-}
-
 /* Error Display */
 .error-display {
     text-align: center;
@@ -892,11 +870,15 @@
         font-size: 24px;
     }
     
-    .admin-footer {
+    .panel-title-row,
+    .panel-controls {
         flex-direction: column;
-        gap: 15px;
-        padding: 20px;
-        text-align: center;
+        align-items: flex-start;
+        gap: 1rem;
+    }
+    
+    .panel-stats {
+        flex-wrap: wrap;
     }
     
     .connect-card,
@@ -938,13 +920,73 @@
     width: 100%;
 }
 
+/* Panel Header & Layout */
 .panel-header {
+    margin-bottom: 1.5rem;
+}
+
+.panel-title-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 1.5rem;
-    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.panel-header h2 {
+    margin: 0;
+    color: #00d4ff;
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.panel-controls {
+    display: flex;
+    align-items: center;
     gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.panel-stats {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.panel-refresh {
+    display: flex;
+    align-items: center;
+}
+
+/* Panel Controls */
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+    margin: 0;
+}
+
+/* Refresh Button */
+.panel-refresh .refresh-btn {
+    background: linear-gradient(135deg, #00d4ff, #0099cc);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 212, 255, 0.3);
+}
+
+.panel-refresh .refresh-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 212, 255, 0.5);
+    background: linear-gradient(135deg, #00b8e6, #00d4ff);
 }
 
 /* CHANGE SIGNER BUTTON VISIBILITY FIX */
@@ -965,7 +1007,6 @@
     box-shadow: 0 4px 12px rgba(243, 156, 18, 0.3);
 }
 
-/* Ensure change signer button is never marked as in-development */
 .proposal-btn[data-modal="change-signer"].in-development {
     opacity: 1 !important;
     pointer-events: auto !important;
@@ -977,37 +1018,6 @@
 .proposal-btn[data-modal="change-signer"].in-development::before,
 .proposal-btn[data-modal="change-signer"].in-development::after {
     display: none !important;
-}
-
-.panel-header h2 {
-    margin: 0;
-    color: #00d4ff;
-    font-size: 1.5rem;
-    font-weight: 600;
-}
-
-.panel-controls {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    flex-wrap: wrap;
-}
-
-.checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: var(--text-primary);
-    cursor: pointer;
-}
-
-.checkbox-label input[type="checkbox"] {
-    margin: 0;
-}
-
-.panel-stats {
-    display: flex;
-    gap: 0.5rem;
 }
 
 .stat-chip {
@@ -1111,6 +1121,10 @@
 
 .proposal-row.rejected {
     background: rgba(220, 53, 69, 0.1);
+}
+
+.proposal-row.expired {
+    background: rgba(108, 117, 125, 0.12);
 }
 
 .proposal-id {
@@ -1270,6 +1284,13 @@
     background: linear-gradient(135deg, rgba(220, 53, 69, 0.2), rgba(231, 76, 60, 0.2));
     color: #e74c3c;
     border: 1px solid rgba(231, 76, 60, 0.4);
+}
+
+.status.expired,
+.status-badge.expired {
+    background: linear-gradient(135deg, rgba(108, 117, 125, 0.2), rgba(108, 117, 125, 0.1));
+    color: #adb5bd;
+    border: 1px solid rgba(173, 181, 189, 0.4);
 }
 
 @keyframes pulse {

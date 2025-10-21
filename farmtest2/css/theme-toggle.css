@@ -1,0 +1,46 @@
+/* ========================================
+   THEME TOGGLE BUTTON - SHARED STYLES
+   ======================================== 
+   
+   Centralized theme toggle button styles used across:
+   - Homepage (index.html)
+   - Admin Panel (admin.html)
+   
+   This ensures consistent animation behavior
+   ======================================== */
+
+.theme-toggle {
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.3s ease-in-out;
+}
+
+.theme-toggle:hover {
+    transform: rotate(180deg);
+    background: var(--action-hover);
+}
+
+/* Material Icons support */
+.theme-toggle .material-icons-outlined {
+    transition: inherit;
+}
+
+/* Accessibility - Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    .theme-toggle {
+        transition: background 0.2s ease;
+    }
+    
+    .theme-toggle:hover {
+        transform: none;
+    }
+}
+

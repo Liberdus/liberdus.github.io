@@ -258,6 +258,13 @@ body {
     border: 1px solid var(--info-main) !important;
 }
 
+.status-badge.expired,
+.status.expired {
+    background: rgba(158, 158, 158, 0.1) !important;
+    color: var(--text-secondary) !important;
+    border: 1px solid rgba(158, 158, 158, 0.4) !important;
+}
+
 /* ========================================
    ACTION TYPE BADGES - HOMEPAGE COLORS
    ======================================== */
@@ -641,6 +648,10 @@ textarea::placeholder {
 
 .proposal-row.rejected {
     background: rgba(244, 67, 54, 0.05) !important;
+}
+
+.proposal-row.expired {
+    background: rgba(158, 158, 158, 0.05) !important;
 }
 
 /* ========================================
@@ -1238,6 +1249,35 @@ button.btn span:not(.btn-loading),
     color: #f44336 !important;
 }
 
+/* ========================================
+   WALLET ADDRESS DISPLAY
+   ======================================== */
+.wallet-address-display {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    padding: 8px 14px !important;
+    border-radius: 8px !important;
+    border: 1px solid var(--divider) !important;
+    background: var(--background-paper) !important;
+    margin-right: 12px !important;
+    transition: all 0.2s ease !important;
+    cursor: default !important;
+}
+
+.wallet-address-display svg {
+    opacity: 0.8 !important;
+    color: var(--primary-main) !important;
+}
+
+.wallet-address-display .wallet-address-text {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    font-family: "Monaco", "Courier New", monospace !important;
+    color: var(--text-primary) !important;
+    letter-spacing: 0.5px !important;
+}
+
 /* Admin header layout adjustments */
 .admin-header-content {
     display: flex !important;
@@ -1410,12 +1450,8 @@ button.btn span:not(.btn-loading),
 /* ========================================
    THEME TRANSITION SMOOTHNESS
    ======================================== */
-* {
-    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease !important;
-}
-
-/* Exclude animations and transforms from theme transition */
-*:not(.spinner):not(.loading-skeleton) {
+/* Exclude theme toggle button from wildcard transition to allow its own animations */
+*:not(.spinner):not(.loading-skeleton):not(.theme-toggle):not(.theme-toggle *) {
     transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease !important;
 }
 

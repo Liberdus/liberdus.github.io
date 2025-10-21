@@ -207,6 +207,7 @@
             'css/in-development.css',
             'css/main.css',
             'css/responsive.css',
+            'css/theme-toggle.css',
             'css/variables.css',
             'css/wallet-popup.css'
         ];

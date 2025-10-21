@@ -168,7 +168,21 @@
             if (toggleButton) {
                 const icon = toggleButton.querySelector('.material-icons-outlined');
                 if (icon) {
-                    icon.textContent = this.currentTheme === 'light' ? 'dark_mode' : 'light_mode';
+                    // Rotate icon 180°
+                    icon.style.transition = 'transform 0.3s ease';
+                    icon.style.transform = 'rotate(180deg)';
+                    
+                    // Change icon at halfway point
+                    setTimeout(() => {
+                        icon.textContent = this.currentTheme === 'light' ? 'bedtime' : 'light_mode';
+                        icon.style.transform = 'rotate(0deg)';
+                    }, 150);
+                    
+                    // Remove inline styles after animation to allow CSS hover
+                    setTimeout(() => {
+                        icon.style.transition = '';
+                        icon.style.transform = '';
+                    }, 350);
                 }
                 toggleButton.setAttribute('aria-label', `Switch to ${this.currentTheme === 'light' ? 'dark' : 'light'} mode`);
             }

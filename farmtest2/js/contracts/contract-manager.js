@@ -1419,10 +1419,13 @@ class ContractManager {
      */
     async getAction(actionId) {
         return await this.executeWithRetry(async () => {
-            const [action, approvals] = await Promise.all([
+            const [action, approvals, expiredOverride] = await Promise.all([
                 this.stakingContract.actions(actionId),
-                this.stakingContract.getActionApproval(actionId)
+                this.stakingContract.getActionApproval(actionId),
+                this.stakingContract.isActionExpired(actionId)
             ]);
+
+            const expired = expiredOverride !== undefined ? !!expiredOverride : action.expired;
             return {
                 actionType: action.actionType,
                 newHourlyRewardRate: action.newHourlyRewardRate.toString(),
@@ -1436,7 +1439,7 @@ class ContractManager {
                 recipient: action.recipient,
                 withdrawAmount: action.withdrawAmount.toString(),
                 executed: action.executed,
-                expired: action.expired,
+                expired: expired,
                 approvals: action.approvals,
                 approvedBy: approvals,
                 proposedTime: action.proposedTime.toNumber(),
@@ -1458,12 +1461,13 @@ class ContractManager {
                 throw new Error(`Invalid action ID: ${actionId}`);
             }
 
-            // Fetch action details, pairs, weights, and approvals in parallel for efficiency
-            const [action, pairs, weights, approvedBy] = await Promise.all([
+            // Fetch action details, pairs, weights, approvals, and expiration in parallel
+            const [action, pairs, weights, approvedBy, expiredOverride] = await Promise.all([
                 this.stakingContract.actions(BigInt(numericActionId)),
                 this.stakingContract.getActionPairs(numericActionId),
                 this.stakingContract.getActionWeights(numericActionId),
-                this.stakingContract.getActionApproval(numericActionId)
+                this.stakingContract.getActionApproval(numericActionId),
+                this.stakingContract.isActionExpired(numericActionId)
             ]);
 
             console.log(`[SINGLE ACTION] ✅ Successfully fetched action ${actionId}:`, {
@@ -1479,7 +1483,7 @@ class ContractManager {
                 actionType: action.actionType,
                 executed: action.executed,
                 rejected: action.rejected,
-                expired: action.expired,
+                expired: expiredOverride !== undefined ? !!expiredOverride : action.expired,
                 approvals: action.approvals,
                 proposer: action.proposer,
                 createdAt: action.proposedTime ? action.proposedTime.toString() : Date.now().toString(),
@@ -1550,14 +1554,23 @@ class ContractManager {
         return await this.safeContractCall(
             async () => {
                 try {
-                    const rawAction = await this.stakingContract.actions(BigInt(actionId));
+                    const [rawAction, expiredOverride] = await Promise.all([
+                        this.stakingContract.actions(BigInt(actionId)),
+                        this.stakingContract.isActionExpired(BigInt(actionId))
+                    ]);
                     this.log(`🔍 Raw action ${actionId}:`, rawAction);
+
+                    const storedExpired = rawAction?.expired ?? (Array.isArray(rawAction) ? rawAction[10] : rawAction?.[10]);
+                    const finalExpired = expiredOverride !== undefined
+                        ? Boolean(expiredOverride)
+                        : (storedExpired !== undefined ? Boolean(storedExpired) : false);
 
                     // Handle different return formats
                     if (rawAction) {
                         // If it's already an object with properties
                         if (rawAction.actionType !== undefined) {
                             this.log(`✅ Action ${actionId} is object format`);
+                            rawAction.expired = finalExpired;
                             return rawAction;
                         }
 
@@ -1575,7 +1588,7 @@ class ContractManager {
                                 recipient: rawAction[7],
                                 withdrawAmount: rawAction[8],
                                 executed: rawAction[9],
-                                expired: rawAction[10],
+                                expired: finalExpired,
                                 approvals: rawAction[11],
                                 proposedTime: rawAction[12],
                                 rejected: rawAction[13],
@@ -1600,7 +1613,7 @@ class ContractManager {
                                 recipient: rawAction[7],
                                 withdrawAmount: rawAction[8],
                                 executed: rawAction[9],
-                                expired: rawAction[10],
+                                expired: finalExpired,
                                 approvals: rawAction[11],
                                 proposedTime: rawAction[12],
                                 rejected: rawAction[13],
@@ -1700,7 +1713,7 @@ class ContractManager {
 
                 try {
                     // Load action, pairs, weights, and approvals in parallel
-                    const [action, pairs, weights, approvedBy] = await Promise.all([
+                    const [action, pairs, weights, approvedBy, expiredOverride] = await Promise.all([
                         blockTag
                             ? contract.actions(BigInt(actionId), { blockTag })
                             : contract.actions(BigInt(actionId)),
@@ -1712,7 +1725,10 @@ class ContractManager {
                             : contract.getActionWeights(actionId),
                         blockTag
                             ? contract.getActionApproval(actionId, { blockTag })
-                            : contract.getActionApproval(actionId)
+                            : contract.getActionApproval(actionId),
+                        blockTag
+                            ? contract.isActionExpired(actionId, { blockTag })
+                            : contract.isActionExpired(actionId)
                     ]);
 
                     const formattedAction = {
@@ -1729,7 +1745,7 @@ class ContractManager {
                         recipient: action.recipient,
                         withdrawAmount: action.withdrawAmount.toString(),
                         executed: action.executed,
-                        expired: action.expired,
+                        expired: expiredOverride !== undefined ? !!expiredOverride : action.expired,
                         approvals: action.approvals,
                         approvedBy: approvedBy,
                         proposedTime: action.proposedTime.toNumber(),
@@ -1832,7 +1848,7 @@ class ContractManager {
             const batchPromises = batchIds.map(async (actionId) => {
                 try {
                     // Load action, pairs, weights, and approvals in parallel
-                    const [action, pairs, weights, approvedBy] = await Promise.all([
+                    const [action, pairs, weights, approvedBy, expiredOverride] = await Promise.all([
                         blockTag
                             ? contract.actions(BigInt(actionId), { blockTag })
                             : contract.actions(BigInt(actionId)),
@@ -1844,7 +1860,10 @@ class ContractManager {
                             : contract.getActionWeights(actionId),
                         blockTag
                             ? contract.getActionApproval(actionId, { blockTag })
-                            : contract.getActionApproval(actionId)
+                            : contract.getActionApproval(actionId),
+                        blockTag
+                            ? contract.isActionExpired(actionId, { blockTag })
+                            : contract.isActionExpired(actionId)
                     ]);
 
                     return {
@@ -1861,7 +1880,7 @@ class ContractManager {
                         recipient: action.recipient,
                         withdrawAmount: action.withdrawAmount.toString(),
                         executed: action.executed,
-                        expired: action.expired,
+                        expired: expiredOverride !== undefined ? !!expiredOverride : action.expired,
                         approvals: action.approvals,
                         approvedBy: approvedBy,
                         proposedTime: action.proposedTime.toNumber(),
@@ -2024,52 +2043,47 @@ class ContractManager {
             const errorMessage = error.message || error.technicalMessage || '';
             const errorCode = error.code;
 
+            // Detect explicit wallet rejection regardless of provider wording
+            const normalizedMessage = typeof errorMessage === 'string' ? errorMessage.toLowerCase() : '';
+            if (errorCode === 4001 || errorCode === 'ACTION_REJECTED' || normalizedMessage.includes('user rejected')) {
+                console.warn('⚠️ User rejected transaction during proposeSetHourlyRewardRate');
+                return {
+                    success: false,
+                    error: 'Transaction was rejected by user',
+                    userRejected: true,
+                    originalError: error
+                };
+            }
+
             // Check for RPC/Network errors
             if (errorCode === -32603 || errorMessage.includes('Internal JSON-RPC error') ||
                 errorMessage.includes('missing trie node') || errorCode === 'NETWORK_ERROR') {
-                console.warn('⚠️ Network/RPC error detected, creating mock proposal for demo');
-
-                // Create a realistic mock proposal for demo purposes
-                const mockProposalId = Math.floor(Math.random() * 1000) + 1;
+                console.warn('⚠️ Network/RPC error detected during proposeSetHourlyRewardRate');
                 return {
-                    success: true,
-                    transactionHash: '0x' + Math.random().toString(16).substr(2, 64),
-                    blockNumber: Math.floor(Math.random() * 100000) + 400000,
-                    gasUsed: '120000',
-                    proposalId: mockProposalId,
-                    message: 'Demo proposal created (network issues prevented real transaction)',
-                    isDemo: true
+                    success: false,
+                    error: 'Network error occurred while creating hourly rate proposal. Please retry once the connection stabilizes.',
+                    networkError: true,
+                    originalError: error
                 };
             }
 
             // Check if this is a signer issue and provide better error message
             if (errorCode === 'UNSUPPORTED_OPERATION' && errorMessage.includes('signer')) {
-                console.warn('⚠️ Signer error detected, creating mock proposal for demo');
-
-                // Create a realistic mock proposal for demo purposes
-                const mockProposalId = Math.floor(Math.random() * 1000) + 1;
+                console.warn('⚠️ Signer error detected during proposeSetHourlyRewardRate');
                 return {
-                    success: true,
-                    transactionHash: '0x' + Math.random().toString(16).substr(2, 64),
-                    blockNumber: Math.floor(Math.random() * 100000) + 400000,
-                    gasUsed: '120000',
-                    proposalId: mockProposalId,
-                    message: 'Demo proposal created (signer issues prevented real transaction)',
-                    isDemo: true
+                    success: false,
+                    error: 'Unable to access wallet signer. Please reconnect your wallet and try again.',
+                    signerUnavailable: true,
+                    originalError: error
                 };
             }
 
-            // For any other error, create mock proposal to keep demo working
-            console.warn('⚠️ Unknown error, creating mock proposal for demo:', errorMessage);
-            const mockProposalId = Math.floor(Math.random() * 1000) + 1;
+            console.warn('⚠️ Unknown error while creating hourly rate proposal:', errorMessage);
             return {
-                success: true,
-                transactionHash: '0x' + Math.random().toString(16).substr(2, 64),
-                blockNumber: Math.floor(Math.random() * 100000) + 400000,
-                gasUsed: '120000',
-                proposalId: mockProposalId,
-                message: 'Demo proposal created (technical issues prevented real transaction)',
-                isDemo: true
+                success: false,
+                error: errorMessage || 'Failed to create hourly rate proposal.',
+                unknownError: true,
+                originalError: error
             };
         }
     }
@@ -2186,14 +2200,10 @@ class ContractManager {
                 console.log('⚠️ proposeAddPair function not available in deployed contract');
                 console.log('🔧 This contract may not have governance functions implemented');
 
-                // Return mock success for development
                 return {
-                    success: true,
-                    transactionHash: '0x' + Math.random().toString(16).substr(2, 64),
-                    blockNumber: Math.floor(Math.random() * 1000000),
-                    gasUsed: '21000',
-                    message: 'Mock transaction - contract function not available',
-                    isDemo: true
+                    success: false,
+                    error: 'proposeAddPair function is not available on the deployed contract.',
+                    methodUnavailable: true
                 };
             }
 
@@ -2704,12 +2714,9 @@ class ContractManager {
             if (typeof this.stakingContract.proposeRemovePair !== 'function') {
                 console.log('⚠️ proposeRemovePair function not available in deployed contract');
                 return {
-                    success: true,
-                    transactionHash: '0x' + Math.random().toString(16).substr(2, 64),
-                    blockNumber: Math.floor(Math.random() * 1000000),
-                    gasUsed: '21000',
-                    message: 'Mock transaction - contract function not available',
-                    isDemo: true
+                    success: false,
+                    error: 'proposeRemovePair function is not available on the deployed contract.',
+                    methodUnavailable: true
                 };
             }
 
@@ -2769,7 +2776,7 @@ class ContractManager {
             console.log(`[REMOVE PAIR FIX]   Error code: ${errorCode}`);
 
             // Check for specific error types
-            if (errorMessage.includes('user rejected') || errorCode === 4001) {
+            if (errorMessage.includes('user rejected') || errorCode === 4001 || errorCode === 'ACTION_REJECTED') {
                 return {
                     success: false,
                     error: 'Transaction was rejected by user',
@@ -2838,12 +2845,9 @@ class ContractManager {
                 console.log('⚠️ Contract instance:', this.stakingContract);
                 console.log('⚠️ Available functions:', this.stakingContract ? Object.getOwnPropertyNames(this.stakingContract.functions || {}) : 'No contract');
                 return {
-                    success: true,
-                    transactionHash: '0x' + Math.random().toString(16).substr(2, 64),
-                    blockNumber: Math.floor(Math.random() * 1000000),
-                    gasUsed: '21000',
-                    message: 'Mock transaction - contract function not available',
-                    isDemo: true
+                    success: false,
+                    error: 'proposeChangeSigner function is not available on the deployed contract.',
+                    methodUnavailable: true
                 };
             }
 
@@ -2909,7 +2913,7 @@ class ContractManager {
             console.log(`[CHANGE SIGNER FIX]   Error code: ${errorCode}`);
 
             // Check for specific error types
-            if (errorMessage.includes('user rejected') || errorCode === 4001) {
+            if (errorMessage.includes('user rejected') || errorCode === 4001 || errorCode === 'ACTION_REJECTED') {
                 return {
                     success: false,
                     error: 'Transaction was rejected by user',
@@ -3744,10 +3748,13 @@ class ContractManager {
      */
     async getAction(actionId) {
         try {
-            const [action, approvedBy] = await Promise.all([
+            const [action, approvedBy, expiredOverride] = await Promise.all([
                 this.stakingContract.actions(actionId),
-                this.stakingContract.getActionApproval(actionId)
+                this.stakingContract.getActionApproval(actionId),
+                this.stakingContract.isActionExpired(actionId)
             ]);
+
+            const expired = expiredOverride !== undefined ? !!expiredOverride : action.expired;
             return {
                 actionType: action.actionType,
                 newHourlyRewardRate: action.newHourlyRewardRate,
@@ -3761,7 +3768,7 @@ class ContractManager {
                 recipient: action.recipient,
                 withdrawAmount: action.withdrawAmount,
                 executed: action.executed,
-                expired: action.expired,
+                expired: expired,
                 approvals: action.approvals,
                 approvedBy: approvedBy,
                 proposedTime: action.proposedTime,

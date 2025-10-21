@@ -194,26 +194,6 @@ body {
     gap: var(--spacing-2);
 }
 
-/* Theme Toggle Button - MATCHING HOMEPAGE */
-.theme-toggle {
-    width: 40px;
-    height: 40px;
-    border: none;
-    border-radius: 50%;
-    background: transparent;
-    color: var(--text-primary);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: transform 0.3s ease-in-out;
-}
-
-.theme-toggle:hover {
-    transform: rotate(180deg);
-    background: var(--action-hover);
-}
-
 /* ========================================
    CARDS - MATCHING HOMEPAGE
    ======================================== */

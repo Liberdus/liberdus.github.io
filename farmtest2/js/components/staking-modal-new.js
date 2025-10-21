@@ -804,6 +804,28 @@ class StakingModalNew {
         // Restore body scroll
         document.body.style.overflow = '';
     }
+    
+    /**
+     * Clear all input values and reset state after successful transaction
+     */
+    clearInputs() {
+        // Clear state
+        this.stakeAmount = '';
+        this.unstakeAmount = '';
+        this.isApproved = false;
+        this.needsApproval = false;
+        this.isApproving = false;
+        
+        // Clear DOM inputs and sliders for both stake and unstake
+        ['stake', 'unstake'].forEach(type => {
+            const input = document.getElementById(`${type}-amount-input`);
+            const slider = document.getElementById(`${type}-slider`);
+            if (input) input.value = '';
+            if (slider) slider.value = '0';
+        });
+        
+        console.log('🧹 Input values cleared');
+    }
 
     updatePairInfo() {
         const pairInfoElement = document.getElementById('modal-pair-info');
@@ -1158,10 +1180,10 @@ class StakingModalNew {
 
             console.log('✅ Staking transaction successful:', result.hash);
 
-            // Reset approval state
-            this.isApproved = false;
-            this.needsApproval = false;
-
+            // Clear inputs after successful transaction
+            this.clearInputs();
+            
+            // Close modal
             this.close();
 
             // Wait for blockchain state to update before refreshing
@@ -1230,6 +1252,11 @@ class StakingModalNew {
             }
 
             console.log('✅ Unstaking transaction successful:', result.hash);
+            
+            // Clear inputs after successful transaction
+            this.clearInputs();
+            
+            // Close modal
             this.close();
 
             // Wait for blockchain state to update before refreshing
@@ -1297,6 +1324,11 @@ class StakingModalNew {
             }
 
             console.log('✅ Claim transaction successful:', result.hash);
+            
+            // Clear inputs after successful transaction
+            this.clearInputs();
+            
+            // Close modal
             this.close();
 
             // Wait for blockchain state to update before refreshing

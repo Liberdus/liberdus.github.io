@@ -209,19 +209,6 @@ class AdminPage {
     }
 
     /**
-     * Get all mock proposals with realistic data
-     */
-    getMockProposals() {
-        return Array.from(this.mockProposals.values()).map(proposal => ({
-            ...proposal,
-            votes: Array.from(this.mockVotes.get(proposal.id)?.entries() || []).map(([signer, voteData]) => ({
-                signer,
-                ...voteData
-            }))
-        }));
-    }
-
-    /**
      * Show initialization error to user
      */
     showInitializationError(error) {
@@ -1242,19 +1229,6 @@ class AdminPage {
         return isValid;
     }
 
-    validateForm(form) {
-        const inputs = form.querySelectorAll('.form-input[data-validation]');
-        let isFormValid = true;
-
-        inputs.forEach(input => {
-            if (!this.validateFormInput(input)) {
-                isFormValid = false;
-            }
-        });
-
-        return isFormValid;
-    }
-
     showTransactionStatus(status, message, hash, error = null) {
         const statusContainer = document.getElementById('transaction-status') || this.createTransactionStatusContainer();
 
@@ -1424,6 +1398,30 @@ class AdminPage {
         }
     }
 
+    /**
+     * Create wallet address display component
+     */
+    createWalletAddressDisplay() {
+        // Get wallet address from multiple sources
+        const address = this.userAddress 
+            || window.walletManager?.address 
+            || window.walletConnection?.address;
+
+        const walletIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;">
+            <path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+        </svg>`;
+
+        const displayText = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Not Connected';
+        const title = address ? `Connected: ${address}` : 'No wallet connected';
+
+        return `
+            <div class="wallet-address-display" title="${title}">
+                ${walletIcon}
+                <span class="wallet-address-text">${displayText}</span>
+            </div>
+        `;
+    }
+
     createAdminLayout() {
         const container = document.getElementById('admin-content') || document.body;
         const devModeIndicator = this.DEVELOPMENT_MODE
@@ -1446,6 +1444,7 @@ class AdminPage {
                         </div>
                         <div class="admin-header-right">
                             ${this.createNetworkIndicator()}
+                            ${this.createWalletAddressDisplay()}
                             <nav class="admin-nav">
                                 <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme">
                                     <span class="material-icons-outlined">light_mode</span>
@@ -1505,14 +1504,6 @@ class AdminPage {
                     </div>
                 </div>
 
-                <div class="admin-footer">
-                    <div class="refresh-status">
-                        <span id="last-refresh">Last updated: Loading...</span>
-                        <button class="btn btn-sm refresh-btn" type="button">
-                            🔄 Refresh
-                        </button>
-                    </div>
-                </div>
             </div>
         `;
         
@@ -1567,7 +1558,14 @@ class AdminPage {
             panelDiv.innerHTML = `
                 <div class="multisign-panel">
                     <div class="panel-header">
-                        <h2>Multi-Signature Proposals</h2>
+                        <div class="panel-title-row">
+                            <h2>Multi-Signature Proposals</h2>
+                            <div class="panel-refresh">
+                                <button class="btn btn-sm refresh-btn" type="button" onclick="adminPage.refreshData()">
+                                    🔄 Refresh
+                                </button>
+                            </div>
+                        </div>
                         <div class="panel-controls">
                             <label class="checkbox-label">
                                 <input type="checkbox" id="hide-executed" checked>
@@ -1974,9 +1972,9 @@ class AdminPage {
         proposal.id = proposal.id || 'unknown';
         proposal.approvedBy = proposal.approvedBy || [];
 
-        const canExecute = proposal.approvals >= proposal.requiredApprovals && !proposal.executed && !proposal.rejected;
-        const statusClass = proposal.executed ? 'executed' : proposal.rejected ? 'rejected' : canExecute ? 'ready' : 'pending';
-        const statusText = proposal.executed ? '✅ Executed' : proposal.rejected ? '❌ Rejected' : canExecute ? '🚀 Ready to Execute' : '⏳ Pending';
+        const canExecute = proposal.approvals >= proposal.requiredApprovals && !proposal.executed && !proposal.rejected && !proposal.expired;
+        const statusClass = proposal.executed ? 'executed' : proposal.rejected ? 'rejected' : proposal.expired ? 'expired' : canExecute ? 'ready' : 'pending';
+        const statusText = proposal.executed ? '✅ Executed' : proposal.rejected ? '❌ Rejected' : proposal.expired ? '⏰ Expired' : canExecute ? '🚀 Ready to Execute' : '⏳ Pending';
 
         // Enhanced action type display with icons
         const actionTypeDisplay = this.getActionTypeDisplay(proposal.actionType);
@@ -2017,7 +2015,7 @@ class AdminPage {
                 </td>
                 <td>
                     <div class="action-buttons">
-                        ${!proposal.executed && !proposal.rejected ? this.renderProposalActionButtons(proposal, canExecute) : ''}
+                        ${!proposal.executed && !proposal.rejected && !proposal.expired ? this.renderProposalActionButtons(proposal, canExecute) : ''}
                     </div>
                 </td>
             </tr>
@@ -2096,14 +2094,6 @@ class AdminPage {
                 </div>
             ` : ''}
         `;
-    }
-
-    /**
-     * PERFORMANCE OPTIMIZATION: Generate action buttons for proposal (legacy)
-     */
-    generateProposalActionButtons(proposal) {
-        // Redirect to new function
-        return this.renderProposalActionButtons(proposal, false);
     }
 
     /**
@@ -3406,9 +3396,9 @@ class AdminPage {
             proposal.id = proposal.id || 'unknown';
             proposal.approvedBy = proposal.approvedBy || [];
 
-            const canExecute = proposal.approvals >= proposal.requiredApprovals && !proposal.executed && !proposal.rejected;
-            const statusClass = proposal.executed ? 'executed' : proposal.rejected ? 'rejected' : canExecute ? 'ready' : 'pending';
-            const statusText = proposal.executed ? '✅ Executed' : proposal.rejected ? '❌ Rejected' : canExecute ? '🚀 Ready to Execute' : '⏳ Pending';
+            const canExecute = proposal.approvals >= proposal.requiredApprovals && !proposal.executed && !proposal.rejected && !proposal.expired;
+            const statusClass = proposal.executed ? 'executed' : proposal.rejected ? 'rejected' : proposal.expired ? 'expired' : canExecute ? 'ready' : 'pending';
+            const statusText = proposal.executed ? '✅ Executed' : proposal.rejected ? '❌ Rejected' : proposal.expired ? '⏰ Expired' : canExecute ? '🚀 Ready to Execute' : '⏳ Pending';
 
             // Add visual indicator for ready-to-execute proposals
             if (canExecute) {
@@ -3454,7 +3444,7 @@ class AdminPage {
                     </td>
                     <td>
                         <div class="action-buttons">
-                            ${!proposal.executed && !proposal.rejected ? this.renderProposalActionButtons(proposal, canExecute) : ''}
+                            ${!proposal.executed && !proposal.rejected && !proposal.expired ? this.renderProposalActionButtons(proposal, canExecute) : ''}
                         </div>
                     </td>
                 </tr>
@@ -3930,15 +3920,6 @@ class AdminPage {
         return `${address.slice(0, 6)}...${address.slice(-4)}`;
     }
 
-    formatNumber(num) {
-        if (num >= 1000000) {
-            return (num / 1000000).toFixed(1) + 'M';
-        } else if (num >= 1000) {
-            return (num / 1000).toFixed(1) + 'K';
-        }
-        return num.toString();
-    }
-
     /**
      * Add demo data indicator to the UI
      */
@@ -4084,183 +4065,6 @@ class AdminPage {
         `;
     }
 
-    // Proposal Actions
-    async approveAction(proposalId) {
-        console.log(`✅ Approving proposal ${proposalId}`);
-
-        try {
-            const contractManager = await this.ensureContractReady();
-
-            // PERFORMANCE OPTIMIZATION: Use optimistic updates for immediate feedback
-            if (this.optimisticUI && this.performanceMonitor) {
-                const startTime = Date.now();
-
-                // Get user address for optimistic update
-                const userAddress = contractManager.signer ? await contractManager.signer.getAddress() : null;
-
-                // Track UI response time
-                this.performanceMonitor.trackUIResponse('button-click', startTime);
-
-                // Use optimistic update system
-                const result = await this.optimisticUI.handleOptimisticApprove(proposalId, userAddress, contractManager);
-
-                // Track optimistic update success
-                this.performanceMonitor.trackOptimisticUpdate(true, proposalId, 'approve');
-
-                console.log('✅ Optimistic approval completed:', result);
-                return result;
-
-            } else {
-                // Fallback to legacy behavior
-                console.log('📋 Using legacy approval flow...');
-
-                // Show loading notification
-                if (window.notificationManager) {
-                    window.notificationManager.info('Approving Proposal', `Submitting approval for proposal #${proposalId}...`);
-                }
-
-                const result = await contractManager.approveAction(proposalId);
-
-                console.log('✅ Approval transaction completed:', result);
-
-                // Show success notification
-                if (window.notificationManager) {
-                    window.notificationManager.success('Proposal Approved', `Successfully approved proposal #${proposalId}`);
-                }
-            }
-
-            // PERFORMANCE OPTIMIZATION: Update only the specific proposal instead of full refresh
-            setTimeout(async () => {
-                if (this.optimizedAdminState && this.optimisticUI) {
-                    // Use single action update instead of full refresh
-                    try {
-                        const updatedAction = await contractManager.getSingleActionForUpdate(proposalId);
-                        this.optimizedAdminState.updateSingleProposal(proposalId, updatedAction);
-                        this.efficientDOM.updateSingleProposalRow(proposalId, updatedAction);
-
-                        // Track performance improvement
-                        if (this.performanceMonitor) {
-                            this.performanceMonitor.trackNetworkCall('single-update', { proposalId, action: 'approve' });
-                        }
-
-                        console.log('🎯 Single proposal updated after approve action (OPTIMIZED)');
-                    } catch (error) {
-                        console.warn('⚠️ Single update failed, falling back to full refresh:', error);
-                        await this.refreshAfterTransaction();
-
-                        if (this.performanceMonitor) {
-                            this.performanceMonitor.trackNetworkCall('full-refresh', { reason: 'single-update-fallback' });
-                        }
-                    }
-                } else {
-                    // Fallback to original behavior - use comprehensive refresh
-                    await this.refreshAfterTransaction();
-                    console.log('🔄 All data refreshed after approve action (LEGACY)');
-                }
-            }, 3000);
-
-        } catch (error) {
-            console.error('❌ Failed to approve proposal:', error);
-
-            if (window.notificationManager) {
-                window.notificationManager.error('Approval Failed', `Failed to approve proposal #${proposalId}: ${error.message}`);
-            }
-        }
-    }
-
-    async rejectAction(proposalId) {
-        console.log(`❌ Rejecting proposal ${proposalId}`);
-
-        try {
-            // Show loading notification
-            if (window.notificationManager) {
-                window.notificationManager.info('Rejecting Proposal', `Submitting rejection for proposal #${proposalId}...`);
-            }
-
-            const contractManager = await this.ensureContractReady();
-            const result = await contractManager.rejectAction(proposalId);
-
-            console.log('✅ Rejection transaction completed:', result);
-
-            // Show success notification
-            if (window.notificationManager) {
-                window.notificationManager.success('Proposal Rejected', `Successfully rejected proposal #${proposalId}`);
-            }
-
-            // PERFORMANCE OPTIMIZATION: Update only the specific proposal instead of full refresh
-            setTimeout(async () => {
-                if (this.optimizedAdminState && this.optimisticUI) {
-                    // Use single action update instead of full refresh
-                    try {
-                        const updatedAction = await contractManager.getSingleActionForUpdate(proposalId);
-                        this.optimizedAdminState.updateSingleProposal(proposalId, updatedAction);
-                        this.efficientDOM.updateSingleProposalRow(proposalId, updatedAction);
-
-                        // Track performance improvement
-                        if (this.performanceMonitor) {
-                            this.performanceMonitor.trackNetworkCall('single-update', { proposalId, action: 'reject' });
-                        }
-
-                        console.log('🎯 Single proposal updated after reject action (OPTIMIZED)');
-                    } catch (error) {
-                        console.warn('⚠️ Single update failed, falling back to full refresh:', error);
-                        await this.refreshAfterTransaction();
-
-                        if (this.performanceMonitor) {
-                            this.performanceMonitor.trackNetworkCall('full-refresh', { reason: 'single-update-fallback' });
-                        }
-                    }
-                } else {
-                    // Fallback to original behavior - use comprehensive refresh
-                    await this.refreshAfterTransaction();
-                    console.log('🔄 All data refreshed after reject action (LEGACY)');
-                }
-            }, 3000);
-
-        } catch (error) {
-            console.error('❌ Failed to reject proposal:', error);
-
-            if (window.notificationManager) {
-                window.notificationManager.error('Rejection Failed', `Failed to reject proposal #${proposalId}: ${error.message}`);
-            }
-        }
-    }
-
-    async executeAction(proposalId) {
-        console.log(`▶ Executing proposal ${proposalId}`);
-
-        try {
-            // Show loading notification
-            if (window.notificationManager) {
-                window.notificationManager.info('Executing Proposal', `Executing proposal #${proposalId}...`);
-            }
-
-            const contractManager = await this.ensureContractReady();
-            const result = await contractManager.executeAction(proposalId);
-
-            console.log('✅ Execution transaction completed:', result);
-
-            // Show success notification
-            if (window.notificationManager) {
-                window.notificationManager.success('Proposal Executed', `Successfully executed proposal #${proposalId}`);
-            }
-
-            // Refresh the proposals list and contract stats with delay
-            setTimeout(async () => {
-                await this.loadMultiSignPanel();
-                await this.loadContractStats();
-                console.log('🔄 Proposals and stats refreshed after execute action');
-            }, 3000);
-
-        } catch (error) {
-            console.error('❌ Failed to execute proposal:', error);
-
-            if (window.notificationManager) {
-                window.notificationManager.error('Execution Failed', `Failed to execute proposal #${proposalId}: ${error.message}`);
-            }
-        }
-    }
-
     toggleProposal(proposalId) {
         console.log(`🔄 Toggling proposal ${proposalId} details`);
         const detailsRow = document.getElementById(`details-${proposalId}`);
@@ -4282,63 +4086,6 @@ class AdminPage {
                 proposalRow.classList.toggle('expanded', !isVisible);
             }
         }
-    }
-
-    // Form Submission Methods
-    async submitHourlyRate(event) {
-        event.preventDefault();
-        const rate = document.getElementById('hourly-rate-input').value;
-        console.log(`💰 Creating hourly rate proposal: ${rate}`);
-        // TODO: Implement contract call
-        alert(`Create hourly rate proposal: ${rate} USDC/hour`);
-        this.closeModal();
-    }
-
-    async submitAddPair(event) {
-        event.preventDefault();
-        const address = document.getElementById('pair-address-input').value;
-        const weight = document.getElementById('pair-weight-input').value;
-        console.log(`➕ Creating add pair proposal: ${address}, weight: ${weight}`);
-        // TODO: Implement contract call
-        alert(`Create add pair proposal: ${address} with weight ${weight}`);
-        this.closeModal();
-    }
-
-    async submitRemovePair(event) {
-        event.preventDefault();
-        const pairAddress = document.getElementById('remove-pair-select').value;
-        console.log(`➖ Creating remove pair proposal: ${pairAddress}`);
-        // TODO: Implement contract call
-        alert(`Create remove pair proposal: ${pairAddress}`);
-        this.closeModal();
-    }
-
-    async submitUpdateWeights(event) {
-        event.preventDefault();
-        console.log(`⚖️ Creating update weights proposal`);
-        // TODO: Implement contract call
-        alert(`Create update weights proposal`);
-        this.closeModal();
-    }
-
-    async submitChangeSigner(event) {
-        event.preventDefault();
-        const oldSigner = document.getElementById('old-signer-input').value;
-        const newSigner = document.getElementById('new-signer-input').value;
-        console.log(`🔄 Creating change signer proposal: ${oldSigner} -> ${newSigner}`);
-        // TODO: Implement contract call
-        alert(`Create change signer proposal: ${oldSigner} -> ${newSigner}`);
-        this.closeModal();
-    }
-
-    async submitWithdrawRewards(event) {
-        event.preventDefault();
-        const amount = document.getElementById('withdraw-amount-input').value;
-        const toAddress = document.getElementById('withdraw-to-input').value;
-        console.log(`💸 Creating withdraw proposal: ${amount} to ${toAddress}`);
-        // TODO: Implement contract call
-        alert(`Create withdraw proposal: ${amount} USDC to ${toAddress}`);
-        this.closeModal();
     }
 
     // Additional utility methods
@@ -4455,20 +4202,6 @@ class AdminPage {
         }
 
         return window.contractManager;
-    }
-
-    // Safe contract call wrapper
-    async safeContractCall(contractMethod, ...args) {
-        try {
-            await this.ensureContractReady();
-
-            const result = await contractMethod(...args);
-            return { success: true, data: result };
-
-        } catch (error) {
-            console.error('❌ Contract call failed:', error);
-            return { success: false, error: error.message };
-        }
     }
 
     // Multi-signature utility methods
@@ -5801,32 +5534,6 @@ class AdminPage {
         return /^0x[a-fA-F0-9]{40}$/.test(address);
     }
 
-    // Refresh admin data once without causing infinite loops
-    refreshAdminDataOnce() {
-        // Use a flag to prevent multiple simultaneous refreshes
-        if (this.isRefreshing) {
-            console.log('⏳ Refresh already in progress, skipping...');
-            return;
-        }
-
-        this.isRefreshing = true;
-        console.log('🔄 Refreshing admin data once...');
-
-        setTimeout(() => {
-            try {
-                this.loadMultiSignPanel();
-                this.loadContractStats();
-            } catch (error) {
-                console.error('❌ Error refreshing admin data:', error);
-            } finally {
-                // Reset flag after a delay
-                setTimeout(() => {
-                    this.isRefreshing = false;
-                }, 2000);
-            }
-        }, 500);
-    }
-
     // React-like safe contract call with RPC failover and fallback values
     async safeContractCall(contractCall, fallbackValue) {
         try {
@@ -6288,92 +5995,6 @@ class AdminPage {
         }
     }
 
-    // Form submission handler
-    async handleFormSubmission(formId) {
-        const form = document.getElementById(formId);
-        if (!form) return;
-
-        const submitBtn = form.querySelector('button[type="submit"]') || document.querySelector(`button[form="${formId}"]`);
-
-        try {
-            this.showLoading(submitBtn);
-
-            switch (formId) {
-                case 'add-pair-form':
-                    await this.submitAddPairProposal();
-                    break;
-                case 'remove-pair-form':
-                    await this.submitRemovePairProposal();
-                    break;
-                case 'update-weights-form':
-                    await this.submitUpdateWeightsProposal();
-                    break;
-                case 'change-signer-form':
-                    await this.submitChangeSignerProposal();
-                    break;
-                case 'withdrawal-form':
-                    await this.submitWithdrawalProposal();
-                    break;
-                case 'hourly-rate-form':
-                    await this.submitHourlyRateProposal();
-                    break;
-                default:
-                    throw new Error('Unknown form type');
-            }
-
-            this.showSuccess('Proposal created successfully!');
-            this.closeModal();
-
-            // SELECTIVE UPDATE OPTIMIZATION: Use smart proposal addition instead of full refresh
-            const optimizedTypes = ['change-signer-form', 'withdrawal-form'];
-            if (!optimizedTypes.includes(formId)) {
-                // Use selective update system for better performance
-                setTimeout(async () => {
-                    try {
-                        await this.addSingleNewProposal();
-                        console.log('🎯 [FORM SUBMISSION] Single proposal added after creation');
-                    } catch (error) {
-                        console.warn('⚠️ [FORM SUBMISSION] Failed to add single proposal, falling back to full refresh');
-                        if (this.loadProposals) {
-                            this.loadProposals();
-                        }
-                    }
-                }, 2000); // Wait 2 seconds for blockchain confirmation
-            }
-
-        } catch (error) {
-            console.error('Form submission error:', error);
-            this.showError(error.message || 'Failed to create proposal. Please try again.');
-        } finally {
-            this.hideLoading(submitBtn);
-        }
-    }
-
-    // UI Helper methods
-    showLoading(button) {
-        if (!button) return;
-
-        const textSpan = button.querySelector('.btn-text');
-        const loadingSpan = button.querySelector('.btn-loading');
-
-        if (textSpan) textSpan.style.display = 'none';
-        if (loadingSpan) loadingSpan.style.display = 'inline-flex';
-
-        button.disabled = true;
-    }
-
-    hideLoading(button) {
-        if (!button) return;
-
-        const textSpan = button.querySelector('.btn-text');
-        const loadingSpan = button.querySelector('.btn-loading');
-
-        if (textSpan) textSpan.style.display = 'inline';
-        if (loadingSpan) loadingSpan.style.display = 'none';
-
-        button.disabled = false;
-    }
-
     // Helper methods for user feedback
     showSuccess(message) {
         const text = message || 'Action completed successfully';
@@ -6496,16 +6117,11 @@ class AdminPage {
                 this.closeModal();
 
                 // Show success message
-                let successMessage = 'Hourly rate change proposal submitted successfully';
-                if (result.isDemo) {
-                    successMessage += ' (Demo Mode)';
+                let successMessage = '✅ Hourly rate change proposal submitted successfully!';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
                 }
-
-                if (window.notificationManager) {
-                    window.notificationManager.success('Proposal Created', successMessage);
-                } else {
-                    alert('✅ ' + successMessage);
-                }
+                this.showSuccess(successMessage);
 
                 // Refresh data once without causing loops
                 this.refreshAdminDataOnce();
@@ -6630,38 +6246,12 @@ class AdminPage {
             if (result.transactionHash) {
                 successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
             }
-            if (result.isDemo) {
-                successMessage += ' (Demo Mode)';
-            }
 
             this.showSuccess(successMessage);
 
-            // Add to mock proposal system for realistic demo
-            const newProposal = this.createMockProposal({
-                type: 'ADD_PAIR',
-                title: `Add ${pairName} Pair`,
-                description: `Add ${pairName} liquidity pair from ${platform} with weight ${weightNum}. ${description || 'No additional description provided.'}`,
-                proposer: this.userAddress || '0x9249cFE964C49Cf2d2D0DBBbB33E99235707aa61',
-                status: 'PENDING',
-                requiredApprovals: 3,
-                currentApprovals: 0,
-                transactionHash: result.transactionHash,
-                blockNumber: result.blockNumber,
-                data: {
-                    pairAddress: pairAddress,
-                    pairName: pairName,
-                    platform: platform,
-                    weight: weightNum
-                },
-                transactionHash: result.transactionHash,
-                isDemo: result.isDemo || false
-            });
-
             console.log('[ADD PAIR UI] 📋 Transaction details:', {
                 hash: result.transactionHash,
-                message: result.message,
-                proposalId: newProposal.id,
-                isDemo: result.isDemo
+                message: result.message
             });
 
             // Close modal
@@ -6759,9 +6349,6 @@ class AdminPage {
             if (result.transactionHash) {
                 successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
             }
-            if (result.isDemo) {
-                successMessage += ' (Demo Mode)';
-            }
 
             this.showSuccess(successMessage);
             this.closeModal();
@@ -6803,26 +6390,28 @@ class AdminPage {
 
         // Collect weight updates
         const weightUpdates = [];
-        weightInputs.forEach(input => {
+        for (const input of weightInputs) {
             const newWeight = input.value.trim();
-            if (newWeight) {
-                const pairAddress = input.dataset.pair;
-                const currentWeight = parseInt(input.dataset.current);
-                const newWeightNum = parseInt(newWeight);
+            if (!newWeight) {
+                continue;
+            }
+
+            const pairAddress = input.dataset.pair;
+            const currentWeight = parseInt(input.dataset.current, 10);
+            const newWeightNum = parseInt(newWeight, 10);
 
                 if (isNaN(newWeightNum) || newWeightNum < 1 || newWeightNum > 10000) {
                     throw new Error(`Invalid weight value: ${newWeight}. Must be between 1-10,000`);
                 }
 
-                if (newWeightNum !== currentWeight) {
-                    weightUpdates.push({
-                        pairAddress,
-                        newWeight: newWeightNum,
-                        currentWeight
-                    });
-                }
+            if (newWeightNum !== currentWeight) {
+                weightUpdates.push({
+                    pairAddress,
+                    newWeight: newWeightNum,
+                    currentWeight
+                });
             }
-        });
+        }
 
         if (weightUpdates.length === 0) {
             throw new Error('Please specify at least one weight change');
@@ -6841,6 +6430,10 @@ class AdminPage {
             if (!result.success) {
                 throw new Error(result.error || 'Failed to create weight update proposal');
             }
+
+            this.closeModal();
+            this.showSuccess('✅ Weight update proposal created successfully!');
+            this.refreshAdminDataOnce();
 
             return { success: true };
 
@@ -6936,41 +6529,13 @@ class AdminPage {
 
             this.closeModal();
 
-            // PERFORMANCE OPTIMIZATION: Add proposal optimistically instead of full refresh
-            const optimisticProposal = this.addProposalOptimistically({
-                actionType: 'CHANGE_SIGNER',
-                oldSigner: oldSigner,
-                newSigner: newSigner,
-                description: document.getElementById('signer-description')?.value || 'Change signer proposal'
-            }, result.transactionHash);
-
             // Show success message with transaction details
             let successMessage = '✅ Change signer proposal created successfully!';
             if (result.transactionHash) {
                 successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
             }
-            if (result.isDemo) {
-                successMessage += ' (Demo Mode)';
-            }
-
-            if (window.notificationManager) {
-                window.notificationManager.success('Proposal Created', successMessage);
-            } else {
-                this.showSuccess(successMessage);
-            }
-
-            // PERFORMANCE OPTIMIZATION: Update single proposal after confirmation instead of full refresh
-            if (result.transactionHash && !result.isDemo) {
-                setTimeout(async () => {
-                    try {
-                        await this.updateSingleProposal(optimisticProposal.id);
-                        console.log('🎯 [CHANGE SIGNER] Single proposal updated after confirmation');
-                    } catch (error) {
-                        console.warn('⚠️ [CHANGE SIGNER] Failed to update single proposal, falling back to full refresh');
-                        await this.refreshData();
-                    }
-                }, 2000); // Wait 2 seconds for blockchain confirmation
-            }
+            this.showSuccess(successMessage);
+            this.refreshAdminDataOnce();
 
         } catch (error) {
             console.error('[CHANGE SIGNER UI] ❌ Failed to create signer change proposal:', error);
@@ -6989,11 +6554,7 @@ class AdminPage {
                 }
             }
 
-            if (window.notificationManager) {
-                window.notificationManager.error('Proposal Failed', errorMessage);
-            } else {
-                this.showError(errorMessage);
-            }
+            this.showError(errorMessage);
         } finally {
             // DUPLICATE PREVENTION FIX: Always reset submission state and button
             this.isSubmittingChangeSigner = false;
@@ -7087,57 +6648,24 @@ class AdminPage {
 
             this.closeModal();
 
-            // PERFORMANCE OPTIMIZATION: Add proposal optimistically instead of full refresh
-            const optimisticProposal = this.addProposalOptimistically({
-                actionType: 'WITHDRAW_REWARDS',
-                recipient: recipient,
-                amount: amount,
-                description: `Withdraw ${amount} USDC to ${recipient.substring(0, 10)}...`
-            }, result.transactionHash);
-
-            // SUCCESS FEEDBACK FIX: Enhanced success message with special case handling
             let successMessage = '✅ Withdrawal proposal created successfully!';
-            let notificationTitle = 'Proposal Created';
 
             if (result.transactionHash) {
                 successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
             }
 
-            if (result.isDemo) {
-                successMessage += ' (Demo Mode)';
-            }
-
-            // Handle special success cases
             if (result.actionRejectedButSucceeded) {
                 successMessage += ' (Confirmed despite initial rejection)';
-                notificationTitle = 'Proposal Created Successfully';
                 console.log('[WITHDRAWAL UI] 🎯 ACTION_REJECTED override - transaction actually succeeded');
             }
 
             if (result.waitError) {
                 successMessage += ' (Confirmation pending)';
-                notificationTitle = 'Proposal Submitted';
                 console.log('[WITHDRAWAL UI] 🎯 tx.wait error override - transaction submitted successfully');
             }
 
-            if (window.notificationManager) {
-                window.notificationManager.success(notificationTitle, successMessage);
-            } else {
-                this.showSuccess(successMessage);
-            }
-
-            // PERFORMANCE OPTIMIZATION: Update single proposal after confirmation instead of full refresh
-            if (result.transactionHash && !result.isDemo) {
-                setTimeout(async () => {
-                    try {
-                        await this.updateSingleProposal(optimisticProposal.id);
-                        console.log('🎯 [WITHDRAWAL] Single proposal updated after confirmation');
-                    } catch (error) {
-                        console.warn('⚠️ [WITHDRAWAL] Failed to update single proposal, falling back to full refresh');
-                        await this.refreshData();
-                    }
-                }, 2000); // Wait 2 seconds for blockchain confirmation
-            }
+            this.showSuccess(successMessage);
+            this.refreshAdminDataOnce();
 
         } catch (error) {
             console.error('[WITHDRAWAL UI] ❌ Failed to create withdrawal proposal:', error);
@@ -7156,11 +6684,7 @@ class AdminPage {
                 }
             }
 
-            if (window.notificationManager) {
-                window.notificationManager.error('Proposal Failed', errorMessage);
-            } else {
-                this.showError(errorMessage);
-            }
+            this.showError(errorMessage);
         } finally {
             // DUPLICATE PREVENTION FIX: Always reset submission state and button
             this.isSubmittingWithdrawal = false;
@@ -7282,12 +6806,9 @@ class AdminPage {
             const result = await window.contractManager.executeProposal(proposalId);
 
             if (result.success) {
-                if (window.notificationManager) {
-                    window.notificationManager.success('Proposal Executed', `Successfully executed proposal #${proposalId}`);
-                }
-
-                // PERFORMANCE OPTIMIZATION: Update single proposal instead of full refresh
-                await this.updateSingleProposal(proposalId);
+                console.log('✅ Proposal executed successfully');
+                this.showSuccess(`✅ Proposal #${proposalId} executed successfully! The proposed action has been carried out on the blockchain.`);
+                this.refreshAdminDataOnce();
             } else {
                 throw new Error(result.error);
             }
@@ -7485,13 +7006,8 @@ class AdminPage {
             window.notificationManager.info('Navigating', 'Loading homepage...');
         }
         
-        // Use history API for faster navigation if possible
-        if (window.history && window.history.length > 1) {
-            window.history.back();
-        } else {
-            // Fallback to direct navigation
-            window.location.href = 'index.html';
-        }
+        // Always navigate directly to index.html to ensure correct destination
+        window.location.href = './';
     }
 }
 
