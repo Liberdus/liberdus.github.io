@@ -37,6 +37,13 @@ window.CONFIG = {
             LPLIBETH: '0xf33CDD487d091d26B2955588791dD81c8940a3F3',
             LPLIBUSDC: '0x104f51469aE06A3Cda5a23901e4e069A5D71F6d3',
             LPLIBUSDT: '0x87D394F688a51584cB59dA49A95E59080D251Cf0'
+        },
+        // Multicall2 addresses (canonical deployment for batch loading optimization)
+        MULTICALL2: {
+            1: '0x5BA1e12693Dc8F9c48aAD8770482f4739bEeD696',      // Ethereum Mainnet
+            137: '0x275617327c958bD06b5D6b871E7f491D76113dd8',    // Polygon Mainnet
+            80002: '0xcA11bde05977b3631167028862bE2a173976CA11',  // Polygon Amoy Testnet
+            31337: '0xcA11bde05977b3631167028862bE2a173976CA11'   // Local Hardhat
         }
     },
 
@@ -110,6 +117,15 @@ window.CONFIG = {
         DEBUG: false,
         CONSOLE_LOGS: false,
         PERFORMANCE_MONITORING: false
+    },
+
+    // Default Values for Contract Stats
+    DEFAULTS: {
+        REWARD_TOKEN: '0x05A4cfAF5a8f939d61E4Ec6D6287c9a065d6574c',
+        HOURLY_REWARD_RATE: 0,
+        REQUIRED_APPROVALS: 3,
+        ACTION_COUNTER: 0,
+        TOTAL_WEIGHT: 0
     },
 
     // Feature Flags

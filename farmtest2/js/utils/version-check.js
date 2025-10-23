@@ -6,7 +6,9 @@
 (function(window) {
     'use strict';
 
-    const VERSION_FILE = 'version.html';
+    // Adjust version file path if running from admin subdirectory
+    const isAdminPage = window.location.pathname.includes('admin');
+    const VERSION_FILE = isAdminPage ? '../version.html' : 'version.html';
     const STORAGE_KEY = 'version';
 
     /**
@@ -116,100 +118,101 @@
      * @returns {string[]} List of all critical files
      */
     function getCriticalFiles() {
+        const basePath = isAdminPage ? '../' : '';
         return [
             // HTML pages
-            'index.html',
-            'admin.html',
+            `${basePath}index.html`,
+            isAdminPage ? 'index.html' : 'admin/',
             
-            // JavaScript - Components
-            'js/components/admin-page.js',
-            'js/components/apr-display.js',
-            'js/components/base-component.js',
-            'js/components/efficient-dom-updates.js',
-            'js/components/home-page.js',
-            'js/components/modal.js',
-            'js/components/notification.js',
-            'js/components/optimistic-ui-updates.js',
-            'js/components/optimized-admin-state.js',
-            'js/components/pending-rewards-display.js',
-            'js/components/performance-monitor.js',
-            'js/components/staking-modal-new.js',
-            'js/components/staking-modal.js',
-            'js/components/transaction-status.js',
-            'js/components/wallet-popup.js',
+            // JavaScript - Components (only existing files)
+            `${basePath}js/components/admin-page.js`,
+            `${basePath}js/components/apr-display.js`,
+            `${basePath}js/components/base-component.js`,
+            `${basePath}js/components/efficient-dom-updates.js`,
+            `${basePath}js/components/home-page.js`,
+            `${basePath}js/components/modal.js`,
+            `${basePath}js/components/notification.js`,
+            `${basePath}js/components/optimistic-ui-updates.js`,
+            `${basePath}js/components/optimized-admin-state.js`,
+            `${basePath}js/components/pending-rewards-display.js`,
+            `${basePath}js/components/performance-monitor.js`,
+            `${basePath}js/components/staking-modal-new.js`,
+            `${basePath}js/components/staking-modal.js`,
+            `${basePath}js/components/transaction-status.js`,
+            `${basePath}js/components/wallet-popup.js`,
             
             // JavaScript - Config
-            'js/config/app-config.js',
-            'js/config/demo-config.js',
-            'js/config/dev-config.js',
+            `${basePath}js/config/app-config.js`,
+            `${basePath}js/config/demo-config.js`,
+            `${basePath}js/config/dev-config.js`,
             
             // JavaScript - Contracts
-            'js/contracts/contract-manager.js',
+            `${basePath}js/contracts/contract-manager.js`,
             
-            // JavaScript - Core
-            'js/core/accessibility-manager.js',
-            'js/core/animation-manager.js',
-            'js/core/error-handler.js',
-            'js/core/loading-manager.js',
-            'js/core/notification-manager-new.js',
-            'js/core/notification-manager.js',
-            'js/core/theme-manager-new.js',
-            'js/core/unified-theme-manager.js',
+            // JavaScript - Core (only existing files)
+            `${basePath}js/core/accessibility-manager.js`,
+            `${basePath}js/core/animation-manager.js`,
+            `${basePath}js/core/error-handler.js`,
+            `${basePath}js/core/loading-manager.js`,
+            `${basePath}js/core/notification-manager-new.js`,
+            `${basePath}js/core/notification-manager.js`,
+            `${basePath}js/core/theme-manager-new.js`,
+            `${basePath}js/core/unified-theme-manager.js`,
             
             // JavaScript - Root
-            'js/debug-logger.js',
-            'js/master-initializer.js',
+            `${basePath}js/debug-logger.js`,
+            `${basePath}js/master-initializer.js`,
             
             // JavaScript - Pages
-            'js/pages/admin.js',
-            'js/pages/home.js',
+            `${basePath}js/pages/home.js`,
             
-            // JavaScript - Utils
-            'js/utils/admin-test.js',
-            'js/utils/cache-integration.js',
-            'js/utils/event-manager.js',
-            'js/utils/gas-estimator.js',
-            'js/utils/helpers.js',
-            'js/utils/logger.js',
-            'js/utils/network-health-check.js',
-            'js/utils/price-feeds.js',
-            'js/utils/production-logger.js',
-            'js/utils/rewards-calculator.js',
-            'js/utils/rewards-history.js',
-            'js/utils/rpc-test.js',
-            'js/utils/ses-safe-handler.js',
-            'js/utils/storage-manager.js',
-            'js/utils/transaction-queue.js',
-            'js/utils/unified-cache.js',
-            'js/utils/version-check.js',
+            // JavaScript - Utils (only existing files)
+            `${basePath}js/utils/admin-test.js`,
+            `${basePath}js/utils/cache-integration.js`,
+            `${basePath}js/utils/event-manager.js`,
+            `${basePath}js/utils/gas-estimator.js`,
+            `${basePath}js/utils/helpers.js`,
+            `${basePath}js/utils/logger.js`,
+            `${basePath}js/utils/network-health-check.js`,
+            `${basePath}js/utils/price-feeds.js`,
+            `${basePath}js/utils/production-logger.js`,
+            `${basePath}js/utils/rewards-calculator.js`,
+            `${basePath}js/utils/rewards-history.js`,
+            `${basePath}js/utils/rpc-test.js`,
+            `${basePath}js/utils/ses-safe-handler.js`,
+            `${basePath}js/utils/storage-manager.js`,
+            `${basePath}js/utils/transaction-queue.js`,
+            `${basePath}js/utils/unified-cache.js`,
+            `${basePath}js/utils/version-check.js`,
+            `${basePath}js/utils/multicall-service.js`,
             
             // JavaScript - Wallet
-            'js/wallet/metamask-connector.js',
-            'js/wallet/network-manager.js',
-            'js/wallet/wallet-manager.js',
-            'js/wallet/walletconnect-connector.js',
+            `${basePath}js/wallet/metamask-connector.js`,
+            `${basePath}js/wallet/network-manager.js`,
+            `${basePath}js/wallet/wallet-manager.js`,
+            `${basePath}js/wallet/walletconnect-connector.js`,
             
             // Libraries
-            'libs/ethers.umd.min.js',
-            
+            `${basePath}libs/ethers.umd.min.js`,
+
             // Config files (non-JS)
-            'config/constants.js',
+            `${basePath}config/constants.js`,
             
-            // CSS - All stylesheets
-            'css/admin-homepage-theme.css',
-            'css/admin-theme.css',
-            'css/admin.css',
-            'css/base.css',
-            'css/component-library.css',
-            'css/components.css',
-            'css/day10-enhancements.css',
-            'css/home-page.css',
-            'css/in-development.css',
-            'css/main.css',
-            'css/responsive.css',
-            'css/theme-toggle.css',
-            'css/variables.css',
-            'css/wallet-popup.css'
+            // CSS - All stylesheets (only existing files)
+            `${basePath}css/admin-homepage-theme.css`,
+            `${basePath}css/admin-theme.css`,
+            `${basePath}css/admin.css`,
+            `${basePath}css/base.css`,
+            `${basePath}css/component-library.css`,
+            `${basePath}css/components.css`,
+            `${basePath}css/day10-enhancements.css`,
+            `${basePath}css/home-page.css`,
+            `${basePath}css/in-development.css`,
+            `${basePath}css/main.css`,
+            `${basePath}css/responsive.css`,
+            `${basePath}css/theme-toggle.css`,
+            `${basePath}css/variables.css`,
+            `${basePath}css/wallet-popup.css`
         ];
     }
 

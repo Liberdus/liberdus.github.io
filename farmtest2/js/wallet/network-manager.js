@@ -491,7 +491,7 @@ class NetworkManager {
 
     /**
      * Centralized permission request with UI updates
-     * Replaces duplicate logic in admin.html and index.html
+     * Replaces duplicate logic in admin/ and index.html
      * @param {string} context - 'admin' or 'home'
      * @returns {Promise<boolean>} Success status
      */

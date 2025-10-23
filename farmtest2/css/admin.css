@@ -1303,11 +1303,33 @@
 }
 
 .action-buttons {
-    display: flex;
-    gap: 0.75rem;
-    justify-content: center;
+    display: grid;
+    grid-template-columns: 32px 32px 32px auto;
+    gap: 0.5rem;
+    justify-content: start;
     align-items: center;
-    flex-wrap: wrap;
+    width: 100%;
+    min-width: 120px;
+    height: 32px;
+}
+
+/* Position specific buttons in fixed grid slots */
+.action-buttons .btn-success {
+    grid-column: 1;
+}
+
+.action-buttons .btn-danger {
+    grid-column: 2;
+}
+
+.action-buttons .btn-primary {
+    grid-column: 3;
+}
+
+.action-buttons .approval-badge {
+    grid-column: 4;
+    justify-self: start;
+    align-self: center;
 }
 
 .action-buttons .btn {
@@ -1323,6 +1345,48 @@
     text-align: center !important;
     vertical-align: middle !important;
     line-height: 1.2 !important;
+}
+
+/* Icon-only buttons for compact layout */
+.action-buttons .btn-icon-compact {
+    width: 32px !important;
+    height: 32px !important;
+    padding: 0 !important;
+    min-width: 32px !important;
+    font-size: 16px !important;
+    line-height: 1 !important;
+}
+
+.btn-icon-compact:hover:not(:disabled) { transform: scale(1.1); }
+.btn-icon-compact:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Optical centering for icon glyphs */
+.action-buttons .btn-icon-compact.btn-success { padding-bottom: 1px !important; }
+.action-buttons .btn-icon-compact.btn-primary { 
+    padding: 0 2px 1px 0 !important;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+/* User approval indicator */
+.approval-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: rgba(46, 204, 113, 0.15);
+    border-radius: 50%;
+    font-size: 0.875rem;
+    margin-left: 0.25rem;
+    line-height: 1;
+    align-self: center;
+}
+
+/* Ensure action buttons column is consistently centered */
+table td:last-child {
+    text-align: center !important;
+    vertical-align: middle !important;
+    padding: 0.5rem !important;
 }
 
 .action-buttons .btn-success {

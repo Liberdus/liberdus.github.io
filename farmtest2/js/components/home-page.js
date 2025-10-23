@@ -18,6 +18,7 @@ class HomePage {
         this.lastWalletAddress = null;
         this.lastNetworkId = null;
         this.refreshDebounceTimer = null; // Prevent overlapping refreshes during rapid network changes
+        this.isAdmin = false; // Track admin status
         // OPTIMIZATION: Simple caching for contract data that doesn't change frequently
         this.cache = {
             hourlyRewardRate: { value: null, timestamp: 0, ttl: 300000 }, // 5 minutes
@@ -82,12 +83,14 @@ class HomePage {
             console.log('🏠 HomePage: Wallet connected, refreshing data...');
             this.updateNetworkIndicator();
             this.refreshDataAfterWalletChange();
+            this.checkAdminAccess();
         });
 
         document.addEventListener('walletDisconnected', () => {
             console.log('🏠 HomePage: Wallet disconnected, refreshing data...');
             this.updateNetworkIndicator();
             this.refreshDataAfterWalletChange();
+            this.hideAdminButton();
         });
 
         // Listen for account changes (MetaMask)
@@ -95,12 +98,14 @@ class HomePage {
             window.ethereum.on('accountsChanged', (accounts) => {
                 console.log('🏠 HomePage: Accounts changed:', accounts);
                 this.refreshDataAfterWalletChange();
+                this.checkAdminAccess();
             });
 
             window.ethereum.on('chainChanged', (chainId) => {
                 console.log('🏠 HomePage: Chain changed:', chainId);
                 this.updateNetworkIndicator();
                 this.refreshDataAfterWalletChange();
+                this.checkAdminAccess();
             });
         }
     }
@@ -130,6 +135,7 @@ class HomePage {
         if (window.contractManager && window.contractManager.isReady()) {
             console.log('🏠 HomePage: ContractManager already ready, loading data immediately...');
             this.loadData();
+            this.checkAdminAccess();
             // Auto-refresh disabled - manual refresh only
         } else {
             console.log('🏠 HomePage: Waiting for ContractManager to be ready...');
@@ -532,46 +538,29 @@ class HomePage {
         }
 
         try {
-            // OPTIMIZATION 1: Check cache first, then load in parallel
+            // OPTIMIZATION 1: Try multicall for basic contract data first
             console.log('⚡ Checking cache and starting optimized data loading...');
 
-            const promises = [];
             const now = Date.now();
+            let hourlyRateWei, totalWeightWei, allPairsInfo;
 
-            // Check cache for hourly reward rate
-            if (this.cache.hourlyRewardRate.value && (now - this.cache.hourlyRewardRate.timestamp) < this.cache.hourlyRewardRate.ttl) {
-                promises.push(Promise.resolve(this.cache.hourlyRewardRate.value));
-                console.log('📦 Using cached hourly reward rate');
-            } else {
-                promises.push(window.contractManager.getHourlyRewardRate().then(value => {
-                    this.cache.hourlyRewardRate = { value, timestamp: now, ttl: this.cache.hourlyRewardRate.ttl };
-                    return value;
-                }));
-            }
-
-            // Check cache for total weight
-            if (this.cache.totalWeight.value && (now - this.cache.totalWeight.timestamp) < this.cache.totalWeight.ttl) {
-                promises.push(Promise.resolve(this.cache.totalWeight.value));
-                console.log('📦 Using cached total weight');
-            } else {
-                promises.push(window.contractManager.getTotalWeight().then(value => {
-                    this.cache.totalWeight = { value, timestamp: now, ttl: this.cache.totalWeight.ttl };
-                    return value;
-                }));
-            }
+            // Load basic contract data with multicall
+            const basicData = await window.contractManager.getBasicContractData();
+            hourlyRateWei = basicData.hourlyRewardRate;
+            totalWeightWei = basicData.totalWeight;
+            
+            // Update cache
+            this.cache.hourlyRewardRate = { value: hourlyRateWei, timestamp: now, ttl: this.cache.hourlyRewardRate.ttl };
+            this.cache.totalWeight = { value: totalWeightWei, timestamp: now, ttl: this.cache.totalWeight.ttl };
 
             // Check cache for pairs info
             if (this.cache.pairsInfo.value && (now - this.cache.pairsInfo.timestamp) < this.cache.pairsInfo.ttl) {
-                promises.push(Promise.resolve(this.cache.pairsInfo.value));
+                allPairsInfo = this.cache.pairsInfo.value;
                 console.log('📦 Using cached pairs info');
             } else {
-                promises.push(window.contractManager.getAllPairsInfo().then(value => {
-                    this.cache.pairsInfo = { value, timestamp: now, ttl: this.cache.pairsInfo.ttl };
-                    return value;
-                }));
+                allPairsInfo = await window.contractManager.getAllPairsInfo();
+                this.cache.pairsInfo = { value: allPairsInfo, timestamp: now, ttl: this.cache.pairsInfo.ttl };
             }
-
-            const [hourlyRateWei, totalWeightWei, allPairsInfo] = await Promise.all(promises);
 
             // Process basic data immediately
             this.hourlyRewardRate = ethers.utils.formatEther(hourlyRateWei);
@@ -645,13 +634,11 @@ class HomePage {
                 this.render(); // Re-render with TVL and APR data
 
                 // OPTIMIZATION 3: Load user data in parallel if wallet connected
-                // Read-only provider can query user data from ANY network!
-                const isWalletConnected = this.isWalletConnected() && window.walletManager?.currentAccount;
-                const isOnCorrectNetwork = window.networkManager?.isOnRequiredNetwork() || false;
-                
-                if (isWalletConnected) {
+                if (this.isWalletConnected() && window.walletManager?.currentAccount) {
                     console.log('⚡ Loading user stake data in parallel...');
                     console.log('👛 Using wallet address:', window.walletManager.currentAccount);
+                    
+                    const isOnCorrectNetwork = window.networkManager?.isOnRequiredNetwork() || false;
                     
                     if (!isOnCorrectNetwork) {
                         const networkName = window.CONFIG?.NETWORK?.NAME || 'configured network';
@@ -661,26 +648,26 @@ class HomePage {
                         console.log(`💡 Switch to ${networkName} to make transactions`);
                     }
 
-                    const userDataPromises = allPairsInfo.map(async (pairInfo, i) => {
-                        if (pairInfo.address === '0x0000000000000000000000000000000000000000') {
-                            return { index: i, userStake: { amount: '0', rewards: '0' } };
-                        }
+                    // Load user data with multicall
+                    const userDataMap = await window.contractManager.getUserDataForAllPairs(
+                        window.walletManager.currentAccount,
+                        allPairsInfo
+                    );
 
-                        try {
-                            const userStake = await window.contractManager.getUserStake(
-                                window.walletManager.currentAccount,
-                                pairInfo.address
-                            );
-                            console.log(`✅ User stake for pair ${i}:`, userStake);
-                            return { index: i, userStake };
-                        } catch (error) {
-                            console.warn(`⚠️ Failed to load user data for pair ${pairInfo.address}:`, error.message);
-                            return { index: i, userStake: { amount: '0', rewards: '0' } };
+                    // Process user data from Map
+                    const userDataResults = allPairsInfo.map((pairInfo, index) => {
+                        const data = userDataMap.get(pairInfo.address);
+                        if (!data) {
+                            return { index, userStake: { amount: '0', rewards: '0' } };
                         }
+                        return {
+                            index,
+                            userStake: {
+                                amount: ethers.utils.formatEther(data.stake || '0'),
+                                rewards: ethers.utils.formatEther(data.pendingRewards || '0')
+                            }
+                        };
                     });
-
-                    // Wait for all user data to load in parallel
-                    const userDataResults = await Promise.all(userDataPromises);
 
                     // Update pairs with user data - EXACT React implementation
                     // React source: lib-lp-staking-frontend/src/pages/home.tsx (Lines 59-64)
@@ -716,9 +703,8 @@ class HomePage {
                 }
             }
 
-            const totalTime = performance.now() - startTime;
-            console.log(`🚀 OPTIMIZED: Blockchain data loaded in ${totalTime.toFixed(0)}ms (${this.pairs.length} pairs)`);
-            console.log(`📊 Performance improvement: ~${Math.max(0, 100 - (totalTime / 100)).toFixed(0)}% faster than sequential loading`);
+               const totalTime = performance.now() - startTime;
+               console.log(`🚀 OPTIMIZED: Blockchain data loaded in ${totalTime.toFixed(0)}ms (${this.pairs.length} pairs)`);
         } catch (error) {
             console.error('❌ Failed to load blockchain data:', error);
             
@@ -749,7 +735,10 @@ class HomePage {
         }
 
         try {
-            console.log('⚡ Calculating TVL and APR for all pairs (React approach)...');
+            console.log('⚡ Calculating TVL and APR for all pairs with multicall...');
+
+            // Load TVL data with multicall (1 RPC call instead of N calls)
+            const tvlMap = await window.contractManager.getTVLForAllPairs(this.pairs);
 
             const calculations = this.pairs.map(async (pair, index) => {
                 try {
@@ -763,8 +752,8 @@ class HomePage {
                     console.log(`  💵 LP token price: $${lpTokenPrice}`);
                     console.log(`  💵 Reward token price: $${rewardTokenPrice}`);
 
-                    // React Line 55: Get TVL from contract (in wei)
-                    const tvlWei = await window.contractManager.getTVL(pair.address);
+                    // Get TVL from multicall result (optimized)
+                    const tvlWei = tvlMap.get(pair.address) || ethers.BigNumber.from(0);
 
                     // React Line 56: Calculate APR using formatEther(tvlWei) as tvl parameter
                     const hourlyRate = parseFloat(this.hourlyRewardRate || '0');
@@ -1481,6 +1470,86 @@ class HomePage {
     destroy() {
         this.stopAutoRefresh();
         clearTimeout(this.refreshDebounceTimer);
+    }
+
+    /**
+     * Check if the connected account has admin access
+     */
+    async checkAdminAccess() {
+        const adminButton = document.getElementById('admin-panel-link');
+        if (!adminButton) return;
+
+        // Check if wallet is connected
+        if (!this.isWalletConnected()) {
+            this.hideAdminButton();
+            return;
+        }
+
+        try {
+            // Get the current user address
+            const userAddress = await window.contractManager?.getCurrentSigner();
+            if (!userAddress) {
+                this.hideAdminButton();
+                return;
+            }
+
+            // Development mode check
+            if (window.DEV_CONFIG?.AUTHORIZED_ADMINS) {
+                const isAuthorizedAdmin = window.DEV_CONFIG.AUTHORIZED_ADMINS.some(
+                    admin => admin.toLowerCase() === userAddress.toLowerCase()
+                );
+                if (isAuthorizedAdmin) {
+                    this.showAdminButton();
+                    return;
+                }
+            }
+
+            // Check if user has admin role from contract
+            if (window.contractManager?.hasAdminRole) {
+                const hasAdminRole = await window.contractManager.hasAdminRole(userAddress);
+                if (hasAdminRole) {
+                    this.showAdminButton();
+                    return;
+                }
+            }
+
+            // Check if user is the contract owner
+            if (window.contractManager?.stakingContract?.owner) {
+                const owner = await window.contractManager.stakingContract.owner();
+                if (owner.toLowerCase() === userAddress.toLowerCase()) {
+                    this.showAdminButton();
+                    return;
+                }
+            }
+
+            // If none of the checks passed, hide the button
+            this.hideAdminButton();
+        } catch (error) {
+            console.error('Error checking admin access:', error);
+            this.hideAdminButton();
+        }
+    }
+
+    /**
+     * Show the admin button
+     */
+    showAdminButton() {
+        const adminButton = document.getElementById('admin-panel-link');
+        if (adminButton) {
+            adminButton.style.display = 'flex';
+            this.isAdmin = true;
+        }
+    }
+
+    /**
+     * Hide the admin button
+     */
+    hideAdminButton() {
+        const adminButton = document.getElementById('admin-panel-link');
+        if (adminButton) {
+            adminButton.style.display = 'none';
+            this.isAdmin = false;
+        }
     }
 }
 

@@ -6,20 +6,20 @@
     <title>LP Staking - Admin Panel</title>
     
     <!-- Favicon -->
-    <link rel="icon" type="image/x-icon" href="assets/favicon.ico">
+    <link rel="icon" type="image/x-icon" href="../assets/favicon.ico">
     
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
 
     <!-- Stylesheets -->
-    <link rel="stylesheet" href="css/variables.css">
-    <link rel="stylesheet" href="css/admin-theme.css">
-    <link rel="stylesheet" href="css/theme-toggle.css">
-    <link rel="stylesheet" href="css/base.css">
-    <link rel="stylesheet" href="css/components.css">
-    <link rel="stylesheet" href="css/admin.css">
-    <link rel="stylesheet" href="css/admin-homepage-theme.css">
+    <link rel="stylesheet" href="../css/variables.css">
+    <link rel="stylesheet" href="../css/admin-theme.css">
+    <link rel="stylesheet" href="../css/theme-toggle.css">
+    <link rel="stylesheet" href="../css/base.css">
+    <link rel="stylesheet" href="../css/components.css">
+    <link rel="stylesheet" href="../css/admin.css">
+    <link rel="stylesheet" href="../css/admin-homepage-theme.css">
     
     <!-- Meta Tags -->
     <meta name="description" content="LP Staking Admin Panel - Manage liquidity provider staking contracts">
@@ -65,12 +65,12 @@
     </div>
 
     <!-- Version Check System (runs first to ensure fresh cache) -->
-    <script src="js/utils/version-check.js"></script>
+    <script src="../js/utils/version-check.js"></script>
 
     <!-- Scripts -->
     <!-- Configuration (load first) -->
-    <script src="js/config/app-config.js"></script>
-    <script src="js/config/dev-config.js"></script>
+    <script src="../js/config/app-config.js"></script>
+    <script src="../js/config/dev-config.js"></script>
 
     <!-- Core Libraries with fallbacks -->
     <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js" onerror="loadEthersFallback()"></script>
@@ -78,7 +78,7 @@
         function loadEthersFallback() {
             console.log('Primary ethers CDN failed, trying local fallback...');
             const script = document.createElement('script');
-            script.src = 'libs/ethers.umd.min.js';
+            script.src = '../libs/ethers.umd.min.js';
             script.onerror = () => {
                 console.error('❌ All ethers sources failed');
                 document.getElementById('error-boundary').style.display = 'flex';
@@ -106,38 +106,38 @@
     </script>
 
     <!-- Theme System (load early to prevent flash) -->
-    <script src="js/core/unified-theme-manager.js"></script>
+    <script src="../js/core/unified-theme-manager.js"></script>
 
     <!-- Core System -->
-    <script src="js/debug-logger.js"></script>
-    <script src="js/utils/unified-cache.js"></script>
-    <script src="js/utils/cache-integration.js"></script>
-    <script src="js/utils/logger.js"></script>
-    <script src="js/utils/event-manager.js"></script>
-    <script src="js/utils/storage-manager.js"></script>
-    <script src="js/utils/network-health-check.js"></script>
-    <script src="js/core/error-handler.js"></script>
-    <script src="js/core/notification-manager.js"></script>
+    <script src="../js/debug-logger.js"></script>
+    <script src="../js/utils/unified-cache.js"></script>
+    <script src="../js/utils/cache-integration.js"></script>
+    <script src="../js/utils/logger.js"></script>
+    <script src="../js/utils/event-manager.js"></script>
+    <script src="../js/utils/storage-manager.js"></script>
+    <script src="../js/utils/network-health-check.js"></script>
+    <script src="../js/core/error-handler.js"></script>
+    <script src="../js/core/notification-manager.js"></script>
     
     <!-- Wallet Integration -->
-    <script src="js/wallet/wallet-manager.js"></script>
-    <script src="js/wallet/metamask-connector.js"></script>
-    <script src="js/wallet/walletconnect-connector.js"></script>
+    <script src="../js/wallet/wallet-manager.js"></script>
+    <script src="../js/wallet/metamask-connector.js"></script>
+    <script src="../js/wallet/walletconnect-connector.js"></script>
     
     <!-- Contract System -->
-    <script src="js/contracts/contract-manager.js"></script>
+    <script src="../js/contracts/contract-manager.js"></script>
     
     <!-- Performance Optimization Components -->
-    <script src="js/components/optimized-admin-state.js"></script>
-    <script src="js/components/optimistic-ui-updates.js"></script>
-    <script src="js/components/efficient-dom-updates.js"></script>
-    <script src="js/components/performance-monitor.js"></script>
+    <script src="../js/components/optimized-admin-state.js"></script>
+    <script src="../js/components/optimistic-ui-updates.js"></script>
+    <script src="../js/components/efficient-dom-updates.js"></script>
+    <script src="../js/components/performance-monitor.js"></script>
 
     <!-- Admin Components -->
-    <script src="js/components/admin-page.js"></script>
+    <script src="../js/components/admin-page.js"></script>
 
     <!-- Master Initializer -->
-    <script src="js/master-initializer.js"></script>
+    <script src="../js/master-initializer.js"></script>
 
     <script>
         // Debug initialization

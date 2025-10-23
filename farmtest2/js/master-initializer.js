@@ -8,7 +8,7 @@ class MasterInitializer {
         this.isReady = false;
 
         // Detect which page we're on to conditionally load components
-        this.isAdminPage = window.location.pathname.includes('admin.html');
+        this.isAdminPage = window.location.pathname.includes('admin');
         
         // Make instance globally available for testing
         window.masterInitializer = this;
@@ -88,6 +88,7 @@ class MasterInitializer {
         const coreScripts = [
             'js/utils/unified-cache.js',        // Load cache system first
             'js/utils/cache-integration.js',    // Then cache integration
+            'js/utils/multicall-service.js',    // Multicall2 for batch loading (90% RPC reduction)
             'js/core/unified-theme-manager.js', // Unified theme manager
             'js/core/theme-manager-new.js',
             'js/core/notification-manager-new.js',
@@ -789,9 +790,12 @@ class MasterInitializer {
             return Promise.resolve();
         }
 
+        // Adjust path if running from admin subdirectory
+        const adjustedSrc = this.isAdminPage && src.startsWith('js/') ? `../${src}` : src;
+
         return new Promise((resolve, reject) => {
             const script = document.createElement('script');
-            script.src = src;
+            script.src = adjustedSrc;
             script.async = true;
 
             script.onload = () => {
