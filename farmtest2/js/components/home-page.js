@@ -758,11 +758,17 @@ class HomePage {
                     // React Line 56: Calculate APR using formatEther(tvlWei) as tvl parameter
                     const hourlyRate = parseFloat(this.hourlyRewardRate || '0');
                     const tvlInTokens = parseFloat(ethers.utils.formatEther(tvlWei || '0'));
+                    // Get weight data for this pool
+                    const poolWeight = parseFloat(pair.weight || 1);
+                    const totalWeight = parseFloat(this.totalWeight || 1);
+                    
                     const apr = window.rewardsCalculator.calcAPR(
                         hourlyRate,
                         tvlInTokens,
                         lpTokenPrice,
-                        rewardTokenPrice
+                        rewardTokenPrice,
+                        poolWeight,
+                        totalWeight
                     );
 
                     // React Line 57: Store TVL as token count (NOT USD)

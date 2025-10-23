@@ -1296,13 +1296,19 @@ class HomePage extends BaseComponent {
                 tvlInTokens = parseFloat(window.ethers.formatEther(tvlWei || '0'));
                 lpTokenPrice = lpPriceResult || 0;
 
-                // Calculate APR using React formula
+                // Calculate APR using weight-based formula
                 if (window.rewardsCalculator && window.rewardsCalculator.calcAPR) {
+                    // Get weight data for this pool
+                    const poolWeight = parseFloat(pairInfo.weight || 1);
+                    const totalWeight = parseFloat(this.totalWeight || 1);
+                    
                     apr = window.rewardsCalculator.calcAPR(
                         hourlyRate,
                         tvlInTokens,
                         lpTokenPrice,
-                        rewardTokenPrice
+                        rewardTokenPrice,
+                        poolWeight,
+                        totalWeight
                     );
                 }
 

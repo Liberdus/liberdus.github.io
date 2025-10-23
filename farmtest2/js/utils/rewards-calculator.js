@@ -117,31 +117,34 @@
         }
 
         /**
-         * Calculate APR using EXACT React implementation formula
-         * React source: lib-lp-staking-frontend/src/utils/index.ts (Lines 5-9)
+         * Calculate APR with weight consideration
+         * Enhanced to properly incorporate pool weights for accurate reward distribution
          *
-         * IMPORTANT: This matches React EXACTLY - no multiplication by 100!
-         * React returns APR as a decimal (e.g., 226.5 for 226.5%), not 22650
-         *
-         * @param {number} hourlyRate - Hourly reward rate in tokens
+         * @param {number} hourlyRate - Total hourly reward rate in tokens
          * @param {number} tvl - Total Value Locked in LP tokens (NOT USD)
          * @param {number} lpTokenPrice - LP token price in USD
          * @param {number} rewardTokenPrice - Reward token price in USD
+         * @param {number} poolWeight - Weight of this specific pool (default: 1)
+         * @param {number} totalWeight - Total weight across all pools (default: 1)
          * @returns {number} - APR as percentage (e.g., 226.5 for 226.5%)
          */
-        calcAPR(hourlyRate, tvl, lpTokenPrice, rewardTokenPrice) {
-            // React Line 6: if (tvl === 0) return 0;
+        calcAPR(hourlyRate, tvl, lpTokenPrice, rewardTokenPrice, poolWeight = 1, totalWeight = 1) {
+            // If no TVL, no APR
             if (tvl === 0) return 0;
 
-            // React Line 7: if (!lpTokenPrice || !rewardTokenPrice) return (hourlyRate * 24 * 365) / tvl || 0;
-            // NOTE: React does NOT multiply by 100 here!
+            // Calculate the weighted portion of rewards this pool receives
+            const weightedHourlyRate = (poolWeight / totalWeight) * hourlyRate;
+
+            // If no price data, use simplified calculation (tvl in tokens, not USD)
             if (!lpTokenPrice || !rewardTokenPrice) {
-                return (hourlyRate * 24 * 365) / tvl || 0;
+                return ((weightedHourlyRate * 24 * 365) / tvl) * 100 || 0;
             }
 
-            // React Line 8: return (hourlyRate * rewardTokenPrice * 365) / (tvl * lpTokenPrice) || 0;
-            // NOTE: React does NOT multiply by 24 or 100 here!
-            return (hourlyRate * rewardTokenPrice * 365) / (tvl * lpTokenPrice) || 0;
+            // Calculate APR with weighted rewards (tvl in USD)
+            // Formula: (Annual Rewards in USD / TVL in USD) * 100
+            const annualRewardsUSD = weightedHourlyRate * 24 * 365 * rewardTokenPrice;
+            const tvlUSD = tvl * lpTokenPrice;
+            return (annualRewardsUSD / tvlUSD) * 100 || 0;
         }
 
         /**
