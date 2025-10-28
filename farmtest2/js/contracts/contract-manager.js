@@ -29,12 +29,8 @@ class ContractManager {
 
         // Enhanced RPC Failover System
         this.currentRpcIndex = 0;
-        this.rpcUrls = window.CONFIG?.RPC?.POLYGON_AMOY || [
-            'https://rpc-amoy.polygon.technology',
-            'https://polygon-amoy-bor-rpc.publicnode.com',
-            'https://rpc.ankr.com/polygon_amoy',
-            'https://polygon-amoy.drpc.org'
-        ];
+        // Initialize with current network's RPC URLs (will be updated by switchNetwork)
+        this.rpcUrls = [window.CONFIG?.NETWORK?.RPC_URL, ...(window.CONFIG?.NETWORK?.FALLBACK_RPCS || [])];
         this.rpcHealthStatus = new Map(); // Track RPC health
         this.lastRpcSwitch = 0; // Prevent rapid switching
 
@@ -69,14 +65,7 @@ class ContractManager {
             gasLimitMultiplier: 1.2,
             gasEstimationBuffer: 0.1, // 10% buffer for gas estimation
             providerTimeout: 2000, // Reduced from 5000ms for faster failover
-            fallbackRPCs: [
-                // Optimized order: fastest and most reliable first
-                'https://rpc-amoy.polygon.technology',                    // ✅ Official & Fastest
-                'https://polygon-amoy-bor-rpc.publicnode.com',            // ✅ PublicNode - Very reliable
-                'https://rpc.ankr.com/polygon_amoy',                      // ✅ Ankr - Good performance
-                'https://polygon-amoy.drpc.org',                          // ✅ DRPC - Additional fallback
-                // Note: Removed rate-limited demo endpoints that cause CORS errors
-            ],
+            fallbackRPCs: window.CONFIG?.NETWORK?.FALLBACK_RPCS || [],
             networkConfig: {
                 chainId: window.CONFIG?.NETWORK?.CHAIN_ID || 80002, // Use centralized config
                 name: window.CONFIG?.NETWORK?.NAME || 'Polygon Amoy Testnet',
@@ -146,35 +135,36 @@ class ContractManager {
 
             // Try MetaMask provider first (bypasses CORS issues)
             // BUGFIX: Don't use MetaMask provider with 'any' network - causes corrupted BigNumber data
-            // when wallet is on different network. Always use dedicated Amoy RPC for read-only mode.
-            this.log('🌐 Read-only mode: Using dedicated Amoy RPC (prevents BigNumber corruption)...');
+            // when wallet is on different network. Always use dedicated network RPC for read-only mode.
+            this.log('🌐 Read-only mode: Using dedicated network RPC (prevents BigNumber corruption)...');
             
-            const amoyRpcUrl = window.CONFIG?.NETWORK?.RPC_URL || 'https://polygon-amoy.g.alchemy.com/v2/CjcioLVYYWW0tsHWorEfC';
+            // Use the current network's RPC URL (updated by switchNetwork)
+            const networkRpcUrl = this.rpcUrls && this.rpcUrls.length > 0 ? this.rpcUrls[0] : window.CONFIG?.NETWORK?.RPC_URL || 'https://polygon-amoy.g.alchemy.com/v2/CjcioLVYYWW0tsHWorEfC';
             
             try {
-                this.log('🚀 Creating dedicated Amoy provider:', amoyRpcUrl);
-                const amoyProvider = new ethers.providers.JsonRpcProvider({
-                    url: amoyRpcUrl,
+                this.log('🚀 Creating dedicated network provider:', networkRpcUrl);
+                const networkProvider = new ethers.providers.JsonRpcProvider({
+                    url: networkRpcUrl,
                     timeout: 10000
                 });
 
                 // Verify connection
-                const network = await amoyProvider.getNetwork();
-                this.log(`✅ Amoy provider connected - Chain ID: ${network.chainId}`);
+                const network = await networkProvider.getNetwork();
+                this.log(`✅ Network provider connected - Chain ID: ${network.chainId}`);
 
-                this.provider = amoyProvider;
+                this.provider = networkProvider;
                 this.signer = null; // No signer in read-only mode
-                this.log('✅ Using dedicated Amoy RPC provider (read-only)');
+                this.log('✅ Using dedicated network RPC provider (read-only)');
 
-            } catch (amoyError) {
-                this.log('⚠️ Primary Amoy RPC failed, trying fallbacks:', amoyError.message);
+            } catch (networkError) {
+                this.log('⚠️ Primary network RPC failed, trying fallbacks:', networkError.message);
 
                 // Try direct provider creation first (faster)
                 try {
-                    this.log('🚀 Attempting direct provider creation with Polygon official...');
-                    const polygonUrl = 'https://rpc-amoy.polygon.technology';
+                    this.log('🚀 Attempting direct provider creation with network fallback...');
+                    const fallbackUrl = this.rpcUrls && this.rpcUrls.length > 1 ? this.rpcUrls[1] : 'https://rpc-amoy.polygon.technology';
                     const directProvider = new ethers.providers.JsonRpcProvider({
-                        url: polygonUrl,
+                        url: fallbackUrl,
                         timeout: 8000
                     });
 
@@ -184,7 +174,7 @@ class ContractManager {
 
                     this.provider = directProvider;
                     this.signer = null;
-                    this.log('✅ Using direct Polygon provider');
+                    this.log('✅ Using direct network provider');
 
                 } catch (directError) {
                     this.log('⚠️ Direct provider failed, trying fallback system:', directError.message);
@@ -505,7 +495,16 @@ class ContractManager {
                 return provider;
 
             } catch (error) {
-                this.log(`❌ RPC ${i + 1} failed: ${error.message}`);
+                // Handle specific error types
+                if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
+                    this.log(`❌ RPC ${i + 1} failed: Authentication error (401) - ${rpcUrl}`);
+                } else if (error.message?.includes('403') || error.message?.includes('Forbidden')) {
+                    this.log(`❌ RPC ${i + 1} failed: Access forbidden (403) - ${rpcUrl}`);
+                } else if (error.message?.includes('429') || error.message?.includes('rate limit')) {
+                    this.log(`❌ RPC ${i + 1} failed: Rate limited (429) - ${rpcUrl}`);
+                } else {
+                    this.log(`❌ RPC ${i + 1} failed: ${error.message}`);
+                }
                 continue;
             }
         }
@@ -519,22 +518,29 @@ class ContractManager {
     getAllRPCUrls() {
         const rpcUrls = [];
 
-        // Primary RPC from CONFIG
-        if (window.CONFIG?.NETWORK?.RPC_URL) {
-            rpcUrls.push(window.CONFIG.NETWORK.RPC_URL);
+        // PRIORITY 1: Use current network's RPC URLs (updated by switchNetwork)
+        if (this.rpcUrls && this.rpcUrls.length > 0) {
+            rpcUrls.push(...this.rpcUrls);
+            this.log('📡 Using current network RPC URLs:', this.rpcUrls.length);
+        } else {
+            // FALLBACK: Use global CONFIG if no network-specific RPCs are set
+            // Primary RPC from CONFIG
+            if (window.CONFIG?.NETWORK?.RPC_URL) {
+                rpcUrls.push(window.CONFIG.NETWORK.RPC_URL);
+            }
+
+            // Fallback RPCs from CONFIG
+            if (window.CONFIG?.NETWORK?.FALLBACK_RPCS) {
+                rpcUrls.push(...window.CONFIG.NETWORK.FALLBACK_RPCS);
+            }
         }
 
-        // Fallback RPCs from CONFIG
-        if (window.CONFIG?.NETWORK?.FALLBACK_RPCS) {
-            rpcUrls.push(...window.CONFIG.NETWORK.FALLBACK_RPCS);
-        }
-
-        // Legacy RPC format
-        if (window.CONFIG?.RPC?.POLYGON_AMOY) {
+        // Legacy RPC format (only if no current network RPCs)
+        if (rpcUrls.length === 0 && window.CONFIG?.RPC?.POLYGON_AMOY) {
             rpcUrls.push(...window.CONFIG.RPC.POLYGON_AMOY);
         }
 
-        // Internal fallback RPCs
+        // Internal fallback RPCs (always add as additional fallbacks)
         if (this.config.fallbackRPCs) {
             rpcUrls.push(...this.config.fallbackRPCs);
         }
@@ -556,7 +562,7 @@ class ContractManager {
 
         // Setup default RPC URLs if not configured
         if (!this.config.fallbackRPCs || this.config.fallbackRPCs.length === 0) {
-            this.config.fallbackRPCs = [
+            this.config.fallbackRPCs = window.CONFIG?.NETWORK?.FALLBACK_RPCS || [
                 'https://rpc-amoy.polygon.technology',
                 'https://polygon-amoy.drpc.org',
                 'https://polygon-amoy-bor-rpc.publicnode.com'
@@ -675,7 +681,7 @@ class ContractManager {
                 this.log('🚨 EMERGENCY FALLBACK: Attempting to create provider without testing...');
 
                 try {
-                    const emergencyRpc = 'https://rpc-amoy.polygon.technology';
+                    const emergencyRpc = this.rpcUrls && this.rpcUrls.length > 0 ? this.rpcUrls[0] : 'https://rpc-amoy.polygon.technology';
                     const emergencyProvider = new ethers.providers.JsonRpcProvider(emergencyRpc);
                     this.fallbackProviders.push(emergencyProvider);
                     this.log('🚨 Emergency provider created (untested):', emergencyRpc);
@@ -1109,6 +1115,64 @@ class ContractManager {
         }
 
         return ready;
+    }
+
+    /**
+     * Switch to a different network and reinitialize contracts
+     * @param {string} networkKey - The network key to switch to
+     */
+    async switchNetwork(networkKey) {
+        try {
+            this.log(`🌐 Switching to ${networkKey} network...`);
+
+            // Reset initialization state
+            this.isInitialized = false;
+            this.isInitializing = false;
+            this.initializationPromise = null;
+
+            // Clear existing contracts
+            this.stakingContract = null;
+            this.rewardTokenContract = null;
+            this.lpTokenContracts.clear();
+
+            // Reset MulticallService
+            if (this.multicallService) {
+                this.log('🔄 Resetting MulticallService for network switch...');
+                this.multicallService.reset();
+                this.multicallService = null;
+            }
+
+            // Update RPC URLs for the new network
+            const network = window.CONFIG.NETWORKS[networkKey];
+            if (network) {
+                this.rpcUrls = [network.RPC_URL, ...network.FALLBACK_RPCS];
+                this.log(`📡 Updated RPC URLs for ${network.NAME}:`, this.rpcUrls.length);
+                
+                // Reset RPC failover state for new network
+                this.currentRpcIndex = 0;
+                this.rpcHealthStatus.clear();
+                this.lastRpcSwitch = 0;
+                this.log('🔄 Reset RPC failover state for network switch');
+            }
+
+            // Check if the new network has valid contract addresses
+            const contracts = window.CONFIG.CONTRACTS;
+            if (!contracts.STAKING_CONTRACT || contracts.STAKING_CONTRACT.trim() === '') {
+                this.log(`⚠️ No contracts deployed on ${network.NAME} - skipping initialization`);
+                this.isInitialized = true; // Mark as initialized but with no contracts
+                return true;
+            }
+
+            // Reinitialize with new network configuration
+            await this.initializeReadOnly();
+            
+            this.log(`✅ Successfully switched to ${networkKey} network`);
+            return true;
+
+        } catch (error) {
+            this.logError(`❌ Failed to switch to ${networkKey} network:`, error);
+            throw error;
+        }
     }
 
     /**
@@ -1601,8 +1665,18 @@ class ContractManager {
                         // If it's already an object with properties
                         if (rawAction.actionType !== undefined) {
                             this.log(`✅ Action ${actionId} is object format`);
-                            rawAction.expired = finalExpired;
-                            return rawAction;
+                            
+                            // If the object is frozen (immutable), create a new object to safely add/override properties
+                            if (Object.isFrozen(rawAction)) {
+                                return {
+                                    ...rawAction,
+                                    expired: finalExpired
+                                };
+                            } else {
+                                // If not frozen, we can safely modify the object directly
+                                rawAction.expired = finalExpired;
+                                return rawAction;
+                            }
                         }
 
                         // If it's a tuple array (correct ABI structure - 14 fields)
@@ -1682,16 +1756,17 @@ class ContractManager {
                     provider
                 );
 
-                return await this._getAllActionsInternal(contractWithProvider, blockTag);
+                // Force 'latest' block to bypass caching
+                return await this._getAllActionsInternal(contractWithProvider, 'latest');
             }, 'getAllActions');
 
         } catch (error) {
             const errorMsg = error?.message || 'Unknown error';
             this.logError('⚠️ All providers failed for getAllActions, trying fallback:', errorMsg);
 
-            // Fallback to standard method
+            // Fallback to standard method with latest block
             return await this.executeWithRetry(async () => {
-                return await this._getAllActionsInternal(this.stakingContract);
+                return await this._getAllActionsInternal(this.stakingContract, 'latest');
             }, 'getAllActions');
         }
     }
@@ -1700,12 +1775,13 @@ class ContractManager {
      * Load all actions using Multicall (ULTRA-FAST)
      * Reduces RPC calls by 66% (1 call instead of 3 per action)
      */
-    async _getAllActionsWithMulticall(contract) {
+    async _getAllActionsWithMulticall(contract, blockTag = null) {
         try {
             const startTime = performance.now();
             
-            // Get action counter
-            const counter = await contract.actionCounter();
+            // Get action counter with blockTag to ensure fresh data
+            const counterOptions = blockTag ? { blockTag } : {};
+            const counter = await contract.actionCounter(counterOptions);
             const actionCount = counter.toNumber();
             
             if (actionCount === 0) {
@@ -1720,7 +1796,7 @@ class ContractManager {
                 actionIds.push(i);
             }
 
-            console.log(`[MULTICALL] 📦 Preparing ${actionIds.length} actions for batch load...`);
+            console.log(`[MULTICALL] 📦 Preparing ${actionIds.length} actions for batch load... (block: ${blockTag || 'default'})`);
 
             // Prepare all calls: action + pairs + weights + approvals + expired for each ID
             const calls = [];
@@ -1734,8 +1810,12 @@ class ContractManager {
 
             console.log(`[MULTICALL] 🚀 Executing ${calls.length} calls in single batch...`);
 
-            // Execute all calls in single RPC request
-            const results = await this.multicallService.batchCall(calls, { timeout: 20000 });
+            // Execute all calls in single RPC request with blockTag for fresh data
+            const multicallOptions = { timeout: 20000 };
+            if (blockTag) {
+                multicallOptions.blockTag = blockTag;
+            }
+            const results = await this.multicallService.batchCall(calls, multicallOptions);
 
             if (!results) {
                 console.log('[MULTICALL] ⚠️ Batch call returned null');
@@ -1830,10 +1910,10 @@ class ContractManager {
     async _getAllActionsInternal(contract, blockTag = null) {
         console.log('[ACTIONS] 🔍 Loading actions using optimized pagination...');
 
-        // Try Multicall if available (90% faster) - only skip if blockTag is explicitly provided
+        // Always try Multicall if available (90% faster) - pass blockTag through
         if (this.multicallService && this.multicallService.isReady()) {
             try {
-                const result = await this._getAllActionsWithMulticall(contract);
+                const result = await this._getAllActionsWithMulticall(contract, blockTag);
                 if (result) {
                     console.log('[ACTIONS] ⚡ Used Multicall optimization');
                     return result;
@@ -1843,7 +1923,7 @@ class ContractManager {
             }
         }
 
-        // Get action counter with block tag if provided
+        // Get action counter with block tag if provided (force latest to bypass cache)
         const counter = blockTag
             ? await contract.actionCounter({ blockTag })
             : await contract.actionCounter();
@@ -2081,14 +2161,27 @@ class ContractManager {
      * Check if an address has admin role
      */
     async hasAdminRole(address = null) {
-        return await this.executeWithRetry(async () => {
-            const userAddress = address || (this.signer ? await this.signer.getAddress() : null);
-            if (!userAddress) {
-                throw new Error('No address provided and no signer available');
-            }
-            const ADMIN_ROLE = await window.contractManager.stakingContract.ADMIN_ROLE();
-            return await this.stakingContract.hasRole(ADMIN_ROLE, userAddress);
-        }, 'hasAdminRole');
+        // Check if contract is properly initialized
+        if (!this.stakingContract) {
+            this.log('⚠️ Staking contract not initialized - admin role check skipped');
+            return false;
+        }
+
+        try {
+            return await this.executeWithRetry(async () => {
+                const userAddress = address || (this.signer ? await this.signer.getAddress() : null);
+                if (!userAddress) {
+                    throw new Error('No address provided and no signer available');
+                }
+                const ADMIN_ROLE = await this.stakingContract.ADMIN_ROLE();
+                return await this.stakingContract.hasRole(ADMIN_ROLE, userAddress);
+            }, 'hasAdminRole');
+        } catch (error) {
+            // Graceful error handling for admin role checks
+            console.warn(`⚠️ Admin role check failed gracefully: ${error.message}`);
+            console.warn('This is expected when contracts are not deployed or user lacks admin permissions');
+            return false;
+        }
     }
 
     // ============ ADMIN PROPOSAL FUNCTIONS ============
@@ -2318,24 +2411,88 @@ class ContractManager {
             };
 
         } catch (error) {
-            // Suppress misleading console errors - this method works correctly
-            console.log(`[UPDATE WEIGHTS] ℹ️ Note: This method works correctly despite any error messages`);
+            this.logError('Failed to propose update pair weights:', error);
 
-            // Return the original result format to maintain compatibility
-            return await this.executeTransactionWithRetry(async () => {
-                const weightsWei = weights.map(w => ethers.utils.parseEther(w.toString()));
-                const gasLimit = 400000;
-                const gasPrice = ethers.utils.parseUnits('50', 'gwei'); // Reasonable gas price
+            // Enhanced error analysis and handling (same pattern as other proposal methods)
+            const errorMessage = error.message || error.technicalMessage || error.reason || '';
+            const errorCode = error.code;
 
-                const contractWithSigner = this.stakingContract.connect(this.signer);
-                const tx = await contractWithSigner.proposeUpdatePairWeights(lpTokens, weightsWei, {
-                    gasLimit: gasLimit,
-                    gasPrice: gasPrice
-                });
-                this.log('Propose update weights transaction sent:', tx.hash);
-                // CRITICAL FIX: Return tx object, not receipt
-                return tx;
-            }, 'proposeUpdatePairWeights');
+            // Detect explicit wallet rejection regardless of provider wording
+            const normalizedMessage = typeof errorMessage === 'string' ? errorMessage.toLowerCase() : '';
+            if (errorCode === 4001 || errorCode === 'ACTION_REJECTED' || normalizedMessage.includes('user rejected')) {
+                return {
+                    success: false,
+                    error: 'Transaction was rejected by user',
+                    userRejected: true,
+                    originalError: error
+                };
+            }
+
+            // Check for access control errors
+            if (errorMessage.includes('AccessControl') || errorMessage.includes('ADMIN_ROLE') ||
+                errorMessage.includes('missing role') || errorMessage.includes('not authorized')) {
+                return {
+                    success: false,
+                    error: 'Access denied: You do not have admin privileges to create proposals',
+                    accessDenied: true
+                };
+            }
+
+            // Check for insufficient funds or gas errors
+            if (errorMessage.includes('insufficient funds') || errorMessage.includes('gas required exceeds allowance') ||
+                errorCode === 'INSUFFICIENT_FUNDS' || errorMessage.includes('out of gas')) {
+                return {
+                    success: false,
+                    error: 'Insufficient funds for gas or transaction amount. Please ensure you have enough MATIC for gas fees.',
+                    insufficientFunds: true
+                };
+            }
+
+            // Check for gas estimation errors
+            if (errorMessage.includes('gas') && (errorMessage.includes('estimate') || errorMessage.includes('limit'))) {
+                return {
+                    success: false,
+                    error: 'Gas estimation failed. The transaction may fail or network conditions are poor.',
+                    gasError: true
+                };
+            }
+
+            // Check for RPC/Network errors
+            if (errorCode === -32603 || errorMessage.includes('Internal JSON-RPC error') ||
+                errorMessage.includes('missing trie node') || errorCode === 'NETWORK_ERROR' ||
+                errorMessage.includes('network') || errorMessage.includes('connection')) {
+                return {
+                    success: false,
+                    error: 'Network error occurred. Please check your connection and try again.',
+                    networkError: true
+                };
+            }
+
+            // Check for nonce errors (stuck transactions)
+            if (errorMessage.includes('nonce') || errorMessage.includes('replacement transaction underpriced')) {
+                return {
+                    success: false,
+                    error: 'Transaction nonce error. You may have pending transactions. Try resetting your MetaMask account or wait for pending transactions to complete.',
+                    nonceError: true
+                };
+            }
+
+            // Check for signer issues
+            if (errorCode === 'UNSUPPORTED_OPERATION' && errorMessage.includes('signer')) {
+                return {
+                    success: false,
+                    error: 'Unable to access wallet signer. Please reconnect your wallet and try again.',
+                    signerUnavailable: true
+                };
+            }
+
+            // For any other error, provide detailed feedback
+            return {
+                success: false,
+                error: `Transaction failed: ${errorMessage}. Please check the console for more details.`,
+                unknownError: true,
+                originalError: error
+            };
         }
     }
 
@@ -2780,8 +2937,33 @@ class ContractManager {
             // Ensure we're on the correct network (using centralized config)
             const network = await web3Provider.getNetwork();
             const expectedChainId = window.CONFIG?.NETWORK?.CHAIN_ID || 80002;
-            if (network.chainId !== expectedChainId) {
-                throw new Error(`Please switch to Polygon Amoy Testnet (Chain ID: ${expectedChainId}) in MetaMask`);
+            
+            // Check permissions for the selected network regardless of current network
+            const selectedNetwork = window.CONFIG?.NETWORK?.CHAIN_ID || 80002;
+            const networkName = window.CONFIG?.NETWORK?.NAME || 'the selected network';
+            
+            if (selectedNetwork === expectedChainId) {
+                console.log(`🌐 ${networkName} selected in UI, checking permissions...`);
+                
+                // Check if we have permission for the selected network
+                const hasPermission = await window.networkManager.hasRequiredNetworkPermission();
+                if (!hasPermission) {
+                    console.log(`🔐 Requesting ${networkName} permission...`);
+                    try {
+                        const permissionGranted = await window.networkManager.requestNetworkPermission('metamask');
+                        if (!permissionGranted) {
+                            throw new Error(`${networkName} permission required for transactions`);
+                        }
+                    } catch (error) {
+                        // Handle network switching errors gracefully
+                        if (error.message.includes('User rejected') || error.message.includes('denied')) {
+                            throw new Error(`User rejected ${networkName} permission request`);
+                        }
+                        throw new Error(`${networkName} permission required for transactions: ${error.message}`);
+                    }
+                }
+            } else if (network.chainId !== expectedChainId) {
+                throw new Error(`Please switch to ${networkName} (Chain ID: ${expectedChainId}) in MetaMask`);
             }
 
             // Get signer from Web3Provider
@@ -3254,7 +3436,7 @@ class ContractManager {
             console.log(`[WITHDRAW REWARDS FIX]   Error code: ${errorCode}`);
 
             // Check for specific error types
-            if (errorMessage.includes('user rejected') || errorCode === 4001) {
+            if (errorMessage.includes('user rejected') || errorCode === 4001 || errorCode === 'ACTION_REJECTED') {
                 return {
                     success: false,
                     error: 'Transaction was rejected by user',
@@ -4236,7 +4418,7 @@ class ContractManager {
             userData.set(pairAddress, {
                 balance: balanceResult?.success ? this.multicallService.decodeResult(erc20Interface, 'balanceOf', balanceResult.returnData) || ethers.BigNumber.from(0) : ethers.BigNumber.from(0),
                 allowance: allowanceResult?.success ? this.multicallService.decodeResult(erc20Interface, 'allowance', allowanceResult.returnData) || ethers.BigNumber.from(0) : ethers.BigNumber.from(0),
-                stake: decodedStakeInfo?.stakedAmount || ethers.BigNumber.from(0),
+                stake: decodedStakeInfo?.amount || ethers.BigNumber.from(0),
                 pendingRewards: decodedStakeInfo?.pendingRewards || ethers.BigNumber.from(0)
             });
         });
@@ -4731,9 +4913,23 @@ class ContractManager {
                 }
 
                 // Try fallback provider for network errors
-                if ((processedError.category === 'network' || error.code === 'NETWORK_ERROR') && this.canUseFallbackProvider()) {
-                    this.log('Network error detected, trying fallback provider...');
-                    await this.tryFallbackProvider();
+                const isNetworkError = processedError.category === 'network' || 
+                                     error.code === 'NETWORK_ERROR' ||
+                                     error.message?.includes('401') ||
+                                     error.message?.includes('403') ||
+                                     error.message?.includes('429') ||
+                                     error.message?.includes('timeout') ||
+                                     error.message?.includes('Internal JSON-RPC error') ||
+                                     error.message?.includes('could not detect network');
+                
+                if (isNetworkError && this.canUseFallbackProvider()) {
+                    this.log('🌐 Network/RPC error detected, trying fallback provider...');
+                    const switched = await this.tryFallbackProvider();
+                    if (switched) {
+                        this.log('✅ Successfully switched to fallback provider');
+                    } else {
+                        console.warn('⚠️ Failed to switch to fallback provider, continuing with current provider');
+                    }
                 }
 
                 throw error; // Re-throw for retry logic
@@ -4797,7 +4993,7 @@ class ContractManager {
         const providers = [];
 
         // OPTIMIZATION: Only use fastest, most reliable providers to reduce fallback time
-        const rpcUrls = [
+        const rpcUrls = this.rpcUrls && this.rpcUrls.length > 0 ? this.rpcUrls : [
             'https://rpc-amoy.polygon.technology',           // Polygon official (most reliable)
             'https://polygon-amoy-bor-rpc.publicnode.com',   // PublicNode (good performance)
             // Removed slower providers to reduce total fallback time
@@ -5624,16 +5820,27 @@ class ContractManager {
             return errorFallback;
         }
 
+        // Check if contract is deployed on current network
+        const contracts = window.CONFIG.CONTRACTS;
+        if (!contracts.STAKING_CONTRACT || contracts.STAKING_CONTRACT.trim() === '') {
+            this.log(`⚠️ No staking contract deployed on current network - ${functionName} skipped gracefully`);
+            return errorFallback;
+        }
+
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
                 return await contractFunction();
 
             } catch (error) {
-                // Check for contract not initialized errors
-                if (error.message.includes('not initialized') ||
+                // Check for contract not deployed errors
+                if (error.message.includes('call revert exception') ||
+                    error.message.includes('execution reverted') ||
+                    error.message.includes('contract not deployed') ||
                     error.message.includes('not a function') ||
-                    error.message.includes('Cannot read properties of null')) {
-                    this.logError(`❌ Contract initialization error for ${functionName}:`, error.message);
+                    error.message.includes('Cannot read properties of null') ||
+                    error.message.includes('not initialized')) {
+                    console.warn(`⚠️ Contract call failed gracefully for ${functionName}: ${error.message}`);
+                    console.warn('This is expected when contracts are not deployed on the current network');
                     return errorFallback;
                 }
 
@@ -5782,7 +5989,11 @@ class ContractManager {
     }
 
     /**
-     * Get current signer address
+     * Get current signer address for transaction operations
+     * Requires signer setup and network context. Use for sending transactions.
+     * For permission checks only, use getCurrentSignerForPermissions() instead.
+     * 
+     * @returns {Promise<string|null>} The signer address or null if not available
      */
     async getCurrentSigner() {
         try {
@@ -5819,6 +6030,29 @@ class ContractManager {
             }
             
             this.logError('Failed to get current signer address:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Get current signer address for permission checks (network-agnostic)
+     * Directly queries wallet accounts without signer setup. Use for UI/permission checks.
+     * For transactions, use getCurrentSigner() instead.
+     * 
+     * @returns {Promise<string|null>} The connected wallet address or null if not connected
+     */
+    async getCurrentSignerForPermissions() {
+        try {
+            if (typeof window.ethereum === 'undefined') return null;
+            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+            return accounts.length > 0 ? accounts[0] : null;
+        } catch (error) {
+            if (error.code === 'UNSUPPORTED_OPERATION' || 
+                error.message?.includes('unknown account') ||
+                error.message?.includes('missing provider')) {
+                return null;
+            }
+            this.logError('Failed to get current signer address for permissions:', error);
             return null;
         }
     }

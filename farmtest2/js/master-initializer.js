@@ -89,6 +89,8 @@ class MasterInitializer {
             'js/utils/unified-cache.js',        // Load cache system first
             'js/utils/cache-integration.js',    // Then cache integration
             'js/utils/multicall-service.js',    // Multicall2 for batch loading (90% RPC reduction)
+            'js/components/network-indicator-selector.js',
+            'js/core/error-handler.js',        // Error handling system
             'js/core/unified-theme-manager.js', // Unified theme manager
             'js/core/theme-manager-new.js',
             'js/core/notification-manager-new.js',
@@ -189,6 +191,10 @@ class MasterInitializer {
             } catch (error) {
                 console.error('❌ Failed to initialize ErrorHandler:', error);
             }
+        } else if (window.errorHandler) {
+            console.log('✅ Error Handler already initialized');
+        } else {
+            console.warn('⚠️ ErrorHandler not available - using fallback error handling');
         }
 
         // Initialize theme manager
@@ -274,6 +280,11 @@ class MasterInitializer {
             window.contractManager = new window.ContractManager();
             this.components.set('contractManager', window.contractManager);
             console.log('✅ Contract Manager created');
+
+            // Set up permission change listener (now handled by network manager)
+            if (window.networkManager && typeof window.networkManager.setupPermissionChangeListener === 'function') {
+                window.networkManager.setupPermissionChangeListener();
+            }
 
             // Initialize with read-only provider for data fetching
             try {
@@ -894,6 +905,11 @@ class MasterInitializer {
 
 // Auto-initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
+    if (window.masterInitializer?.isReady) {
+        console.log('⚠️ System already initialized, skipping...');
+        return;
+    }
+
     console.log('🚀 DOM loaded, starting system initialization...');
     window.masterInitializer = new MasterInitializer();
 

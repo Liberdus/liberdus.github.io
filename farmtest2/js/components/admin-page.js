@@ -513,11 +513,38 @@ class AdminPage {
 
     showUnauthorizedAccess() {
         const container = document.getElementById('admin-content') || document.body;
+        const currentNetwork = window.CONFIG?.NETWORK?.NAME || 'Unknown Network';
+        const currentChainId = window.CONFIG?.NETWORK?.CHAIN_ID || 'Unknown';
+        const currentContract = window.CONFIG?.CONTRACTS?.STAKING_CONTRACT || 'Not configured';
+        
         container.innerHTML = `
             <div class="admin-unauthorized">
                 <div class="unauthorized-card">
                     <h2>🚫 Access Denied</h2>
-                    <p>Switch to an account with admin privileges for this contract.</p>
+                    <p><strong>Switch to an account with admin privileges for this contract.</strong></p>
+                    
+                    <div class="account-switcher">
+                        <h3>👤 Switch Admin Account</h3>
+                        <p>Use your wallet to switch to an account that has admin permissions for this contract.</p>
+                        <div class="network-info">
+                            <div class="network-details">
+                                <p><strong>Current Network:</strong> ${currentNetwork} (Chain ID: ${currentChainId})</p>
+                                <p><strong>Contract:</strong> ${currentContract}</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="network-switcher">
+                        <h3>🌐 Alternative: Switch Network</h3>
+                        <p>Or try switching to a network where you have admin permissions:</p>
+                        <div class="network-selector-container">
+                            <select id="unauthorized-network-select" class="network-select">
+                                <option value="AMOY" ${window.CONFIG?.SELECTED_NETWORK === 'AMOY' ? 'selected' : ''}>Amoy Testnet</option>
+                                <option value="POLYGON_MAINNET" ${window.CONFIG?.SELECTED_NETWORK === 'POLYGON_MAINNET' ? 'selected' : ''}>Polygon Mainnet</option>
+                            </select>
+                        </div>
+                    </div>
+                    
                     <div class="access-details">
                         <p><strong>Your Address:</strong> ${this.userAddress}</p>
                         <p><strong>Required Role:</strong> ADMIN_ROLE or Contract Owner</p>
@@ -525,7 +552,42 @@ class AdminPage {
                 </div>
             </div>
         `;
+        
+        // Set up network selector for unauthorized access
+        this.setupUnauthorizedNetworkSelector();
     }
+
+    /**
+     * Set up network selector for unauthorized access screen
+     */
+    setupUnauthorizedNetworkSelector() {
+        const networkSelect = document.getElementById('unauthorized-network-select');
+        if (!networkSelect) {
+            console.warn('⚠️ Unauthorized network selector not found');
+            return;
+        }
+
+        networkSelect.addEventListener('change', async (event) => {
+            const selectedNetwork = event.target.value;
+            console.log(`🔄 Unauthorized access: Switching to ${selectedNetwork} network...`);
+            
+            try {
+                // Use the existing network selector functionality
+                if (window.networkSelector) {
+                    await window.networkSelector.handleNetworkChange(selectedNetwork, 'admin');
+                    console.log(`✅ Network switched to ${selectedNetwork} from unauthorized access screen`);
+                } else {
+                    console.error('❌ Network selector not available');
+                }
+            } catch (error) {
+                console.error('❌ Error switching network from unauthorized access:', error);
+            }
+        });
+
+        console.log('✅ Unauthorized network selector set up');
+    }
+
+
 
     async loadAdminInterface() {
         console.log('🎨 Loading admin interface...');
@@ -547,6 +609,9 @@ class AdminPage {
 
         // Setup event listeners
         this.setupEventListeners();
+
+        // Setup network selector
+        this.setupNetworkSelector();
 
         // Start auto-refresh
         this.startAutoRefresh();
@@ -625,6 +690,36 @@ class AdminPage {
         } catch (error) {
             console.error('❌ Failed to setup event listeners:', error);
         }
+    }
+
+    /**
+     * Set up network selector
+     */
+    setupNetworkSelector() {
+        if (!window.networkSelector) {
+            console.warn('⚠️ Network selector not available');
+            return;
+        }
+
+        // Initialize network selector with change handler
+        window.networkSelector.init(async (networkKey, context) => {
+            console.log(`🌐 Network changed to ${networkKey} in ${context}`);
+            
+            // Refresh contract data for new network
+            if (window.contractManager) {
+                try {
+                    await window.contractManager.initialize();
+                    await this.loadContractStats();
+                    await this.loadMultiSignPanel();
+                } catch (error) {
+                    console.error('❌ Error refreshing contract data:', error);
+                }
+            }
+
+            // Update network indicator
+            window.NetworkIndicator?.update('network-indicator', 'admin-network-selector', 'admin');
+        });
+
     }
 
     /**
@@ -781,9 +876,13 @@ class AdminPage {
                 }
             });
 
-            window.ethereum.on('chainChanged', (chainId) => {
+            window.ethereum.on('chainChanged', async (chainId) => {
                 console.log('🌐 Chain changed:', chainId);
-                this.handleChainChanged(chainId);
+                try {
+                    await this.handleChainChanged(chainId);
+                } catch (error) {
+                    console.error('❌ Error handling chain changed:', error);
+                }
             });
         }
     }
@@ -1129,7 +1228,7 @@ class AdminPage {
         }
     }
 
-    handleChainChanged(chainId) {
+    async handleChainChanged(chainId) {
         console.log('🌐 Handling chain changed:', chainId);
 
         // Update network indicator when chain changes
@@ -1141,11 +1240,30 @@ class AdminPage {
             // Check permission asynchronously and update
             if (window.networkManager) {
                 window.networkManager.hasRequiredNetworkPermission().then(hasPermission => {
-                    this.updateNetworkIndicatorWithPermission(hasPermission, chainIdDecimal);
+                    window.NetworkIndicator?.update('network-indicator', 'admin-network-selector', 'admin');
                 }).catch(error => {
                     console.error('Error checking permission after chain change:', error);
                 });
             }
+        }
+
+        // CRITICAL: Re-verify admin access when network changes
+        // This ensures users are kicked out if they don't have admin permissions on the new network
+        console.log('🔐 Re-verifying admin access after network change...');
+        try {
+            await this.verifyAdminAccess();
+            
+            if (this.isAuthorized) {
+                console.log('✅ Admin access verified for new network');
+                // Reload the admin interface to ensure it's working with the new network
+                await this.loadAdminInterface();
+            } else {
+                console.log('❌ Admin access denied for new network - showing unauthorized access');
+                this.showUnauthorizedAccess();
+            }
+        } catch (error) {
+            console.error('❌ Error re-verifying admin access after network change:', error);
+            this.showUnauthorizedAccess();
         }
     }
 
@@ -1318,7 +1436,6 @@ class AdminPage {
     createNetworkIndicator() {
         const chainId = window.walletManager?.getChainId();
         const expectedChainId = window.CONFIG.NETWORK.CHAIN_ID;
-        const networkName = window.networkManager?.getNetworkName(chainId) || 'Unknown';
         const expectedNetworkName = window.CONFIG?.NETWORK?.NAME || 'Unknown';
 
         // We'll check permission asynchronously and update the indicator
@@ -1328,76 +1445,26 @@ class AdminPage {
         // Schedule async permission check to update indicator
         if (window.networkManager) {
             window.networkManager.hasRequiredNetworkPermission().then(hasPermission => {
-                this.updateNetworkIndicatorWithPermission(hasPermission, chainId);
+                window.NetworkIndicator?.update('network-indicator', 'admin-network-selector', 'admin');
             }).catch(error => {
                 console.error('Error checking network permission:', error);
             });
         }
 
         return `
-            <div class="network-indicator ${onExpectedNetwork ? 'network-correct' : 'network-wrong'}" id="network-indicator">
-                <span class="network-icon">${onExpectedNetwork ? '🟢' : '⚠️'}</span>
-                <div class="network-info">
-                    <span class="network-name">${onExpectedNetwork ? networkName : 'No permission'}</span>
-                    <span class="network-id">${onExpectedNetwork ? `Chain ID: ${chainId}` : ''}</span>
-                </div>
+            <div class="network-indicator-home ${onExpectedNetwork ? 'has-permission' : 'missing-permission'}" id="network-indicator">
+                <span class="network-status-dot ${onExpectedNetwork ? 'green' : 'red'}"></span>
+                <div id="admin-network-selector"></div>
                 ${!onExpectedNetwork ? `
-                    <button class="btn btn-sm btn-warning" onclick="window.networkManager.requestPermissionWithUIUpdate('admin')" title="Grant permission for ${expectedNetworkName}">
-                        Grant ${expectedNetworkName} Permission
+                    <button class="btn-grant-permission" onclick="${window.PermissionUtils?.getPermissionButtonAction(expectedNetworkName, 'admin') || `window.networkManager.requestPermissionWithUIUpdate('admin')`}" title="${window.PermissionUtils?.getPermissionButtonTitle(expectedNetworkName) || `Grant permission for ${expectedNetworkName}`}">
+                        ${window.PermissionUtils?.getPermissionButtonText(expectedNetworkName) || `Grant ${expectedNetworkName} Permission`}
                     </button>
                 ` : ''}
             </div>
         `;
     }
 
-    /**
-     * Update network indicator with permission information
-     */
-    updateNetworkIndicatorWithPermission(hasPermission, chainIdDecimal) {
-        const indicator = document.getElementById('network-indicator');
-        const expectedNetworkName = window.CONFIG?.NETWORK?.NAME || 'Unknown';
-        const expectedChainId = window.CONFIG?.NETWORK?.CHAIN_ID;
 
-        if (indicator) {
-            const networkIcon = indicator.querySelector('.network-icon');
-            const networkNameEl = indicator.querySelector('.network-name');
-            const networkIdEl = indicator.querySelector('.network-id');
-
-            if (hasPermission) {
-                indicator.className = 'network-indicator network-correct';
-                if (networkIcon) networkIcon.textContent = '🟢';
-                
-                // Show correct network name and chain ID
-                const networkName = window.networkManager?.getNetworkName(chainIdDecimal) || expectedNetworkName;
-                if (networkNameEl) networkNameEl.textContent = networkName;
-                if (networkIdEl) networkIdEl.textContent = `Chain ID: ${chainIdDecimal}`;
-                
-                // Remove any existing permission button
-                const existingButton = indicator.querySelector('button');
-                if (existingButton) {
-                    existingButton.remove();
-                }
-            } else {
-                indicator.className = 'network-indicator network-wrong';
-                if (networkIcon) networkIcon.textContent = '⚠️';
-                
-                // Show "No permission" instead of wrong network name/chain ID
-                if (networkNameEl) networkNameEl.textContent = 'No permission';
-                if (networkIdEl) networkIdEl.textContent = '';
-                
-                // Add permission button if not present
-                const existingButton = indicator.querySelector('button');
-                if (!existingButton) {
-                    const button = document.createElement('button');
-                    button.className = 'btn btn-sm btn-warning';
-                    button.textContent = `Grant ${expectedNetworkName} Permission`;
-                    button.onclick = () => window.networkManager.requestPermissionWithUIUpdate('admin');
-                    button.title = `Grant permission for ${expectedNetworkName}`;
-                    indicator.appendChild(button);
-                }
-            }
-        }
-    }
 
     /**
      * Create wallet address display component
@@ -1522,6 +1589,11 @@ class AdminPage {
     async loadMultiSignPanel() {
         console.log('📋 Loading MultiSign Panel...');
         const panelDiv = document.getElementById('multisign-panel');
+
+        if (!panelDiv) {
+            console.warn('⚠️ Network status container not found');
+            return;
+        }
 
         try {
             // Show loading indicator
@@ -1649,16 +1721,17 @@ class AdminPage {
                 `;
             }
 
-            panelDiv.innerHTML = `
-                <div class="error-panel">
-                    <h3>${errorTitle}</h3>
-                    <p class="error-message">${errorMessage}</p>
-                    ${suggestions}
-                    <div class="error-actions">
-                        <button class="btn btn-secondary" onclick="adminPage.loadMultiSignPanel()">
-                            🔄 Retry
-                        </button>
-                        <button class="btn btn-outline" onclick="adminPage.checkNetworkConnectivity().then(ok => console.log('Network check result:', ok))">
+            if (panelDiv) {
+                panelDiv.innerHTML = `
+                    <div class="error-panel">
+                        <h3>${errorTitle}</h3>
+                        <p class="error-message">${errorMessage}</p>
+                        ${suggestions}
+                        <div class="error-actions">
+                            <button class="btn btn-secondary" onclick="adminPage.loadMultiSignPanel()">
+                                🔄 Retry
+                            </button>
+                            <button class="btn btn-outline" onclick="adminPage.checkNetworkConnectivity().then(ok => console.log('Network check result:', ok))">
                             🌐 Check Network
                         </button>
                         <button class="btn btn-outline" onclick="adminPage.forceLoadRealProposals()">
@@ -1670,6 +1743,7 @@ class AdminPage {
                     </div>
                 </div>
             `;
+            }
         }
     }
 
@@ -2118,26 +2192,21 @@ class AdminPage {
         console.log('🔄 Refreshing admin panel data...');
 
         try {
+            // IMPORTANT: Clear proposal cache to force fresh data
+            this.proposalsCache.clear();
+            this.proposalStates.clear();
+
             // Always refresh contract stats AND contract information (lightweight)
             await Promise.all([
                 this.loadContractStats(),
                 this.loadContractInformation()
             ]);
 
-            // Try selective proposal updates first
-            if (this.isSelectiveUpdateEnabled && this.isUsingRealData) {
-                const selectiveUpdateSuccess = await this.trySelectiveProposalUpdate();
-
-                if (selectiveUpdateSuccess) {
-                    console.log('✅ Admin panel data refreshed using selective updates (with contract info)');
-                    return;
-                }
-            }
-
-            // Fall back to full refresh if selective updates failed or disabled
-            console.log('🔄 Using full refresh...');
+            // ALWAYS do full refresh to ensure we get latest data from blockchain
+            // Selective updates are disabled during manual refresh to guarantee fresh data
+            console.log('🔄 Using full refresh to get latest blockchain data...');
             await this.loadMultiSignPanel();
-            console.log('✅ Admin panel data refreshed using full refresh (with contract info)');
+            console.log('✅ Admin panel data refreshed with fresh blockchain data');
 
         } catch (error) {
             console.error('❌ Failed to refresh data:', error);
@@ -6231,109 +6300,25 @@ class AdminPage {
         }
 
         try {
-            console.log('[ADD PAIR UI] 🔧 Getting contract manager...');
             const contractManager = await this.ensureContractReady();
-
-            // STEP 1: Run diagnostic test first (optional but helpful for debugging)
-            console.log('[ADD PAIR UI] 🔍 Running diagnostic test...');
-            try {
-                const diagnostic = await contractManager.diagnosticTestAddPair(pairAddress, pairName, platform, weightNum);
-                console.log('[ADD PAIR UI] 📊 Diagnostic results:', diagnostic);
-
-                // Check for critical issues
-                if (diagnostic.recommendations && diagnostic.recommendations.length > 0) {
-                    console.warn('[ADD PAIR UI] ⚠️ Diagnostic recommendations:', diagnostic.recommendations);
-
-                    // Show warnings for non-critical issues
-                    const criticalIssues = diagnostic.recommendations.filter(rec =>
-                        rec.includes('not have admin') ||
-                        rec.includes('Switch to Polygon') ||
-                        rec.includes('not deployed')
-                    );
-
-                    if (criticalIssues.length > 0) {
-                        this.showError(`Pre-flight check failed: ${criticalIssues[0]}`);
-                        return;
-                    }
-                }
-            } catch (diagnosticError) {
-                console.warn('[ADD PAIR UI] ⚠️ Diagnostic test failed, proceeding anyway:', diagnosticError.message);
-            }
-
-            // STEP 2: Execute the actual transaction
-            console.log('[ADD PAIR UI] 🚀 Executing proposeAddPair transaction...');
             const result = await contractManager.proposeAddPair(pairAddress, pairName, platform, weightNum);
 
-            console.log('[ADD PAIR UI] 📊 Transaction result:', result);
+            if (result.success) {
+                this.closeModal();
 
-            // STEP 3: Handle the result
-            if (!result.success) {
-                // Enhanced error handling based on error type
-                let errorMessage = result.error || 'Failed to create proposal';
-
-                if (result.accessDenied) {
-                    errorMessage = '🔐 Access Denied: You need admin privileges to create proposals. Please contact an administrator.';
-                } else if (result.insufficientFunds) {
-                    errorMessage = '💰 Insufficient Funds: You need more MATIC for gas fees. Please add funds to your wallet.';
-                } else if (result.userRejected) {
-                    errorMessage = '👤 Transaction Cancelled: You rejected the transaction in MetaMask.';
-                } else if (result.networkError) {
-                    errorMessage = '🌐 Network Error: Please check your internet connection and try again.';
-                } else if (result.gasError) {
-                    errorMessage = '⛽ Gas Error: Network congestion detected. Please try again with higher gas fees.';
-                } else if (result.nonceError) {
-                    errorMessage = '🔢 Transaction Error: You may have pending transactions. Please wait or reset your MetaMask account.';
-                } else if (result.validationError) {
-                    errorMessage = `📋 Validation Error: ${result.error}`;
+                let successMessage = '✅ Add Pair proposal created successfully!';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
                 }
-
-                this.showError(errorMessage);
-                return;
+                this.showSuccess(successMessage);
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error || 'Failed to create proposal');
             }
-
-            // STEP 4: Success handling
-            console.log('[ADD PAIR UI] ✅ Transaction successful!');
-
-            // Show success message with transaction details
-            let successMessage = '✅ Add Pair proposal created successfully!';
-            if (result.transactionHash) {
-                successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
-            }
-
-            this.showSuccess(successMessage);
-
-            console.log('[ADD PAIR UI] 📋 Transaction details:', {
-                hash: result.transactionHash,
-                message: result.message
-            });
-
-            // Close modal
-            this.closeModal();
-
-            // Refresh admin data
-            this.refreshAdminDataOnce();
-
-            return result;
 
         } catch (error) {
-            console.error('[ADD PAIR UI] ❌ Failed to create add pair proposal:', error);
-
-            // Enhanced error handling for unexpected errors
-            let errorMessage = 'Failed to create proposal';
-            if (error.message) {
-                if (error.message.includes('user rejected')) {
-                    errorMessage = '👤 Transaction was cancelled by user';
-                } else if (error.message.includes('insufficient funds')) {
-                    errorMessage = '💰 Insufficient funds for gas fees';
-                } else if (error.message.includes('network')) {
-                    errorMessage = '🌐 Network connection error';
-                } else {
-                    errorMessage = `Failed to create proposal: ${error.message}`;
-                }
-            }
-
-            this.showError(errorMessage);
-            throw error; // Re-throw for higher-level error handling
+            console.error('Failed to create add pair proposal:', error);
+            this.showError('Failed to create proposal: ' + error.message);
         }
     }
 
@@ -6344,13 +6329,6 @@ class AdminPage {
             const pairAddress = document.getElementById('remove-pair-select')?.value;
             const description = document.getElementById('remove-description')?.value;
             const confirmRemoval = document.getElementById('confirm-removal')?.checked;
-
-            console.log('🔍 Remove pair form data:', {
-                pairAddress,
-                description: description?.substring(0, 50) + '...',
-                descriptionLength: description?.length,
-                confirmRemoval
-            });
 
             // Validate required fields
             if (!pairAddress) {
@@ -6368,65 +6346,25 @@ class AdminPage {
                 return;
             }
 
-            console.log('✅ Validation passed, creating removal proposal...');
-
             const contractManager = await this.ensureContractReady();
             const result = await contractManager.proposeRemovePair(pairAddress);
 
-            console.log('[REMOVE PAIR UI] 📊 Transaction result:', result);
+            if (result.success) {
+                this.closeModal();
 
-            // Handle the result based on new response format
-            if (!result.success) {
-                // Enhanced error handling based on error type
-                let errorMessage = result.error || 'Failed to create removal proposal';
-
-                if (result.accessDenied) {
-                    errorMessage = '🔐 Access Denied: You need admin privileges to create proposals.';
-                } else if (result.insufficientFunds) {
-                    errorMessage = '💰 Insufficient Funds: You need more MATIC for gas fees.';
-                } else if (result.userRejected) {
-                    errorMessage = '👤 Transaction Cancelled: You rejected the transaction in MetaMask.';
-                } else if (result.networkError) {
-                    errorMessage = '🌐 Network Error: Please check your internet connection and try again.';
+                let successMessage = '✅ Remove Pair proposal created successfully!';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
                 }
-
-                this.showError(errorMessage);
-                return;
+                this.showSuccess(successMessage);
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error || 'Failed to create removal proposal');
             }
-
-            // Success handling
-            console.log('[REMOVE PAIR UI] ✅ Transaction successful!');
-
-            // Show success message with transaction details
-            let successMessage = '✅ Remove Pair proposal created successfully!';
-            if (result.transactionHash) {
-                successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
-            }
-
-            this.showSuccess(successMessage);
-            this.closeModal();
-            this.refreshAdminDataOnce();
-            return result;
 
         } catch (error) {
-            console.error('[REMOVE PAIR UI] ❌ Failed to create removal proposal:', error);
-
-            // Enhanced error handling for unexpected errors
-            let errorMessage = 'Failed to create removal proposal';
-            if (error.message) {
-                if (error.message.includes('user rejected')) {
-                    errorMessage = '👤 Transaction was cancelled by user';
-                } else if (error.message.includes('insufficient funds')) {
-                    errorMessage = '💰 Insufficient funds for gas fees';
-                } else if (error.message.includes('network')) {
-                    errorMessage = '🌐 Network connection error';
-                } else {
-                    errorMessage = `Failed to create removal proposal: ${error.message}`;
-                }
-            }
-
-            this.showError(errorMessage);
-            throw error;
+            console.error('Failed to create removal proposal:', error);
+            this.showError('Failed to create proposal: ' + error.message);
         }
     }
 
@@ -6438,7 +6376,8 @@ class AdminPage {
 
         // Validate description
         if (!description || description.trim().length < 10) {
-            throw new Error('Please provide a detailed description for the weight changes (minimum 10 characters)');
+            this.showError('Please provide a detailed description for the weight changes (minimum 10 characters)');
+            return;
         }
 
         // Collect weight updates
@@ -6453,9 +6392,10 @@ class AdminPage {
             const currentWeight = parseInt(input.dataset.current, 10);
             const newWeightNum = parseInt(newWeight, 10);
 
-                if (isNaN(newWeightNum) || newWeightNum < 1 || newWeightNum > 10000) {
-                    throw new Error(`Invalid weight value: ${newWeight}. Must be between 1-10,000`);
-                }
+            if (isNaN(newWeightNum) || newWeightNum < 1 || newWeightNum > 10000) {
+                this.showError(`Invalid weight value: ${newWeight}. Must be between 1-10,000`);
+                return;
+            }
 
             if (newWeightNum !== currentWeight) {
                 weightUpdates.push({
@@ -6467,7 +6407,8 @@ class AdminPage {
         }
 
         if (weightUpdates.length === 0) {
-            throw new Error('Please specify at least one weight change');
+            this.showError('Please specify at least one weight change');
+            return;
         }
 
         try {
@@ -6480,19 +6421,22 @@ class AdminPage {
             // Create batch weight update proposal
             const result = await contractManager.proposeUpdatePairWeights(lpTokens, weights);
 
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to create weight update proposal');
+            if (result.success) {
+                this.closeModal();
+
+                let successMessage = '✅ Weight update proposal created successfully!';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
+                }
+                this.showSuccess(successMessage);
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error || 'Failed to create weight update proposal');
             }
-
-            this.closeModal();
-            this.showSuccess('✅ Weight update proposal created successfully!');
-            this.refreshAdminDataOnce();
-
-            return { success: true };
 
         } catch (error) {
             console.error('Failed to create weight update proposal:', error);
-            throw error;
+            this.showError('Failed to create proposal: ' + error.message);
         }
     }
 
@@ -6552,62 +6496,22 @@ class AdminPage {
             const contractManager = await this.ensureContractReady();
             const result = await contractManager.proposeChangeSigner(oldSigner, newSigner);
 
-            console.log('[CHANGE SIGNER UI] 📊 Transaction result:', result);
+            if (result.success) {
+                this.closeModal();
 
-            // Handle the result based on new response format
-            if (!result.success) {
-                // Enhanced error handling based on error type
-                let errorMessage = result.error || 'Failed to create change signer proposal';
-
-                if (result.accessDenied) {
-                    errorMessage = '🔐 Access Denied: You need admin privileges to create proposals.';
-                } else if (result.insufficientFunds) {
-                    errorMessage = '💰 Insufficient Funds: You need more MATIC for gas fees.';
-                } else if (result.userRejected) {
-                    errorMessage = '👤 Transaction Cancelled: You rejected the transaction in MetaMask.';
-                } else if (result.networkError) {
-                    errorMessage = '🌐 Network Error: Please check your internet connection and try again.';
-                } else if (result.invalidOldSigner) {
-                    errorMessage = '❌ Invalid Old Signer: The old signer address is not currently an admin.';
-                } else if (result.signerAlreadyExists) {
-                    errorMessage = '❌ Signer Already Exists: The new signer address is already an admin.';
+                let successMessage = '✅ Change signer proposal created successfully!';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
                 }
-
-                this.showError(errorMessage);
-                return;
+                this.showSuccess(successMessage);
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error || 'Failed to create change signer proposal');
             }
-
-            // Success handling
-            console.log('[CHANGE SIGNER UI] ✅ Transaction successful!');
-
-            this.closeModal();
-
-            // Show success message with transaction details
-            let successMessage = '✅ Change signer proposal created successfully!';
-            if (result.transactionHash) {
-                successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
-            }
-            this.showSuccess(successMessage);
-            this.refreshAdminDataOnce();
 
         } catch (error) {
-            console.error('[CHANGE SIGNER UI] ❌ Failed to create signer change proposal:', error);
-
-            // Enhanced error handling for unexpected errors
-            let errorMessage = 'Failed to create signer change proposal';
-            if (error.message) {
-                if (error.message.includes('user rejected')) {
-                    errorMessage = '👤 Transaction was cancelled by user';
-                } else if (error.message.includes('insufficient funds')) {
-                    errorMessage = '💰 Insufficient funds for gas fees';
-                } else if (error.message.includes('network')) {
-                    errorMessage = '🌐 Network connection error';
-                } else {
-                    errorMessage = `Failed to create signer change proposal: ${error.message}`;
-                }
-            }
-
-            this.showError(errorMessage);
+            console.error('Failed to create signer change proposal:', error);
+            this.showError('Failed to create proposal: ' + error.message);
         } finally {
             // DUPLICATE PREVENTION FIX: Always reset submission state and button
             this.isSubmittingChangeSigner = false;
@@ -6671,73 +6575,22 @@ class AdminPage {
             const contractManager = await this.ensureContractReady();
             const result = await contractManager.proposeWithdrawal(amount, toAddress, description);
 
-            console.log('[WITHDRAWAL UI] 📊 Transaction result:', result);
+            if (result.success) {
+                this.closeModal();
 
-            // Handle the result based on new response format
-            if (!result.success) {
-                // Enhanced error handling based on error type
-                let errorMessage = result.error || 'Failed to create withdrawal proposal';
-
-                if (result.accessDenied) {
-                    errorMessage = '🔐 Access Denied: You need admin privileges to create proposals.';
-                } else if (result.insufficientFunds) {
-                    errorMessage = '💰 Insufficient Funds: You need more MATIC for gas fees.';
-                } else if (result.userRejected) {
-                    errorMessage = '👤 Transaction Cancelled: You rejected the transaction in MetaMask.';
-                } else if (result.networkError) {
-                    errorMessage = '🌐 Network Error: Please check your internet connection and try again.';
-                } else if (result.insufficientContractBalance) {
-                    errorMessage = '💸 Insufficient Contract Balance: The withdrawal amount exceeds available funds.';
-                } else if (result.invalidRecipient) {
-                    errorMessage = '❌ Invalid Recipient: Please verify the recipient address format.';
+                let successMessage = '✅ Withdrawal proposal created successfully!';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
                 }
-
-                this.showError(errorMessage);
-                return;
+                this.showSuccess(successMessage);
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error || 'Failed to create withdrawal proposal');
             }
-
-            // Success handling
-            console.log('[WITHDRAWAL UI] ✅ Transaction successful!');
-
-            this.closeModal();
-
-            let successMessage = '✅ Withdrawal proposal created successfully!';
-
-            if (result.transactionHash) {
-                successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
-            }
-
-            if (result.actionRejectedButSucceeded) {
-                successMessage += ' (Confirmed despite initial rejection)';
-                console.log('[WITHDRAWAL UI] 🎯 ACTION_REJECTED override - transaction actually succeeded');
-            }
-
-            if (result.waitError) {
-                successMessage += ' (Confirmation pending)';
-                console.log('[WITHDRAWAL UI] 🎯 tx.wait error override - transaction submitted successfully');
-            }
-
-            this.showSuccess(successMessage);
-            this.refreshAdminDataOnce();
 
         } catch (error) {
-            console.error('[WITHDRAWAL UI] ❌ Failed to create withdrawal proposal:', error);
-
-            // Enhanced error handling for unexpected errors
-            let errorMessage = 'Failed to create withdrawal proposal';
-            if (error.message) {
-                if (error.message.includes('user rejected')) {
-                    errorMessage = '👤 Transaction was cancelled by user';
-                } else if (error.message.includes('insufficient funds')) {
-                    errorMessage = '💰 Insufficient funds for gas fees';
-                } else if (error.message.includes('network')) {
-                    errorMessage = '🌐 Network connection error';
-                } else {
-                    errorMessage = `Failed to create withdrawal proposal: ${error.message}`;
-                }
-            }
-
-            this.showError(errorMessage);
+            console.error('Failed to create withdrawal proposal:', error);
+            this.showError('Failed to create proposal: ' + error.message);
         } finally {
             // DUPLICATE PREVENTION FIX: Always reset submission state and button
             this.isSubmittingWithdrawal = false;

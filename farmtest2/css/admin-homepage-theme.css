@@ -1208,47 +1208,6 @@ button.btn span:not(.btn-loading),
     margin-right: 16px !important;
 }
 
-.network-indicator .network-icon {
-    font-size: 16px !important;
-}
-
-.network-indicator .network-info {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 2px !important;
-}
-
-.network-indicator .network-name {
-    font-size: 14px !important;
-    font-weight: 600 !important;
-    color: var(--text-primary) !important;
-}
-
-.network-indicator .network-id {
-    font-size: 11px !important;
-    color: var(--text-secondary) !important;
-}
-
-/* Correct network styling */
-.network-indicator.network-correct {
-    border-color: rgba(76, 175, 80, 0.3) !important;
-    background: rgba(76, 175, 80, 0.05) !important;
-}
-
-.network-indicator.network-correct .network-name {
-    color: #4caf50 !important;
-}
-
-/* Wrong network styling */
-.network-indicator.network-wrong {
-    border-color: rgba(244, 67, 54, 0.3) !important;
-    background: rgba(244, 67, 54, 0.05) !important;
-}
-
-.network-indicator.network-wrong .network-name {
-    color: #f44336 !important;
-}
-
 /* ========================================
    WALLET ADDRESS DISPLAY
    ======================================== */

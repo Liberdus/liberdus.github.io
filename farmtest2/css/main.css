@@ -577,3 +577,22 @@ a:hover {
         animation: none;
     }
 }
+
+/* Admin button checking indicator */
+#admin-panel-link.admin-checking {
+    opacity: 0.6;
+    position: relative;
+}
+
+#admin-panel-link.admin-checking::after {
+    content: '';
+    position: absolute;
+    top: calc(50% - 6px);
+    right: 8px;
+    width: 12px;
+    height: 12px;
+    border: 2px solid transparent;
+    border-top: 2px solid currentColor;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}

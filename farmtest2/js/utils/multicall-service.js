@@ -51,10 +51,24 @@
         }
 
         /**
+         * Reset the service for network switching
+         */
+        reset() {
+            this.provider = null;
+            this.chainId = null;
+            this.multicallContract = null;
+            this.isAvailable = false;
+            console.log('🔄 MulticallService reset for network switch');
+        }
+
+        /**
          * Initialize with provider and chain ID
          */
         async initialize(provider, chainId) {
             try {
+                // Reset any existing state
+                this.reset();
+                
                 this.provider = provider;
                 this.chainId = chainId;
 
@@ -74,9 +88,14 @@
                     provider
                 );
 
-                // Test if contract exists at address
+                // Test if contract exists at address with timeout
                 try {
-                    const code = await provider.getCode(multicallAddress);
+                    const codePromise = provider.getCode(multicallAddress);
+                    const timeoutPromise = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Contract verification timeout')), 5000)
+                    );
+                    
+                    const code = await Promise.race([codePromise, timeoutPromise]);
                     if (code === '0x') {
                         console.warn(`⚠️ No contract at Multicall2 address ${multicallAddress}`);
                         this.isAvailable = false;
@@ -108,6 +127,7 @@
         async tryAggregate(calls, options = {}) {
             const requireSuccess = options.requireSuccess === true;
             const timeout = options.timeout || 10000; // 10s default timeout
+            const blockTag = options.blockTag; // Support blockTag for fresh queries
 
             if (!this.isAvailable) {
                 console.warn('⚠️ Multicall not available, returning null for fallback');
@@ -122,8 +142,9 @@
                 const startTime = performance.now();
                 this.stats.totalCalls++;
 
-                // Execute with timeout
-                const callPromise = this.multicallContract.tryAggregate(requireSuccess, calls);
+                // Execute with timeout and optional blockTag
+                const callOptions = blockTag ? { blockTag } : {};
+                const callPromise = this.multicallContract.tryAggregate(requireSuccess, calls, callOptions);
                 const timeoutPromise = new Promise((_, reject) =>
                     setTimeout(() => reject(new Error('Multicall timeout')), timeout)
                 );
@@ -139,13 +160,20 @@
                 this.stats.totalTimeSaved += timeSaved;
                 this.stats.successfulCalls++;
 
-                console.log(`⚡ Multicall: ${calls.length} calls in ${timeTaken.toFixed(0)}ms (saved ~${timeSaved.toFixed(0)}ms)`);
+                const blockInfo = blockTag ? ` (block: ${blockTag})` : '';
+                console.log(`⚡ Multicall: ${calls.length} calls in ${timeTaken.toFixed(0)}ms (saved ~${timeSaved.toFixed(0)}ms)${blockInfo}`);
 
                 return results;
 
             } catch (error) {
                 this.stats.failedCalls++;
-                console.warn('⚠️ Multicall failed, returning null for fallback:', error.message);
+                
+                // Handle specific error types more gracefully
+                const errorType = error.message.includes('CORS') || error.message.includes('network') ? 'Network error' :
+                                error.message.includes('timeout') ? 'Timeout' :
+                                error.message.includes('rate limit') || error.message.includes('429') ? 'Rate limited' : 'Unknown error';
+                console.warn(`⚠️ Multicall ${errorType.toLowerCase()}, returning null for fallback`);
+                
                 return null;
             }
         }

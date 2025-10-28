@@ -1368,11 +1368,6 @@
     flex: 1;
 }
 
-.network-name {
-    font-size: var(--font-size-base);
-    color: var(--text-primary);
-    font-weight: var(--font-weight-medium);
-}
 
 .wallet-actions {
     display: flex;

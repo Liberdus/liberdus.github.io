@@ -38,6 +38,7 @@ class HomePage {
         this.setupContractManagerListeners();
         this.setupWalletChangeDetection();
         this.setupNetworkIndicator();
+        this.setupNetworkSelector();
         this.loadDataWhenReady();
         this.isInitialized = true;
 
@@ -81,14 +82,14 @@ class HomePage {
         // Listen for wallet connection changes
         document.addEventListener('walletConnected', (event) => {
             console.log('🏠 HomePage: Wallet connected, refreshing data...');
-            this.updateNetworkIndicator();
+            window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
             this.refreshDataAfterWalletChange();
             this.checkAdminAccess();
         });
 
         document.addEventListener('walletDisconnected', () => {
             console.log('🏠 HomePage: Wallet disconnected, refreshing data...');
-            this.updateNetworkIndicator();
+            window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
             this.refreshDataAfterWalletChange();
             this.hideAdminButton();
         });
@@ -101,11 +102,17 @@ class HomePage {
                 this.checkAdminAccess();
             });
 
+            // Re-check permissions when wallet network changes
             window.ethereum.on('chainChanged', (chainId) => {
                 console.log('🏠 HomePage: Chain changed:', chainId);
-                this.updateNetworkIndicator();
-                this.refreshDataAfterWalletChange();
-                this.checkAdminAccess();
+                // Only update the network indicator to re-check permissions
+                window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
+            });
+
+            // Re-check permissions when page regains focus (in case permissions were removed in another tab)
+            window.addEventListener('focus', () => {
+                console.log('🏠 HomePage: Page focused, re-checking permissions...');
+                window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
             });
         }
     }
@@ -527,6 +534,24 @@ class HomePage {
     }
 
     /**
+     * Load empty data when no contracts are deployed
+     */
+    loadEmptyData() {
+        console.log('📊 Loading empty data for network without contracts...');
+        
+        // Set empty data
+        this.hourlyRewardRate = 0;
+        this.totalWeight = 0;
+        this.pairsData = [];
+        
+        // Update display
+        this.updateHourlyRateDisplay(0);
+        this.render();
+        
+        console.log('✅ Empty data loaded successfully');
+    }
+
+    /**
      * Load real blockchain data from contracts - OPTIMIZED FOR SPEED
      */
     async loadBlockchainData() {
@@ -535,6 +560,14 @@ class HomePage {
 
         if (!window.contractManager || !window.contractManager.isReady()) {
             throw new Error('Contract manager not ready');
+        }
+
+        // Check if there are valid contracts for the current network
+        const contracts = window.CONFIG.CONTRACTS;
+        if (!contracts.STAKING_CONTRACT || contracts.STAKING_CONTRACT.trim() === '') {
+            console.log('⚠️ No contracts deployed on current network - loading empty data');
+            this.loadEmptyData();
+            return;
         }
 
         try {
@@ -1399,79 +1432,54 @@ class HomePage {
      */
     setupNetworkIndicator() {
         // Update indicator initially
-        this.updateNetworkIndicator();
+        window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
 
         // Update on wallet connection/disconnection
         document.addEventListener('walletConnected', () => {
-            this.updateNetworkIndicator();
+            window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
         });
 
         document.addEventListener('walletDisconnected', () => {
-            const indicator = document.getElementById('network-indicator-home');
-            if (indicator) {
-                indicator.style.display = 'none';
-            }
+            // Update network indicator to show disconnected state
+            window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
         });
-
-        // Update on network change
-        if (window.ethereum) {
-            window.ethereum.on('chainChanged', () => {
-                this.updateNetworkIndicator();
-            });
-        }
     }
 
-    /**
-     * Update network indicator with current status
-     */
-    async updateNetworkIndicator() {
-        const indicator = document.getElementById('network-indicator-home');
-        if (!indicator) return;
 
-        // Only show if wallet is connected
-        if (!window.walletManager || !window.walletManager.isConnected()) {
-            indicator.style.display = 'none';
+    /**
+     * Set up network selector
+     */
+    setupNetworkSelector() {
+        if (!window.networkSelector) {
+            console.warn('⚠️ Network selector not available');
             return;
         }
 
-        const chainId = window.walletManager.getChainId();
-        const networkName = window.networkManager?.getNetworkName(chainId) || 'Unknown';
-        const expectedNetworkName = window.CONFIG?.NETWORK?.NAME || 'Unknown';
-
-        // Check permission asynchronously
-        if (window.networkManager) {
-            try {
-                const hasPermission = await window.networkManager.hasRequiredNetworkPermission();
-
-                indicator.style.display = 'flex';
-
-                if (hasPermission) {
-                    // Green indicator - has permission
-                    indicator.innerHTML = `
-                        <span class="network-status-dot green"></span>
-                        <span class="network-name">${expectedNetworkName}</span>
-                    `;
-                    indicator.className = 'network-indicator-home has-permission';
-                } else {
-                    // Red indicator - missing permission, show "No permission"
-                    indicator.innerHTML = `
-                        <span class="network-status-dot red"></span>
-                        <span class="network-name">No permission</span>
-                        <button class="btn-grant-permission" onclick="window.networkManager.requestPermissionWithUIUpdate('home')">
-                            Grant ${expectedNetworkName} Permission
-                        </button>
-                    `;
-                    indicator.className = 'network-indicator-home missing-permission';
+        // Initialize network selector with change handler
+        window.networkSelector.init(async (networkKey, context) => {
+            console.log(`🌐 Network changed to ${networkKey} in ${context}`);
+            
+            // Clear cache to ensure fresh data is fetched for new network
+            this.cache.hourlyRewardRate = { value: null, timestamp: 0, ttl: this.cache.hourlyRewardRate.ttl };
+            this.cache.totalWeight = { value: null, timestamp: 0, ttl: this.cache.totalWeight.ttl };
+            this.cache.pairsInfo = { value: null, timestamp: 0, ttl: this.cache.pairsInfo.ttl };
+            
+            // Refresh contract data for new network
+            if (window.contractManager) {
+                try {
+                    await window.contractManager.initialize();
+                    this.loadDataWhenReady();
+                } catch (error) {
+                    console.error('❌ Error refreshing contract data:', error);
                 }
-            } catch (error) {
-                console.error('Error checking network permission:', error);
-                indicator.style.display = 'none';
             }
-        } else {
-            // Fallback if networkManager not available
-            indicator.style.display = 'none';
-        }
+
+            // Update network indicator
+            window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
+        });
+
     }
+
 
     destroy() {
         this.stopAutoRefresh();
@@ -1485,6 +1493,8 @@ class HomePage {
         const adminButton = document.getElementById('admin-panel-link');
         if (!adminButton) return;
 
+        console.log('🔍 Checking admin access...');
+
         // Check if wallet is connected
         if (!this.isWalletConnected()) {
             this.hideAdminButton();
@@ -1492,12 +1502,19 @@ class HomePage {
         }
 
         try {
-            // Get the current user address
-            const userAddress = await window.contractManager?.getCurrentSigner();
+            // Wait for contract manager to be ready before making contract calls
+            if (window.contractManager && !window.contractManager.isReady()) {
+                await window.contractManager.waitForReady(10000); // Wait up to 10 seconds
+            }
+
+            // Get the current user address (network-agnostic for permission checks)
+            const userAddress = await window.contractManager?.getCurrentSignerForPermissions();
             if (!userAddress) {
                 this.hideAdminButton();
                 return;
             }
+
+            console.log('👤 Checking admin access for:', userAddress);
 
             // Development mode check
             if (window.DEV_CONFIG?.AUTHORIZED_ADMINS) {
@@ -1510,30 +1527,75 @@ class HomePage {
                 }
             }
 
-            // Check if user has admin role from contract
+            // Check if user has admin role from contract (with timeout and error handling)
             if (window.contractManager?.hasAdminRole) {
-                const hasAdminRole = await window.contractManager.hasAdminRole(userAddress);
-                if (hasAdminRole) {
-                    this.showAdminButton();
-                    return;
+                try {
+                    let timeoutId;
+                    const timeoutPromise = new Promise((_, reject) => {
+                        timeoutId = setTimeout(() => reject(new Error('Admin role check timeout')), 5000);
+                    });
+                    
+                    const hasAdminRole = await Promise.race([
+                        window.contractManager.hasAdminRole(userAddress),
+                        timeoutPromise
+                    ]);
+                    
+                    // Clear the timeout since the race completed
+                    clearTimeout(timeoutId);
+                    
+                    if (hasAdminRole) {
+                        this.showAdminButton();
+                        return;
+                    }
+                } catch (adminRoleError) {
+                    console.warn('⚠️ Admin role check failed:', adminRoleError.message);
                 }
             }
 
-            // Check if user is the contract owner
+            // Check if user is the contract owner (with timeout and error handling)
             if (window.contractManager?.stakingContract?.owner) {
-                const owner = await window.contractManager.stakingContract.owner();
-                if (owner.toLowerCase() === userAddress.toLowerCase()) {
-                    this.showAdminButton();
-                    return;
+                try {
+                    let timeoutId;
+                    const timeoutPromise = new Promise((_, reject) => {
+                        timeoutId = setTimeout(() => reject(new Error('Owner check timeout')), 5000);
+                    });
+                    
+                    const owner = await Promise.race([
+                        window.contractManager.stakingContract.owner(),
+                        timeoutPromise
+                    ]);
+                    
+                    // Clear the timeout since the race completed
+                    clearTimeout(timeoutId);
+                    
+                    if (owner.toLowerCase() === userAddress.toLowerCase()) {
+                        this.showAdminButton();
+                        return;
+                    }
+                } catch (ownerError) {
+                    console.warn('⚠️ Owner check failed:', ownerError.message);
                 }
             }
 
             // If none of the checks passed, hide the button
             this.hideAdminButton();
         } catch (error) {
-            console.error('Error checking admin access:', error);
+            console.error('❌ Error checking admin access:', error);
             this.hideAdminButton();
         }
+    }
+
+    /**
+     * Check if we're currently in the middle of a network switch
+     */
+    isNetworkSwitching() {
+        // Check if contract manager is initializing
+        if (window.contractManager && window.contractManager.isInitializing) {
+            return true;
+        }
+        
+        // Check if we're in the middle of a network switch
+        return window.networkSelector && window.networkSelector.isNetworkSwitching();
     }
 
     /**
@@ -1543,6 +1605,7 @@ class HomePage {
         const adminButton = document.getElementById('admin-panel-link');
         if (adminButton) {
             adminButton.style.display = 'flex';
+            adminButton.classList.remove('admin-checking');
             this.isAdmin = true;
         }
     }
@@ -1554,10 +1617,24 @@ class HomePage {
         const adminButton = document.getElementById('admin-panel-link');
         if (adminButton) {
             adminButton.style.display = 'none';
+            adminButton.classList.remove('admin-checking');
             this.isAdmin = false;
         }
     }
+
+    /**
+     * Show admin button with checking indicator
+     */
+    showAdminButtonChecking() {
+        const adminButton = document.getElementById('admin-panel-link');
+        if (adminButton) {
+            adminButton.style.display = 'flex';
+            adminButton.classList.add('admin-checking');
+            this.isAdmin = false; // Not confirmed yet
+        }
+    }
 }
+
 
 // Initialize home page
 let homePage;

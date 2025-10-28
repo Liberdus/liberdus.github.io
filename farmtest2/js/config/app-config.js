@@ -6,45 +6,96 @@
 
 // Application Configuration
 window.CONFIG = {
-    // Network Configuration
-    NETWORK: {
-        CHAIN_ID: 80002, // Polygon Amoy Testnet
-        NAME: 'Amoy',
-        // ✅ USING ALCHEMY - Best reliability and performance!
-        // Using existing Alchemy API key for Polygon Amoy testnet
-        RPC_URL: 'https://polygon-amoy.g.alchemy.com/v2/CjcioLVYYWW0tsHWorEfC',
-        FALLBACK_RPCS: [
-            'https://polygon-amoy.g.alchemy.com/v2/0abef17687cb430ca83c21ccc5bcbdd2',
-            'https://polygon-amoy.drpc.org',
-            'https://polygon-amoy-bor-rpc.publicnode.com',
-            'https://rpc-amoy.polygon.technology',
-            'https://rpc.ankr.com/polygon_amoy'
-        ],
-        BLOCK_EXPLORER: 'https://amoy.polygonscan.com',
-        NATIVE_CURRENCY: {
-            name: 'MATIC',
-            symbol: 'MATIC',
-            decimals: 18
+    // Multi-Network Configuration
+    NETWORKS: {
+        AMOY: {
+            CHAIN_ID: 80002,
+            NAME: 'Amoy',
+            RPC_URL: 'https://polygon-amoy.drpc.org',
+            FALLBACK_RPCS: [
+                'https://rpc.ankr.com/polygon_amoy',
+                'https://polygon-amoy-bor-rpc.publicnode.com',
+                'https://rpc-amoy.polygon.technology',
+                'https://polygon-amoy.g.alchemy.com/v2/CjcioLVYYWW0tsHWorEfC'
+            ],
+            BLOCK_EXPLORER: 'https://amoy.polygonscan.com',
+            NATIVE_CURRENCY: {
+                name: 'MATIC',
+                symbol: 'MATIC',
+                decimals: 18
+            },
+            CONTRACTS: {
+                STAKING_CONTRACT: '0xDB7100D6f037fc36A51c38E76c910626A2d755f4',
+                REWARD_TOKEN: '0x6e2b7ABA70e8262Fb534aF5e14E786981760b829',
+                LP_TOKENS: {
+                    LPLIBETH: '0xf33CDD487d091d26B2955588791dD81c8940a3F3',
+                    LPLIBUSDC: '0x104f51469aE06A3Cda5a23901e4e069A5D71F6d3',
+                    LPLIBUSDT: '0x87D394F688a51584cB59dA49A95E59080D251Cf0'
+                }
+            }
+        },
+        POLYGON_MAINNET: {
+            CHAIN_ID: 137,
+            NAME: 'Polygon Mainnet',
+            RPC_URL: 'https://rpc.ankr.com/polygon',
+            FALLBACK_RPCS: [
+                'https://polygon-mainnet.public.blastapi.io',
+                'https://polygon-rpc.com',
+                'https://polygon-mainnet.chainstacklabs.com',
+                'https://polygon-mainnet.g.alchemy.com/v2/CjcioLVYYWW0tsHWorEfC',
+                'https://polygon-mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161'
+            ],
+            BLOCK_EXPLORER: 'https://polygonscan.com',
+            NATIVE_CURRENCY: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
+            CONTRACTS: {
+                STAKING_CONTRACT: '0xef15eB728CEF704f40269319BBA495d4131Beb71',
+                REWARD_TOKEN: '0x693ed886545970F0a3ADf8C59af5cCdb6dDF0a76',
+                LP_TOKENS: {}
+            }
         }
     },
 
-    // Contract Addresses (Polygon Amoy Testnet Deployment)
-    
-    CONTRACTS: {
-        STAKING_CONTRACT: '0xDB7100D6f037fc36A51c38E76c910626A2d755f4',
-        REWARD_TOKEN: '0x6e2b7ABA70e8262Fb534aF5e14E786981760b829',
-        LP_TOKENS: {
-            LPLIBETH: '0xf33CDD487d091d26B2955588791dD81c8940a3F3',
-            LPLIBUSDC: '0x104f51469aE06A3Cda5a23901e4e069A5D71F6d3',
-            LPLIBUSDT: '0x87D394F688a51584cB59dA49A95E59080D251Cf0'
-        },
-        // Multicall2 addresses (canonical deployment for batch loading optimization)
-        MULTICALL2: {
-            1: '0x5BA1e12693Dc8F9c48aAD8770482f4739bEeD696',      // Ethereum Mainnet
-            137: '0x275617327c958bD06b5D6b871E7f491D76113dd8',    // Polygon Mainnet
-            80002: '0xcA11bde05977b3631167028862bE2a173976CA11',  // Polygon Amoy Testnet
-            31337: '0xcA11bde05977b3631167028862bE2a173976CA11'   // Local Hardhat
+    // Selected Network (defaults to AMOY, can be changed via dropdown)
+    SELECTED_NETWORK: 'AMOY',
+
+    // Backward compatibility - these reference the selected network
+    get NETWORK() {
+        return this.NETWORKS[this.SELECTED_NETWORK];
+    },
+
+    get CONTRACTS() {
+        return this.NETWORKS[this.SELECTED_NETWORK].CONTRACTS;
+    },
+
+    // Network switching functionality
+    switchNetwork(networkKey) {
+        if (this.NETWORKS[networkKey]) {
+            this.SELECTED_NETWORK = networkKey;
+            // Store in localStorage for persistence
+            localStorage.setItem('liberdus-selected-network', networkKey);
+            console.log(`🌐 Switched to ${this.NETWORK.NAME} network`);
+            return true;
         }
+        console.error(`❌ Network ${networkKey} not found`);
+        return false;
+    },
+
+    // Load selected network from localStorage
+    loadSelectedNetwork() {
+        const stored = localStorage.getItem('liberdus-selected-network');
+        if (stored && this.NETWORKS[stored]) {
+            this.SELECTED_NETWORK = stored;
+            console.log(`🔄 Loaded network from storage: ${this.NETWORK.NAME}`);
+        }
+    },
+
+
+    // Multicall2 addresses (canonical deployment for batch loading optimization)
+    MULTICALL2: {
+        1: '0x5BA1e12693Dc8F9c48aAD8770482f4739bEeD696',      // Ethereum Mainnet
+        137: '0x275617327c958bD06b5D6b871E7f491D76113dd8',    // Polygon Mainnet
+        80002: '0xcA11bde05977b3631167028862bE2a173976CA11',  // Polygon Amoy Testnet
+        31337: '0xcA11bde05977b3631167028862bE2a173976CA11'   // Local Hardhat
     },
 
     // Governance Configuration
@@ -222,8 +273,18 @@ window.CONFIG.ABIS = {
     ]
 };
 
-// Freeze the configuration to prevent accidental modifications
-Object.freeze(window.CONFIG);
+// Initialize network selection
+window.CONFIG.loadSelectedNetwork();
+
+// Make SELECTED_NETWORK writable
+Object.defineProperty(window.CONFIG, 'SELECTED_NETWORK', {
+    value: window.CONFIG.SELECTED_NETWORK,
+    writable: true,
+    enumerable: true,
+    configurable: true
+});
+
+// Note: Not freezing CONFIG to allow SELECTED_NETWORK to be writable for network switching
 
 console.log('✅ Application configuration loaded successfully');
 console.log('🌐 Network:', window.CONFIG.NETWORK.NAME);

@@ -29,11 +29,11 @@
             
             // API configuration
             this.config = {
-                // CoinGecko API settings
+                // CoinGecko API settings (use CORS proxy for development)
                 COINGECKO_BASE_URL: 'https://api.coingecko.com/api/v3',
                 COINGECKO_TIMEOUT: 10000, // 10 seconds
                 
-                // DEX API settings (fallback)
+                // DEX API settings (fallback) - CORS-enabled
                 DEX_APIS: [
                     'https://api.dexscreener.com/latest/dex/tokens/',
                     'https://api.1inch.io/v5.0/137/quote'
@@ -113,6 +113,12 @@
         async testAPIConnectivity() {
             try {
                 console.log('🔍 Testing CoinGecko API connectivity...');
+                
+                // Skip API test in development to avoid CORS issues
+                if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                    console.log('🚧 Development mode: Skipping API test, using fallback prices');
+                    return false;
+                }
                 
                 const response = await this.makeRequest(`${this.config.COINGECKO_BASE_URL}/ping`);
                 

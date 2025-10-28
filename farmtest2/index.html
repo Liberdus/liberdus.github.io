@@ -7,7 +7,7 @@
     <meta name="description" content="Stake your liquidity provider tokens and earn rewards on our secure DeFi platform">
 
     <!-- Favicon -->
-    <link rel="icon" type="image/x-icon" href="assets/favicon.ico">
+    <link rel="icon" type="image/png" href="assets/logo.png">
 
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Exo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -16,6 +16,7 @@
 
     <!-- Stylesheets -->
     <link rel="stylesheet" href="css/day10-enhancements.css">
+    <link rel="stylesheet" href="css/network-indicator-selector.css">
     <link rel="stylesheet" href="css/theme-toggle.css">
     <style>
         :root {
@@ -783,17 +784,6 @@
             gap: var(--spacing-2);
         }
 
-        /* Network Indicator Styles */
-        .network-indicator-home {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            transition: all 0.2s ease;
-        }
-
         .network-indicator-home.has-permission {
             background: rgba(76, 175, 80, 0.1);
             border: 1px solid rgba(76, 175, 80, 0.3);
@@ -827,27 +817,6 @@
             50% { opacity: 0.5; }
         }
 
-        .network-name {
-            font-weight: 500;
-            color: var(--text-color);
-        }
-
-        .btn-grant-permission {
-            margin-left: 8px;
-            padding: 4px 8px;
-            font-size: 0.75rem;
-            background: var(--warning-main);
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background 0.2s ease;
-        }
-
-        .btn-grant-permission:hover {
-            background: var(--secondary-hover);
-            opacity: 0.9;
-        }
     </style>
 </head>
 <body>
@@ -941,9 +910,6 @@
 
     <!-- Version Check System (runs first to ensure fresh cache) -->
     <script src="js/utils/version-check.js"></script>
-
-    <!-- Theme System (load early to prevent flash) -->
-    <script src="js/core/unified-theme-manager.js"></script>
 
     <script src="libs/ethers.umd.min.js"></script>
     <script src="js/master-initializer.js"></script>

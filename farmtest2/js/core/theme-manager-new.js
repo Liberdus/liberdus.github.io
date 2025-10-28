@@ -42,6 +42,13 @@ class ThemeManagerNew {
 
     applyTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
+        
+        // Also apply to body for consistency with UnifiedThemeManager
+        document.body.setAttribute('data-theme', theme);
+        
+        // Update body class for backward compatibility
+        document.body.classList.remove('theme-light', 'theme-dark');
+        document.body.classList.add(`theme-${theme}`);
 
         // Apply CSS custom properties for the theme
         this.applyCSSVariables(theme);

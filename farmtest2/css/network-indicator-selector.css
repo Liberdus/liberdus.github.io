@@ -1,0 +1,290 @@
+/* Network Indicator and Selector Styles */
+
+/* Button Styling - Centralized */
+.btn-grant-permission {
+    margin-left: 8px;
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    background: var(--warning-main, #f59e0b);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    white-space: nowrap;
+}
+
+.btn-grant-permission:hover {
+    background: var(--secondary-hover, #d97706);
+    opacity: 0.9;
+}
+
+/* Network Selector Styles */
+.network-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 12px;
+}
+
+.network-selector-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.network-selector-icon {
+    font-size: 14px;
+    opacity: 0.7;
+}
+
+.network-select {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: #fff;
+    padding: 8px 28px 8px 12px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 120px;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 12px;
+}
+
+.network-select:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.network-select:focus {
+    outline: none;
+    border-color: #1976d2;
+    box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2);
+}
+
+.network-select option {
+    background: #1e1e1e;
+    color: #fff;
+    padding: 8px;
+}
+
+.network-select-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+}
+
+/* Theme-specific overrides */
+html[data-theme="dark"] .network-select {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #fff;
+    font-weight: 600;
+    padding: 6px 24px 6px 8px;
+    width: 100%;
+    min-width: 0;
+}
+
+html[data-theme="light"] .network-select {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.2);
+    color: #000;
+    font-weight: 700;
+    padding: 6px 24px 6px 8px;
+    width: 100%;
+    min-width: 0;
+}
+
+html[data-theme="dark"] .network-select-chevron,
+html[data-theme="light"] .network-select-chevron {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    pointer-events: none;
+    z-index: 1;
+    line-height: 1;
+}
+
+html[data-theme="dark"] .network-select-chevron {
+    color: #fff;
+}
+
+html[data-theme="light"] .network-select-chevron {
+    color: #000;
+}
+
+html[data-theme="dark"] .network-select:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.4);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+html[data-theme="light"] .network-select:hover {
+    background: rgba(0, 0, 0, 0.1);
+    border-color: rgba(0, 0, 0, 0.3);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="light"] .network-select option {
+    background: #fff;
+    color: #333;
+}
+
+/* Layout specific */
+.network-indicator-home .network-selector {
+    margin-left: 0;
+    flex: 1;
+    min-width: 0;
+}
+
+/* Admin page network selector styling - match homepage exactly */
+.network-indicator .network-selector {
+    margin-left: 0;
+    flex: 1;
+    min-width: 0;
+}
+
+.network-indicator .network-select-wrapper {
+    flex: 1;
+    min-width: 0;
+}
+
+.network-indicator .network-select {
+    min-width: 0;
+    font-size: 15px;
+    padding: 6px 24px 6px 8px;
+    width: 100%;
+    max-width: 146px;
+    height: 30px !important;
+    line-height: 18px;
+    box-sizing: border-box;
+}
+
+/* More specific rule for admin page network selector */
+#network-indicator .network-select {
+    height: 30px !important;
+    max-height: 30px !important;
+    line-height: normal !important;
+    font-size: 14px !important;
+    padding: 6px 24px 6px 8px !important;
+    vertical-align: middle !important;
+    background: rgba(0, 0, 0, 0.05) !important; /* Override admin CSS */
+}
+
+/* Ensure consistent background for both pages */
+#network-indicator-home .network-select {
+    background: rgba(0, 0, 0, 0.05) !important; /* Ensure consistency */
+}
+
+/* Status indicators */
+.network-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 0;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+}
+
+.network-status-dot.green {
+    background: #4CAF50;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.network-status-dot.red {
+    background: #f44336;
+    box-shadow: 0 0 0 2px rgba(244, 67, 54, 0.2);
+}
+
+.network-status-dot.gray {
+    background: #666;
+    border: 2px solid #666;
+    box-shadow: 0 0 0 2px rgba(102, 102, 102, 0.2);
+}
+
+.network-indicator-home {
+    height: 38px;
+    min-height: 32px;
+    border-radius: 4px;
+    padding: 8px 3px 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+    cursor: default;
+    box-sizing: border-box;
+    position: relative;
+    max-width: 300px;
+}
+
+html[data-theme="dark"] .network-indicator-home {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+
+html[data-theme="light"] .network-indicator-home {
+    background: rgba(0, 0, 0, 0.05);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    color: #000;
+}
+
+.network-indicator-home.no-wallet {
+    opacity: 0.8;
+}
+
+.network-indicator-home.loading {
+    opacity: 0.6;
+}
+
+.network-indicator-home.loading .network-status-dot {
+    background: #888;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .network-selector {
+        margin-left: 6px;
+    }
+    
+    .network-select {
+        font-size: 11px;
+        padding: 3px 6px;
+        min-width: 70px;
+    }
+    
+    .network-selector-icon {
+        font-size: 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    .network-selector {
+        margin-left: 4px;
+    }
+    
+    .network-select {
+        font-size: 10px;
+        padding: 2px 4px;
+        min-width: 60px;
+    }
+}
