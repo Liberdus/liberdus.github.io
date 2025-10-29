@@ -320,7 +320,7 @@ class OptimisticUIUpdates {
             const message = action === 'approve' 
                 ? `Successfully approved proposal #${proposalId}` 
                 : `Successfully rejected proposal #${proposalId}`;
-            window.notificationManager.success('Action Completed', message);
+            window.notificationManager.success(message);
         }
     }
 
@@ -332,7 +332,7 @@ class OptimisticUIUpdates {
             const message = action === 'approve' 
                 ? `Failed to approve proposal #${proposalId}: ${error.message}` 
                 : `Failed to reject proposal #${proposalId}: ${error.message}`;
-            window.notificationManager.error('Action Failed', message);
+            window.notificationManager.error(message);
         }
     }
 

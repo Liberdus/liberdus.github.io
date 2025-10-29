@@ -89,29 +89,86 @@ body {
 /* ========================================
    BUTTONS - HOMEPAGE STYLE
    ======================================== */
+/* Base button styles */
 .btn-primary,
 .proposal-btn,
-.connect-wallet-btn {
+.connect-wallet-btn,
+.btn-secondary,
+.btn-danger,
+.btn-error,
+.btn-warning,
+.btn-success {
     background: var(--primary-main) !important;
-    color: white !important;
     border: none !important;
+    padding: 10px 16px !important;
+    border-radius: 8px !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    max-width: 100% !important;
 }
 
-.btn-primary:hover,
-.proposal-btn:hover,
-.connect-wallet-btn:hover {
-    background: var(--primary-hover) !important;
+/* Button type specific backgrounds */
+.btn-secondary {
+    background: var(--secondary-main) !important;
+}
+
+.btn-danger,
+.btn-error {
+    background: var(--error-main) !important;
+}
+
+.btn-warning {
+    background: var(--warning-main) !important;
+}
+
+.btn-success {
+    background: var(--success-main) !important;
+}
+
+/* Hover states */
+.btn-primary:hover:not(:disabled),
+.proposal-btn:hover:not(:disabled),
+.connect-wallet-btn:hover:not(:disabled) {
+    background: var(--primary-dark) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3) !important;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: var(--secondary-hover) !important;
     transform: translateY(-1px) !important;
     box-shadow: var(--shadow-4) !important;
 }
 
-.btn-secondary {
-    background: var(--secondary-main) !important;
-    color: white !important;
+.btn-danger:hover:not(:disabled),
+.btn-error:hover:not(:disabled) {
+    background: var(--error-dark) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 12px rgba(244, 67, 54, 0.3) !important;
 }
 
-.btn-secondary:hover {
-    background: var(--secondary-hover) !important;
+.btn-warning:hover:not(:disabled) {
+    background: #fb8c00 !important;
+    transform: translateY(-1px) !important;
+    box-shadow: var(--shadow-4) !important;
+}
+
+.btn-success:hover:not(:disabled) {
+    background: #43a047 !important;
+    transform: translateY(-1px) !important;
+    box-shadow: var(--shadow-4) !important;
+}
+
+/* Special proposal button styling */
+.proposal-btn {
+    padding: 10px 20px !important;
+    white-space: nowrap !important;
+}
+
+.proposal-btn:hover:not(:disabled) {
+    transform: translateY(-2px) !important;
 }
 
 /* ========================================
@@ -191,39 +248,6 @@ body {
 
 .modal-close:hover {
     background: var(--action-hover) !important;
-    color: var(--text-primary) !important;
-}
-
-/* ========================================
-   NOTIFICATIONS - HOMEPAGE STYLE
-   ======================================== */
-.notification {
-    background: var(--background-paper) !important;
-    color: var(--text-primary) !important;
-    border: 1px solid var(--divider) !important;
-    box-shadow: var(--shadow-8) !important;
-}
-
-[data-theme="dark"] .notification {
-    background: linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98)) !important;
-    border: 1px solid rgba(71, 85, 105, 0.5) !important;
-}
-
-.notification-title {
-    color: var(--text-primary) !important;
-}
-
-.notification-message {
-    color: var(--text-secondary) !important;
-}
-
-.notification-close {
-    background: var(--action-hover) !important;
-    color: var(--text-secondary) !important;
-}
-
-.notification-close:hover {
-    background: var(--surface-hover) !important;
     color: var(--text-primary) !important;
 }
 
@@ -587,34 +611,6 @@ textarea::placeholder {
 /* ========================================
    BUTTON VARIANTS - HOMEPAGE STYLE
    ======================================== */
-.btn-success {
-    background: var(--success-main) !important;
-    color: white !important;
-}
-
-.btn-success:hover {
-    background: #43a047 !important;
-}
-
-.btn-danger,
-.btn-error {
-    background: var(--error-main) !important;
-    color: white !important;
-}
-
-.btn-danger:hover,
-.btn-error:hover {
-    background: #e53935 !important;
-}
-
-.btn-warning {
-    background: var(--warning-main) !important;
-    color: white !important;
-}
-
-.btn-warning:hover {
-    background: #fb8c00 !important;
-}
 
 .btn-outline {
     background: transparent !important;
@@ -919,12 +915,6 @@ select option:disabled,
 /* ========================================
    ENHANCED BUTTON STATES
    ======================================== */
-.proposal-btn,
-.btn-primary,
-#remove-pair-btn {
-    position: relative !important;
-    transition: all 0.2s ease !important;
-}
 
 .proposal-btn:disabled,
 .btn-primary:disabled,
@@ -933,6 +923,15 @@ select option:disabled,
     cursor: not-allowed !important;
     background: var(--action-disabled) !important;
     color: var(--text-disabled) !important;
+}
+
+/* Ensure all submit buttons have white text consistently */
+button[type="submit"] .btn-text,
+.btn-primary .btn-text,
+.btn-danger .btn-text,
+.btn-warning .btn-text,
+.btn-secondary .btn-text {
+    color: white !important;
 }
 
 .proposal-btn:disabled:hover,
@@ -999,64 +998,12 @@ select option:disabled,
     white-space: nowrap !important;
 }
 
-.btn-danger {
-    background: var(--error-main) !important;
-    color: white !important;
-    border: none !important;
-    padding: 10px 16px !important;
-    font-size: 14px !important;
-    max-width: 100% !important;
-}
-
-.btn-danger:hover:not(:disabled) {
-    background: var(--error-dark) !important;
-    transform: translateY(-1px) !important;
-    box-shadow: 0 4px 12px rgba(244, 67, 54, 0.3) !important;
-}
-
-.btn-danger:active:not(:disabled) {
-    transform: translateY(0) !important;
-}
-
-.btn-primary {
-    background: var(--primary-main) !important;
-    color: white !important;
-    padding: 10px 16px !important;
-    border-radius: 8px !important;
-    font-size: 14px !important;
-    font-weight: 500 !important;
-    border: none !important;
-    cursor: pointer !important;
-    transition: all 0.2s ease !important;
-    max-width: 100% !important;
-}
-
-.btn-primary:hover:not(:disabled) {
-    background: var(--primary-dark) !important;
-    transform: translateY(-1px) !important;
-    box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3) !important;
-}
-
-.proposal-btn {
-    background: var(--primary-main) !important;
-    color: white !important;
-    padding: 10px 20px !important;
-    border-radius: 8px !important;
-    font-size: 14px !important;
-    font-weight: 500 !important;
-    border: none !important;
-    cursor: pointer !important;
-    transition: all 0.2s ease !important;
-    white-space: nowrap !important;
-    max-width: 100% !important;
-}
-
-.proposal-btn:hover:not(:disabled) {
-    background: var(--primary-dark) !important;
-    transform: translateY(-2px) !important;
-    box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3) !important;
-}
-
+/* Active states */
+.btn-primary:active:not(:disabled),
+.btn-danger:active:not(:disabled),
+.btn-error:active:not(:disabled),
+.btn-warning:active:not(:disabled),
+.btn-secondary:active:not(:disabled),
 .proposal-btn:active:not(:disabled) {
     transform: translateY(0) !important;
 }
@@ -1120,78 +1067,6 @@ select option:disabled,
     border-top-color: white !important;
     border-radius: 50% !important;
     animation: spin 0.6s linear infinite !important;
-}
-
-/* ========================================
-   BUTTON TEXT OVERFLOW FIXES - COMPREHENSIVE
-   ======================================== */
-button[type="submit"],
-button.btn,
-.btn-primary,
-.btn-secondary,
-.btn-danger,
-.btn-warning {
-    max-width: 100% !important;
-}
-
-button[type="submit"] span:not(.btn-loading),
-button.btn span:not(.btn-loading),
-.btn-primary span:not(.btn-loading),
-.btn-secondary span:not(.btn-loading),
-.btn-danger span:not(.btn-loading),
-.btn-warning span:not(.btn-loading) {
-    display: inline-block !important;
-    white-space: nowrap !important;
-}
-
-/* Specific fix for long button texts */
-#remove-pair-btn,
-#add-pair-btn,
-#update-weights-btn,
-#change-signer-btn,
-#withdraw-btn,
-#submit-removal-btn,
-#submit-add-pair-btn,
-#submit-change-signer-btn {
-    font-size: 13px !important;
-    padding: 10px 16px !important;
-    min-width: 140px !important;
-}
-
-#remove-pair-btn .btn-text,
-#add-pair-btn .btn-text,
-#update-weights-btn .btn-text,
-#change-signer-btn .btn-text,
-#withdraw-btn .btn-text,
-#submit-removal-btn .btn-text,
-#submit-add-pair-btn .btn-text,
-#submit-change-signer-btn .btn-text {
-    font-size: 13px !important;
-}
-
-/* Improve removal proposal button specifically */
-#submit-removal-btn {
-    background: var(--error-main) !important;
-    color: white !important;
-    font-weight: 500 !important;
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    gap: 6px !important;
-}
-
-#submit-removal-btn:hover:not(:disabled) {
-    background: var(--error-dark) !important;
-    transform: translateY(-1px) !important;
-    box-shadow: 0 4px 12px rgba(244, 67, 54, 0.3) !important;
-}
-
-#submit-removal-btn .btn-icon {
-    font-size: 16px !important;
-}
-
-#submit-removal-btn .btn-text {
-    white-space: nowrap !important;
 }
 
 /* ========================================
@@ -1261,6 +1136,7 @@ button.btn span:not(.btn-loading),
     padding: 8px 16px !important;
     font-size: 14px !important;
     white-space: nowrap !important;
+    color: white !important;
 }
 
 /* ========================================
@@ -1352,30 +1228,6 @@ button.btn span:not(.btn-loading),
     opacity: 0.5 !important;
     cursor: not-allowed !important;
     pointer-events: none !important;
-}
-
-
-/* ========================================
-   TOAST/NOTIFICATION POSITIONING FIX
-   ======================================== */
-/* Ensure toasts are ALWAYS above modals and never blurred */
-.notification-container,
-#notification-container {
-    position: fixed !important;
-    top: 20px !important;
-    right: 20px !important;
-    left: auto !important;
-    bottom: auto !important;
-    z-index: 1000000 !important; /* Way above everything */
-    pointer-events: none !important;
-    max-width: 420px !important;
-}
-
-.notification {
-    pointer-events: auto !important;
-    backdrop-filter: none !important; /* Remove blur effect */
-    -webkit-backdrop-filter: none !important;
-    filter: none !important; /* Ensure no filters applied */
 }
 
 /* Ensure modal backdrop doesn't affect toasts */

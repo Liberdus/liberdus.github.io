@@ -54,6 +54,7 @@ class ErrorHandler {
             
             // Wallet errors
             'USER_REJECTED': { category: 'WALLET', severity: 'low', retryable: false },
+            'ACTION_REJECTED': { category: 'WALLET', severity: 'low', retryable: false },
             'WALLET_NOT_CONNECTED': { category: 'WALLET', severity: 'high', retryable: false },
             'UNSUPPORTED_NETWORK': { category: 'WALLET', severity: 'medium', retryable: false },
             
@@ -122,6 +123,11 @@ class ErrorHandler {
                 action: 'Add Funds'
             },
             'USER_REJECTED': {
+                title: 'Transaction Cancelled',
+                message: 'You cancelled the transaction in your wallet.',
+                action: 'Try Again'
+            },
+            'ACTION_REJECTED': {
                 title: 'Transaction Cancelled',
                 message: 'You cancelled the transaction in your wallet.',
                 action: 'Try Again'
@@ -216,7 +222,7 @@ class ErrorHandler {
             return this.errorCategories.BLOCKCHAIN;
         }
         
-        if (errorString.includes('user rejected') || errorString.includes('user denied')) {
+        if (errorString.includes('user rejected') || errorString.includes('user denied') || errorCode === 'ACTION_REJECTED') {
             return this.errorCategories.WALLET;
         }
         
@@ -248,16 +254,17 @@ class ErrorHandler {
         if (error.message) {
             // Try to extract common error patterns
             const patterns = [
-                /execution reverted/i,
-                /insufficient funds/i,
-                /user rejected/i,
-                /network error/i,
-                /timeout/i
+                { pattern: /execution reverted/i, code: 'EXECUTION_REVERTED' },
+                { pattern: /insufficient funds/i, code: 'INSUFFICIENT_FUNDS' },
+                { pattern: /user rejected/i, code: 'USER_REJECTED' },
+                { pattern: /user denied/i, code: 'USER_REJECTED' },
+                { pattern: /network error/i, code: 'NETWORK_ERROR' },
+                { pattern: /timeout/i, code: 'TIMEOUT' }
             ];
             
-            for (const pattern of patterns) {
+            for (const { pattern, code } of patterns) {
                 if (pattern.test(error.message)) {
-                    return pattern.source.replace(/[^a-zA-Z_]/g, '').toUpperCase();
+                    return code;
                 }
             }
         }

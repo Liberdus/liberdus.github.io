@@ -248,7 +248,7 @@ class WalletPopup {
             
             // Show notification if available
             if (window.notificationManager) {
-                window.notificationManager.success('Copied!', 'Address copied to clipboard');
+                window.notificationManager.success('Address copied to clipboard');
             }
         } catch (error) {
             // Fallback for older browsers
@@ -264,7 +264,7 @@ class WalletPopup {
             this.showCopyFeedback();
             
             if (window.notificationManager) {
-                window.notificationManager.success('Copied!', 'Address copied to clipboard');
+                window.notificationManager.success('Address copied to clipboard');
             }
         }
     }
@@ -294,14 +294,14 @@ class WalletPopup {
                 await walletManager.disconnect();
                 
                 if (window.notificationManager) {
-                    window.notificationManager.success('Disconnected', 'Wallet disconnected successfully');
+                    window.notificationManager.success('Wallet disconnected successfully');
                 }
             }
         } catch (error) {
             console.error('Error disconnecting wallet:', error);
             
             if (window.notificationManager) {
-                window.notificationManager.error('Error', 'Failed to disconnect wallet');
+                window.notificationManager.error('Failed to disconnect wallet');
             }
         }
     }

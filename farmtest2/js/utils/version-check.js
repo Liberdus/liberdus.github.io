@@ -132,7 +132,6 @@
             `${basePath}js/components/home-page.js`,
             `${basePath}js/components/modal.js`,
             `${basePath}js/components/network-indicator-selector.js`,
-            `${basePath}js/components/notification.js`,
             `${basePath}js/components/optimistic-ui-updates.js`,
             `${basePath}js/components/optimized-admin-state.js`,
             `${basePath}js/components/pending-rewards-display.js`,
@@ -156,7 +155,6 @@
             `${basePath}js/core/error-handler.js`,
             `${basePath}js/core/loading-manager.js`,
             `${basePath}js/core/notification-manager-new.js`,
-            `${basePath}js/core/notification-manager.js`,
             `${basePath}js/core/theme-manager-new.js`,
             `${basePath}js/core/unified-theme-manager.js`,
             

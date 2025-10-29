@@ -240,11 +240,11 @@ class WalletManager {
             // Show user-friendly error message
             if (window.notificationManager) {
                 if (error.code === 4001) {
-                    window.notificationManager.warning('Connection Cancelled', 'You cancelled the connection request');
+                    window.notificationManager.warning('You cancelled the connection request');
                 } else if (error.code === -32002) {
-                    window.notificationManager.warning('Request Pending', 'MetaMask is already processing a request. Please wait.');
+                    window.notificationManager.warning('MetaMask is already processing a request. Please wait.');
                 } else {
-                    window.notificationManager.error('Connection Failed', error.message || 'An error occurred while connecting');
+                    window.notificationManager.error(error.message || 'An error occurred while connecting');
                 }
             }
 

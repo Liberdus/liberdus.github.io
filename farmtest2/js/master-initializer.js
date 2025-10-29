@@ -501,7 +501,7 @@ class MasterInitializer {
                         if (window.walletManager.isConnecting) {
                             console.log('Connection already in progress, please wait...');
                             if (window.notificationManager) {
-                                window.notificationManager.info('Connection in progress', 'Please wait for the current connection attempt to complete');
+                                window.notificationManager.info('Please wait for the current connection attempt to complete');
                             }
                             return;
                         }
@@ -510,14 +510,14 @@ class MasterInitializer {
                         if (!window.ethereum) {
                             console.error('MetaMask not available');
                             if (window.notificationManager) {
-                                window.notificationManager.error('MetaMask not installed', 'Please install MetaMask browser extension to connect your wallet');
+                                window.notificationManager.error('Please install MetaMask browser extension to connect your wallet');
                             }
                             return;
                         }
 
                         // Show connecting notification
                         if (window.notificationManager) {
-                            window.notificationManager.info('Connecting...', 'Please approve the connection in MetaMask');
+                            window.notificationManager.info('Please approve the connection in MetaMask');
                         }
 
                         // Use safe MetaMask connection with circuit breaker protection
@@ -539,7 +539,7 @@ class MasterInitializer {
                                 errorMessage = 'Connection was cancelled. Click connect to try again.';
                             }
 
-                            window.notificationManager.error('Connection failed', errorMessage);
+                            window.notificationManager.error(errorMessage);
                         }
                     }
                 }
@@ -640,7 +640,6 @@ class MasterInitializer {
             if (event.error && event.error.message && event.error.message.includes('circuit breaker')) {
                 if (window.notificationManager) {
                     window.notificationManager.error(
-                        'Connection Issue',
                         'MetaMask is temporarily busy. Please wait a moment and try again.'
                     );
                 }
@@ -649,7 +648,7 @@ class MasterInitializer {
 
             // Generic error notification
             if (window.notificationManager) {
-                window.notificationManager.error('Unexpected Error', 'An unexpected error occurred. Please try again.');
+                window.notificationManager.error('An unexpected error occurred. Please try again.');
             }
         });
 
@@ -667,7 +666,6 @@ class MasterInitializer {
                 if (event.reason.message.includes('circuit breaker')) {
                     if (window.notificationManager) {
                         window.notificationManager.error(
-                            'MetaMask Busy',
                             'MetaMask is temporarily overloaded. Please wait a moment and try again.'
                         );
                     }
@@ -676,7 +674,6 @@ class MasterInitializer {
                 } else if (event.reason.message.includes('already processing')) {
                     if (window.notificationManager) {
                         window.notificationManager.warning(
-                            'Request Pending',
                             'MetaMask is processing another request. Please wait.'
                         );
                     }
@@ -687,7 +684,7 @@ class MasterInitializer {
 
             // Generic error notification
             if (window.notificationManager) {
-                window.notificationManager.error('Unexpected Error', 'An unexpected error occurred. Please try again.');
+                window.notificationManager.error('An unexpected error occurred. Please try again.');
             }
         });
 
@@ -850,12 +847,12 @@ class MasterInitializer {
     }
 
     handleInitializationError(error) {
-        // Use homepage notification manager if available (overlay toast)
-        if (window.homepageNotificationManager) {
-            window.homepageNotificationManager.error(
+        // Use standard notification manager
+        if (window.notificationManager) {
+            window.notificationManager.error(
                 'System Initialization Failed',
                 `${error.message || 'An unknown error occurred'}. Please refresh the page.`,
-                0 // Persistent error notification
+                { persistent: true }
             );
         } else {
             // Fallback to console and alert
@@ -882,11 +879,6 @@ class MasterInitializer {
     // Retry initialization without full page reload
     async retryInitialization() {
         console.log('🔄 Retrying system initialization...');
-
-        // Clear any existing notifications
-        if (window.homepageNotificationManager) {
-            window.homepageNotificationManager.dismissAll();
-        }
 
         // Reset initialization state
         this.isReady = false;
