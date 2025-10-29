@@ -6,7 +6,30 @@ markdown: kramdown
 permalink: pretty
 excerpt_separator: <!--more-->
 
+# Explicitly set source and destination to prevent Jekyll from looking elsewhere
+source: .
+destination: ./_site
+
+# Important: Leave baseurl empty for root deployment
+# GitHub Actions will set this automatically
+baseurl: ""
+
 port: 4000
 
 sass:
     sass_dir: css
+    
+# Exclude these files from the Jekyll build
+exclude:
+  - node_modules
+  - gulpfile.js
+  - package.json
+  - package-lock.json
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - vendor
+  - .bundle
+
+# Explicitly set data directory to current folder
+data_source: _data
