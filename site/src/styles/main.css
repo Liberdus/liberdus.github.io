@@ -1250,9 +1250,14 @@ body {
 }
 
 .feature-icon {
+  /*
   font-size: 3rem;
   margin-bottom: var(--space-8);
+  */
+  font-size: 1.5rem;
+  margin-bottom: var(--space-1);
   display: block;
+  align-items: center;
   filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
 }
 
@@ -2177,11 +2182,6 @@ body {
   color: var(--text-secondary);
   font-weight: 600;
   flex: 1;
-}
-
-.feature-icon {
-  font-size: 1.5rem;
-  margin-bottom: var(--space-1);
 }
 
 /* Migration Section */
