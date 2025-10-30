@@ -12,7 +12,7 @@ async function loadHtml() {
 
     response = await fetch('footer.html');
     data = await response.text();
-    document.getElementById('header').innerHTML = data;
+    document.getElementById('footer').innerHTML = data;
 
     // Now initialize your app
     initialize();
