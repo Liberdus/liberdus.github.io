@@ -1,0 +1,1 @@
+To restore the orginal site, the contents of this folder have to be copied to the top level.
