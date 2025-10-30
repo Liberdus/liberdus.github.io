@@ -608,6 +608,7 @@ body {
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.1em;
+  white-space: nowrap;
 }
 
 .hero-actions {
