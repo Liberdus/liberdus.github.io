@@ -3,6 +3,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🚀 Liberdus website loading...');
 
+    console.log('checking header')
     if (document.getElementById('header')){
         console.log('adding header')
         fetch('header.html')
