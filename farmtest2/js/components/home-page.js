@@ -315,7 +315,11 @@ class HomePage {
                         </tr>
                     </thead>
                     <tbody>
-                        ${this.pairs.map(pair => this.renderPairRow(pair)).join('')}
+                        ${[...this.pairs].sort((a, b) => {
+                            const weightA = parseFloat(a.weight || '0');
+                            const weightB = parseFloat(b.weight || '0');
+                            return weightB - weightA; // Descending order (highest first)
+                        }).map(pair => this.renderPairRow(pair)).join('')}
                     </tbody>
                 </table>
             </div>

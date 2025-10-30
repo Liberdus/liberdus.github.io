@@ -2509,19 +2509,6 @@ class AdminPage {
                     });
                     console.log(`🎯 Cached states for ${formattedProposals.length} proposals`);
 
-                    // Show success notification
-                    if (window.notificationManager) {
-                        if (realProposals.length > 0) {
-                            window.notificationManager.success(
-                                `Successfully loaded ${realProposals.length} proposals from blockchain`
-                            );
-                        } else {
-                            window.notificationManager.info(
-                                'Connected to blockchain - no proposals exist yet'
-                            );
-                        }
-                    }
-
                     return formattedProposals;
                 } else {
                     console.log('⚠️ Invalid response from getAllActions:', realProposals);
@@ -2949,12 +2936,6 @@ class AdminPage {
                 // Update the UI
                 await this.loadMultiSignPanel();
 
-                if (window.notificationManager) {
-                    window.notificationManager.success(
-                        `Successfully loaded ${realProposals.length} proposals from blockchain`
-                    );
-                }
-
                 return formattedProposals;
             } else {
                 throw new Error('No proposals returned from contract');
@@ -3278,12 +3259,6 @@ class AdminPage {
 
                 // Refresh the display
                 await this.loadMultiSignPanel();
-
-                if (window.notificationManager) {
-                    window.notificationManager.success(
-                        `Successfully loaded all ${allProposals.length} proposals from blockchain`
-                    );
-                }
             }
 
         } catch (error) {
@@ -5938,9 +5913,17 @@ class AdminPage {
         // Update LP pairs with real contract data
         const pairsContainer = document.querySelector('[data-info="lp-pairs"]');
         if (pairsContainer) {
-            pairsContainer.innerHTML = (info.pairs && info.pairs.length > 0)
-                ? this.renderPairsList(info.pairs)
-                : '<div class="no-data">No LP pairs configured</div>';
+            if (info.pairs && info.pairs.length > 0) {
+                // Sort pairs by weight (highest first)
+                const sortedPairs = [...info.pairs].sort((a, b) => {
+                    const weightA = parseFloat(a.weight || '0');
+                    const weightB = parseFloat(b.weight || '0');
+                    return weightB - weightA; // Descending order (highest first)
+                });
+                pairsContainer.innerHTML = this.renderPairsList(sortedPairs);
+            } else {
+                pairsContainer.innerHTML = '<div class="no-data">No LP pairs configured</div>';
+            }
         }
 
         // Update signers with real contract data
