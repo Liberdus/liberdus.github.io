@@ -234,6 +234,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     if (document.getElementById('header')){
+        console.log('adding header')
         fetch('header.html')
         .then(response => response.text())
         .then(data => {
