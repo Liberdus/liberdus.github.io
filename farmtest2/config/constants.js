@@ -62,7 +62,6 @@ window.CONFIG = {
 
     // UI Configuration
     UI: {
-        THEME_STORAGE_KEY: 'lp-staking-theme',
         WALLET_STORAGE_KEY: 'lp-staking-wallet-connection',
         DATA_REFRESH_INTERVAL: 30000, // 30 seconds
         NOTIFICATION_DURATION: 5000, // 5 seconds

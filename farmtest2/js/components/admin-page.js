@@ -4907,12 +4907,6 @@ class AdminPage {
                                 <small class="form-help">Current rate: ${this.contractStats?.hourlyRewardRate || 'Loading...'} ${this.contractStats?.rewardTokenSymbol || 'USDC'}/hour</small>
                             </div>
 
-                            <div class="form-group">
-                                <label for="rate-description">Description</label>
-                                <textarea id="rate-description" class="form-input" rows="3" required
-                                          placeholder="Explain the reason for this rate change..."></textarea>
-                            </div>
-
                             <div class="proposal-info">
                                 <div class="info-item">
                                     <span class="info-label">Required Approvals:</span>
@@ -5004,13 +4998,6 @@ class AdminPage {
                                 <div class="field-error" id="pair-weight-error"></div>
                             </div>
 
-                            <div class="form-group">
-                                <label for="pair-description">Description</label>
-                                <textarea id="pair-description" class="form-input" rows="3"
-                                          placeholder="Optional description or notes about this pair..." maxlength="500"></textarea>
-                                <small class="form-help">Additional information about the pair (optional)</small>
-                            </div>
-
                             <div class="proposal-info">
                                 <div class="info-item">
                                     <span class="info-label">Required Approvals:</span>
@@ -5096,15 +5083,6 @@ class AdminPage {
                                 </button>
                             </div>
 
-                            <div class="form-group" style="margin-top: 24px;">
-                                <label for="weights-description" style="display: block; margin-bottom: 8px; font-weight: 500;">Description *</label>
-                                <textarea id="weights-description" class="form-input" rows="4" required
-                                          placeholder="Explain the reason for these weight changes..." maxlength="500"
-                                          style="width: 100%; padding: 12px; border: 1px solid var(--divider); border-radius: 6px; background: var(--background-paper); color: var(--text-primary); font-family: inherit; resize: vertical;"></textarea>
-                                <small class="form-help" style="display: block; margin-top: 6px; color: var(--text-secondary); font-size: 13px;">Describe why these weight changes are needed</small>
-                                <div class="field-error" id="weights-description-error"></div>
-                            </div>
-
                             <div class="proposal-info" style="background: rgba(33, 150, 243, 0.05); border: 1px solid rgba(33, 150, 243, 0.2); border-radius: 8px; padding: 16px; margin-top: 24px;">
                                 <div class="info-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0;">
                                     <span class="info-label" style="color: var(--text-secondary); font-size: 14px;">Required Approvals:</span>
@@ -5175,14 +5153,6 @@ class AdminPage {
                                 </select>
                                 <small class="form-help">Choose the LP pair to remove from staking rewards</small>
                                 <div class="field-error" id="remove-pair-select-error"></div>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="remove-description">Reason for Removal *</label>
-                                <textarea id="remove-description" class="form-input" rows="3" required
-                                          placeholder="Explain why this pair should be removed..." maxlength="500"></textarea>
-                                <small class="form-help">Provide a clear justification for removing this pair</small>
-                                <div class="field-error" id="remove-description-error"></div>
                             </div>
 
                             <div class="warning-box" style="background: rgba(255, 152, 0, 0.1); border: 1px solid rgba(255, 152, 0, 0.3); border-radius: 8px; padding: 16px; display: flex; gap: 12px; margin: 20px 0;">
@@ -5322,12 +5292,6 @@ class AdminPage {
                                 <small class="form-help">Enter the new signer's wallet address</small>
                             </div>
 
-                            <div class="form-group">
-                                <label for="signer-description">Reason for Change</label>
-                                <textarea id="signer-description" rows="3" required
-                                          placeholder="Explain why this signer change is necessary..."></textarea>
-                            </div>
-
                             <div class="warning-box">
                                 <div class="warning-icon">⚠️</div>
                                 <div class="warning-text">
@@ -5391,12 +5355,6 @@ class AdminPage {
                                 <input type="text" id="withdrawal-address" required
                                        placeholder="0x..." pattern="^0x[a-fA-F0-9]{40}$">
                                 <small class="form-help">Address to receive the withdrawn funds</small>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="withdrawal-description">Purpose</label>
-                                <textarea id="withdrawal-description" rows="3" required
-                                          placeholder="Explain the purpose of this withdrawal..."></textarea>
                             </div>
 
                             <div class="warning-box">
@@ -6226,11 +6184,10 @@ class AdminPage {
         if (event) event.preventDefault();
 
         const rate = document.getElementById('new-rate').value;
-        const description = document.getElementById('rate-description').value;
 
         // Validate inputs
-        if (!rate || !description) {
-            this.showError('Please fill in all required fields');
+        if (!rate) {
+            this.showError('Please fill in the new hourly rate');
             return;
         }
 
@@ -6281,10 +6238,8 @@ class AdminPage {
         const weight = document.getElementById('pair-weight').value;
         const pairName = document.getElementById('pair-name').value;
         const platform = document.getElementById('pair-platform').value;
-        const description = document.getElementById('pair-description').value;
-
         console.log('[ADD PAIR UI] 📋 Form data collected:', {
-            pairAddress, weight, pairName, platform, description
+            pairAddress, weight, pairName, platform
         });
 
         // Enhanced validation with detailed feedback
@@ -6342,17 +6297,11 @@ class AdminPage {
 
         try {
             const pairAddress = document.getElementById('remove-pair-select')?.value;
-            const description = document.getElementById('remove-description')?.value;
             const confirmRemoval = document.getElementById('confirm-removal')?.checked;
 
             // Validate required fields
             if (!pairAddress) {
                 this.showError('Please select a pair to remove');
-                return;
-            }
-
-            if (!description || description.trim().length < 10) {
-                this.showError('Please provide a detailed reason for removal (minimum 10 characters)');
                 return;
             }
 
@@ -6386,14 +6335,7 @@ class AdminPage {
     async submitUpdateWeightsProposal(event = null) {
         if (event) event.preventDefault();
 
-        const description = document.getElementById('weights-description').value;
         const weightInputs = document.querySelectorAll('.weight-input');
-
-        // Validate description
-        if (!description || description.trim().length < 10) {
-            this.showError('Please provide a detailed description for the weight changes (minimum 10 characters)');
-            return;
-        }
 
         // Collect weight updates
         const weightUpdates = [];
@@ -6468,10 +6410,9 @@ class AdminPage {
 
         const oldSigner = document.getElementById('old-signer').value;
         const newSigner = document.getElementById('new-signer').value;
-        const description = document.getElementById('signer-description').value;
 
         console.log('[CHANGE SIGNER UI] 📋 Form data collected:', {
-            oldSigner, newSigner, description
+            oldSigner, newSigner
         });
 
         // DUPLICATE PREVENTION FIX: Set submission flag and disable submit button
@@ -6551,10 +6492,9 @@ class AdminPage {
 
         const amount = document.getElementById('withdrawal-amount').value;
         const toAddress = document.getElementById('withdrawal-address').value;
-        const description = document.getElementById('withdrawal-description').value;
 
         console.log('[WITHDRAWAL UI] 📋 Form data collected:', {
-            amount, toAddress, description
+            amount, toAddress
         });
 
         // DUPLICATE PREVENTION FIX: Set submission flag and disable submit button
@@ -6588,7 +6528,7 @@ class AdminPage {
             }
 
             const contractManager = await this.ensureContractReady();
-            const result = await contractManager.proposeWithdrawal(amount, toAddress, description);
+            const result = await contractManager.proposeWithdrawRewards(toAddress, amount);
 
             if (result.success) {
                 this.closeModal();

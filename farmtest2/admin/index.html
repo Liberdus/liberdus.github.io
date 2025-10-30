@@ -115,11 +115,8 @@
 
     <!-- Core System -->
     <script src="../js/debug-logger.js"></script>
-    <script src="../js/utils/unified-cache.js"></script>
-    <script src="../js/utils/cache-integration.js"></script>
     <script src="../js/utils/logger.js"></script>
     <script src="../js/utils/event-manager.js"></script>
-    <script src="../js/utils/storage-manager.js"></script>
     <script src="../js/utils/network-health-check.js"></script>
     <script src="../js/core/error-handler.js"></script>
     
@@ -723,8 +720,7 @@
                     '0x1234567890123456789012345678901234567890',
                     'TEST/USDC',
                     'Uniswap V3',
-                    100,
-                    'Test description'
+                    100
                 );
 
                 console.log('✅ Contract function result:', result);
@@ -1209,11 +1205,9 @@
 
                 // Fill form fields
                 const rateInput = document.getElementById('new-rate');
-                const descInput = document.getElementById('rate-description');
 
-                if (rateInput && descInput) {
+                if (rateInput) {
                     rateInput.value = '0.5';
-                    descInput.value = 'Test hourly rate proposal';
 
                     // Simulate form submission
                     const result = await window.adminPage.submitHourlyRateProposal({preventDefault: () => {}});
@@ -1229,14 +1223,11 @@
                 const pairNameInput = document.getElementById('pair-name');
                 const pairPlatformInput = document.getElementById('pair-platform');
                 const pairWeightInput = document.getElementById('pair-weight');
-                const pairDescInput = document.getElementById('pair-description');
-
                 if (pairAddressInput && pairNameInput && pairPlatformInput && pairWeightInput) {
                     pairAddressInput.value = '0x1234567890123456789012345678901234567890';
                     pairNameInput.value = 'TEST/USDC';
                     pairPlatformInput.value = 'Uniswap V3';
                     pairWeightInput.value = '100';
-                    if (pairDescInput) pairDescInput.value = 'Test add pair proposal';
 
                     // Simulate form submission
                     const result = await window.adminPage.submitAddPairProposal({preventDefault: () => {}});

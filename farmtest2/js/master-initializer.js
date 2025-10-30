@@ -86,17 +86,13 @@ class MasterInitializer {
 
     async loadCoreUtilities() {
         const coreScripts = [
-            'js/utils/unified-cache.js',        // Load cache system first
-            'js/utils/cache-integration.js',    // Then cache integration
             'js/utils/multicall-service.js',    // Multicall2 for batch loading (90% RPC reduction)
             'js/components/network-indicator-selector.js',
             'js/core/error-handler.js',        // Error handling system
             'js/core/unified-theme-manager.js', // Unified theme manager
-            'js/core/theme-manager-new.js',
             'js/core/notification-manager-new.js',
             'js/core/loading-manager.js',
-            'js/core/accessibility-manager.js',
-            'js/core/animation-manager.js'
+            'js/core/accessibility-manager.js'
         ];
 
         // Only load dev/test utilities if in development mode
@@ -159,17 +155,6 @@ class MasterInitializer {
     async initializeComponents() {
         console.log('🔧 Initializing components...');
 
-        // Initialize unified cache system first (needed by other components)
-        if (window.unifiedCache) {
-            try {
-                window.unifiedCache.initialize();
-                this.components.set('unifiedCache', window.unifiedCache);
-                console.log('✅ Unified Cache initialized');
-            } catch (error) {
-                console.error('❌ Failed to initialize UnifiedCache:', error);
-            }
-        }
-
         // Initialize unified theme manager
         if (window.UnifiedThemeManager) {
             try {
@@ -197,12 +182,6 @@ class MasterInitializer {
             console.warn('⚠️ ErrorHandler not available - using fallback error handling');
         }
 
-        // Initialize theme manager
-        if (window.ThemeManagerNew) {
-            window.themeManager = new window.ThemeManagerNew();
-            this.components.set('themeManager', window.themeManager);
-            console.log('✅ Theme Manager initialized');
-        }
 
         // Initialize notification manager
         if (window.NotificationManagerNew) {
@@ -286,27 +265,30 @@ class MasterInitializer {
                 window.networkManager.setupPermissionChangeListener();
             }
 
-            // Initialize with read-only provider for data fetching
+            // Initialize ContractManager: wallet mode if already connected, else read-only
             try {
-                console.log('🔄 Initializing ContractManager with read-only provider...');
-                await window.contractManager.initializeReadOnly();
-                console.log('✅ ContractManager initialized with read-only provider');
-
-                // Initialize cache integration with contract manager
-                if (window.cacheIntegration && window.unifiedCache) {
-                    try {
-                        window.cacheIntegration.initialize(window.unifiedCache, window.contractManager);
-                        this.components.set('cacheIntegration', window.cacheIntegration);
-                        console.log('✅ Cache Integration initialized with ContractManager');
-                    } catch (error) {
-                        console.error('❌ Failed to initialize CacheIntegration:', error);
-                    }
+                const isWalletConnected = !!(window.walletManager && typeof window.walletManager.isConnected === 'function' && window.walletManager.isConnected());
+                if (isWalletConnected && typeof window.ethereum !== 'undefined' && window.ethers) {
+                    console.log('🔄 Wallet detected as connected on load - initializing in wallet mode...');
+                    const provider = new window.ethers.providers.Web3Provider(window.ethereum);
+                    const signer = provider.getSigner();
+                    await window.contractManager.upgradeToWalletMode(provider, signer);
+                    // Notify listeners that ContractManager is ready
+                    document.dispatchEvent(new CustomEvent('contractManagerReady', {
+                        detail: { contractManager: window.contractManager }
+                    }));
+                    console.log('✅ ContractManager initialized in wallet mode');
+                } else {
+                    console.log('🔄 Initializing ContractManager with read-only provider...');
+                    await window.contractManager.initializeReadOnly();
+                    // Notify listeners that ContractManager is ready
+                    document.dispatchEvent(new CustomEvent('contractManagerReady', {
+                        detail: { contractManager: window.contractManager }
+                    }));
+                    console.log('✅ ContractManager initialized with read-only provider');
                 }
 
-                // Dispatch event for components waiting for contract manager
-                document.dispatchEvent(new CustomEvent('contractManagerReady', {
-                    detail: { contractManager: window.contractManager }
-                }));
+                // Note: contractManagerReady is dispatched above after initialization
             } catch (error) {
                 console.error('❌ Failed to initialize ContractManager with read-only provider:', error);
             }
@@ -775,13 +757,8 @@ class MasterInitializer {
             if (window.contractManager) {
                 // Downgrade to read-only mode: recreate provider and contracts
                 window.contractManager.signer = null;
-                
-                if (window.ethereum) {
-                    // Create fresh provider to clear cached account references
-                    window.contractManager.provider = new ethers.providers.Web3Provider(window.ethereum);
-                    // Reinitialize all contracts with fresh provider
-                    await window.contractManager.initializeContracts();
-                }
+            // Reinitialize ContractManager in read-only mode using configured RPCs
+            await window.contractManager.initializeReadOnly();
                 
                 console.log('✅ ContractManager downgraded to read-only mode');
             }

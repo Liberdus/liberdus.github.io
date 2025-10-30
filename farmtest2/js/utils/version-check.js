@@ -126,19 +126,13 @@
             
             // JavaScript - Components (only existing files)
             `${basePath}js/components/admin-page.js`,
-            `${basePath}js/components/apr-display.js`,
-            `${basePath}js/components/base-component.js`,
             `${basePath}js/components/efficient-dom-updates.js`,
             `${basePath}js/components/home-page.js`,
-            `${basePath}js/components/modal.js`,
             `${basePath}js/components/network-indicator-selector.js`,
             `${basePath}js/components/optimistic-ui-updates.js`,
             `${basePath}js/components/optimized-admin-state.js`,
-            `${basePath}js/components/pending-rewards-display.js`,
             `${basePath}js/components/performance-monitor.js`,
             `${basePath}js/components/staking-modal-new.js`,
-            `${basePath}js/components/staking-modal.js`,
-            `${basePath}js/components/transaction-status.js`,
             `${basePath}js/components/wallet-popup.js`,
             
             // JavaScript - Config
@@ -155,19 +149,14 @@
             `${basePath}js/core/error-handler.js`,
             `${basePath}js/core/loading-manager.js`,
             `${basePath}js/core/notification-manager-new.js`,
-            `${basePath}js/core/theme-manager-new.js`,
             `${basePath}js/core/unified-theme-manager.js`,
             
             // JavaScript - Root
             `${basePath}js/debug-logger.js`,
             `${basePath}js/master-initializer.js`,
             
-            // JavaScript - Pages
-            `${basePath}js/pages/home.js`,
-            
             // JavaScript - Utils (only existing files)
             `${basePath}js/utils/admin-test.js`,
-            `${basePath}js/utils/cache-integration.js`,
             `${basePath}js/utils/event-manager.js`,
             `${basePath}js/utils/gas-estimator.js`,
             `${basePath}js/utils/helpers.js`,
@@ -176,12 +165,8 @@
             `${basePath}js/utils/price-feeds.js`,
             `${basePath}js/utils/production-logger.js`,
             `${basePath}js/utils/rewards-calculator.js`,
-            `${basePath}js/utils/rewards-history.js`,
             `${basePath}js/utils/rpc-test.js`,
             `${basePath}js/utils/ses-safe-handler.js`,
-            `${basePath}js/utils/storage-manager.js`,
-            `${basePath}js/utils/transaction-queue.js`,
-            `${basePath}js/utils/unified-cache.js`,
             `${basePath}js/utils/version-check.js`,
             `${basePath}js/utils/multicall-service.js`,
             

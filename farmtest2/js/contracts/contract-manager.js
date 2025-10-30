@@ -339,22 +339,25 @@ class ContractManager {
     async upgradeToWalletMode(provider, signer) {
         try {
             this.log('🔄 Upgrading ContractManager to wallet mode...');
+            this.isInitializing = true;
 
-            // Update provider and signer
+            // Update provider and signer, then delegate to shared initialization path
             this.provider = provider;
             this.signer = signer;
 
-            // Re-initialize contract instances with signer
-            await this.initializeContracts();
+            await this._performInitialization(provider, signer);
 
-            // Initialize additional wallet-dependent components
+            // _performInitialization sets isInitialized and notifies callbacks
+            this.isInitializing = false;
+
+            // Update any wallet-dependent helpers
             if (this.gasEstimator) {
                 this.gasEstimator.updateProvider(provider);
             }
 
             this.log('✅ ContractManager upgraded to wallet mode successfully');
-
         } catch (error) {
+            this.isInitializing = false;
             this.logError('❌ Failed to upgrade to wallet mode:', error);
             throw error;
         }
@@ -1291,11 +1294,6 @@ class ContractManager {
     getLPTokenContract(pairName) {
         const contract = this.lpTokenContracts.get(pairName);
         if (!contract) {
-            // In fallback mode, return null instead of throwing error
-            if (this.lpTokenContracts.size === 0) {
-                this.log(`No LP token contracts available - running in fallback mode for pair: ${pairName}`);
-                return null;
-            }
             throw new Error(`LP token contract not found for pair: ${pairName}`);
         }
         return contract;
@@ -3845,19 +3843,6 @@ class ContractManager {
         }
     }
 
-    /**
-     * Wrapper methods for admin panel compatibility - FIXED PARAMETER ORDER
-     */
-    async proposeWithdrawal(amount, toAddress, description) {
-        console.log(`[WRAPPER FIX] 🔄 proposeWithdrawal called with:`);
-        console.log(`[WRAPPER FIX]   amount: ${amount}`);
-        console.log(`[WRAPPER FIX]   toAddress: ${toAddress}`);
-        console.log(`[WRAPPER FIX]   description: ${description} (ignored - not used by contract)`);
-
-        // CRITICAL FIX: Correct parameter order - recipient first, then amount
-        return await this.proposeWithdrawRewards(toAddress, amount);
-    }
-
     async cancelProposal(proposalId) {
         // Note: The contract doesn't have a cancel function, so we reject instead
         return await this.rejectProposal(proposalId);
@@ -4453,19 +4438,6 @@ class ContractManager {
 
         // Check if we're in fallback mode
         const lpContract = this.getLPTokenContract(pairName);
-        if (!lpContract) {
-            // Fallback mode - simulate transaction
-            this.log(`Fallback mode: Simulating approveLPToken for ${pairName}, amount: ${amount}`);
-            return {
-                hash: '0x' + Math.random().toString(16).substr(2, 64),
-                wait: async () => ({
-                    status: 1,
-                    transactionHash: '0x' + Math.random().toString(16).substr(2, 64),
-                    blockNumber: Math.floor(Math.random() * 1000000) + 1000000,
-                    gasUsed: ethers.BigNumber.from('21000')
-                })
-            };
-        }
 
         return await this.executeTransactionWithRetry(async () => {
             const stakingAddress = this.contractAddresses.get('STAKING');
