@@ -2,15 +2,20 @@
 
 
 
-document.addEventListener('DOMContentLoaded', loadHeader);
+document.addEventListener('DOMContentLoaded', loadHtml);
 
-async function loadHeader() {
-  const response = await fetch('header.html');
-  const data = await response.text();
-  document.getElementById('header').innerHTML = data;
-  
-  // Now initialize your app
-  initialize();
+async function loadHtml() {
+    let response, data;
+    response = await fetch('header.html');
+    data = await response.text();
+    document.getElementById('header').innerHTML = data;
+
+    response = await fetch('footer.html');
+    data = await response.text();
+    document.getElementById('header').innerHTML = data;
+
+    // Now initialize your app
+    initialize();
 }
 
 function initialize(){
