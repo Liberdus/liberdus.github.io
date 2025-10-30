@@ -3,6 +3,15 @@
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🚀 Liberdus website loading...');
 
+    if (document.getElementById('header')){
+        console.log('adding header')
+        fetch('header.html')
+        .then(response => response.text())
+        .then(data => {
+          document.getElementById('header').innerHTML = data;
+        });
+    }
+
     // Theme Toggle Functionality
     const themeToggle = document.getElementById('themeToggle');
     const themeIcon = document.querySelector('.theme-icon');
@@ -230,15 +239,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 navMenu.classList.remove('active');
                 document.body.style.overflow = '';
             }
-        });
-    }
-
-    if (document.getElementById('header')){
-        console.log('adding header')
-        fetch('header.html')
-        .then(response => response.text())
-        .then(data => {
-          document.getElementById('header').innerHTML = data;
         });
     }
 
