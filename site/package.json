@@ -1,32 +1,48 @@
 {
-  "name": "browser-sync-jekyll",
-  "version": "0.0.0",
-  "description": "A starter project including full setup for Jekyll, GulpJS, SASS & BrowserSync",
-  "main": "gulpfile.js",
+  "name": "liberdus-modern",
+  "version": "2.0.0",
+  "description": "Modern Liberdus website with integrated Docusaurus documentation - The first quantum secure, decentralized messaging app.",
+  "main": "index.html",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "author": "Shane Osbourne",
-  "license": "ISC",
-  "devDependencies": {
-    "gulp": "^3.8.8",
-    "gulp-sass": "^2.1.0",
-    "browser-sync": "^1.3.7",
-    "gulp-autoprefixer": "1.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/shakyShane/jekyll-gulp-sass-browser-sync.git"
+    "dev": "python3 -m http.server 3000",
+    "serve": "python3 -m http.server 8000",
+    "build": "echo 'Static site - no build needed'",
+    "start": "python3 -m http.server 3000",
+    "lint": "echo 'No linting configured yet'",
+    "test": "echo 'No tests configured yet'"
   },
   "keywords": [
-    "jekyll",
-    "gulp",
-    "sass",
-    "browsersync",
-    "jade"
+    "liberdus",
+    "cryptocurrency",
+    "blockchain",
+    "messaging",
+    "payments",
+    "decentralized",
+    "shardus",
+    "quantum-resistant",
+    "whatsapp",
+    "signal",
+    "modern-website"
   ],
-  "bugs": {
-    "url": "https://github.com/shakyShane/jekyll-gulp-sass-browser-sync/issues"
+  "author": "Liberdus Team",
+  "license": "Private",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/soniasingla/liberdus-website"
   },
-  "homepage": "https://github.com/shakyShane/jekyll-gulp-sass-browser-sync"
+  "homepage": "https://liberdus-modern.vercel.app",
+  "directories": {
+    "src": "src",
+    "assets": "assets",
+    "docs": "docs"
+  },
+  "files": [
+    "src/",
+    "assets/",
+    "index.html",
+    "README.md"
+  ],
+  "engines": {
+    "node": "22.x"
+  }
 }
