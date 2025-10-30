@@ -1,17 +1,21 @@
 // LIBERDUS - Simple JavaScript
 
-document.addEventListener('DOMContentLoaded', function() {
+
+
+document.addEventListener('DOMContentLoaded', loadHeader);
+
+async function loadHeader() {
+  const response = await fetch('header.html');
+  const data = await response.text();
+  document.getElementById('header').innerHTML = data;
+  
+  // Now initialize your app
+  initialize();
+}
+
+function initialize(){
     console.log('🚀 Liberdus website loading...');
 
-    console.log('checking header')
-    if (document.getElementById('header')){
-        console.log('adding header')
-        fetch('header.html')
-        .then(response => response.text())
-        .then(data => {
-          document.getElementById('header').innerHTML = data;
-        });
-    }
 
     // Theme Toggle Functionality
     const themeToggle = document.getElementById('themeToggle');
@@ -244,4 +248,4 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     console.log('✅ Liberdus website loaded successfully!');
-});
+};
