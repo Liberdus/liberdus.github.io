@@ -12,7 +12,8 @@
   --bg-main: #000000;
   --bg-dark: #0a0f1c;
   --bg-darker: #1a202c;
-  --bg-card: rgba(15, 23, 42, 0.4);
+/*  --bg-card: rgba(15, 23, 42, 0.4); */
+  --bg-card: rgba(248, 250, 252, 0.98);
   --bg-glass: rgba(255, 255, 255, 0.05);
 
   --text-primary: #ffffff;
@@ -246,6 +247,7 @@ body {
   z-index: 1000;
   padding: var(--space-2) 0;
   margin-top: var(--space-2);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .nav-dropdown:hover .dropdown-menu {
