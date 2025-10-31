@@ -224,16 +224,6 @@ class ContractManager {
             await this.initializeContractsReadOnly();
             this.log('🔗 Contract instances initialized');
 
-            // Verify contract deployment and functions (with graceful fallback)
-            this.log('🔍 Verifying contract deployment...');
-            try {
-                await this.verifyContractDeployment();
-                this.log('🔍 Contract deployment verified');
-            } catch (error) {
-                this.logError('⚠️ Contract deployment verification failed, but continuing:', error.message);
-                // Don't throw - allow system to continue with limited functionality
-            }
-
             // Verify contract function availability (with graceful fallback)
             this.log('🔍 Verifying contract functions...');
             try {
@@ -550,28 +540,6 @@ class ContractManager {
 
         // Remove duplicates and return
         return [...new Set(rpcUrls)];
-    }
-
-    /**
-     * Setup fallback provider configuration
-     */
-    async setupFallbackProviders() {
-        this.log('🔧 Setting up fallback provider configuration...');
-
-        // Ensure fallback providers array is initialized
-        if (!this.fallbackProviders) {
-            this.fallbackProviders = [];
-        }
-
-        // Setup default RPC URLs if not configured
-        if (!this.config.fallbackRPCs || this.config.fallbackRPCs.length === 0) {
-            this.config.fallbackRPCs = window.CONFIG?.NETWORK?.FALLBACK_RPCS || [
-                'https://rpc-amoy.polygon.technology',
-                'https://polygon-amoy.drpc.org',
-                'https://polygon-amoy-bor-rpc.publicnode.com'
-            ];
-            this.log('🔧 Using default fallback RPC URLs');
-        }
     }
 
     /**
@@ -981,18 +949,6 @@ class ContractManager {
     }
 
     /**
-     * Verify contract deployment exists (ENHANCED with retry logic)
-     */
-    async verifyContractDeployment(maxRetries = 3, retryDelay = 2000) {
-        // DISABLED: Skip contract verification to prevent MetaMask RPC errors
-        this.log('🔍 Contract verification skipped - using Polygon Amoy testnet');
-        return true;
-
-        // NOTE: Contract verification code removed to prevent unreachable code error
-        // The method now simply returns true to skip verification on Polygon Amoy testnet
-    }
-
-    /**
      * Verify contract function availability (NEW)
      */
     async verifyContractFunctions() {
@@ -1052,7 +1008,6 @@ class ContractManager {
             this.log('🔍 Verifying contract connections...');
 
             // Call the new verification methods
-            await this.verifyContractDeployment();
             await this.verifyContractFunctions();
 
             this.log('✅ Contract connection verification completed');
@@ -1242,17 +1197,6 @@ class ContractManager {
     }
 
     /**
-     * Add callback to be called when contract manager is ready
-     */
-    onReady(callback) {
-        if (this.isReady()) {
-            callback();
-        } else {
-            this.readyCallbacks.push(callback);
-        }
-    }
-
-    /**
      * Notify all ready callbacks
      */
     _notifyReadyCallbacks() {
@@ -1327,6 +1271,7 @@ class ContractManager {
     /**
      * Get pool information for a specific LP token (using available contract methods)
      */
+    // TODO: Implement or remove if not applicable  
     async getPoolInfo(lpTokenAddress) {
         return await this.executeWithRetry(async () => {
             // Since getPoolInfo doesn't exist, we'll return basic info
@@ -1428,7 +1373,7 @@ class ContractManager {
                     throw new Error('totalWeight method not available in contract');
                 }
             },
-            BigInt(1), // Fallback value - use 1 instead of 0 to avoid division by zero
+            BigInt(0),
             'getTotalWeight'
         );
     }
@@ -1442,45 +1387,6 @@ class ContractManager {
             [], // Fallback empty array
             'getPairs'
         );
-    }
-
-    /**
-     * Retry contract call with exponential backoff (ENHANCED)
-     */
-    async retryContractCall(contractFunction, maxRetries = 2, functionName = 'unknown') {
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                this.log(`🔄 Calling ${functionName} (attempt ${attempt}/${maxRetries})`);
-                const result = await Promise.race([
-                    contractFunction(),
-                    new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('Contract call timeout')), 8000) // Reduced from 15000ms
-                    )
-                ]);
-                this.log(`✅ ${functionName} succeeded on attempt ${attempt}`);
-                return result;
-            } catch (error) {
-                this.log(`❌ ${functionName} failed on attempt ${attempt}: ${error.message}`);
-
-                if (attempt === maxRetries) {
-                    throw error;
-                }
-
-                // Check if it's an RPC error that might be retryable
-                if (error.code === -32603 ||
-                    (error.message && error.message.includes('missing trie node')) ||
-                    (error.message && error.message.includes('timeout')) ||
-                    (error.message && error.message.includes('CALL_EXCEPTION'))) {
-                    const delay = 500 * Math.pow(1.5, attempt - 1); // Reduced exponential backoff
-                    this.log(`⏳ Retrying ${functionName} in ${delay}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    continue;
-                }
-
-                // Non-retryable error
-                throw error;
-            }
-        }
     }
 
     /**
@@ -1786,9 +1692,9 @@ class ContractManager {
                 return [];
             }
 
-            // Load recent 25 actions for better UX
+            // Load recent 50 actions for better UX
             const startIndex = actionCount;
-            const endIndex = Math.max(actionCount - 25, 1);
+            const endIndex = Math.max(actionCount - 50, 1);
             const actionIds = [];
             for (let i = startIndex; i >= endIndex; i--) {
                 actionIds.push(i);
@@ -2779,130 +2685,6 @@ class ContractManager {
     }
 
     /**
-     * Diagnostic test for Add Pair functionality - TROUBLESHOOTING TOOL
-     */
-    async diagnosticTestAddPair(lpToken, pairName, platform, weight) {
-        console.log(`[DIAGNOSTIC] 🔍 Starting Add Pair Diagnostic Test`);
-        console.log(`[DIAGNOSTIC] ================================================`);
-
-        const diagnosticResults = {
-            timestamp: new Date().toISOString(),
-            parameters: { lpToken, pairName, platform, weight },
-            checks: {},
-            recommendations: []
-        };
-
-        try {
-            // Test 1: Parameter Validation
-            console.log(`[DIAGNOSTIC] 📋 Test 1: Parameter Validation`);
-            diagnosticResults.checks.parameterValidation = {
-                lpTokenValid: ethers.utils.isAddress(lpToken),
-                pairNameValid: pairName && pairName.trim().length > 0,
-                platformValid: platform && platform.trim().length > 0,
-                weightValid: !isNaN(weight) && weight > 0
-            };
-            console.log(`[DIAGNOSTIC]   LP Token valid: ${diagnosticResults.checks.parameterValidation.lpTokenValid}`);
-            console.log(`[DIAGNOSTIC]   Pair name valid: ${diagnosticResults.checks.parameterValidation.pairNameValid}`);
-            console.log(`[DIAGNOSTIC]   Platform valid: ${diagnosticResults.checks.parameterValidation.platformValid}`);
-            console.log(`[DIAGNOSTIC]   Weight valid: ${diagnosticResults.checks.parameterValidation.weightValid}`);
-
-            // Test 2: Network Connection
-            console.log(`[DIAGNOSTIC] 🌐 Test 2: Network Connection`);
-            const networkInfo = await this.provider.getNetwork();
-            const gasPrice = await this.provider.getGasPrice();
-            diagnosticResults.checks.network = {
-                chainId: networkInfo.chainId,
-                networkName: networkInfo.name,
-                gasPrice: ethers.utils.formatUnits(gasPrice, 'gwei') + ' gwei',
-                isPolygonAmoy: networkInfo.chainId === (window.CONFIG?.NETWORK?.CHAIN_ID || 80002)
-            };
-            console.log(`[DIAGNOSTIC]   Chain ID: ${diagnosticResults.checks.network.chainId}`);
-            console.log(`[DIAGNOSTIC]   Network: ${diagnosticResults.checks.network.networkName}`);
-            console.log(`[DIAGNOSTIC]   Gas Price: ${diagnosticResults.checks.network.gasPrice}`);
-            console.log(`[DIAGNOSTIC]   Is Polygon Amoy: ${diagnosticResults.checks.network.isPolygonAmoy}`);
-
-            // Test 3: Signer Status
-            console.log(`[DIAGNOSTIC] 🔐 Test 3: Signer Status`);
-            await this.ensureSigner();
-            const signerAddress = await this.signer.getAddress();
-            const balance = await this.provider.getBalance(signerAddress);
-            diagnosticResults.checks.signer = {
-                address: signerAddress,
-                balance: ethers.utils.formatEther(balance) + ' MATIC',
-                hasSufficientBalance: balance.gt(ethers.utils.parseEther('0.01'))
-            };
-            console.log(`[DIAGNOSTIC]   Signer address: ${diagnosticResults.checks.signer.address}`);
-            console.log(`[DIAGNOSTIC]   Balance: ${diagnosticResults.checks.signer.balance}`);
-            console.log(`[DIAGNOSTIC]   Sufficient balance: ${diagnosticResults.checks.signer.hasSufficientBalance}`);
-
-            // Test 4: Contract Status
-            console.log(`[DIAGNOSTIC] 📄 Test 4: Contract Status`);
-            const contractCode = await this.provider.getCode(this.stakingContract.address);
-            const hasProposeAddPair = typeof this.stakingContract.proposeAddPair === 'function';
-            diagnosticResults.checks.contract = {
-                address: this.stakingContract.address,
-                hasCode: contractCode !== '0x',
-                hasProposeAddPairFunction: hasProposeAddPair,
-                codeLength: contractCode.length
-            };
-            console.log(`[DIAGNOSTIC]   Contract address: ${diagnosticResults.checks.contract.address}`);
-            console.log(`[DIAGNOSTIC]   Has code: ${diagnosticResults.checks.contract.hasCode}`);
-            console.log(`[DIAGNOSTIC]   Has proposeAddPair: ${diagnosticResults.checks.contract.hasProposeAddPairFunction}`);
-
-            // Test 5: Access Control (if possible)
-            console.log(`[DIAGNOSTIC] 🔑 Test 5: Access Control Check`);
-            try {
-                // Try to check if user has ADMIN_ROLE
-                const adminRole = ethers.utils.keccak256(ethers.utils.toUtf8Bytes('ADMIN_ROLE'));
-                const hasAdminRole = await this.stakingContract.hasRole(adminRole, signerAddress);
-                diagnosticResults.checks.accessControl = {
-                    hasAdminRole: hasAdminRole,
-                    adminRoleHash: adminRole
-                };
-                console.log(`[DIAGNOSTIC]   Has ADMIN_ROLE: ${hasAdminRole}`);
-            } catch (accessError) {
-                diagnosticResults.checks.accessControl = {
-                    error: accessError.message,
-                    hasAdminRole: 'unknown'
-                };
-                console.log(`[DIAGNOSTIC]   Access control check failed: ${accessError.message}`);
-            }
-
-            // Generate Recommendations
-            console.log(`[DIAGNOSTIC] 💡 Generating Recommendations`);
-            if (!diagnosticResults.checks.network.isPolygonAmoy) {
-                const expectedChainId = window.CONFIG?.NETWORK?.CHAIN_ID || 80002;
-                diagnosticResults.recommendations.push(`Switch to Polygon Amoy testnet (Chain ID: ${expectedChainId})`);
-            }
-            if (!diagnosticResults.checks.signer.hasSufficientBalance) {
-                diagnosticResults.recommendations.push('Get more MATIC from Polygon Amoy faucet for gas fees');
-            }
-            if (!diagnosticResults.checks.contract.hasCode) {
-                diagnosticResults.recommendations.push('Contract address may be incorrect or not deployed');
-            }
-            if (!diagnosticResults.checks.contract.hasProposeAddPairFunction) {
-                diagnosticResults.recommendations.push('Contract may not have governance functions implemented');
-            }
-            if (diagnosticResults.checks.accessControl.hasAdminRole === false) {
-                diagnosticResults.recommendations.push('User does not have ADMIN_ROLE - cannot create proposals');
-            }
-
-            console.log(`[DIAGNOSTIC] ================================================`);
-            console.log(`[DIAGNOSTIC] 📊 Diagnostic Complete - ${diagnosticResults.recommendations.length} recommendations`);
-            diagnosticResults.recommendations.forEach((rec, i) => {
-                console.log(`[DIAGNOSTIC]   ${i + 1}. ${rec}`);
-            });
-
-            return diagnosticResults;
-
-        } catch (error) {
-            console.error(`[DIAGNOSTIC] ❌ Diagnostic test failed:`, error);
-            diagnosticResults.error = error.message;
-            return diagnosticResults;
-        }
-    }
-
-    /**
      * Ensure we have a proper signer for transactions
      */
     async ensureSigner() {
@@ -3013,46 +2795,6 @@ class ContractManager {
             console.error('❌ Failed to recreate contracts with signer:', error);
             console.log('⚠️ Continuing without signer update - demo mode will be used');
         }
-    }
-
-    /**
-     * Recreate contract instances with signer for transactions
-     */
-    async recreateContractsWithSigner() {
-        if (!this.signer) {
-            throw new Error('No signer available for contract recreation');
-        }
-
-        const stakingAddress = this.contractAddresses.get('STAKING');
-        const rewardTokenAddress = this.contractAddresses.get('REWARD_TOKEN');
-
-        if (!stakingAddress || !rewardTokenAddress) {
-            throw new Error('Contract addresses not available');
-        }
-
-        // Get ABIs
-        const stakingABI = this.contractABIs.get('STAKING');
-        const rewardTokenABI = this.contractABIs.get('ERC20');
-
-        if (!stakingABI || !rewardTokenABI) {
-            console.error('❌ Available ABI keys:', Array.from(this.contractABIs.keys()));
-            throw new Error('Contract ABIs not available');
-        }
-
-        // Recreate contracts with signer
-        this.stakingContract = new ethers.Contract(
-            stakingAddress,
-            stakingABI,
-            this.signer
-        );
-
-        this.rewardTokenContract = new ethers.Contract(
-            rewardTokenAddress,
-            rewardTokenABI,
-            this.signer
-        );
-
-        console.log('✅ Contracts recreated with signer for transactions');
     }
 
     /**
@@ -3777,48 +3519,6 @@ class ContractManager {
     // These methods provide the expected interface for the admin panel
 
     /**
-     * Approve a proposal (wrapper for approveAction)
-     */
-    async approveProposal(proposalId) {
-        try {
-            const result = await this.approveAction(proposalId);
-            return {
-                success: true,
-                transactionHash: result.transactionHash,
-                blockNumber: result.blockNumber,
-                gasUsed: result.gasUsed.toString()
-            };
-        } catch (error) {
-            this.logError('Failed to approve proposal:', error);
-            return {
-                success: false,
-                error: error.message
-            };
-        }
-    }
-
-    /**
-     * Reject a proposal (wrapper for rejectAction)
-     */
-    async rejectProposal(proposalId) {
-        try {
-            const result = await this.rejectAction(proposalId);
-            return {
-                success: true,
-                transactionHash: result.transactionHash,
-                blockNumber: result.blockNumber,
-                gasUsed: result.gasUsed.toString()
-            };
-        } catch (error) {
-            this.logError('Failed to reject proposal:', error);
-            return {
-                success: false,
-                error: error.message
-            };
-        }
-    }
-
-    /**
      * Execute a proposal (wrapper for executeAction) - SIMPLIFIED TO MATCH REACT PATTERN
      */
     async executeProposal(proposalId) {
@@ -3841,11 +3541,6 @@ class ContractManager {
                 error: errorMessage
             };
         }
-    }
-
-    async cancelProposal(proposalId) {
-        // Note: The contract doesn't have a cancel function, so we reject instead
-        return await this.rejectProposal(proposalId);
     }
 
     /**
@@ -4022,41 +3717,6 @@ class ContractManager {
                 isActive: isActive
             };
         }, 'getPairInfo');
-    }
-
-    /**
-     * Get hourly reward rate from contract with provider fallback and graceful degradation
-     */
-    async getHourlyRewardRate() {
-        try {
-            return await this.executeWithProviderFallback(async (provider, blockTag) => {
-                // Create contract instance with specific provider
-                const contractWithProvider = new ethers.Contract(
-                    this.contractAddresses.get('STAKING'),
-                    this.contractABIs.get('STAKING'),
-                    provider
-                );
-
-                this.log('💰 Getting hourly reward rate from contract...');
-
-                // Call with block tag if provided
-                const rate = blockTag
-                    ? await contractWithProvider.hourlyRewardRate({ blockTag })
-                    : await contractWithProvider.hourlyRewardRate();
-
-                this.log(`✅ Hourly reward rate: ${ethers.utils.formatEther(rate)} LIB/hour`);
-                return rate;
-            }, 'getHourlyRewardRate');
-
-        } catch (error) {
-            const errorMsg = error?.message || 'Unknown error';
-            this.logError('⚠️ All providers failed for getHourlyRewardRate, using fallback value:', errorMsg);
-
-            // Graceful fallback: return a reasonable default value
-            const fallbackRate = ethers.utils.parseEther('0.1'); // 0.1 LIB/hour as fallback
-            this.log('🔄 Using fallback hourly reward rate: 0.1 LIB/hour');
-            return fallbackRate;
-        }
     }
 
     /**
@@ -4257,18 +3917,6 @@ class ContractManager {
         return userData;
     }
 
-
-    /**
-     * Get LP token balance for user
-     */
-    async getLPTokenBalance(userAddress, pairName) {
-        return await this.executeWithRetry(async () => {
-            const lpContract = this.getLPTokenContract(pairName);
-            const balance = await lpContract.balanceOf(userAddress);
-            return ethers.formatEther(balance);
-        }, 'getLPTokenBalance');
-    }
-
     /**
      * Get LP token allowance for staking contract
      */
@@ -4458,90 +4106,6 @@ class ContractManager {
             // CRITICAL FIX: Return tx object, not receipt
             return tx;
         }, 'approveLPToken');
-    }
-
-    /**
-     * Stake LP tokens with enhanced gas estimation
-     */
-    async stakeLPTokens(pairName, amount) {
-        this.log(`Executing transaction stakeLPTokens`);
-
-        // Check if we're in fallback mode
-        if (!this.stakingContract) {
-            // Fallback mode - simulate transaction
-            this.log(`Fallback mode: Simulating stakeLPTokens for ${pairName}, amount: ${amount}`);
-            return {
-                hash: '0x' + Math.random().toString(16).substr(2, 64),
-                wait: async () => ({
-                    status: 1,
-                    transactionHash: '0x' + Math.random().toString(16).substr(2, 64),
-                    blockNumber: Math.floor(Math.random() * 1000000) + 1000000,
-                    gasUsed: ethers.BigNumber.from('21000')
-                })
-            };
-        }
-
-        return await this.executeTransactionWithRetry(async () => {
-            const lpTokenAddress = this.contractAddresses.get(`LP_${pairName}`);
-            const amountWei = ethers.utils.parseEther(amount.toString());
-
-            // Enhanced gas estimation
-            const gasLimit = await this.estimateGasWithBuffer(this.stakingContract, 'stake', [lpTokenAddress, amountWei]);
-            const gasPrice = await this.getGasPrice();
-
-            // Execute transaction with optimized gas settings
-            const tx = await this.stakingContract.stake(lpTokenAddress, amountWei, {
-                gasLimit,
-                gasPrice
-            });
-
-            this.log('Stake transaction sent:', tx.hash, `Gas: ${gasLimit}, Price: ${ethers.utils.formatUnits(gasPrice, 'gwei')} gwei`);
-
-            // CRITICAL FIX: Return tx object, not receipt
-            return tx;
-        }, 'stakeLPTokens');
-    }
-
-    /**
-     * Unstake LP tokens with enhanced gas estimation
-     */
-    async unstakeLPTokens(pairName, amount) {
-        this.log(`Executing transaction unstakeLPTokens`);
-
-        // Check if we're in fallback mode
-        if (!this.stakingContract) {
-            // Fallback mode - simulate transaction
-            this.log(`Fallback mode: Simulating unstakeLPTokens for ${pairName}, amount: ${amount}`);
-            return {
-                hash: '0x' + Math.random().toString(16).substr(2, 64),
-                wait: async () => ({
-                    status: 1,
-                    transactionHash: '0x' + Math.random().toString(16).substr(2, 64),
-                    blockNumber: Math.floor(Math.random() * 1000000) + 1000000,
-                    gasUsed: ethers.BigNumber.from('21000')
-                })
-            };
-        }
-
-        return await this.executeTransactionWithRetry(async () => {
-            const lpTokenAddress = this.contractAddresses.get(`LP_${pairName}`);
-            const amountWei = ethers.utils.parseEther(amount.toString());
-
-            // Enhanced gas estimation
-            const gasLimit = await this.estimateGasWithBuffer(this.stakingContract, 'unstake', [lpTokenAddress, amountWei]);
-            const gasPrice = await this.getGasPrice();
-
-            // Execute transaction with optimized gas settings
-            const tx = await this.stakingContract.unstake(lpTokenAddress, amountWei, {
-                gasLimit,
-                gasPrice
-            });
-
-            this.log('Unstake transaction sent:', tx.hash, `Gas: ${gasLimit}, Price: ${ethers.utils.formatUnits(gasPrice, 'gwei')} gwei`);
-
-            // CRITICAL FIX: Return tx object, not receipt
-            return tx;
-        }, 'unstakeLPTokens');
     }
 
     /**
@@ -5309,60 +4873,6 @@ class ContractManager {
     }
 
     /**
-     * Test provider connection and performance
-     */
-    async testProvider(provider, timeout = 5000) {
-        try {
-            const startTime = Date.now();
-
-            await Promise.race([
-                provider.getBlockNumber(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), timeout))
-            ]);
-
-            const responseTime = Date.now() - startTime;
-            this.log(`Provider test successful, response time: ${responseTime}ms`);
-
-            return { success: true, responseTime };
-        } catch (error) {
-            this.log('Provider test failed:', error.message);
-            return { success: false, error: error.message };
-        }
-    }
-
-    /**
-     * Get provider health status
-     */
-    async getProviderHealth() {
-        try {
-            const health = {
-                currentProvider: this.currentProviderIndex,
-                totalProviders: this.fallbackProviders.length,
-                isConnected: !!this.provider,
-                networkId: null,
-                blockNumber: null,
-                responseTime: null
-            };
-
-            if (this.provider) {
-                const startTime = Date.now();
-                const network = await this.provider.getNetwork();
-                const blockNumber = await this.provider.getBlockNumber();
-                const responseTime = Date.now() - startTime;
-
-                health.networkId = Number(network.chainId);
-                health.blockNumber = blockNumber;
-                health.responseTime = responseTime;
-            }
-
-            return health;
-        } catch (error) {
-            this.logError('Failed to get provider health:', error);
-            return { error: error.message };
-        }
-    }
-
-    /**
      * Delay utility for retry logic
      */
     async delay(ms) {
@@ -5414,173 +4924,6 @@ class ContractManager {
         if (url) {
             window.open(url, '_blank', 'noopener,noreferrer');
             this.log('Opened address in explorer:', address);
-        }
-    }
-
-    // ==================== COMPREHENSIVE ERROR HANDLING ====================
-
-    /**
-     * Enhanced error handling for all transaction failure scenarios
-     */
-    handleTransactionError(error, context = {}) {
-        const errorInfo = {
-            message: error.message,
-            code: error.code,
-            context,
-            timestamp: Date.now(),
-            category: this.categorizeError(error)
-        };
-
-        this.logError('Transaction error:', errorInfo);
-
-        // Emit error event for UI handling
-        if (window.eventManager) {
-            window.eventManager.emit('transaction:error', errorInfo);
-        }
-
-        // Show user-friendly notification
-        if (window.notificationManager) {
-            const userMessage = this.getUserFriendlyErrorMessage(error);
-            window.notificationManager.show({
-                type: 'error',
-                title: 'Transaction Failed',
-                message: userMessage,
-                duration: 8000,
-                actions: this.getErrorActions(error, context)
-            });
-        }
-
-        return errorInfo;
-    }
-
-    /**
-     * Categorize error for better handling
-     */
-    categorizeError(error) {
-        const message = error.message.toLowerCase();
-
-        if (message.includes('user rejected') || message.includes('user denied')) {
-            return 'USER_REJECTED';
-        } else if (message.includes('insufficient funds')) {
-            return 'INSUFFICIENT_FUNDS';
-        } else if (message.includes('gas')) {
-            return 'GAS_ERROR';
-        } else if (message.includes('nonce')) {
-            return 'NONCE_ERROR';
-        } else if (message.includes('network') || message.includes('connection')) {
-            return 'NETWORK_ERROR';
-        } else if (message.includes('timeout')) {
-            return 'TIMEOUT_ERROR';
-        } else if (message.includes('reverted')) {
-            return 'CONTRACT_ERROR';
-        } else {
-            return 'UNKNOWN_ERROR';
-        }
-    }
-
-    /**
-     * Get user-friendly error message
-     */
-    getUserFriendlyErrorMessage(error) {
-        const category = this.categorizeError(error);
-
-        const messages = {
-            USER_REJECTED: 'Transaction was cancelled by user',
-            INSUFFICIENT_FUNDS: 'Insufficient funds to complete transaction',
-            GAS_ERROR: 'Gas estimation failed. Please try again with higher gas limit',
-            NONCE_ERROR: 'Transaction nonce error. Please refresh and try again',
-            NETWORK_ERROR: 'Network connection error. Please check your connection',
-            TIMEOUT_ERROR: 'Transaction timed out. Please try again',
-            CONTRACT_ERROR: 'Smart contract execution failed. Please check transaction parameters',
-            UNKNOWN_ERROR: 'An unexpected error occurred. Please try again'
-        };
-
-        return messages[category] || messages.UNKNOWN_ERROR;
-    }
-
-    /**
-     * Get error-specific actions for user
-     */
-    getErrorActions(error, context) {
-        const category = this.categorizeError(error);
-        const actions = [];
-
-        switch (category) {
-            case 'INSUFFICIENT_FUNDS':
-                actions.push({
-                    label: 'Check Balance',
-                    action: () => this.refreshUserBalance(context.userAddress)
-                });
-                break;
-
-            case 'GAS_ERROR':
-                actions.push({
-                    label: 'Retry with Higher Gas',
-                    action: () => this.retryWithHigherGas(context)
-                });
-                break;
-
-            case 'NETWORK_ERROR':
-                actions.push({
-                    label: 'Grant Network Permission',
-                    action: () => {
-                        if (window.networkManager) {
-                            window.networkManager.requestPermissionWithUIUpdate('admin');
-                        } else {
-                            alert('Please grant permission for Amoy network in MetaMask');
-                        }
-                    }
-                });
-                break;
-
-            case 'CONTRACT_ERROR':
-                if (context.txHash) {
-                    actions.push({
-                        label: 'View on Explorer',
-                        action: () => this.openTransactionInExplorer(context.txHash)
-                    });
-                }
-                break;
-        }
-
-        return actions;
-    }
-
-    /**
-     * Retry transaction with higher gas
-     */
-    async retryWithHigherGas(context) {
-        try {
-            if (context.operation && context.args) {
-                // Increase gas limit by 50%
-                const newContext = {
-                    ...context,
-                    gasMultiplier: (context.gasMultiplier || 1) * 1.5
-                };
-
-                this.log('Retrying transaction with higher gas:', newContext);
-
-                // Re-execute the operation
-                return await this[context.operation](...context.args, newContext);
-            }
-        } catch (error) {
-            this.logError('Retry with higher gas failed:', error);
-        }
-    }
-
-
-    /**
-     * Refresh user balance
-     */
-    async refreshUserBalance(userAddress) {
-        try {
-            if (userAddress && window.stateManager) {
-                // Trigger balance refresh
-                window.stateManager.set('user.balanceRefresh', Date.now());
-                this.log('Triggered balance refresh for:', userAddress);
-            }
-        } catch (error) {
-            this.logError('Failed to refresh balance:', error);
         }
     }
 
@@ -5792,21 +5135,6 @@ class ContractManager {
     }
 
     /**
-     * Validate multiple addresses at once
-     * @param {Object} addresses - Object with fieldName: address pairs
-     * @returns {Object} - Object with fieldName: checksummedAddress pairs
-     */
-    validateAddresses(addresses) {
-        const validated = {};
-
-        for (const [fieldName, address] of Object.entries(addresses)) {
-            validated[fieldName] = this.validateAndChecksumAddress(address, fieldName);
-        }
-
-        return validated;
-    }
-
-    /**
      * Get current signer address for transaction operations
      * Requires signer setup and network context. Use for sending transactions.
      * For permission checks only, use getCurrentSignerForPermissions() instead.
@@ -5873,13 +5201,6 @@ class ContractManager {
             this.logError('Failed to get current signer address for permissions:', error);
             return null;
         }
-    }
-
-    /**
-     * Get current signer address (alias)
-     */
-    async getCurrentSignerAddress() {
-        return await this.getCurrentSigner();
     }
 
     /**

@@ -18,17 +18,10 @@ class AdminPage {
         // SECURITY: Default to false (production mode) if DEV_CONFIG is not loaded
         this.DEVELOPMENT_MODE = window.DEV_CONFIG?.ADMIN_DEVELOPMENT_MODE ?? false;
 
-        // Professional Mock Data System
-        this.mockProposals = new Map();
-        this.mockProposalCounter = 1;
-        this.mockVotes = new Map();
-        this.mockApprovals = new Map();
-
         // PERFORMANCE OPTIMIZATION: Proposal state management
         this.proposalsCache = new Map(); // Cache proposals by ID for O(1) access
         this.lastProposalId = 0; // Track highest proposal ID for incremental loading
         this.pendingOptimisticUpdates = new Map(); // Track optimistic updates
-        this.isUsingRealData = false; // Track data source
 
         // PAGINATION OPTIMIZATION: Track loaded proposals for "Load More" functionality
         this.loadedProposalCount = 0; // Track how many proposals are currently loaded
@@ -40,172 +33,14 @@ class AdminPage {
         this.lastKnownProposalCount = 0; // Track last known total proposal count
         this.isSelectiveUpdateEnabled = true; // Enable selective update system
 
-        // Initialize mock system only in development mode
-        if (this.DEVELOPMENT_MODE) {
-            console.log('🚧 Development mode: Initializing mock system');
-            this.initializeMockSystem();
-        } else {
-            console.log('🚀 Production mode: Skipping mock system');
-        }
+        // UI state: remember proposal filter preference across refreshes
+        this.hideExecutedPreference = true;
 
         // Initialize asynchronously (don't await in constructor)
         this.init().catch(error => {
             console.error('❌ AdminPage initialization failed:', error);
             this.showInitializationError(error);
         });
-    }
-
-    /**
-     * Initialize Professional Mock System
-     * Creates realistic proposal data that feels completely real
-     */
-    initializeMockSystem() {
-        console.log('🔧 Initializing professional mock system...');
-
-        // Initialize with some realistic existing proposals for demo
-        this.createMockProposal({
-            id: 48,
-            actionType: 'SET_HOURLY_REWARD_RATE',
-            title: 'Set Reward Rate',
-            description: 'Update hourly reward rate to boost staking incentives',
-            proposer: '0x9249cFE964C49Cf2d2D0DBBbB33E99235707aa61',
-            status: 'PENDING',
-            requiredApprovals: 3,
-            currentApprovals: 1,
-            details: {
-                newHourlyRewardRate: '100'
-            },
-            createdAt: Date.now() - 86400000, // 1 day ago
-            expiresAt: Date.now() + 518400000 // 6 days from now
-        });
-
-        this.createMockProposal({
-            id: 47,
-            actionType: 'SET_HOURLY_REWARD_RATE',
-            title: 'Set Reward Rate',
-            description: 'Update hourly reward rate for better rewards distribution',
-            proposer: '0xea7bb30fbcCBB2646B0eFeB31382D3A4da07a3cC',
-            status: 'PENDING',
-            requiredApprovals: 3,
-            currentApprovals: 1,
-            details: {
-                newHourlyRewardRate: '150'
-            },
-            createdAt: Date.now() - 172800000, // 2 days ago
-            expiresAt: Date.now() + 432000000 // 5 days from now
-        });
-
-        this.createMockProposal({
-            id: 46,
-            actionType: 'ADD_PAIR',
-            title: 'Add Pair',
-            description: 'Add LIB/ETH LP pair from Uniswap V3 (weight: 20)',
-            proposer: '0xea7bb30fbcCBB2646B0eFeB31382D3A4da07a3cC',
-            status: 'PENDING',
-            requiredApprovals: 3,
-            currentApprovals: 0,
-            details: {
-                pairToAdd: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640',
-                pairNameToAdd: 'LIB/ETH',
-                platformToAdd: 'Uniswap V3',
-                weightToAdd: 20
-            },
-            createdAt: Date.now() - 259200000, // 3 days ago
-            expiresAt: Date.now() + 345600000 // 4 days from now
-        });
-
-        this.createMockProposal({
-            id: 45,
-            actionType: 'ADD_PAIR',
-            title: 'Add Pair',
-            description: 'Add LIB/ETH LP pair from Uniswap V3 (weight: 20)',
-            proposer: '0xea7bb30fbcCBB2646B0eFeB31382D3A4da07a3cC',
-            status: 'PENDING',
-            requiredApprovals: 3,
-            currentApprovals: 0,
-            details: {
-                pairToAdd: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640',
-                pairNameToAdd: 'LIB/ETH',
-                platformToAdd: 'Uniswap V3',
-                weightToAdd: 20
-            },
-            createdAt: Date.now() - 345600000, // 4 days ago
-            expiresAt: Date.now() + 259200000 // 3 days from now
-        });
-
-        this.createMockProposal({
-            id: 44,
-            actionType: 'SET_HOURLY_REWARD_RATE',
-            title: 'Set Reward Rate',
-            description: 'Governance proposal to update reward rate',
-            proposer: '0xea7bb30fbcCBB2646B0eFeB31382D3A4da07a3cC',
-            status: 'PENDING',
-            requiredApprovals: 3,
-            currentApprovals: 0,
-            details: {
-                newHourlyRewardRate: '200'
-            },
-            createdAt: Date.now() - 432000000, // 5 days ago
-            expiresAt: Date.now() + 172800000 // 2 days from now
-        });
-
-        console.log('✅ Professional mock system initialized with realistic proposals');
-        console.log('🔧 Mock proposals created:', this.mockProposals.size);
-        console.log('🔧 Mock proposal IDs:', Array.from(this.mockProposals.keys()));
-    }
-
-    /**
-     * Create a mock proposal that looks completely real
-     */
-    createMockProposal(proposalData) {
-        const proposal = {
-            id: proposalData.id || this.mockProposalCounter++,
-            actionType: proposalData.actionType,
-            title: proposalData.title,
-            description: proposalData.description,
-            proposer: proposalData.proposer,
-            status: proposalData.status || 'PENDING',
-            requiredApprovals: proposalData.requiredApprovals || 3,
-            currentApprovals: proposalData.currentApprovals || 0,
-            details: proposalData.details,
-            createdAt: proposalData.createdAt || Date.now(),
-            expiresAt: proposalData.expiresAt || (Date.now() + 604800000), // 7 days
-            votes: [],
-            transactionHash: proposalData.transactionHash || ('0x' + Math.random().toString(16).substr(2, 64))
-        };
-
-        this.mockProposals.set(proposal.id, proposal);
-        this.mockVotes.set(proposal.id, new Map());
-        this.mockApprovals.set(proposal.id, new Set());
-
-        return proposal;
-    }
-
-    /**
-     * Add a vote to a mock proposal
-     */
-    addMockVote(proposalId, signerAddress, vote) {
-        if (!this.mockVotes.has(proposalId)) {
-            this.mockVotes.set(proposalId, new Map());
-        }
-
-        this.mockVotes.get(proposalId).set(signerAddress, {
-            vote: vote, // 'APPROVE' or 'REJECT'
-            timestamp: Date.now(),
-            transactionHash: '0x' + Math.random().toString(16).substr(2, 64)
-        });
-
-        // Update proposal approval count
-        const proposal = this.mockProposals.get(proposalId);
-        if (proposal && vote === 'APPROVE') {
-            this.mockApprovals.get(proposalId).add(signerAddress);
-            proposal.currentApprovals = this.mockApprovals.get(proposalId).size;
-
-            // Update status if enough approvals
-            if (proposal.currentApprovals >= proposal.requiredApprovals) {
-                proposal.status = 'APPROVED';
-            }
-        }
     }
 
     /**
@@ -238,12 +73,7 @@ class AdminPage {
             if (this.DEVELOPMENT_MODE) {
                 console.log('🚧 DEVELOPMENT MODE: Bypassing access control');
                 this.isAuthorized = true;
-                this.userAddress = window.DEV_CONFIG?.MOCK_USER_ADDRESS || '0x1234567890123456789012345678901234567890';
-
-                // Use mock contract stats if enabled
-                if (window.DEV_CONFIG?.MOCK_CONTRACT_DATA) {
-                    this.contractStats = window.DEV_CONFIG.MOCK_STATS || {};
-                }
+                this.userAddress = '0x1234567890123456789012345678901234567890';
 
                 await this.loadAdminInterface();
                 this.startAutoRefresh();
@@ -1645,8 +1475,15 @@ class AdminPage {
             this.loadedProposalCount = proposals.length;
             console.log(`📊 Set loadedProposalCount to ${this.loadedProposalCount}`);
 
-            // Filter proposals based on hide-executed checkbox (default: hide executed)
-            const filteredProposals = proposals.filter(proposal => !proposal.executed);
+            // Filter proposals based on stored hide-executed preference (default: hide executed)
+            const hideExecuted = this.hideExecutedPreference !== undefined
+                ? this.hideExecutedPreference
+                : true;
+
+            const filteredProposals = hideExecuted
+                ? proposals.filter(proposal => !proposal.executed)
+                : proposals;
+
             console.log(`📊 Filtered proposals: ${filteredProposals.length} (hidden ${proposals.length - filteredProposals.length} executed)`);
             console.log(`📊 First 5 filtered proposals:`, filteredProposals.slice(0, 5).map(p => ({ id: p.id, executed: p.executed, actionType: p.actionType })));
 
@@ -1663,16 +1500,13 @@ class AdminPage {
                         </div>
                         <div class="panel-controls">
                             <label class="checkbox-label">
-                                <input type="checkbox" id="hide-executed" checked>
+                                <input type="checkbox" id="hide-executed" ${hideExecuted ? 'checked' : ''}>
                                 Hide executed transactions
                             </label>
                             <div class="panel-stats">
-                                <span class="stat-chip">Total Proposals: ${proposals.length}</span>
-                                <span class="stat-chip">Showing: ${filteredProposals.length}</span>
-                                <span class="stat-chip">Required Approvals: ${this.contractStats.requiredApprovals || 2}</span>
-                                <span class="stat-chip data-source-indicator" id="data-source-indicator">
-                                    ${this.isUsingRealData ? '🔗 Live Data' : '🎭 Demo Data'}
-                                </span>
+                                <span class="stat-chip" data-stat="total-proposals">Total Proposals: ${this.totalProposalCount}</span>
+                                <span class="stat-chip" data-stat="showing-proposals">Showing: ${filteredProposals.length}</span>
+                                <span class="stat-chip" data-stat="required-approvals">Required Approvals: ${this.contractStats?.requiredApprovals ?? 3}</span>
                             </div>
                         </div>
                     </div>
@@ -1698,13 +1532,21 @@ class AdminPage {
                 </div>
             `;
 
+            this.updateProposalStatsUI({
+                total: this.totalProposalCount,
+                showing: filteredProposals.length,
+                required: this.contractStats?.requiredApprovals ?? 3
+            });
+
             // Proposals are ready, enable actions now that data exists
             this.setProposalButtonsEnabled(true);
 
             // Add event listener for hide-executed checkbox
             const hideExecutedCheckbox = document.getElementById('hide-executed');
             if (hideExecutedCheckbox) {
+                hideExecutedCheckbox.checked = hideExecuted;
                 hideExecutedCheckbox.addEventListener('change', () => {
+                    this.hideExecutedPreference = hideExecutedCheckbox.checked;
                     this.toggleExecutedProposals();
                 });
             }
@@ -1762,9 +1604,6 @@ class AdminPage {
                         <button class="btn btn-outline" onclick="adminPage.forceLoadRealProposals()">
                             🔗 Try Real Data
                         </button>
-                        <button class="btn btn-outline" onclick="adminPage.loadMockProposals().then(proposals => adminPage.renderProposalsRows(proposals))">
-                            📋 Load Demo Data
-                        </button>
                     </div>
                 </div>
             `;
@@ -1779,8 +1618,8 @@ class AdminPage {
         return `
             <div class="info-card">
                 <div class="card-header">
-                    <h3>Contract Information</h3>
-                    <button class="btn btn-sm" onclick="adminPage.refreshContractInfo()">
+                    <h5>Contract Information</h5>
+                    <button class="btn btn-sm refresh-btn" type="button" onclick="adminPage.refreshContractInfo()">
                         🔄 Refresh
                     </button>
                 </div>
@@ -1788,28 +1627,42 @@ class AdminPage {
                 <div class="card-content">
                     <div class="info-grid">
                         <div class="info-item">
-                            <div class="info-label">💰 Reward Balance</div>
-                            <div class="info-value" data-info="reward-balance">Loading...</div>
+                            <div class="info-label-wrapper">
+                                <h6>Reward Token Balance</h6>
+                            </div>
+                            <h6 class="info-value" data-info="reward-balance">Loading...</h6>
                         </div>
                         <div class="info-item">
-                            <div class="info-label">⏰ Hourly Rate</div>
-                            <div class="info-value" data-info="hourly-rate">Loading...</div>
+                            <div class="info-label-wrapper">
+                                <h6>Hourly Distribution Rate</h6>
+                            </div>
+                            <h6 class="info-value" data-info="hourly-rate">Loading...</h6>
                         </div>
                         <div class="info-item">
-                            <div class="info-label">⚖️ Total Weight</div>
-                            <div class="info-value" data-info="total-weight">Loading...</div>
+                            <div class="info-label-wrapper">
+                                <h6>Total Weight</h6>
+                            </div>
+                            <h6 class="info-value" data-info="total-weight">Loading...</h6>
                         </div>
                     </div>
 
+                    <hr class="contract-info-separator">
+
                     <div class="pairs-section">
-                        <h4>🔗 LP Pairs</h4>
+                        <div class="section-header">
+                            <h6>Eligible Pairs</h6>
+                        </div>
                         <div class="pairs-list" data-info="lp-pairs">
                             <div class="info-value">Loading pairs...</div>
                         </div>
                     </div>
 
+                    <hr class="contract-info-separator">
+
                     <div class="signers-section">
-                        <h4>👥 Current Signers</h4>
+                        <div class="section-header">
+                            <h6>Current Signers</h6>
+                        </div>
                         <div class="signers-list" data-info="signers">
                             <div class="info-value">Loading signers...</div>
                         </div>
@@ -1856,125 +1709,6 @@ class AdminPage {
                     </button>
                 </div>
             `;
-        }
-    }
-
-    /**
-     * Load professional mock proposals that look completely real
-     */
-    async loadMockProposals() {
-        console.log('📋 Loading enhanced mock proposals...');
-        console.log('🔧 DEBUG: Mock proposals map size:', this.mockProposals.size);
-        console.log('🔧 DEBUG: Mock proposals keys:', Array.from(this.mockProposals.keys()));
-
-        const mockProposals = this.getMockProposals();
-        console.log('🔧 DEBUG: getMockProposals returned:', mockProposals.length, 'proposals');
-
-        // Convert to the format expected by the UI with enhanced data
-        const formattedProposals = mockProposals.map(proposal => {
-            // Ensure actionType is always defined and valid
-            let actionType = proposal.actionType || 'UNKNOWN';
-            if (typeof actionType !== 'string') {
-                console.warn('⚠️ Invalid actionType for proposal:', proposal);
-                actionType = 'UNKNOWN';
-            }
-
-            const baseProposal = {
-                id: proposal.id || Math.floor(Math.random() * 1000),
-                actionType: actionType, // Ensure this is always a string
-                approvals: proposal.approvals || proposal.currentApprovals || 1,
-                requiredApprovals: proposal.requiredApprovals || 3,
-                executed: proposal.executed || proposal.status === 'EXECUTED',
-                rejected: proposal.rejected || proposal.status === 'REJECTED',
-                expired: proposal.expired || (proposal.expiresAt && proposal.expiresAt < Date.now()),
-                proposedTime: proposal.proposedTime || Math.floor((proposal.createdAt || Date.now()) / 1000),
-                approvedBy: proposal.approvedBy || Array.from(this.mockApprovals.get(proposal.id) || []),
-                title: proposal.title || `Proposal #${proposal.id}`,
-                description: proposal.description || 'Mock proposal for testing',
-                proposer: proposal.proposer || '0x1234567890123456789012345678901234567890',
-                transactionHash: proposal.transactionHash || '0x' + Math.random().toString(16).substr(2, 64),
-                votes: proposal.votes || []
-            };
-
-            // Add enhanced data based on proposal type for detailed display
-            switch (proposal.actionType) {
-                case 'ADD_PAIR':
-                    return {
-                        ...baseProposal,
-                        pairToAdd: proposal.details?.pairToAdd || '0x1234567890123456789012345678901234567890',
-                        pairNameToAdd: proposal.details?.pairNameToAdd || 'TEST/USDC',
-                        platformToAdd: proposal.details?.platformToAdd || 'Uniswap V3',
-                        weightToAdd: BigInt(proposal.details?.weightToAdd || 100)
-                    };
-                case 'UPDATE_RATE':
-                case 'SET_HOURLY_REWARD_RATE':
-                    return {
-                        ...baseProposal,
-                        newHourlyRewardRate: (() => {
-                            const rawRate = proposal.details?.newHourlyRewardRate ?? '100';
-                            const rateString = rawRate.toString();
-                            if (ethers?.utils?.parseEther) {
-                                return BigInt(ethers.utils.parseEther(rateString).toString());
-                            }
-                            return BigInt(Math.floor(parseFloat(rateString || '100') * 1e18));
-                        })()
-                    };
-                case 'REMOVE_PAIR':
-                    return {
-                        ...baseProposal,
-                        pairToRemove: proposal.details?.pairToRemove || '0x1234567890123456789012345678901234567890',
-                        pairNameToRemove: proposal.details?.pairNameToRemove || 'OLD/USDC'
-                    };
-                case 'WITHDRAW_REWARDS':
-                    return {
-                        ...baseProposal,
-                        recipient: proposal.details?.recipient || proposal.proposer || '0x1234567890123456789012345678901234567890',
-                        withdrawAmount: BigInt(proposal.details?.withdrawAmount || '500000000000000000000')
-                    };
-                case 'CHANGE_SIGNER':
-                    return {
-                        ...baseProposal,
-                        newSigner: proposal.details?.newSigner || '0x1234567890123456789012345678901234567890'
-                    };
-                default:
-                    return baseProposal;
-            }
-        });
-
-        console.log(`✅ Loaded ${formattedProposals.length} mock proposals`);
-        console.log('🔧 DEBUG: Formatted proposals:', formattedProposals.map(p => ({ id: p.id, actionType: p.actionType })));
-        return formattedProposals;
-    }
-
-    /**
-     * Format mock proposal details for display
-     */
-    formatMockProposalDetails(proposal) {
-        switch (proposal.type) {
-            case 'ADD_PAIR':
-                return {
-                    type: 'Add LP Pair',
-                    pairAddress: proposal.data.pairAddress,
-                    pairName: proposal.data.pairName,
-                    platform: proposal.data.platform,
-                    weight: proposal.data.weight
-                };
-            case 'UPDATE_RATE':
-                return {
-                    type: 'Update Reward Rate',
-                    newRate: proposal.data.newRate
-                };
-            case 'REMOVE_PAIR':
-                return {
-                    type: 'Remove LP Pair',
-                    pairAddress: proposal.data.pairAddress,
-                    reason: proposal.data.reason
-                };
-            default:
-                return {
-                    type: proposal.type,
-                    data: proposal.data
-                };
         }
     }
 
@@ -2348,52 +2082,6 @@ class AdminPage {
         };
     }
 
-    /**
-     * Mock approval system for realistic demo
-     */
-    mockApproveProposal(proposalId) {
-        console.log(`🔧 Mock approving proposal: ${proposalId}`);
-
-        const currentSigner = this.userAddress || '0x9249cFE964C49Cf2d2D0DBBbB33E99235707aa61';
-
-        // Add vote to mock system
-        this.addMockVote(proposalId, currentSigner, 'APPROVE');
-
-        const proposal = this.mockProposals.get(proposalId);
-        if (proposal) {
-            console.log(`✅ Mock approval added. Current approvals: ${proposal.currentApprovals}/${proposal.requiredApprovals}`);
-        }
-
-        return {
-            success: true,
-            transactionHash: '0x' + Math.random().toString(16).substr(2, 64),
-            message: 'Mock approval successful'
-        };
-    }
-
-    /**
-     * Mock rejection system for realistic demo
-     */
-    mockRejectProposal(proposalId) {
-        console.log(`🔧 Mock rejecting proposal: ${proposalId}`);
-
-        const currentSigner = this.userAddress || '0x9249cFE964C49Cf2d2D0DBBbB33E99235707aa61';
-
-        // Add vote to mock system
-        this.addMockVote(proposalId, currentSigner, 'REJECT');
-
-        const proposal = this.mockProposals.get(proposalId);
-        if (proposal) {
-            proposal.status = 'REJECTED';
-            console.log(`✅ Mock rejection added. Proposal status: ${proposal.status}`);
-        }
-
-        return {
-            success: true,
-            transactionHash: '0x' + Math.random().toString(16).substr(2, 64),
-            message: 'Mock rejection successful'
-        };
-    }
 
     async loadProposals() {
         console.log('📋 Loading proposals...');
@@ -2430,9 +2118,6 @@ class AdminPage {
 
                 if (realProposals && Array.isArray(realProposals)) {
                     console.log(`✅ Loaded ${realProposals.length} real proposals from contract`);
-
-                    // Set flag to indicate we're using real data
-                    this.isUsingRealData = true;
 
                     // PERFORMANCE OPTIMIZATION: Initialize optimized state with proposals
                     const formattedProposals = this.formatRealProposals(realProposals);
@@ -2518,7 +2203,7 @@ class AdminPage {
                 throw new Error('Contract manager or getAllActions method not available');
             }
         } catch (error) {
-            console.warn('⚠️ Failed to load real proposals, falling back to mock data:', error.message);
+            console.warn('⚠️ Failed to load real proposals:', error.message);
             console.error('❌ Full error details:', error);
 
             // Check if it's a network-related error
@@ -2529,26 +2214,25 @@ class AdminPage {
                 errorMessage = 'Contract call failed - contract may not be deployed or accessible';
             }
 
-            // Show warning notification
+            // Show error notification
             if (window.notificationManager) {
-                window.notificationManager.warning(
-                    `Could not load real proposals: ${errorMessage}`
+                window.notificationManager.error(
+                    `Failed to load proposals: ${errorMessage}`
                 );
             }
         }
 
-        // Fallback to mock proposals if real ones can't be loaded
-        console.log('🎭 Using mock proposals as fallback');
-        this.isUsingRealData = false;
-        return await this.loadMockProposals();
+        // Return empty array if proposals can't be loaded
+        console.log('❌ Could not load proposals from contract');
+        return [];
     }
 
     /**
      * PERFORMANCE OPTIMIZATION: Load more proposals for pagination
      */
     async loadMoreProposals() {
-        if (this.isLoadingMore || !this.isUsingRealData) {
-            console.log('⚠️ Load more already in progress or not using real data');
+        if (this.isLoadingMore) {
+            console.log('⚠️ Load more already in progress');
             return;
         }
 
@@ -2595,7 +2279,9 @@ class AdminPage {
 
                 // Check if we should show these proposals based on filter
                 const hideExecutedCheckbox = document.getElementById('hide-executed');
-                const hideExecuted = hideExecutedCheckbox ? hideExecutedCheckbox.checked : true;
+                const hideExecuted = hideExecutedCheckbox
+                    ? hideExecutedCheckbox.checked
+                    : (this.hideExecutedPreference !== undefined ? this.hideExecutedPreference : true);
 
                 const visibleBatch = hideExecuted
                     ? formattedBatch.filter(proposal => !proposal.executed)
@@ -2614,6 +2300,19 @@ class AdminPage {
                 this.loadedProposalCount += formattedBatch.length;
 
                 console.log(`📊 Added ${formattedBatch.length} proposals to cache, ${visibleBatch.length} visible`);
+
+                const allCachedProposals = this.proposalsCache
+                    ? Array.from(this.proposalsCache.values())
+                    : [];
+                const currentVisibleCount = hideExecuted
+                    ? allCachedProposals.filter(proposal => !proposal.executed).length
+                    : allCachedProposals.length;
+
+                this.updateProposalStatsUI({
+                    total: this.totalProposalCount,
+                    showing: currentVisibleCount,
+                    required: this.contractStats?.requiredApprovals ?? 2
+                });
 
                 // Update Load More button
                 this.updateLoadMoreButton();
@@ -2682,6 +2381,33 @@ class AdminPage {
             this.isLoadingMore = false;
             loadMoreContainer.outerHTML = this.renderLoadMoreButton([]);
         }
+    }
+
+    updateProposalStatsUI(stats = {}) {
+        const statsContainer = document.querySelector('.panel-stats');
+        if (!statsContainer) {
+            return;
+        }
+
+        const updateChip = (selector, label, value) => {
+            if (value === undefined || value === null) {
+                return;
+            }
+
+            const numericValue = Number(value);
+            if (!Number.isFinite(numericValue)) {
+                return;
+            }
+
+            const chip = statsContainer.querySelector(selector);
+            if (chip) {
+                chip.textContent = `${label}: ${numericValue}`;
+            }
+        };
+
+        updateChip('[data-stat="total-proposals"]', 'Total Proposals', stats.total);
+        updateChip('[data-stat="showing-proposals"]', 'Showing', stats.showing);
+        updateChip('[data-stat="required-approvals"]', 'Required Approvals', stats.required);
     }
 
     /**
@@ -2929,7 +2655,6 @@ class AdminPage {
 
             if (realProposals && realProposals.length >= 0) {
                 console.log(`✅ Successfully loaded ${realProposals.length} real proposals`);
-                this.isUsingRealData = true;
 
                 const formattedProposals = this.formatRealProposals(realProposals);
 
@@ -2943,7 +2668,6 @@ class AdminPage {
 
         } catch (error) {
             console.error('❌ Failed to force load real proposals:', error);
-            this.isUsingRealData = false;
 
             if (window.notificationManager) {
                 window.notificationManager.error(
@@ -2951,7 +2675,7 @@ class AdminPage {
                 );
             }
 
-            // Fall back to mock data
+            // Fall back to empty state
             await this.loadMultiSignPanel();
         }
     }
@@ -3058,29 +2782,6 @@ class AdminPage {
         });
     }
 
-    getMockProposals() {
-        return [
-            {
-                id: 1,
-                actionType: 'SET_HOURLY_REWARD_RATE',
-                approvals: 1,
-                requiredApprovals: 2,
-                executed: false,
-                rejected: false,
-                details: { newHourlyRewardRate: '100' }
-            },
-            {
-                id: 2,
-                actionType: 'ADD_PAIR',
-                approvals: 2,
-                requiredApprovals: 2,
-                executed: true,
-                rejected: false,
-                details: { pairToAdd: '0x1234...5678' }
-            }
-        ];
-    }
-
     getActionTypeName(actionType) {
         const types = {
             0: 'Set Hourly Reward Rate',
@@ -3138,7 +2839,6 @@ class AdminPage {
         // this.loadedProposalCount is already set correctly
 
         console.log(`🔍 Load More Button Logic:`, {
-            isUsingRealData: this.isUsingRealData,
             totalProposalCount: this.totalProposalCount,
             loadedProposalCount: this.loadedProposalCount,
             proposalsLength: proposals ? proposals.length : 0,
@@ -3146,13 +2846,11 @@ class AdminPage {
         });
 
         // Show Load More button if:
-        // 1. We're using real data (not mock data)
-        // 2. Either we know there are more proposals OR we can't determine total count (show optimistically)
+        // 1. Either we know there are more proposals OR we can't determine total count (show optimistically)
         const hasMoreProposals = this.totalProposalCount > this.loadedProposalCount;
         const unknownTotal = this.totalProposalCount === 0 || this.totalProposalCount === undefined;
 
-        const shouldShowLoadMore = this.isUsingRealData &&
-                                  this.loadedProposalCount > 0 &&
+        const shouldShowLoadMore = this.loadedProposalCount > 0 &&
                                   (hasMoreProposals || unknownTotal);
 
         console.log(`🔍 Load More Decision:`, {
@@ -3194,11 +2892,12 @@ class AdminPage {
         console.log(`📊 Total proposals available: ${this.totalProposalCount}`);
         console.log(`📊 Currently loaded: ${this.loadedProposalCount}`);
         console.log(`📊 Cached proposals: ${this.proposalsCache.size}`);
-        console.log(`📊 Using real data: ${this.isUsingRealData}`);
         console.log(`📊 Is loading more: ${this.isLoadingMore}`);
 
         const hideExecutedCheckbox = document.getElementById('hide-executed');
-        const hideExecuted = hideExecutedCheckbox ? hideExecutedCheckbox.checked : 'unknown';
+        const hideExecuted = hideExecutedCheckbox
+            ? hideExecutedCheckbox.checked
+            : (this.hideExecutedPreference !== undefined ? this.hideExecutedPreference : 'unknown');
         console.log(`📊 Hide executed: ${hideExecuted}`);
 
         const proposalsTbody = document.getElementById('proposals-tbody');
@@ -3404,6 +3103,7 @@ class AdminPage {
         }
 
         const hideExecuted = hideExecutedCheckbox.checked;
+        this.hideExecutedPreference = hideExecuted;
         console.log(`🔄 Toggling executed proposals visibility: ${hideExecuted ? 'hide' : 'show'}`);
 
         // Get all current proposals from cache or reload
@@ -3425,11 +3125,8 @@ class AdminPage {
         // Update the table
         proposalsTbody.innerHTML = this.renderProposalsRows(filteredProposals);
 
-        // Update stats
-        const showingChip = document.querySelector('.stat-chip:nth-child(2)');
-        if (showingChip) {
-            showingChip.textContent = `Showing: ${filteredProposals.length}`;
-        }
+        // Update stats to reflect filtered count
+        this.updateProposalStatsUI({ showing: filteredProposals.length });
     }
 
     renderProposalsRows(proposals) {
@@ -3707,15 +3404,6 @@ class AdminPage {
                 }
             }
 
-            // Try to find in mock proposals data
-            for (const [, proposal] of this.mockProposals) {
-                if (proposal.data && proposal.data.pairAddress &&
-                    proposal.data.pairAddress.toLowerCase() === address.toLowerCase() &&
-                    proposal.data.pairName) {
-                    return this.formatPairName(proposal.data.pairName);
-                }
-            }
-
             return null;
         } catch (error) {
             console.warn('Error getting pair name by address:', error);
@@ -3728,22 +3416,65 @@ class AdminPage {
             return '<div class="no-data">No pairs configured</div>';
         }
 
-        return pairs.map(pair => {
-            const displayName = pair && pair.name
-                ? this.formatPairName(pair.name)
-                : (pair && pair.address ? this.getPairNameByAddress(pair.address) : null) || 'Unknown Pair';
-            const displayAddress = pair && pair.address
-                ? this.formatAddress(pair.address)
-                : 'Unknown';
-            const displayWeight = (pair && typeof pair.weight !== 'undefined' && pair.weight !== null)
-                ? this.formatWeight(pair.weight)
-                : '0';
+        // Calculate total weight and parse pair weights
+        const parseWeight = (weight) => {
+            if (!weight || (typeof weight === 'object' && weight === null)) return null;
+            try {
+                const num = typeof weight === 'string' ? parseFloat(weight) : Number(weight);
+                return !isNaN(num) ? num : null;
+            } catch {
+                return null;
+            }
+        };
+
+        const pairData = pairs.map(pair => {
+            const weight = parseWeight(pair?.weight);
+            let displayWeight;
+            if (weight !== null) {
+                displayWeight = window.Formatter?.formatSmallNumberWithSubscript(weight) || weight.toString();
+            } else {
+                displayWeight = this.formatWeightForDisplay(pair?.weight) || '0';
+            }
+            
+            return {
+                name: pair?.name ? this.formatPairName(pair.name) 
+                    : (pair?.address ? this.getPairNameByAddress(pair.address) : null) || 'Unknown Pair',
+                address: pair?.address || 'Unknown',
+                weight: weight,
+                displayWeight: displayWeight
+            };
+        });
+
+        const totalWeight = pairData.reduce((sum, p) => sum + (p.weight || 0), 0);
+
+        return pairData.map(pair => {
+            const percentageValue = totalWeight > 0 && pair.weight !== null 
+                ? (pair.weight / totalWeight) * 100 
+                : 0;
+            const percentage = Math.round(percentageValue);
 
             return `
-                <div class="pair-item">
-                    <div class="pair-name">${displayName}</div>
-                    <div class="pair-address">${displayAddress}</div>
-                    <div class="pair-weight">Weight: ${displayWeight}</div>
+                <div class="pair-item-card">
+                    <div class="pair-header-section">
+                        <div class="pair-name-section">
+                            <h6 class="pair-name">${pair.name}</h6>
+                            <div class="pair-address-wrapper">
+                                <span class="address-label">Address:</span>
+                                <code class="pair-address">${pair.address}</code>
+                            </div>
+                        </div>
+                        <div class="pair-weight-badge">
+                            <div class="weight-label">Weight</div>
+                            <span class="weight-value">${pair.displayWeight}</span>
+                            <div class="percentage-label">Share</div>
+                            <span class="weight-percentage">${percentage}%</span>
+                        </div>
+                    </div>
+                    <div class="pair-details-section">
+                        <div class="weight-bar-container">
+                            <div class="weight-bar" style="width: ${percentageValue}%"></div>
+                        </div>
+                    </div>
                 </div>
             `;
         }).join('');
@@ -3755,9 +3486,7 @@ class AdminPage {
         }
 
         return signers.map(signer => `
-            <div class="signer-item">
-                <div class="signer-address">${this.formatAddress(signer)}</div>
-            </div>
+            <p class="signer-address">${signer}</p>
         `).join('');
     }
 
@@ -3882,8 +3611,6 @@ class AdminPage {
                         Number(ethers.utils.formatEther(stats.hourlyRewardRate)) : defaults.HOURLY_REWARD_RATE;
                     this.contractStats.requiredApprovals = stats.requiredApprovals?.toNumber() || defaults.REQUIRED_APPROVALS;
                     this.contractStats.actionCounter = stats.actionCounter?.toNumber() || defaults.ACTION_COUNTER;
-                    this.contractStats.totalWeight = stats.totalWeight ? 
-                        Number(ethers.utils.formatEther(stats.totalWeight)) : defaults.TOTAL_WEIGHT;
                 } else {
                     // Fallback to individual calls with config defaults
                     const defaults = window.CONFIG?.DEFAULTS || {};
@@ -4284,7 +4011,7 @@ class AdminPage {
     // Contract readiness check with graceful fallback
     async ensureContractReady() {
         if (!window.contractManager) {
-            console.log('⚠️ Contract manager not available - will use mock data');
+            console.log('⚠️ Contract manager not available');
             throw new Error('Contract manager not available');
         }
 
@@ -4300,7 +4027,7 @@ class AdminPage {
             try {
                 await this.waitForContractManager();
             } catch (error) {
-                console.log('⚠️ Contract manager failed to initialize - will use mock data');
+                console.log('⚠️ Contract manager failed to initialize');
                 throw new Error('Contract manager initialization failed');
             }
         }
@@ -4405,9 +4132,9 @@ class AdminPage {
 
             case 'add-pair':
             case 'add_pair':
-                // Format weight properly using formatWeight helper
+                // Format weight for display without rounding
                 const weight = proposal.weightToAdd
-                    ? this.formatWeight(proposal.weightToAdd, 'allocation weight')
+                    ? this.formatWeightForDisplay(proposal.weightToAdd)
                     : 'Not specified';
 
                 // Show full address for LP token
@@ -4504,8 +4231,8 @@ class AdminPage {
                     const pairCards = proposal.pairs.map((pairAddress, index) => {
                         const pairName = this.getPairNameByAddress(pairAddress);
                         const rawWeight = proposal.weights[index];
-                        // Format weight properly using formatWeight helper
-                        const weight = rawWeight ? this.formatWeight(rawWeight, 'weight') : 'Not specified';
+                        // Format weight for display without rounding
+                        const weight = rawWeight ? this.formatWeightForDisplay(rawWeight) : 'Not specified';
                         return `
                             <div class="parameter-card">
                                 <div class="parameter-icon">⚖️</div>
@@ -4678,13 +4405,13 @@ class AdminPage {
 
                     // Format weights if key contains "weight"
                     if (key.toLowerCase().includes('weight') && !Array.isArray(value)) {
-                        displayValue = this.formatWeight(value, key);
+                        displayValue = this.formatWeightForDisplay(value);
                     }
                     // Format arrays (like pairs or weights arrays)
                     else if (Array.isArray(value)) {
                         if (key.toLowerCase() === 'weights') {
                             // Format weight arrays
-                            displayValue = value.map(w => this.formatWeight(w, 'weight')).join(', ');
+                            displayValue = value.map(w => this.formatWeightForDisplay(w)).join(', ');
                         } else if (key.toLowerCase() === 'pairs') {
                             // Format pair addresses
                             displayValue = value.map(addr => {
@@ -5832,18 +5559,11 @@ class AdminPage {
                 `0.0000 ${rewardTokenSymbol}/hour`
             );
 
-            // Get total weight - real data only
             contractInfo.totalWeight = await this.safeContractCall(
                 async () => {
-                    const weight = await contractManager.getTotalWeight();
-                    if (weight && weight.toString) {
-                        const weightStr = weight.toString();
-                        const weightBigInt = BigInt(weightStr);
-                        const weightNum = Number(weightBigInt);
-                        return weightNum > Number.MAX_SAFE_INTEGER ?
-                            weightBigInt.toString() : weightNum.toLocaleString();
-                    }
-                    return '0';
+                    const totalWeight = await contractManager.getTotalWeight();
+                    // consistent formatting without rounding
+                    return this.formatWeightForDisplay(totalWeight);
                 },
                 '0'
             );
@@ -5904,10 +5624,10 @@ class AdminPage {
             hourlyRateEl.textContent = info.hourlyRate || 'N/A';
         }
 
-        // Update total weight
+        // Update total weight (use innerHTML to render subscript HTML)
         const totalWeightEl = document.querySelector('[data-info="total-weight"]');
         if (totalWeightEl) {
-            totalWeightEl.textContent = info.totalWeight || 'N/A';
+            totalWeightEl.innerHTML = info.totalWeight || 'N/A';
         }
 
         // Update LP pairs with real contract data
@@ -6045,7 +5765,7 @@ class AdminPage {
                                 <div style="display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;">
                                     <div style="display: flex; flex-direction: column; min-width: 100px;">
                                         <span style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">Current</span>
-                                        <span style="font-size: 20px; font-weight: 600; color: var(--primary-main);">${this.formatWeight(pair.weight)}</span>
+                                        <span style="font-size: 20px; font-weight: 600; color: var(--primary-main);">${this.formatWeightForDisplay(pair.weight)}</span>
                                     </div>
                                     <div style="display: flex; flex-direction: column; flex: 1; min-width: 180px;">
                                         <label for="weight-${index}" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">New Weight</label>
@@ -6056,7 +5776,7 @@ class AdminPage {
                                        min="1" max="10000"
                                                style="padding: 10px 12px; border: 1px solid var(--divider); border-radius: 6px; background: var(--background-default); color: var(--text-primary); font-size: 16px; font-weight: 500; width: 100%; box-sizing: border-box;"
                                        data-pair="${pair.address}"
-                                       data-current="${this.formatWeight(pair.weight)}">
+                                       data-current="${this.formatWeightForDisplay(pair.weight)}">
                                     </div>
                                 </div>
                             </div>
@@ -6665,33 +6385,6 @@ class AdminPage {
         }
     }
 
-    async cancelAction(proposalId) {
-        try {
-            if (window.notificationManager) {
-                window.notificationManager.info(`Cancelling proposal #${proposalId}`);
-            }
-
-            const result = await window.contractManager.cancelProposal(proposalId);
-
-            if (result.success) {
-                if (window.notificationManager) {
-                    window.notificationManager.success(`Successfully cancelled proposal #${proposalId}`);
-                }
-
-                // PERFORMANCE OPTIMIZATION: Update single proposal instead of full refresh
-                await this.updateSingleProposal(proposalId);
-            } else {
-                throw new Error(result.error);
-            }
-
-        } catch (error) {
-            console.error('Failed to cancel proposal:', error);
-            if (window.notificationManager) {
-                window.notificationManager.error(error.message);
-            }
-        }
-    }
-
     // Cleanup
     destroy() {
         // Clear intervals
@@ -6764,78 +6457,39 @@ class AdminPage {
     }
 
     /**
-     * Format weight values (BigNumber to decimal) - ENHANCED VERSION
+     * Format weight for display without rounding, using formatSmallNumberWithSubscript if available
      */
-    formatWeight(weight, label = "weight") {
-        console.log(`[FORMAT DEBUG] Formatting ${label}:`, {
-            value: weight,
-            type: typeof weight,
-            isBigNumber: weight && weight._isBigNumber,
-            toString: weight ? weight.toString() : 'null',
-            length: typeof weight === 'string' ? weight.length : 'N/A'
-        });
-
-        if (!weight) return '0.000';
+    formatWeightForDisplay(weight) {
+        if (!weight && weight !== 0) return '0';
 
         try {
-            // Handle BigNumber values (like 10000000000000000000)
+            let weightString;
+            
+            // Handle BigNumber values - preserve precision by using string representation
             if (typeof weight === 'object' && weight._isBigNumber) {
-                const formatted = ethers.utils.formatUnits(weight, 18);
-                const result = parseFloat(formatted).toFixed(3);
-                console.log(`[FORMAT DEBUG] BigNumber ${label} formatted:`, result);
-                return result;
+                weightString = ethers.utils.formatEther(weight);
             }
-
-            // ENHANCED: Handle string values that look like wei (more aggressive detection)
-            if (typeof weight === 'string') {
-                // Check if it's a large number string (wei format)
+            // Handle string values that look like wei
+            else if (typeof weight === 'string') {
                 const weightStr = weight.trim();
-
-                // If it's a very large number (> 1000000000000000000), treat as wei
-                if (/^\d+$/.test(weightStr) && weightStr.length >= 18) {
-                    const formatted = ethers.utils.formatUnits(weightStr, 18);
-                    const result = parseFloat(formatted).toFixed(3);
-                    console.log(`[FORMAT DEBUG] Large wei string ${label} formatted: ${weightStr} -> ${result}`, 'success');
-                    return result;
-                }
-
-                // If it's exactly "10000000000000000000" (10 ether in wei), format it
-                if (weightStr === '10000000000000000000') {
-                    const result = '10.000';
-                    console.log(`[FORMAT DEBUG] Standard wei ${label} formatted: ${weightStr} -> ${result}`, 'success');
-                    return result;
-                }
-
-                // Handle other large wei values
-                if (weightStr.length > 15 && /^\d+$/.test(weightStr)) {
-                    const formatted = ethers.utils.formatUnits(weightStr, 18);
-                    const result = parseFloat(formatted).toFixed(3);
-                    console.log(`[FORMAT DEBUG] Wei string ${label} formatted: ${weightStr} -> ${result}`, 'success');
-                    return result;
-                }
-
-                // Handle regular string numbers (small values)
-                const num = parseFloat(weightStr);
-                if (!isNaN(num)) {
-                    const result = num.toFixed(3);
-                    console.log(`[FORMAT DEBUG] String number ${label} formatted:`, result);
-                    return result;
-                }
+                weightString = (/^\d+$/.test(weightStr) && weightStr.length >= 18)
+                    ? ethers.utils.formatUnits(weightStr, 18)
+                    : weightStr;
+            }
+            // Handle numbers and other types
+            else {
+                weightString = weight.toString();
             }
 
-            // Handle regular numbers
-            if (typeof weight === 'number') {
-                const result = weight.toFixed(3);
-                console.log(`[FORMAT DEBUG] Number ${label} formatted:`, result);
-                return result;
-            }
+            // Validate and format
+            if (isNaN(parseFloat(weightString))) return '0';
 
-            console.warn(`[FORMAT DEBUG] Unhandled ${label} type, returning as string:`, weight);
-            return weight.toString();
+            // Apply formatSmallNumberWithSubscript if available
+            // Pass the string representation to preserve precision for very small decimals
+            return window.Formatter?.formatSmallNumberWithSubscript(weightString) || weightString;
         } catch (error) {
-            console.error(`[FORMAT ERROR] BigNumber formatting failed for ${label}:`, error);
-            console.error(`[FORMAT ERROR] Input was:`, weight);
-            return "0.000";
+            console.error('[FORMAT ERROR] Weight formatting failed:', error);
+            return '0';
         }
     }
 

@@ -87,6 +87,7 @@ class MasterInitializer {
     async loadCoreUtilities() {
         const coreScripts = [
             'js/utils/multicall-service.js',    // Multicall2 for batch loading (90% RPC reduction)
+            'js/utils/formatter.js',            // Formatter utilities (needed before UI components)
             'js/components/network-indicator-selector.js',
             'js/core/error-handler.js',        // Error handling system
             'js/core/unified-theme-manager.js', // Unified theme manager

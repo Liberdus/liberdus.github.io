@@ -158,6 +158,7 @@
             // JavaScript - Utils (only existing files)
             `${basePath}js/utils/admin-test.js`,
             `${basePath}js/utils/event-manager.js`,
+            `${basePath}js/utils/formatter.js`,
             `${basePath}js/utils/gas-estimator.js`,
             `${basePath}js/utils/helpers.js`,
             `${basePath}js/utils/logger.js`,

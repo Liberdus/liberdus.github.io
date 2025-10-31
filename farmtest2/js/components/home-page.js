@@ -345,7 +345,7 @@ class HomePage {
                 </td>
                 <td>
                     <span class="chip chip-secondary">
-                        ${parseFloat(pair.weight || '0').toFixed(1)} (${pair.weightPercentage || '0.00'}%)
+                        ${window.Formatter?.formatSmallNumberWithSubscript(parseFloat(pair.weight || '0')) || '0'} (${pair.weightPercentage || '0.00'}%)
                     </span>
                 </td>
                 <td>

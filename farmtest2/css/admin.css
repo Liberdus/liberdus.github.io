@@ -412,18 +412,67 @@
 }
 
 .card-header {
-    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-2);
+    border-bottom: 1px solid var(--divider);
+    margin-bottom: 0;
+    background: transparent;
 }
 
-.card-header h3 {
+.card-header h3,
+.card-header h5 {
     margin: 0;
     font-size: 16px;
-    font-weight: 500;
-    color: #a0a0a0;
+    font-weight: 600;
+    color: var(--text-primary);
 }
 
-.card-content {
-    text-align: center;
+.info-card .card-content {
+    text-align: left;
+}
+
+/* Light theme overrides */
+[data-theme="light"] .info-card,
+[data-theme="light"] .pair-item-card,
+[data-theme="light"] .signer-address {
+    background: rgba(0, 0, 0, 0.02);
+    border-color: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .pair-item-card:hover,
+[data-theme="light"] .signer-address:hover {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 212, 255, 0.3);
+}
+
+[data-theme="light"] .pair-name-section .pair-name,
+[data-theme="light"] .section-header h6,
+[data-theme="light"] .pair-address,
+[data-theme="light"] .signer-address {
+    color: rgba(0, 0, 0, 0.8);
+}
+
+[data-theme="light"] .pair-address {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .address-label {
+    color: rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="light"] .weight-label,
+[data-theme="light"] .percentage-label {
+    color: rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="light"] .weight-percentage {
+    color: rgba(0, 0, 0, 0.7);
+}
+
+[data-theme="light"] .contract-info-separator {
+    border-top-color: rgba(0, 0, 0, 0.1);
 }
 
 .stat-value {
@@ -758,8 +807,9 @@
     margin: 0;
 }
 
-/* Refresh Button */
-.panel-refresh .refresh-btn {
+/* Refresh Button - Unified gradient style */
+.panel-refresh .refresh-btn,
+.card-header .refresh-btn {
     background: linear-gradient(135deg, #00d4ff, #0099cc);
     color: white;
     border: none;
@@ -772,10 +822,19 @@
     box-shadow: 0 2px 8px rgba(0, 212, 255, 0.3);
 }
 
-.panel-refresh .refresh-btn:hover {
+.panel-refresh .refresh-btn:hover:not(:disabled),
+.card-header .refresh-btn:hover:not(:disabled) {
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(0, 212, 255, 0.5);
     background: linear-gradient(135deg, #00b8e6, #00d4ff);
+}
+
+.panel-refresh .refresh-btn:disabled,
+.card-header .refresh-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: none !important;
 }
 
 /* CHANGE SIGNER BUTTON VISIBILITY FIX */
@@ -1934,24 +1993,247 @@ table td:last-child {
     margin-top: 20px;
 }
 
-.info-item {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 8px;
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-bottom: 16px;
 }
 
-.info-item:last-child {
-    margin-bottom: 0;
+/* Responsive: Stack on mobile */
+@media (max-width: 768px) {
+    .info-grid,
+    .signers-list {
+        grid-template-columns: 1fr;
+    }
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.info-label-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .info-label {
     font-weight: 500;
-    color: #666;
+    color: var(--text-secondary);
 }
 
 .info-value {
-    color: #333;
+    color: var(--text-primary);
     font-weight: 500;
+}
+
+/* Eligible Pairs Section Styles */
+.pairs-section {
+    margin-top: 20px;
+    margin-bottom: 20px;
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.section-header h6 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.pairs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.pair-item-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 16px;
+    transition: all 0.2s ease;
+}
+
+.pair-item-card:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(0, 212, 255, 0.3);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 212, 255, 0.1);
+}
+
+.pair-header-section {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8px;
+    gap: 12px;
+}
+
+.pair-name-section {
+    flex: 1;
+    min-width: 0;
+}
+
+.pair-name-section .pair-name {
+    margin: 0 0 6px 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: #ffffff;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.pair-weight-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    padding: 10px 14px;
+    background: rgba(0, 212, 255, 0.1);
+    border-radius: 6px;
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    min-width: 90px;
+}
+
+.weight-label,
+.percentage-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.2;
+    margin-bottom: 2px;
+}
+
+.weight-value,
+.weight-percentage {
+    line-height: 1.2;
+}
+
+.weight-value {
+    font-size: 15px;
+    font-weight: 700;
+    color: #00d4ff;
+    font-family: 'Courier New', monospace;
+    margin-bottom: 6px;
+}
+
+.weight-percentage {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.pair-details-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.pair-address-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+}
+
+.address-label,
+.weight-label,
+.percentage-label {
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.address-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.pair-address,
+.signer-address {
+    font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+    word-break: break-all;
+}
+
+.pair-address {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.weight-bar-container {
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.weight-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #00d4ff 0%, #00a8cc 100%);
+    border-radius: inherit;
+    transition: width 0.3s ease;
+}
+
+.no-data {
+    padding: 20px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.5);
+    font-style: italic;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+}
+
+/* Signers Section Styles */
+.signers-section {
+    margin-top: 20px;
+}
+
+.signers-list {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+}
+
+.signer-address {
+    margin: 0;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+    word-break: break-all;
+    transition: all 0.2s ease;
+}
+
+.signer-address:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(0, 212, 255, 0.3);
+}
+
+.contract-info-separator {
+    margin: 20px 0;
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .warning-box {
@@ -2079,10 +2361,10 @@ table td:last-child {
     justify-content: space-between;
     align-items: center;
     padding: 12px;
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--divider);
     border-radius: 6px;
     margin-bottom: 10px;
-    background-color: #000000;
+    background-color: var(--background-paper);
 }
 
 .pair-info {
@@ -2092,11 +2374,11 @@ table td:last-child {
 .pair-info strong {
     display: block;
     font-size: 14px;
-    color: #333;
+    color: var(--text-primary);
 }
 
 .pair-info small {
-    color: #666;
+    color: var(--text-secondary);
     font-size: 12px;
     font-family: monospace;
 }
@@ -2110,7 +2392,7 @@ table td:last-child {
 
 .weight-input-group label {
     font-size: 12px;
-    color: #666;
+    color: var(--text-secondary);
     margin: 0;
 }
 
@@ -2260,8 +2542,9 @@ table td:last-child {
 }
 
 .btn-sm {
-    padding: 6px 12px;
+    padding: var(--spacing-1) var(--spacing-2);
     font-size: 12px;
+    min-height: 32px;
 }
 
 /* No Data / Error Messages */

@@ -737,49 +737,6 @@
             }
         };
 
-        // Debug proposal system
-        window.debugProposals = function() {
-            console.log('🔧 DEBUG: Testing proposal system...');
-
-            if (!window.adminPage) {
-                console.error('❌ AdminPage not available');
-                return;
-            }
-
-            console.log('🔧 AdminPage found, checking mock proposals...');
-            console.log('Mock proposals map:', window.adminPage.mockProposals);
-            console.log('Mock proposals size:', window.adminPage.mockProposals.size);
-
-            // Test getMockProposals
-            const mockProposals = window.adminPage.getMockProposals();
-            console.log('Mock proposals array:', mockProposals);
-
-            // Test loadMockProposals
-            const formattedProposals = window.adminPage.loadMockProposals();
-            console.log('Formatted proposals:', formattedProposals);
-
-            // Force reload proposals
-            console.log('🔧 Force reloading proposals...');
-            window.adminPage.loadMultiSignPanel();
-        };
-
-        // Test mock system initialization
-        window.testMockSystem = function() {
-            console.log('🔧 Testing mock system initialization...');
-
-            if (!window.adminPage) {
-                console.error('❌ AdminPage not available');
-                return;
-            }
-
-            // Manually initialize mock system
-            window.adminPage.initializeMockSystem();
-            console.log('✅ Mock system initialized');
-
-            // Debug the results
-            debugProposals();
-        };
-
         // Test ADD PAIR functionality
         window.testAddPair = async function() {
             console.log('🧪 Testing ADD PAIR functionality...');
@@ -2204,57 +2161,6 @@
             }
         };
 
-        // Quick test to verify mock proposals have enhanced data
-        window.testMockProposalData = function() {
-            console.log('🔍 TESTING MOCK PROPOSAL DATA');
-            console.log('============================');
-
-            if (!window.adminPage) {
-                console.error('❌ AdminPage not available');
-                return;
-            }
-
-            // Get mock proposals
-            const mockProposals = window.adminPage.getMockProposals();
-            console.log(`📋 Found ${mockProposals.length} mock proposals`);
-
-            mockProposals.forEach((proposal, index) => {
-                console.log(`\n📋 Mock Proposal ${index + 1}:`);
-                console.log(`  - ID: ${proposal.id}`);
-                console.log(`  - Type: ${proposal.type}`);
-                console.log(`  - Title: ${proposal.title}`);
-                console.log(`  - Data:`, proposal.data);
-            });
-
-            // Test formatted proposals
-            console.log('\n🔄 Testing formatted proposals...');
-            window.adminPage.loadMockProposals().then(formattedProposals => {
-                console.log(`📋 Found ${formattedProposals.length} formatted proposals`);
-
-                formattedProposals.forEach((proposal, index) => {
-                    console.log(`\n📋 Formatted Proposal ${index + 1}:`);
-                    console.log(`  - ID: ${proposal.id}`);
-                    console.log(`  - Action Type: ${proposal.actionType}`);
-                    console.log(`  - Enhanced Data:`);
-
-                    // Show enhanced data fields
-                    const enhancedFields = ['pairToAdd', 'pairNameToAdd', 'platformToAdd', 'weightToAdd',
-                                          'newHourlyRewardRate', 'pairToRemove', 'recipient', 'withdrawAmount'];
-                    enhancedFields.forEach(field => {
-                        if (proposal[field] !== undefined) {
-                            console.log(`    - ${field}: ${proposal[field]}`);
-                        }
-                    });
-
-                    // Test summary generation
-                    const summary = window.adminPage.getProposalSummary(proposal);
-                    console.log(`  - Generated Summary: "${summary}"`);
-                });
-
-                console.log('🎉 MOCK PROPOSAL DATA TEST COMPLETED!');
-            });
-        };
-
         // Force refresh proposals to see enhanced display
         window.forceRefreshProposals = function() {
             console.log('🔄 FORCING PROPOSAL REFRESH');
@@ -2292,53 +2198,6 @@
                 console.log('🎉 FORCE REFRESH COMPLETED!');
             }).catch(error => {
                 console.error('❌ Force refresh failed:', error);
-            });
-        };
-
-        // Force use mock proposals (bypass all contract calls)
-        window.forceMockProposals = function() {
-            console.log('🎭 FORCING MOCK PROPOSALS');
-            console.log('========================');
-
-            if (!window.adminPage) {
-                console.error('❌ AdminPage not available');
-                return;
-            }
-
-            console.log('🎭 Loading enhanced mock proposals directly...');
-            window.adminPage.loadMockProposals().then(proposals => {
-                console.log(`📋 Loaded ${proposals.length} mock proposals`);
-
-                proposals.forEach((proposal, index) => {
-                    console.log(`\n📋 Mock Proposal ${index + 1}:`);
-                    console.log(`  - ID: ${proposal.id}`);
-                    console.log(`  - Action Type: ${proposal.actionType}`);
-                    console.log(`  - Summary: ${window.adminPage.getProposalSummary(proposal)}`);
-
-                    // Show enhanced data
-                    const enhancedFields = ['pairToAdd', 'pairNameToAdd', 'platformToAdd', 'weightToAdd',
-                                          'newHourlyRewardRate', 'pairToRemove', 'recipient', 'withdrawAmount'];
-                    enhancedFields.forEach(field => {
-                        if (proposal[field] !== undefined) {
-                            console.log(`  - ${field}: ${proposal[field]}`);
-                        }
-                    });
-                });
-
-                // Force update the UI with mock proposals
-                console.log('🔄 Updating UI with mock proposals...');
-                const proposalsHtml = window.adminPage.renderProposalsRows(proposals);
-                const tbody = document.getElementById('proposals-tbody');
-                if (tbody) {
-                    tbody.innerHTML = proposalsHtml;
-                    console.log('✅ UI updated with enhanced mock proposals');
-                } else {
-                    console.warn('⚠️ Could not find proposals tbody');
-                }
-
-                console.log('🎉 FORCE MOCK PROPOSALS COMPLETED!');
-            }).catch(error => {
-                console.error('❌ Force mock proposals failed:', error);
             });
         };
 
