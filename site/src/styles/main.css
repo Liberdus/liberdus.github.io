@@ -2053,12 +2053,13 @@ body {
   background: var(--bg-glass);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: var(--space-8);
+  padding: var(--space-4) var(--space-4) var(--space-2) var(--space-4);
   backdrop-filter: blur(20px);
   transition: all 0.3s ease;
   text-align: center;
   display: flex;
   flex-direction: column;
+  height: 290px;
 }
 
 .download-option-card:hover {
@@ -2069,13 +2070,13 @@ body {
 
 .option-header {
   flex-shrink: 0;
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-2);
 }
 
 .platform-logo {
-  width: 56px;
-  height: 56px;
-  margin: 0 auto var(--space-4) auto;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto var(--space-2) auto;
   display: block;
   filter: invert(1) drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
   transition: all 0.3s ease;
@@ -2095,23 +2096,24 @@ body {
 }
 
 .option-header h3 {
-  font-size: 1.4rem;
+  font-size: 1.2rem;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .option-header p {
   color: var(--text-secondary);
-  font-size: 0.95rem;
+  font-size: 0.85rem;
+  line-height: 1.3;
 }
 
 .option-content {
   flex: 1;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  min-height: 280px;
+  justify-content: flex-start;
+  min-height: 130px;
 }
 
 .option-middle {
@@ -2119,12 +2121,13 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  margin: var(--space-4) 0;
-  min-height: 160px;
+  margin: var(--space-1) 0 0 0;
+  min-height: 50px;
 }
 
 .option-bottom {
   margin-top: auto;
+  flex-shrink: 0;
 }
 
 .steps {
@@ -2150,15 +2153,15 @@ body {
 }
 
 .beta-note {
-  font-size: 1rem;
+  font-size: 0.85rem;
   color: var(--text-secondary);
   font-style: normal;
   text-align: center;
-  padding: var(--space-4);
+  padding: var(--space-1);
   background: transparent;
   border-radius: var(--radius);
-  line-height: 1.4;
-  min-height: 60px;
+  line-height: 1.3;
+  min-height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2569,21 +2572,48 @@ body {
   /* Download page mobile fixes */
   .download-options-grid {
     grid-template-columns: 1fr;
-    gap: var(--space-4);
-    padding: 0 var(--space-4);
+    gap: var(--space-3);
+    padding: 0 var(--space-3);
   }
 
   .download-option-card {
-    padding: var(--space-6);
+    padding: var(--space-3) var(--space-3) var(--space-1) var(--space-3);
+    height: 250px;
+  }
+
+  .platform-logo {
+    width: 36px;
+    height: 36px;
+    margin-bottom: var(--space-1);
+  }
+
+  .option-header h3 {
+    font-size: 1.1rem;
+    margin-bottom: var(--space-1);
+  }
+
+  .option-header p {
+    font-size: 0.8rem;
   }
 
   .option-content {
-    min-height: auto;
+    min-height: 130px;
   }
 
   .option-middle {
-    min-height: auto;
-    margin: var(--space-2) 0;
+    min-height: 40px;
+    margin: var(--space-1) 0 0 0;
+  }
+
+  .beta-note {
+    font-size: 0.8rem;
+    padding: var(--space-1);
+    min-height: 25px;
+  }
+
+  .btn-large {
+    padding: var(--space-3) var(--space-5);
+    font-size: 1rem;
   }
 
   /* Navigation mobile fixes */
