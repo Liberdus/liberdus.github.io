@@ -8,3 +8,4 @@ update-dev-client.sh
 update-test-client.sh
 update-otctest-client.sh
 settings.json
+update-docs.sh
