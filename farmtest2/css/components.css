@@ -919,7 +919,7 @@
 }
 
 .proposal-row.expanded .expand-icon {
-    transform: rotate(90deg);
+    transform: rotate(180deg);
 }
 
 /* Proposal Details Row Styles */

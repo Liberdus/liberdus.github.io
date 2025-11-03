@@ -447,3 +447,37 @@
 .space-x-4 > * + * { margin-left: 1rem; }
 .space-x-6 > * + * { margin-left: 1.5rem; }
 .space-x-8 > * + * { margin-left: 2rem; }
+
+/* Pair Name Link Component */
+.pair-name-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 4px 0;
+}
+
+.pair-name-link:hover {
+    opacity: 0.8;
+}
+
+.pair-name-link-text {
+    font-weight: 700;
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.pair-name-link-icon {
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+    min-width: 20px;
+    width: 20px;
+    height: 20px;
+    stroke: var(--primary-main);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+}

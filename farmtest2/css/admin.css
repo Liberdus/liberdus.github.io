@@ -837,37 +837,6 @@
     box-shadow: none !important;
 }
 
-/* CHANGE SIGNER BUTTON VISIBILITY FIX */
-.proposal-btn[data-modal="change-signer"] {
-    display: inline-block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    pointer-events: auto !important;
-    background: var(--warning-color, #f39c12) !important;
-    color: white !important;
-    border: 1px solid var(--warning-color, #f39c12) !important;
-}
-
-.proposal-btn[data-modal="change-signer"]:hover {
-    background: var(--warning-color-dark, #e67e22) !important;
-    border-color: var(--warning-color-dark, #e67e22) !important;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(243, 156, 18, 0.3);
-}
-
-.proposal-btn[data-modal="change-signer"].in-development {
-    opacity: 1 !important;
-    pointer-events: auto !important;
-    cursor: pointer !important;
-    background: var(--warning-color, #f39c12) !important;
-    color: white !important;
-}
-
-.proposal-btn[data-modal="change-signer"].in-development::before,
-.proposal-btn[data-modal="change-signer"].in-development::after {
-    display: none !important;
-}
-
 .stat-chip {
     background: rgba(0, 123, 255, 0.2);
     color: #007bff;
@@ -1278,7 +1247,7 @@ table td:last-child {
 }
 
 .proposal-row.expanded .expand-icon {
-    transform: rotate(90deg);
+    transform: rotate(180deg);
 }
 
 .expand-btn {

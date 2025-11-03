@@ -913,7 +913,6 @@
     text-align: center;
     min-width: 100px;
 }
-
 @media (max-width: 1200px) {
     .actions-col {
         min-width: 240px;
@@ -944,3 +943,4 @@
         justify-content: center;
     }
 }
+

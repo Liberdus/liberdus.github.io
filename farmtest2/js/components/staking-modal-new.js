@@ -447,18 +447,18 @@ class StakingModalNew {
         // Update pair info
         this.updatePairInfo();
 
-        // Load user balances if contract manager is ready
-        await this.loadUserBalances();
-
-        // Switch to specified tab
-        this.switchTab(tab);
-
         // Show modal
         const modal = document.getElementById('staking-modal-new');
         if (modal) {
             modal.style.display = 'flex';
             setTimeout(() => modal.classList.add('open'), 10);
         }
+
+        // Load user balances if contract manager is ready
+        await this.loadUserBalances();
+
+        // Switch to specified tab
+        this.switchTab(tab);
 
         // Prevent body scroll
         document.body.style.overflow = 'hidden';
@@ -808,7 +808,7 @@ class StakingModalNew {
 
         pairInfoElement.innerHTML = `
             <span class="material-icons" style="font-size: 16px;">swap_horiz</span>
-            ${this.currentPair.token0Symbol}/${this.currentPair.token1Symbol}
+            ${this.currentPair.name || 'Unknown Pair'}
             <span class="chip chip-primary" style="margin-left: 8px;">${this.currentPair.platform}</span>
         `;
     }

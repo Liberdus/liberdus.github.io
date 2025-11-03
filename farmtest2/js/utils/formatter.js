@@ -64,5 +64,33 @@ window.Formatter = {
         const limited = parseFloat(`${integerPart}.${decimalPart}`).toFixed(6).replace(/\.?0+$/, '');
         return prefix + limited;
     },
+
+    /**
+     * Format pair name for display with Uniswap link
+     * Simply displays the raw pair name from the contract as a clickable link
+     * @param {string} pairName - The pair name from the contract
+     * @param {string} lpTokenAddress - The LP token address for the Uniswap link
+     * @returns {string} HTML string with clickable link to Uniswap
+     */
+    formatPairName(pairName, lpTokenAddress = '') {
+        if (!pairName) return pairName;
+
+        const uniswapUrl = lpTokenAddress ? 
+            `https://app.uniswap.org/explore/pools/polygon/${lpTokenAddress}` : 
+            `https://app.uniswap.org/explore/pools`;
+        
+        return `
+            <a href="${uniswapUrl}" target="_blank" rel="noopener noreferrer" 
+               class="pair-name-link"
+               title="View pool on Uniswap">
+                <span class="pair-name-link-text">${pairName}</span>
+                <svg class="pair-name-link-icon" viewBox="0 0 24 24">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                    <polyline points="15 3 21 3 21 9"></polyline>
+                    <line x1="10" y1="14" x2="21" y2="3"></line>
+                </svg>
+            </a>
+        `;
+    },
 };
 

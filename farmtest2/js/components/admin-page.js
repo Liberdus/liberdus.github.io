@@ -1830,7 +1830,7 @@ class AdminPage {
             <tr class="proposal-row ${statusClass}">
                 <td>
                     <button class="expand-btn" onclick="adminPage.toggleProposal('${proposal.id}')" title="View Details">
-                        <span class="expand-icon">▶</span>
+                        <span class="expand-icon">▼</span>
                     </button>
                 </td>
                 <td>
@@ -3179,7 +3179,7 @@ class AdminPage {
                 <tr class="proposal-row ${statusClass}">
                     <td>
                         <button class="expand-btn" onclick="adminPage.toggleProposal('${proposal.id}')" title="View Details">
-                            <span class="expand-icon">▶</span>
+                            <span class="expand-icon">▼</span>
                         </button>
                     </td>
                     <td>
@@ -3340,54 +3340,6 @@ class AdminPage {
         }
     }
 
-    /**
-     * Format pair name for better display
-     * Converts "LPLIBETH" to "LIB/ETH LP"
-     * Converts "LPLIBUSDC" to "LIB/USDC LP"
-     */
-    formatPairName(pairName) {
-        if (!pairName) return pairName;
-
-        // If already formatted (contains /), return as is
-        if (pairName.includes('/')) {
-            return pairName;
-        }
-
-        // Handle LP prefix format: "LPLIBETH" -> "LIB/ETH LP"
-        if (pairName.startsWith('LP') && pairName.length > 4) {
-            const tokens = pairName.substring(2); // Remove "LP"
-
-            // Try to split into two tokens
-            // Common patterns: LIBETH, LIBUSDC, LIBUSDT, ETHUSDC, etc.
-            const commonTokens = ['USDC', 'USDT', 'DAI', 'WETH', 'ETH', 'WBTC', 'BTC', 'LIB', 'MATIC'];
-
-            for (const token of commonTokens) {
-                if (tokens.endsWith(token)) {
-                    const token1 = tokens.substring(0, tokens.length - token.length);
-                    const token2 = token;
-                    if (token1.length > 0) {
-                        return `${token1}/${token2} LP`;
-                    }
-                }
-                if (tokens.startsWith(token)) {
-                    const token1 = token;
-                    const token2 = tokens.substring(token.length);
-                    if (token2.length > 0) {
-                        return `${token1}/${token2} LP`;
-                    }
-                }
-            }
-
-            // Fallback: split in half
-            const mid = Math.floor(tokens.length / 2);
-            const token1 = tokens.substring(0, mid);
-            const token2 = tokens.substring(mid);
-            return `${token1}/${token2} LP`;
-        }
-
-        // Return original if no pattern matched
-        return pairName;
-    }
 
     /**
      * Get pair name by address from existing pairs or contract data
@@ -3400,7 +3352,7 @@ class AdminPage {
                     p.address && p.address.toLowerCase() === address.toLowerCase()
                 );
                 if (pair && pair.name) {
-                    return this.formatPairName(pair.name);
+                    return pair.name;
                 }
             }
 
@@ -3437,8 +3389,7 @@ class AdminPage {
             }
             
             return {
-                name: pair?.name ? this.formatPairName(pair.name) 
-                    : (pair?.address ? this.getPairNameByAddress(pair.address) : null) || 'Unknown Pair',
+                name: pair?.name || (pair?.address ? this.getPairNameByAddress(pair.address) : null) || 'Unknown Pair',
                 address: pair?.address || 'Unknown',
                 weight: weight,
                 displayWeight: displayWeight
@@ -3457,7 +3408,7 @@ class AdminPage {
                 <div class="pair-item-card">
                     <div class="pair-header-section">
                         <div class="pair-name-section">
-                            <h6 class="pair-name">${pair.name}</h6>
+                            <h6 class="pair-name">${window.Formatter?.formatPairName(pair.name, pair.address) || pair.name}</h6>
                             <div class="pair-address-wrapper">
                                 <span class="address-label">Address:</span>
                                 <code class="pair-address">${pair.address}</code>
@@ -3911,10 +3862,6 @@ class AdminPage {
         if (detailsRow) {
             const isVisible = detailsRow.style.display !== 'none';
             detailsRow.style.display = isVisible ? 'none' : 'table-row';
-
-            if (expandIcon) {
-                expandIcon.textContent = isVisible ? '▶' : '▼';
-            }
 
             // Add/remove expanded class for additional styling
             const proposalRow = expandBtn?.closest('.proposal-row');

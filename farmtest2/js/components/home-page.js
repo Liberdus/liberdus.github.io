@@ -225,6 +225,10 @@ class HomePage {
                                 APR
                             </th>
                             <th>
+                                <span class="material-icons">fitness_center</span>
+                                Weight
+                            </th>
+                            <th>
                                 <span class="material-icons">account_balance</span>
                                 TVL
                             </th>
@@ -236,10 +240,6 @@ class HomePage {
                                 <span class="material-icons">monetization_on</span>
                                 Your Earnings
                             </th>
-                            <th>
-                                <span class="material-icons">settings</span>
-                                Actions
-                            </th>
                         </tr>
                     </thead>
                     <tbody>
@@ -248,8 +248,8 @@ class HomePage {
                                 <td><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
                                 <td><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
                                 <td><div class="skeleton" style="height: 20px; width: 60px;"></div></td>
-                                <td><div class="skeleton" style="height: 20px; width: 100px;"></div></td>
                                 <td><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
+                                <td><div class="skeleton" style="height: 20px; width: 100px;"></div></td>
                                 <td><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
                                 <td><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
                             </tr>
@@ -308,17 +308,24 @@ class HomePage {
                                 <span class="material-icons">monetization_on</span>
                                 Your Earnings
                             </th>
-                            <th>
-                                <span class="material-icons">settings</span>
-                                Actions
-                            </th>
                         </tr>
                     </thead>
                     <tbody>
                         ${[...this.pairs].sort((a, b) => {
-                            const weightA = parseFloat(a.weight || '0');
-                            const weightB = parseFloat(b.weight || '0');
-                            return weightB - weightA; // Descending order (highest first)
+                            const parseValue = (value) => {
+                                const num = parseFloat(value ?? '0');
+                                return Number.isFinite(num) ? num : 0;
+                            };
+
+                            const aprA = parseValue(a.apr);
+                            const aprB = parseValue(b.apr);
+                            if (aprB !== aprA) {
+                                return aprB - aprA;
+                            }
+
+                            const tvlA = parseValue(a.tvl ?? a.totalStaked);
+                            const tvlB = parseValue(b.tvl ?? b.totalStaked);
+                            return tvlB - tvlA;
                         }).map(pair => this.renderPairRow(pair)).join('')}
                     </tbody>
                 </table>
@@ -335,7 +342,7 @@ class HomePage {
         return `
             <tr class="pair-row" data-pair-id="${pair.id}" style="cursor: pointer;">
                 <td>
-                    ${this.formatPairName(`${pair.token0Symbol}/${pair.token1Symbol}`, pair.address)}
+                    ${window.Formatter?.formatPairName(pair.name, pair.address) || pair.name}
                 </td>
                 <td>
                     <span class="chip chip-primary">${pair.platform || 'Uniswap V2'}</span>
@@ -372,22 +379,6 @@ class HomePage {
                         <span class="material-icons" style="font-size: 16px;">redeem</span>
                         ${userEarnings} LIB
                     </button>
-                </td>
-                <td>
-                    <div style="display: flex; gap: 8px;">
-                        <button class="btn btn-primary btn-stake" data-pair-id="${pair.id}" data-pair-address="${pair.address}" ${!canTransact || !pair.stakingEnabled ? 'disabled' : ''}>
-                            <span class="material-icons">add</span>
-                            Stake
-                        </button>
-                        <button class="btn btn-secondary btn-unstake" data-pair-id="${pair.id}" data-pair-address="${pair.address}" ${!canTransact || parseFloat(userShares) === 0 ? 'disabled' : ''}>
-                            <span class="material-icons">remove</span>
-                            Unstake
-                        </button>
-                        <button class="btn btn-text btn-claim" data-pair-id="${pair.id}" data-pair-address="${pair.address}" ${!canTransact || parseFloat(userEarnings) === 0 ? 'disabled' : ''}>
-                            <span class="material-icons">redeem</span>
-                            Claim
-                        </button>
-                    </div>
                 </td>
             </tr>
         `;
@@ -449,26 +440,6 @@ class HomePage {
                 this.openStakingModal(pairId, 'claim');
             }
 
-            // Handle Stake button click
-            if (e.target.closest('.btn-stake')) {
-                e.stopPropagation();
-                const pairId = e.target.closest('.btn-stake').dataset.pairId;
-                this.openStakingModal(pairId, 'stake');
-            }
-
-            // Handle Unstake button click
-            if (e.target.closest('.btn-unstake')) {
-                e.stopPropagation();
-                const pairId = e.target.closest('.btn-unstake').dataset.pairId;
-                this.openStakingModal(pairId, 'unstake');
-            }
-
-            // Handle Claim button click
-            if (e.target.closest('.btn-claim')) {
-                e.stopPropagation();
-                const pairId = e.target.closest('.btn-claim').dataset.pairId;
-                this.claimRewards(pairId);
-            }
         });
     }
 
@@ -621,8 +592,6 @@ class HomePage {
                 this.pairs = [{
                     id: '1',
                     address: '0x0000000000000000000000000000000000000000',
-                    token0Symbol: 'LIB',
-                    token1Symbol: 'USDC',
                     name: 'No Pairs Configured',
                     platform: 'Waiting for Setup',
                     apr: '0.00',
@@ -648,8 +617,6 @@ class HomePage {
                     return {
                         id: pairInfo.id || (i + 1).toString(),
                         address: pairInfo.address,
-                        token0Symbol: 'LIB',
-                        token1Symbol: this.extractTokenSymbol(pairInfo.name) || 'TOKEN',
                         name: pairInfo.name || `LP Token ${i + 1}`,
                         platform: pairInfo.platform || 'Unknown',
                         apr: pairInfo.apr || '0.00',
@@ -848,185 +815,16 @@ class HomePage {
         }
     }
 
-    /**
-     * Get token color for avatar
-     */
-    getTokenColor(tokenSymbol) {
-        const colors = {
-            'LIB': '#3B82F6',      // Blue
-            'USDT': '#26A17B',     // Tether Green
-            'USDC': '#2775CA',     // USDC Blue
-            'DAI': '#F5AC37',      // DAI Gold
-            'WETH': '#627EEA',     // Ethereum Purple
-            'ETH': '#627EEA',      // Ethereum Purple
-            'WBTC': '#F7931A',     // Bitcoin Orange
-            'BTC': '#F7931A',      // Bitcoin Orange
-            'MATIC': '#8247E5',    // Polygon Purple
-            'TOKEN': '#FF9800'     // Default Orange
-        };
-        return colors[tokenSymbol.toUpperCase()] || '#6B7280';
-    }
 
-    /**
-     * Create token avatar HTML
-     */
-    createTokenAvatar(tokenSymbol) {
-        const symbol = tokenSymbol.toUpperCase();
-        const color = this.getTokenColor(symbol);
-        const initial = symbol.substring(0, 3);
-        
-        return `
-            <div class="token-avatar" style="
-                width: 32px;
-                height: 32px;
-                border-radius: 50%;
-                background: ${color};
-                color: white;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 10px;
-                font-weight: 700;
-                letter-spacing: -0.5px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            ">${initial}</div>
-        `;
-    }
 
-    /**
-     * Format pair name for display with token avatars and Uniswap link
-     */
-    formatPairName(pairName, lpTokenAddress = '') {
-        if (!pairName) return pairName;
-
-        let token1 = '';
-        let token2 = '';
-        let formattedName = pairName;
-
-        // If already formatted (contains /), extract tokens
-        if (pairName.includes('/')) {
-            const parts = pairName.split('/');
-            token1 = parts[0].trim();
-            token2 = parts[1].replace('LP', '').trim();
-            formattedName = `${token1}/${token2}`;
-        }
-        // Handle "LIB-USDT" format
-        else if (pairName.includes('-')) {
-            const parts = pairName.split('-');
-            token1 = parts[0].trim();
-            token2 = parts[1].trim();
-            formattedName = `${token1}/${token2}`;
-        }
-        // Handle LP prefix format: "LPLIBETH" -> "LIB/ETH"
-        else if (pairName.startsWith('LP') && pairName.length > 4) {
-            const tokens = pairName.substring(2); // Remove "LP"
-
-            // Try to split into two tokens
-            const commonTokens = ['USDC', 'USDT', 'DAI', 'WETH', 'ETH', 'WBTC', 'BTC', 'LIB', 'MATIC'];
-
-            for (const token of commonTokens) {
-                if (tokens.endsWith(token)) {
-                    token1 = tokens.substring(0, tokens.length - token.length);
-                    token2 = token;
-                    if (token1.length > 0) {
-                        formattedName = `${token1}/${token2}`;
-                        break;
-                    }
-                }
-                if (tokens.startsWith(token)) {
-                    token1 = token;
-                    token2 = tokens.substring(token.length);
-                    if (token2.length > 0) {
-                        formattedName = `${token1}/${token2}`;
-                        break;
-                    }
-                }
-            }
-
-            // Fallback: split in half if tokens not found
-            if (!token1 || !token2) {
-                const mid = Math.floor(tokens.length / 2);
-                token1 = tokens.substring(0, mid);
-                token2 = tokens.substring(mid);
-                formattedName = `${token1}/${token2}`;
-            }
-        }
-
-        // Create pair display with avatars and Uniswap link
-        if (token1 && token2) {
-            const avatar1 = this.createTokenAvatar(token1);
-            const avatar2 = this.createTokenAvatar(token2);
-            const uniswapUrl = lpTokenAddress ? 
-                `https://app.uniswap.org/explore/pools/polygon/${lpTokenAddress}` : 
-                `https://app.uniswap.org/explore/pools`;
-            
-            return `
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <div style="display: flex; align-items: center;">
-                        ${avatar1}
-                        <div style="margin-left: -8px; z-index: 1;">${avatar2}</div>
-                    </div>
-                    <a href="${uniswapUrl}" target="_blank" rel="noopener noreferrer" 
-                       class="pair-name-link"
-                       style="display: inline-flex; align-items: center; gap: 8px; text-decoration: none; cursor: pointer; transition: all 0.2s ease; padding: 4px 0;"
-                       onmouseover="this.style.opacity='0.8'"
-                       onmouseout="this.style.opacity='1'"
-                       title="View pool on Uniswap">
-                        <span style="font-weight: 700; color: var(--primary-main); font-size: 14px;">${formattedName}</span>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary-main)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; transition: all 0.2s ease; min-width: 20px;">
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                            <polyline points="15 3 21 3 21 9"></polyline>
-                            <line x1="10" y1="14" x2="21" y2="3"></line>
-                        </svg>
-                    </a>
-                    <span style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${pairName}</span>
-                </div>
-            `;
-        }
-
-        // Return original if no pattern matched
-        return formattedName;
-    }
-
-    /**
-     * Extract token symbol from pair name
-     */
-    extractTokenSymbol(pairName) {
-        if (!pairName) return 'USDT';
-
-        // Try to extract the second token from patterns like "LIB/USDC" or "LIB-USDC"
-        const match = pairName.match(/LIB[\/\-](\w+)/i);
-        if (match) {
-            return match[1].toUpperCase();
-        }
-
-        // Fallback patterns
-        if (pairName.toLowerCase().includes('usdc')) return 'USDC';
-        if (pairName.toLowerCase().includes('usdt')) return 'USDT';
-        if (pairName.toLowerCase().includes('eth')) return 'ETH';
-        if (pairName.toLowerCase().includes('btc')) return 'BTC';
-        if (pairName.toLowerCase().includes('dai')) return 'DAI';
-        if (pairName.toLowerCase().includes('matic')) return 'MATIC';
-
-        // Default to USDT instead of TOKEN
-        return 'USDT';
-    }
 
     /**
      * Build real pair data from contract information
      */
     async buildRealPairData(pairInfo, index) {
         try {
-            // Extract pair name from platform or use address
-            const pairName = this.extractPairName(pairInfo.address, pairInfo.platform);
-            
-            // Use existing token symbols if available, otherwise extract from pair name
-            let tokens;
-            if (pairInfo.token0Symbol && pairInfo.token1Symbol) {
-                tokens = { token0: pairInfo.token0Symbol, token1: pairInfo.token1Symbol };
-            } else {
-                tokens = this.extractTokenSymbols(pairName);
-            }
+            // Use the raw pair name from contract (contract manager ensures this is always set)
+            const pairName = pairInfo.name || 'Unknown Pair';
 
             // Get additional data if available
             let tvl = 0;
@@ -1109,9 +907,7 @@ class HomePage {
 
             return {
                 id: index.toString(),
-                token0Symbol: tokens.token0,
-                token1Symbol: tokens.token1,
-                name: `${tokens.token0}/${tokens.token1} LP`,
+                name: pairName,
                 platform: pairInfo.platform || 'Unknown',
                 apr: apr.toFixed(2),
                 tvl: tvl,
@@ -1119,7 +915,8 @@ class HomePage {
                 userEarnings: userEarnings,
                 totalStaked: totalStaked.toString(),
                 rewardRate: rewardRate.toFixed(3),
-                stakingEnabled: pairInfo.isActive
+                stakingEnabled: pairInfo.isActive,
+                address: pairInfo.address
             };
         } catch (error) {
             console.error('Failed to build real pair data:', error);
@@ -1127,78 +924,7 @@ class HomePage {
         }
     }
 
-    /**
-     * Extract pair name from address or platform
-     */
-    extractPairName(address, platform) {
-        // Try to find a known pair name from config
-        const lpTokens = window.CONFIG?.CONTRACTS?.LP_TOKENS || {};
-        for (const [pairName, pairAddress] of Object.entries(lpTokens)) {
-            if (pairAddress.toLowerCase() === address.toLowerCase()) {
-                return pairName;
-            }
-        }
 
-        // Use platform if available
-        if (platform && platform !== 'Unknown') {
-            return platform;
-        }
-
-        // Fallback to shortened address
-        return `${address.slice(0, 6)}...${address.slice(-4)}`;
-    }
-
-    /**
-     * Extract token symbols from pair name
-     */
-    extractTokenSymbols(pairName) {
-        // Handle common pair name formats
-        if (pairName.includes('/')) {
-            const parts = pairName.split('/');
-            return { token0: parts[0].trim(), token1: parts[1].trim() };
-        } else if (pairName.includes('-')) {
-            const parts = pairName.split('-');
-            return { token0: parts[0].trim(), token1: parts[1].trim() };
-        } else if (pairName.includes('_')) {
-            const parts = pairName.split('_');
-            return { token0: parts[0].trim(), token1: parts[1].trim() };
-        }
-
-        // Handle LP prefix format: "LPLIBUSDT" -> "LIB/USDT"
-        if (pairName.startsWith('LP') && pairName.length > 4) {
-            const tokens = pairName.substring(2); // Remove "LP"
-            
-            // Try to split into two tokens using common token patterns
-            const commonTokens = ['USDC', 'USDT', 'DAI', 'WETH', 'ETH', 'WBTC', 'BTC', 'LIB', 'MATIC'];
-            
-            for (const token of commonTokens) {
-                if (tokens.endsWith(token)) {
-                    const token1 = tokens.substring(0, tokens.length - token.length);
-                    const token2 = token;
-                    if (token1.length > 0) {
-                        return { token0: token1, token1: token2 };
-                    }
-                }
-                if (tokens.startsWith(token)) {
-                    const token1 = token;
-                    const token2 = tokens.substring(token.length);
-                    if (token2.length > 0) {
-                        return { token0: token1, token1: token2 };
-                    }
-                }
-            }
-            
-            // Fallback: split in half
-            const mid = Math.floor(tokens.length / 2);
-            const token1 = tokens.substring(0, mid);
-            const token2 = tokens.substring(mid);
-            return { token0: token1, token1: token2 };
-        }
-
-        // Fallback for unknown formats - try to extract from address or use LIB/USDT as default
-        console.warn(`Could not parse pair name: ${pairName}, using LIB/USDT as fallback`);
-        return { token0: 'LIB', token1: 'USDT' };
-    }
 
     openStakingModal(pairId, tab = 'stake') {
         const pair = this.pairs.find(p => p.id === pairId);
@@ -1208,63 +934,6 @@ class HomePage {
             window.stakingModal.open(pair, tab);
         } else {
             console.warn('Staking modal not available');
-        }
-    }
-
-    async claimRewards(pairId) {
-        console.log(`🎁 Claiming rewards for pair ${pairId}`);
-
-        const pair = this.pairs.find(p => p.id === pairId);
-        if (!pair) {
-            console.error('Pair not found:', pairId);
-            return;
-        }
-
-        if (!this.isWalletConnected()) {
-            window.notificationManager.error('Please connect your wallet first');
-            return;
-        }
-
-        try {
-            // Show loading state
-            const button = document.querySelector(`.btn-claim[data-pair-id="${pairId}"]`);
-            if (button) {
-                button.disabled = true;
-                button.innerHTML = '<span class="material-icons">hourglass_empty</span> Claiming...';
-            }
-
-            window.notificationManager.info('Claiming rewards...');
-
-            // Call contract manager to claim rewards
-            if (window.contractManager && window.contractManager.claimRewards) {
-                console.log(`🎁 Claiming rewards for LP token: ${pair.address}`);
-                const result = await window.contractManager.claimRewards(pair.address);
-
-                if (result && result.success) {
-                    console.log('✅ Rewards claimed successfully');
-                    window.notificationManager.success(`Successfully claimed ${pair.userEarnings} LIB rewards!`);
-
-                    // Refresh data after successful transaction
-                    setTimeout(() => {
-                        this.refreshData().catch(() => {});
-                    }, 2000);
-                } else {
-                    throw new Error(result?.error || 'Transaction failed');
-                }
-            } else {
-                throw new Error('Contract manager not available');
-            }
-
-        } catch (error) {
-            console.error('❌ Failed to claim rewards:', error);
-            window.notificationManager.error(error);
-        } finally {
-            // Reset button state
-            const button = document.querySelector(`.btn-claim[data-pair-id="${pairId}"]`);
-            if (button) {
-                button.disabled = false;
-                button.innerHTML = '<span class="material-icons">redeem</span> Claim';
-            }
         }
     }
 
