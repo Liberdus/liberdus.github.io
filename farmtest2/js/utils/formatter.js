@@ -66,23 +66,46 @@ window.Formatter = {
     },
 
     /**
-     * Format pair name for display with Uniswap link
-     * Simply displays the raw pair name from the contract as a clickable link
-     * @param {string} pairName - The pair name from the contract
-     * @param {string} lpTokenAddress - The LP token address for the Uniswap link
-     * @returns {string} HTML string with clickable link to Uniswap
+     * Build platform URL by replacing address placeholder in base URL template
+     * @param {string} baseUrl - The base URL template with {address} placeholder
+     * @param {string} address - The LP token address to insert (optional)
+     * @returns {string} The URL with address replaced, or placeholder removed if no address
      */
-    formatPairName(pairName, lpTokenAddress = '') {
-        if (!pairName) return pairName;
+    buildPlatformUrl(baseUrl, address = '') {
+        if (!baseUrl) return '';
+        return address 
+            ? baseUrl.replace('{address}', address)
+            : baseUrl.replace(/\{address\}/g, '');
+    },
 
-        const uniswapUrl = lpTokenAddress ? 
-            `https://app.uniswap.org/explore/pools/polygon/${lpTokenAddress}` : 
-            `https://app.uniswap.org/explore/pools`;
+    /**
+     * Format pair name for display with platform-specific link
+     * Uses the platform from contract data to link to the correct DEX
+     * @param {string} pairName - The pair name from the contract
+     * @param {string} lpTokenAddress - The LP token address for the platform link
+     * @param {string} platform - The platform name from the contract (e.g., "Uniswap V3", "SushiSwap")
+     * @returns {string} HTML string with clickable link to the platform, or plain text if platform not configured
+     */
+    formatPairName(pairName, lpTokenAddress = '', platform = '') {
+        if (!pairName) return `<span class="pair-name-link-text">Not provided</span>`;
+
+        const platformsConfig = window.CONFIG?.PLATFORMS;
+        const baseUrl = platform && platformsConfig?.BASE_URLS?.[platform];
         
+        // Only return a link if we have a valid platform URL configured
+        if (!baseUrl) {
+            window.notificationManager.error(`Platform ${platform} not configured for pair ${pairName}`);
+            return `<span class="pair-name-link-text">${pairName}</span>`;
+        }
+
+        // Build platform URL with address
+        const platformUrl = this.buildPlatformUrl(baseUrl, lpTokenAddress);
+        const platformTitle = `View pool on ${platform}`;
+
         return `
-            <a href="${uniswapUrl}" target="_blank" rel="noopener noreferrer" 
+            <a href="${platformUrl}" target="_blank" rel="noopener noreferrer" 
                class="pair-name-link"
-               title="View pool on Uniswap">
+               title="${platformTitle}">
                 <span class="pair-name-link-text">${pairName}</span>
                 <svg class="pair-name-link-icon" viewBox="0 0 24 24">
                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>

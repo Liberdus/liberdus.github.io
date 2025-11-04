@@ -34,7 +34,7 @@ class AdminPage {
         this.isSelectiveUpdateEnabled = true; // Enable selective update system
 
         // UI state: remember proposal filter preference across refreshes
-        this.hideExecutedPreference = true;
+        this.proposalFilter = 'pending';
 
         // Initialize asynchronously (don't await in constructor)
         this.init().catch(error => {
@@ -839,17 +839,6 @@ class AdminPage {
                 return;
             }
 
-            // Add Another Pair button in Update Weights modal
-            if (e.target.id === 'add-weight-pair') {
-                e.preventDefault();
-                console.log('🔘 Add Another Pair button clicked - opening Add Pair modal');
-                this.closeModal(); // Close current modal
-                setTimeout(() => {
-                    this.showAddPairModal(); // Open Add Pair modal
-                }, 100);
-                return;
-            }
-
             // Action buttons in modals (for backward compatibility)
             if (e.target.classList.contains('btn') && e.target.closest('.modal-content')) {
                 const buttonText = e.target.textContent.trim();
@@ -1475,17 +1464,12 @@ class AdminPage {
             this.loadedProposalCount = proposals.length;
             console.log(`📊 Set loadedProposalCount to ${this.loadedProposalCount}`);
 
-            // Filter proposals based on stored hide-executed preference (default: hide executed)
-            const hideExecuted = this.hideExecutedPreference !== undefined
-                ? this.hideExecutedPreference
-                : true;
+            // Filter proposals based on stored selection (default: show pending)
+            const filterValue = this.proposalFilter || 'pending';
+            const filteredProposals = this.filterProposalsByStatus(proposals, filterValue);
 
-            const filteredProposals = hideExecuted
-                ? proposals.filter(proposal => !proposal.executed)
-                : proposals;
-
-            console.log(`📊 Filtered proposals: ${filteredProposals.length} (hidden ${proposals.length - filteredProposals.length} executed)`);
-            console.log(`📊 First 5 filtered proposals:`, filteredProposals.slice(0, 5).map(p => ({ id: p.id, executed: p.executed, actionType: p.actionType })));
+            console.log(`📊 Filtered proposals: ${filteredProposals.length} using filter "${filterValue}" (original total ${proposals.length})`);
+            console.log('📊 First 5 filtered proposals:', filteredProposals.slice(0, 5).map(p => ({ id: p.id, executed: p.executed, rejected: p.rejected, expired: p.expired, actionType: p.actionType })));
 
             panelDiv.innerHTML = `
                 <div class="multisign-panel">
@@ -1499,9 +1483,15 @@ class AdminPage {
                             </div>
                         </div>
                         <div class="panel-controls">
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="hide-executed" ${hideExecuted ? 'checked' : ''}>
-                                Hide executed transactions
+                            <label class="checkbox-label" for="proposal-filter">
+                                Filter proposals
+                                <select id="proposal-filter" class="proposal-filter">
+                                    <option value="pending">Show pending proposals</option>
+                                    <option value="executed">Show executed proposals</option>
+                                    <option value="rejected">Show rejected proposals</option>
+                                    <option value="expired">Show expired proposals</option>
+                                    <option value="all">Show all proposals</option>
+                                </select>
                             </label>
                             <div class="panel-stats">
                                 <span class="stat-chip" data-stat="total-proposals">Total Proposals: ${this.totalProposalCount}</span>
@@ -1541,13 +1531,13 @@ class AdminPage {
             // Proposals are ready, enable actions now that data exists
             this.setProposalButtonsEnabled(true);
 
-            // Add event listener for hide-executed checkbox
-            const hideExecutedCheckbox = document.getElementById('hide-executed');
-            if (hideExecutedCheckbox) {
-                hideExecutedCheckbox.checked = hideExecuted;
-                hideExecutedCheckbox.addEventListener('change', () => {
-                    this.hideExecutedPreference = hideExecutedCheckbox.checked;
-                    this.toggleExecutedProposals();
+            // Add event listener for proposal filter dropdown
+            const filterSelect = document.getElementById('proposal-filter');
+            if (filterSelect) {
+                filterSelect.value = filterValue;
+                filterSelect.addEventListener('change', () => {
+                    this.proposalFilter = filterSelect.value || 'pending';
+                    this.applyProposalFilter();
                 });
             }
 
@@ -2278,14 +2268,10 @@ class AdminPage {
                 });
 
                 // Check if we should show these proposals based on filter
-                const hideExecutedCheckbox = document.getElementById('hide-executed');
-                const hideExecuted = hideExecutedCheckbox
-                    ? hideExecutedCheckbox.checked
-                    : (this.hideExecutedPreference !== undefined ? this.hideExecutedPreference : true);
+                const filterSelect = document.getElementById('proposal-filter');
+                const filterValue = filterSelect ? filterSelect.value : (this.proposalFilter || 'pending');
 
-                const visibleBatch = hideExecuted
-                    ? formattedBatch.filter(proposal => !proposal.executed)
-                    : formattedBatch;
+                const visibleBatch = this.filterProposalsByStatus(formattedBatch, filterValue);
 
                 // Append to proposals table
                 const proposalsTbody = document.getElementById('proposals-tbody');
@@ -2304,9 +2290,7 @@ class AdminPage {
                 const allCachedProposals = this.proposalsCache
                     ? Array.from(this.proposalsCache.values())
                     : [];
-                const currentVisibleCount = hideExecuted
-                    ? allCachedProposals.filter(proposal => !proposal.executed).length
-                    : allCachedProposals.length;
+                const currentVisibleCount = this.filterProposalsByStatus(allCachedProposals, filterValue).length;
 
                 this.updateProposalStatsUI({
                     total: this.totalProposalCount,
@@ -2560,6 +2544,38 @@ class AdminPage {
             cachedState.expired !== currentState.expired ||
             cachedState.status !== currentState.status
         );
+    }
+
+    filterProposalsByStatus(proposals, filterValue = 'pending') {
+        if (!Array.isArray(proposals)) {
+            return [];
+        }
+
+        const normalizedFilter = filterValue || 'pending';
+
+        return proposals.filter(proposal => {
+            if (!proposal || typeof proposal !== 'object') {
+                return false;
+            }
+
+            const executed = proposal.executed === true;
+            const rejected = proposal.rejected === true;
+            const expired = proposal.expired === true;
+
+            switch (normalizedFilter) {
+                case 'executed':
+                    return executed;
+                case 'rejected':
+                    return rejected;
+                case 'expired':
+                    return expired && !executed && !rejected;
+                case 'all':
+                    return true;
+                case 'pending':
+                default:
+                    return !executed && !rejected && !expired;
+            }
+        });
     }
 
     /**
@@ -2894,11 +2910,9 @@ class AdminPage {
         console.log(`📊 Cached proposals: ${this.proposalsCache.size}`);
         console.log(`📊 Is loading more: ${this.isLoadingMore}`);
 
-        const hideExecutedCheckbox = document.getElementById('hide-executed');
-        const hideExecuted = hideExecutedCheckbox
-            ? hideExecutedCheckbox.checked
-            : (this.hideExecutedPreference !== undefined ? this.hideExecutedPreference : 'unknown');
-        console.log(`📊 Hide executed: ${hideExecuted}`);
+        const filterSelect = document.getElementById('proposal-filter');
+        const filterValue = filterSelect ? filterSelect.value : (this.proposalFilter || 'pending');
+        console.log(`📊 Proposal filter: ${filterValue}`);
 
         const proposalsTbody = document.getElementById('proposals-tbody');
         const visibleRows = proposalsTbody ? proposalsTbody.querySelectorAll('tr').length : 0;
@@ -2906,14 +2920,16 @@ class AdminPage {
 
         if (this.proposalsCache.size > 0) {
             const cachedProposals = Array.from(this.proposalsCache.values());
-            const executedCount = cachedProposals.filter(p => p.executed).length;
-            const pendingCount = cachedProposals.filter(p => !p.executed && !p.rejected).length;
-            const rejectedCount = cachedProposals.filter(p => p.rejected).length;
+            const executedCount = this.filterProposalsByStatus(cachedProposals, 'executed').length;
+            const pendingCount = this.filterProposalsByStatus(cachedProposals, 'pending').length;
+            const rejectedCount = this.filterProposalsByStatus(cachedProposals, 'rejected').length;
+            const expiredCount = this.filterProposalsByStatus(cachedProposals, 'expired').length;
 
             console.log(`📊 Cached proposal breakdown:`);
             console.log(`   - Executed: ${executedCount}`);
             console.log(`   - Pending: ${pendingCount}`);
             console.log(`   - Rejected: ${rejectedCount}`);
+            console.log(`   - Expired: ${expiredCount}`);
         }
     }
 
@@ -3091,20 +3107,20 @@ class AdminPage {
     }
 
     /**
-     * Toggle visibility of executed proposals
+     * Apply proposal filter based on dropdown selection
      */
-    async toggleExecutedProposals() {
-        const hideExecutedCheckbox = document.getElementById('hide-executed');
+    async applyProposalFilter() {
+        const filterSelect = document.getElementById('proposal-filter');
         const proposalsTbody = document.getElementById('proposals-tbody');
 
-        if (!hideExecutedCheckbox || !proposalsTbody) {
-            console.warn('⚠️ Could not find hide-executed checkbox or proposals table');
+        if (!filterSelect || !proposalsTbody) {
+            console.warn('⚠️ Could not find proposal filter dropdown or proposals table');
             return;
         }
 
-        const hideExecuted = hideExecutedCheckbox.checked;
-        this.hideExecutedPreference = hideExecuted;
-        console.log(`🔄 Toggling executed proposals visibility: ${hideExecuted ? 'hide' : 'show'}`);
+        const filterValue = filterSelect.value || 'pending';
+        this.proposalFilter = filterValue;
+        console.log(`🔄 Applying proposal filter: ${filterValue}`);
 
         // Get all current proposals from cache or reload
         let allProposals = [];
@@ -3115,12 +3131,9 @@ class AdminPage {
             allProposals = await this.loadProposals();
         }
 
-        // Filter based on checkbox state
-        const filteredProposals = hideExecuted
-            ? allProposals.filter(proposal => !proposal.executed)
-            : allProposals;
+        const filteredProposals = this.filterProposalsByStatus(allProposals, filterValue);
 
-        console.log(`📊 Showing ${filteredProposals.length} of ${allProposals.length} proposals`);
+        console.log(`📊 Showing ${filteredProposals.length} of ${allProposals.length} proposals after filter`);
 
         // Update the table
         proposalsTbody.innerHTML = this.renderProposalsRows(filteredProposals);
@@ -3391,6 +3404,7 @@ class AdminPage {
             return {
                 name: pair?.name || (pair?.address ? this.getPairNameByAddress(pair.address) : null) || 'Unknown Pair',
                 address: pair?.address || 'Unknown',
+                platform: pair?.platform || '',
                 weight: weight,
                 displayWeight: displayWeight
             };
@@ -3408,7 +3422,7 @@ class AdminPage {
                 <div class="pair-item-card">
                     <div class="pair-header-section">
                         <div class="pair-name-section">
-                            <h6 class="pair-name">${window.Formatter?.formatPairName(pair.name, pair.address) || pair.name}</h6>
+                            <h6 class="pair-name">${window.Formatter?.formatPairName(pair.name, pair.address, pair.platform) || pair.name}</h6>
                             <div class="pair-address-wrapper">
                                 <span class="address-label">Address:</span>
                                 <code class="pair-address">${pair.address}</code>
@@ -4627,13 +4641,9 @@ class AdminPage {
                                 <label for="pair-platform">Platform *</label>
                                 <select id="pair-platform" class="form-input" required>
                                     <option value="">Select platform...</option>
-                                    <option value="Uniswap V3">Uniswap V3</option>
-                                    <option value="Uniswap V2">Uniswap V2</option>
-                                    <option value="SushiSwap">SushiSwap</option>
-                                    <option value="Curve Finance">Curve Finance</option>
-                                    <option value="Balancer">Balancer</option>
-                                    <option value="PancakeSwap">PancakeSwap</option>
-                                    <option value="Other">Other</option>
+                                    ${(window.CONFIG?.PLATFORMS?.OPTIONS || []).map(platform => 
+                                        `<option value="${platform}">${platform}</option>`
+                                    ).join('')}
                                 </select>
                                 <small class="form-help">Select the DEX platform where this pair trades</small>
                                 <div class="field-error" id="pair-platform-error"></div>
@@ -4727,9 +4737,6 @@ class AdminPage {
                                         <p style="margin-top: 16px; color: var(--text-secondary);">Loading pairs...</p>
                                     </div>
                                 </div>
-                                <button type="button" class="btn btn-outline btn-sm" id="add-weight-pair" style="margin-top: 10px; padding: 8px 16px; border: 1px dashed var(--primary-main); background: transparent; color: var(--primary-main);">
-                                    + Add Another Pair
-                                </button>
                             </div>
 
                             <div class="proposal-info" style="background: rgba(33, 150, 243, 0.05); border: 1px solid rgba(33, 150, 243, 0.2); border-radius: 8px; padding: 16px; margin-top: 24px;">
@@ -5064,68 +5071,6 @@ class AdminPage {
             }
         } catch (error) {
             console.error('❌ Failed to refresh contract info:', error);
-        }
-    }
-
-    // Add another pair row in Update Weights modal
-    addAnotherPairRow() {
-        console.log('🔧 Adding another pair row...');
-
-        const container = document.getElementById('weight-pairs-container');
-        if (!container) {
-            console.error('❌ Weight pairs container not found');
-            return;
-        }
-
-        // Count existing pair rows
-        const existingRows = container.querySelectorAll('.pair-weight-row').length;
-        const newRowIndex = existingRows;
-
-        // Create new pair row HTML
-        const newRowHTML = `
-            <div class="pair-weight-row" data-index="${newRowIndex}">
-                <div class="pair-weight-item">
-                    <label for="pair-select-${newRowIndex}">Pair ${newRowIndex + 1}</label>
-                    <select id="pair-select-${newRowIndex}" class="form-input" required>
-                        <option value="">Select pair...</option>
-                        <option value="LPLIBETH">LIB/ETH</option>
-                        <option value="LPLIBUSDC">LIB/USDC</option>
-                        <option value="LPLIBUSDT">LIB/USDT</option>
-                    </select>
-                </div>
-                <div class="pair-weight-item">
-                    <label for="weight-${newRowIndex}">New Weight</label>
-                    <input type="number" id="weight-${newRowIndex}" class="form-input"
-                           min="1" max="10000" step="1" required placeholder="Enter weight">
-                </div>
-                <div class="pair-weight-item">
-                    <button type="button" class="btn btn-danger btn-sm remove-pair-row"
-                            data-index="${newRowIndex}" style="margin-top: 25px;">
-                        Remove
-                    </button>
-                </div>
-            </div>
-        `;
-
-        // Add the new row before the "Add Another Pair" button
-        const addButton = document.getElementById('add-weight-pair');
-        if (addButton) {
-            addButton.insertAdjacentHTML('beforebegin', newRowHTML);
-            console.log(`✅ Added pair row ${newRowIndex + 1}`);
-
-            // Add event listener for the remove button
-            const removeBtn = container.querySelector(`[data-index="${newRowIndex}"] .remove-pair-row`);
-            if (removeBtn) {
-                removeBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const rowIndex = e.target.dataset.index;
-                    const rowToRemove = container.querySelector(`[data-index="${rowIndex}"]`);
-                    if (rowToRemove) {
-                        rowToRemove.remove();
-                        console.log(`✅ Removed pair row ${parseInt(rowIndex) + 1}`);
-                    }
-                });
-            }
         }
     }
 

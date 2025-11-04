@@ -722,10 +722,6 @@ select,
 #remove-pair-select,
 select.form-input,
 #current-signer-select {
-    /* Remove ALL default styling */
-    appearance: none !important;
-    -webkit-appearance: none !important;
-    -moz-appearance: none !important;
 
     /* Base styling */
     background-color: var(--background-paper) !important;
