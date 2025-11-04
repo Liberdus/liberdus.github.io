@@ -1,7 +1,5 @@
 // LIBERDUS - Simple JavaScript
 
-
-
 document.addEventListener('DOMContentLoaded', loadHtml);
 
 async function loadHtml() {
@@ -249,6 +247,29 @@ function initialize(){
                 navMenu.classList.remove('active');
                 document.body.style.overflow = '';
             }
+        });
+    }
+
+    // Distribution items scroll animations
+    const distributionItems = document.querySelectorAll('.distribution-item');
+    if (distributionItems.length > 0) {
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: "0px 0px -100px 0px",
+        };
+
+        const distributionObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry, index) => {
+                if (entry.isIntersecting) {
+                    setTimeout(() => {
+                        entry.target.classList.add("visible");
+                    }, index * 100);
+                }
+            });
+        }, observerOptions);
+
+        distributionItems.forEach((item) => {
+            distributionObserver.observe(item);
         });
     }
 

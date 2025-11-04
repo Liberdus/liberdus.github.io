@@ -327,28 +327,5 @@
     </footer>
 
     <script src="src/scripts/main.js"></script>
-
-    <!-- Scroll animations for distribution items -->
-    <script>
-      // Scroll animations
-      const observerOptions = {
-        threshold: 0.1,
-        rootMargin: "0px 0px -100px 0px",
-      };
-
-      const observer = new IntersectionObserver((entries) => {
-        entries.forEach((entry, index) => {
-          if (entry.isIntersecting) {
-            setTimeout(() => {
-              entry.target.classList.add("visible");
-            }, index * 100);
-          }
-        });
-      }, observerOptions);
-
-      document.querySelectorAll(".distribution-item").forEach((item) => {
-        observer.observe(item);
-      });
-    </script>
   </body>
 </html>
