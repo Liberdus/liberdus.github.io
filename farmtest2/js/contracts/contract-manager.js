@@ -2462,10 +2462,8 @@ class ContractManager {
 
             // STEP 4: Execute transaction with proper parameter handling
             const result = await this.executeTransactionWithRetry(async () => {
-                // CRITICAL FIX: Weight should be passed as regular uint256, NOT wei
-                // The contract expects weight as a regular number (e.g., 100 for 100 weight)
-                // NOT as wei (which would be 100 * 10^18)
-                const weightUint256 = ethers.BigNumber.from(weight.toString());
+                // Use wei to match update pair weights logic and what the front end expects
+                const weightUint256 = ethers.utils.parseEther(weight.toString());
 
                 console.log(`[ADD PAIR FIX] 📋 Parameter conversion:`);
                 console.log(`[ADD PAIR FIX]   Original weight: ${weight}`);

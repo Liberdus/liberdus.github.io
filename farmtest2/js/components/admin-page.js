@@ -5489,6 +5489,7 @@ class AdminPage {
                 },
                 []
             );
+            this.contractStats.signers = contractInfo.signers;
 
             console.log('✅ Contract information loaded:', contractInfo);
             this.displayContractInfo(contractInfo);
@@ -6178,8 +6179,7 @@ class AdminPage {
     }
 
     renderSignerOptions() {
-        // Get signers from CONFIG first, then fallback to contractStats
-        const signers = window.CONFIG?.GOVERNANCE?.SIGNERS || this.contractStats?.signers || [];
+        const signers = this.contractStats?.signers || [];
 
         console.log('🔧 DEBUG: Available signers:', signers);
 
