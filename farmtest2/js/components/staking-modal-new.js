@@ -496,10 +496,14 @@ class StakingModalNew {
 
             const ethers = window.ethers;
 
-            // If amount is already a formatted string (like "0.0"), return it
+            // If amount is already a formatted string (from formatEther/formatUnits), preserve it
             if (typeof amount === 'string' && amount.includes('.')) {
+                // Check if it's a zero value that should be normalized
                 const parsed = parseFloat(amount);
-                return parsed.toFixed(6);
+                if (parsed === 0) {
+                    return '0.00';
+                }
+                return amount;
             }
 
             // Try ethers v6 API first (formatUnits is directly on ethers)
@@ -1028,8 +1032,16 @@ class StakingModalNew {
     }
 
     setPercentage(percentage) {
-        const maxAmount = this.currentTab === 'stake' ? parseFloat(this.userBalance) : parseFloat(this.userStaked);
-        const amount = (maxAmount * percentage / 100).toFixed(6);
+        let amount;
+        
+        // For 100% (MAX), use the exact original value to preserve precision
+        if (percentage === 100) {
+            amount = this.currentTab === 'stake' ? this.userBalance : this.userStaked;
+        } else {
+            // For other percentages, calculate the amount
+            const maxAmount = this.currentTab === 'stake' ? parseFloat(this.userBalance) : parseFloat(this.userStaked);
+            amount = (maxAmount * percentage / 100).toFixed(6);
+        }
 
         if (this.currentTab === 'stake') {
             this.stakeAmount = amount;
@@ -1073,8 +1085,17 @@ class StakingModalNew {
     updateAmountFromSlider(slider) {
         const type = slider.dataset.type;
         const percentage = parseFloat(slider.value);
-        const maxAmount = parseFloat(type === 'stake' ? this.userBalance : this.userStaked) || 0;
-        const amount = (maxAmount * percentage / 100).toFixed(6);
+        let amount;
+        
+        // For 100% (MAX), use the exact original value to preserve precision
+        // This prevents rounding issues when slider is dragged to max
+        if (percentage === 100) {
+            amount = type === 'stake' ? this.userBalance : this.userStaked;
+        } else {
+            // For other percentages, calculate the amount
+            const maxAmount = parseFloat(type === 'stake' ? this.userBalance : this.userStaked) || 0;
+            amount = (maxAmount * percentage / 100).toFixed(6);
+        }
 
         if (type === 'stake') {
             this.stakeAmount = amount;

@@ -1692,9 +1692,9 @@ class ContractManager {
                 return [];
             }
 
-            // Load recent 50 actions for better UX
+            // Load recent 10 actions initially
             const startIndex = actionCount;
-            const endIndex = Math.max(actionCount - 50, 1);
+            const endIndex = Math.max(actionCount - 10, 1);
             const actionIds = [];
             for (let i = startIndex; i >= endIndex; i--) {
                 actionIds.push(i);
@@ -1839,10 +1839,10 @@ class ContractManager {
             return [];
         }
 
-        // PERFORMANCE OPTIMIZATION: Load 25 most recent proposals initially for better UX
+        // PERFORMANCE OPTIMIZATION: Load 10 most recent proposals initially for better UX
         // This ensures Load More button appears and users see more proposals
         const startIndex = actionCount;
-        const endIndex = Math.max(actionCount - 25, 1); // Load 25 instead of 15 for better pagination
+        const endIndex = Math.max(actionCount - 10, 1); // Load 10 proposals initially
         const actionIds = [];
         for (let i = startIndex; i >= endIndex; i--) {
             actionIds.push(i);
@@ -2081,9 +2081,29 @@ class ContractManager {
                 return await this.stakingContract.hasRole(ADMIN_ROLE, userAddress);
             }, 'hasAdminRole');
         } catch (error) {
-            // Graceful error handling for admin role checks
             console.warn(`⚠️ Admin role check failed gracefully: ${error.message}`);
             console.warn('This is expected when contracts are not deployed or user lacks admin permissions');
+        }
+        return false;
+    }
+
+    async hasOwnerApproverRole(address = null) {
+        if (!this.stakingContract) {
+            this.log('⚠️ Staking contract not initialized - owner role check skipped');
+            return false;
+        }
+
+        try {
+            return await this.executeWithRetry(async () => {
+                const userAddress = address || (this.signer ? await this.signer.getAddress() : null);
+                if (!userAddress) {
+                    throw new Error('No address provided and no signer available');
+                }
+                const OWNER_ROLE = await this.stakingContract.OWNER_APPROVER_ROLE();
+                return await this.stakingContract.hasRole(OWNER_ROLE, userAddress);
+            }, 'hasOwnerApproverRole');
+        } catch (error) {
+            console.warn(`⚠️ Owner approver role check failed gracefully: ${error.message}`);
             return false;
         }
     }
@@ -3790,13 +3810,6 @@ class ContractManager {
                     }
                 }
 
-                // Method 3: If still no pairs, extract from approved "Add Pair" proposals
-                if (!pairs || pairs.length === 0) {
-                    this.log('🔍 No pairs from contract methods, checking approved proposals...');
-                    pairs = await this.getPairsFromApprovedProposals();
-                    this.log('✅ Got pairs from approved proposals:', pairs.length);
-                }
-
                 const pairsInfo = [];
 
                 // Transform the contract data to the expected format
@@ -3831,45 +3844,6 @@ class ContractManager {
                 return [];
             }
         }, 'getAllPairsInfo');
-    }
-
-    /**
-     * Get pairs from approved "Add Pair" proposals
-     */
-    async getPairsFromApprovedProposals() {
-        try {
-            const actionCounter = await this.getActionCounter();
-            const pairs = [];
-
-            // Check recent proposals for approved "Add Pair" actions
-            for (let i = actionCounter; i > Math.max(actionCounter - 50, 0); i--) {
-                try {
-                    const action = await this.getActions(i);
-                    if (action && action.actionType === 2 && action.executed && !action.rejected) { // ActionType 2 = Add Pair
-                        pairs.push({
-                            address: action.pairToAdd,
-                            pairToAdd: action.pairToAdd,
-                            pairNameToAdd: action.pairNameToAdd,
-                            platformToAdd: action.platformToAdd,
-                            weightToAdd: action.weightToAdd,
-                            name: action.pairNameToAdd,
-                            platform: action.platformToAdd,
-                            weight: action.weightToAdd,
-                            isActive: true
-                        });
-                        this.log(`✅ Found approved pair from proposal ${i}: ${action.pairNameToAdd}`);
-                    }
-                } catch (error) {
-                    // Skip failed actions
-                    continue;
-                }
-            }
-
-            return pairs;
-        } catch (error) {
-            this.logError('Failed to get pairs from proposals:', error);
-            return [];
-        }
     }
 
     /**

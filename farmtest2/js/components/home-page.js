@@ -234,11 +234,11 @@ class HomePage {
                             </th>
                             <th>
                                 <span class="material-icons">pie_chart</span>
-                                Your Shares
+                                My Share
                             </th>
                             <th>
                                 <span class="material-icons">monetization_on</span>
-                                Your Earnings
+                                My Reward
                             </th>
                         </tr>
                     </thead>
@@ -302,11 +302,11 @@ class HomePage {
                             </th>
                             <th>
                                 <span class="material-icons">pie_chart</span>
-                                Your Shares
+                                My Share
                             </th>
                             <th>
                                 <span class="material-icons">monetization_on</span>
-                                Your Earnings
+                                My Reward
                             </th>
                         </tr>
                     </thead>
@@ -364,6 +364,7 @@ class HomePage {
                             data-pair-address="${pair.address}"
                             data-tab="0"
                             ${!canTransact ? 'disabled' : ''}
+                            title="Stake or Unstake"
                             style="min-width: 100px;">
                         <span class="material-icons" style="font-size: 16px;">share</span>
                         ${userShares}%
@@ -375,6 +376,7 @@ class HomePage {
                             data-pair-address="${pair.address}"
                             data-tab="2"
                             ${!canTransact ? 'disabled' : ''}
+                            title="Claim reward"
                             style="min-width: 120px;">
                         <span class="material-icons" style="font-size: 16px;">redeem</span>
                         ${userEarnings} LIB
@@ -1115,28 +1117,27 @@ class HomePage {
                 }
             }
 
-            // Check if user is the contract owner (with timeout and error handling)
-            if (window.contractManager?.stakingContract?.owner) {
+            // Check if user has the owner approver role (with timeout and error handling)
+            if (typeof window.contractManager?.hasOwnerApproverRole === 'function') {
                 try {
                     let timeoutId;
                     const timeoutPromise = new Promise((_, reject) => {
-                        timeoutId = setTimeout(() => reject(new Error('Owner check timeout')), 5000);
+                        timeoutId = setTimeout(() => reject(new Error('Owner approver role check timeout')), 5000);
                     });
-                    
-                    const owner = await Promise.race([
-                        window.contractManager.stakingContract.owner(),
+
+                    const hasOwnerRole = await Promise.race([
+                        window.contractManager.hasOwnerApproverRole(userAddress),
                         timeoutPromise
                     ]);
-                    
-                    // Clear the timeout since the race completed
+
                     clearTimeout(timeoutId);
-                    
-                    if (owner.toLowerCase() === userAddress.toLowerCase()) {
+
+                    if (hasOwnerRole) {
                         this.showAdminButton();
                         return;
                     }
-                } catch (ownerError) {
-                    console.warn('⚠️ Owner check failed:', ownerError.message);
+                } catch (ownerRoleError) {
+                    console.warn('⚠️ Owner approver role check failed:', ownerRoleError.message);
                 }
             }
 

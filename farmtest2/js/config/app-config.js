@@ -25,7 +25,7 @@ window.CONFIG = {
                 decimals: 18
             },
             CONTRACTS: {
-                STAKING_CONTRACT: '0xDB7100D6f037fc36A51c38E76c910626A2d755f4',
+                STAKING_CONTRACT: '0x61590B1c1346F695AEB7BF53FA0132C84f0e4c18',
                 REWARD_TOKEN: '0x6e2b7ABA70e8262Fb534aF5e14E786981760b829',
                 LP_TOKENS: {
                     LPLIBETH: '0xf33CDD487d091d26B2955588791dD81c8940a3F3',
@@ -259,6 +259,7 @@ window.CONFIG.ABIS = {
         // Access control
         'function hasRole(bytes32 role, address account) external view returns (bool)',
         'function ADMIN_ROLE() external view returns (bytes32)',
+        'function OWNER_APPROVER_ROLE() external view returns (bytes32)',
 
         // ============ GOVERNANCE FUNCTIONS ============
         // Multi-signature proposal functions
