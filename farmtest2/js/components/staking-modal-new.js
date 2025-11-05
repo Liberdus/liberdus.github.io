@@ -460,6 +460,9 @@ class StakingModalNew {
         // Switch to specified tab
         this.switchTab(tab);
 
+        // Update button states after everything is loaded (to check weight)
+        this.updateButtonStates();
+
         // Prevent body scroll
         document.body.style.overflow = 'hidden';
     }
@@ -877,7 +880,9 @@ class StakingModalNew {
         const stakeBtn = document.querySelector('.modal-actions .btn-primary[onclick*="Stake"]');
         if (stakeBtn && this.currentTab === 'stake') {
             const amount = parseFloat(this.stakeAmount);
-            stakeBtn.disabled = !amount || amount === 0;
+            // Check if weight is 0 to disable staking
+            const weight = parseFloat(this.currentPair?.weight || '0');
+            stakeBtn.disabled = !amount || amount === 0 || !weight || weight === 0;
         }
 
         // Update unstake button
