@@ -56,25 +56,8 @@ class MasterInitializer {
         // Load SES-safe handler
         await this.loadScript('js/utils/ses-safe-handler.js');
 
-        // Load demo configuration first (if available)
-        try {
-            await this.loadScript('js/config/demo-config.js');
-        } catch (error) {
-            console.log('Demo config not found - running in production mode');
-        }
-
         // Load main configuration
         await this.loadScript('js/config/app-config.js');
-
-        // Load mock service if demo mode is enabled
-        if (window.DEMO_CONFIG && window.DEMO_CONFIG.ENABLED) {
-            try {
-                await this.loadScript('js/services/mock-blockchain-service.js');
-                console.log('🎭 Demo mode active - Mock blockchain service loaded');
-            } catch (error) {
-                console.warn('Failed to load mock blockchain service:', error);
-            }
-        }
 
         // Verify configuration loaded
         if (!window.CONFIG) {
@@ -432,27 +415,6 @@ class MasterInitializer {
         } else {
             console.log('❌ MetaMask not detected');
             window.isMetaMaskAvailable = false;
-
-            // For testing purposes, create a mock ethereum object
-            if (window.location.href.includes('test') || window.location.href.includes('localhost')) {
-                console.log('🧪 Creating mock MetaMask for testing...');
-                window.ethereum = {
-                    isMetaMask: true,
-                    request: async (params) => {
-                        if (params.method === 'eth_requestAccounts') {
-                            return ['0x1234567890123456789012345678901234567890'];
-                        } else if (params.method === 'eth_accounts') {
-                            return ['0x1234567890123456789012345678901234567890'];
-                        }
-                        return [];
-                    },
-                    on: (event, callback) => {
-                        console.log(`Mock MetaMask: Registered listener for ${event}`);
-                    }
-                };
-                window.isMetaMaskAvailable = true;
-                console.log('✅ Mock MetaMask created for testing');
-            }
         }
 
         // Ensure connect button is properly set up

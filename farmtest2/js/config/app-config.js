@@ -25,12 +25,12 @@ window.CONFIG = {
                 decimals: 18
             },
             CONTRACTS: {
-                STAKING_CONTRACT: '0x61590B1c1346F695AEB7BF53FA0132C84f0e4c18',
+                STAKING_CONTRACT: '0x5e4216c952190BEA7abC4Fc64e990AfbF4F9885a',
                 REWARD_TOKEN: '0x6e2b7ABA70e8262Fb534aF5e14E786981760b829',
                 LP_TOKENS: {
-                    LPLIBETH: '0xf33CDD487d091d26B2955588791dD81c8940a3F3',
-                    LPLIBUSDC: '0x104f51469aE06A3Cda5a23901e4e069A5D71F6d3',
-                    LPLIBUSDT: '0x87D394F688a51584cB59dA49A95E59080D251Cf0'
+                    LPLIBETH: '0x34370487063aE6e02400Db1336f1724f28EF4cDC',
+                    LPLIBUSDC: '0x020393f1E32DFeeE19D3889aa55205E6e4733623',
+                    LPLIBUSDT: '0xE797b9130527BF6972Ee0a1e84D31e076f76f278'
                 }
             }
         },

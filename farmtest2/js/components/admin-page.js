@@ -3291,7 +3291,7 @@ class AdminPage {
                             const weight = typeof proposal.weightToAdd === 'bigint'
                                 ? proposal.weightToAdd.toString()
                                 : proposal.weightToAdd;
-                            summary += ` (weight: ${weight})`;
+                            summary += ` (weight: ${this.formatWeightForDisplay(weight)})`;
                         }
                     } else if (proposal.pairToAdd) {
                         summary = `Add LP pair ${this.formatAddress(proposal.pairToAdd)}`;
@@ -3303,7 +3303,7 @@ class AdminPage {
                 case 'REMOVE_PAIR':
                     if (proposal.pairToRemove) {
                         // Try to get pair name from existing pairs or show address
-                        const pairName = this.getPairNameByAddress(proposal.pairToRemove);
+                        const pairName = proposal.pairNameToAdd;
                         if (pairName) {
                             return `Remove ${pairName} LP pair`;
                         } else {
@@ -3318,7 +3318,7 @@ class AdminPage {
                         if (pairCount === 1) {
                             const pairName = this.getPairNameByAddress(proposal.pairs[0]);
                             const weight = proposal.weights[0];
-                            return `Update ${pairName || this.formatAddress(proposal.pairs[0])} weight to ${weight}`;
+                            return `Update ${pairName || this.formatAddress(proposal.pairs[0])} weight to ${this.formatWeightForDisplay(weight)}`;
                         } else {
                             return `Update weights for ${pairCount} LP pairs`;
                         }
@@ -3388,7 +3388,7 @@ class AdminPage {
         }
     }
 
-    renderPairsList(pairs) {
+    renderPairsList(pairs, totalWeight) {
         if (!pairs || pairs.length === 0) {
             return '<div class="no-data">No pairs configured</div>';
         }
@@ -3421,8 +3421,11 @@ class AdminPage {
                 displayWeight: displayWeight
             };
         });
-
-        const totalWeight = pairData.reduce((sum, p) => sum + (p.weight || 0), 0);
+        
+        // if totalWeight not provided, calculate it
+        if (totalWeight === undefined || totalWeight === null) {
+            totalWeight = pairData.reduce((sum, p) => sum + (p.weight || 0), 0);
+        }
 
         return pairData.map(pair => {
             const percentageValue = totalWeight > 0 && pair.weight !== null 
@@ -4161,23 +4164,20 @@ class AdminPage {
 
             case 'remove-pair':
             case 'remove_pair':
-                const pairName = proposal.pairToRemove ? this.getPairNameByAddress(proposal.pairToRemove) : null;
-                const removePairAddress = proposal.pairToRemove || 'Not specified';
-
                 let removePairHTML = `
                     <div class="parameters-container">
                         <div class="parameter-card">
                             <div class="parameter-icon">🏷️</div>
                             <div class="parameter-content">
                                 <div class="parameter-label">Pair to Remove</div>
-                                <div class="parameter-value">${pairName || (proposal.pairToRemove ? this.formatAddress(proposal.pairToRemove) : 'Not specified')}</div>
+                                <div class="parameter-value">${proposal?.pairNameToAdd}</div>
                             </div>
                         </div>
                         <div class="parameter-card">
                             <div class="parameter-icon">📍</div>
                             <div class="parameter-content">
                                 <div class="parameter-label">LP Token Address</div>
-                                <div class="parameter-value address-display" style="font-family: monospace; font-size: 0.85em; word-break: break-all;">${removePairAddress}</div>
+                                <div class="parameter-value address-display" style="font-family: monospace; font-size: 0.85em; word-break: break-all;">${proposal?.pairToRemove}</div>
                             </div>
                         </div>`;
 
@@ -4249,14 +4249,22 @@ class AdminPage {
 
             case 'change-signer':
             case 'change_signer':
-                const newSignerAddress = proposal.newSigner || 'Not specified';
+                const newSignerAddress = proposal.pairToRemove || 'Not specified';
+                const signerToRemove = proposal.pairToAdd || 'Not specified';
 
                 let changeSignerHTML = `
                     <div class="parameters-container">
                         <div class="parameter-card">
-                            <div class="parameter-icon">🔑</div>
+                            <div class="parameter-icon">➖</div>
                             <div class="parameter-content">
-                                <div class="parameter-label">New Signer Address</div>
+                                <div class="parameter-label">Signer To Remove</div>
+                                <div class="parameter-value address-display" style="font-family: monospace; font-size: 0.85em; word-break: break-all;">${signerToRemove}</div>
+                            </div>
+                        </div>
+                        <div class="parameter-card">
+                            <div class="parameter-icon">➕</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Signer To Add</div>
                                 <div class="parameter-value address-display" style="font-family: monospace; font-size: 0.85em; word-break: break-all;">${newSignerAddress}</div>
                             </div>
                         </div>`;
@@ -5545,7 +5553,7 @@ class AdminPage {
                     const weightB = parseFloat(b.weight || '0');
                     return weightB - weightA; // Descending order (highest first)
                 });
-                pairsContainer.innerHTML = this.renderPairsList(sortedPairs);
+                pairsContainer.innerHTML = this.renderPairsList(sortedPairs, info.totalWeight);
             } else {
                 pairsContainer.innerHTML = '<div class="no-data">No LP pairs configured</div>';
             }

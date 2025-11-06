@@ -137,7 +137,6 @@
             
             // JavaScript - Config
             `${basePath}js/config/app-config.js`,
-            `${basePath}js/config/demo-config.js`,
             `${basePath}js/config/dev-config.js`,
             
             // JavaScript - Contracts
@@ -179,9 +178,6 @@
             
             // Libraries
             `${basePath}libs/ethers.umd.min.js`,
-
-            // Config files (non-JS)
-            `${basePath}config/constants.js`,
             
             // CSS - All stylesheets (only existing files)
             `${basePath}css/admin-homepage-theme.css`,

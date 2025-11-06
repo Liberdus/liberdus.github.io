@@ -45,7 +45,8 @@ class ContractManager {
 
         // Enhanced components
         this.gasEstimator = null;
-        this.transactionQueue = null;
+        // DEPRECATED: Transaction queue is unused - all UI calls go directly to stake/unstake/claimRewards
+        // this.transactionQueue = null;
         this.transactionStatus = null;
         this.multicallService = null; // Multicall2 for batch loading optimization
 
@@ -959,7 +960,7 @@ class ContractManager {
                 throw new Error('Staking contract not initialized');
             }
 
-            // Test required functions with timeout - made more lenient for demo mode
+            // Test required functions with timeout
             const requiredFunctions = [
                 { name: 'rewardToken', test: () => this.stakingContract.rewardToken(), required: false },
                 { name: 'hourlyRewardRate', test: () => this.stakingContract.hourlyRewardRate(), required: false },
@@ -995,7 +996,7 @@ class ContractManager {
         } catch (error) {
             this.logError('❌ Contract function verification failed:', error);
             this.log('⚠️ Contract function verification failed, but continuing:', error.message);
-            // Don't throw error - allow system to continue with mock data
+            // Don't throw error - allow system to continue with limited functionality
             return false;
         }
     }
@@ -2811,7 +2812,7 @@ class ContractManager {
             console.log('✅ Contracts recreated with signer');
         } catch (error) {
             console.error('❌ Failed to recreate contracts with signer:', error);
-            console.log('⚠️ Continuing without signer update - demo mode will be used');
+            console.log('⚠️ Continuing without signer update - transactions may not be available');
         }
     }
 
@@ -3904,8 +3905,11 @@ class ContractManager {
     // ==================== CONTRACT WRITE OPERATIONS ====================
 
     /**
-     * Enhanced approval flow with comprehensive checking and multi-step handling
+     * DEPRECATED: Enhanced approval flow with comprehensive checking and multi-step handling
+     * This method is unused - UI components handle approvals directly
+     * Commented out to reduce maintenance burden
      */
+    /*
     async executeApprovalFlow(pairName, amount, options = {}) {
         try {
             this.log(`Starting approval flow for ${pairName}, amount: ${amount}`);
@@ -3975,10 +3979,14 @@ class ContractManager {
             throw error;
         }
     }
+    */
 
     /**
-     * Enhanced staking flow with automatic approval handling
+     * DEPRECATED: Enhanced staking flow with automatic approval handling
+     * This method is unused - UI components call stake/unstake/claimRewards directly
+     * Commented out to reduce maintenance burden
      */
+    /*
     async executeStakingFlow(pairName, amount, options = {}) {
         try {
             this.log(`Starting staking flow for ${pairName}, amount: ${amount}`);
@@ -4037,10 +4045,13 @@ class ContractManager {
             throw error;
         }
     }
+    */
 
     /**
-     * Calculate total gas cost for multiple transactions
+     * DEPRECATED: Calculate total gas cost for multiple transactions
+     * Only used by deprecated executeStakingFlow
      */
+    /*
     calculateTotalGasCost(transactions) {
         return transactions.reduce((total, tx) => {
             if (tx.gasEstimate) {
@@ -4049,6 +4060,7 @@ class ContractManager {
             return total;
         }, 0);
     }
+    */
 
     /**
      * Approve LP token for staking with enhanced gas estimation
@@ -4056,7 +4068,7 @@ class ContractManager {
     async approveLPToken(pairName, amount) {
         this.log(`Executing transaction approveLPToken`);
 
-        // Check if we're in fallback mode
+        // Get LP token contract
         const lpContract = this.getLPTokenContract(pairName);
 
         return await this.executeTransactionWithRetry(async () => {
@@ -4075,7 +4087,6 @@ class ContractManager {
 
             this.log('Approve transaction sent:', tx.hash, `Gas: ${gasLimit}, Price: ${ethers.utils.formatUnits(gasPrice, 'gwei')} gwei`);
 
-            // CRITICAL FIX: Return tx object, not receipt
             return tx;
         }, 'approveLPToken');
     }
@@ -4089,14 +4100,18 @@ class ContractManager {
         // Ensure we have a signer for transactions
         await this.ensureSigner();
 
-        // Check if we're in fallback mode
+        // Verify contract is available
         if (!this.stakingContract) {
-            // Fallback mode - simulate transaction
-            this.log(`Fallback mode: Simulating claimRewards for ${lpTokenAddress}`);
+            const errorMsg = 'Staking contract is not available. Please ensure you are connected to the correct network.';
+            this.logError('❌ Cannot claim rewards: Staking contract not initialized');
+            
+            
+            window.notificationManager?.error(errorMsg);
+            
+            
             return {
-                success: true,
-                hash: '0x' + Math.random().toString(16).substr(2, 64),
-                message: 'Rewards claimed successfully (demo mode)'
+                success: false,
+                error: errorMsg
             };
         }
 
@@ -4140,13 +4155,18 @@ class ContractManager {
         // Ensure we have a signer for transactions
         await this.ensureSigner();
 
-        // Check if we're in fallback mode
+        // Verify contract is available
         if (!this.stakingContract) {
-            this.log(`Fallback mode: Simulating stake for ${lpTokenAddress}`);
+            const errorMsg = 'Staking contract is not available. Please ensure you are connected to the correct network.';
+            this.logError('❌ Cannot stake: Staking contract not initialized');
+            
+            if (window.notificationManager) {
+                window.notificationManager.error(errorMsg);
+            }
+            
             return {
-                success: true,
-                hash: '0x' + Math.random().toString(16).substr(2, 64),
-                message: 'Stake transaction successful (demo mode)'
+                success: false,
+                error: errorMsg
             };
         }
 
@@ -4193,13 +4213,18 @@ class ContractManager {
         // Ensure we have a signer for transactions
         await this.ensureSigner();
 
-        // Check if we're in fallback mode
+        // Verify contract is available
         if (!this.stakingContract) {
-            this.log(`Fallback mode: Simulating unstake for ${lpTokenAddress}`);
+            const errorMsg = 'Staking contract is not available. Please ensure you are connected to the correct network.';
+            this.logError('❌ Cannot unstake: Staking contract not initialized');
+            
+            if (window.notificationManager) {
+                window.notificationManager.error(errorMsg);
+            }
+            
             return {
-                success: true,
-                hash: '0x' + Math.random().toString(16).substr(2, 64),
-                message: 'Unstake transaction successful (demo mode)'
+                success: false,
+                error: errorMsg
             };
         }
 
