@@ -1422,6 +1422,9 @@ body {
   font-size: 1.1rem;
   line-height: 1.6;
   font-weight: 500;
+}
+
+.link-icon {
   text-decoration: none;
 }
 
