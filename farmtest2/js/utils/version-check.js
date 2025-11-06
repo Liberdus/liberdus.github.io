@@ -146,7 +146,6 @@
             `${basePath}js/core/accessibility-manager.js`,
             `${basePath}js/core/animation-manager.js`,
             `${basePath}js/core/error-handler.js`,
-            `${basePath}js/core/loading-manager.js`,
             `${basePath}js/core/notification-manager-new.js`,
             `${basePath}js/core/unified-theme-manager.js`,
             
@@ -187,7 +186,6 @@
             `${basePath}css/component-library.css`,
             `${basePath}css/components.css`,
             `${basePath}css/day10-enhancements.css`,
-            `${basePath}css/home-page.css`,
             `${basePath}css/in-development.css`,
             `${basePath}css/main.css`,
             `${basePath}css/network-indicator-selector.css`,

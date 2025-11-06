@@ -736,9 +736,9 @@ class AdminPage {
      */
     setupContractListeners() {
         // Listen for contract events
-        window.addEventListener('contractReady', () => {
+        window.addEventListener('contractReady', async () => {
             console.log('📋 Contract ready event received');
-            this.handleContractReady();
+            await this.handleContractReady();
         });
 
         window.addEventListener('contractError', (event) => {
@@ -1100,12 +1100,11 @@ class AdminPage {
         }
     }
 
-    handleContractReady() {
+    async handleContractReady() {
         console.log('📋 Handling contract ready');
 
         // Refresh contract data
-        this.loadContractStats();
-        this.refreshData();
+        await this.refreshData();
     }
 
     handleContractError(error) {
@@ -3407,7 +3406,7 @@ class AdminPage {
         const pairData = pairs.map(pair => {
             const weight = parseWeight(pair?.weight);
             let displayWeight;
-            if (weight !== null) {
+            if (weight != null) {
                 displayWeight = window.Formatter?.formatSmallNumberWithSubscript(weight) || weight.toString();
             } else {
                 displayWeight = this.formatWeightForDisplay(pair?.weight) || '0';
@@ -3428,7 +3427,7 @@ class AdminPage {
         }
 
         return pairData.map(pair => {
-            const percentageValue = totalWeight > 0 && pair.weight !== null 
+            const percentageValue = totalWeight > 0 && pair.weight != null 
                 ? (pair.weight / totalWeight) * 100 
                 : 0;
             const percentage = Math.round(percentageValue);
@@ -3473,6 +3472,17 @@ class AdminPage {
     async showDashboard() {
         const contentDiv = document.getElementById('admin-section-content');
         
+        // Initialize contractStats if null (from previous failed load)
+        if (!this.contractStats) {
+            this.contractStats = {
+                activePairs: 0,      // This can stay 0 since it's loaded from contract
+                totalPairs: 0,       // This can stay 0 since it's loaded from contract
+                totalTVL: null,      // Not available without price feeds
+                totalStakers: null,  // Not available without event parsing
+                totalRewards: null   // Not available without additional data
+            };
+        }
+        
         contentDiv.innerHTML = `
             <div class="dashboard-section">
                 <h2>📊 Contract Statistics</h2>
@@ -3484,7 +3494,7 @@ class AdminPage {
                         </div>
                         <div class="card-content">
                             <div class="stat-value" id="active-pairs-count">
-                                ${this.contractStats.activePairs || 0}
+                                ${this.contractStats.activePairs ?? 0}
                             </div>
                             <div class="stat-label">Active Pairs</div>
                         </div>
@@ -3496,7 +3506,9 @@ class AdminPage {
                         </div>
                         <div class="card-content">
                             <div class="stat-value" id="total-tvl">
-                                $${this.formatNumber(this.contractStats.totalTVL || 0)}
+                                ${this.contractStats.totalTVL != null 
+                                    ? `$${this.formatNumber(this.contractStats.totalTVL)}` 
+                                    : 'N/A'}
                             </div>
                             <div class="stat-label">USD Value</div>
                         </div>
@@ -3508,7 +3520,9 @@ class AdminPage {
                         </div>
                         <div class="card-content">
                             <div class="stat-value" id="total-stakers">
-                                ${this.contractStats.totalStakers || 0}
+                                ${this.contractStats.totalStakers != null 
+                                    ? this.contractStats.totalStakers 
+                                    : 'N/A'}
                             </div>
                             <div class="stat-label">Unique Users</div>
                         </div>
@@ -3520,7 +3534,9 @@ class AdminPage {
                         </div>
                         <div class="card-content">
                             <div class="stat-value" id="total-rewards">
-                                ${this.formatNumber(this.contractStats.totalRewards || 0)}
+                                ${this.contractStats.totalRewards != null 
+                                    ? this.formatNumber(this.contractStats.totalRewards) 
+                                    : 'N/A'}
                             </div>
                             <div class="stat-label">LIB Tokens</div>
                         </div>
@@ -3556,9 +3572,9 @@ class AdminPage {
             this.contractStats = {
                 activePairs: 0,
                 totalPairs: 0,
-                totalTVL: 0,
-                totalStakers: 0,
-                totalRewards: 0,
+                totalTVL: null,
+                totalStakers: null,
+                totalRewards: null,
                 rewardBalance: null,
                 rewardToken: null,
                 rewardTokenSymbol: '',
@@ -3571,77 +3587,71 @@ class AdminPage {
             const isRpcDown = await this.checkRpcHealth(contractManager);
 
             if (isRpcDown) {
-                console.log('⚠️ RPC node issues detected, using demo values');
-                this.contractStats.rewardToken = '0x05A4cfAF5a8f939d61E4Ec6D6287c9a065d6574c';
-                this.contractStats.hourlyRewardRate = 0;
-                this.contractStats.requiredApprovals = 3;
-                this.contractStats.actionCounter = 2; // We know we have 2 proposals
-                const symbol = this.contractStats.rewardTokenSymbol || 'USDC';
-                this.contractStats.rewardTokenSymbol = symbol;
-                this.contractStats.rewardBalance = `0.00 ${symbol}`;
-            } else {
-                // Try multicall for better performance (5 calls -> 1 call)
-                const stats = await contractManager.getContractStatsWithMulticall();
-
-                if (stats) {
-                    // Use multicall results with config defaults
-                    const defaults = window.CONFIG?.DEFAULTS || {};
-                    this.contractStats.rewardToken = stats.rewardToken || defaults.REWARD_TOKEN;
-                    this.contractStats.hourlyRewardRate = stats.hourlyRewardRate ? 
-                        Number(ethers.utils.formatEther(stats.hourlyRewardRate)) : defaults.HOURLY_REWARD_RATE;
-                    this.contractStats.requiredApprovals = stats.requiredApprovals?.toNumber() || defaults.REQUIRED_APPROVALS;
-                    this.contractStats.actionCounter = stats.actionCounter?.toNumber() || defaults.ACTION_COUNTER;
-                } else {
-                    // Fallback to individual calls with config defaults
-                    const defaults = window.CONFIG?.DEFAULTS || {};
-                    this.contractStats.rewardToken = await this.safeContractCall(
-                        () => contractManager.stakingContract.rewardToken(), 
-                        defaults.REWARD_TOKEN
-                    );
-                    this.contractStats.hourlyRewardRate = this.convertBigIntToNumber(
-                        await this.safeContractCall(
-                            () => contractManager.stakingContract.hourlyRewardRate(), 
-                            defaults.HOURLY_REWARD_RATE
-                        )
-                    );
-                    this.contractStats.requiredApprovals = this.convertBigIntToNumber(
-                        await this.safeContractCall(
-                            () => contractManager.stakingContract.REQUIRED_APPROVALS(), 
-                            defaults.REQUIRED_APPROVALS
-                        )
-                    );
-                    this.contractStats.actionCounter = this.convertBigIntToNumber(
-                        await this.safeContractCall(
-                            () => contractManager.stakingContract.actionCounter(), 
-                            defaults.ACTION_COUNTER
-                        )
-                    );
-
-                    const symbol = await this.safeContractCall(
-                        () => contractManager.rewardTokenContract.symbol(),
-                        this.contractStats.rewardTokenSymbol || 'USDC'
-                    );
-                    this.contractStats.rewardTokenSymbol = symbol;
-
-                    this.contractStats.rewardBalance = await this.safeContractCall(
-                        async () => {
-                            const stakingAddress = contractManager.stakingContract?.address;
-                            if (!stakingAddress) {
-                                throw new Error('Staking contract address not available');
-                            }
-                            const balance = await contractManager.rewardTokenContract.balanceOf(stakingAddress);
-                            const balanceValue = Number(ethers.utils.formatEther(balance));
-                            return `${balanceValue.toFixed(2)} ${symbol}`;
-                        },
-                        `0.00 ${symbol}`
-                    );
-                }
-
-                console.log(`📊 rewardToken: ${this.contractStats.rewardToken}`);
-                console.log(`📊 hourlyRewardRate: ${this.contractStats.hourlyRewardRate}`);
-                console.log(`📊 requiredApprovals: ${this.contractStats.requiredApprovals}`);
-                console.log(`📊 actionCounter: ${this.contractStats.actionCounter}`);
+                console.error('❌ RPC node issues detected, cannot load contract statistics');
+                throw new Error('RPC connection failed. Please check your network connection and try again.');
             }
+
+            // Try multicall for better performance (5 calls -> 1 call)
+            const stats = await contractManager.getContractStatsWithMulticall();
+
+            if (stats) {
+                // Use multicall results with config defaults
+                const defaults = window.CONFIG?.DEFAULTS || {};
+                this.contractStats.rewardToken = stats.rewardToken || defaults.REWARD_TOKEN;
+                this.contractStats.hourlyRewardRate = stats.hourlyRewardRate ? 
+                    Number(ethers.utils.formatEther(stats.hourlyRewardRate)) : defaults.HOURLY_REWARD_RATE;
+                this.contractStats.requiredApprovals = stats.requiredApprovals?.toNumber() || defaults.REQUIRED_APPROVALS;
+                this.contractStats.actionCounter = stats.actionCounter?.toNumber() || defaults.ACTION_COUNTER;
+            } else {
+                // Fallback to individual calls with config defaults
+                const defaults = window.CONFIG?.DEFAULTS || {};
+                this.contractStats.rewardToken = await this.safeContractCall(
+                    () => contractManager.stakingContract.rewardToken(), 
+                    defaults.REWARD_TOKEN
+                );
+                this.contractStats.hourlyRewardRate = this.convertBigIntToNumber(
+                    await this.safeContractCall(
+                        () => contractManager.stakingContract.hourlyRewardRate(), 
+                        defaults.HOURLY_REWARD_RATE
+                    )
+                );
+                this.contractStats.requiredApprovals = this.convertBigIntToNumber(
+                    await this.safeContractCall(
+                        () => contractManager.stakingContract.REQUIRED_APPROVALS(), 
+                        defaults.REQUIRED_APPROVALS
+                    )
+                );
+                this.contractStats.actionCounter = this.convertBigIntToNumber(
+                    await this.safeContractCall(
+                        () => contractManager.stakingContract.actionCounter(), 
+                        defaults.ACTION_COUNTER
+                    )
+                );
+
+                const symbol = await this.safeContractCall(
+                    () => contractManager.rewardTokenContract.symbol(),
+                    this.contractStats.rewardTokenSymbol || 'USDC'
+                );
+                this.contractStats.rewardTokenSymbol = symbol;
+
+                this.contractStats.rewardBalance = await this.safeContractCall(
+                    async () => {
+                        const stakingAddress = contractManager.stakingContract?.address;
+                        if (!stakingAddress) {
+                            throw new Error('Staking contract address not available');
+                        }
+                        const balance = await contractManager.rewardTokenContract.balanceOf(stakingAddress);
+                        const balanceValue = Number(ethers.utils.formatEther(balance));
+                        return `${balanceValue.toFixed(2)} ${symbol}`;
+                    },
+                    null
+                );
+            }
+
+            console.log(`📊 rewardToken: ${this.contractStats.rewardToken}`);
+            console.log(`📊 hourlyRewardRate: ${this.contractStats.hourlyRewardRate}`);
+            console.log(`📊 requiredApprovals: ${this.contractStats.requiredApprovals}`);
+            console.log(`📊 actionCounter: ${this.contractStats.actionCounter}`);
 
             // Get pairs information (with error handling)
             try {
@@ -3653,46 +3663,23 @@ class AdminPage {
                 console.warn('⚠️ Could not load pairs info:', error.message);
                 this.contractStats.totalPairs = this.contractStats.activePairs;
             }
-
-            // Calculate estimated TVL (placeholder - would need price feeds in real implementation)
-            this.contractStats.totalTVL = this.contractStats.activePairs * 10000; // Placeholder
-
-            // Estimate total stakers (placeholder - would need event parsing in real implementation)
-            this.contractStats.totalStakers = this.contractStats.activePairs * 25; // Placeholder
-            
-            // Estimate total rewards (placeholder)
-            this.contractStats.totalRewards = this.contractStats.activePairs * 5000; // Placeholder
             
             console.log('✅ Contract stats loaded:', this.contractStats);
             
         } catch (error) {
             console.error('❌ Failed to load contract stats:', error);
 
-            // Provide fallback demo values instead of zeros for better UX
-            const fallbackSymbol = (this.contractStats && this.contractStats.rewardTokenSymbol) || 'USDC';
-            this.contractStats = {
-                activePairs: 3,
-                totalPairs: 5,
-                totalTVL: 125000,
-                totalStakers: 89,
-                totalRewards: 15000,
-                rewardToken: '0x05A4cfAF5a8f939d61E4Ec6D6287c9a065d6574c',
-                hourlyRewardRate: 0.1,
-                requiredApprovals: 3,
-                actionCounter: 2,
-                rewardTokenSymbol: fallbackSymbol,
-                rewardBalance: `0.00 ${fallbackSymbol}`,
-                isDemo: true // Flag to indicate these are demo values
-            };
+            // Set contractStats to null to indicate failure
+            this.contractStats = null;
 
-            // Show user-friendly notification about using demo data
+            // Show error to user
+            const errorMessage = error.message || 'Failed to load contract statistics';
+            this.showError('Failed to load contract statistics', errorMessage);
+
+            // Also show notification
             if (window.notificationManager) {
-                window.notificationManager.warning(
-                    'Contract data unavailable. Displaying demo values for interface testing.'
-                );
+                window.notificationManager.error('Failed to load contract statistics. Please try again.');
             }
-
-            console.log('📊 Using demo contract stats due to error:', this.contractStats);
         }
     }
 
@@ -3709,17 +3696,23 @@ class AdminPage {
     }
 
     updateDashboardDisplay() {
-        // Add demo data indicator if using fallback values
-        if (this.contractStats.isDemo) {
-            this.addDemoDataIndicator();
+        // Don't update display if stats failed to load (error already shown)
+        if (!this.contractStats) {
+            return;
         }
 
         // Update stat values
         const elements = {
-            'active-pairs-count': this.contractStats.activePairs || 0,
-            'total-tvl': this.formatNumber(this.contractStats.totalTVL || 0),
-            'total-stakers': this.contractStats.totalStakers || 0,
-            'total-rewards': this.formatNumber(this.contractStats.totalRewards || 0)
+            'active-pairs-count': this.contractStats.activePairs ?? 0,
+            'total-tvl': this.contractStats.totalTVL != null 
+                ? `$${this.formatNumber(this.contractStats.totalTVL)}` 
+                : 'N/A',
+            'total-stakers': this.contractStats.totalStakers != null 
+                ? this.contractStats.totalStakers 
+                : 'N/A',
+            'total-rewards': this.contractStats.totalRewards != null 
+                ? this.formatNumber(this.contractStats.totalRewards) 
+                : 'N/A'
         };
         
         Object.entries(elements).forEach(([id, value]) => {
@@ -3736,44 +3729,12 @@ class AdminPage {
         return `${address.slice(0, 6)}...${address.slice(-4)}`;
     }
 
-    /**
-     * Add demo data indicator to the UI
-     */
-    addDemoDataIndicator() {
-        // Check if indicator already exists
-        if (document.querySelector('.demo-data-indicator')) {
-            return;
-        }
-
-        // Create demo data indicator
-        const indicator = document.createElement('div');
-        indicator.className = 'demo-data-indicator';
-        indicator.innerHTML = `
-            <div class="demo-banner">
-                <span class="demo-icon">🎭</span>
-                <span class="demo-text">Demo Mode: Contract data unavailable, showing sample values</span>
-                <button class="demo-retry-btn" onclick="adminPage.retryContractConnection()">
-                    🔄 Retry Connection
-                </button>
-            </div>
-        `;
-
-        // Add to the top of the admin container
-        const adminContainer = document.querySelector('.admin-container') || document.body;
-        adminContainer.insertBefore(indicator, adminContainer.firstChild);
-    }
 
     /**
      * Retry contract connection
      */
     async retryContractConnection() {
         console.log('🔄 Retrying contract connection...');
-
-        // Remove demo indicator
-        const indicator = document.querySelector('.demo-data-indicator');
-        if (indicator) {
-            indicator.remove();
-        }
 
         // Show loading state
         if (window.notificationManager) {
@@ -3795,8 +3756,9 @@ class AdminPage {
             }
         } catch (error) {
             console.error('❌ Failed to reconnect:', error);
+            const errorMessage = error.message || 'Could not reconnect to contracts';
             if (window.notificationManager) {
-                window.notificationManager.error('Could not reconnect to contracts. Using demo data.');
+                window.notificationManager.error(`Could not reconnect to contracts: ${errorMessage}`);
             }
         }
     }
@@ -4587,7 +4549,7 @@ class AdminPage {
                                 <label for="new-rate">New Hourly Rate (${this.contractStats?.rewardTokenSymbol || 'USDC'})</label>
                                 <input type="number" id="new-rate" class="form-input" step="0.01" min="0" required
                                        placeholder="Enter new hourly rate">
-                                <small class="form-help">Current rate: ${this.contractStats?.hourlyRewardRate || 'Loading...'} ${this.contractStats?.rewardTokenSymbol || 'USDC'}/hour</small>
+                                <small class="form-help">Current rate: ${this.contractStats?.hourlyRewardRate != null ? `${this.contractStats.hourlyRewardRate} ${this.contractStats?.rewardTokenSymbol || 'USDC'}/hour` : 'N/A'}</small>
                             </div>
 
                             <div class="proposal-info">
@@ -5023,7 +4985,7 @@ class AdminPage {
                                 <label for="withdrawal-amount">Amount (${this.contractStats?.rewardTokenSymbol || 'USDC'})</label>
                                 <input type="number" id="withdrawal-amount" step="0.01" min="0" required
                                        placeholder="Enter amount to withdraw">
-                                <small class="form-help">Available balance: ${this.contractStats?.rewardBalance || (this.contractStats?.rewardTokenSymbol ? `0.00 ${this.contractStats.rewardTokenSymbol}` : 'Loading...')}</small>
+                                <small class="form-help">Available balance: ${this.contractStats?.rewardBalance ?? 'N/A'}</small>
                             </div>
 
                             <div class="form-group">
@@ -5319,55 +5281,6 @@ class AdminPage {
         }
     }
 
-    // Create demo proposals when RPC is down (like React version fallback)
-    createDemoProposals() {
-        console.log('🎭 Creating enhanced demo proposals for contract call issues');
-        return [
-            {
-                id: 13,
-                actionType: 'ADD_PAIR',
-                approvals: 1,
-                requiredApprovals: 3,
-                executed: false,
-                rejected: false,
-                expired: false,
-                proposedTime: Math.floor(Date.now() / 1000) - 1800, // 30 minutes ago
-                approvedBy: ['0x9249cFE964C49Cf2d2D0DBBbB33E99235707aa61'],
-                // Enhanced data for detailed display
-                pairToAdd: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640',
-                pairNameToAdd: 'WETH/USDC',
-                platformToAdd: 'Uniswap V3',
-                weightToAdd: BigInt('100')
-            },
-            {
-                id: 12,
-                actionType: 'WITHDRAW_REWARDS',
-                approvals: 1,
-                requiredApprovals: 3,
-                executed: false,
-                rejected: true,
-                expired: false,
-                proposedTime: Math.floor(Date.now() / 1000) - 3600, // 1 hour ago
-                approvedBy: ['0xea7bb30fbcCBB2646B0eFeB31382D3A4da07a3cC'],
-                // Enhanced data for detailed display
-                recipient: '0xea7bb30fbcCBB2646B0eFeB31382D3A4da07a3cC',
-                withdrawAmount: BigInt('500000000000000000000') // 500 tokens
-            },
-            {
-                id: 11,
-                actionType: 'SET_HOURLY_REWARD_RATE',
-                approvals: 1,
-                requiredApprovals: 3,
-                executed: false,
-                rejected: true,
-                expired: false,
-                proposedTime: Math.floor(Date.now() / 1000) - 7200, // 2 hours ago
-                approvedBy: ['0xea7bb30fbcCBB2646B0eFeB31382D3A4da07a3cC'],
-                // Enhanced data for detailed display
-                newHourlyRewardRate: BigInt('500000000000000000') // 0.5 tokens per hour
-            }
-        ];
-    }
 
     // Display proposals in the UI (for manual testing)
     displayProposals(proposals) {
@@ -5457,7 +5370,7 @@ class AdminPage {
                     const balanceValue = Number(ethers.utils.formatEther(balance));
                     return `${balanceValue.toFixed(2)} ${rewardTokenSymbol}`;
                 },
-                `0.00 ${rewardTokenSymbol}`
+                null
             );
 
             this.contractStats.rewardBalance = contractInfo.rewardBalance;
@@ -5468,7 +5381,7 @@ class AdminPage {
                     const rateValue = Number(ethers.utils.formatEther(rate));
                     return `${rateValue.toFixed(4)} ${rewardTokenSymbol}/hour`;
                 },
-                `0.0000 ${rewardTokenSymbol}/hour`
+                null
             );
 
             contractInfo.totalWeight = await this.safeContractCall(
@@ -5477,7 +5390,7 @@ class AdminPage {
                     // consistent formatting without rounding
                     return this.formatWeightForDisplay(totalWeight);
                 },
-                '0'
+                null
             );
 
             // Get pairs with full information - real data only
@@ -5528,19 +5441,19 @@ class AdminPage {
         // Update reward balance (already includes token symbol)
         const rewardBalanceEl = document.querySelector('[data-info="reward-balance"]');
         if (rewardBalanceEl) {
-            rewardBalanceEl.textContent = info.rewardBalance || 'N/A';
+            rewardBalanceEl.textContent = info.rewardBalance ?? 'N/A';
         }
 
         // Update hourly rate (already includes token symbol)
         const hourlyRateEl = document.querySelector('[data-info="hourly-rate"]');
         if (hourlyRateEl) {
-            hourlyRateEl.textContent = info.hourlyRate || 'N/A';
+            hourlyRateEl.textContent = info.hourlyRate ?? 'N/A';
         }
 
         // Update total weight (use innerHTML to render subscript HTML)
         const totalWeightEl = document.querySelector('[data-info="total-weight"]');
         if (totalWeightEl) {
-            totalWeightEl.innerHTML = info.totalWeight || 'N/A';
+            totalWeightEl.innerHTML = info.totalWeight ?? 'N/A';
         }
 
         // Update LP pairs with real contract data

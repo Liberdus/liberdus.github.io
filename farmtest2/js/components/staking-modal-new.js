@@ -606,15 +606,24 @@ class StakingModalNew {
     getPairName() {
         if (!this.currentPair) throw new Error('No current pair available');
 
-        const address = this.currentPair.lpToken || this.currentPair.address;
-        const lpTokens = window.CONFIG?.CONTRACTS?.LP_TOKENS || {};
-        
-        // Find known pair name or use platform/address fallback
-        return Object.entries(lpTokens).find(([, pairAddress]) => 
-            pairAddress.toLowerCase() === address.toLowerCase()
-        )?.[0] || 
-        (this.currentPair.platform !== 'Unknown' ? this.currentPair.platform : 
-         `${address.slice(0, 6)}...${address.slice(-4)}`);
+        const originalAddress = this.currentPair.lpToken || this.currentPair.address;
+        if (!originalAddress || typeof originalAddress !== 'string') {
+            throw new Error('No LP token address available');
+        }
+        const normalizedAddress = originalAddress.toLowerCase();
+        const manager = window.contractManager;
+
+        if (manager && manager.contractAddresses instanceof Map) {
+            for (const [key, value] of manager.contractAddresses.entries()) {
+                if (!key.startsWith('LP_')) continue;
+                if (typeof value === 'string' && value.toLowerCase() === normalizedAddress) {
+                    return key.replace('LP_', '');
+                }
+            }
+        }
+
+        return (this.currentPair.platform !== 'Unknown' ? this.currentPair.platform : 
+         `${originalAddress.slice(0, 6)}...${originalAddress.slice(-4)}`);
     }
 
     /**

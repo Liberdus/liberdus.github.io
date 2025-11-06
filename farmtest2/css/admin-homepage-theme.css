@@ -774,17 +774,6 @@ select::after {
     position: relative !important;
 }
 
-.form-group::after {
-    content: '▼' !important;
-    position: absolute !important;
-    right: 16px !important;
-    top: 50% !important;
-    transform: translateY(-50%) !important;
-    pointer-events: none !important;
-    font-size: 12px !important;
-    color: var(--text-secondary) !important;
-}
-
 select option,
 .form-input select option,
 #remove-pair-select option {

@@ -75,7 +75,6 @@ class MasterInitializer {
             'js/core/error-handler.js',        // Error handling system
             'js/core/unified-theme-manager.js', // Unified theme manager
             'js/core/notification-manager-new.js',
-            'js/core/loading-manager.js',
             'js/core/accessibility-manager.js'
         ];
 
@@ -326,7 +325,10 @@ class MasterInitializer {
                     window.rewardsCalculator = new window.RewardsCalculator();
 
                     console.log('🔄 Initializing RewardsCalculator...');
-                    const initResult = await window.rewardsCalculator.initialize(window.contractManager, window.priceFeeds);
+                    const initResult = await window.rewardsCalculator.initialize({
+                        contractManager: window.contractManager,
+                        priceFeeds: window.priceFeeds
+                    });
 
                     this.components.set('rewardsCalculator', window.rewardsCalculator);
                     console.log('✅ Rewards Calculator initialized successfully:', {

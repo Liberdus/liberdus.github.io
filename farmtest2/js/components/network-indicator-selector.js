@@ -159,6 +159,14 @@ class NetworkSelector {
         
         this._networkSwitching = true;
         
+        // Show skeleton table immediately when switching networks (for home page)
+        if (window.homePage && context === 'home') {
+            window.homePage.loading = true;
+            window.homePage.pairs = []; // Clear existing pairs
+            window.homePage.error = null;
+            window.homePage.render(); // Show skeleton immediately
+        }
+        
         // Hide admin button immediately when switching networks
         if (window.homePage?.hideAdminButton) {
             window.homePage.hideAdminButton();

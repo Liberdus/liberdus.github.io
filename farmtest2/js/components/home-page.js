@@ -123,6 +123,10 @@ class HomePage {
     refreshDataAfterWalletChange() {
         // Cancel any pending refresh
         clearTimeout(this.refreshDebounceTimer);
+        this.loading = true;
+        this.pairs = [];
+        this.error = null;
+        this.render(); // Show skeleton immediately
         
         // Schedule new refresh after 500ms (waits for rapid events + network transition to settle)
         this.refreshDebounceTimer = setTimeout(async () => {
@@ -243,7 +247,7 @@ class HomePage {
                         </tr>
                     </thead>
                     <tbody>
-                        ${Array(5).fill(0).map(() => `
+                        ${Array(3).fill(0).map(() => `
                             <tr>
                                 <td><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
                                 <td><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
@@ -275,6 +279,49 @@ class HomePage {
     }
 
     renderTable() {
+        // Generate table rows - either data rows or "no data" row
+        let tbodyContent = '';
+        if (this.pairs.length === 0) {
+            // Show "no data" row when there are no pairs
+            tbodyContent = `
+                <tr>
+                    <td colspan="7" style="text-align: center; padding: 48px 24px; color: var(--text-secondary);">
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 16px;">
+                            <span class="material-icons" style="font-size: 48px; color: var(--text-secondary); opacity: 0.5;">inbox</span>
+                            <div>
+                                <p style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0; color: var(--text-primary);">No Staking Pairs Available</p>
+                                <p style="font-size: 14px; margin: 0; color: var(--text-secondary);">
+                                    There are currently no staking pairs configured in the contract. Please check back later.
+                                </p>
+                            </div>
+                            <button class="btn btn-primary" id="retry-load" type="button" style="margin-top: 8px;">
+                                <span class="material-icons">refresh</span>
+                                Refresh Data
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        } else {
+            // Show data rows
+            tbodyContent = [...this.pairs].sort((a, b) => {
+                const parseValue = (value) => {
+                    const num = parseFloat(value ?? '0');
+                    return Number.isFinite(num) ? num : 0;
+                };
+
+                const aprA = parseValue(a.apr);
+                const aprB = parseValue(b.apr);
+                if (aprB !== aprA) {
+                    return aprB - aprA;
+                }
+
+                const tvlA = parseValue(a.tvl ?? a.totalStaked);
+                const tvlB = parseValue(b.tvl ?? b.totalStaked);
+                return tvlB - tvlA;
+            }).map(pair => this.renderPairRow(pair)).join('');
+        }
+
         return `
             <div class="table-container">
                 <table class="table">
@@ -311,22 +358,7 @@ class HomePage {
                         </tr>
                     </thead>
                     <tbody>
-                        ${[...this.pairs].sort((a, b) => {
-                            const parseValue = (value) => {
-                                const num = parseFloat(value ?? '0');
-                                return Number.isFinite(num) ? num : 0;
-                            };
-
-                            const aprA = parseValue(a.apr);
-                            const aprB = parseValue(b.apr);
-                            if (aprB !== aprA) {
-                                return aprB - aprA;
-                            }
-
-                            const tvlA = parseValue(a.tvl ?? a.totalStaked);
-                            const tvlB = parseValue(b.tvl ?? b.totalStaked);
-                            return tvlB - tvlA;
-                        }).map(pair => this.renderPairRow(pair)).join('')}
+                        ${tbodyContent}
                     </tbody>
                 </table>
             </div>
@@ -345,14 +377,14 @@ class HomePage {
                     ${window.Formatter?.formatPairName(pair.name, pair.address, pair.platform) || pair.name}
                 </td>
                 <td>
-                    <span class="chip chip-primary">${pair.platform || 'Unknown'}</span>
+                    ${pair.platform ? `<span style="font-weight: 600; font-size: smaller;">${pair.platform}</span>` : '<span>-</span>'}
                 </td>
                 <td>
                     <span style="color: var(--success-main); font-weight: bold;">${pair.apr || '0.00'}%</span>
                 </td>
                 <td>
-                    <span class="chip chip-secondary">
-                        ${window.Formatter?.formatSmallNumberWithSubscript(parseFloat(pair.weight || '0')) || '0'} (${pair.weightPercentage || '0.00'}%)
+                    <span style="font-weight: 600;">
+                        ${pair.weightPercentage || '0.00'}%
                     </span>
                 </td>
                 <td>
@@ -525,6 +557,7 @@ class HomePage {
         this.totalWeight = 0;
         this.pairsData = [];
         this.pairs = [];
+        this.loading = false;
         
         // Update display
         this.updateHourlyRateDisplay(0);
@@ -590,62 +623,61 @@ class HomePage {
 
             if (allPairsInfo.length === 0) {
                 console.log('⚠️ No pairs configured in the staking contract yet');
-                // Create a placeholder pair to show the UI structure
-                this.pairs = [{
-                    id: '1',
-                    address: '0x0000000000000000000000000000000000000000',
-                    name: 'No Pairs Configured',
-                    platform: 'Waiting for Setup',
-                    apr: '0.00',
-                    tvl: 0,
-                    userShares: '0.00',
-                    userEarnings: '0.00',
-                    totalStaked: '0',
-                    rewardRate: '0',
-                    stakingEnabled: false,
-                    weight: '0',
-                    weightPercentage: '0.00'
-                }];
+                // Keep pairs empty - will show empty state UI
             } else {
                 // OPTIMIZATION 2: Progressive display - show basic pair data immediately
                 console.log('⚡ Processing pairs with progressive loading...');
 
                 // First, create basic pair data without user-specific info
-                const basicPairs = allPairsInfo.map((pairInfo, i) => {
-                    const weightPercentage = this.totalWeight > 0 ?
-                        ((parseFloat(pairInfo.weight || '0') * 100) / parseFloat(this.totalWeight)).toFixed(2) :
-                        '0.00';
+                // Filter out pairs with missing critical data (address is required)
+                const basicPairs = allPairsInfo
+                    .filter(pairInfo => pairInfo.address && pairInfo.address !== '0x0000000000000000000000000000000000000000')
+                    .map((pairInfo, i) => {
+                        const weightPercentage = this.totalWeight > 0 ?
+                            ((parseFloat(pairInfo.weight || '0') * 100) / parseFloat(this.totalWeight)).toFixed(2) :
+                            '0.00';
 
-                    return {
-                        id: pairInfo.id || (i + 1).toString(),
-                        address: pairInfo.address,
-                        name: pairInfo.name || `LP Token ${i + 1}`,
-                        platform: pairInfo.platform || 'Unknown',
-                        apr: pairInfo.apr || '0.00',
-                        tvl: pairInfo.tvl || 0,
-                        userShares: '0.00', // Will be updated if wallet connected
-                        userEarnings: '0.00', // Will be updated if wallet connected
-                        totalStaked: pairInfo.totalStaked || '0',
-                        rewardRate: pairInfo.rewardRate || '0',
-                        stakingEnabled: pairInfo.isActive !== false,
-                        weight: pairInfo.weight || '0',
-                        weightPercentage: weightPercentage
-                    };
-                });
+                        // Use address as fallback for name if missing, but don't create fake names
+                        const displayName = pairInfo.name || `${pairInfo.address.slice(0, 6)}...${pairInfo.address.slice(-4)}`;
+
+                        return {
+                            id: pairInfo.id || (i + 1).toString(),
+                            address: pairInfo.address,
+                            name: displayName,
+                            platform: pairInfo.platform || '',
+                            apr: pairInfo.apr || '0.00',
+                            tvl: pairInfo.tvl || 0,
+                            userShares: '0.00', // Will be updated if wallet connected
+                            userEarnings: '0.00', // Will be updated if wallet connected
+                            totalStaked: pairInfo.totalStaked || '0',
+                            rewardRate: pairInfo.rewardRate || '0',
+                            stakingEnabled: pairInfo.isActive !== false,
+                            weight: pairInfo.weight || '0',
+                            weightPercentage: weightPercentage
+                        };
+                    });
 
                 // Set basic pairs immediately for progressive display
                 this.pairs = basicPairs;
-                this.render(); // Show basic data immediately
+                
+                // If all pairs were filtered out, log a warning
+                if (basicPairs.length === 0 && allPairsInfo.length > 0) {
+                    console.warn('⚠️ All pairs were filtered out due to missing critical data');
+                }
+                
+                this.render(); // Show basic data immediately (will show empty state if pairs.length === 0)
 
-                // OPTIMIZATION 2.5: Calculate TVL and APR in parallel for each pair
-                console.log('⚡ Calculating TVL and APR for all pairs...');
-                await this.calculateTVLAndAPR();
-                console.log('🎨 Re-rendering after TVL/APR calculation...');
-                console.log('📊 Pairs data after calculation:', this.pairs.map(p => ({ name: p.name, tvl: p.tvl, apr: p.apr })));
-                this.render(); // Re-render with TVL and APR data
+                // OPTIMIZATION 2.5: Calculate TVL and APR in parallel for each pair (skip if no pairs)
+                if (this.pairs.length > 0) {
+                    console.log('⚡ Calculating TVL and APR for all pairs...');
+                    await this.calculateTVLAndAPR();
+                    console.log('🎨 Re-rendering after TVL/APR calculation...');
+                    console.log('📊 Pairs data after calculation:', this.pairs.map(p => ({ name: p.name, tvl: p.tvl, apr: p.apr })));
+                    this.render(); // Re-render with TVL and APR data
+                }
 
-                // OPTIMIZATION 3: Load user data in parallel if wallet connected
-                if (this.isWalletConnected() && window.walletManager?.currentAccount) {
+                // OPTIMIZATION 3: Load user data in parallel if wallet connected (skip if no pairs)
+                if (this.pairs.length > 0 && this.isWalletConnected() && window.walletManager?.currentAccount) {
                     console.log('⚡ Loading user stake data in parallel...');
                     console.log('👛 Using wallet address:', window.walletManager.currentAccount);
                     
@@ -659,50 +691,49 @@ class HomePage {
                         console.log(`💡 Switch to ${networkName} to make transactions`);
                     }
 
-                    // Load user data with multicall
+                    // Load user data with multicall (use filtered pairs, not allPairsInfo)
+                    const validPairsInfo = allPairsInfo.filter(pairInfo => 
+                        pairInfo.address && pairInfo.address !== '0x0000000000000000000000000000000000000000'
+                    );
                     const userDataMap = await window.contractManager.getUserDataForAllPairs(
                         window.walletManager.currentAccount,
-                        allPairsInfo
+                        validPairsInfo
                     );
 
-                    // Process user data from Map
-                    const userDataResults = allPairsInfo.map((pairInfo, index) => {
-                        const data = userDataMap.get(pairInfo.address);
+                    // Process user data from Map - use address to match pairs correctly
+                    this.pairs.forEach((pair, pairIndex) => {
+                        const data = userDataMap.get(pair.address);
                         if (!data) {
-                            return { index, userStake: { amount: '0', rewards: '0' } };
+                            return; // Skip if no user data
                         }
-                        return {
-                            index,
-                            userStake: {
-                                amount: ethers.utils.formatEther(data.stake || '0'),
-                                rewards: ethers.utils.formatEther(data.pendingRewards || '0')
-                            }
-                        };
-                    });
 
-                    // Update pairs with user data - EXACT React implementation
-                    // React source: lib-lp-staking-frontend/src/pages/home.tsx (Lines 59-64)
-                    userDataResults.forEach(({ index, userStake }) => {
-                        if (this.pairs[index]) {
+                        const userStake = {
+                            amount: ethers.utils.formatEther(data.stake || '0'),
+                            rewards: ethers.utils.formatEther(data.pendingRewards || '0')
+                        };
+
+                        // Update pairs with user data - EXACT React implementation
+                        // React source: lib-lp-staking-frontend/src/pages/home.tsx (Lines 59-64)
+                        if (this.pairs[pairIndex]) {
                             // React Line 62: myShare = tvlWei > 0n ? Number((userStake.amount * 100n) / tvlWei) : 0;
                             // Both userStake.amount and tvl are in ether format (already converted from wei)
                             const userStakeAmount = parseFloat(userStake.amount || '0');
-                            const tvl = this.pairs[index].tvl || 0;  // This is now LP token count
+                            const tvl = this.pairs[pairIndex].tvl || 0;  // This is now LP token count
 
                             if (userStakeAmount > 0 && tvl > 0) {
                                 // Calculate share percentage: (userStake * 100) / TVL
                                 const sharePercentage = (userStakeAmount * 100) / tvl;
-                                this.pairs[index].userShares = sharePercentage.toFixed(2);
+                                this.pairs[pairIndex].userShares = sharePercentage.toFixed(2);
                             } else {
-                                this.pairs[index].userShares = '0.00';
+                                this.pairs[pairIndex].userShares = '0.00';
                             }
 
                             // React Line 63: myEarnings = Number(ethers.formatEther(await getPendingRewards(...)));
                             // Format user earnings
                             const earnings = parseFloat(userStake.rewards || '0');
-                            this.pairs[index].userEarnings = earnings.toFixed(4);  // React uses .toFixed(4)
+                            this.pairs[pairIndex].userEarnings = earnings.toFixed(4);  // React uses .toFixed(4)
 
-                            console.log(`📊 Pair ${index}: SharePercentage=${this.pairs[index].userShares}%, Earnings=${this.pairs[index].userEarnings} LIB`);
+                            console.log(`📊 Pair ${pairIndex}: SharePercentage=${this.pairs[pairIndex].userShares}%, Earnings=${this.pairs[pairIndex].userEarnings} LIB`);
                         }
                     });
 
@@ -740,6 +771,10 @@ class HomePage {
      * 3. Display shows token count, matching React Line 199
      */
     async calculateTVLAndAPR() {
+        if (this.pairs.length === 0) {
+            return; // No pairs to calculate
+        }
+
         if (!window.priceFeeds || !window.rewardsCalculator) {
             console.warn('⚠️ Price feeds or rewards calculator not available, skipping TVL/APR calculation');
             return;
@@ -750,6 +785,22 @@ class HomePage {
 
             // Load TVL data with multicall (1 RPC call instead of N calls)
             const tvlMap = await window.contractManager.getTVLForAllPairs(this.pairs);
+            const rewardTokenAddress = (window.contractManager?.contractAddresses instanceof Map)
+                ? window.contractManager.contractAddresses.get('REWARD_TOKEN')
+                : null;
+            const rewardTokenPricePromise = (async () => {
+                if (!rewardTokenAddress) {
+                    console.warn('⚠️ Reward token address unavailable; defaulting price to 0');
+                    return 0;
+                }
+
+                try {
+                    return await window.priceFeeds.fetchTokenPrice(rewardTokenAddress);
+                } catch (error) {
+                    console.warn('⚠️ Failed to fetch reward token price:', error);
+                    return 0;
+                }
+            })();
 
             const calculations = this.pairs.map(async (pair, index) => {
                 try {
@@ -757,8 +808,7 @@ class HomePage {
 
                     // React Line 52-53: Fetch token prices
                     const lpTokenPrice = await window.priceFeeds.fetchTokenPrice(pair.address);
-                    const rewardTokenAddress = window.CONFIG?.CONTRACTS?.REWARD_TOKEN;
-                    const rewardTokenPrice = await window.priceFeeds.fetchTokenPrice(rewardTokenAddress);
+                    const rewardTokenPrice = await rewardTokenPricePromise;
 
                     console.log(`  💵 LP token price: $${lpTokenPrice}`);
                     console.log(`  💵 Reward token price: $${rewardTokenPrice}`);
@@ -817,117 +867,6 @@ class HomePage {
         }
     }
 
-
-
-
-    /**
-     * Build real pair data from contract information
-     */
-    async buildRealPairData(pairInfo, index) {
-        try {
-            // Use the raw pair name from contract (contract manager ensures this is always set)
-            const pairName = pairInfo.name || 'Unknown Pair';
-
-            // Get additional data if available
-            let tvl = 0;
-            let totalStaked = 0;
-            let apr = 0;
-            let rewardRate = 0;
-
-            try {
-                // Try to get pool info if available
-                const poolInfo = await window.contractManager.getPoolInfo(pairInfo.address);
-                totalStaked = parseFloat(poolInfo.totalStaked || '0');
-                rewardRate = parseFloat(poolInfo.rewardRate || '0');
-
-                // Calculate TVL and APR if rewards calculator is available
-                if (window.rewardsCalculator) {
-                    const aprData = await window.rewardsCalculator.calculateAPR(pairName);
-                    apr = aprData.apr || 0;
-                    tvl = aprData.tvl || totalStaked;
-                }
-            } catch (dataError) {
-                console.log(`Could not get additional data for ${pairName}:`, dataError.message);
-            }
-
-            // Get user-specific data if wallet is connected AND on correct network
-            let userSharesPercentage = '0.00';
-            let userEarnings = '0.00';
-
-            // Check if we're on configured network before querying user data
-            const isOnCorrectNetwork = this.isWalletConnected() && 
-                                        window.walletManager?.currentAccount && 
-                                        (window.networkManager?.isOnRequiredNetwork() || false);
-
-            if (isOnCorrectNetwork) {
-                try {
-                    const userStake = await window.contractManager.getUserStake(
-                        window.walletManager.currentAccount,
-                        pairInfo.address
-                    );
-                    const pendingRewards = await window.contractManager.getPendingRewards(
-                        window.walletManager.currentAccount,
-                        pairInfo.address
-                    );
-
-                    // Calculate pool share percentage: (userStake * 100) / TVL
-                    // userStake is in ether format, tvl is also in ether format
-                    const userStakeAmount = parseFloat(userStake || '0');
-                    if (userStakeAmount > 0 && tvl > 0) {
-                        const sharePercentage = (userStakeAmount * 100) / tvl;
-                        userSharesPercentage = sharePercentage.toFixed(2);
-                        console.log(`📊 Pool share calculation: ${userStakeAmount} LP / ${tvl} TVL * 100 = ${sharePercentage}%`);
-                    } else {
-                        userSharesPercentage = '0.00';
-                    }
-
-                    // Format pendingRewards - convert from wei to ether if needed
-                    if (pendingRewards && pendingRewards !== '0') {
-                        try {
-                            // Check if it's a BigNumber or large number (in wei)
-                            const rewardsStr = pendingRewards.toString();
-                            if (rewardsStr.length > 10) {
-                                // Likely in wei, convert to ether
-                                userEarnings = parseFloat(window.ethers.formatEther(pendingRewards)).toFixed(6);
-                            } else {
-                                // Already in ether format
-                                userEarnings = parseFloat(pendingRewards).toFixed(6);
-                            }
-                        } catch (formatError) {
-                            console.log(`Error formatting rewards for ${pairName}:`, formatError.message);
-                            userEarnings = parseFloat(pendingRewards || '0').toFixed(6);
-                        }
-                    } else {
-                        userEarnings = '0.000000';
-                    }
-
-                    console.log(`📊 User data for ${pairName}: SharePercentage=${userSharesPercentage}%, Earnings=${userEarnings} LIB`);
-                } catch (userError) {
-                    console.log(`Could not get user data for ${pairName}:`, userError.message);
-                }
-            }
-
-            return {
-                id: index.toString(),
-                name: pairName,
-                platform: pairInfo.platform || 'Unknown',
-                apr: apr.toFixed(2),
-                tvl: tvl,
-                userShares: userSharesPercentage,
-                userEarnings: userEarnings,
-                totalStaked: totalStaked.toString(),
-                rewardRate: rewardRate.toFixed(3),
-                stakingEnabled: pairInfo.isActive,
-                address: pairInfo.address
-            };
-        } catch (error) {
-            console.error('Failed to build real pair data:', error);
-            return null;
-        }
-    }
-
-
-
     openStakingModal(pairId, tab = 'stake') {
         const pair = this.pairs.find(p => p.id === pairId);
         if (!pair) return;
@@ -949,7 +888,9 @@ class HomePage {
         }
 
         this.isRefreshing = true;
+        this.loading = true;
         console.log('🔄 Refreshing homepage data...');
+        this.render(); // Show skeleton table
         try {
             await this.loadData();
             console.log('✅ Homepage data refreshed successfully');
@@ -1036,6 +977,9 @@ class HomePage {
                     this.loadDataWhenReady();
                 } catch (error) {
                     console.error('❌ Error refreshing contract data:', error);
+                    this.loading = false;
+                    this.error = 'Failed to initialize contract for new network';
+                    this.render();
                 }
             }
 

@@ -25,13 +25,7 @@ window.CONFIG = {
                 decimals: 18
             },
             CONTRACTS: {
-                STAKING_CONTRACT: '0x5e4216c952190BEA7abC4Fc64e990AfbF4F9885a',
-                REWARD_TOKEN: '0x6e2b7ABA70e8262Fb534aF5e14E786981760b829',
-                LP_TOKENS: {
-                    LPLIBETH: '0x34370487063aE6e02400Db1336f1724f28EF4cDC',
-                    LPLIBUSDC: '0x020393f1E32DFeeE19D3889aa55205E6e4733623',
-                    LPLIBUSDT: '0xE797b9130527BF6972Ee0a1e84D31e076f76f278'
-                }
+                STAKING_CONTRACT: '0x5e4216c952190BEA7abC4Fc64e990AfbF4F9885a'
             }
         },
         POLYGON_MAINNET: {
@@ -39,18 +33,13 @@ window.CONFIG = {
             NAME: 'Polygon Mainnet',
             RPC_URL: 'https://rpc.ankr.com/polygon',
             FALLBACK_RPCS: [
-                'https://polygon-mainnet.public.blastapi.io',
                 'https://polygon-rpc.com',
-                'https://polygon-mainnet.chainstacklabs.com',
-                'https://polygon-mainnet.g.alchemy.com/v2/CjcioLVYYWW0tsHWorEfC',
-                'https://polygon-mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161'
+                'https://polygon-mainnet.g.alchemy.com/v2/CjcioLVYYWW0tsHWorEfC'
             ],
             BLOCK_EXPLORER: 'https://polygonscan.com',
             NATIVE_CURRENCY: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
             CONTRACTS: {
-                STAKING_CONTRACT: '0xef15eB728CEF704f40269319BBA495d4131Beb71',
-                REWARD_TOKEN: '0x693ed886545970F0a3ADf8C59af5cCdb6dDF0a76',
-                LP_TOKENS: {}
+                STAKING_CONTRACT: '0xef15eB728CEF704f40269319BBA495d4131Beb71'
             }
         }
     },
@@ -188,7 +177,7 @@ window.CONFIG = {
     // Development Configuration
     DEV: {
         DEBUG: false,
-        CONSOLE_LOGS: false,
+        CONSOLE_LOGS: true,
         PERFORMANCE_MONITORING: false
     },
 

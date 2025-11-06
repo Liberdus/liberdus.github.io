@@ -45,8 +45,6 @@ class ContractManager {
 
         // Enhanced components
         this.gasEstimator = null;
-        // DEPRECATED: Transaction queue is unused - all UI calls go directly to stake/unstake/claimRewards
-        // this.transactionQueue = null;
         this.transactionStatus = null;
         this.multicallService = null; // Multicall2 for batch loading optimization
 
@@ -215,10 +213,9 @@ class ContractManager {
             await this.loadContractABIs();
             this.log('📋 Contract ABIs loaded:', this.contractABIs.size);
 
-            // Load contract addresses
-            this.log('📍 Loading contract addresses...');
-            this.loadContractAddresses();
-            this.log('📍 Contract addresses loaded:', this.contractAddresses.size);
+            // Seed staking address from configuration so we can build the contract instance next
+            this.log('🏗️ Loading staking contract address from config...');
+            this.loadStakingAddressFromConfig();
 
             // Initialize contract instances (read-only)
             this.log('🔗 Initializing contract instances (read-only)...');
@@ -285,6 +282,12 @@ class ContractManager {
                 }
             } else {
                 this.log('❌ Staking contract address invalid or missing, skipping:', stakingAddress);
+            }
+
+            try {
+                await this.loadContractAddresses();
+            } catch (addressError) {
+                this.log('⚠️ Failed to refresh reward/LP addresses from contract (read-only):', addressError.message);
             }
 
             // Initialize reward token contract
@@ -415,9 +418,9 @@ class ContractManager {
             this.log('📋 Loading contract ABIs...');
             await this.loadContractABIs();
 
-            // Load contract addresses
-            this.log('📍 Loading contract addresses...');
-            this.loadContractAddresses();
+            // Seed staking address from configuration before building the contract instance
+            this.log('🏗️ Loading staking contract address from config...');
+            this.loadStakingAddressFromConfig();
 
             // Initialize contract instances
             this.log('🔗 Initializing contract instances...');
@@ -695,6 +698,10 @@ class ContractManager {
                     "function REQUIRED_APPROVALS() external view returns (uint256)",
                     "function actionCounter() external view returns (uint256)",
                     "function totalWeight() external view returns (uint256)",
+                    "function getPairs() external view returns (tuple(address lpToken, string pairName, string platform, uint256 weight, bool isActive)[])",
+                    "function getActivePairs() external view returns (address[])",
+                    "function pairs(address lpToken) external view returns (address lpToken_, string pairName, string platform, uint256 weight, bool isActive)",
+                    "function getPairInfo(address lpToken) external view returns (address token, string platform, uint256 weight, bool isActive)",
                     "function getActionPairs(uint256 actionId) external view returns (address[])",
                     "function getActionWeights(uint256 actionId) external view returns (uint256[])",
                     "function getActionApproval(uint256 actionId) external view returns (address[])",
@@ -762,13 +769,10 @@ class ContractManager {
     }
 
     /**
-     * Load contract addresses from configuration
+     * Load staking contract address from configuration so we can build the contract instance.
      */
-    loadContractAddresses() {
+    loadStakingAddressFromConfig() {
         try {
-            this.log('Loading contract addresses...');
-
-            // Load from global config
             const config = window.CONFIG;
 
             if (!config) {
@@ -776,46 +780,115 @@ class ContractManager {
                 throw new Error('Configuration not available');
             }
 
-            this.log('✅ Using configuration:', config.CONTRACTS);
+            const stakingAddress = config.CONTRACTS?.STAKING_CONTRACT || null;
+            this.log('   - Staking contract (config):', stakingAddress);
 
-            const addresses = {
-                STAKING_CONTRACT: config.CONTRACTS?.STAKING_CONTRACT || null,
-                REWARD_TOKEN: config.CONTRACTS?.REWARD_TOKEN || null,
-                LP_TOKENS: config.CONTRACTS?.LP_TOKENS || {}
-            };
-
-            // Store addresses only if they are valid
-            if (addresses.STAKING_CONTRACT && this.isValidContractAddress(addresses.STAKING_CONTRACT)) {
-                this.contractAddresses.set('STAKING', addresses.STAKING_CONTRACT);
-                this.log('Valid staking contract address loaded:', addresses.STAKING_CONTRACT);
+            if (stakingAddress && this.isValidContractAddress(stakingAddress)) {
+                this.contractAddresses.set('STAKING', stakingAddress);
+                this.log('Valid staking contract address loaded from config:', stakingAddress);
             } else {
-                this.log('No valid staking contract address provided - will use fallback mode');
+                this.contractAddresses.delete('STAKING');
+                this.log('No valid staking contract address provided in config');
+            }
+        } catch (error) {
+            this.logError('Failed to load staking contract address from config:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Load reward token and LP token addresses from the staking contract.
+     */
+    async loadContractAddresses() {
+        try {
+            this.log('Loading contract addresses...');
+
+            if (!this.stakingContract) {
+                this.log('Staking contract not initialized; skipping contract-derived addresses');
+                return;
             }
 
-            if (addresses.REWARD_TOKEN && this.isValidContractAddress(addresses.REWARD_TOKEN)) {
-                this.contractAddresses.set('REWARD_TOKEN', addresses.REWARD_TOKEN);
-                this.log('Valid reward token address loaded:', addresses.REWARD_TOKEN);
-            } else {
-                this.log('No valid reward token address provided - will use fallback mode');
+            const stakingAddress = this.contractAddresses.get('STAKING');
+            if (!stakingAddress || !this.isValidContractAddress(stakingAddress)) {
+                this.log('⚠️ Staking address missing or invalid; cannot load contract-derived addresses');
+                return;
             }
 
-            // Store LP token addresses only if valid
-            let validLPTokens = 0;
-            for (const [pair, address] of Object.entries(addresses.LP_TOKENS)) {
-                if (address && this.isValidContractAddress(address)) {
-                    this.contractAddresses.set(`LP_${pair}`, address);
-                    this.log(`Valid LP token address loaded for ${pair}:`, address);
-                    validLPTokens++;
+            this.log('🔄 Fetching reward token and LP token addresses from staking contract');
+
+            try {
+                const rewardTokenAddress = await this.stakingContract.rewardToken();
+                if (this.isValidContractAddress(rewardTokenAddress)) {
+                    this.contractAddresses.set('REWARD_TOKEN', rewardTokenAddress);
+                    this.log('✅ Reward token address loaded from contract:', rewardTokenAddress);
                 } else {
-                    this.log(`Invalid LP token address for ${pair}:`, address);
+                    this.contractAddresses.delete('REWARD_TOKEN');
+                    this.log('⚠️ Received invalid reward token address from contract');
+                }
+            } catch (error) {
+                this.contractAddresses.delete('REWARD_TOKEN');
+                this.log('⚠️ Unable to read reward token from contract:', error.message);
+            }
+
+            const existingLPKeys = new Set(
+                [...this.contractAddresses.keys()].filter(key => key.startsWith('LP_'))
+            );
+            const activeLPKeys = new Set();
+
+            let pairsRetrieved = false;
+
+            try {
+                const pairs = await this.stakingContract.getPairs();
+                if (Array.isArray(pairs)) {
+                    pairsRetrieved = true;
+                    this.log(`✅ Loaded ${pairs.length} LP pair definitions from contract`);
+
+                    pairs.forEach((pair, index) => {
+                        if (!pair) {
+                            return;
+                        }
+
+                        const tuple = Array.isArray(pair) ? pair : [];
+                        const lpTokenAddress = tuple[0] || pair.lpToken;
+                        const rawPairName = tuple[1] || pair.pairName || pair.name;
+                        const isActive = tuple[4] ?? pair.isActive;
+
+                        if (!isActive) {
+                            return;
+                        }
+
+                        if (!this.isValidContractAddress(lpTokenAddress)) {
+                            this.log(`Skipping LP pair with invalid address at index ${index}:`, lpTokenAddress);
+                            return;
+                        }
+
+                        const normalizedName = this.normalizePairKey(rawPairName);
+                        if (!normalizedName) {
+                            this.log(`Skipping LP pair with missing name at index ${index}`);
+                            return;
+                        }
+
+                        const mapKey = `LP_${normalizedName}`;
+                        this.contractAddresses.set(mapKey, lpTokenAddress);
+                        activeLPKeys.add(mapKey);
+                    });
+                } else {
+                    this.log('⚠️ getPairs() did not return an array');
+                }
+            } catch (error) {
+                this.log('⚠️ getPairs() call failed:', error.message);
+            }
+
+            // Remove stale LP entries that are no longer returned by the contract
+            if (pairsRetrieved) {
+                for (const key of existingLPKeys) {
+                    if (!activeLPKeys.has(key)) {
+                        this.contractAddresses.delete(key);
+                    }
                 }
             }
-
-            this.log(`Contract address loading completed. Valid addresses: Staking=${!!this.contractAddresses.get('STAKING')}, RewardToken=${!!this.contractAddresses.get('REWARD_TOKEN')}, LPTokens=${validLPTokens}`);
         } catch (error) {
             this.logError('Failed to load contract addresses:', error);
-            // Don't throw error - allow system to continue in fallback mode
-            this.log('Continuing in fallback mode without contract addresses...');
         }
     }
 
@@ -845,6 +918,12 @@ class ContractManager {
                 }
             } else {
                 this.log('Staking contract address invalid or missing, skipping:', stakingAddress);
+            }
+
+            try {
+                await this.loadContractAddresses();
+            } catch (addressError) {
+                this.log('⚠️ Failed to refresh reward/LP addresses from contract (wallet mode):', addressError.message);
             }
 
             // Initialize reward token contract
@@ -906,6 +985,24 @@ class ContractManager {
         ];
 
         return !placeholderPatterns.some(pattern => pattern.test(address));
+    }
+
+    /**
+    * Normalize LP pair names so keys remain consistent regardless of contract formatting
+    * @param {string} rawName - Original pair name from the contract
+    * @returns {string|null} Normalized pair identifier with an LP prefix, or null when input cannot be normalized
+     */
+    normalizePairKey(rawName) {
+        if (typeof rawName !== 'string') {
+            return null;
+        }
+
+        const sanitized = rawName.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+        if (sanitized.length === 0) {
+            return null;
+        }
+
+        return sanitized.startsWith('LP') ? sanitized : `LP${sanitized}`;
     }
 
     /**
@@ -3903,164 +4000,6 @@ class ContractManager {
     }
 
     // ==================== CONTRACT WRITE OPERATIONS ====================
-
-    /**
-     * DEPRECATED: Enhanced approval flow with comprehensive checking and multi-step handling
-     * This method is unused - UI components handle approvals directly
-     * Commented out to reduce maintenance burden
-     */
-    /*
-    async executeApprovalFlow(pairName, amount, options = {}) {
-        try {
-            this.log(`Starting approval flow for ${pairName}, amount: ${amount}`);
-
-            // Initialize gas estimator if not available
-            if (!this.gasEstimator) {
-                this.gasEstimator = new GasEstimator();
-                await this.gasEstimator.initialize(this.provider);
-            }
-
-            // Initialize transaction queue if not available
-            if (!this.transactionQueue) {
-                this.transactionQueue = new TransactionQueue();
-            }
-
-            const userAddress = await this.signer.getAddress();
-            const currentAllowance = await this.getLPTokenAllowance(userAddress, pairName);
-            const requiredAmount = parseFloat(amount);
-
-            this.log(`Current allowance: ${currentAllowance}, Required: ${requiredAmount}`);
-
-            // Check if approval is needed
-            if (parseFloat(currentAllowance) >= requiredAmount) {
-                this.log('Sufficient allowance already exists, skipping approval');
-                return { approved: true, skipped: true, allowance: currentAllowance };
-            }
-
-            // Determine approval amount (use max approval for better UX)
-            const approvalAmount = options.useMaxApproval !== false ?
-                ethers.constants.MaxUint256 : ethers.utils.parseEther(amount.toString());
-
-            // Get gas estimation for approval
-            const lpContract = this.getLPTokenContract(pairName);
-            const stakingAddress = this.contractAddresses.get('STAKING');
-            const gasEstimate = await this.gasEstimator.getTransactionGasEstimate(
-                lpContract, 'approve', [stakingAddress, approvalAmount], 'approve'
-            );
-
-            // Create approval transaction
-            const approvalTx = {
-                id: `approve_${pairName}_${Date.now()}`,
-                operation: 'approve',
-                args: [pairName, approvalAmount],
-                priority: this.transactionQueue.config.priorityLevels.HIGH,
-                metadata: {
-                    type: 'approve',
-                    pairName,
-                    amount: amount.toString(),
-                    approvalAmount: approvalAmount.toString(),
-                    gasEstimate
-                }
-            };
-
-            // Add to transaction queue
-            const transactionId = await this.transactionQueue.addTransaction(approvalTx);
-
-            return {
-                approved: false,
-                pending: true,
-                transactionId,
-                gasEstimate,
-                approvalAmount: approvalAmount.toString()
-            };
-
-        } catch (error) {
-            this.logError('Approval flow failed:', error);
-            throw error;
-        }
-    }
-    */
-
-    /**
-     * DEPRECATED: Enhanced staking flow with automatic approval handling
-     * This method is unused - UI components call stake/unstake/claimRewards directly
-     * Commented out to reduce maintenance burden
-     */
-    /*
-    async executeStakingFlow(pairName, amount, options = {}) {
-        try {
-            this.log(`Starting staking flow for ${pairName}, amount: ${amount}`);
-
-            const userAddress = await this.signer.getAddress();
-            const transactions = [];
-
-            // Step 1: Check and handle approval
-            const approvalResult = await this.executeApprovalFlow(pairName, amount, options);
-
-            if (approvalResult.pending) {
-                transactions.push({
-                    id: approvalResult.transactionId,
-                    type: 'approve',
-                    status: 'pending'
-                });
-            }
-
-            // Step 2: Create staking transaction
-            const gasEstimate = await this.gasEstimator.getTransactionGasEstimate(
-                this.stakingContract, 'stake',
-                [this.contractAddresses.get(`LP_${pairName}`), ethers.utils.parseEther(amount.toString())],
-                'stake'
-            );
-
-            const stakingTx = {
-                id: `stake_${pairName}_${Date.now()}`,
-                operation: 'stake',
-                args: [pairName, amount],
-                priority: this.transactionQueue.config.priorityLevels.NORMAL,
-                dependencies: approvalResult.pending ? [approvalResult.transactionId] : [],
-                metadata: {
-                    type: 'stake',
-                    pairName,
-                    amount: amount.toString(),
-                    gasEstimate
-                }
-            };
-
-            const stakingTransactionId = await this.transactionQueue.addTransaction(stakingTx);
-            transactions.push({
-                id: stakingTransactionId,
-                type: 'stake',
-                status: 'queued'
-            });
-
-            return {
-                success: true,
-                transactions,
-                totalSteps: transactions.length,
-                estimatedGasCost: this.calculateTotalGasCost(transactions)
-            };
-
-        } catch (error) {
-            this.logError('Staking flow failed:', error);
-            throw error;
-        }
-    }
-    */
-
-    /**
-     * DEPRECATED: Calculate total gas cost for multiple transactions
-     * Only used by deprecated executeStakingFlow
-     */
-    /*
-    calculateTotalGasCost(transactions) {
-        return transactions.reduce((total, tx) => {
-            if (tx.gasEstimate) {
-                return total + parseFloat(tx.gasEstimate.estimatedCostEth);
-            }
-            return total;
-        }, 0);
-    }
-    */
 
     /**
      * Approve LP token for staking with enhanced gas estimation
