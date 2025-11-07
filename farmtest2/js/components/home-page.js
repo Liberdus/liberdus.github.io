@@ -180,25 +180,11 @@ class HomePage {
             container.innerHTML = this.renderHomepage();
         }
 
-        // Update the hourly rate in the existing HTML header
-        this.updateHourlyRateDisplay();
         this.attachRetryHandler();
     }
 
     renderHomepage() {
         return this.renderTable();
-    }
-
-    /**
-     * Update the hourly rate display in the existing HTML header
-     */
-    updateHourlyRateDisplay() {
-        const hourlyRateElement = document.getElementById('hourly-rate');
-        if (hourlyRateElement) {
-            const formattedRate = parseFloat(this.hourlyRewardRate || '0').toFixed(2);
-            hourlyRateElement.textContent = formattedRate;
-            console.log(`📊 Updated hourly rate display: ${formattedRate} LIB`);
-        }
     }
 
     attachRetryHandler() {
@@ -560,7 +546,6 @@ class HomePage {
         this.loading = false;
         
         // Update display
-        this.updateHourlyRateDisplay(0);
         this.render();
         
         console.log('✅ Empty data loaded successfully');

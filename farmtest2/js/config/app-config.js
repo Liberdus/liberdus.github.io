@@ -156,7 +156,6 @@ window.CONFIG = {
     PLATFORMS: {
         // Available platforms for dropdown (matches contract values)
         OPTIONS: [
-            'Uniswap V3',
             'Uniswap V2',
             'SushiSwap',
             'Curve Finance',
@@ -165,7 +164,6 @@ window.CONFIG = {
         ],
         // Base URLs for each platform (address will be inserted where {address} appears)
         BASE_URLS: {
-            'Uniswap V3': 'https://app.uniswap.org/explore/pools/polygon/{address}',
             'Uniswap V2': 'https://app.uniswap.org/explore/pools/polygon/{address}',
             'SushiSwap': 'https://www.sushi.com/analytics/pools/polygon/{address}',
             'Curve Finance': 'https://curve.fi/polygon/pools/{address}',
@@ -177,7 +175,7 @@ window.CONFIG = {
     // Development Configuration
     DEV: {
         DEBUG: false,
-        CONSOLE_LOGS: true,
+        CONSOLE_LOGS: false,
         PERFORMANCE_MONITORING: false
     },
 

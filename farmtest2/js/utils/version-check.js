@@ -143,7 +143,6 @@
             `${basePath}js/contracts/contract-manager.js`,
             
             // JavaScript - Core (only existing files)
-            `${basePath}js/core/accessibility-manager.js`,
             `${basePath}js/core/animation-manager.js`,
             `${basePath}js/core/error-handler.js`,
             `${basePath}js/core/notification-manager-new.js`,
@@ -155,12 +154,7 @@
             
             // JavaScript - Utils (only existing files)
             `${basePath}js/utils/admin-test.js`,
-            `${basePath}js/utils/event-manager.js`,
             `${basePath}js/utils/formatter.js`,
-            `${basePath}js/utils/gas-estimator.js`,
-            `${basePath}js/utils/helpers.js`,
-            `${basePath}js/utils/logger.js`,
-            `${basePath}js/utils/network-health-check.js`,
             `${basePath}js/utils/price-feeds.js`,
             `${basePath}js/utils/production-logger.js`,
             `${basePath}js/utils/rewards-calculator.js`,

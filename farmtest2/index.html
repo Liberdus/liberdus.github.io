@@ -257,26 +257,16 @@
         .page-title h1 {
             font-size: 48px;
             font-weight: 700;
-            margin-bottom: var(--spacing-2);
+            margin-bottom: 0;
             color: var(--text-primary);
         }
-        
-        .reward-info {
-            display: flex;
+
+        .page-title-header {
+            display: inline-flex;
             align-items: center;
             justify-content: center;
             gap: var(--spacing-2);
             margin-bottom: var(--spacing-2);
-        }
-        
-        .reward-info .material-icons {
-            color: var(--primary-main);
-        }
-        
-        .reward-rate {
-            font-size: 20px;
-            font-weight: 600;
-            color: var(--text-primary);
         }
         
         /* Refresh button */
@@ -526,7 +516,7 @@
                 font-size: 32px;
             }
 
-            .reward-info {
+            .page-title-header {
                 flex-direction: column;
                 gap: var(--spacing-1);
             }
@@ -678,10 +668,8 @@
         <div class="container-xl">
 
             <div class="page-title">
-                <h1>LP Staking</h1>
-                <div class="reward-info">
-                    <span class="material-icons" aria-hidden="true">access_time</span>
-                    <span class="reward-rate">Hourly Reward Rate: <span id="hourly-rate" aria-live="polite">0.00</span> LIB</span>
+                <div class="page-title-header">
+                    <h1>LP Staking</h1>
                     <button id="refresh-button" class="refresh-button" aria-label="Refresh data">
                         <span class="material-icons" aria-hidden="true">refresh</span>
                     </button>

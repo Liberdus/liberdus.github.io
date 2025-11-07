@@ -74,8 +74,7 @@ class MasterInitializer {
             'js/components/network-indicator-selector.js',
             'js/core/error-handler.js',        // Error handling system
             'js/core/unified-theme-manager.js', // Unified theme manager
-            'js/core/notification-manager-new.js',
-            'js/core/accessibility-manager.js'
+            'js/core/notification-manager-new.js'
         ];
 
         // Only load dev/test utilities if in development mode
