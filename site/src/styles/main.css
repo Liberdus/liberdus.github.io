@@ -1425,6 +1425,7 @@ body {
 }
 
 .link-icon {
+  color: var(--text-secondary);
   text-decoration: none;
 }
 
