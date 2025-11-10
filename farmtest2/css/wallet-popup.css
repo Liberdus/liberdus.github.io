@@ -4,126 +4,108 @@
 
 .wallet-popup {
     position: absolute;
-    background: #2a2a2a;
-    border: 1px solid #404040;
-    border-radius: 16px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+    background: var(--background-paper);
+    border: 1px solid var(--divider);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-8);
     width: 280px;
     z-index: 10001;
-    backdrop-filter: blur(20px);
+    /* backdrop-filter: blur(20px); */
     overflow: hidden;
-    color: white;
-    font-family: "Exo", "Helvetica", "Arial", sans-serif;
+    color: var(--text-primary);
+    font-family: var(--font-family);
 }
 
 .wallet-popup-content {
-    padding: 24px;
+    padding: var(--spacing-3);
     text-align: center;
     position: relative;
+    background: var(--background-paper);
 }
 
 /* Close Button */
 .wallet-popup-close {
     position: absolute;
-    top: 12px;
-    right: 12px;
+    top: var(--spacing-2);
+    right: var(--spacing-2);
     background: none;
     border: none;
-    color: #888;
+    color: var(--text-secondary);
     cursor: pointer;
     padding: 4px;
-    border-radius: 4px;
+    border-radius: var(--border-radius);
     transition: all 0.2s ease;
     z-index: 1;
 }
 
 .wallet-popup-close:hover {
-    color: white;
-    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    background: var(--surface-hover);
 }
 
 .wallet-popup-close .material-icons {
     font-size: 18px;
 }
 
-/* Wallet Avatar */
-.wallet-avatar {
-    margin-bottom: 16px;
-}
-
-.avatar-circle {
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    margin: 0 auto;
-    position: relative;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+/* Wallet Address */
+.wallet-address {
+    margin-top: var(--spacing-2);
+    margin-bottom: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-}
-
-.avatar-gradient {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-.avatar-icon {
-    position: relative;
-    z-index: 1;
-    color: white;
-}
-
-.avatar-icon .material-icons {
-    font-size: 28px;
-}
-
-/* Wallet Address */
-.wallet-address {
-    margin-bottom: 8px;
+    gap: var(--spacing-1);
 }
 
 .address-text {
     font-family: 'Courier New', monospace;
     font-size: 16px;
     font-weight: 600;
-    color: white;
+    color: var(--text-primary);
     letter-spacing: 0.5px;
 }
 
-/* Wallet Balance */
-.wallet-balance {
-    margin-bottom: 24px;
+.copy-icon-button {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: var(--border-radius);
+    transition: all 0.2s ease;
+    min-width: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.balance-amount {
-    font-size: 14px;
-    color: #888;
-    font-weight: 500;
+.copy-icon-button:hover {
+    color: var(--text-primary);
+    background: var(--surface-hover);
+}
+
+.copy-icon-button .material-icons {
+    font-size: 18px;
 }
 
 /* Action Buttons */
 .wallet-actions {
     display: flex;
-    gap: 12px;
+    justify-content: center;
+    margin-top: var(--spacing-2);
 }
 
-.action-button {
-    flex: 1;
-    background: #404040;
-    color: white;
-    border: 1px solid #555;
-    padding: 12px 16px;
-    border-radius: 8px;
-    font-size: 13px;
+.disconnect-button {
+    min-width: 120px;
+    padding: calc(var(--spacing-2) - 4px) var(--spacing-3);
+    background: color-mix(in srgb, var(--error-main) 8%, transparent);
+    color: var(--error-main);
+    border: 1px solid var(--divider);
+    border-radius: var(--border-radius);
+    font-size: 0.875rem;
     font-weight: 500;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
@@ -131,32 +113,14 @@
     font-family: inherit;
 }
 
-.action-button:hover {
-    background: #4a4a4a;
-    border-color: #666;
+.disconnect-button:hover {
+    border-color: var(--error-main);
+    background: color-mix(in srgb, var(--error-main) 18%, transparent);
     transform: translateY(-1px);
 }
 
-.action-button .material-icons {
+.disconnect-button .material-icons {
     font-size: 16px;
-}
-
-.copy-button {
-    border-color: #555;
-}
-
-.copy-button:hover {
-    border-color: #3b82f6;
-    background: rgba(59, 130, 246, 0.1);
-}
-
-.disconnect-button {
-    border-color: #555;
-}
-
-.disconnect-button:hover {
-    border-color: #ef4444;
-    background: rgba(239, 68, 68, 0.1);
 }
 
 /* Mobile Responsive */
@@ -167,7 +131,7 @@
     }
 
     .wallet-popup-content {
-        padding: 20px;
+        padding: var(--spacing-2);
     }
 
     .avatar-circle {
@@ -180,12 +144,12 @@
     }
 
     .address-text {
-        font-size: 14px;
+        font-size: 0.875rem;
     }
 
     .action-button {
-        padding: 10px 12px;
-        font-size: 12px;
+        padding: var(--spacing-1) var(--spacing-2);
+        font-size: 0.75rem;
     }
 }
 
@@ -215,17 +179,17 @@
 /* Focus States for Accessibility */
 .action-button:focus,
 .wallet-popup-close:focus {
-    outline: 2px solid #3b82f6;
+    outline: 2px solid var(--primary-main);
     outline-offset: 2px;
 }
 
 /* Success State for Copy */
-.copy-button.success {
-    border-color: #10b981;
-    background: rgba(16, 185, 129, 0.1);
+.copy-icon-button.success {
+    color: var(--success-main);
+    background: color-mix(in srgb, var(--success-main) 15%, transparent);
 }
 
-.copy-button.success .material-icons {
+.copy-icon-button.success .material-icons {
     animation: checkmark 0.3s ease;
 }
 

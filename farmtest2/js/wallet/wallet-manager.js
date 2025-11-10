@@ -78,6 +78,7 @@ class WalletManager {
     }
 
     async init() {
+        this.isConnecting = true;
         try {
 
             await this.checkPreviousConnection();
@@ -88,6 +89,8 @@ class WalletManager {
             this.log('WalletManager initialized');
         } catch (error) {
             this.logError('Failed to initialize WalletManager:', error);
+        } finally {
+            this.isConnecting = false;
         }
     }
 

@@ -17,74 +17,65 @@
     class RewardsCalculator {
         constructor() {
             this.contractManager = null;
-            this.priceFeeds = null;
             this.isInitialized = false;
         }
 
-        async initialize(contractManagerOrOptions, priceFeeds) {
-            const { contractManager, priceFeeds: normalizedFeeds } = this.normalizeInitArgs(
-                contractManagerOrOptions,
-                priceFeeds
-            );
+        async initialize(contractManagerOrOptions) {
+            const { contractManager } = this.normalizeInitArgs(contractManagerOrOptions);
 
             this.contractManager = contractManager || null;
-            this.priceFeeds = normalizedFeeds || null;
             this.isInitialized = true;
 
             return {
-                hasContractManager: !!this.contractManager,
-                hasPriceFeeds: !!this.priceFeeds
+                hasContractManager: !!this.contractManager
             };
         }
 
-        normalizeInitArgs(contractManagerOrOptions, priceFeeds) {
+        normalizeInitArgs(contractManagerOrOptions) {
             if (contractManagerOrOptions && typeof contractManagerOrOptions === 'object' && !Array.isArray(contractManagerOrOptions)) {
-                const hasOptionsShape = Object.prototype.hasOwnProperty.call(contractManagerOrOptions, 'contractManager') ||
-                    Object.prototype.hasOwnProperty.call(contractManagerOrOptions, 'priceFeeds');
+                const hasOptionsShape = Object.prototype.hasOwnProperty.call(contractManagerOrOptions, 'contractManager');
 
                 if (hasOptionsShape) {
                     return {
-                        contractManager: contractManagerOrOptions.contractManager,
-                        priceFeeds: contractManagerOrOptions.priceFeeds
+                        contractManager: contractManagerOrOptions.contractManager
                     };
                 }
             }
 
             return {
-                contractManager: contractManagerOrOptions,
-                priceFeeds
+                contractManager: contractManagerOrOptions
             };
         }
 
         /**
-         * Calculate APR with weight consideration
-         * Enhanced to properly incorporate pool weights for accurate reward distribution
+         * Calculate APR from the on-chain LIB-per-LP ratio.
          *
-         * @param {number} hourlyRate - Total hourly reward rate in tokens
-         * @param {number} tvl - Total Value Locked in LP tokens (NOT USD)
-         * @param {number} lpTokenPrice - LP token price in USD
-         * @param {number} rewardTokenPrice - Reward token price in USD
-         * @param {number} poolWeight - Weight of this specific pool (default: 1)
-         * @param {number} totalWeight - Total weight across all pools (default: 1)
-         * @returns {number} - APR as percentage (e.g., 226.5 for 226.5%)
+         * @param {number} hourlyRate - Total LIB distributed per hour across all pools.
+         * @param {number} tvlLpTokens - Total LP tokens staked in this pool (formatted, not wei).
+         * @param {number|Object} libPerLp - LIB-equivalent value backing one LP token, or legacy options object with libPerLp/poolWeight/totalWeight.
+         * @param {number} [poolWeight=1] - Pool-specific weight used for reward distribution.
+         * @param {number} [totalWeight=1] - Sum of all pool weights.
+         * @returns {number} APR percentage (e.g., 150 equals 150%).
          */
-        calcAPR(hourlyRate, tvl, lpTokenPrice, rewardTokenPrice, poolWeight = 1, totalWeight = 1) {
-            // If no TVL, no APR
-            if (tvl === 0) return 0;
-
-            // Calculate the weighted portion of rewards this pool receives
-            const weightedHourlyRate = (poolWeight / totalWeight) * hourlyRate;
-
-            // If no price data, use simplified calculation (tvl in tokens, not USD)
-            if (!lpTokenPrice || !rewardTokenPrice) {
-                return ((weightedHourlyRate * 24 * 365) / tvl) * 100 || 0;
+        calcAPR(hourlyRate, tvlLpTokens, libPerLp, poolWeight = 1, totalWeight = 1) {
+            if (typeof libPerLp === 'object' && libPerLp !== null) {
+                const opts = libPerLp;
+                libPerLp = opts.libPerLp ?? 0;
+                poolWeight = opts.poolWeight ?? poolWeight;
+                totalWeight = opts.totalWeight ?? totalWeight;
             }
 
-            // Calculate APR with weighted rewards (tvl in USD)
-            // Formula: (Annual Rewards in USD / TVL in USD) * 100
-            const annualRewardsUSD = weightedHourlyRate * 24 * 365 * rewardTokenPrice;
-            const tvlUSD = tvl * lpTokenPrice;
-            return (annualRewardsUSD / tvlUSD) * 100 || 0;
+            if (!hourlyRate || !tvlLpTokens || !libPerLp || !poolWeight || !totalWeight) {
+                return 0;
+            }
+
+            const pairPct = poolWeight / totalWeight;
+            if (pairPct <= 0) {
+                return 0;
+            }
+
+            const annualRewards = hourlyRate * 8760 * pairPct;
+            return (annualRewards / (tvlLpTokens * libPerLp)) * 100;
         }
     }
 

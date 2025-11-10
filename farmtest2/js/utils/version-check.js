@@ -155,7 +155,6 @@
             // JavaScript - Utils (only existing files)
             `${basePath}js/utils/admin-test.js`,
             `${basePath}js/utils/formatter.js`,
-            `${basePath}js/utils/price-feeds.js`,
             `${basePath}js/utils/production-logger.js`,
             `${basePath}js/utils/rewards-calculator.js`,
             `${basePath}js/utils/rpc-test.js`,

@@ -2054,7 +2054,8 @@
     font-size: 0.9rem;
 }
 
-.wallet-icon {
+.wallet-icon,
+.connect-wallet-btn svg {
     width: 16px;
     height: 16px;
     color: var(--text-secondary);

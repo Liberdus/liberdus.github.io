@@ -131,7 +131,6 @@ class WalletPopup {
 
     createPopupHTML(walletData) {
         const shortAddress = this.formatAddress(walletData.address);
-        const balance = this.getWalletBalance();
 
         return `
             <div class="wallet-popup">
@@ -141,32 +140,16 @@ class WalletPopup {
                         <span class="material-icons">close</span>
                     </button>
 
-                    <!-- Wallet Avatar -->
-                    <div class="wallet-avatar">
-                        <div class="avatar-circle">
-                            <div class="avatar-gradient"></div>
-                            <div class="avatar-icon">
-                                <span class="material-icons">account_balance_wallet</span>
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- Wallet Address -->
                     <div class="wallet-address">
                         <span class="address-text">${shortAddress}</span>
-                    </div>
-
-                    <!-- Wallet Balance -->
-                    <div class="wallet-balance">
-                        <span class="balance-amount">${balance}</span>
+                        <button class="copy-icon-button" data-address="${walletData.address}" title="Copy address">
+                            <span class="material-icons">content_copy</span>
+                        </button>
                     </div>
 
                     <!-- Action Buttons -->
                     <div class="wallet-actions">
-                        <button class="action-button copy-button" data-address="${walletData.address}">
-                            <span class="material-icons">content_copy</span>
-                            <span>Copy Address</span>
-                        </button>
                         <button class="action-button disconnect-button">
                             <span class="material-icons">logout</span>
                             <span>Disconnect</span>
@@ -214,10 +197,10 @@ class WalletPopup {
         });
 
         // Copy button
-        const copyButton = this.popupElement.querySelector('.copy-button');
+        const copyButton = this.popupElement.querySelector('.copy-icon-button');
         copyButton?.addEventListener('click', (e) => {
             e.stopPropagation();
-            this.copyAddress(e.target.closest('.copy-button').dataset.address);
+            this.copyAddress(e.currentTarget.dataset.address);
         });
 
         // Disconnect button
@@ -270,19 +253,21 @@ class WalletPopup {
     }
 
     showCopyFeedback() {
-        const copyButton = this.popupElement?.querySelector('.copy-button');
-        if (copyButton) {
-            const icon = copyButton.querySelector('.material-icons');
-            const originalText = icon.textContent;
-            
-            icon.textContent = 'check';
-            copyButton.style.color = 'var(--success-main)';
-            
-            setTimeout(() => {
-                icon.textContent = originalText;
-                copyButton.style.color = '';
-            }, 1500);
-        }
+        const copyButton = this.popupElement?.querySelector('.copy-icon-button');
+        if (!copyButton) return;
+
+        const icon = copyButton.querySelector('.material-icons');
+        if (!icon) return;
+
+        const originalText = icon.textContent;
+
+        icon.textContent = 'check';
+        copyButton.classList.add('success');
+
+        setTimeout(() => {
+            icon.textContent = originalText;
+            copyButton.classList.remove('success');
+        }, 1500);
     }
 
     async disconnectWallet() {
@@ -330,32 +315,6 @@ class WalletPopup {
         this.popupElement.style.transform = 'translateY(-10px) scale(0.95)';
         
         setTimeout(callback, 150);
-    }
-
-    getWalletBalance() {
-        try {
-            // Try to get balance from wallet manager or state manager
-            if (window.walletManager && window.walletManager.getBalance) {
-                const balance = window.walletManager.getBalance();
-                if (balance) {
-                    return `${parseFloat(balance).toFixed(2)} POL`;
-                }
-            }
-
-            // Try to get from state manager
-            if (window.stateManager && window.stateManager.getState) {
-                const state = window.stateManager.getState('wallet.balance');
-                if (state) {
-                    return `${parseFloat(state).toFixed(2)} POL`;
-                }
-            }
-
-            // Default fallback
-            return '4.86 POL';
-        } catch (error) {
-            console.warn('Error getting wallet balance:', error);
-            return '4.86 POL';
-        }
     }
 
     formatAddress(address) {

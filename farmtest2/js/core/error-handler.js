@@ -539,12 +539,6 @@ class ErrorHandler {
                 notification.technicalMessage = processedError.technicalMessage;
             }
 
-            // Add to state manager notifications
-            if (window.stateManager) {
-                const currentNotifications = window.stateManager.get('ui.notifications') || [];
-                window.stateManager.set('ui.notifications', [...currentNotifications, notification]);
-            }
-
             this.log('Error displayed to user:', processedError.id);
             return notification;
         } catch (displayError) {

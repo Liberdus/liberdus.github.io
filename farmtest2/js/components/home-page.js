@@ -747,81 +747,97 @@ class HomePage {
     }
 
     /**
-     * Calculate TVL and APR for all pairs - EXACT React implementation
-     * React source: lib-lp-staking-frontend/src/pages/home.tsx (Lines 46-78)
-     *
-     * Key differences from previous implementation:
-     * 1. TVL is stored as LP token count (NOT USD value) - React Line 57
-     * 2. APR uses React's exact formula (no × 100) - React Line 56
-     * 3. Display shows token count, matching React Line 199
+     * Calculate TVL and APR for all pairs using on-chain LP composition.
+     * TVL remains in LP token units, while APR now leverages the LIB-per-LP
+     * ratio derived from Uniswap V2 reserve data instead of external pricing.
      */
     async calculateTVLAndAPR() {
         if (this.pairs.length === 0) {
             return; // No pairs to calculate
         }
 
-        if (!window.priceFeeds || !window.rewardsCalculator) {
-            console.warn('⚠️ Price feeds or rewards calculator not available, skipping TVL/APR calculation');
+        if (!window.rewardsCalculator || !window.contractManager) {
+            console.warn('⚠️ Rewards calculator or contract manager not available, skipping TVL/APR calculation');
             return;
         }
 
         try {
-            console.log('⚡ Calculating TVL and APR for all pairs with multicall...');
+            console.log('⚡ Calculating TVL and APR for all pairs...');
 
-            // Load TVL data with multicall (1 RPC call instead of N calls)
-            const tvlMap = await window.contractManager.getTVLForAllPairs(this.pairs);
             const rewardTokenAddress = (window.contractManager?.contractAddresses instanceof Map)
                 ? window.contractManager.contractAddresses.get('REWARD_TOKEN')
                 : null;
-            const rewardTokenPricePromise = (async () => {
-                if (!rewardTokenAddress) {
-                    console.warn('⚠️ Reward token address unavailable; defaulting price to 0');
-                    return 0;
-                }
+            const rewardTokenAddressLower = typeof rewardTokenAddress === 'string'
+                ? rewardTokenAddress.toLowerCase()
+                : null;
 
-                try {
-                    return await window.priceFeeds.fetchTokenPrice(rewardTokenAddress);
-                } catch (error) {
-                    console.warn('⚠️ Failed to fetch reward token price:', error);
-                    return 0;
-                }
-            })();
+            const hourlyRate = Number(this.hourlyRewardRate) || 0;
+            const totalWeight = Number(this.totalWeight) || 1;
 
             const calculations = this.pairs.map(async (pair, index) => {
                 try {
                     console.log(`🔍 Calculating TVL/APR for ${pair.name}...`);
 
-                    // React Line 52-53: Fetch token prices
-                    const lpTokenPrice = await window.priceFeeds.fetchTokenPrice(pair.address);
-                    const rewardTokenPrice = await rewardTokenPricePromise;
+                    const breakdown = await window.contractManager.getLPStakeBreakdown(pair.address);
+                    const lpDecimals = Number(breakdown?.lpToken?.decimals) || 18;
+                    const stakedBn = ethers.BigNumber.from(breakdown?.lpToken?.stakedBalance?.raw || '0');
+                    const tvlInTokens = Number(ethers.utils.formatUnits(stakedBn, lpDecimals)) || 0;
 
-                    console.log(`  💵 LP token price: $${lpTokenPrice}`);
-                    console.log(`  💵 Reward token price: $${rewardTokenPrice}`);
+                    const poolWeight = Number(pair.weight) || 1;
 
-                    // Get TVL from multicall result (optimized)
-                    const tvlWei = tvlMap.get(pair.address) || ethers.BigNumber.from(0);
+                    const token0 = breakdown?.token0;
+                    const token1 = breakdown?.token1;
+                    const token0Addr = token0?.address?.toLowerCase?.();
+                    const token1Addr = token1?.address?.toLowerCase?.();
 
-                    // React Line 56: Calculate APR using formatEther(tvlWei) as tvl parameter
-                    const hourlyRate = parseFloat(this.hourlyRewardRate || '0');
-                    const tvlInTokens = parseFloat(ethers.utils.formatEther(tvlWei || '0'));
-                    // Get weight data for this pool
-                    const poolWeight = parseFloat(pair.weight || 1);
-                    const totalWeight = parseFloat(this.totalWeight || 1);
-                    
+                    let libToken = null;
+                    if (rewardTokenAddressLower && token0Addr === rewardTokenAddressLower) {
+                        libToken = token0;
+                    } else if (rewardTokenAddressLower && token1Addr === rewardTokenAddressLower) {
+                        libToken = token1;
+                    }
+
+                    if (!libToken) {
+                        console.warn(`⚠️ LIB token not found for ${pair.name}, skipping APR calculation`);
+                        return;
+                    }
+
+                    const libStaked = Number(libToken?.staked?.formatted) || 0;
+                    const libReserve = Number(libToken?.reserve?.formatted) || 0;
+
+                    const otherToken = libToken === token0 ? token1 : token0;
+                    const otherStaked = Number(otherToken?.staked?.formatted) || 0;
+                    const otherReserve = Number(otherToken?.reserve?.formatted) || 0;
+
+                    // Convert the counter token stake to a LIB-equivalent amount using the reserve ratio
+                    let otherTokenLibEquivalent = 0;
+                    if (otherStaked > 0 && otherReserve > 0 && libReserve > 0) {
+                        const otherToLibRate = libReserve / otherReserve;
+                        otherTokenLibEquivalent = otherStaked * otherToLibRate;
+                    }
+
+                    const totalStakeValueInLib = libStaked + otherTokenLibEquivalent;
+                    const stakeValuePerLpInLib = tvlInTokens > 0 ? totalStakeValueInLib / tvlInTokens : 0;
+
+                    if (stakeValuePerLpInLib <= 0) {
+                        console.warn(`⚠️ Invalid LIB-equivalent value per LP for ${pair.name}, skipping APR calculation`);
+                        return;
+                    }
+
                     const apr = window.rewardsCalculator.calcAPR(
                         hourlyRate,
                         tvlInTokens,
-                        lpTokenPrice,
-                        rewardTokenPrice,
+                        stakeValuePerLpInLib,
                         poolWeight,
                         totalWeight
                     );
 
-                    // React Line 57: Store TVL as token count (NOT USD)
-                    // This is the key difference: React displays token count, not USD value
                     const tvl = tvlInTokens;
 
-                    console.log(`  📊 TVL in tokens: ${tvlInTokens}`);
+                    console.log(`  📊 TVL (LP tokens): ${tvlInTokens}`);
+                    console.log(`  💧 LIB-equivalent value per LP token: ${stakeValuePerLpInLib}`);
+                    console.log(`  💠 LIB tokens in stake: ${libStaked}`);
+                    console.log(`  🔁 Counter-token LIB equivalent: ${otherTokenLibEquivalent}`);
                     console.log(`  📈 Calculated APR: ${apr.toFixed(1)}%`);
 
                     // Update pair data to match React structure
@@ -831,14 +847,18 @@ class HomePage {
                     this.pairs[index].tvl = tvl;  // Token count, not USD
                     this.pairs[index].apr = apr.toFixed(1);  // React uses .toFixed(1)
                     this.pairs[index].totalStaked = tvlInTokens.toFixed(6);
-                    this.pairs[index].lpTokenPrice = lpTokenPrice;  // Store for reference
-                    this.pairs[index].rewardTokenPrice = rewardTokenPrice;  // Store for reference
+                    this.pairs[index].libPerLp = stakeValuePerLpInLib;
+                    this.pairs[index].libTokensStaked = libStaked;
+                    this.pairs[index].counterTokenStaked = otherStaked;
+                    this.pairs[index].counterTokenLibEquivalent = otherTokenLibEquivalent;
+                    this.pairs[index].totalStakeValueInLib = totalStakeValueInLib;
 
                     console.log(`  After: tvl=${this.pairs[index].tvl}, apr=${this.pairs[index].apr}`);
                     console.log(`✅ ${pair.name}: TVL=${tvl.toFixed(2)} LP, APR=${apr.toFixed(1)}%`);
 
                 } catch (error) {
                     console.error(`❌ Failed to calculate TVL/APR for ${pair.name}:`, error);
+                    window.notificationManager?.error(`Failed to calculate TVL/APR for ${pair.name}`);
                     // Keep default values (0)
                 }
             });

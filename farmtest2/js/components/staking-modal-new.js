@@ -16,20 +16,126 @@ class StakingModalNew {
 
         // Approval state
         this.needsApproval = false;
-        this.isApproving = false;
         this.isApproved = false;
         this.currentAllowance = '0';
+
+        // Transaction progress state
+        this.actionPhases = {
+            approve: 'idle',
+            stake: 'idle',
+            unstake: 'idle',
+            claim: 'idle'
+        };
+        this.pendingOperations = {
+            approve: false,
+            stake: false,
+            unstake: false,
+            claim: false
+        };
 
         // Execution guards
         this.isExecutingStake = false;
         this.isExecutingUnstake = false;
         this.isExecutingClaim = false;
 
+        this.transactionPhaseHandler = this.handleTransactionPhase.bind(this);
+        if (typeof window !== 'undefined') {
+            window.addEventListener('transaction-phase', this.transactionPhaseHandler);
+        }
+
         // Set global reference immediately
         window.stakingModal = this;
         window.stakingModalNew = this;
 
         this.init();
+    }
+
+    mapOperationToAction(operationName) {
+        switch (operationName) {
+            case 'approveLPToken':
+                return 'approve';
+            case 'stake':
+                return 'stake';
+            case 'unstake':
+                return 'unstake';
+            case 'claimRewards':
+                return 'claim';
+            default:
+                return null;
+        }
+    }
+
+    getPhaseLabel(phase) {
+        if (phase === 'userApproval') {
+            return ' User Approval...';
+        }
+        if (phase === 'processing') {
+            return ' Processing Transaction...';
+        }
+        return '';
+    }
+
+    setActionPhase(action, phase) {
+        if (!this.actionPhases || !Object.prototype.hasOwnProperty.call(this.actionPhases, action)) {
+            return;
+        }
+
+        if (this.actionPhases[action] === phase) {
+            return;
+        }
+
+        this.actionPhases[action] = phase;
+
+        if (action === 'approve' || action === 'stake') {
+            this.updateStakeButton();
+        }
+
+        if (action === 'unstake') {
+            this.updateUnstakeButton();
+        }
+
+        if (action === 'claim') {
+            this.updateClaimButton();
+        }
+    }
+
+    handleTransactionPhase(event) {
+        const detail = event?.detail;
+        if (!detail) return;
+
+        const action = this.mapOperationToAction(detail.operationName);
+        if (!action || !this.pendingOperations[action]) return;
+
+        switch (detail.phase) {
+            case 'user_approval':
+                this.setActionPhase(action, 'userApproval');
+                break;
+            case 'processing':
+                this.setActionPhase(action, 'processing');
+                break;
+            case 'confirmed':
+            case 'failed':
+            case 'timeout':
+            case 'settled':
+                this.pendingOperations[action] = false;
+                this.setActionPhase(action, 'idle');
+                break;
+            default:
+                break;
+        }
+    }
+
+    resetActionStates(triggerUpdate = true) {
+        if (!this.actionPhases || !this.pendingOperations) return;
+
+        Object.keys(this.actionPhases).forEach(action => {
+            this.actionPhases[action] = 'idle';
+            this.pendingOperations[action] = false;
+        });
+
+        if (triggerUpdate) {
+            this.updateButtonStates();
+        }
     }
 
     init() {
@@ -436,8 +542,10 @@ class StakingModalNew {
         // Reset approval state
         this.isApproved = false;
         this.needsApproval = false;
-        this.isApproving = false;
         this.currentAllowance = '0';
+
+        // Reset transaction progress state
+        this.resetActionStates(false);
 
         // Reset execution guards
         this.isExecutingStake = false;
@@ -643,8 +751,8 @@ class StakingModalNew {
                 throw new Error('Contract manager or wallet not ready');
             }
 
-            this.isApproving = true;
-            this.updateStakeButton();
+            this.pendingOperations.approve = true;
+            this.setActionPhase('approve', 'userApproval');
 
             const pairName = this.getPairName();
             console.log(`🔐 Approving LP tokens:`, { pairName, amount: this.stakeAmount });
@@ -654,21 +762,24 @@ class StakingModalNew {
             const approveTx = await window.contractManager.approveLPToken(pairName, this.stakeAmount);
             console.log(`✅ Approval transaction sent: ${approveTx.hash}`);
 
+            if (this.actionPhases.approve === 'userApproval') {
+                this.setActionPhase('approve', 'processing');
+            }
+
             // Update state and UI
             this.isApproved = true;
             this.needsApproval = false;
-            this.isApproving = false;
-            this.updateStakeButton();
 
             return true;
 
         } catch (error) {
             console.error('❌ Approval failed:', error);
             window.notificationManager?.error('Token approval failed. ' + error.message);
-            this.isApproving = false;
             this.isApproved = false;
-            this.updateStakeButton();
             return false;
+        } finally {
+            this.pendingOperations.approve = false;
+            this.setActionPhase('approve', 'idle');
         }
     }
 
@@ -676,25 +787,95 @@ class StakingModalNew {
      * Update stake button text and state based on approval status
      */
     updateStakeButton() {
-        const stakeButton = document.querySelector('.modal-body button.btn-primary');
+        const stakeButton = document.querySelector('.modal-actions .btn-primary[onclick*="safeModalExecuteStake"]');
         if (!stakeButton) return;
 
         const buttonIcon = stakeButton.querySelector('.material-icons');
         const buttonText = stakeButton.childNodes[stakeButton.childNodes.length - 1];
 
-        if (this.isApproving) {
+        const amount = parseFloat(this.stakeAmount) || 0;
+        const weight = parseFloat(this.currentPair?.weight || '0') || 0;
+        const hasAmount = amount > 0;
+        const hasValidWeight = weight > 0;
+        const approvalPhase = this.actionPhases?.approve || 'idle';
+        const stakePhase = this.actionPhases?.stake || 'idle';
+        const activePhase = approvalPhase !== 'idle' ? approvalPhase : stakePhase;
+
+        if (activePhase !== 'idle') {
             stakeButton.disabled = true;
             if (buttonIcon) buttonIcon.textContent = 'hourglass_empty';
-            if (buttonText) buttonText.textContent = ' Approving...';
-        } else if (this.isApproved) {
-            stakeButton.disabled = false;
-            if (buttonIcon) buttonIcon.textContent = 'add';
-            if (buttonText) buttonText.textContent = ' Stake LP Tokens';
-        } else {
-            stakeButton.disabled = !this.stakeAmount || parseFloat(this.stakeAmount) === 0;
-            if (buttonIcon) buttonIcon.textContent = 'add';
-            if (buttonText) buttonText.textContent = ' Stake LP Tokens';
+            if (buttonText) {
+                const phaseLabel = this.getPhaseLabel(activePhase) || ' Processing Transaction...';
+                buttonText.textContent = phaseLabel;
+            }
+            return;
         }
+
+        const shouldDisable = this.isExecutingStake || !hasAmount || !hasValidWeight;
+        stakeButton.disabled = shouldDisable;
+
+        if (buttonIcon) buttonIcon.textContent = 'add';
+        if (buttonText) buttonText.textContent = ' Stake LP Tokens';
+    }
+
+    /**
+     * Update unstake button text and state during transaction flow
+     */
+    updateUnstakeButton() {
+        const unstakeButton = document.querySelector('.modal-actions .btn-primary[onclick*="safeModalExecuteUnstake"]');
+        if (!unstakeButton) return;
+
+        const buttonIcon = unstakeButton.querySelector('.material-icons');
+        const buttonText = unstakeButton.childNodes[unstakeButton.childNodes.length - 1];
+        const amount = parseFloat(this.unstakeAmount) || 0;
+        const hasAmount = amount > 0;
+        const unstakePhase = this.actionPhases?.unstake || 'idle';
+
+        if (unstakePhase !== 'idle') {
+            unstakeButton.disabled = true;
+            if (buttonIcon) buttonIcon.textContent = 'hourglass_empty';
+            if (buttonText) {
+                const phaseLabel = this.getPhaseLabel(unstakePhase) || ' Processing Transaction...';
+                buttonText.textContent = phaseLabel;
+            }
+            return;
+        }
+
+        const shouldDisable = this.isExecutingUnstake || !hasAmount;
+        unstakeButton.disabled = shouldDisable;
+
+        if (buttonIcon) buttonIcon.textContent = 'remove';
+        if (buttonText) buttonText.textContent = ' Unstake LP Tokens';
+    }
+
+    /**
+     * Update claim button text and state during transaction flow
+     */
+    updateClaimButton() {
+        const claimButton = document.querySelector('.modal-actions .btn-primary[onclick*="safeModalExecuteClaim"]');
+        if (!claimButton) return;
+
+        const buttonIcon = claimButton.querySelector('.material-icons');
+        const buttonText = claimButton.childNodes[claimButton.childNodes.length - 1];
+        const rewards = parseFloat(this.pendingRewards) || 0;
+        const hasRewards = rewards > 0;
+        const claimPhase = this.actionPhases?.claim || 'idle';
+
+        if (claimPhase !== 'idle') {
+            claimButton.disabled = true;
+            if (buttonIcon) buttonIcon.textContent = 'hourglass_empty';
+            if (buttonText) {
+                const phaseLabel = this.getPhaseLabel(claimPhase) || ' Processing Transaction...';
+                buttonText.textContent = phaseLabel;
+            }
+            return;
+        }
+
+        const shouldDisable = this.isExecutingClaim || !hasRewards;
+        claimButton.disabled = shouldDisable;
+
+        if (buttonIcon) buttonIcon.textContent = 'redeem';
+        if (buttonText) buttonText.textContent = ' Claim Rewards';
     }
 
     /**
@@ -805,7 +986,7 @@ class StakingModalNew {
         this.unstakeAmount = '';
         this.isApproved = false;
         this.needsApproval = false;
-        this.isApproving = false;
+        this.resetActionStates(false);
         
         // Clear DOM inputs and sliders for both stake and unstake
         ['stake', 'unstake'].forEach(type => {
@@ -816,6 +997,7 @@ class StakingModalNew {
         });
         
         console.log('🧹 Input values cleared');
+        this.updateButtonStates();
     }
 
     updatePairInfo() {
@@ -885,28 +1067,9 @@ class StakingModalNew {
     }
 
     updateButtonStates() {
-        // Update stake button
-        const stakeBtn = document.querySelector('.modal-actions .btn-primary[onclick*="Stake"]');
-        if (stakeBtn && this.currentTab === 'stake') {
-            const amount = parseFloat(this.stakeAmount);
-            // Check if weight is 0 to disable staking
-            const weight = parseFloat(this.currentPair?.weight || '0');
-            stakeBtn.disabled = !amount || amount === 0 || !weight || weight === 0;
-        }
-
-        // Update unstake button
-        const unstakeBtn = document.querySelector('.modal-actions .btn-primary[onclick*="Unstake"]');
-        if (unstakeBtn && this.currentTab === 'unstake') {
-            const amount = parseFloat(this.unstakeAmount);
-            unstakeBtn.disabled = !amount || amount === 0;
-        }
-
-        // Update claim button
-        const claimBtn = document.querySelector('.modal-actions .btn-primary[onclick*="Claim"]');
-        if (claimBtn && this.currentTab === 'claim') {
-            const rewards = parseFloat(this.pendingRewards);
-            claimBtn.disabled = !rewards || rewards === 0;
-        }
+        this.updateStakeButton();
+        this.updateUnstakeButton();
+        this.updateClaimButton();
     }
 
     renderStakeTab() {
@@ -1134,6 +1297,7 @@ class StakingModalNew {
         try {
             // Set execution guard
             this.isExecutingStake = true;
+            this.updateStakeButton();
             console.log('🔒 Stake execution started, guard enabled');
 
             // Check if contract manager is ready
@@ -1172,6 +1336,8 @@ class StakingModalNew {
             // Use lpToken address from pair object
             const lpTokenAddress = this.currentPair.lpToken || this.currentPair.address;
 
+            this.pendingOperations.stake = true;
+            this.setActionPhase('stake', 'userApproval');
             console.log('📤 Sending stake transaction...');
 
             // Execute real staking transaction
@@ -1179,6 +1345,10 @@ class StakingModalNew {
                 lpTokenAddress,
                 this.stakeAmount
             );
+
+            if (this.actionPhases.stake === 'userApproval') {
+                this.setActionPhase('stake', 'processing');
+            }
 
             if (!result.success) {
                 throw new Error(result.error || 'Staking transaction failed');
@@ -1216,7 +1386,10 @@ class StakingModalNew {
             }
         } finally {
             // Always release the guard
+            this.pendingOperations.stake = false;
+            this.setActionPhase('stake', 'idle');
             this.isExecutingStake = false;
+            this.updateStakeButton();
             console.log('🔓 Stake execution finished, guard released');
         }
     }
@@ -1233,6 +1406,7 @@ class StakingModalNew {
         try {
             // Set execution guard
             this.isExecutingUnstake = true;
+            this.updateUnstakeButton();
             console.log('🔒 Unstake execution started, guard enabled');
 
             // Check if contract manager is ready
@@ -1248,10 +1422,16 @@ class StakingModalNew {
             }
 
             // Execute real unstaking transaction
+            this.pendingOperations.unstake = true;
+            this.setActionPhase('unstake', 'userApproval');
             const result = await window.contractManager.unstake(
                 this.currentPair.address,
                 this.unstakeAmount
             );
+
+            if (this.actionPhases.unstake === 'userApproval') {
+                this.setActionPhase('unstake', 'processing');
+            }
 
             if (!result.success) {
                 throw new Error(result.error || 'Unstaking transaction failed');
@@ -1289,7 +1469,10 @@ class StakingModalNew {
             }
         } finally {
             // Always release the guard
+            this.pendingOperations.unstake = false;
+            this.setActionPhase('unstake', 'idle');
             this.isExecutingUnstake = false;
+            this.updateUnstakeButton();
             console.log('🔓 Unstake execution finished, guard released');
         }
     }
@@ -1306,6 +1489,7 @@ class StakingModalNew {
         try {
             // Set execution guard
             this.isExecutingClaim = true;
+            this.updateClaimButton();
             console.log('🔒 Claim execution started, guard enabled');
 
             // Check if contract manager is ready
@@ -1321,9 +1505,15 @@ class StakingModalNew {
             }
 
             // Execute real claim transaction
+            this.pendingOperations.claim = true;
+            this.setActionPhase('claim', 'userApproval');
             const result = await window.contractManager.claimRewards(
                 this.currentPair.address
             );
+
+            if (this.actionPhases.claim === 'userApproval') {
+                this.setActionPhase('claim', 'processing');
+            }
 
             if (!result.success) {
                 throw new Error(result.error || 'Claim transaction failed');
@@ -1361,7 +1551,10 @@ class StakingModalNew {
             }
         } finally {
             // Always release the guard
+            this.pendingOperations.claim = false;
+            this.setActionPhase('claim', 'idle');
             this.isExecutingClaim = false;
+            this.updateClaimButton();
             console.log('🔓 Claim execution finished, guard released');
         }
     }

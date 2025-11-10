@@ -1006,6 +1006,47 @@ class ContractManager {
     }
 
     /**
+     * Resolve an LP token identifier (name or address) to a contract address
+     * @param {string} pairIdentifier - Address, normalized key, or human-readable name
+     * @returns {string|null} Resolved contract address or null when not found
+     */
+    resolveLPTokenAddress(pairIdentifier) {
+        if (!pairIdentifier || typeof pairIdentifier !== 'string') {
+            return null;
+        }
+
+        if (this.isValidContractAddress(pairIdentifier)) {
+            return pairIdentifier;
+        }
+
+        // Direct map lookup when identifier already matches stored key
+        if (pairIdentifier.startsWith('LP_')) {
+            const direct = this.contractAddresses.get(pairIdentifier);
+            if (direct && this.isValidContractAddress(direct)) {
+                return direct;
+            }
+            pairIdentifier = pairIdentifier.replace(/^LP_/, '');
+        }
+
+        const normalizedKey = this.normalizePairKey(pairIdentifier);
+        if (!normalizedKey) {
+            return null;
+        }
+
+        const addressFromMap = this.contractAddresses.get(`LP_${normalizedKey}`);
+        if (addressFromMap && this.isValidContractAddress(addressFromMap)) {
+            return addressFromMap;
+        }
+
+        const lpContract = this.lpTokenContracts.get(normalizedKey);
+        if (lpContract?.address && this.isValidContractAddress(lpContract.address)) {
+            return lpContract.address;
+        }
+
+        return null;
+    }
+
+    /**
      * Initialize LP token contracts dynamically
      */
     async initializeLPTokenContracts() {
@@ -1414,6 +1455,215 @@ class ContractManager {
             const balance = await lpTokenContract.balanceOf(stakingContractAddress);
             return balance;
         }, 'getTVL');
+    }
+
+    /**
+     * Get LP stake composition using Uniswap V2 pair reserves
+     * Returns LP totals plus underlying token amounts held by the staking contract
+     */
+    async getLPStakeBreakdown(pairIdentifier) {
+        return await this.executeWithRetry(async () => {
+            const lpTokenAddress = this.resolveLPTokenAddress(pairIdentifier);
+            if (!lpTokenAddress) {
+                throw new Error(`Unable to resolve LP token for identifier: ${pairIdentifier}`);
+            }
+
+            const stakingAddress = this.contractAddresses.get('STAKING') || window.CONFIG?.CONTRACTS?.STAKING_CONTRACT;
+            if (!stakingAddress || !this.isValidContractAddress(stakingAddress)) {
+                throw new Error('Staking contract address not available');
+            }
+
+            const provider = this.provider || this.signer?.provider;
+            if (!provider) {
+                throw new Error('Provider not initialized');
+            }
+
+            const pairContract = new ethers.Contract(
+                lpTokenAddress,
+                [
+                    'function token0() view returns (address)',
+                    'function token1() view returns (address)',
+                    'function getReserves() view returns (uint112,uint112,uint32)',
+                    'function totalSupply() view returns (uint256)',
+                    'function balanceOf(address owner) view returns (uint256)',
+                    'function decimals() view returns (uint8)'
+                ],
+                provider
+            );
+
+            const multicall = this.multicallService;
+            if (!multicall || typeof multicall.isReady !== 'function' || !multicall.isReady()) {
+                throw new Error('Multicall service not ready');
+            }
+
+            const pairCalls = [
+                multicall.createCall(pairContract, 'token0'),
+                multicall.createCall(pairContract, 'token1'),
+                multicall.createCall(pairContract, 'getReserves'),
+                multicall.createCall(pairContract, 'totalSupply'),
+                multicall.createCall(pairContract, 'balanceOf', [stakingAddress]),
+                multicall.createCall(pairContract, 'decimals')
+            ];
+
+            const pairResults = await multicall.batchCall(pairCalls, { requireSuccess: true, maxRetries: 0 });
+            if (!pairResults || pairResults.length !== pairCalls.length) {
+                throw new Error('Multicall pair query failed');
+            }
+
+            const decodePair = (index, method) => {
+                const entry = pairResults[index];
+                if (!entry || entry.success !== true) {
+                    throw new Error(`Multicall failed for pair.${method}`);
+                }
+                const decoded = multicall.decodeResult(pairContract, method, entry.returnData);
+                if (decoded === null || decoded === undefined) {
+                    throw new Error(`Unable to decode pair.${method}`);
+                }
+                return decoded;
+            };
+
+            const token0Address = decodePair(0, 'token0');
+            const token1Address = decodePair(1, 'token1');
+            const reserves = decodePair(2, 'getReserves');
+            const totalSupplyRaw = decodePair(3, 'totalSupply');
+            const stakedBalanceRaw = decodePair(4, 'balanceOf');
+            const lpDecimalsRaw = decodePair(5, 'decimals');
+
+            const reserve0 = ethers.BigNumber.from(reserves[0]);
+            const reserve1 = ethers.BigNumber.from(reserves[1]);
+            const reserveTimestampRaw = Number(reserves[2]);
+            if (!Number.isFinite(reserveTimestampRaw)) {
+                throw new Error('Invalid reserve timestamp');
+            }
+            const blockTimestampLast = Math.trunc(reserveTimestampRaw);
+
+            const totalSupply = ethers.BigNumber.from(totalSupplyRaw);
+            const stakedBalance = ethers.BigNumber.from(stakedBalanceRaw);
+
+            if (stakedBalance.gt(totalSupply)) {
+                throw new Error('Staked balance exceeds total supply');
+            }
+
+            const metadataAbi = [
+                'function decimals() view returns (uint8)',
+                'function symbol() view returns (string)'
+            ];
+
+            const token0Contract = new ethers.Contract(token0Address, metadataAbi, provider);
+            const token1Contract = new ethers.Contract(token1Address, metadataAbi, provider);
+
+            const tokenMetadataCalls = [
+                multicall.createCall(token0Contract, 'decimals'),
+                multicall.createCall(token0Contract, 'symbol'),
+                multicall.createCall(token1Contract, 'decimals'),
+                multicall.createCall(token1Contract, 'symbol')
+            ];
+
+            const tokenMetadataResults = await multicall.batchCall(tokenMetadataCalls, { requireSuccess: true, maxRetries: 0 });
+            if (!tokenMetadataResults || tokenMetadataResults.length !== tokenMetadataCalls.length) {
+                throw new Error('Multicall token metadata query failed');
+            }
+
+            const decodeToken = (contract, method, index) => {
+                const entry = tokenMetadataResults[index];
+                if (!entry || entry.success !== true) {
+                    throw new Error(`Multicall failed for ${contract.address}.${method}`);
+                }
+                const decoded = multicall.decodeResult(contract, method, entry.returnData);
+                if (decoded === null || decoded === undefined) {
+                    throw new Error(`Unable to decode ${contract.address}.${method}`);
+                }
+                return decoded;
+            };
+
+            const token0DecimalsRaw = decodeToken(token0Contract, 'decimals', 0);
+            const token0SymbolRaw = decodeToken(token0Contract, 'symbol', 1);
+            const token1DecimalsRaw = decodeToken(token1Contract, 'decimals', 2);
+            const token1SymbolRaw = decodeToken(token1Contract, 'symbol', 3);
+
+            const lpDecimalsNum = Number(lpDecimalsRaw);
+            const token0DecimalsNum = Number(token0DecimalsRaw);
+            const token1DecimalsNum = Number(token1DecimalsRaw);
+
+            if (!Number.isFinite(lpDecimalsNum)) {
+                throw new Error('Invalid LP decimals');
+            }
+            if (!Number.isFinite(token0DecimalsNum)) {
+                throw new Error('Invalid token0 decimals');
+            }
+            if (!Number.isFinite(token1DecimalsNum)) {
+                throw new Error('Invalid token1 decimals');
+            }
+
+            const lpDecimals = Math.trunc(lpDecimalsNum);
+            const token0Decimals = Math.trunc(token0DecimalsNum);
+            const token1Decimals = Math.trunc(token1DecimalsNum);
+
+            if (typeof token0SymbolRaw !== 'string' || !token0SymbolRaw.trim()) {
+                throw new Error('Invalid token0 symbol');
+            }
+            if (typeof token1SymbolRaw !== 'string' || !token1SymbolRaw.trim()) {
+                throw new Error('Invalid token1 symbol');
+            }
+
+            const token0Symbol = token0SymbolRaw.trim();
+            const token1Symbol = token1SymbolRaw.trim();
+
+            if (totalSupply.isZero()) {
+                throw new Error('LP total supply is zero');
+            }
+
+            const token0Staked = stakedBalance.mul(reserve0).div(totalSupply);
+            const token1Staked = stakedBalance.mul(reserve1).div(totalSupply);
+            const outstandingBalance = totalSupply.sub(stakedBalance);
+
+            return {
+                lpTokenAddress,
+                stakingContractAddress: stakingAddress,
+                blockTimestampLast,
+                lpToken: {
+                    decimals: lpDecimals,
+                    totalSupply: {
+                        raw: totalSupply.toString(),
+                        formatted: ethers.utils.formatUnits(totalSupply, lpDecimals)
+                    },
+                    stakedBalance: {
+                        raw: stakedBalance.toString(),
+                        formatted: ethers.utils.formatUnits(stakedBalance, lpDecimals)
+                    },
+                    outstandingBalance: {
+                        raw: outstandingBalance.toString(),
+                        formatted: ethers.utils.formatUnits(outstandingBalance, lpDecimals)
+                    }
+                },
+                token0: {
+                    address: token0Address,
+                    symbol: token0Symbol,
+                    decimals: token0Decimals,
+                    reserve: {
+                        raw: reserve0.toString(),
+                        formatted: ethers.utils.formatUnits(reserve0, token0Decimals)
+                    },
+                    staked: {
+                        raw: token0Staked.toString(),
+                        formatted: ethers.utils.formatUnits(token0Staked, token0Decimals)
+                    }
+                },
+                token1: {
+                    address: token1Address,
+                    symbol: token1Symbol,
+                    decimals: token1Decimals,
+                    reserve: {
+                        raw: reserve1.toString(),
+                        formatted: ethers.utils.formatUnits(reserve1, token1Decimals)
+                    },
+                    staked: {
+                        raw: token1Staked.toString(),
+                        formatted: ethers.utils.formatUnits(token1Staked, token1Decimals)
+                    }
+                }
+            };
+        }, 'getLPStakeBreakdown');
     }
 
     /**
@@ -4007,27 +4257,35 @@ class ContractManager {
     async approveLPToken(pairName, amount) {
         this.log(`Executing transaction approveLPToken`);
 
-        // Get LP token contract
-        const lpContract = this.getLPTokenContract(pairName);
+        try {
+            // Get LP token contract
+            const lpContract = this.getLPTokenContract(pairName);
 
-        return await this.executeTransactionWithRetry(async () => {
-            const stakingAddress = this.contractAddresses.get('STAKING');
-            const amountWei = typeof amount === 'bigint' ? amount : ethers.utils.parseEther(amount.toString());
+            return await this.executeTransactionWithRetry(async () => {
+                const stakingAddress = this.contractAddresses.get('STAKING');
+                const amountWei = typeof amount === 'bigint' ? amount : ethers.utils.parseEther(amount.toString());
 
-            // Enhanced gas estimation
-            const gasLimit = await this.estimateGasWithBuffer(lpContract, 'approve', [stakingAddress, amountWei]);
-            const gasPrice = await this.getGasPrice();
+                // Enhanced gas estimation
+                const gasLimit = await this.estimateGasWithBuffer(lpContract, 'approve', [stakingAddress, amountWei]);
+                const gasPrice = await this.getGasPrice();
 
-            // Execute transaction with optimized gas settings
-            const tx = await lpContract.approve(stakingAddress, amountWei, {
-                gasLimit,
-                gasPrice
-            });
+                // Execute transaction with optimized gas settings
+                const tx = await lpContract.approve(stakingAddress, amountWei, {
+                    gasLimit,
+                    gasPrice
+                });
 
-            this.log('Approve transaction sent:', tx.hash, `Gas: ${gasLimit}, Price: ${ethers.utils.formatUnits(gasPrice, 'gwei')} gwei`);
+                this.log('Approve transaction sent:', tx.hash, `Gas: ${gasLimit}, Price: ${ethers.utils.formatUnits(gasPrice, 'gwei')} gwei`);
 
-            return tx;
-        }, 'approveLPToken');
+                return tx;
+            }, 'approveLPToken');
+        } catch (error) {
+            this.logError('❌ Failed to approve LP token:', error);
+            return {
+                success: false,
+                error: error.userMessage?.title || 'Failed to approve LP token'
+            };
+        }
     }
 
     /**
@@ -4405,6 +4663,46 @@ class ContractManager {
     }
 
     /**
+     * Notify listeners about transaction phase changes
+     */
+    notifyTransactionPhase(operationName, phase) {
+        try {
+            if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+                return;
+            }
+
+            const detail = {
+                operationName,
+                phase,
+                timestamp: Date.now()
+            };
+
+            const eventName = 'transaction-phase';
+            // Modern browsers support CustomEvent constructor
+            if (typeof CustomEvent === 'function') {
+                window.dispatchEvent(new CustomEvent(eventName, { detail }));
+                return;
+            }
+
+            // Fall back to legacy initCustomEvent when CustomEvent constructor is unavailable
+            if (typeof document !== 'undefined' && typeof document.createEvent === 'function') {
+                const legacyEvent = document.createEvent('CustomEvent');
+                const legacyInit = /** @type {any} */ (legacyEvent).initCustomEvent;
+                if (typeof legacyInit === 'function') {
+                    // Signature marked deprecated but required for older browsers; safe via dynamic call
+                    legacyInit.call(legacyEvent, eventName, false, false, detail);
+                } else {
+                    // Last resort: manually attach detail when initCustomEvent is missing entirely
+                    legacyEvent.detail = detail;
+                }
+                window.dispatchEvent(legacyEvent);
+            }
+        } catch (error) {
+            this.log(`⚠️ Failed to dispatch transaction phase event for ${operationName}: ${error.message}`);
+        }
+    }
+
+    /**
      * Monitor transaction with timeout and detailed logging
      */
     async monitorTransactionWithTimeout(tx, operationName, timeoutMs = 60000) {
@@ -4514,7 +4812,9 @@ class ContractManager {
                 this.log(`🚀 Fallback: Executing ${operationName} (attempt ${attempt}/${retries + 1})`);
 
                 // Execute the operation
+                this.notifyTransactionPhase(operationName, 'user_approval');
                 const tx = await operation();
+                this.notifyTransactionPhase(operationName, 'processing');
 
                 // Log transaction hash immediately
                 this.log(`✅ Transaction submitted: ${tx.hash}`);
@@ -4522,12 +4822,14 @@ class ContractManager {
 
                 // Monitor with timeout
                 const result = await this.monitorTransactionWithTimeout(tx, operationName, 60000);
+                this.notifyTransactionPhase(operationName, 'confirmed');
 
                 this.log(`🎉 Fallback: ${operationName} completed successfully`);
                 return result;
 
             } catch (error) {
                 lastError = error;
+                this.notifyTransactionPhase(operationName, 'failed');
                 this.log(`❌ Fallback: ${operationName} attempt ${attempt} failed: ${error.message}`);
 
                 if (attempt <= retries) {
@@ -4558,7 +4860,9 @@ class ContractManager {
                 this.log(`🚀 Starting transaction ${operationName}`);
 
                 // Execute the operation (this sends the transaction)
+                this.notifyTransactionPhase(operationName, 'user_approval');
                 const tx = await operation();
+                this.notifyTransactionPhase(operationName, 'processing');
 
                 // CRITICAL: Log transaction hash immediately after MetaMask confirmation
                 this.log(`✅ Transaction submitted to blockchain: ${tx.hash}`);
@@ -4567,28 +4871,14 @@ class ContractManager {
 
                 // Add transaction monitoring with timeout
                 const result = await this.monitorTransactionWithTimeout(tx, operationName, 60000); // 60 second timeout
+                this.notifyTransactionPhase(operationName, 'confirmed');
 
                 this.log(`🎉 Transaction ${operationName} completed successfully in block ${result.blockNumber}`);
-
-                // Display success notification
-                if (window.stateManager) {
-                    const notifications = window.stateManager.get('ui.notifications') || [];
-                    window.stateManager.set('ui.notifications', [
-                        ...notifications,
-                        {
-                            id: `tx_${Date.now()}`,
-                            type: 'success',
-                            title: 'Transaction Successful',
-                            message: `${operationName} completed successfully`,
-                            timestamp: Date.now(),
-                            metadata: { transactionHash: result.transactionHash }
-                        }
-                    ]);
-                }
 
                 return result;
             } catch (error) {
                 this.log(`❌ Transaction ${operationName} failed:`, error.message);
+                this.notifyTransactionPhase(operationName, 'failed');
 
                 // Enhanced error handling with specific error types
                 let userMessage = `Transaction ${operationName} failed`;
@@ -4638,22 +4928,6 @@ class ContractManager {
                     if (window.notificationManager) {
                         window.notificationManager.error(userMessage);
                     }
-                }
-
-                // Display user-friendly error notification
-                if (window.stateManager) {
-                    const notifications = window.stateManager.get('ui.notifications') || [];
-                    window.stateManager.set('ui.notifications', [
-                        ...notifications,
-                        {
-                            id: `error_${Date.now()}`,
-                            type: 'error',
-                            title: 'Transaction Failed',
-                            message: userMessage,
-                            timestamp: Date.now(),
-                            metadata: { errorType, operationName, transactionHash: error.transactionHash || null }
-                        }
-                    ]);
                 }
 
                 // Try fallback provider for network errors and RPC errors
