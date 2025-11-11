@@ -38,114 +38,62 @@
     gap: 6px;
 }
 
-.network-selector-icon {
-    font-size: 14px;
-    opacity: 0.7;
-}
-
 .network-select {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 6px;
-    color: #fff;
-    padding: 8px 28px 8px 12px;
-    font-size: 14px;
-    font-weight: 500;
+    min-width: 160px;
+    height: 38px !important;
+    padding: 0 48px 0 16px !important;
+    font-size: 14px !important;
+    line-height: 38px !important;
+    background: var(--background-paper, rgba(0, 0, 0, 0.05));
+    color: var(--text-primary, #1f2937);
+    border: 1px solid var(--primary-main, #1976d2) !important;
+    border-radius: 8px !important;
     cursor: pointer;
-    transition: all 0.2s ease;
-    min-width: 120px;
+    transition: all 0.2s ease !important;
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
-    background-repeat: no-repeat;
-    background-position: right 8px center;
-    background-size: 12px;
 }
 
 .network-select:hover {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.3);
+    background: var(--surface-hover, rgba(25, 118, 210, 0.08));
+    border-color: var(--primary-main, #1976d2) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(25, 118, 210, 0.25);
 }
 
 .network-select:focus {
     outline: none;
-    border-color: #1976d2;
+    border-color: var(--primary-main, #1976d2) !important;
     box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2);
 }
 
 .network-select option {
-    background: #1e1e1e;
-    color: #fff;
-    padding: 8px;
+    background: var(--background-paper, rgba(0, 0, 0, 0.05));
+    color: var(--text-primary, #1f2937);
+    padding: 8px 12px;
 }
 
 .network-select-wrapper {
     position: relative;
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    flex: 1;
-    min-width: 0;
+    height: 38px;
 }
 
-/* Theme-specific overrides */
-html[data-theme="dark"] .network-select {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.2);
-    color: #fff;
-    font-weight: 600;
-    padding: 6px 24px 6px 8px;
-    width: 100%;
-    min-width: 0;
-}
-
-html[data-theme="light"] .network-select {
-    background: rgba(0, 0, 0, 0.05);
-    border-color: rgba(0, 0, 0, 0.2);
-    color: #000;
-    font-weight: 700;
-    padding: 6px 24px 6px 8px;
-    width: 100%;
-    min-width: 0;
-}
-
-html[data-theme="dark"] .network-select-chevron,
-html[data-theme="light"] .network-select-chevron {
+.network-select-chevron {
     position: absolute;
-    right: 8px;
+    right: 16px;
     top: 50%;
     transform: translateY(-50%);
     font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     pointer-events: none;
     z-index: 1;
     line-height: 1;
-}
-
-html[data-theme="dark"] .network-select-chevron {
-    color: #fff;
-}
-
-html[data-theme="light"] .network-select-chevron {
-    color: #000;
-}
-
-html[data-theme="dark"] .network-select:hover {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.4);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-html[data-theme="light"] .network-select:hover {
-    background: rgba(0, 0, 0, 0.1);
-    border-color: rgba(0, 0, 0, 0.3);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-}
-
-[data-theme="light"] .network-select option {
-    background: #fff;
-    color: #333;
+    color: var(--text-primary);
 }
 
 /* Layout specific */
@@ -165,33 +113,6 @@ html[data-theme="light"] .network-select:hover {
 .network-indicator .network-select-wrapper {
     flex: 1;
     min-width: 0;
-}
-
-.network-indicator .network-select {
-    min-width: 0;
-    font-size: 15px;
-    padding: 6px 24px 6px 8px;
-    width: 100%;
-    max-width: 146px;
-    height: 30px !important;
-    line-height: 18px;
-    box-sizing: border-box;
-}
-
-/* More specific rule for admin page network selector */
-#network-indicator .network-select {
-    height: 30px !important;
-    max-height: 30px !important;
-    line-height: normal !important;
-    font-size: 14px !important;
-    padding: 6px 24px 6px 8px !important;
-    vertical-align: middle !important;
-    background: rgba(0, 0, 0, 0.05) !important; /* Override admin CSS */
-}
-
-/* Ensure consistent background for both pages */
-#network-indicator-home .network-select {
-    background: rgba(0, 0, 0, 0.05) !important; /* Ensure consistency */
 }
 
 /* Status indicators */
@@ -225,7 +146,7 @@ html[data-theme="light"] .network-select:hover {
     height: 38px;
     min-height: 32px;
     border-radius: 4px;
-    padding: 8px 3px 8px 12px;
+    padding: 0 8px 0 12px;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -234,17 +155,19 @@ html[data-theme="light"] .network-select:hover {
     box-sizing: border-box;
     position: relative;
     max-width: 300px;
+    background: transparent;
+    border: none;
 }
 
 html[data-theme="dark"] .network-indicator-home {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: transparent;
+    border: none;
     color: #fff;
 }
 
 html[data-theme="light"] .network-indicator-home {
-    background: rgba(0, 0, 0, 0.05);
-    border: 1px solid rgba(0, 0, 0, 0.1);
+    background: transparent;
+    border: none;
     color: #000;
 }
 
@@ -267,13 +190,11 @@ html[data-theme="light"] .network-indicator-home {
     }
     
     .network-select {
-        font-size: 11px;
-        padding: 3px 6px;
-        min-width: 70px;
-    }
-    
-    .network-selector-icon {
-        font-size: 12px;
+        height: 34px !important;
+        line-height: 34px !important;
+        font-size: 12px !important;
+        padding: 0 40px 0 12px !important;
+        min-width: 130px;
     }
 }
 
@@ -283,8 +204,10 @@ html[data-theme="light"] .network-indicator-home {
     }
     
     .network-select {
-        font-size: 10px;
-        padding: 2px 4px;
-        min-width: 60px;
+        height: 32px !important;
+        line-height: 32px !important;
+        font-size: 11px !important;
+        padding: 0 36px 0 10px !important;
+        min-width: 110px;
     }
 }

@@ -2639,34 +2639,6 @@ table td:last-child {
     margin-bottom: 16px;
 }
 
-.network-selector-container {
-    display: flex;
-    justify-content: center;
-}
-
-.network-select {
-    background: var(--bg-secondary, rgba(249, 250, 251, 0.8));
-    border: 1px solid var(--border-color, rgba(100, 116, 139, 0.5));
-    border-radius: 8px;
-    color: var(--text-primary, #1f2937);
-    padding: 12px 16px;
-    font-size: 1rem;
-    min-width: 0;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.network-select:hover {
-    border-color: rgba(59, 130, 246, 0.5);
-    background: var(--bg-secondary-hover, rgba(249, 250, 251, 0.9));
-}
-
-.network-select:focus {
-    outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
 .access-details {
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.3);
