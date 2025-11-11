@@ -766,6 +766,10 @@ class StakingModalNew {
                 this.setActionPhase('approve', 'processing');
             }
 
+            if (!approveTx.success) {
+                throw new Error(approveTx.error || 'Approval transaction failed');
+            }
+
             // Update state and UI
             this.isApproved = true;
             this.needsApproval = false;
