@@ -665,7 +665,6 @@ body {
 
 [data-theme="light"] .chat-screenshot {
   box-shadow: 0 50px 100px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.1);
-  background: #ffffff;
 }
 
 @keyframes phone-float {
@@ -2536,6 +2535,36 @@ html[data-theme="light"] .page-header #funding-bg {
     padding-top: 120px;
     padding-left: var(--space-4);
     padding-right: var(--space-4);
+  }
+
+  /* Mobile bubble animation adjustments */
+  .page-header #funding-bg svg {
+    viewBox: "0 0 400 300";
+    height: 300px !important;
+  }
+  
+  .page-header #funding-bg svg circle:nth-child(1) {
+    cx: "80" !important;
+    cy: "60" !important;
+    r: "25" !important;
+  }
+  
+  .page-header #funding-bg svg circle:nth-child(2) {
+    cx: "250" !important;
+    cy: "180" !important;
+    r: "20" !important;
+  }
+  
+  .page-header #funding-bg svg circle:nth-child(3) {
+    cx: "320" !important;
+    cy: "80" !important;
+    r: "25" !important;
+  }
+  
+  .page-header #funding-bg svg circle:nth-child(4) {
+    cx: "350" !important;
+    cy: "220" !important;
+    r: "20" !important;
   }
 
   .page-title {
