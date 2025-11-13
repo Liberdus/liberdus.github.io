@@ -540,16 +540,18 @@
 .connect-card h2,
 .unauthorized-card h2 {
     margin: 0 0 20px 0;
-    font-size: 24px;
+    font-size: 1.5rem;
     font-weight: 600;
-    color: #ffffff;
+    color: var(--text-primary);
+    text-align: center;
 }
 
 .connect-card p,
 .unauthorized-card p {
     margin: 0 0 25px 0;
-    color: #a0a0a0;
-    line-height: 1.6;
+    font-size: 1rem;
+    color: var(--text-secondary);
+    line-height: var(--line-height-normal);
 }
 
 .access-details {
@@ -2526,13 +2528,6 @@ table td:last-child {
     max-width: 600px;
     width: 100%;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-}
-
-.unauthorized-card h2 {
-    color: #ef4444;
-    margin-bottom: 16px;
-    font-size: 1.5rem;
-    text-align: center;
 }
 
 .unauthorized-card h3 {

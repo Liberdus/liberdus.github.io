@@ -25,6 +25,7 @@
     <link rel="stylesheet" href="../css/day10-enhancements.css">
     <link rel="stylesheet" href="../css/network-indicator-selector.css">
     <link rel="stylesheet" href="../css/admin-homepage-theme.css">
+    <link rel="stylesheet" href="../css/admin-loading.css">
     
     <!-- Meta Tags -->
     <meta name="description" content="LP Staking Admin Panel - Manage liquidity provider staking contracts">
@@ -313,83 +314,37 @@
             });
         }
 
-        // Connect wallet function for admin access (CORS-free approach)
-        async function connectWallet() {
+        // Connect wallet helper that delegates to the shared WalletManager
+        async function connectWallet(preferredWallet = 'metamask') {
             try {
-                console.log('🔗 Attempting wallet connection...');
+                console.log('🔗 Attempting wallet connection via WalletManager...');
+                const result = await window.walletManager.connectWallet(preferredWallet);
 
-                // Direct MetaMask connection (bypasses wallet manager issues)
-                if (!window.ethereum) {
-                    throw new Error('MetaMask not installed. Please install MetaMask to continue.');
-                }
+                // Snapshot connection details for legacy checks
+                const wm = window.walletManager;
+                const provider = wm.getProvider?.() || wm.provider;
+                const chainId = wm.getChainId?.() || result?.chainId;
 
-                console.log('🦊 Connecting directly to MetaMask...');
-
-                // Request account access
-                const accounts = await window.ethereum.request({
-                    method: 'eth_requestAccounts'
-                });
-
-                if (!accounts || accounts.length === 0) {
-                    throw new Error('No accounts found. Please unlock MetaMask.');
-                }
-
-                // Create provider and signer
-                const provider = new ethers.providers.Web3Provider(window.ethereum);
-                const signer = provider.getSigner();
-                const address = await signer.getAddress();
-                const network = await provider.getNetwork();
-
-                console.log('✅ Wallet connected successfully');
-                console.log('📍 Address:', address);
-                console.log('🌐 Network:', network.chainId);
-
-                // Store connection info globally
                 window.walletConnection = {
                     provider,
-                    signer,
-                    address,
-                    network,
+                    signer: wm.getSigner?.() || wm.signer,
+                    address: wm.getAddress?.() || result?.address,
+                    network: provider ? await provider.getNetwork().catch(() => ({ chainId })) : { chainId },
                     isConnected: true
                 };
 
-                // Update wallet manager if available
-                if (window.walletManager) {
-                    window.walletManager.provider = provider;
-                    window.walletManager.signer = signer;
-                    window.walletManager.address = address;
-                    window.walletManager.chainId = network.chainId;
-                    console.log('🔄 Updated wallet manager with connection info');
-                }
+                console.log('✅ Wallet connected through WalletManager', window.walletConnection.address, chainId);
 
-                // Wait a moment for state to update
-                await new Promise(resolve => setTimeout(resolve, 500));
+                // Re-run admin initialization to unlock the panel
+                setTimeout(() => window.adminPage?.init?.(), 500);
 
-                // Reinitialize admin panel after wallet connection
-                if (adminPage) {
-                    console.log('🔄 Reinitializing admin panel...');
-                    await adminPage.init();
-                } else {
-                    console.log('⚠️ Admin page not available, reloading...');
-                    location.reload();
-                }
+                return result;
 
             } catch (error) {
                 console.error('❌ Wallet connection failed:', error);
-
-                // Show user-friendly error message
-                let errorMessage;
-                if (error.message.includes('User rejected') || error.message.includes('User denied')) {
-                    errorMessage = 'Wallet connection was cancelled by user';
-                } else if (error.message.includes('not installed')) {
-                    errorMessage = 'MetaMask not installed. Please install MetaMask extension.';
-                } else if (error.message.includes('No accounts')) {
-                    errorMessage = 'Please unlock MetaMask and try again.';
-                } else {
-                    errorMessage = `Wallet connection failed: ${error.message}`;
-                }
-
-                alert(errorMessage);
+                const message = error?.message || 'An unexpected error occurred while connecting to the wallet.';
+                (window.notificationManager?.error || alert)(message);
+                throw error;
             }
         }
 
@@ -437,85 +392,5 @@
             }
         });
     </script>
-
-    <style>
-        /* Loading styles for initial state */
-        .admin-loading {
-            position: fixed;
-            inset: 0;
-            z-index: 2000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            color: #ffffff;
-        }
-
-        .loading-container {
-            text-align: center;
-            padding: 40px;
-        }
-
-        .loading-spinner {
-            width: 50px;
-            height: 50px;
-            border: 3px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: #00d4ff;
-            animation: spin 1s ease-in-out infinite;
-            margin: 0 auto 20px;
-        }
-
-        .loading-container h2 {
-            margin: 0 0 10px 0;
-            font-size: 24px;
-            font-weight: 600;
-            color: #ffffff;
-        }
-
-        .loading-container p {
-            margin: 0;
-            color: #a0a0a0;
-            font-size: 16px;
-        }
-
-        .error-container {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            color: #ffffff;
-            text-align: center;
-            padding: 40px;
-        }
-
-        .error-container h2 {
-            margin: 0 0 15px 0;
-            color: #ff6b6b;
-            font-size: 24px;
-        }
-
-        .error-container p {
-            margin: 0 0 25px 0;
-            color: #a0a0a0;
-            max-width: 500px;
-            line-height: 1.6;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        #error-boundary {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 9999;
-        }
-    </style>
 </body>
 </html>

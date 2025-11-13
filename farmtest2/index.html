@@ -135,21 +135,8 @@
     <script src="js/master-initializer.js"></script>
 
     <script>
-    // Initialize theme toggle button
+    // Display version in header
     document.addEventListener('DOMContentLoaded', function() {
-        console.log('🎨 Setting up theme toggle button...');
-        
-        // Wait for unified theme manager to be ready
-        setTimeout(function() {
-            if (window.unifiedThemeManager) {
-                window.unifiedThemeManager.setupToggleButton('theme-toggle');
-                console.log('✅ Theme toggle button initialized');
-            } else {
-                console.error('❌ UnifiedThemeManager not found');
-            }
-        }, 100);
-        
-        // Display version in header
         if (window.getCurrentVersion) {
             window.getCurrentVersion().then(function(version) {
                 const versionElement = document.getElementById('app-version');

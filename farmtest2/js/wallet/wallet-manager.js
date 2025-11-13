@@ -652,24 +652,4 @@ class WalletManager {
 // Export the class to global scope
 window.WalletManager = WalletManager;
 
-// Create global instance (only if not already created)
-if (!window.walletManager) {
-    try {
-        window.walletManager = new WalletManager();
-        console.log('✅ WalletManager instance created successfully');
-
-        // Verify methods are available
-        console.log('🔍 WalletManager methods check:');
-        console.log('  - connectMetaMask:', typeof window.walletManager.connectMetaMask);
-        console.log('  - connectWallet:', typeof window.walletManager.connectWallet);
-        console.log('  - isConnected:', typeof window.walletManager.isConnected);
-        console.log('  - disconnect:', typeof window.walletManager.disconnect);
-
-    } catch (error) {
-        console.error('❌ Failed to create WalletManager instance:', error);
-    }
-} else {
-    console.log('⚠️ WalletManager instance already exists');
-}
-
 } // End of duplicate prevention guard

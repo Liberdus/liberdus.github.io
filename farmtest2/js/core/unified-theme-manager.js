@@ -193,15 +193,27 @@
          */
         setupToggleButton(buttonId = 'theme-toggle') {
             const toggleButton = document.getElementById(buttonId);
-            if (toggleButton) {
-                toggleButton.addEventListener('click', () => {
-                    this.toggleTheme();
-                });
-                this.updateToggleButton();
-                console.log('✅ Theme toggle button setup complete');
-            } else {
+            if (!toggleButton) {
                 console.warn(`⚠️ Theme toggle button not found: #${buttonId}`);
+                return;
             }
+
+            // Check if already initialized to prevent duplicate listeners
+            if (toggleButton.dataset.themeInitialized === 'true') {
+                console.log('✅ Theme toggle button already initialized');
+                return;
+            }
+
+            // Attach click listener
+            toggleButton.addEventListener('click', () => {
+                this.toggleTheme();
+            });
+            
+            // Mark as initialized
+            toggleButton.dataset.themeInitialized = 'true';
+            
+            this.updateToggleButton();
+            console.log('✅ Theme toggle button setup complete');
         }
 
         /**
