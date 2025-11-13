@@ -94,7 +94,6 @@ body {
 /* Base button styles */
 .btn-primary,
 .proposal-btn,
-.connect-wallet-btn,
 .btn-secondary,
 .btn-danger,
 .btn-error,
@@ -131,8 +130,7 @@ body {
 
 /* Hover states */
 .btn-primary:hover:not(:disabled),
-.proposal-btn:hover:not(:disabled),
-.connect-wallet-btn:hover:not(:disabled) {
+.proposal-btn:hover:not(:disabled) {
     background: var(--primary-dark) !important;
     transform: translateY(-1px) !important;
     box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3) !important;
@@ -372,22 +370,6 @@ body {
     color: var(--primary-main) !important;
 }
 
-/* ========================================
-   HEADER & NAVIGATION - HOMEPAGE STYLE
-   ======================================== */
-.admin-header {
-    background: rgba(255, 255, 255, 0.8) !important;
-    backdrop-filter: blur(8px) !important;
-    border-bottom: 1px solid var(--divider) !important;
-}
-
-[data-theme="dark"] .admin-header {
-    background: rgba(0, 0, 0, 0.8) !important;
-}
-
-.admin-title {
-    color: var(--text-primary) !important;
-}
 
 .nav-section {
     background: transparent !important;
@@ -674,18 +656,6 @@ textarea::placeholder {
 
 .proposal-row.expired {
     background: rgba(158, 158, 158, 0.05) !important;
-}
-
-/* ========================================
-   CONNECT WALLET STATES - HOMEPAGE STYLE
-   ======================================== */
-.connect-wallet-btn.connected {
-    background: var(--success-main) !important;
-    color: white !important;
-}
-
-.connect-wallet-btn.connected:hover {
-    background: var(--success-main) !important;
 }
 
 /* ========================================
@@ -1123,32 +1093,6 @@ button[type="submit"] .btn-text,
     letter-spacing: 0.5px !important;
 }
 
-/* Admin header layout adjustments */
-.admin-header-content {
-    display: flex !important;
-    justify-content: space-between !important;
-    align-items: center !important;
-    width: 100% !important;
-}
-
-.admin-header-left {
-    display: flex !important;
-    align-items: center !important;
-    gap: 16px !important;
-}
-
-.admin-header-right {
-    display: flex !important;
-    align-items: center !important;
-    gap: 12px !important;
-}
-
-.back-btn {
-    padding: 8px 16px !important;
-    font-size: 14px !important;
-    white-space: nowrap !important;
-    color: white !important;
-}
 
 /* ========================================
    NETWORK ERROR CARD

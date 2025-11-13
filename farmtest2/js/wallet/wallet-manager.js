@@ -101,13 +101,19 @@ class WalletManager {
         try {
             this.log(`Connecting wallet (preferred: ${preferredType})...`);
 
-            if (preferredType === 'metamask' || (preferredType === 'auto' && window.ethereum)) {
-                return await this.connectMetaMask();
-            } else if (preferredType === 'walletconnect' || preferredType === 'auto') {
-                return await this.connectWalletConnect();
-            } else {
-                throw new Error('No supported wallet found');
+            const normalizedPreference = (preferredType || 'auto').toLowerCase();
+
+            if (normalizedPreference === 'metamask' || normalizedPreference === 'auto') {
+                if (window.ethereum) {
+                    return await this.connectMetaMask();
+                }
+
+                if (normalizedPreference === 'metamask') {
+                    throw new Error('MetaMask not installed. Please install MetaMask browser extension.');
+                }
             }
+
+            throw new Error('No supported wallet found');
         } catch (error) {
             this.logError('Wallet connection failed:', error);
             throw error;
@@ -257,133 +263,6 @@ class WalletManager {
             this.isConnecting = false;
         }
     }
-
-    /**
-     * CRITICAL FIX: Connect to WalletConnect with enhanced connection guards
-     */
-    async connectWalletConnect() {
-        // CRITICAL FIX: Enhanced connection state checking
-        if (this.isConnecting) {
-            console.warn('WalletConnect connection already in progress, waiting...');
-            // Wait for current connection to complete
-            return new Promise((resolve, reject) => {
-                const checkConnection = () => {
-                    if (!this.isConnecting) {
-                        if (this.isConnected()) {
-                            resolve(true);
-                        } else {
-                            reject(new Error('Previous connection attempt failed'));
-                        }
-                    } else {
-                        setTimeout(checkConnection, 100);
-                    }
-                };
-                setTimeout(checkConnection, 100);
-            });
-        }
-
-        if (this.isConnected()) {
-            console.log('WalletConnect already connected:', this.address);
-            return true;
-        }
-
-        this.isConnecting = true;
-
-        try {
-            this.log('Connecting to WalletConnect...');
-
-            // Load WalletConnect dynamically if not already loaded
-            if (!window.WalletConnectProvider) {
-                await this.loadWalletConnect();
-            }
-
-            // Initialize WalletConnect provider
-            const provider = new window.WalletConnectProvider({
-                rpc: {
-                    [window.CONFIG.DEFAULT_NETWORK]: window.CONFIG.RPC.POLYGON_AMOY[0]
-                },
-                chainId: window.CONFIG.DEFAULT_NETWORK,
-                qrcode: true,
-                qrcodeModalOptions: {
-                    mobileLinks: [
-                        'rainbow',
-                        'metamask',
-                        'argent',
-                        'trust',
-                        'imtoken',
-                        'pillar'
-                    ]
-                }
-            });
-
-            // Enable session (triggers QR Code modal)
-            await provider.enable();
-
-            // Create ethers provider
-            this.provider = new ethers.providers.Web3Provider(provider);
-            this.signer = this.provider.getSigner();
-            this.address = provider.accounts[0];
-            this.chainId = provider.chainId;
-            this.walletType = 'walletconnect';
-            this.walletConnectProvider = provider;
-
-            // Store connection info
-            this.storeConnectionInfo();
-
-            // Set up WalletConnect event listeners
-            provider.on('accountsChanged', (accounts) => {
-                this.handleAccountsChanged(accounts);
-            });
-
-            provider.on('chainChanged', (chainId) => {
-                this.handleChainChanged(chainId);
-            });
-
-            provider.on('disconnect', (code, reason) => {
-                this.handleDisconnect(code, reason);
-            });
-
-            // Notify listeners
-            this.notifyListeners('connected', {
-                address: this.address,
-                chainId: this.chainId,
-                walletType: this.walletType
-            });
-
-            this.log('WalletConnect connected successfully:', this.address);
-            return true;
-
-        } catch (error) {
-            this.logError('WalletConnect connection failed:', error);
-            throw error;
-        } finally {
-            this.isConnecting = false;
-        }
-    }
-
-    /**
-     * Load WalletConnect SDK dynamically
-     */
-    async loadWalletConnect() {
-        return new Promise((resolve, reject) => {
-            if (window.WalletConnectProvider) {
-                resolve();
-                return;
-            }
-
-            const script = document.createElement('script');
-            script.src = 'https://unpkg.com/@walletconnect/web3-provider@1.8.0/dist/umd/index.min.js';
-            script.onload = () => {
-                this.log('WalletConnect SDK loaded successfully');
-                resolve();
-            };
-            script.onerror = () => {
-                reject(new Error('Failed to load WalletConnect SDK'));
-            };
-            document.head.appendChild(script);
-        });
-    }
-
     /**
      * Disconnect wallet
      */
@@ -394,18 +273,12 @@ class WalletManager {
             // Clear stored connection info
             this.clearConnectionInfo();
 
-            // Disconnect WalletConnect if active
-            if (this.walletType === 'walletconnect' && this.walletConnectProvider) {
-                await this.walletConnectProvider.disconnect();
-            }
-
             // Reset state
             this.provider = null;
             this.signer = null;
             this.address = null;
             this.chainId = null;
             this.walletType = null;
-            this.walletConnectProvider = null;
 
             // Notify listeners
             this.notifyListeners('disconnected', {});
@@ -788,7 +661,6 @@ if (!window.walletManager) {
         // Verify methods are available
         console.log('🔍 WalletManager methods check:');
         console.log('  - connectMetaMask:', typeof window.walletManager.connectMetaMask);
-        console.log('  - connectWalletConnect:', typeof window.walletManager.connectWalletConnect);
         console.log('  - connectWallet:', typeof window.walletManager.connectWallet);
         console.log('  - isConnected:', typeof window.walletManager.isConnected);
         console.log('  - disconnect:', typeof window.walletManager.disconnect);

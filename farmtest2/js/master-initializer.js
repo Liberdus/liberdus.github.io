@@ -29,6 +29,7 @@ class MasterInitializer {
     async initializeSystem() {
         try {
             await this.loadConfiguration();
+            await this.loadEthersLibrary();
             await this.loadCoreUtilities();
             await this.loadWalletSystems();
             await this.loadUIComponents();
@@ -50,9 +51,6 @@ class MasterInitializer {
     async loadConfiguration() {
         console.log('⚙️ Loading application configuration...');
 
-        // Load production logger first
-        await this.loadScript('js/utils/production-logger.js');
-
         // Load SES-safe handler
         await this.loadScript('js/utils/ses-safe-handler.js');
 
@@ -65,6 +63,22 @@ class MasterInitializer {
         }
 
         console.log('✅ Configuration loaded successfully');
+    }
+
+    async loadEthersLibrary() {
+        if (typeof window.ethers !== 'undefined') {
+            console.log('Ethers.js already available, skipping load');
+            return;
+        }
+
+        console.log('Loading Ethers.js library...');
+        await this.loadScript('libs/ethers.umd.min.js');
+
+        if (typeof window.ethers === 'undefined') {
+            throw new Error('Failed to load Ethers.js library');
+        }
+
+        console.log('Ethers.js loaded successfully:', window.ethers.version);
     }
 
     async loadCoreUtilities() {
@@ -108,6 +122,30 @@ class MasterInitializer {
 
         for (const script of walletScripts) {
             await this.loadScript(script);
+        }
+    }
+
+    /**
+     * Normalize the admin navigation link state across pages.
+     * @param {'home'|'admin'} target
+     */
+    updateAdminPanelLink(target) {
+        const adminLink = document.getElementById('admin-panel-link');
+        if (!adminLink) {
+            return;
+        }
+
+        const icon = adminLink.querySelector('.material-icons');
+        const label = adminLink.querySelector('span:last-child');
+
+        if (target === 'home') {
+            adminLink.href = '../';
+            if (icon) icon.textContent = 'home';
+            if (label) label.textContent = 'Home';
+        } else {
+            adminLink.href = 'admin/';
+            if (icon) icon.textContent = 'admin_panel_settings';
+            if (label) label.textContent = 'Admin Panel';
         }
     }
 
@@ -326,19 +364,18 @@ class MasterInitializer {
                 this.components.set('stakingModal', window.stakingModal);
                 console.log('✅ Staking Modal initialized');
             }
-
-            // Initialize wallet popup
-            if (window.WalletPopup && !window.walletPopup) {
-                try {
-                    window.walletPopup = new window.WalletPopup();
-                    this.components.set('walletPopup', window.walletPopup);
-                    console.log('✅ Wallet Popup initialized');
-                } catch (error) {
-                    console.error('❌ Failed to initialize WalletPopup:', error);
-                }
-            }
         } else {
             console.log('⏭️ Skipping homepage UI components initialization (admin mode)');
+        }
+
+        if (window.WalletPopup && !window.walletPopup) {
+            try {
+                window.walletPopup = new window.WalletPopup();
+                this.components.set('walletPopup', window.walletPopup);
+                console.log('✅ Wallet Popup initialized');
+            } catch (error) {
+                console.error('❌ Failed to initialize WalletPopup:', error);
+            }
         }
 
         // Ensure wallet connection is properly set up
@@ -741,7 +778,8 @@ class MasterInitializer {
         }
 
         // Adjust path if running from admin subdirectory
-        const adjustedSrc = this.isAdminPage && src.startsWith('js/') ? `../${src}` : src;
+        const needsAdminPrefix = this.isAdminPage && !src.startsWith('../') && (src.startsWith('js/') || src.startsWith('libs/'));
+        const adjustedSrc = needsAdminPrefix ? `../${src}` : src;
 
         return new Promise((resolve, reject) => {
             const script = document.createElement('script');
@@ -765,6 +803,23 @@ class MasterInitializer {
 
     async loadCSS(href) {
         if (this.loadedScripts.has(href)) {
+            return Promise.resolve();
+        }
+
+        // Skip if stylesheet already injected or linked statically.
+        const existingLink = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).find((link) => {
+            const linkHref = link.getAttribute('href');
+            if (!linkHref) return false;
+            try {
+                const normalized = new URL(linkHref, window.location.href).pathname;
+                return normalized.endsWith(href);
+            } catch {
+                return false;
+            }
+        });
+        if (existingLink) {
+            this.loadedScripts.add(href);
+            console.log(`ℹ️ CSS already present: ${href}`);
             return Promise.resolve();
         }
 

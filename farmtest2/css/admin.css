@@ -300,24 +300,6 @@
     50% { opacity: 0.8; }
 }
 
-/* Admin Header */
-.admin-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    height: 80px;
-    padding: 0 30px;
-    background: rgba(255, 255, 255, 0.05);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
-}
-
-.admin-header h1 {
-    margin: 0;
-    font-size: 24px;
-    font-weight: 600;
-    color: #00d4ff;
-}
 
 .admin-user-info {
     display: flex;
@@ -539,6 +521,9 @@
     align-items: center;
     min-height: 100vh;
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
 }
 
 .connect-card,
@@ -670,13 +655,6 @@
 
 /* Responsive Design */
 @media (max-width: 768px) {
-    .admin-header {
-        flex-direction: column;
-        gap: 15px;
-        text-align: center;
-        padding: 20px;
-    }
-    
     .admin-user-info {
         align-items: center;
     }
@@ -727,10 +705,6 @@
 }
 
 @media (max-width: 480px) {
-    .admin-header h1 {
-        font-size: 20px;
-    }
-    
     .user-address {
         font-size: 12px;
     }
@@ -1408,17 +1382,6 @@ table td:last-child {
     background: #0056b3;
 }
 
-/* Connected Wallet Button */
-.connect-wallet-btn.connected {
-    background: #28a745;
-    color: #ffffff;
-    cursor: default;
-}
-
-.connect-wallet-btn.connected:hover {
-    background: #28a745;
-}
-
 /* Animations */
 @keyframes slideInRight {
     from {
@@ -1474,15 +1437,6 @@ table td:last-child {
     padding: 2rem 1rem;
 }
 
-/* Typography variant="h3" align="center" gutterBottom sx={{ my: 4 }} */
-.admin-title {
-    font-size: 3rem;
-    font-weight: 400;
-    text-align: center;
-    margin: 2rem 0;
-    color: #ffffff;
-    line-height: 1.167;
-}
 
 /* Typography variant="h5" gutterBottom */
 .proposal-title {

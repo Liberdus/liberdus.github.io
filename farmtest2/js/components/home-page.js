@@ -1119,6 +1119,7 @@ class HomePage {
         if (adminButton) {
             adminButton.style.display = 'flex';
             adminButton.classList.remove('admin-checking');
+            window.masterInitializer?.updateAdminPanelLink('admin');
             this.isAdmin = true;
         }
     }
@@ -1131,6 +1132,7 @@ class HomePage {
         if (adminButton) {
             adminButton.style.display = 'none';
             adminButton.classList.remove('admin-checking');
+            window.masterInitializer?.updateAdminPanelLink('admin');
             this.isAdmin = false;
         }
     }
@@ -1143,6 +1145,7 @@ class HomePage {
         if (adminButton) {
             adminButton.style.display = 'flex';
             adminButton.classList.add('admin-checking');
+            window.masterInitializer?.updateAdminPanelLink('admin');
             this.isAdmin = false; // Not confirmed yet
         }
     }

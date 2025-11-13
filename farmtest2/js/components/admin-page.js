@@ -561,7 +561,7 @@ class AdminPage {
             }
 
             // Update network indicator
-            window.NetworkIndicator?.update('network-indicator', 'admin-network-selector', 'admin');
+            window.NetworkIndicator?.update('network-indicator-home', 'admin-network-selector', 'admin');
         });
 
     }
@@ -698,12 +698,12 @@ class AdminPage {
      */
     setupWalletListeners() {
         // Listen for wallet connection events
-        window.addEventListener('walletConnected', (event) => {
+        document.addEventListener('walletConnected', (event) => {
             console.log('🎉 Wallet connected event received:', event.detail);
             this.handleWalletConnected(event.detail);
         });
 
-        window.addEventListener('walletDisconnected', () => {
+        document.addEventListener('walletDisconnected', () => {
             console.log('👋 Wallet disconnected event received');
             this.handleWalletDisconnected();
         });
@@ -1016,6 +1016,8 @@ class AdminPage {
     handleWalletDisconnected() {
         console.log('👋 Handling wallet disconnected');
 
+        this.isAuthorized = false;
+
         // Update UI to reflect disconnected state
         const connectButtons = document.querySelectorAll('.connect-wallet-btn');
         connectButtons.forEach(btn => {
@@ -1065,7 +1067,7 @@ class AdminPage {
         console.log('🌐 Handling chain changed:', chainId);
 
         // Update network indicator when chain changes
-        const indicator = document.getElementById('network-indicator');
+        const indicator = document.getElementById('network-indicator-home');
         if (indicator) {
             const chainIdDecimal = parseInt(chainId, 16);
             const expectedChainId = window.CONFIG.NETWORK.CHAIN_ID;
@@ -1073,7 +1075,7 @@ class AdminPage {
             // Check permission asynchronously and update
             if (window.networkManager) {
                 window.networkManager.hasRequiredNetworkPermission().then(hasPermission => {
-                    window.NetworkIndicator?.update('network-indicator', 'admin-network-selector', 'admin');
+                    window.NetworkIndicator?.update('network-indicator-home', 'admin-network-selector', 'admin');
                 }).catch(error => {
                     console.error('Error checking permission after chain change:', error);
                 });
@@ -1261,67 +1263,6 @@ class AdminPage {
         }
     }
 
-    /**
-     * Create network indicator component
-     * Modern approach: Shows permission status instead of blocking on active network
-     */
-    createNetworkIndicator() {
-        const chainId = window.walletManager?.getChainId();
-        const expectedChainId = window.CONFIG.NETWORK.CHAIN_ID;
-        const expectedNetworkName = window.CONFIG?.NETWORK?.NAME || 'Unknown';
-
-        // We'll check permission asynchronously and update the indicator
-        // For now, show current network status
-        const onExpectedNetwork = chainId === expectedChainId;
-
-        // Schedule async permission check to update indicator
-        if (window.networkManager) {
-            window.networkManager.hasRequiredNetworkPermission().then(hasPermission => {
-                window.NetworkIndicator?.update('network-indicator', 'admin-network-selector', 'admin');
-            }).catch(error => {
-                console.error('Error checking network permission:', error);
-            });
-        }
-
-        return `
-            <div class="network-indicator-home ${onExpectedNetwork ? 'has-permission' : 'missing-permission'}" id="network-indicator">
-                <span class="network-status-dot ${onExpectedNetwork ? 'green' : 'red'}"></span>
-                <div id="admin-network-selector"></div>
-                ${!onExpectedNetwork ? `
-                    <button class="btn-grant-permission" onclick="${window.PermissionUtils?.getPermissionButtonAction(expectedNetworkName, 'admin') || `window.networkManager.requestPermissionWithUIUpdate('admin')`}" title="${window.PermissionUtils?.getPermissionButtonTitle(expectedNetworkName) || `Grant permission for ${expectedNetworkName}`}">
-                        ${window.PermissionUtils?.getPermissionButtonText(expectedNetworkName) || `Grant ${expectedNetworkName} Permission`}
-                    </button>
-                ` : ''}
-            </div>
-        `;
-    }
-
-
-
-    /**
-     * Create wallet address display component
-     */
-    createWalletAddressDisplay() {
-        // Get wallet address from multiple sources
-        const address = this.userAddress 
-            || window.walletManager?.address 
-            || window.walletConnection?.address;
-
-        const walletIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;">
-            <path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
-        </svg>`;
-
-        const displayText = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Not Connected';
-        const title = address ? `Connected: ${address}` : 'No wallet connected';
-
-        return `
-            <div class="wallet-address-display" title="${title}">
-                ${walletIcon}
-                <span class="wallet-address-text">${displayText}</span>
-            </div>
-        `;
-    }
-
     createAdminLayout() {
         const container = document.getElementById('admin-content') || document.body;
         const devModeIndicator = this.DEVELOPMENT_MODE
@@ -1332,29 +1273,6 @@ class AdminPage {
             <div class="admin-panel">
                 ${devModeIndicator}
 
-                <!-- Admin Header with Theme Toggle and Network Indicator -->
-                <header class="admin-header">
-                    <div class="admin-header-content">
-                        <div class="admin-header-left">
-                            <button class="btn btn-secondary back-btn" onclick="navigateToHome()" title="Back to Staking Page">
-                                ← Back to Staking
-                            </button>
-                            <h1 class="admin-title">Admin Panel</h1>
-                            <span class="version-badge" id="admin-version">v0.0.0</span>
-                        </div>
-                        <div class="admin-header-right">
-                            ${this.createNetworkIndicator()}
-                            ${this.createWalletAddressDisplay()}
-                            <nav class="admin-nav">
-                                <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme">
-                                    <span class="material-icons-outlined">light_mode</span>
-                                </button>
-                            </nav>
-                        </div>
-                    </div>
-                </header>
-
-                <!-- Container maxWidth="lg" with py: 4 (matching React) -->
                 <div class="admin-container">
 
                     <!-- Grid container spacing={3} -->
@@ -1410,15 +1328,29 @@ class AdminPage {
         // Prevent proposal actions until the underlying data is ready
         this.setProposalButtonsEnabled(false);
         
-        // Display version in header
-        if (window.getCurrentVersion) {
-            window.getCurrentVersion().then(version => {
-                const versionElement = document.getElementById('admin-version');
-                if (versionElement) {
-                    versionElement.textContent = 'v' + version;
-                }
-            });
+        this.attachAdminHeaderHelpers();
+    }
+
+    attachAdminHeaderHelpers() {
+        const adminLink = document.getElementById('admin-panel-link');
+        if (adminLink) {
+            adminLink.style.display = 'flex';
+            adminLink.classList.remove('admin-checking');
         }
+        window.masterInitializer?.updateAdminPanelLink('home');
+
+        if (window.getCurrentVersion) {
+            window.getCurrentVersion()
+                .then((version) => {
+                    const versionBadge = document.getElementById('app-version');
+                    if (versionBadge) {
+                        versionBadge.textContent = 'v' + version;
+                    }
+                })
+                .catch(() => {});
+        }
+
+        window.NetworkIndicator?.update('network-indicator-home', 'admin-network-selector', 'admin');
     }
 
     /**
@@ -6229,8 +6161,8 @@ class AdminPage {
         }
 
         // Remove custom event listeners
-        window.removeEventListener('walletConnected', this.handleWalletConnected);
-        window.removeEventListener('walletDisconnected', this.handleWalletDisconnected);
+        document.removeEventListener('walletConnected', this.handleWalletConnected);
+        document.removeEventListener('walletDisconnected', this.handleWalletDisconnected);
         window.removeEventListener('contractReady', this.handleContractReady);
         window.removeEventListener('contractError', this.handleContractError);
 

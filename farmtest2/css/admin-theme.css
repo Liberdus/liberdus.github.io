@@ -117,68 +117,6 @@ body {
     padding: 0 var(--spacing-3);
 }
 
-/* ========================================
-   HEADER - MATCHING HOMEPAGE EXACTLY
-   ======================================== */
-.admin-header {
-    position: sticky;
-    top: 0;
-    z-index: 1100;
-    background: rgba(255, 255, 255, 0.8);
-    backdrop-filter: blur(8px);
-    border-bottom: 1px solid var(--divider);
-    transition: all 0.3s ease;
-}
-
-[data-theme="dark"] .admin-header {
-    background: rgba(0, 0, 0, 0.8);
-}
-
-.admin-header-content {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 var(--spacing-3);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-top: var(--spacing-2);
-    padding-bottom: var(--spacing-2);
-    min-height: 64px;
-}
-
-.admin-title {
-    font-size: 24px;
-    font-weight: 700;
-    background: linear-gradient(45deg, #2196F3 30%, #21CBF3 90%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin: 0;
-}
-
-[data-theme="dark"] .admin-title {
-    background: linear-gradient(45deg, #fff 30%, #ccc 90%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.version-badge {
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    margin-left: 12px;
-    padding: 2px 8px;
-    background: var(--action-hover);
-    border-radius: 12px;
-    white-space: nowrap;
-}
-
-.admin-header-left {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-2);
-}
 
 @media (max-width: 768px) {
     .version-badge {
@@ -290,28 +228,6 @@ body {
     padding: 6px 12px;
     font-size: 13px;
     min-width: 80px;
-}
-
-/* Connect wallet button - MATCHING HOMEPAGE */
-.connect-wallet-btn {
-    background: var(--primary-main);
-    color: white;
-    border: none;
-    padding: var(--spacing-1) var(--spacing-3);
-    border-radius: var(--border-radius);
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-1);
-    font-size: var(--font-size);
-}
-
-.connect-wallet-btn:hover {
-    background: var(--primary-hover);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-4);
 }
 
 /* ========================================
@@ -584,14 +500,6 @@ table tbody tr:last-child td {
 @media (max-width: 768px) {
     .admin-container {
         padding: 0 var(--spacing-2);
-    }
-
-    .admin-header-content {
-        padding: var(--spacing-1) var(--spacing-2);
-    }
-
-    .admin-title {
-        font-size: 20px;
     }
 
     .modal-content {

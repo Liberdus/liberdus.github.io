@@ -23,6 +23,33 @@
     background: var(--background-paper);
 }
 
+.wallet-balance {
+    margin-top: var(--spacing-1);
+    margin-bottom: var(--spacing-2);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.wallet-balance .balance-label {
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.wallet-balance .balance-value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    transition: color 0.2s ease;
+}
+
+.wallet-balance .balance-value.error {
+    color: var(--error-main);
+}
+
 /* Close Button */
 .wallet-popup-close {
     position: absolute;

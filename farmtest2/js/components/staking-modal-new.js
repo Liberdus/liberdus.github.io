@@ -603,6 +603,10 @@ class StakingModalNew {
         this.needsApproval = false;
         this.currentAllowance = '0';
 
+        // Reset form inputs
+        this.stakeAmount = '';
+        this.unstakeAmount = '';
+
         // Reset transaction progress state
         this.resetActionStates(false);
 
@@ -614,6 +618,9 @@ class StakingModalNew {
         // Update pair info
         this.updatePairInfo();
 
+        // Render requested tab immediately with any previously cached data
+        this.switchTab(tab);
+
         // Show modal
         const modal = document.getElementById('staking-modal-new');
         if (modal) {
@@ -624,11 +631,8 @@ class StakingModalNew {
         // Load user balances if contract manager is ready
         await this.loadUserBalances();
 
-        // Switch to specified tab
+        // Re-render the tab to reflect fresh data
         this.switchTab(tab);
-
-        // Update button states after everything is loaded (to check weight)
-        this.updateButtonStates();
 
         // Prevent body scroll
         document.body.style.overflow = 'hidden';

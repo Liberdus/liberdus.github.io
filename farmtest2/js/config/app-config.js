@@ -20,8 +20,8 @@ window.CONFIG = {
             ],
             BLOCK_EXPLORER: 'https://amoy.polygonscan.com',
             NATIVE_CURRENCY: {
-                name: 'MATIC',
-                symbol: 'MATIC',
+                name: 'Polygon',
+                symbol: 'POL',
                 decimals: 18
             },
             CONTRACTS: {
@@ -37,7 +37,7 @@ window.CONFIG = {
                 'https://polygon-mainnet.g.alchemy.com/v2/CjcioLVYYWW0tsHWorEfC'
             ],
             BLOCK_EXPLORER: 'https://polygonscan.com',
-            NATIVE_CURRENCY: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
+            NATIVE_CURRENCY: { name: 'Polygon', symbol: 'POL', decimals: 18 },
             CONTRACTS: {
                 STAKING_CONTRACT: '0xef15eB728CEF704f40269319BBA495d4131Beb71'
             }
@@ -139,7 +139,6 @@ window.CONFIG = {
 
     // Wallet Configuration
     WALLET: {
-        SUPPORTED_WALLETS: ['MetaMask', 'WalletConnect', 'Coinbase Wallet'],
         AUTO_CONNECT: true,
         CONNECTION_TIMEOUT: 30000 // 30 seconds
     },
@@ -174,9 +173,7 @@ window.CONFIG = {
 
     // Development Configuration
     DEV: {
-        DEBUG: false,
-        CONSOLE_LOGS: true,
-        PERFORMANCE_MONITORING: false
+        DEBUG: false
     },
 
     // Default Values for Contract Stats
