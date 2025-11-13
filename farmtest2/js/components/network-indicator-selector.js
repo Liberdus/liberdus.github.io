@@ -117,7 +117,6 @@ class NetworkSelector {
                         </option>
                     `).join('')}
                 </select>
-                <span class="network-select-chevron">▼</span>
             </div>
         `;
     }

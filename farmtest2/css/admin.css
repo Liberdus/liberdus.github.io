@@ -1443,7 +1443,7 @@ table td:last-child {
     font-size: 1.5rem;
     font-weight: 400;
     margin: 0 0 1rem 0;
-    color: #ffffff;
+    color: var(--text-primary);
     line-height: 1.334;
 }
 

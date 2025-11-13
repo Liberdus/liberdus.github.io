@@ -50,9 +50,6 @@
     border-radius: 8px !important;
     cursor: pointer;
     transition: all 0.2s ease !important;
-    appearance: none;
-    -webkit-appearance: none;
-    -moz-appearance: none;
 }
 
 .network-select:hover {
@@ -79,21 +76,6 @@
     display: inline-flex;
     align-items: center;
     height: 38px;
-}
-
-.network-select-chevron {
-    position: absolute;
-    right: 16px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: 12px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
-    z-index: 1;
-    line-height: 1;
-    color: var(--text-primary);
 }
 
 /* Layout specific */
