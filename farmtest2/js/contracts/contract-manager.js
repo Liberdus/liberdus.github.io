@@ -27,13 +27,6 @@ class ContractManager {
         this.currentProviderIndex = 0;
         this.disabledFeatures = new Set(); // Track disabled features due to contract limitations
 
-        // Enhanced RPC Failover System
-        this.currentRpcIndex = 0;
-        // Initialize with current network's RPC URLs (will be updated by switchNetwork)
-        this.rpcUrls = [window.CONFIG?.NETWORK?.RPC_URL, ...(window.CONFIG?.NETWORK?.FALLBACK_RPCS || [])];
-        this.rpcHealthStatus = new Map(); // Track RPC health
-        this.lastRpcSwitch = 0; // Prevent rapid switching
-
         // State management
         this.isInitialized = false;
         this.isInitializing = false;
@@ -63,14 +56,7 @@ class ContractManager {
             retryDelay: 400, // Reduced from 800ms for faster recovery
             gasLimitMultiplier: 1.2,
             gasEstimationBuffer: 0.1, // 10% buffer for gas estimation
-            providerTimeout: 2000, // Reduced from 5000ms for faster failover
-            fallbackRPCs: window.CONFIG?.NETWORK?.FALLBACK_RPCS || [],
-            networkConfig: {
-                chainId: window.CONFIG?.NETWORK?.CHAIN_ID || 80002, // Use centralized config
-                name: window.CONFIG?.NETWORK?.NAME || 'Polygon Amoy Testnet',
-                currency: window.CONFIG?.NETWORK?.NATIVE_CURRENCY?.symbol || 'MATIC',
-                explorerUrl: 'https://amoy.polygonscan.com'
-            }
+            providerTimeout: 2000 // Reduced from 5000ms for faster failover
         };
 
         this.log('ContractManager initialized with comprehensive features');
@@ -137,59 +123,24 @@ class ContractManager {
             // when wallet is on different network. Always use dedicated network RPC for read-only mode.
             this.log('🌐 Read-only mode: Using dedicated network RPC (prevents BigNumber corruption)...');
             
-            // Use the current network's RPC URL (updated by switchNetwork)
-            const networkRpcUrl = this.rpcUrls && this.rpcUrls.length > 0 ? this.rpcUrls[0] : window.CONFIG?.NETWORK?.RPC_URL || 'https://polygon-amoy.g.alchemy.com/v2/CjcioLVYYWW0tsHWorEfC';
-            
-            try {
-                this.log('🚀 Creating dedicated network provider:', networkRpcUrl);
-                const networkProvider = new ethers.providers.JsonRpcProvider({
-                    url: networkRpcUrl,
-                    timeout: 10000
-                });
+            // Use the current network's RPC URLs (resolved from CONFIG each time)
+            const configuredRpcUrls = this.getAllRPCUrls();
 
-                // Verify connection
-                const network = await networkProvider.getNetwork();
-                this.log(`✅ Network provider connected - Chain ID: ${network.chainId}`);
-
-                this.provider = networkProvider;
-                this.signer = null; // No signer in read-only mode
-                this.log('✅ Using dedicated network RPC provider (read-only)');
-
-            } catch (networkError) {
-                this.log('⚠️ Primary network RPC failed, trying fallbacks:', networkError.message);
-
-                // Try direct provider creation first (faster)
-                try {
-                    this.log('🚀 Attempting direct provider creation with network fallback...');
-                    const fallbackUrl = this.rpcUrls && this.rpcUrls.length > 1 ? this.rpcUrls[1] : 'https://rpc-amoy.polygon.technology';
-                    const directProvider = new ethers.providers.JsonRpcProvider({
-                        url: fallbackUrl,
-                        timeout: 8000
-                    });
-
-                    // Quick test
-                    const network = await directProvider.getNetwork();
-                    this.log(`✅ Direct provider connected - Chain ID: ${network.chainId}`);
-
-                    this.provider = directProvider;
-                    this.signer = null;
-                    this.log('✅ Using direct network provider');
-
-                } catch (directError) {
-                    this.log('⚠️ Direct provider failed, trying fallback system:', directError.message);
-
-                    // Initialize fallback providers (read-only)
-                    this.log('📡 Initializing fallback providers...');
-                    await this.initializeFallbackProviders();
-                    this.log('📡 Fallback providers initialized:', this.fallbackProviders.length);
-
-                    // Use working provider (ENHANCED)
-                    this.log('🔄 Finding working RPC provider...');
-                    this.provider = await this.getWorkingProvider();
-                    this.signer = null; // No signer in read-only mode
-                    this.log('✅ Using working provider:', this.provider.connection?.url || 'Unknown');
-                }
+            if (configuredRpcUrls.length === 0) {
+                throw new Error('No RPC URL configured for read-only mode');
             }
+
+            this.log(`🔍 Searching for working RPC provider from ${configuredRpcUrls.length} configured endpoints...`);
+
+            // Find a working provider using the comprehensive health checks
+            this.provider = await this.getWorkingProvider();
+            this.signer = null; // No signer in read-only mode
+            this.log('✅ Using working provider:', this.provider.connection?.url || 'Unknown');
+
+            // Initialize fallback providers (read-only)
+            this.log('📡 Initializing fallback providers...');
+            await this.initializeFallbackProviders();
+            this.log('📡 Fallback providers initialized:', this.fallbackProviders.length);
 
             // Initialize Multicall service for batch loading optimization
             if (window.MulticallService && this.provider) {
@@ -244,8 +195,7 @@ class ContractManager {
             this.isReadyFlag = true;
             this.log('⚠️ ContractManager marked as ready with limited functionality');
 
-            // Don't throw error - allow system to continue
-            // throw error;
+            throw error;
         }
     }
 
@@ -514,36 +464,19 @@ class ContractManager {
      */
     getAllRPCUrls() {
         const rpcUrls = [];
+        const networkConfig = window.CONFIG?.NETWORK;
 
-        // PRIORITY 1: Use current network's RPC URLs (updated by switchNetwork)
-        if (this.rpcUrls && this.rpcUrls.length > 0) {
-            rpcUrls.push(...this.rpcUrls);
-            this.log('📡 Using current network RPC URLs:', this.rpcUrls.length);
-        } else {
-            // FALLBACK: Use global CONFIG if no network-specific RPCs are set
-            // Primary RPC from CONFIG
-            if (window.CONFIG?.NETWORK?.RPC_URL) {
-                rpcUrls.push(window.CONFIG.NETWORK.RPC_URL);
-            }
-
-            // Fallback RPCs from CONFIG
-            if (window.CONFIG?.NETWORK?.FALLBACK_RPCS) {
-                rpcUrls.push(...window.CONFIG.NETWORK.FALLBACK_RPCS);
-            }
+        if (networkConfig?.RPC_URL) {
+            rpcUrls.push(networkConfig.RPC_URL);
         }
 
-        // Legacy RPC format (only if no current network RPCs)
-        if (rpcUrls.length === 0 && window.CONFIG?.RPC?.POLYGON_AMOY) {
-            rpcUrls.push(...window.CONFIG.RPC.POLYGON_AMOY);
+        if (Array.isArray(networkConfig?.FALLBACK_RPCS)) {
+            rpcUrls.push(...networkConfig.FALLBACK_RPCS.filter(Boolean));
         }
 
-        // Internal fallback RPCs (always add as additional fallbacks)
-        if (this.config.fallbackRPCs) {
-            rpcUrls.push(...this.config.fallbackRPCs);
-        }
-
-        // Remove duplicates and return
-        return [...new Set(rpcUrls)];
+        const uniqueRpcUrls = [...new Set(rpcUrls.filter(Boolean))];
+        this.log('📡 Resolved RPC URLs from CONFIG:', uniqueRpcUrls.length);
+        return uniqueRpcUrls;
     }
 
     /**
@@ -552,30 +485,9 @@ class ContractManager {
     async initializeFallbackProviders() {
         try {
             this.fallbackProviders = [];
+            this.currentProviderIndex = 0;
 
-            // Get RPC URLs from multiple sources
-            let rpcUrls = [];
-
-            // First try from internal config
-            if (this.config.fallbackRPCs && this.config.fallbackRPCs.length > 0) {
-                rpcUrls = [...this.config.fallbackRPCs];
-                this.log('📡 Using internal fallback RPCs:', rpcUrls.length);
-            }
-
-            // Also try from global CONFIG (new FALLBACK_RPCS format)
-            if (window.CONFIG?.NETWORK?.FALLBACK_RPCS && window.CONFIG.NETWORK.FALLBACK_RPCS.length > 0) {
-                rpcUrls = [...rpcUrls, ...window.CONFIG.NETWORK.FALLBACK_RPCS];
-                this.log('📡 Added global CONFIG FALLBACK_RPCS:', window.CONFIG.NETWORK.FALLBACK_RPCS.length);
-            }
-
-            // Legacy support for old RPC format
-            if (window.CONFIG?.RPC?.POLYGON_AMOY && window.CONFIG.RPC.POLYGON_AMOY.length > 0) {
-                rpcUrls = [...rpcUrls, ...window.CONFIG.RPC.POLYGON_AMOY];
-                this.log('📡 Added legacy CONFIG RPCs:', window.CONFIG.RPC.POLYGON_AMOY.length);
-            }
-
-            // Remove duplicates
-            rpcUrls = [...new Set(rpcUrls)];
+            const rpcUrls = this.getAllRPCUrls();
             this.log('📡 Total unique RPC URLs to test:', rpcUrls.length);
             this.log('📡 RPC URLs:', rpcUrls);
 
@@ -607,9 +519,9 @@ class ContractManager {
 
                     const network = await Promise.race([networkPromise, timeoutPromise]);
 
-                    // Verify correct network (using centralized config)
-                    const expectedChainId = window.CONFIG?.NETWORK?.CHAIN_ID || 80002;
-                    if (network.chainId !== expectedChainId) {
+                    // Verify correct network (using centralized config when available)
+                    const expectedChainId = window.CONFIG?.NETWORK?.CHAIN_ID;
+                    if (expectedChainId != null && network.chainId !== expectedChainId) {
                         throw new Error(`Wrong network: expected ${expectedChainId}, got ${network.chainId}`);
                     }
 
@@ -652,22 +564,10 @@ class ContractManager {
             this.log(`📊 Successfully initialized ${this.fallbackProviders.length} fallback providers`);
 
             if (this.fallbackProviders.length === 0) {
-                // Emergency fallback: try to create a basic provider without testing
-                this.log('🚨 EMERGENCY FALLBACK: Attempting to create provider without testing...');
-
-                try {
-                    const emergencyRpc = this.rpcUrls && this.rpcUrls.length > 0 ? this.rpcUrls[0] : 'https://rpc-amoy.polygon.technology';
-                    const emergencyProvider = new ethers.providers.JsonRpcProvider(emergencyRpc);
-                    this.fallbackProviders.push(emergencyProvider);
-                    this.log('🚨 Emergency provider created (untested):', emergencyRpc);
-                    this.log('⚠️ WARNING: Using untested provider - functionality may be limited');
-                } catch (emergencyError) {
-                    const errorMsg = 'No working fallback providers found. All RPC endpoints failed connection tests.';
-                    this.logError('❌ CRITICAL:', errorMsg);
-                    this.logError('❌ Emergency fallback also failed:', emergencyError.message);
-                    this.logError('❌ Test results:', testResults.map(r => `${r.url}: ${r.error || 'Success'}`));
-                    throw new Error(errorMsg);
-                }
+                const errorMsg = 'No working fallback providers found. All RPC endpoints failed connection tests.';
+                this.logError('❌ CRITICAL:', errorMsg);
+                this.logError('❌ Test results:', testResults.map(r => `${r.url}: ${r.error || 'Success'}`));
+                throw new Error(errorMsg);
             }
 
         } catch (error) {
@@ -1242,14 +1142,11 @@ class ContractManager {
             // Update RPC URLs for the new network
             const network = window.CONFIG.NETWORKS[networkKey];
             if (network) {
-                this.rpcUrls = [network.RPC_URL, ...network.FALLBACK_RPCS];
-                this.log(`📡 Updated RPC URLs for ${network.NAME}:`, this.rpcUrls.length);
-                
-                // Reset RPC failover state for new network
-                this.currentRpcIndex = 0;
-                this.rpcHealthStatus.clear();
-                this.lastRpcSwitch = 0;
-                this.log('🔄 Reset RPC failover state for network switch');
+                const updatedRpcUrls = [network.RPC_URL, ...(network.FALLBACK_RPCS || [])].filter(Boolean);
+                this.log(`📡 Updated RPC URLs for ${network.NAME}:`, updatedRpcUrls.length);
+                // Reset provider rotation for new network
+                this.currentProviderIndex = 0;
+                this.log('🔄 Reset provider index for network switch');
             }
 
             // Check if the new network has valid contract addresses
@@ -4568,12 +4465,12 @@ class ContractManager {
     async getWorkingProvidersForHistoricalState() {
         const providers = [];
 
-        // OPTIMIZATION: Only use fastest, most reliable providers to reduce fallback time
-        const rpcUrls = this.rpcUrls && this.rpcUrls.length > 0 ? this.rpcUrls : [
-            'https://rpc-amoy.polygon.technology',           // Polygon official (most reliable)
-            'https://polygon-amoy-bor-rpc.publicnode.com',   // PublicNode (good performance)
-            // Removed slower providers to reduce total fallback time
-        ];
+        // OPTIMIZATION: Only use configured providers to reduce fallback time
+        const rpcUrls = this.getAllRPCUrls();
+
+        if (!rpcUrls || rpcUrls.length === 0) {
+            throw new Error('No RPC URLs configured for historical state queries');
+        }
 
         for (const rpcUrl of rpcUrls) {
             try {
@@ -5251,58 +5148,64 @@ class ContractManager {
      * Switch to next available RPC provider
      */
     async switchToNextProvider() {
-        const rpcSources = [
-            this.config.fallbackRPCs,
-            window.CONFIG?.NETWORK?.FALLBACK_RPCS,
-            this.rpcUrls
-        ].filter(rpcs => rpcs && rpcs.length > 0);
+        const rpcUrls = this.getAllRPCUrls();
 
-        for (const rpcs of rpcSources) {
-            if (rpcs.length > 1) {
-                this.currentProviderIndex = (this.currentProviderIndex + 1) % rpcs.length;
-                const newRpcUrl = rpcs[this.currentProviderIndex];
+        if (!rpcUrls || rpcUrls.length === 0) {
+            throw new Error('No working RPC providers available');
+        }
 
-                this.log(`🔄 Switching to RPC: ${newRpcUrl}`);
+        if (rpcUrls.length === 1) {
+            throw new Error('No alternative RPC providers configured');
+        }
 
-                try {
-                    // Create new provider with timeout
-                    this.provider = new ethers.providers.JsonRpcProvider({
-                        url: newRpcUrl,
-                        timeout: 5000 // 5 second timeout
-                    });
+        for (let attempt = 0; attempt < rpcUrls.length; attempt++) {
+            this.currentProviderIndex = (this.currentProviderIndex + 1) % rpcUrls.length;
+            const newRpcUrl = rpcUrls[this.currentProviderIndex];
 
-                    // Test the new provider with timeout
-                    const testPromise = this.provider.getBlockNumber();
-                    const timeoutPromise = new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('Provider test timeout')), 2000)
+            if (!newRpcUrl) {
+                continue;
+            }
+
+            this.log(`🔄 Switching to RPC: ${newRpcUrl}`);
+
+            try {
+                // Create new provider with timeout
+                this.provider = new ethers.providers.JsonRpcProvider({
+                    url: newRpcUrl,
+                    timeout: 5000 // 5 second timeout
+                });
+
+                // Test the new provider with timeout
+                const testPromise = this.provider.getBlockNumber();
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Provider test timeout')), 2000)
+                );
+
+                await Promise.race([testPromise, timeoutPromise]);
+
+                // Reinitialize contracts with new provider
+                if (this.stakingContract) {
+                    this.stakingContract = new ethers.Contract(
+                        this.stakingContract.address,
+                        this.stakingContract.interface,
+                        this.signer || this.provider
                     );
-
-                    await Promise.race([testPromise, timeoutPromise]);
-
-                    // Reinitialize contracts with new provider
-                    if (this.stakingContract) {
-                        this.stakingContract = new ethers.Contract(
-                            this.stakingContract.address,
-                            this.stakingContract.interface,
-                            this.signer || this.provider
-                        );
-                    }
-
-                    if (this.rewardTokenContract) {
-                        this.rewardTokenContract = new ethers.Contract(
-                            this.rewardTokenContract.address,
-                            this.rewardTokenContract.interface,
-                            this.signer || this.provider
-                        );
-                    }
-
-                    this.log(`✅ Successfully switched to RPC: ${newRpcUrl}`);
-                    return; // Success, exit
-
-                } catch (testError) {
-                    this.logError(`❌ Failed to switch to RPC ${newRpcUrl}: ${testError.message}`);
-                    // Continue to try next RPC
                 }
+
+                if (this.rewardTokenContract) {
+                    this.rewardTokenContract = new ethers.Contract(
+                        this.rewardTokenContract.address,
+                        this.rewardTokenContract.interface,
+                        this.signer || this.provider
+                    );
+                }
+
+                this.log(`✅ Successfully switched to RPC: ${newRpcUrl}`);
+                return; // Success, exit
+
+            } catch (testError) {
+                this.logError(`❌ Failed to switch to RPC ${newRpcUrl}: ${testError.message}`);
+                // Continue to try next RPC
             }
         }
 

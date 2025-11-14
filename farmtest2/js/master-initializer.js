@@ -9,6 +9,7 @@ class MasterInitializer {
 
         // Detect which page we're on to conditionally load components
         this.isAdminPage = window.location.pathname.includes('admin');
+        this.pendingContractManagerError = null; // Store initialization errors until listeners are ready
         
         // Make instance globally available for testing
         window.masterInitializer = this;
@@ -300,6 +301,7 @@ class MasterInitializer {
                 } else {
                     console.log('🔄 Initializing ContractManager with read-only provider...');
                     await window.contractManager.initializeReadOnly();
+                    this.pendingContractManagerError = null;
                     // Notify listeners that ContractManager is ready
                     document.dispatchEvent(new CustomEvent('contractManagerReady', {
                         detail: { contractManager: window.contractManager }
@@ -310,6 +312,11 @@ class MasterInitializer {
                 // Note: contractManagerReady is dispatched above after initialization
             } catch (error) {
                 console.error('❌ Failed to initialize ContractManager with read-only provider:', error);
+                const errorMessage = error?.message || 'Unknown error occurred while initializing the contract manager';
+                this.pendingContractManagerError = errorMessage;
+                document.dispatchEvent(new CustomEvent('contractManagerError', {
+                    detail: { error: errorMessage }
+                }));
             }
         }
 
@@ -356,6 +363,17 @@ class MasterInitializer {
                 window.homePage = new window.HomePage();
                 this.components.set('homePage', window.homePage);
                 console.log('✅ Home Page initialized');
+
+                if (this.pendingContractManagerError) {
+                    const errorMessage = this.pendingContractManagerError;
+                    // Re-dispatch so newly initialized listeners receive the failure
+                    setTimeout(() => {
+                        document.dispatchEvent(new CustomEvent('contractManagerError', {
+                            detail: { error: errorMessage }
+                        }));
+                        this.pendingContractManagerError = null;
+                    }, 0);
+                }
             }
 
             // Initialize staking modal
@@ -811,6 +829,8 @@ class MasterInitializer {
                         console.log('✅ ContractManager initialized with wallet');
                     }
 
+                    this.pendingContractManagerError = null;
+
                     // Dispatch event for components waiting for contract manager
                     document.dispatchEvent(new CustomEvent('contractManagerWalletReady', {
                         detail: { contractManager: window.contractManager }
@@ -823,8 +843,10 @@ class MasterInitializer {
             console.error('❌ Failed to initialize contract manager:', error);
 
             // Dispatch error event
+            const errorMessage = error?.message || 'Unknown error occurred while initializing the contract manager';
+            this.pendingContractManagerError = errorMessage;
             document.dispatchEvent(new CustomEvent('contractManagerError', {
-                detail: { error: error.message }
+                detail: { error: errorMessage }
             }));
         }
     }
@@ -841,6 +863,7 @@ class MasterInitializer {
                 window.contractManager.signer = null;
             // Reinitialize ContractManager in read-only mode using configured RPCs
             await window.contractManager.initializeReadOnly();
+                this.pendingContractManagerError = null;
                 
                 console.log('✅ ContractManager downgraded to read-only mode');
             }

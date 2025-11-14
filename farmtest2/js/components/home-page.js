@@ -59,7 +59,7 @@ class HomePage {
         // Listen for contract manager error event
         document.addEventListener('contractManagerError', (event) => {
             console.error('🏠 HomePage: ContractManager error:', event.detail.error);
-            this.error = `Contract manager initialization failed: ${event.detail.error}`;
+            this.error = `Loading failed: ${event.detail.error}`;
             this.loading = false;
             this.render();
         });
