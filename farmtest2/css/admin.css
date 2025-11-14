@@ -385,6 +385,8 @@
     padding: 20px;
     transition: all 0.3s ease;
     backdrop-filter: blur(10px);
+    position: relative;
+    overflow: hidden;
 }
 
 .info-card:hover {
@@ -413,6 +415,63 @@
 
 .info-card .card-content {
     text-align: left;
+}
+
+.info-card .section-loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    background: transparent;
+    color: var(--text-primary);
+    font-weight: 500;
+    text-align: center;
+    padding: 1rem;
+    z-index: 2;
+}
+
+[data-theme="light"] .info-card .section-loading-overlay {
+    color: #1b1b1f;
+}
+
+.contract-info-loading {
+    opacity: 0.6;
+    pointer-events: none;
+    position: relative;
+}
+
+.contract-info-loading::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--background-paper);
+    opacity: 0.7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+}
+
+.info-card.section-refreshing .section-loading-overlay {
+    display: flex;
+}
+
+.section-loading-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.section-loading-spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid var(--primary-main);
+    border: 3px solid color-mix(in srgb, var(--primary-main) 35%, transparent);
+    border-top-color: var(--primary-main);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
 }
 
 /* Light theme overrides */
@@ -748,7 +807,7 @@
 
 .panel-header h2 {
     margin: 0;
-    color: #00d4ff;
+    color: var(--text-primary);
     font-size: 1.5rem;
     font-weight: 600;
 }
@@ -808,34 +867,36 @@
     color: #1b1b1f;
 }
 
-/* Refresh Button - Unified gradient style */
-.panel-refresh .refresh-btn,
-.card-header .refresh-btn {
-    background: linear-gradient(135deg, #00d4ff, #0099cc);
-    color: white;
+/* Refresh Button - Unified style */
+.panel-refresh .refresh-button,
+.card-header .refresh-button {
+    background: transparent;
     border: none;
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    font-size: 0.875rem;
-    font-weight: 600;
+    color: var(--primary-main);
+    width: 40px;
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
     cursor: pointer;
-    transition: all 0.3s ease;
-    box-shadow: 0 2px 8px rgba(0, 212, 255, 0.3);
+    transition: background 0.2s, transform 0.2s;
+    transform-origin: center;
+    padding: 0;
 }
 
-.panel-refresh .refresh-btn:hover:not(:disabled),
-.card-header .refresh-btn:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 212, 255, 0.5);
-    background: linear-gradient(135deg, #00b8e6, #00d4ff);
+.panel-refresh .refresh-button:hover:not(:disabled),
+.card-header .refresh-button:hover:not(:disabled) {
+    background: var(--action-hover);
+    transform: rotate(180deg);
 }
 
-.panel-refresh .refresh-btn:disabled,
-.card-header .refresh-btn:disabled {
+.panel-refresh .refresh-button:disabled,
+.card-header .refresh-button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
-    transform: none !important;
-    box-shadow: none !important;
+    transform: none;
+    background: transparent;
 }
 
 .stat-chip {
@@ -1437,6 +1498,43 @@ table td:last-child {
     max-width: 1200px;
     margin: 0 auto;
     padding: 2rem 1rem;
+}
+
+/* Back Button Styles */
+.btn-back {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    margin-bottom: 1.5rem;
+    background: transparent;
+    color: #64b5f6;
+    border: 1.5px solid rgba(100, 181, 246, 0.4);
+    border-radius: 8px;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-back:hover {
+    background: rgba(100, 181, 246, 0.08);
+    border-color: rgba(100, 181, 246, 0.6);
+    color: #90caf9;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(100, 181, 246, 0.2);
+}
+
+.btn-back:active { transform: translateY(0); }
+.btn-back .material-icons-outlined { font-size: 1.25rem; }
+
+[data-theme="light"] .btn-back { border-color: rgba(66, 165, 245, 0.5); color: #1976d2; }
+[data-theme="light"] .btn-back:hover { 
+    background: rgba(66, 165, 245, 0.1); 
+    border-color: rgba(66, 165, 245, 0.7); 
+    color: #1565c0; 
 }
 
 

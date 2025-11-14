@@ -1,28 +1,5 @@
 /* Network Indicator and Selector Styles */
 
-/* Button Styling - Centralized */
-.btn-grant-permission {
-    margin-left: 8px;
-    padding: 2px 8px;
-    font-size: 0.75rem;
-    background: var(--warning-main, #f59e0b);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background 0.2s ease;
-    height: 26px;
-    display: flex;
-    align-items: center;
-    box-sizing: border-box;
-    white-space: nowrap;
-}
-
-.btn-grant-permission:hover {
-    background: var(--secondary-hover, #d97706);
-    opacity: 0.9;
-}
-
 /* Network Selector Styles */
 .network-selector {
     display: flex;

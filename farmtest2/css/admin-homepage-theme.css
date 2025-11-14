@@ -161,21 +161,6 @@ body {
     box-shadow: var(--shadow-4) !important;
 }
 
-.panel-refresh .refresh-btn,
-.card-header .refresh-btn {
-    background: linear-gradient(135deg, #00d4ff, #0099cc) !important;
-    padding: 0.5rem 1rem !important;
-    border-radius: 6px !important;
-    font-size: 0.875rem !important;
-    box-shadow: 0 2px 8px rgba(0, 212, 255, 0.3) !important;
-}
-
-.panel-refresh .refresh-btn:hover:not(:disabled),
-.card-header .refresh-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, #00b8e6, #00d4ff) !important;
-    box-shadow: 0 4px 12px rgba(0, 212, 255, 0.5) !important;
-}
-
 /* Special proposal button styling */
 .proposal-btn {
     padding: 10px 20px !important;
@@ -872,27 +857,6 @@ select option:disabled,
     color: var(--text-secondary) !important;
 }
 
-/* Contract data loading states */
-.contract-info-loading {
-    opacity: 0.6 !important;
-    pointer-events: none !important;
-    position: relative !important;
-}
-
-.contract-info-loading::after {
-    content: '' !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    background: var(--background-paper) !important;
-    opacity: 0.7 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-}
-
 /* ========================================
    ENHANCED BUTTON STATES
    ======================================== */
@@ -1203,7 +1167,7 @@ button[type="submit"] .btn-text,
    THEME TRANSITION SMOOTHNESS
    ======================================== */
 /* Exclude theme toggle button from wildcard transition to allow its own animations */
-*:not(.spinner):not(.loading-skeleton):not(.theme-toggle):not(.theme-toggle *) {
+*:not(.spinner):not(.loading-skeleton):not(.theme-toggle):not(.theme-toggle *):not(.refresh-button) {
     transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease !important;
 }
 

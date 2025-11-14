@@ -1,57 +1,8 @@
 /**
  * Network Indicator Selector Component
- * Consolidated component for network status, permissions, and network switching
- * Combines functionality from network-indicator.js, network-selector.js, and permission-utils.js
+ * Consolidated component for network status indicators and network switching
+ * Combines functionality from network-indicator.js and network-selector.js
  */
-
-/**
- * Permission Utilities
- * Shared functions for permission button text and actions
- */
-class PermissionUtils {
-    /**
-     * Get the appropriate button text for permission buttons
-     * @param {string} networkName - The network name
-     * @returns {string} - The button text
-     */
-    static getPermissionButtonText(networkName) {
-        // For Polygon Mainnet, show "Add Polygon Mainnet" since it's likely not in MetaMask
-        if (networkName === 'Polygon Mainnet') {
-            return 'Add Polygon';
-        }
-        // For other networks, show "Grant [Network] Permission"
-        return `Grant ${networkName} Permission`;
-    }
-
-    /**
-     * Get the appropriate button action for permission buttons
-     * @param {string} networkName - The network name
-     * @param {string} context - Context ('home' or 'admin')
-     * @returns {string} - The button action
-     */
-    static getPermissionButtonAction(networkName, context = 'home') {
-        // For Polygon Mainnet, add network to MetaMask
-        if (networkName === 'Polygon Mainnet') {
-            return 'window.networkSelector.addNetworkToMetaMaskAndReload("POLYGON_MAINNET")';
-        }
-        // For other networks, use the standard permission request
-        return `window.networkManager.requestPermissionWithUIUpdate('${context}')`;
-    }
-
-    /**
-     * Get the appropriate button title for permission buttons
-     * @param {string} networkName - The network name
-     * @returns {string} - The button title
-     */
-    static getPermissionButtonTitle(networkName) {
-        // For Polygon Mainnet, show "Add Polygon Mainnet to MetaMask"
-        if (networkName === 'Polygon Mainnet') {
-            return 'Add Polygon to MetaMask';
-        }
-        // For other networks, show "Grant permission for [Network]"
-        return `Grant permission for ${networkName}`;
-    }
-}
 
 /**
  * Network Selector Component
@@ -422,30 +373,18 @@ class NetworkIndicator {
                     indicator.className = `network-indicator-home has-permission`;
                 } else {
                     // Red indicator - missing permission
-                    const buttonText = window.PermissionUtils?.getPermissionButtonText(expectedNetworkName) || `Grant ${expectedNetworkName} Permission`;
-                    const buttonAction = window.PermissionUtils?.getPermissionButtonAction(expectedNetworkName, context) || `window.networkManager.requestPermissionWithUIUpdate('${context}')`;
-                    
                     indicator.innerHTML = `
                         <span class="network-status-dot red"></span>
                         <div id="${selectorId}"></div>
-                        <button class="btn-grant-permission" onclick="${buttonAction}">
-                            ${buttonText}
-                        </button>
                     `;
                     indicator.className = `network-indicator-home missing-permission`;
                 }
             } catch (error) {
                 console.error('Error checking network permission:', error);
                 // Fallback to no permission state
-                const buttonText = window.PermissionUtils?.getPermissionButtonText(expectedNetworkName) || `Grant ${expectedNetworkName} Permission`;
-                const buttonAction = window.PermissionUtils?.getPermissionButtonAction(expectedNetworkName, context) || `window.networkManager.requestPermissionWithUIUpdate('${context}')`;
-                
                 indicator.innerHTML = `
                     <span class="network-status-dot red"></span>
                     <div id="${selectorId}"></div>
-                    <button class="btn-grant-permission" onclick="${buttonAction}">
-                        ${buttonText}
-                    </button>
                 `;
                 indicator.className = `network-indicator-home missing-permission`;
             }
@@ -470,11 +409,10 @@ class NetworkIndicator {
 }
 
 // Create global instances
-window.PermissionUtils = PermissionUtils;
 window.networkSelector = new NetworkSelector();
 window.NetworkIndicator = NetworkIndicator;
 
 // Export for module systems
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { PermissionUtils, NetworkSelector, NetworkIndicator };
+    module.exports = { NetworkSelector, NetworkIndicator };
 }

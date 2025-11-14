@@ -342,6 +342,11 @@ class AdminPage {
         container.innerHTML = `
             <div class="admin-connect-prompt">
                 <div class="connect-card">
+                    <button class="btn btn-back" onclick="window.location.href='../'">
+                        <span class="material-icons-outlined">arrow_back</span>
+                        <span>Back to Home</span>
+                    </button>
+                    
                     <h2>🔐 Admin Panel Access</h2>
                     <p>Please connect your wallet to access the admin panel.</p>
                     <button class="btn btn-primary" onclick="connectWallet()">
@@ -362,6 +367,11 @@ class AdminPage {
         container.innerHTML = `
             <div class="admin-unauthorized">
                 <div class="unauthorized-card">
+                    <button class="btn btn-back" onclick="window.location.href='../'">
+                        <span class="material-icons-outlined">arrow_back</span>
+                        <span>Back to Home</span>
+                    </button>
+                    
                     <h2>🚫 Access Denied</h2>
                     <p><strong>Switch to an account with admin privileges for this contract.</strong></p>
                     
@@ -780,14 +790,6 @@ class AdminPage {
                 id: e.target.id,
                 dataset: e.target.dataset
             });
-            // Refresh button
-            if (e.target.classList.contains('refresh-btn')) {
-                e.preventDefault();
-                console.log('🔘 Refresh button clicked');
-                this.refreshData();
-                return;
-            }
-
             // Proposal buttons (main admin panel buttons)
             if (e.target.classList.contains('proposal-btn') && e.target.dataset.modal) {
                 e.preventDefault();
@@ -926,9 +928,10 @@ class AdminPage {
     setupRefreshListeners() {
         // Manual refresh button
         document.addEventListener('click', (e) => {
-            if (e.target.classList.contains('refresh-btn')) {
+            const refreshTrigger = e.target.closest?.('.refresh-button, .refresh-btn');
+            if (refreshTrigger) {
                 e.preventDefault();
-                this.refreshData();
+                this.handleRefreshButtonClick(refreshTrigger);
             }
         });
 
@@ -955,6 +958,73 @@ class AdminPage {
                 console.log('▶️ Auto-refresh resumed (tab active) - no immediate refresh');
             }
         });
+    }
+
+    handleRefreshButtonClick(trigger) {
+        if (!trigger) {
+            return;
+        }
+
+        const target = (trigger.dataset.refreshTarget || trigger.dataset.refresh || '').toLowerCase();
+
+        switch (target) {
+            case 'contract':
+                console.log('🔁 Refreshing contract info via refresh button');
+                if (document.querySelector('.info-card')?.getAttribute('aria-busy') === 'true') {
+                    console.log('⏳ Contract info refresh already in progress');
+                    return;
+                }
+                this.refreshContractInfo();
+                break;
+            case 'proposals':
+                console.log('🔁 Refreshing proposals via refresh button');
+                this.refreshData();
+                break;
+            default:
+                console.log('🔁 Refresh trigger without explicit target, defaulting to full admin refresh');
+                this.refreshData();
+        }
+    }
+
+    setInfoCardRefreshing(isRefreshing, message = 'Refreshing contract data...') {
+        const infoCard = document.querySelector('.info-card');
+        if (!infoCard) {
+            return;
+        }
+
+        infoCard.classList.toggle('contract-info-loading', isRefreshing);
+        infoCard.classList.toggle('section-refreshing', isRefreshing);
+        infoCard.setAttribute('aria-busy', isRefreshing ? 'true' : 'false');
+
+        let overlay = infoCard.querySelector('.section-loading-overlay');
+        if (!overlay && isRefreshing) {
+            overlay = document.createElement('div');
+            overlay.className = 'section-loading-overlay';
+            overlay.innerHTML = `
+                <div class="section-loading-content" role="status" aria-live="polite">
+                    <span class="section-loading-spinner" aria-hidden="true"></span>
+                    <span class="loading-message">${message}</span>
+                </div>
+            `;
+            infoCard.appendChild(overlay);
+        }
+
+        if (overlay) {
+            const messageEl = overlay.querySelector('.loading-message');
+            if (messageEl) {
+                messageEl.textContent = message;
+            }
+            overlay.style.display = isRefreshing ? 'flex' : 'none';
+            overlay.setAttribute('aria-hidden', isRefreshing ? 'false' : 'true');
+        }
+
+        const refreshButton = infoCard.querySelector('[data-refresh-target="contract"]');
+        if (refreshButton) {
+            refreshButton.disabled = isRefreshing;
+            refreshButton.setAttribute('aria-busy', isRefreshing ? 'true' : 'false');
+            refreshButton.setAttribute('aria-label', isRefreshing ? 'Refreshing contract info' : 'Refresh contract info');
+            refreshButton.setAttribute('title', isRefreshing ? 'Refreshing contract info' : 'Refresh contract info');
+        }
     }
 
     /**
@@ -1417,8 +1487,8 @@ class AdminPage {
                         <div class="panel-title-row">
                             <h2>Multi-Signature Proposals</h2>
                             <div class="panel-refresh">
-                                <button class="btn btn-sm refresh-btn" type="button" onclick="adminPage.refreshData()">
-                                    🔄 Refresh
+                                <button class="refresh-button" type="button" data-refresh-target="proposals" aria-label="Refresh proposals" title="Refresh proposals">
+                                    <span class="material-icons" aria-hidden="true">refresh</span>
                                 </button>
                             </div>
                         </div>
@@ -1549,8 +1619,8 @@ class AdminPage {
             <div class="info-card">
                 <div class="card-header">
                     <h5>Contract Information</h5>
-                    <button class="btn btn-sm refresh-btn" type="button" onclick="adminPage.refreshContractInfo()">
-                        🔄 Refresh
+                    <button class="refresh-button" type="button" data-refresh-target="contract" aria-label="Refresh contract info" title="Refresh contract info">
+                        <span class="material-icons" aria-hidden="true">refresh</span>
                     </button>
                 </div>
 
@@ -4984,6 +5054,7 @@ class AdminPage {
     // Missing function that's called from HTML
     async refreshContractInfo() {
         console.log('🔄 Refreshing contract info...');
+        this.setInfoCardRefreshing(true);
         try {
             const result = await this.loadContractInformation();
             if (result && result.success) {
@@ -4994,6 +5065,8 @@ class AdminPage {
             }
         } catch (error) {
             console.error('❌ Failed to refresh contract info:', error);
+        } finally {
+            this.setInfoCardRefreshing(false);
         }
     }
 
