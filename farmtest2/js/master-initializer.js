@@ -63,6 +63,19 @@ class MasterInitializer {
             throw new Error('Failed to load application configuration');
         }
 
+        // Disable console output if not in debug mode
+        if (!window.CONFIG?.DEV?.DEBUG) {
+            console.log('🔇 Console output disabled (not in debug mode)');
+            console.log = () => {};
+            console.info = () => {};
+            console.warn = () => {};
+            console.table = () => {};
+            console.group = () => {};
+            console.groupCollapsed = () => {};
+            console.groupEnd = () => {};
+            console.debug = () => {};
+        }
+
         console.log('✅ Configuration loaded successfully');
     }
 

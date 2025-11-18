@@ -444,9 +444,6 @@ class AdminPage {
     async loadAdminInterface() {
         console.log('🎨 Loading admin interface...');
 
-        // Initialize performance optimization components
-        this.initializeOptimizedComponents();
-
         // Create admin layout
         this.createAdminLayout();
 
@@ -467,52 +464,6 @@ class AdminPage {
 
         // Start auto-refresh
         this.startAutoRefresh();
-    }
-
-    /**
-     * Initialize optimized performance components
-     */
-    initializeOptimizedComponents() {
-        console.log('⚡ Initializing performance optimization components...');
-
-        try {
-            // Initialize optimized state management
-            if (window.OptimizedAdminState) {
-                this.optimizedAdminState = new window.OptimizedAdminState();
-                console.log('✅ OptimizedAdminState initialized');
-            }
-
-            // Initialize efficient DOM updates
-            if (window.EfficientDOMUpdates && this.optimizedAdminState) {
-                this.efficientDOM = new window.EfficientDOMUpdates(this.optimizedAdminState);
-                console.log('✅ EfficientDOMUpdates initialized');
-            }
-
-            // Initialize optimistic UI updates
-            if (window.OptimisticUIUpdates && this.optimizedAdminState) {
-                this.optimisticUI = new window.OptimisticUIUpdates(this.optimizedAdminState);
-                console.log('✅ OptimisticUIUpdates initialized');
-            }
-
-            // Initialize performance monitor
-            if (window.PerformanceMonitor) {
-                this.performanceMonitor = new window.PerformanceMonitor();
-                console.log('✅ PerformanceMonitor initialized');
-
-                // Log performance report every 5 minutes
-                setInterval(() => {
-                    if (this.performanceMonitor) {
-                        this.performanceMonitor.generateReport();
-                    }
-                }, 300000); // 5 minutes
-            }
-
-            console.log('🎉 All performance optimization components initialized successfully');
-
-        } catch (error) {
-            console.warn('⚠️ Failed to initialize some optimization components:', error);
-            console.log('📋 Falling back to legacy admin panel behavior');
-        }
     }
 
     /**
@@ -563,8 +514,7 @@ class AdminPage {
             if (window.contractManager) {
                 try {
                     await window.contractManager.initialize();
-                    await this.loadContractStats();
-                    await this.loadMultiSignPanel();
+                    await this.refreshData();
                 } catch (error) {
                     console.error('❌ Error refreshing contract data:', error);
                 }
@@ -2181,19 +2131,6 @@ class AdminPage {
                             console.warn('⚠️ All methods to get total proposal count failed:', error.message);
                             // Set to 0 to indicate unknown, but still show Load More button
                             this.totalProposalCount = 0;
-                        }
-                    }
-
-                    if (this.optimizedAdminState) {
-                        this.optimizedAdminState.initializeProposals(formattedProposals);
-                        console.log('🎯 Proposals initialized in optimized state management');
-
-                        // Track performance
-                        if (this.performanceMonitor) {
-                            this.performanceMonitor.trackNetworkCall('full-refresh', {
-                                reason: 'initial-load',
-                                proposalCount: realProposals.length
-                            });
                         }
                     }
 
