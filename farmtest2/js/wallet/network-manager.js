@@ -27,14 +27,6 @@ class NetworkManager {
     }
 
     /**
-     * Check if current network is supported
-     */
-    isNetworkSupported(chainId = null) {
-        const targetChainId = chainId || this.getCurrentChainId();
-        return targetChainId === window.CONFIG?.NETWORK?.CHAIN_ID;
-    }
-
-    /**
      * Check if wallet is on the required network (synchronous chainId comparison)
      * ⚠️ NETWORK CHECK ONLY - Does NOT verify MetaMask permissions
      * Only compares chainId values, not wallet_getPermissions
@@ -44,7 +36,8 @@ class NetworkManager {
      */
     isOnRequiredNetwork(chainId = null) {
         const targetChainId = chainId || this.getCurrentChainId();
-        return targetChainId === window.CONFIG?.NETWORK?.CHAIN_ID;
+        const currentChainId = window.networkSelector?.getCurrentChainId();
+        return targetChainId === currentChainId;
     }
 
     /**
@@ -95,13 +88,14 @@ class NetworkManager {
      * Returns network info if chainId matches configured network, null otherwise
      */
     getNetworkInfo(chainId) {
-        if (chainId === window.CONFIG?.NETWORK?.CHAIN_ID) {
+        const network = window.networkSelector?.getCurrentNetworkConfig();
+        if (chainId === network?.CHAIN_ID) {
             return {
-                chainId: window.CONFIG.NETWORK.CHAIN_ID,
-                name: window.CONFIG.NETWORK.NAME,
-                rpcUrl: window.CONFIG.NETWORK.RPC_URL,
-                blockExplorer: window.CONFIG.NETWORK.BLOCK_EXPLORER,
-                nativeCurrency: window.CONFIG.NETWORK.NATIVE_CURRENCY
+                chainId: network.CHAIN_ID,
+                name: network.NAME,
+                rpcUrl: network.RPC_URL,
+                blockExplorer: network.BLOCK_EXPLORER,
+                nativeCurrency: network.NATIVE_CURRENCY
             };
         }
         return null;
@@ -123,20 +117,15 @@ class NetworkManager {
             throw new Error('Wallet not connected');
         }
 
-        const chainId = window.CONFIG?.NETWORK?.CHAIN_ID;
+        const chainId = window.networkSelector?.getCurrentChainId();
         if (!chainId) {
             throw new Error('Network configuration not found');
         }
 
         try {
-            this.log('Switching to network:', window.CONFIG.NETWORK.NAME);
-
             // Try to switch to the network
             await this.requestNetworkSwitch(chainId);
-            
-            this.log('Network switch successful');
             return true;
-
         } catch (error) {
             // If the network doesn't exist in wallet, try to add it
             if (error.code === 4902 || error.message.includes('Unrecognized chain ID')) {
@@ -182,8 +171,8 @@ class NetworkManager {
         }
 
         const networkConfig = this.buildNetworkConfig();
-        const networkName = window.CONFIG?.NETWORK?.NAME || 'configured network';
-        
+        const networkName = window.networkSelector?.getCurrentNetworkName();
+
         try {
             await window.ethereum.request({
                 method: 'wallet_addEthereumChain',
@@ -227,7 +216,6 @@ class NetworkManager {
         this.notifyListeners('networkChanged', {
             chainId,
             networkInfo: this.getNetworkInfo(chainId),
-            isSupported: this.isNetworkSupported(chainId),
             isCorrect: this.isOnRequiredNetwork(chainId),
             previousNetwork
         });
@@ -245,7 +233,7 @@ class NetworkManager {
 
         const chainId = this.getCurrentChainId();
         const isCorrect = this.isOnRequiredNetwork(chainId);
-        const isSupported = this.isNetworkSupported(chainId);
+        const networkName = window.networkSelector?.getCurrentNetworkName();
 
         if (!chainId || !isCorrect) {
             // Show warning
@@ -255,10 +243,8 @@ class NetworkManager {
             if (messageElement) {
                 if (!chainId) {
                     messageElement.textContent = 'Please connect your wallet';
-                } else if (!isSupported) {
-                    messageElement.textContent = 'Unsupported network detected';
                 } else {
-                    messageElement.textContent = `Please switch to ${window.CONFIG?.NETWORK?.NAME || 'the configured network'}`;
+                    messageElement.textContent = `Please switch to ${networkName}`;
                 }
             }
         } else {
@@ -273,14 +259,13 @@ class NetworkManager {
     getNetworkStatus() {
         const chainId = this.getCurrentChainId();
         const networkInfo = this.getNetworkInfo(chainId);
-        
+
         return {
             chainId,
             networkInfo,
             isConnected: !!chainId,
-            isSupported: this.isNetworkSupported(chainId),
             isCorrect: this.isOnRequiredNetwork(chainId),
-            configuredNetwork: this.getNetworkInfo(window.CONFIG?.NETWORK?.CHAIN_ID)
+            configuredNetwork: this.getNetworkInfo(window.networkSelector?.getCurrentChainId())
         };
     }
 
@@ -348,10 +333,10 @@ class NetworkManager {
      */
     validateNetworkConfig() {
         const errors = [];
-        const network = window.CONFIG?.NETWORK;
+        const network = window.networkSelector?.getCurrentNetworkConfig();
         
         if (!network) {
-            errors.push('No network configuration found (CONFIG.NETWORK is missing)');
+            errors.push('No network configuration found (network not selected)');
         } else {
             if (!network.CHAIN_ID) {
                 errors.push('Missing CHAIN_ID in network configuration');
@@ -383,7 +368,7 @@ class NetworkManager {
      * @returns {string} Chain ID in hex (e.g., '0x13882')
      */
     getChainIdHex() {
-        const chainId = window.CONFIG?.NETWORK?.CHAIN_ID;
+        const chainId = window.networkSelector?.getCurrentChainId();
         return chainId ? '0x' + chainId.toString(16) : null;
     }
 
@@ -393,9 +378,9 @@ class NetworkManager {
      * @returns {object} Network configuration for wallet_addEthereumChain
      */
     buildNetworkConfig() {
-        const network = window.CONFIG?.NETWORK;
+        const network = window.networkSelector?.getCurrentNetworkConfig();
         if (!network) {
-            throw new Error('Network configuration not found in CONFIG.NETWORK');
+            throw new Error('Network configuration not found');
         }
         
         const hexChainId = '0x' + network.CHAIN_ID.toString(16);
@@ -447,7 +432,7 @@ class NetworkManager {
 
             throw new Error(`Unsupported wallet type: ${walletType}`);
         } catch (error) {
-            const networkName = window.CONFIG?.NETWORK?.NAME || 'configured network';
+            const networkName = window.networkSelector?.getCurrentNetworkName();
             console.error(`Failed to request ${networkName} permission:`, error);
             throw error;
         }
@@ -464,7 +449,7 @@ class NetworkManager {
         }
 
         try {
-            const networkName = window.CONFIG?.NETWORK?.NAME || 'configured network';
+            const networkName = window.networkSelector?.getCurrentNetworkName();
             console.log(`🔐 Requesting ${networkName} network permission...`);
 
             // First, ensure we have account permissions
@@ -501,8 +486,7 @@ class NetworkManager {
         // Set flag for background permission checks
         this._showPermissionNotification = showNotification;
         try {
-            const expectedChainId = window.CONFIG?.NETWORK?.CHAIN_ID;
-            const networkName = this.getNetworkName(expectedChainId);
+            const networkName = window.networkSelector?.getCurrentNetworkName();
 
             // Request permission using modern approach
             await this.requestNetworkPermission('metamask');
@@ -527,7 +511,7 @@ class NetworkManager {
             return true;
         } catch (error) {
             console.error('❌ Failed to get network permission:', error);
-            const networkName = window.CONFIG?.NETWORK?.NAME || 'the configured network';
+            const networkName = window.networkSelector?.getCurrentNetworkName();
             const errorMessage = `Failed to get network permission. Please grant permission for ${networkName} network in MetaMask.`;
             
             if (context === 'admin') {
@@ -640,7 +624,8 @@ class NetworkManager {
             // Check if we have permission for the selected network
             const hasPermission = await this.hasRequiredNetworkPermission();
             const currentChainId = window.ethereum ? parseInt(await window.ethereum.request({ method: 'eth_chainId' }), 16) : null;
-            const expectedChainId = window.CONFIG?.NETWORK?.CHAIN_ID || 80002;
+            const network = window.networkSelector?.getCurrentNetworkConfig();
+            const expectedChainId = network?.CHAIN_ID;
             
             console.log('Permission state:', { hasPermission, currentChainId, expectedChainId });
             
@@ -657,8 +642,7 @@ class NetworkManager {
                 
                 // Only show notification for explicit permission requests, not background checks
                 if (window.notificationManager && this._showPermissionNotification) {
-                    const networkName = window.CONFIG?.NETWORK?.NAME || 'the selected network';
-                    window.notificationManager.success(`${networkName} permission confirmed. You can now make transactions.`);
+                    window.notificationManager.success(`${network?.NAME} permission confirmed. You can now make transactions.`);
                 }
             } else {
                 // No permission or wrong network

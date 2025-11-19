@@ -55,6 +55,9 @@ class MasterInitializer {
         // Load SES-safe handler
         await this.loadScript('js/utils/ses-safe-handler.js');
 
+        // Load network selector (contains network config utilities)
+        await this.loadScript('js/components/network-indicator-selector.js');
+
         // Load main configuration
         await this.loadScript('js/config/app-config.js');
 
@@ -62,6 +65,12 @@ class MasterInitializer {
         if (!window.CONFIG) {
             throw new Error('Failed to load application configuration');
         }
+
+        // Initialize network selection (validate localStorage)
+        window.networkSelector.loadSelectedNetwork();
+
+        // Freeze CONFIG to make it immutable - network state is only in localStorage
+        Object.freeze(window.CONFIG);
 
         // Disable console output if not in debug mode
         if (!window.CONFIG?.DEV?.DEBUG) {
@@ -75,8 +84,6 @@ class MasterInitializer {
             console.groupEnd = () => {};
             console.debug = () => {};
         }
-
-        console.log('✅ Configuration loaded successfully');
     }
 
     async loadEthersLibrary() {
@@ -99,20 +106,10 @@ class MasterInitializer {
         const coreScripts = [
             'js/utils/multicall-service.js',    // Multicall2 for batch loading (90% RPC reduction)
             'js/utils/formatter.js',            // Formatter utilities (needed before UI components)
-            'js/components/network-indicator-selector.js',
             'js/core/error-handler.js',        // Error handling system
             'js/core/unified-theme-manager.js', // Unified theme manager
             'js/core/notification-manager-new.js'
         ];
-
-        // Only load dev/test utilities if in development mode
-        if (window.DEV_CONFIG?.ADMIN_DEVELOPMENT_MODE) {
-            console.log('🚧 Development mode: Loading test utilities');
-            coreScripts.push('js/utils/rpc-test.js');
-            coreScripts.push('js/utils/admin-test.js');
-        } else {
-            console.log('🚀 Production mode: Skipping test utilities');
-        }
 
         for (const script of coreScripts) {
             await this.loadScript(script);
@@ -194,7 +191,6 @@ class MasterInitializer {
                 window.unifiedThemeManager = new window.UnifiedThemeManager();
                 window.unifiedThemeManager.initialize();
                 this.components.set('unifiedThemeManager', window.unifiedThemeManager);
-                console.log('✅ Unified Theme Manager initialized');
             } catch (error) {
                 console.error('❌ Failed to initialize UnifiedThemeManager:', error);
             }
@@ -205,13 +201,10 @@ class MasterInitializer {
             try {
                 window.errorHandler = new window.ErrorHandler();
                 this.components.set('errorHandler', window.errorHandler);
-                console.log('✅ Error Handler initialized');
             } catch (error) {
                 console.error('❌ Failed to initialize ErrorHandler:', error);
             }
-        } else if (window.errorHandler) {
-            console.log('✅ Error Handler already initialized');
-        } else {
+        } else if (!window.errorHandler) {
             console.warn('⚠️ ErrorHandler not available - using fallback error handling');
         }
 
@@ -220,7 +213,6 @@ class MasterInitializer {
         if (window.NotificationManagerNew) {
             window.notificationManager = new window.NotificationManagerNew();
             this.components.set('notificationManager', window.notificationManager);
-            console.log('✅ Notification Manager initialized');
         }
 
         // Initialize wallet manager - check multiple sources
@@ -237,7 +229,6 @@ class MasterInitializer {
                     await window.walletManager.init(); // Initialize if init method exists
                 }
                 this.components.set('walletManager', window.walletManager);
-                console.log('✅ Wallet Manager (New) initialized');
 
                 // Update button status after wallet manager is ready
                 setTimeout(() => {
@@ -257,7 +248,6 @@ class MasterInitializer {
                 window.walletManager = new window.WalletManager();
                 await window.walletManager.init(); // Initialize wallet manager
                 this.components.set('walletManager', window.walletManager);
-                console.log('✅ Wallet Manager (Main) initialized');
 
                 // Update button status after wallet manager is ready
                 setTimeout(() => {
@@ -310,7 +300,6 @@ class MasterInitializer {
                     document.dispatchEvent(new CustomEvent('contractManagerReady', {
                         detail: { contractManager: window.contractManager }
                     }));
-                    console.log('✅ ContractManager initialized in wallet mode');
                 } else {
                     console.log('🔄 Initializing ContractManager with read-only provider...');
                     await window.contractManager.initializeReadOnly();
@@ -319,7 +308,6 @@ class MasterInitializer {
                     document.dispatchEvent(new CustomEvent('contractManagerReady', {
                         detail: { contractManager: window.contractManager }
                     }));
-                    console.log('✅ ContractManager initialized with read-only provider');
                 }
 
                 // Note: contractManagerReady is dispatched above after initialization
@@ -352,10 +340,6 @@ class MasterInitializer {
                     });
 
                     this.components.set('rewardsCalculator', window.rewardsCalculator);
-                    console.log('✅ Rewards Calculator initialized successfully:', {
-                        isInitialized: window.rewardsCalculator.isInitialized,
-                        initResult: initResult
-                    });
                 } catch (error) {
                     console.error('❌ Failed to initialize RewardsCalculator:', error);
                     console.error('   Error stack:', error.stack);
@@ -375,7 +359,6 @@ class MasterInitializer {
             if (window.HomePage) {
                 window.homePage = new window.HomePage();
                 this.components.set('homePage', window.homePage);
-                console.log('✅ Home Page initialized');
 
                 if (this.pendingContractManagerError) {
                     const errorMessage = this.pendingContractManagerError;
@@ -393,7 +376,6 @@ class MasterInitializer {
             if (window.StakingModalNew) {
                 window.stakingModal = new window.StakingModalNew();
                 this.components.set('stakingModal', window.stakingModal);
-                console.log('✅ Staking Modal initialized');
             }
         } else {
             console.log('⏭️ Skipping homepage UI components initialization (admin mode)');
@@ -403,7 +385,6 @@ class MasterInitializer {
             try {
                 window.walletPopup = new window.WalletPopup();
                 this.components.set('walletPopup', window.walletPopup);
-                console.log('✅ Wallet Popup initialized');
             } catch (error) {
                 console.error('❌ Failed to initialize WalletPopup:', error);
             }
@@ -679,7 +660,7 @@ class MasterInitializer {
 
                 if (!hasPermission) {
                     // Wallet is connected but missing permission - show as disconnected
-                    const networkName = window.CONFIG?.NETWORK?.NAME || 'network';
+                    const networkName = window.networkSelector?.getCurrentNetworkName();
                     this.renderConnectButton(connectBtn, {
                         text: 'Connect Wallet',
                         title: `Grant permission for ${networkName}`,
@@ -818,7 +799,7 @@ class MasterInitializer {
                     : false;
                 
                 if (!isOnRequiredNetwork) {
-                    const networkName = window.CONFIG?.NETWORK?.NAME || 'configured network';
+                    const networkName = window.networkSelector?.getCurrentNetworkName();
                     console.log(`📊 Wallet connected but not on ${networkName} - staying in read-only mode`);
                     console.log(`💡 ContractManager will upgrade when switched to ${networkName}`);
                     // Don't upgrade yet - stay in read-only mode
@@ -835,11 +816,9 @@ class MasterInitializer {
                     if (window.contractManager.isReady()) {
                         // Already initialized in read-only mode, upgrade to wallet mode
                         await window.contractManager.upgradeToWalletMode(provider, signer);
-                        console.log('✅ ContractManager upgraded to wallet mode');
                     } else {
                         // Initialize with wallet provider
                         await window.contractManager.initialize(provider, signer);
-                        console.log('✅ ContractManager initialized with wallet');
                     }
 
                     this.pendingContractManagerError = null;
@@ -904,7 +883,6 @@ class MasterInitializer {
 
             script.onload = () => {
                 this.loadedScripts.add(src);
-                console.log(`✅ Loaded: ${src}`);
                 resolve();
             };
 
@@ -946,7 +924,6 @@ class MasterInitializer {
 
             link.onload = () => {
                 this.loadedScripts.add(href);
-                console.log(`✅ Loaded CSS: ${href}`);
                 resolve();
             };
 
@@ -1020,7 +997,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     try {
         await window.masterInitializer.init();
-        console.log('✅ System initialization completed successfully');
     } catch (error) {
         console.error('❌ System initialization failed:', error);
         window.masterInitializer.handleInitializationError(error);

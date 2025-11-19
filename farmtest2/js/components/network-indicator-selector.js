@@ -15,6 +15,50 @@ class NetworkSelector {
         this.isInitialized = false;
         this.eventListeners = new Map(); // Store event listeners for cleanup
         this._networkSwitching = false; // Track network switching state
+        this.defaultNetwork = 'AMOY';
+    }
+
+    getSelectedNetworkKey() {
+        const selectedNetworkKey = localStorage.getItem('liberdus-selected-network')
+        if (!selectedNetworkKey) {
+            localStorage.setItem('liberdus-selected-network', this.defaultNetwork);
+            return this.defaultNetwork;
+        }
+        return selectedNetworkKey;
+    }
+
+    /**
+     * Load selected network from localStorage and initialize if needed
+     * @param {string} defaultNetwork - The default network key to use if no network is selected
+     * @returns {string|null} Active network key
+     */
+    loadSelectedNetwork() {
+        const selectedNetworkKey = this.getSelectedNetworkKey();
+        if (selectedNetworkKey && window.CONFIG?.NETWORKS[selectedNetworkKey]) {
+            console.log(`🔄 Loaded network from storage: ${window.CONFIG.NETWORKS[selectedNetworkKey].NAME}`);
+            return selectedNetworkKey;
+        }
+
+
+        console.error('❌ No valid default network configured');
+        return null;
+    }
+
+    /**
+     * Switch to a different network
+     * @param {string} networkKey - The network key to switch to
+     * @returns {boolean} Success status
+     */
+    switchNetwork(networkKey) {
+        const targetNetwork = window.CONFIG?.NETWORKS[networkKey];
+        if (targetNetwork) {
+            localStorage.setItem('liberdus-selected-network', networkKey);
+            console.log(`🌐 Switched to ${targetNetwork.NAME} network`);
+            return true;
+        }
+
+        console.error(`❌ Network ${networkKey} not found`);
+        return false;
     }
 
     /**
@@ -58,12 +102,13 @@ class NetworkSelector {
      */
     getSelectorHTML() {
         const networks = Object.entries(window.CONFIG.NETWORKS);
+        const selectedNetwork = this.getSelectedNetworkKey();
         
         return `
             <div class="network-select-wrapper">
                 <select id="network-select" class="network-select">
                     ${networks.map(([key, network]) => `
-                        <option value="${key}" ${key === window.CONFIG.SELECTED_NETWORK ? 'selected' : ''}>
+                        <option value="${key}" ${key === selectedNetwork ? 'selected' : ''}>
                             ${network.NAME}
                         </option>
                     `).join('')}
@@ -123,15 +168,11 @@ class NetworkSelector {
         }
 
         try {
-            // Switch network in config
-            const success = window.CONFIG.switchNetwork(networkKey);
+            const success = this.switchNetwork(networkKey);
             if (!success) {
                 console.error(`❌ Failed to switch to ${networkKey}`);
                 return;
             }
-
-            // Update the network name display immediately
-            this.updateNetworkNameDisplay(networkKey, context);
 
             // Switch contract manager to new network
             if (window.contractManager?.switchNetwork) {
@@ -186,48 +227,58 @@ class NetworkSelector {
         // Update the selector value if it exists
         const selector = document.getElementById('network-select');
         if (selector) {
-            selector.value = window.CONFIG.SELECTED_NETWORK;
+            selector.value = this.getSelectedNetworkKey();
         }
     }
 
     /**
-     * Update the network name display immediately
-     * @param {string} networkKey - The selected network key
-     * @param {string} context - Context ('home' or 'admin')
+     * Get current network configuration (replaces CONFIG.NETWORK getter)
+     * @returns {object|undefined} Network configuration object or undefined
      */
-    updateNetworkNameDisplay(networkKey, context) {
-        const networkName = window.CONFIG.NETWORKS[networkKey]?.NAME || networkKey;        
-        console.log(`📝 Updated network name display to: ${networkName}`);
+    getCurrentNetworkConfig() {
+        const selectedNetwork = this.getSelectedNetworkKey();
+        return window.CONFIG?.NETWORKS[selectedNetwork] ?? undefined;
     }
 
     /**
-     * Get available networks for display
+     * Get current network contracts (replaces CONFIG.CONTRACTS getter)
+     * @returns {object|undefined} Contracts object or undefined
      */
-    getAvailableNetworks() {
-        return Object.entries(window.CONFIG.NETWORKS).map(([key, network]) => ({
-            key,
-            name: network.NAME,
-            chainId: network.CHAIN_ID
-        }));
+    getCurrentContracts() {
+        const selectedNetwork = this.getSelectedNetworkKey();
+        return window.CONFIG?.NETWORKS[selectedNetwork]?.CONTRACTS;
     }
 
     /**
-     * Check if a network is available
-     * @param {string} networkKey - Network key to check
+     * Get current network name
+     * @returns {string|undefined} Network name or undefined
      */
-    isNetworkAvailable(networkKey) {
-        return !!window.CONFIG.NETWORKS[networkKey];
+    getCurrentNetworkName() {
+        return this.getCurrentNetworkConfig()?.NAME;
     }
 
     /**
-     * Get current selected network info
+     * Get current network chain ID
+     * @returns {number|undefined} Chain ID or undefined
      */
-    getCurrentNetwork() {
-        return {
-            key: window.CONFIG.SELECTED_NETWORK,
-            name: window.CONFIG.NETWORK.NAME,
-            chainId: window.CONFIG.NETWORK.CHAIN_ID
-        };
+    getCurrentChainId() {
+        return this.getCurrentNetworkConfig()?.CHAIN_ID;
+    }
+
+    /**
+     * Get staking contract address for current network
+     * @returns {string|undefined} Staking contract address or undefined
+     */
+    getStakingContractAddress() {
+        return this.getCurrentContracts()?.STAKING_CONTRACT;
+    }
+
+    /**
+     * Get native currency for current network
+     * @returns {object|undefined} Native currency object or undefined
+     */
+    getCurrentNativeCurrency() {
+        return this.getCurrentNetworkConfig()?.NATIVE_CURRENCY;
     }
 
     /**
@@ -244,28 +295,22 @@ class NetworkSelector {
      * @param {string} networkKey - The network key to switch to
      */
     async switchWalletToNetwork(networkKey) {
-        // Store the original network
-        const originalNetwork = window.CONFIG.SELECTED_NETWORK;
-        
         try {
-            // Temporarily switch config to target network for NetworkManager
-            window.CONFIG.SELECTED_NETWORK = networkKey;
+            // Switch localStorage to target network for NetworkManager
+            localStorage.setItem('liberdus-selected-network', networkKey);
             
             // Use NetworkManager's switchNetwork method
             await window.networkManager.switchNetwork();
             
-            // On success, keep the new network selected
+            // On success, keep the new network selected (already in localStorage)
             return true;
         } catch (error) {
             console.error(`❌ Failed to switch to ${networkKey}:`, error);
             
-            // Restore original network on error
-            window.CONFIG.SELECTED_NETWORK = originalNetwork;
-            
             // If the network is not added to MetaMask, try to add it
             if (error.code === 4902) {
                 console.log(`🔗 Network ${networkKey} not found in MetaMask, attempting to add it...`);
-                return await this.addNetworkToMetaMask(window.CONFIG.NETWORKS[networkKey]);
+                return await this.addNetworkToMetaMask(networkKey);
             }
             
             return false;
@@ -275,44 +320,21 @@ class NetworkSelector {
     /**
      * Add network to MetaMask and switch to it
      * Delegates to NetworkManager.addNetwork()
-     * @param {string|Object} networkKeyOrObject - The network key or network object
+     * @param {string} networkKey - The network key to add
      */
-    async addNetworkToMetaMask(networkKeyOrObject) {
-        // Store the original network
-        const originalNetwork = window.CONFIG.SELECTED_NETWORK;
-        
+    async addNetworkToMetaMask(networkKey) {
         try {
-            let networkKey;
-            
-            // Handle both network key string and network object
-            if (typeof networkKeyOrObject === 'string') {
-                networkKey = networkKeyOrObject;
-            } else {
-                // Find the network key from the network object
-                networkKey = Object.keys(window.CONFIG.NETWORKS).find(
-                    key => window.CONFIG.NETWORKS[key] === networkKeyOrObject
-                );
-            }
-            
-            // Temporarily switch config to target network
-            if (networkKey) {
-                window.CONFIG.SELECTED_NETWORK = networkKey;
-            }
+            // Switch localStorage to target network for NetworkManager
+            localStorage.setItem('liberdus-selected-network', networkKey);
             
             // Use NetworkManager's addNetwork method
             await window.networkManager.addNetwork();
             
+            // On success, keep the new network selected (already in localStorage)
             return true;
         } catch (addError) {
             console.error(`❌ Failed to add network to MetaMask:`, addError);
-            
-            // Restore original network on error
-            window.CONFIG.SELECTED_NETWORK = originalNetwork;
-            
             return false;
-        } finally {
-            // Restore the config
-            window.CONFIG.SELECTED_NETWORK = originalNetwork;
         }
     }
 
@@ -357,7 +379,6 @@ class NetworkIndicator {
         indicator.className = `network-indicator-home loading`;
 
         const isWalletConnected = window.walletManager && window.walletManager.isConnected();
-        const expectedNetworkName = window.CONFIG?.NETWORK?.NAME || 'Unknown';
 
         // Check permission asynchronously if wallet is connected
         if (isWalletConnected && window.networkManager) {

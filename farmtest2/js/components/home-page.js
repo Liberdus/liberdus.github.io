@@ -430,7 +430,7 @@ class HomePage {
                     
                     // Check if wallet is on configured network
                     if (!(window.networkManager?.isOnRequiredNetwork() || false)) {
-                        const networkName = window.CONFIG?.NETWORK?.NAME || 'configured network';
+                        const networkName = window.networkSelector?.getCurrentNetworkName();
                         if (window.notificationManager) {
                             window.notificationManager.warning(
                                 `Please switch to ${networkName} network to make transactions`
@@ -563,8 +563,8 @@ class HomePage {
         }
 
         // Check if there are valid contracts for the current network
-        const contracts = window.CONFIG.CONTRACTS;
-        if (!contracts.STAKING_CONTRACT || contracts.STAKING_CONTRACT.trim() === '') {
+        const contractAddress = window.networkSelector?.getStakingContractAddress();
+        if (!contractAddress || contractAddress.trim() === '') {
             console.log('⚠️ No contracts deployed on current network - loading empty data');
             this.loadEmptyData();
             return;
@@ -669,7 +669,7 @@ class HomePage {
                     const isOnCorrectNetwork = window.networkManager?.isOnRequiredNetwork() || false;
                     
                     if (!isOnCorrectNetwork) {
-                        const networkName = window.CONFIG?.NETWORK?.NAME || 'configured network';
+                        const networkName = window.networkSelector?.getCurrentNetworkName();
                         const currentChainId = window.walletManager?.getChainId();
                         const currentNetworkName = window.networkManager?.getNetworkName(currentChainId) || 'Unknown';
                         console.log(`📊 Read-only mode: Wallet on ${currentNetworkName}, viewing ${networkName} data`);
@@ -1152,11 +1152,5 @@ class HomePage {
 }
 
 
-// Initialize home page
-let homePage;
-document.addEventListener('DOMContentLoaded', () => {
-    homePage = new HomePage();
-});
-
-// Export for global access
+// Export class for master-initializer.js to use
 window.HomePage = HomePage;

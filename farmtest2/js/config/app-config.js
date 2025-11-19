@@ -45,58 +45,12 @@ window.CONFIG = {
         }
     },
 
-    // Selected Network (defaults to AMOY, can be changed via dropdown)
-    SELECTED_NETWORK: 'AMOY',
-
-    // Backward compatibility - these reference the selected network
-    get NETWORK() {
-        return this.NETWORKS[this.SELECTED_NETWORK];
-    },
-
-    get CONTRACTS() {
-        return this.NETWORKS[this.SELECTED_NETWORK].CONTRACTS;
-    },
-
-    // Network switching functionality
-    switchNetwork(networkKey) {
-        if (this.NETWORKS[networkKey]) {
-            this.SELECTED_NETWORK = networkKey;
-            // Store in localStorage for persistence
-            localStorage.setItem('liberdus-selected-network', networkKey);
-            console.log(`🌐 Switched to ${this.NETWORK.NAME} network`);
-            return true;
-        }
-        console.error(`❌ Network ${networkKey} not found`);
-        return false;
-    },
-
-    // Load selected network from localStorage
-    loadSelectedNetwork() {
-        const stored = localStorage.getItem('liberdus-selected-network');
-        if (stored && this.NETWORKS[stored]) {
-            this.SELECTED_NETWORK = stored;
-            console.log(`🔄 Loaded network from storage: ${this.NETWORK.NAME}`);
-        }
-    },
-
-
     // Multicall2 addresses (canonical deployment for batch loading optimization)
     MULTICALL2: {
         1: '0x5BA1e12693Dc8F9c48aAD8770482f4739bEeD696',      // Ethereum Mainnet
         137: '0x275617327c958bD06b5D6b871E7f491D76113dd8',    // Polygon Mainnet
         80002: '0xcA11bde05977b3631167028862bE2a173976CA11',  // Polygon Amoy Testnet
         31337: '0xcA11bde05977b3631167028862bE2a173976CA11'   // Local Hardhat
-    },
-
-    // Governance Configuration
-    GOVERNANCE: {
-        SIGNERS: [
-            '0x9249cFE964C49Cf2d2D0DBBbB33E99235707aa61',
-            '0xea7bb30fbcCBB2646B0eFeB31382D3A4da07a3cC',
-            '0x2fBe1cd4BC1718B7625932f35e3cb03E6847289F',
-            '0xd3ac493dc0dA16077CC589A838ac473bC010324F'
-        ],
-        REQUIRED_APPROVALS: 3
     },
 
     // Application Settings
@@ -174,7 +128,7 @@ window.CONFIG = {
 
     // Development Configuration
     DEV: {
-        DEBUG: false
+        DEBUG: true
     },
 
     // Default Values for Contract Stats
@@ -280,21 +234,3 @@ window.CONFIG.ABIS = {
         'function name() external view returns (string)'
     ]
 };
-
-// Initialize network selection
-window.CONFIG.loadSelectedNetwork();
-
-// Make SELECTED_NETWORK writable
-Object.defineProperty(window.CONFIG, 'SELECTED_NETWORK', {
-    value: window.CONFIG.SELECTED_NETWORK,
-    writable: true,
-    enumerable: true,
-    configurable: true
-});
-
-// Note: Not freezing CONFIG to allow SELECTED_NETWORK to be writable for network switching
-
-console.log('✅ Application configuration loaded successfully');
-console.log('🌐 Network:', window.CONFIG.NETWORK.NAME);
-console.log('📄 Staking Contract:', window.CONFIG.CONTRACTS.STAKING_CONTRACT);
-console.log('🎨 Default Theme:', window.CONFIG.UI.THEME.DEFAULT);

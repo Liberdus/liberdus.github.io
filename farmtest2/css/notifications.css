@@ -29,9 +29,9 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    transform: translateX(120%);
+    transform: translateX(100%);
     opacity: 0;
-    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     pointer-events: auto;
     position: relative;
     overflow: hidden;
@@ -53,11 +53,23 @@
 .notification.show {
     transform: translateX(0);
     opacity: 1;
+    animation: notificationSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .notification.hide {
     transform: translateX(120%);
     opacity: 0;
+}
+
+@keyframes notificationSlideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
 }
 
 /* Type Colors */
@@ -137,6 +149,13 @@
     background: rgba(100, 116, 139, 0.6);
     color: #e2e8f0;
     transform: scale(1.05);
+}
+
+@media (hover: none) and (pointer: coarse) {
+    .notification-close {
+        min-width: 32px;
+        min-height: 32px;
+    }
 }
 
 /* Progress Bar */
@@ -220,6 +239,12 @@ body.dark-mode .notification-close:hover {
     color: #e2e8f0;
 }
 
+@media (prefers-contrast: high) {
+    .notification {
+        border: 2px solid currentColor;
+    }
+}
+
 /* Responsive - Mobile */
 @media (max-width: 480px) {
     .notification-container {
@@ -242,6 +267,17 @@ body.dark-mode .notification-close:hover {
     }
 }
 
+@media (max-width: 320px) {
+    .notification-container,
+    #notification-container {
+        top: 10px !important;
+        right: 10px !important;
+        left: auto !important;
+        bottom: auto !important;
+        max-width: none;
+    }
+}
+
 /* Respect reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
     .notification {
@@ -251,6 +287,7 @@ body.dark-mode .notification-close:hover {
 
     .notification.show {
         opacity: 1;
+        animation: none;
     }
 
     .notification.hide {

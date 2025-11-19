@@ -140,7 +140,7 @@ class WalletPopup {
 
     createPopupHTML(walletData) {
         const shortAddress = this.formatAddress(walletData.address);
-        const nativeCurrency = window.CONFIG?.NETWORK?.NATIVE_CURRENCY;
+        const nativeCurrency = window.networkSelector?.getCurrentNativeCurrency();
         const labelToken = nativeCurrency?.name || nativeCurrency?.symbol;
         const balanceLabel = labelToken ? `${labelToken} Balance` : 'Balance';
 
@@ -189,7 +189,6 @@ class WalletPopup {
         let left = buttonRect.right - popupRect.width;
         
         // Adjust if popup goes off screen
-        const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
         
         if (left < 8) {
@@ -305,11 +304,10 @@ class WalletPopup {
             return;
         }
 
-        const network = window.CONFIG?.NETWORK;
-        const nativeCurrency = network?.NATIVE_CURRENCY || {};
-        const decimals = typeof nativeCurrency.decimals === 'number' ? nativeCurrency.decimals : 18;
-        const displaySymbol = nativeCurrency.symbol || 'Native';
-        const displayName = nativeCurrency.name || displaySymbol;
+        const nativeCurrency = window.networkSelector?.getCurrentNativeCurrency();
+        const decimals = typeof nativeCurrency?.decimals === 'number' ? nativeCurrency.decimals : 18;
+        const displaySymbol = nativeCurrency?.symbol || 'Native';
+        const displayName = nativeCurrency?.name || displaySymbol;
 
         const labelElement = this.popupElement.querySelector('[data-wallet-balance-label]');
         if (labelElement) {
@@ -323,7 +321,7 @@ class WalletPopup {
         try {
             const balance = await this.fetchNativeBalance(
                 walletData.address,
-                network?.CHAIN_ID,
+                window.networkSelector?.getCurrentChainId(),
                 walletData.chainId
             );
 

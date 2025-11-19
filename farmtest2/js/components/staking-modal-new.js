@@ -407,9 +407,7 @@ class StakingModalNew {
             const userAddress = window.walletManager.address;
 
             // Get staking contract address (try multiple config paths)
-            const stakingAddress = window.CONFIG?.CONTRACTS?.STAKING_CONTRACT ||
-                                   window.CONFIG?.CONTRACTS?.STAKING ||
-                                   '0xDB7100D6f037fc36A51c38E76c910626A2d755f4'; // Fallback
+            const stakingAddress = window.networkSelector?.getStakingContractAddress();
 
             console.log(`🔍 Checking approval for:`, {
                 lpToken: lpTokenAddress,

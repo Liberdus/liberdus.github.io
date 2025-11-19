@@ -152,15 +152,11 @@ class MetaMaskConnector {
         if (!this.isAvailable()) {
             throw new Error('MetaMask is not available');
         }
-
-        try {
-            await window.ethereum.request({
-                method: 'wallet_addEthereumChain',
-                params: [networkConfig],
-            });
-        } catch (addError) {
-            throw addError;
-        }
+        
+        await window.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [networkConfig],
+        });
     }
 
     /**

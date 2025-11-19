@@ -195,3 +195,42 @@
 .theme-icon {
   font-size: 1.125rem;
 }
+
+@media (max-width: 768px) {
+    .nav-section {
+        width: 100%;
+        justify-content: space-between;
+    }
+}
+
+@media (max-width: 480px) {
+    .header {
+        padding: 12px 0;
+    }
+
+    .nav-section {
+        gap: 8px;
+    }
+
+    .nav-button {
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+
+    .nav-button .material-icons {
+        font-size: 18px;
+    }
+
+    .connect-wallet-btn {
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+}
+
+@media (hover: none) and (pointer: coarse) {
+    .nav-button,
+    .connect-wallet-btn {
+        min-height: 44px;
+        min-width: 44px;
+    }
+}

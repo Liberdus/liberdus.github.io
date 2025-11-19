@@ -28,6 +28,13 @@
     background: var(--action-hover);
 }
 
+@media (hover: none) and (pointer: coarse) {
+    .theme-toggle {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}
+
 /* Material Icons support */
 .theme-toggle .material-icons-outlined {
     transition: inherit;

@@ -14,10 +14,6 @@ class AdminPage {
         this.isRefreshing = false; // Prevent overlapping refreshes
         this.autoRefreshActive = false; // Prevent multiple auto-refresh timers
 
-        // Development mode from centralized config
-        // SECURITY: Default to false (production mode) if DEV_CONFIG is not loaded
-        this.DEVELOPMENT_MODE = window.DEV_CONFIG?.ADMIN_DEVELOPMENT_MODE ?? false;
-
         // PERFORMANCE OPTIMIZATION: Proposal state management
         this.proposalsCache = new Map(); // Cache proposals by ID for O(1) access
         this.lastProposalId = 0; // Track highest proposal ID for incremental loading
@@ -68,19 +64,6 @@ class AdminPage {
     async init() {
         try {
             console.log('🔐 Initializing Admin Panel...');
-
-            // Development mode bypass
-            if (this.DEVELOPMENT_MODE) {
-                console.log('🚧 DEVELOPMENT MODE: Bypassing access control');
-                this.isAuthorized = true;
-                this.userAddress = '0x1234567890123456789012345678901234567890';
-
-                await this.loadAdminInterface();
-                this.startAutoRefresh();
-                this.isInitialized = true;
-                console.log('✅ Admin Panel initialized (Development Mode)');
-                return;
-            }
 
             // Production mode - wait for contract manager and wallet
             console.log('🚀 Production mode: Waiting for contract manager and wallet...');
@@ -223,7 +206,7 @@ class AdminPage {
             }
 
             const healthChecker = new window.NetworkHealthCheck();
-            const contractAddress = window.CONFIG?.CONTRACTS?.STAKING_CONTRACT;
+            const contractAddress = window.networkSelector?.getStakingContractAddress();
 
             // Perform comprehensive health check
             const isReady = await healthChecker.waitForNetworkReady(contractAddress, 20000); // 20 second timeout
@@ -360,9 +343,9 @@ class AdminPage {
 
     showUnauthorizedAccess() {
         const container = document.getElementById('admin-content') || document.body;
-        const currentNetwork = window.CONFIG?.NETWORK?.NAME || 'Unknown Network';
-        const currentChainId = window.CONFIG?.NETWORK?.CHAIN_ID || 'Unknown';
-        const currentContract = window.CONFIG?.CONTRACTS?.STAKING_CONTRACT || 'Not configured';
+        const currentNetwork = window.networkSelector?.getCurrentNetworkName();
+        const currentChainId = window.networkSelector?.getCurrentChainId();
+        const currentContract = window.networkSelector?.getStakingContractAddress();
         
         container.innerHTML = `
             <div class="admin-unauthorized">
@@ -391,8 +374,8 @@ class AdminPage {
                         <p>Or try switching to a network where you have admin permissions:</p>
                         <div class="network-selector-container">
                             <select id="unauthorized-network-select" class="network-select">
-                                <option value="AMOY" ${window.CONFIG?.SELECTED_NETWORK === 'AMOY' ? 'selected' : ''}>Amoy Testnet</option>
-                                <option value="POLYGON_MAINNET" ${window.CONFIG?.SELECTED_NETWORK === 'POLYGON_MAINNET' ? 'selected' : ''}>Polygon Mainnet</option>
+                                <option value="AMOY" ${(window.networkSelector.getSelectedNetworkKey() || '') === 'AMOY' ? 'selected' : ''}>Amoy Testnet</option>
+                                <option value="POLYGON_MAINNET" ${(window.networkSelector.getSelectedNetworkKey() || '') === 'POLYGON_MAINNET' ? 'selected' : ''}>Polygon Mainnet</option>
                             </select>
                         </div>
                     </div>
@@ -1086,15 +1069,13 @@ class AdminPage {
         // Update network indicator when chain changes
         const indicator = document.getElementById('network-indicator-home');
         if (indicator) {
-            const chainIdDecimal = parseInt(chainId, 16);
-            const expectedChainId = window.CONFIG.NETWORK.CHAIN_ID;
-
             // Check permission asynchronously and update
             if (window.networkManager) {
                 window.networkManager.hasRequiredNetworkPermission().then(hasPermission => {
                     window.NetworkIndicator?.update('network-indicator-home', 'admin-network-selector', 'admin');
                 }).catch(error => {
-                    console.error('Error checking permission after chain change:', error);
+                    const networkName = window.networkSelector?.getCurrentNetworkName();
+                    console.error(`Error checking permission after chain change: ${networkName}`, error);
                 });
             }
         }
@@ -1282,13 +1263,9 @@ class AdminPage {
 
     createAdminLayout() {
         const container = document.getElementById('admin-content') || document.body;
-        const devModeIndicator = this.DEVELOPMENT_MODE
-            ? '<div class="dev-mode-banner">🚧 DEVELOPMENT MODE - Access Control Bypassed</div>'
-            : '';
 
         container.innerHTML = `
             <div class="admin-panel">
-                ${devModeIndicator}
 
                 <div class="admin-container">
 
@@ -3796,7 +3773,6 @@ class AdminPage {
         const detailsRow = document.getElementById(`details-${proposalId}`);
         const expandBtn = document.querySelector(`[onclick="adminPage.toggleProposal('${proposalId}')"]`) ||
                          document.querySelector(`[onclick="adminPage.toggleProposal(${proposalId})"]`);
-        const expandIcon = expandBtn?.querySelector('.expand-icon');
 
         if (detailsRow) {
             const isVisible = detailsRow.style.display !== 'none';
@@ -3886,7 +3862,7 @@ class AdminPage {
             }
 
             const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-            const expectedChainId = window.networkManager?.getChainIdHex() || ('0x' + window.CONFIG.NETWORK.CHAIN_ID.toString(16));
+            const expectedChainId = window.networkManager?.getChainIdHex();
             return chainId === expectedChainId;
         } catch (error) {
             console.error('❌ Network status check failed:', error);
@@ -6291,31 +6267,7 @@ class AdminPage {
         }
     }
 
-    /**
-     * Navigate to home page with optimized loading
-     */
-    navigateToHome() {
-        console.log('🏠 Navigating to home page...');
-        
-        // Show loading indicator
-        if (window.notificationManager) {
-            window.notificationManager.info('Loading homepage...');
-        }
-        
-        // Always navigate directly to index.html to ensure correct destination
-        window.location.href = '../';
-    }
 }
 
 // Export for global access
 window.AdminPage = AdminPage;
-
-// Make navigateToHome globally available
-window.navigateToHome = function() {
-    if (window.adminPage && window.adminPage.navigateToHome) {
-        window.adminPage.navigateToHome();
-    } else {
-        // Fallback navigation
-        window.location.href = '../';
-    }
-};

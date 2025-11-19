@@ -105,8 +105,6 @@ class ContractManager {
                 throw new Error('CONFIG not loaded');
             }
 
-            console.log('✅ CONFIG available:', window.CONFIG.CONTRACTS);
-
             // Check if ethers is available
             if (!window.ethers) {
                 console.error('❌ Ethers.js not available - cannot initialize contracts');
@@ -143,7 +141,7 @@ class ContractManager {
             if (window.MulticallService && this.provider) {
                 console.log('📦 Initializing Multicall service...');
                 try {
-                    this.multicallService = new MulticallService();
+                    this.multicallService = new window.MulticallService();
                     const network = await this.provider.getNetwork();
                     const initialized = await this.multicallService.initialize(this.provider, network.chainId);
                     if (initialized) {
@@ -351,7 +349,7 @@ class ContractManager {
             // Initialize Multicall service for batch loading optimization
             if (window.MulticallService) {
                 console.log('📦 Initializing Multicall service...');
-                this.multicallService = new MulticallService();
+                this.multicallService = new window.MulticallService();
                 const chainId = await this.provider.getNetwork().then(n => n.chainId);
                 const initialized = await this.multicallService.initialize(this.provider, chainId);
                 if (initialized) {
@@ -424,7 +422,7 @@ class ContractManager {
                 const network = await Promise.race([networkPromise, timeoutPromise]);
 
                 // Verify correct network (using centralized config)
-                const expectedChainId = window.CONFIG?.NETWORK?.CHAIN_ID || 80002;
+                const expectedChainId = window.networkSelector?.getCurrentChainId();
                 if (network.chainId !== expectedChainId) {
                     throw new Error(`Wrong network: expected ${expectedChainId}, got ${network.chainId}`);
                 }
@@ -461,7 +459,7 @@ class ContractManager {
      */
     getAllRPCUrls() {
         const rpcUrls = [];
-        const networkConfig = window.CONFIG?.NETWORK;
+        const networkConfig = window.networkSelector?.getCurrentNetworkConfig();
 
         if (networkConfig?.RPC_URL) {
             rpcUrls.push(networkConfig.RPC_URL);
@@ -517,7 +515,7 @@ class ContractManager {
                     const network = await Promise.race([networkPromise, timeoutPromise]);
 
                     // Verify correct network (using centralized config when available)
-                    const expectedChainId = window.CONFIG?.NETWORK?.CHAIN_ID;
+                    const expectedChainId = window.networkSelector?.getCurrentChainId();
                     if (expectedChainId != null && network.chainId !== expectedChainId) {
                         throw new Error(`Wrong network: expected ${expectedChainId}, got ${network.chainId}`);
                     }
@@ -677,7 +675,7 @@ class ContractManager {
                 throw new Error('Configuration not available');
             }
 
-            const stakingAddress = config.CONTRACTS?.STAKING_CONTRACT || null;
+            const stakingAddress = window.networkSelector?.getStakingContractAddress();
             console.log('   - Staking contract (config):', stakingAddress);
 
             if (stakingAddress && this.isValidContractAddress(stakingAddress)) {
@@ -1097,17 +1095,6 @@ class ContractManager {
                         this.provider &&
                         (this.stakingContract || this.rewardTokenContract));
 
-        // Debug logging
-        if (window.DEV_CONFIG?.VERBOSE_LOGGING) {
-            console.log('🔍 ContractManager.isReady() check:', {
-                isInitialized: this.isInitialized,
-                hasProvider: !!this.provider,
-                hasStakingContract: !!this.stakingContract,
-                hasRewardTokenContract: !!this.rewardTokenContract,
-                ready: ready
-            });
-        }
-
         return ready;
     }
 
@@ -1147,9 +1134,10 @@ class ContractManager {
             }
 
             // Check if the new network has valid contract addresses
-            const contracts = window.CONFIG.CONTRACTS;
-            if (!contracts.STAKING_CONTRACT || contracts.STAKING_CONTRACT.trim() === '') {
-                console.log(`⚠️ No contracts deployed on ${network.NAME} - skipping initialization`);
+            const contractAddress = window.networkSelector?.getStakingContractAddress();
+            if (!contractAddress || contractAddress.trim() === '') {
+                const networkName = window.networkSelector?.getCurrentNetworkName() || networkKey || 'current network';
+                console.log(`⚠️ No contracts deployed on ${networkName} - skipping initialization`);
                 this.isInitialized = true; // Mark as initialized but with no contracts
                 return true;
             }
@@ -1341,7 +1329,7 @@ class ContractManager {
             );
 
             // Get balance of staking contract (total LP tokens staked)
-            const stakingContractAddress = window.CONFIG?.CONTRACTS?.STAKING_CONTRACT;
+            const stakingContractAddress = window.networkSelector?.getStakingContractAddress();
             if (!stakingContractAddress) {
                 throw new Error('Staking contract address not configured');
             }
@@ -1362,7 +1350,7 @@ class ContractManager {
                 throw new Error(`Unable to resolve LP token for identifier: ${pairIdentifier}`);
             }
 
-            const stakingAddress = this.contractAddresses.get('STAKING') || window.CONFIG?.CONTRACTS?.STAKING_CONTRACT;
+            const stakingAddress = this.contractAddresses.get('STAKING') || window.networkSelector?.getStakingContractAddress();
             if (!stakingAddress || !this.isValidContractAddress(stakingAddress)) {
                 throw new Error('Staking contract address not available');
             }
@@ -1591,32 +1579,8 @@ class ContractManager {
     async getSigners() {
         return await this.safeContractCall(
             () => this.stakingContract.getSigners(),
-            window.CONFIG?.GOVERNANCE?.SIGNERS || [], // Fallback signers from config
+            [],
             'getSigners'
-        );
-    }
-
-    /**
-     * Get total weight (like React version) with RPC failover
-     */
-    async getTotalWeight() {
-        return await this.safeContractCall(
-            async () => {
-                // Check if staking contract is initialized
-                if (!this.stakingContract) {
-                    throw new Error('Staking contract not initialized');
-                }
-
-                // The deployed contract uses totalWeight() method
-                if (typeof this.stakingContract.totalWeight === 'function') {
-                    return await this.stakingContract.totalWeight();
-                } else {
-                    console.log('⚠️ totalWeight method not available in contract');
-                    throw new Error('totalWeight method not available in contract');
-                }
-            },
-            BigInt(0),
-            'getTotalWeight'
         );
     }
 
@@ -1635,7 +1599,7 @@ class ContractManager {
      * Get required approvals for multi-signature actions with RPC failover
      */
     async getRequiredApprovals() {
-        return await this.safeContractCall(
+        const requiredApprovals = await this.safeContractCall(
             async () => {
                 if (!this.stakingContract) {
                     throw new Error('Staking contract not initialized');
@@ -1643,50 +1607,21 @@ class ContractManager {
 
                 // Check if function exists first
                 if (typeof this.stakingContract.REQUIRED_APPROVALS !== 'function') {
-                    console.log('⚠️ REQUIRED_APPROVALS function not available in contract');
-                    return 3; // Default fallback value (updated to match config)
+                    throw new Error('REQUIRED_APPROVALS function not available in contract');
                 }
 
                 const result = await this.stakingContract.REQUIRED_APPROVALS();
                 return result.toNumber();
             },
-            window.CONFIG?.GOVERNANCE?.REQUIRED_APPROVALS || 3, // Fallback from config
+            null,
             'getRequiredApprovals'
         );
-    }
 
-    /**
-     * Get action details by ID
-     */
-    async getAction(actionId) {
-        return await this.executeWithRetry(async () => {
-            const [action, approvals, expiredOverride] = await Promise.all([
-                this.stakingContract.actions(actionId),
-                this.stakingContract.getActionApproval(actionId),
-                this.stakingContract.isActionExpired(actionId)
-            ]);
+        if (!Number.isFinite(requiredApprovals)) {
+            throw new Error('Failed to retrieve required approvals from staking contract');
+        }
 
-            const expired = expiredOverride !== undefined ? !!expiredOverride : action.expired;
-            return {
-                actionType: action.actionType,
-                newHourlyRewardRate: action.newHourlyRewardRate.toString(),
-                pairs: action.pairs,
-                weights: action.weights.map(w => w.toString()),
-                pairToAdd: action.pairToAdd,
-                pairNameToAdd: action.pairNameToAdd,
-                platformToAdd: action.platformToAdd,
-                weightToAdd: action.weightToAdd.toString(),
-                pairToRemove: action.pairToRemove,
-                recipient: action.recipient,
-                withdrawAmount: action.withdrawAmount.toString(),
-                executed: action.executed,
-                expired: expired,
-                approvals: action.approvals,
-                approvedBy: approvals,
-                proposedTime: action.proposedTime.toNumber(),
-                rejected: action.rejected
-            };
-        }, 'getAction');
+        return requiredApprovals;
     }
 
     /**
@@ -2897,11 +2832,11 @@ class ContractManager {
 
             // Ensure we're on the correct network (using centralized config)
             const network = await web3Provider.getNetwork();
-            const expectedChainId = window.CONFIG?.NETWORK?.CHAIN_ID || 80002;
+            const expectedChainId = window.networkSelector?.getCurrentChainId();
             
             // Check permissions for the selected network regardless of current network
-            const selectedNetwork = window.CONFIG?.NETWORK?.CHAIN_ID || 80002;
-            const networkName = window.CONFIG?.NETWORK?.NAME || 'the selected network';
+            const selectedNetwork = window.networkSelector?.getCurrentChainId();
+            const networkName = window.networkSelector?.getCurrentNetworkName();
             
             if (selectedNetwork === expectedChainId) {
                 console.log(`🌐 ${networkName} selected in UI, checking permissions...`);
@@ -4367,7 +4302,7 @@ class ContractManager {
 
         console.log(`⏱️ Monitoring transaction ${tx.hash} with ${timeoutMs/1000}s timeout`);
 
-        return new Promise(async (resolve, reject) => {
+        return new Promise((resolve, reject) => {
             // Set up timeout
             const timeoutId = setTimeout(() => {
                 console.log(`[TX MONITOR] ⏰ TIMEOUT REACHED after ${timeoutMs/1000} seconds`);
@@ -4377,76 +4312,79 @@ class ContractManager {
                 reject(new Error(`Transaction timeout after ${timeoutMs/1000} seconds.`));
             }, timeoutMs);
 
-            try {
-                // Monitor transaction with periodic status updates
-                let checkCount = 0;
-                const checkInterval = setInterval(() => {
-                    checkCount++;
-                    const elapsed = Math.round((Date.now() - startTime) / 1000);
-                    console.log(`[TX MONITOR] ⏳ Check #${checkCount}: Transaction pending for ${elapsed}s`);
-                    console.log(`[TX MONITOR]   Status: Still waiting for confirmation...`);
-                    console.log(`⏳ Transaction ${operationName} pending... ${elapsed}s elapsed`);
-                }, 10000); // Log every 10 seconds
+            // Use async IIFE to handle await inside Promise executor
+            (async () => {
+                try {
+                    // Monitor transaction with periodic status updates
+                    let checkCount = 0;
+                    const checkInterval = setInterval(() => {
+                        checkCount++;
+                        const elapsed = Math.round((Date.now() - startTime) / 1000);
+                        console.log(`[TX MONITOR] ⏳ Check #${checkCount}: Transaction pending for ${elapsed}s`);
+                        console.log(`[TX MONITOR]   Status: Still waiting for confirmation...`);
+                        console.log(`⏳ Transaction ${operationName} pending... ${elapsed}s elapsed`);
+                    }, 10000); // Log every 10 seconds
 
-                // Wait for transaction confirmation
-                console.log(`[TX MONITOR] 🔄 Calling tx.wait() for confirmation...`);
-                console.log(`🔄 Waiting for blockchain confirmation...`);
+                    // Wait for transaction confirmation
+                    console.log(`[TX MONITOR] 🔄 Calling tx.wait() for confirmation...`);
+                    console.log(`🔄 Waiting for blockchain confirmation...`);
 
-                const receipt = await tx.wait();
+                    const receipt = await tx.wait();
 
-                // Clear monitoring
-                clearTimeout(timeoutId);
-                clearInterval(checkInterval);
+                    // Clear monitoring
+                    clearTimeout(timeoutId);
+                    clearInterval(checkInterval);
 
-                const totalTime = Math.round((Date.now() - startTime) / 1000);
+                    const totalTime = Math.round((Date.now() - startTime) / 1000);
 
-                // Check if transaction succeeded or failed
-                if (receipt.status === 0) {
-                    console.log(`[TX MONITOR] ❌ TRANSACTION FAILED ON BLOCKCHAIN!`);
-                    console.log(`[TX MONITOR]   Receipt received but status is 0 (failed)`);
+                    // Check if transaction succeeded or failed
+                    if (receipt.status === 0) {
+                        console.log(`[TX MONITOR] ❌ TRANSACTION FAILED ON BLOCKCHAIN!`);
+                        console.log(`[TX MONITOR]   Receipt received but status is 0 (failed)`);
+                        console.log(`[TX MONITOR] 📊 Transaction Statistics:`);
+                        console.log(`[TX MONITOR]   Total time: ${totalTime}s`);
+                        console.log(`[TX MONITOR]   Block number: ${receipt.blockNumber}`);
+                        console.log(`[TX MONITOR]   Gas used: ${receipt.gasUsed.toString()} (low gas = early revert)`);
+                        console.log(`[TX MONITOR]   Status: FAILED (0)`);
+                        console.log(`[TX MONITOR]   Transaction fee: ${ethers.utils.formatEther(receipt.gasUsed.mul(tx.gasPrice || receipt.effectiveGasPrice))} MATIC`);
+
+                        console.log(`❌ Transaction reverted on blockchain - Block: ${receipt.blockNumber}, Gas: ${receipt.gasUsed}`);
+
+                        // Throw error with helpful message
+                        const error = new Error(`Transaction failed on blockchain. The smart contract rejected the transaction.`);
+                        error.code = 'TRANSACTION_REVERTED';
+                        error.receipt = receipt;
+                        throw error;
+                    }
+
+                    console.log(`[TX MONITOR] ✅ TRANSACTION CONFIRMED!`);
+                    console.log(`[TX MONITOR]   Receipt received:`, receipt);
                     console.log(`[TX MONITOR] 📊 Transaction Statistics:`);
                     console.log(`[TX MONITOR]   Total time: ${totalTime}s`);
                     console.log(`[TX MONITOR]   Block number: ${receipt.blockNumber}`);
-                    console.log(`[TX MONITOR]   Gas used: ${receipt.gasUsed.toString()} (low gas = early revert)`);
-                    console.log(`[TX MONITOR]   Status: FAILED (0)`);
+                    console.log(`[TX MONITOR]   Gas used: ${receipt.gasUsed.toString()}`);
+                    console.log(`[TX MONITOR]   Status: SUCCESS (1)`);
                     console.log(`[TX MONITOR]   Transaction fee: ${ethers.utils.formatEther(receipt.gasUsed.mul(tx.gasPrice || receipt.effectiveGasPrice))} MATIC`);
 
-                    console.log(`❌ Transaction reverted on blockchain - Block: ${receipt.blockNumber}, Gas: ${receipt.gasUsed}`);
+                    // add success to receipt. needed for ui to detect and display success.
+                    receipt.success = true;
 
-                    // Throw error with helpful message
-                    const error = new Error(`Transaction failed on blockchain. The smart contract rejected the transaction.`);
-                    error.code = 'TRANSACTION_REVERTED';
-                    error.receipt = receipt;
-                    throw error;
+                    console.log(`✅ Transaction confirmed in ${totalTime}s - Block: ${receipt.blockNumber}, Gas: ${receipt.gasUsed}`);
+
+                    resolve(receipt);
+
+                } catch (error) {
+                    console.log(`[TX MONITOR] ❌ TRANSACTION MONITORING ERROR!`);
+                    console.log(`[TX MONITOR]   Error type: ${error.constructor.name}`);
+                    console.log(`[TX MONITOR]   Error message: ${error.message}`);
+                    console.log(`[TX MONITOR]   Error code: ${error.code}`);
+                    console.log(`[TX MONITOR]   Error details:`, error);
+
+                    clearTimeout(timeoutId);
+                    console.log(`❌ Transaction monitoring failed: ${error.message}`);
+                    reject(error);
                 }
-
-                console.log(`[TX MONITOR] ✅ TRANSACTION CONFIRMED!`);
-                console.log(`[TX MONITOR]   Receipt received:`, receipt);
-                console.log(`[TX MONITOR] 📊 Transaction Statistics:`);
-                console.log(`[TX MONITOR]   Total time: ${totalTime}s`);
-                console.log(`[TX MONITOR]   Block number: ${receipt.blockNumber}`);
-                console.log(`[TX MONITOR]   Gas used: ${receipt.gasUsed.toString()}`);
-                console.log(`[TX MONITOR]   Status: SUCCESS (1)`);
-                console.log(`[TX MONITOR]   Transaction fee: ${ethers.utils.formatEther(receipt.gasUsed.mul(tx.gasPrice || receipt.effectiveGasPrice))} MATIC`);
-
-                // add success to receipt. needed for ui to detect and display success.
-                receipt.success = true;
-
-                console.log(`✅ Transaction confirmed in ${totalTime}s - Block: ${receipt.blockNumber}, Gas: ${receipt.gasUsed}`);
-
-                resolve(receipt);
-
-            } catch (error) {
-                console.log(`[TX MONITOR] ❌ TRANSACTION MONITORING ERROR!`);
-                console.log(`[TX MONITOR]   Error type: ${error.constructor.name}`);
-                console.log(`[TX MONITOR]   Error message: ${error.message}`);
-                console.log(`[TX MONITOR]   Error code: ${error.code}`);
-                console.log(`[TX MONITOR]   Error details:`, error);
-
-                clearTimeout(timeoutId);
-                console.log(`❌ Transaction monitoring failed: ${error.message}`);
-                reject(error);
-            }
+            })();
         });
     }
 
@@ -4635,19 +4573,6 @@ class ContractManager {
      */
     async safeContractCall(contractFunction, errorFallback = null, functionName = 'unknown') {
         const maxRetries = 2;
-
-        // Check if contracts are initialized before attempting calls
-        if (!this.stakingContract && functionName.includes('staking')) {
-            console.error(`❌ Staking contract not initialized for ${functionName}`);
-            return errorFallback;
-        }
-
-        // Check if contract is deployed on current network
-        const contracts = window.CONFIG.CONTRACTS;
-        if (!contracts.STAKING_CONTRACT || contracts.STAKING_CONTRACT.trim() === '') {
-            console.log(`⚠️ No staking contract deployed on current network - ${functionName} skipped gracefully`);
-            return errorFallback;
-        }
 
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
