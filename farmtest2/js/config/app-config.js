@@ -25,7 +25,7 @@ window.CONFIG = {
                 decimals: 18
             },
             CONTRACTS: {
-                STAKING_CONTRACT: '0x3aca5B70C7153671Fb96705E9593DABd1Ff7717F'
+                STAKING_CONTRACT: '0x3aca5B70C7153671Fb96705E9593DABd1Ff7717F' /* '0x5e4216c952190BEA7abC4Fc64e990AfbF4F9885a' */
             }
         },
         POLYGON_MAINNET: {
@@ -178,7 +178,7 @@ window.CONFIG.ABIS = {
     STAKING_CONTRACT: [
         // Core staking functions
         'function stake(address lpToken, uint256 amount) external',
-        'function unstake(address lpToken, uint256 amount) external',
+        'function unstake(address lpToken, uint256 amount, bool claimRewards) external',
         'function claimRewards(address lpToken) external',
 
         // View functions - User info
