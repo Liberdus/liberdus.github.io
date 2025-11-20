@@ -937,6 +937,27 @@
     padding: 2px 6px;
     border-radius: 4px;
     border: 1px solid var(--border-primary);
+    transition: all 0.2s ease;
+}
+
+.parameter-value.address-display[data-address] {
+    cursor: pointer;
+}
+
+.parameter-value.address-display[data-address]:hover {
+    opacity: 0.9;
+    background: var(--primary-100);
+    border-color: var(--primary-400);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Light mode hover styles for better contrast */
+[data-theme="light"] .parameter-value.address-display[data-address]:hover {
+    background: var(--primary-50);
+    border-color: var(--primary-500);
+    color: var(--text-primary);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
 }
 
 .no-parameters {

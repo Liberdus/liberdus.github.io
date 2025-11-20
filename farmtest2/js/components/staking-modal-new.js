@@ -42,6 +42,9 @@ class StakingModalNew {
         this.isExecutingUnstake = false;
         this.isExecutingClaim = false;
 
+        // Claim rewards on unstake
+        this.claimRewardsOnUnstake = true;
+
         this.transactionPhaseHandler = this.handleTransactionPhase.bind(this);
         if (typeof window !== 'undefined') {
             window.addEventListener('transaction-phase', this.transactionPhaseHandler);
@@ -236,6 +239,14 @@ class StakingModalNew {
 
             if (e.target.classList.contains('amount-slider')) {
                 this.updateAmountFromSlider(e.target);
+            }
+        });
+
+        // Checkbox changes
+        document.addEventListener('change', (e) => {
+            if (e.target.id === 'claim-rewards-checkbox') {
+                this.claimRewardsOnUnstake = e.target.checked;
+                console.log('Claim rewards on unstake:', this.claimRewardsOnUnstake);
             }
         });
 
@@ -959,6 +970,18 @@ class StakingModalNew {
                 <span class="balance-value success-text">${this.pendingRewards} LIB</span>
             </div>
 
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input
+                        type="checkbox"
+                        id="claim-rewards-checkbox"
+                        ${this.claimRewardsOnUnstake ? 'checked' : ''}
+                    >
+                    <span class="checkmark"></span>
+                    Claim reward tokens
+                </label>
+            </div>
+
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="safeModalClose()">Cancel</button>
                 <button class="btn btn-primary" onclick="safeModalExecuteUnstake()" ${!this.unstakeAmount || parseFloat(this.unstakeAmount) === 0 ? 'disabled' : ''}>
@@ -1219,7 +1242,8 @@ class StakingModalNew {
             this.setActionPhase('unstake', 'userApproval');
             const result = await window.contractManager.unstake(
                 this.currentPair.address,
-                this.unstakeAmount
+                this.unstakeAmount,
+                this.claimRewardsOnUnstake
             );
 
             if (this.actionPhases.unstake === 'userApproval') {

@@ -32,6 +32,16 @@ class AdminPage {
         // UI state: remember proposal filter preference across refreshes
         this.proposalFilter = 'pending';
 
+        // Shared selectors for address copy functionality
+        this.addressCopySelectors = [
+            '.address-display',
+            '.parameter-value.address-display',
+            '.pair-address',
+            '.signer-address',
+            '[data-info="staking-address"]',
+            '[data-info="reward-token-address"]'
+        ].join(', ');
+
         // Initialize asynchronously (don't await in constructor)
         this.init().catch(error => {
             console.error('❌ AdminPage initialization failed:', error);
@@ -473,11 +483,53 @@ class AdminPage {
             // Refresh and update event listeners
             this.setupRefreshListeners();
 
+            // Address copy-to-clipboard event delegation
+            this.setupAddressCopyListeners();
+
             console.log('✅ Admin panel event listeners setup complete');
 
         } catch (error) {
             console.error('❌ Failed to setup event listeners:', error);
         }
+    }
+
+    /**
+     * Setup event delegation for address copy-to-clipboard functionality
+     */
+    setupAddressCopyListeners() {
+        // Use event delegation on document to handle dynamically rendered addresses
+        document.addEventListener('click', (event) => {
+            const addressElement = event.target.closest(this.addressCopySelectors);
+            if (!addressElement) {
+                return;
+            }
+
+            // Get address from data-address attribute or text content
+            const address = addressElement.getAttribute('data-address') || addressElement.textContent?.trim();
+            if (!this.isCopyableAddress(address)) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            this.copyAddressToClipboard(address.trim());
+        });
+    }
+
+    /**
+     * Determine if an address value should be copyable
+     * @param {string} address
+     * @returns {boolean}
+     */
+    isCopyableAddress(address) {
+        if (!address) return false;
+
+        const normalized = address.trim();
+        if (!normalized || normalized === 'N/A' || normalized === 'Not specified') {
+            return false;
+        }
+
+        return normalized.startsWith('0x') && normalized.length > 20;
     }
 
     /**
@@ -3364,7 +3416,7 @@ class AdminPage {
                             <h6 class="pair-name">${window.Formatter?.formatPairName(pair.name, pair.address, pair.platform) || pair.name}</h6>
                             <div class="pair-address-wrapper">
                                 <span class="address-label">Address:</span>
-                                <code class="pair-address">${pair.address}</code>
+                                <code class="pair-address" data-address="${pair.address}" title="Click to copy address">${pair.address}</code>
                             </div>
                         </div>
                         <div class="pair-weight-badge">
@@ -3390,7 +3442,7 @@ class AdminPage {
         }
 
         return signers.map(signer => `
-            <p class="signer-address">${signer}</p>
+            <p class="signer-address" data-address="${signer}" title="Click to copy address">${signer}</p>
         `).join('');
     }
 
@@ -3937,7 +3989,7 @@ class AdminPage {
             return `
                 <div class="signature-item ${hasSigned ? 'signed' : 'pending'} ${isCurrentUser ? 'current-user' : ''}">
                     <div class="signer-info">
-                        <span class="signer-address">${this.formatAddress(signer)}</span>
+                        <span class="signer-address" data-address="${signer}" title="Click to copy address">${this.formatAddress(signer)}</span>
                         ${isCurrentUser ? '<span class="user-badge">You</span>' : ''}
                     </div>
                     <div class="signature-status">
@@ -4015,7 +4067,10 @@ class AdminPage {
                             <div class="parameter-icon">📍</div>
                             <div class="parameter-content">
                                 <div class="parameter-label">LP Token Address</div>
-                                <div class="parameter-value address-display" style="font-family: monospace; font-size: 0.85em; word-break: break-all;">${lpTokenAddress}</div>
+                                <div class="parameter-value address-display" 
+                                     data-address="${lpTokenAddress}" 
+                                     style="font-family: monospace; font-size: 0.85em; word-break: break-all; cursor: pointer;" 
+                                     title="Click to copy address">${lpTokenAddress}</div>
                             </div>
                         </div>
                         <div class="parameter-card">
@@ -4063,7 +4118,10 @@ class AdminPage {
                             <div class="parameter-icon">📍</div>
                             <div class="parameter-content">
                                 <div class="parameter-label">LP Token Address</div>
-                                <div class="parameter-value address-display" style="font-family: monospace; font-size: 0.85em; word-break: break-all;">${proposal?.pairToRemove}</div>
+                                <div class="parameter-value address-display" 
+                                     data-address="${proposal?.pairToRemove}" 
+                                     style="font-family: monospace; font-size: 0.85em; word-break: break-all; cursor: pointer;" 
+                                     title="Click to copy address">${proposal?.pairToRemove}</div>
                             </div>
                         </div>`;
 
@@ -4144,14 +4202,20 @@ class AdminPage {
                             <div class="parameter-icon">➖</div>
                             <div class="parameter-content">
                                 <div class="parameter-label">Signer To Remove</div>
-                                <div class="parameter-value address-display" style="font-family: monospace; font-size: 0.85em; word-break: break-all;">${signerToRemove}</div>
+                                <div class="parameter-value address-display" 
+                                     data-address="${signerToRemove}" 
+                                     style="font-family: monospace; font-size: 0.85em; word-break: break-all; cursor: pointer;" 
+                                     title="Click to copy address">${signerToRemove}</div>
                             </div>
                         </div>
                         <div class="parameter-card">
                             <div class="parameter-icon">➕</div>
                             <div class="parameter-content">
                                 <div class="parameter-label">Signer To Add</div>
-                                <div class="parameter-value address-display" style="font-family: monospace; font-size: 0.85em; word-break: break-all;">${newSignerAddress}</div>
+                                <div class="parameter-value address-display" 
+                                     data-address="${newSignerAddress}" 
+                                     style="font-family: monospace; font-size: 0.85em; word-break: break-all; cursor: pointer;" 
+                                     title="Click to copy address">${newSignerAddress}</div>
                             </div>
                         </div>`;
 
@@ -4194,7 +4258,10 @@ class AdminPage {
                             <div class="parameter-icon">📍</div>
                             <div class="parameter-content">
                                 <div class="parameter-label">Recipient Address</div>
-                                <div class="parameter-value address-display" style="font-family: monospace; font-size: 0.85em; word-break: break-all;">${recipientAddress}</div>
+                                <div class="parameter-value address-display" 
+                                     data-address="${recipientAddress}" 
+                                     style="font-family: monospace; font-size: 0.85em; word-break: break-all; cursor: pointer;" 
+                                     title="Click to copy address">${recipientAddress}</div>
                             </div>
                         </div>`;
 
@@ -4290,16 +4357,22 @@ class AdminPage {
                         }
                     }
                     // Format addresses
-                    else if (typeof value === 'string' && value.startsWith('0x') && value.length > 20) {
-                        displayValue = `<span style="font-family: monospace; font-size: 0.85em; word-break: break-all;">${value}</span>`;
+                    const isAddress = typeof value === 'string' && this.isCopyableAddress(value);
+                    if (isAddress) {
+                        displayValue = value;
                     }
+                    // Add address-display class and data-address attribute if it is an address
+                    const addressClass = isAddress ? ' address-display' : '';
+                    const addressAttributes = isAddress
+                        ? ` data-address="${value}" title="Click to copy address"`
+                        : '';
 
                     defaultHTML += `
                         <div class="parameter-card">
                             <div class="parameter-icon">📋</div>
                             <div class="parameter-content">
                                 <div class="parameter-label">${key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</div>
-                                <div class="parameter-value">${displayValue}</div>
+                                <div class="parameter-value${addressClass}"${addressAttributes}>${displayValue}</div>
                             </div>
                         </div>`;
                 });
@@ -5397,12 +5470,26 @@ class AdminPage {
 
         const stakingAddressEl = document.querySelector('[data-info="staking-address"]');
         if (stakingAddressEl) {
-            stakingAddressEl.textContent = info.stakingAddress ?? 'N/A';
+            const stakingAddress = info.stakingAddress ?? 'N/A';
+            stakingAddressEl.textContent = stakingAddress;
+            // Add styling and data attribute for click-to-copy (handled by event delegation)
+            if (stakingAddress !== 'N/A') {
+                stakingAddressEl.style.cursor = 'pointer';
+                stakingAddressEl.title = 'Click to copy address';
+                stakingAddressEl.setAttribute('data-address', stakingAddress);
+            }
         }
 
         const rewardTokenAddressEl = document.querySelector('[data-info="reward-token-address"]');
         if (rewardTokenAddressEl) {
-            rewardTokenAddressEl.textContent = info.rewardTokenAddress ?? 'N/A';
+            const rewardTokenAddress = info.rewardTokenAddress ?? 'N/A';
+            rewardTokenAddressEl.textContent = rewardTokenAddress;
+            // Add styling and data attribute for click-to-copy (handled by event delegation)
+            if (rewardTokenAddress !== 'N/A') {
+                rewardTokenAddressEl.style.cursor = 'pointer';
+                rewardTokenAddressEl.title = 'Click to copy address';
+                rewardTokenAddressEl.setAttribute('data-address', rewardTokenAddress);
+            }
         }
 
         // Update LP pairs with real contract data
@@ -5583,6 +5670,25 @@ class AdminPage {
             window.notificationManager.success(text);
         } else if (!canShowInline) {
             alert('✅ ' + text);
+        }
+    }
+
+    /**
+     * Copy address to clipboard and show notification
+     * @param {string} address - The address to copy
+     */
+    async copyAddressToClipboard(address) {
+        if (!this.isCopyableAddress(address)) {
+            return;
+        }
+
+        try {
+            const normalized = address.trim();
+            await navigator.clipboard.writeText(normalized);
+            window.notificationManager.success('Address copied to clipboard');
+        } catch (error) {
+            console.error('Failed to copy address:', error);
+            window.notificationManager.error('Failed to copy address');
         }
     }
 

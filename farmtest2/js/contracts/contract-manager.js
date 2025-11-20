@@ -69,7 +69,7 @@ class ContractManager {
         }
 
         if (this.isInitialized) {
-            console.log('✅ ContractManager already initialized');
+            console.warn('ContractManager already initialized, skipping...');
             return;
         }
 
@@ -82,7 +82,6 @@ class ContractManager {
 
             this.isInitialized = true;
             this.isInitializing = false;
-            console.log('✅ ContractManager read-only initialization completed successfully');
             this._notifyReadyCallbacks();
 
         } catch (error) {
@@ -110,8 +109,6 @@ class ContractManager {
                 console.error('❌ Ethers.js not available - cannot initialize contracts');
                 throw new Error('Ethers.js not loaded');
             }
-
-            console.log('✅ Ethers.js available');
 
             // Try MetaMask provider first (bypasses CORS issues)
             // BUGFIX: Don't use MetaMask provider with 'any' network - causes corrupted BigNumber data
@@ -144,9 +141,7 @@ class ContractManager {
                     this.multicallService = new window.MulticallService();
                     const network = await this.provider.getNetwork();
                     const initialized = await this.multicallService.initialize(this.provider, network.chainId);
-                    if (initialized) {
-                        console.log('✅ Multicall service ready - batch loading enabled');
-                    } else {
+                    if (!initialized) {
                         console.log('⚠️ Multicall service not available - using fallback methods');
                     }
                 } catch (error) {
@@ -180,7 +175,6 @@ class ContractManager {
 
             // Mark as ready even if some verifications failed
             this.isReadyFlag = true;
-            console.log('✅ ContractManager read-only initialization completed');
 
         } catch (error) {
             console.error('❌ Read-only initialization failed:', error);
@@ -217,7 +211,6 @@ class ContractManager {
                 try {
                     console.log('🔄 Creating staking contract instance...');
                     this.stakingContract = new ethers.Contract(stakingAddress, stakingABI, this.provider);
-                    console.log('✅ Staking contract initialized (read-only):', stakingAddress);
                     console.log('   - Contract methods available:', Object.keys(this.stakingContract.interface.functions).length);
                     contractsInitialized++;
                 } catch (contractError) {
@@ -248,7 +241,6 @@ class ContractManager {
                 try {
                     console.log('🔄 Creating reward token contract instance...');
                     this.rewardTokenContract = new ethers.Contract(rewardTokenAddress, erc20ABI, this.provider);
-                    console.log('✅ Reward token contract initialized (read-only):', rewardTokenAddress);
                     contractsInitialized++;
                 } catch (contractError) {
                     console.error('❌ Failed to create reward token contract:', contractError.message);
@@ -293,8 +285,6 @@ class ContractManager {
             if (this.gasEstimator) {
                 this.gasEstimator.updateProvider(provider);
             }
-
-            console.log('✅ ContractManager upgraded to wallet mode successfully');
         } catch (error) {
             this.isInitializing = false;
             console.error('❌ Failed to upgrade to wallet mode:', error);
@@ -352,10 +342,8 @@ class ContractManager {
                 this.multicallService = new window.MulticallService();
                 const chainId = await this.provider.getNetwork().then(n => n.chainId);
                 const initialized = await this.multicallService.initialize(this.provider, chainId);
-                if (initialized) {
-                    console.log('✅ Multicall service ready - batch loading enabled');
-                } else {
-                    console.log('⚠️ Multicall service not available - using fallback methods');
+                if (!initialized) {
+                    console.warn('⚠️ Multicall service not available - using fallback methods');
                 }
             }
 
@@ -372,11 +360,9 @@ class ContractManager {
             await this.initializeContracts();
 
             // Verify contract connections
-            console.log('✅ Verifying contract connections...');
             await this.verifyContractConnections();
 
             this.isInitialized = true;
-            console.log('✅ ContractManager initialized successfully with all features');
 
             // Notify all waiting callbacks
             this._notifyReadyCallbacks();
@@ -582,10 +568,9 @@ class ContractManager {
             let stakingABI;
 
             if (window.CONFIG?.ABIS?.STAKING_CONTRACT) {
-                console.log('✅ Using ABI from CONFIG');
                 stakingABI = window.CONFIG.ABIS.STAKING_CONTRACT;
             } else {
-                console.log('⚠️ CONFIG ABI not found, using fallback ABI');
+                console.warn('⚠️ CONFIG ABI not found, using fallback ABI');
                 // Fallback ABI with essential functions only (no duplicates)
                 stakingABI = [
                     "function rewardToken() external view returns (address)",
@@ -602,7 +587,7 @@ class ContractManager {
                     "function getActionApproval(uint256 actionId) external view returns (address[])",
                     "function actions(uint256 actionId) external view returns (uint8 actionType, uint256 newHourlyRewardRate, address pairToAdd, string memory pairNameToAdd, string memory platformToAdd, uint256 weightToAdd, address pairToRemove, address recipient, uint256 withdrawAmount, bool executed, bool expired, uint8 approvals, uint256 proposedTime, bool rejected)",
                     "function stake(address lpToken, uint256 amount) external",
-                    "function unstake(address lpToken, uint256 amount) external",
+                    "function unstake(address lpToken, uint256 amount, bool claimRewards) external",
                     "function claimRewards(address lpToken) external",
 
                     // Admin role functions
@@ -653,10 +638,6 @@ class ContractManager {
             // Store ABIs
             this.contractABIs.set('STAKING', stakingABI);
             this.contractABIs.set('ERC20', erc20ABI);
-
-            console.log('✅ Contract ABIs loaded successfully');
-            console.log(`   - Staking ABI functions: ${stakingABI.length}`);
-            console.log(`   - ERC20 ABI functions: ${erc20ABI.length}`);
         } catch (error) {
             console.error('Failed to load contract ABIs:', error);
             throw error;
@@ -715,14 +696,13 @@ class ContractManager {
                 const rewardTokenAddress = await this.stakingContract.rewardToken();
                 if (this.isValidContractAddress(rewardTokenAddress)) {
                     this.contractAddresses.set('REWARD_TOKEN', rewardTokenAddress);
-                    console.log('✅ Reward token address loaded from contract:', rewardTokenAddress);
                 } else {
                     this.contractAddresses.delete('REWARD_TOKEN');
-                    console.log('⚠️ Received invalid reward token address from contract');
+                    console.warn('⚠️ Received invalid reward token address from contract');
                 }
             } catch (error) {
                 this.contractAddresses.delete('REWARD_TOKEN');
-                console.log('⚠️ Unable to read reward token from contract:', error.message);
+                console.error('⚠️ Unable to read reward token from contract:', error.message);
             }
 
             const existingLPKeys = new Set(
@@ -1011,7 +991,6 @@ class ContractManager {
                             setTimeout(() => reject(new Error('Function call timeout')), 10000)
                         )
                     ]);
-                    console.log(`✅ Function ${func.name}: ${result}`);
                     workingFunctions++;
                 } catch (error) {
                     if (func.required) {
@@ -1024,7 +1003,6 @@ class ContractManager {
                 }
             }
 
-            console.log(`✅ Contract functions verified: ${workingFunctions}/${requiredFunctions.length} required functions working`);
             return true;
         } catch (error) {
             console.error('❌ Contract function verification failed:', error);
@@ -1043,8 +1021,6 @@ class ContractManager {
 
             // Call the new verification methods
             await this.verifyContractFunctions();
-
-            console.log('✅ Contract connection verification completed');
         } catch (error) {
             console.error('❌ Contract verification failed:', error);
             // Don't throw here as this is just verification - let the system continue
@@ -1145,7 +1121,6 @@ class ContractManager {
             // Reinitialize with new network configuration
             await this.initializeReadOnly();
             
-            console.log(`✅ Successfully switched to ${networkKey} network`);
             return true;
 
         } catch (error) {
@@ -2867,12 +2842,9 @@ class ContractManager {
             // Keep the original provider for read operations, but use Web3Provider for transactions
             this.transactionProvider = web3Provider;
 
-            console.log('✅ Web3Provider and signer created for transactions');
-
             // Verify signer is connected
             try {
-                const address = await this.signer.getAddress();
-                console.log('✅ Signer verified, address:', address);
+                await this.signer.getAddress();
             } catch (error) {
                 console.error('❌ Signer verification failed:', error);
 
@@ -2884,8 +2856,7 @@ class ContractManager {
                     this.provider = provider;
 
                     // Try verification again
-                    const address = await this.signer.getAddress();
-                    console.log('✅ Signer recreated and verified, address:', address);
+                    await this.signer.getAddress();
                 } else {
                     throw new Error('Signer not properly connected');
                 }
@@ -2906,7 +2877,6 @@ class ContractManager {
         try {
             console.log('🔧 Recreating contracts with signer...');
             await this.initializeContracts();
-            console.log('✅ Contracts recreated with signer');
         } catch (error) {
             console.error('❌ Failed to recreate contracts with signer:', error);
             console.log('⚠️ Continuing without signer update - transactions may not be available');
@@ -4001,7 +3971,7 @@ class ContractManager {
     /**
      * Unstake LP tokens
      */
-    async unstake(lpTokenAddress, amount) {
+    async unstake(lpTokenAddress, amount, claimRewards) {
         console.log(`📉 Executing unstake for LP token: ${lpTokenAddress}, amount: ${amount}`);
 
         // Ensure we have a signer for transactions
@@ -4029,7 +3999,7 @@ class ContractManager {
 
                 // Connect contract with signer for transaction
                 const contractWithSigner = this.stakingContract.connect(this.signer);
-                const tx = await contractWithSigner.unstake(lpTokenAddress, amountWei);
+                const tx = await contractWithSigner.unstake(lpTokenAddress, amountWei, claimRewards);
 
                 console.log(`✅ Unstake transaction sent: ${tx.hash}`);
                 console.log(`   Amount: ${amount} LP tokens`);
@@ -4893,12 +4863,6 @@ class ContractManager {
     }
 }
 
-    // Export ContractManager class to global scope
-    console.log('🔧 Exporting ContractManager to global scope...');
+    // Export ContractManager class, used in the master-initializer.js file
     global.ContractManager = ContractManager;
-    console.log('🔧 ContractManager exported. Type:', typeof global.ContractManager);
-
-    // Note: Instance creation is now handled by SystemManager
-    console.log('✅ ContractManager class loaded and exported successfully');
-
 })(window);
