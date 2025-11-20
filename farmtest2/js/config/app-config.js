@@ -25,7 +25,7 @@ window.CONFIG = {
                 decimals: 18
             },
             CONTRACTS: {
-                STAKING_CONTRACT: '0x5e4216c952190BEA7abC4Fc64e990AfbF4F9885a'
+                STAKING_CONTRACT: '0x3aca5B70C7153671Fb96705E9593DABd1Ff7717F'
             }
         },
         POLYGON_MAINNET: {
@@ -40,7 +40,7 @@ window.CONFIG = {
             BLOCK_EXPLORER: 'https://polygonscan.com',
             NATIVE_CURRENCY: { name: 'Polygon', symbol: 'POL', decimals: 18 },
             CONTRACTS: {
-                STAKING_CONTRACT: '0x3aca5B70C7153671Fb96705E9593DABd1Ff7717F'/* '0x74b00fe491Ab0CDf5291af69bD8c4ECD5FBbE8Ca' */
+                STAKING_CONTRACT: '0x74b00fe491Ab0CDf5291af69bD8c4ECD5FBbE8Ca'
             }
         }
     },
