@@ -488,8 +488,7 @@ ol {
     border: 1px solid var(--divider);
 }
 
-.card-header,
-.card-footer {
+.card-header {
     padding: var(--spacing-2) var(--spacing-3);
     background: var(--background-elevated);
     border-color: var(--divider);
@@ -568,7 +567,6 @@ ol {
 /* Display Utilities */
 .block { display: block; }
 .inline-block { display: inline-block; }
-.inline { display: inline; }
 .hidden { display: none; }
 
 /* Position Utilities */

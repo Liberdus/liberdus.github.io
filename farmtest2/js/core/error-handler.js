@@ -68,7 +68,10 @@ class ErrorHandler {
             'UNAUTHORIZED': { category: 'PERMISSION', severity: 'high', retryable: false },
             
             // Rate limiting
-            'RATE_LIMITED': { category: 'RATE_LIMIT', severity: 'low', retryable: true }
+            'RATE_LIMITED': { category: 'RATE_LIMIT', severity: 'low', retryable: true },
+
+            // Staking errors
+            'INSUFFICIENT_REWARD_BALANCE': { category: 'CONTRACT', severity: 'medium', retryable: false },
         };
         
         // User-friendly error messages
@@ -146,6 +149,11 @@ class ErrorHandler {
                 title: 'Wallet Not Connected',
                 message: 'Please connect your wallet to continue.',
                 action: 'Connect Wallet'
+            },
+            'INSUFFICIENT_REWARD_BALANCE': {
+                title: 'Reward Pool Underfunded',
+                message: 'The reward pool is currently underfunded. You can still unstake your LP tokens, but cannot claim rewards right now.',
+                action: 'Unstake Without Rewards'
             }
         };
         
@@ -171,32 +179,114 @@ class ErrorHandler {
      */
     processError(error, context = {}) {
         try {
+            // Extract Solidity revert reason (e.g. "Insufficient reward balance")
+            const revertReason = this.extractRevertReason(error);
+
+            // Let extractErrorCode handle mapping that to a semantic code
+            const code = this.extractErrorCode(error);
+
+            // Base category from existing logic
+            let category = this.categorizeError(error);
+
+            // If we have a Solidity revert reason, treat it as a CONTRACT error
+            // (this also covers UNPREDICTABLE_GAS_LIMIT cases where the real cause
+            // is a require() in the contract)
+            if (revertReason) {
+                category = this.errorCategories.CONTRACT;
+            }
+
+            const severity = this.determineSeverity(error);
+            const retryable = this.isRetryable(error);
+
+            const userMessage = this.getUserMessage({
+                ...error,
+                code,                  // ensure message selection sees our mapped code
+                revertReason
+            });
+
+            const technicalMessage = this.getTechnicalMessage({
+                ...error,
+                revertReason
+            });
+
+            const suggestions = this.getSuggestions({
+                ...error,
+                code,
+                revertReason
+            });
+
+            const metadata = this.extractMetadata(error);
+            // NEW: include revertReason in metadata for debugging/analytics
+            if (revertReason) {
+                metadata.revertReason = revertReason;
+            }
+
             const processedError = {
                 id: this.generateErrorId(),
                 timestamp: Date.now(),
                 context,
                 original: error,
-                category: this.categorizeError(error),
-                code: this.extractErrorCode(error),
-                severity: this.determineSeverity(error),
-                retryable: this.isRetryable(error),
-                userMessage: this.getUserMessage(error),
-                technicalMessage: this.getTechnicalMessage(error),
-                suggestions: this.getSuggestions(error),
-                metadata: this.extractMetadata(error)
+                category,
+                code,
+                severity,
+                retryable,
+                userMessage,
+                technicalMessage,
+                suggestions,
+                metadata,
             };
-            
+
             // Add to history
             this.addToHistory(processedError);
-            
+
             // Log error based on severity
             this.logError(processedError);
-            
+
             return processedError;
         } catch (processingError) {
-            this.logError('Error processing error:', processingError);
+            this.logError({
+                id: 'processing_error',
+                category: this.errorCategories.UNKNOWN,
+                code: 'PROCESSING_ERROR',
+                severity: 'high',
+                technicalMessage: processingError?.message || 'Error processing error',
+                context: { originalError: error }
+            });
             return this.createFallbackError(error, context);
         }
+    }
+
+    /**
+     * Extract Solidity revert reason ("execution reverted: ...") from nested ethers / RPC errors
+     */
+    extractRevertReason(error) {
+        if (!error) return null;
+
+        // Messages that often contain "execution reverted: <reason>"
+        const candidates = [
+            error?.error?.data?.message,
+            error?.error?.message,
+            error?.data?.message,
+            error?.message
+        ].filter(Boolean);
+
+        for (const msg of candidates) {
+            if (typeof msg !== 'string') continue;
+            const idx = msg.indexOf('execution reverted:');
+            if (idx !== -1) {
+                return msg.slice(idx + 'execution reverted:'.length).trim();
+            }
+        }
+
+        // Some providers put the plain revert reason in `reason` for CALL_EXCEPTION / UNPREDICTABLE_GAS_LIMIT
+        if (
+            (error.code === 'CALL_EXCEPTION' || error.code === 'UNPREDICTABLE_GAS_LIMIT') &&
+            typeof error.reason === 'string'
+        ) {
+            return error.reason.trim();
+        }
+
+        return null;
     }
 
     /**
@@ -249,10 +339,24 @@ class ErrorHandler {
      * Extract error code from error object
      */
     extractErrorCode(error) {
+        if (!error) return 'UNKNOWN_ERROR';
+
+        // Step 1: Check for Solidity revert reason (highest priority, most specific)
+        const revertReason = this.extractRevertReason(error);
+        if (revertReason) {
+            const reason = revertReason.toLowerCase();
+            if (reason.includes('insufficient reward balance')) {
+                return 'INSUFFICIENT_REWARD_BALANCE';
+            }
+            return 'EXECUTION_REVERTED';
+        }
+
+        // Step 2: Check direct error properties
         if (error.code) return error.code;
         if (error.reason) return error.reason;
+
+        // Step 3: Pattern matching on error.message (fallback, ordered by specificity)
         if (error.message) {
-            // Try to extract common error patterns
             const patterns = [
                 { pattern: /execution reverted/i, code: 'EXECUTION_REVERTED' },
                 { pattern: /insufficient funds/i, code: 'INSUFFICIENT_FUNDS' },
@@ -335,21 +439,38 @@ class ErrorHandler {
      */
     getUserMessage(error) {
         const errorCode = this.extractErrorCode(error);
-        
-        // Check for specific message override
-        if (this.specificMessages[errorCode]) {
+        const revertReason = this.extractRevertReason(error);
+
+        // 1. Use specific overrides for special cases
+        // (but NOT for EXECUTION_REVERTED – we want that dynamic)
+        if (this.specificMessages[errorCode] && errorCode !== 'EXECUTION_REVERTED') {
             return this.specificMessages[errorCode];
         }
-        
-        // Use category-based message
+
+        // 2. Generic contract revert with a Solidity reason
+        if (errorCode === 'EXECUTION_REVERTED' && revertReason) {
+            return {
+                title: 'Transaction failed',
+                message: revertReason,
+                action: 'Try again'
+            };
+        }
+
+        // 3. Fall back to category-level message
         const category = this.categorizeError(error);
         return this.userMessages[category] || this.userMessages.UNKNOWN;
     }
+
 
     /**
      * Get technical error message for debugging
      */
     getTechnicalMessage(error) {
+        const revertReason = this.extractRevertReason(error);
+        if (revertReason) {
+            return `execution reverted: ${revertReason}`;
+        }
+
         if (error.message) return error.message;
         if (error.reason) return error.reason;
         if (typeof error === 'string') return error;

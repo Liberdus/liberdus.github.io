@@ -17,21 +17,6 @@
     text-align: center;
 }
 
-.loading-spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid var(--border-primary);
-    border-top: 3px solid var(--primary-color);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin: 0 auto var(--space-4);
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
 /* Network Warning */
 .network-warning {
     position: fixed;
@@ -96,36 +81,10 @@
     text-decoration: none;
 }
 
-.logo-icon {
-    width: 32px;
-    height: 32px;
-    background: linear-gradient(135deg, var(--liberdus-gold) 0%, var(--liberdus-gold-dark) 100%);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.125rem;
-    color: var(--liberdus-bg-primary);
-    box-shadow: 0 0 0 2px var(--liberdus-gold-glow);
-    position: relative;
-}
-
-.logo-icon::before {
-    content: "₿";
-    font-weight: bold;
-}
-
 .logo h1 {
     margin: 0;
     font-size: 1.25rem;
     font-weight: var(--liberdus-font-semibold);
-}
-
-.logo-subtitle {
-    color: var(--liberdus-text-tertiary);
-    font-size: 0.875rem;
-    font-weight: var(--liberdus-font-normal);
-    margin-left: 0.5rem;
 }
 
 /* Liberdus Navigation - Exact Match */
@@ -172,77 +131,6 @@
     gap: 0.75rem;
 }
 
-/* User Avatar Dropdown */
-.user-dropdown {
-    position: relative;
-}
-
-.user-avatar {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: var(--liberdus-bg-tertiary);
-    border: 1px solid var(--liberdus-border-primary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-}
-
-.user-avatar:hover {
-    background: var(--liberdus-bg-hover);
-    border-color: var(--liberdus-border-secondary);
-}
-
-.avatar-icon {
-    font-size: 1.125rem;
-    color: var(--liberdus-text-secondary);
-}
-
-/* Token Selector */
-.token-selector {
-    position: relative;
-}
-
-.token-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
-    background: var(--liberdus-bg-tertiary);
-    border: 1px solid var(--liberdus-border-primary);
-    border-radius: 0.375rem;
-    color: var(--liberdus-text-primary);
-    font-size: 0.875rem;
-    font-weight: var(--liberdus-font-medium);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-}
-
-.token-btn:hover {
-    background: var(--liberdus-bg-hover);
-    border-color: var(--liberdus-border-secondary);
-}
-
-.token-icon {
-    font-size: 1rem;
-}
-
-.token-text {
-    font-weight: var(--liberdus-font-semibold);
-}
-
-.dropdown-arrow {
-    font-size: 0.75rem;
-    color: var(--liberdus-text-tertiary);
-    transition: transform var(--transition-fast);
-}
-
-.token-btn:hover .dropdown-arrow {
-    transform: translateY(1px);
-}
-
 /* Buttons */
 .btn {
     display: inline-flex;
@@ -267,45 +155,7 @@
     outline-offset: 2px;
 }
 
-.btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
 /* Button Variants */
-.btn-primary {
-    background-color: var(--primary-color);
-    color: white;
-    border-color: var(--primary-color);
-}
-
-.btn-primary:hover:not(:disabled) {
-    background-color: var(--primary-hover);
-    border-color: var(--primary-hover);
-}
-
-.btn-secondary {
-    background-color: var(--background-secondary);
-    color: var(--text-primary);
-    border-color: var(--border-primary);
-}
-
-.btn-secondary:hover:not(:disabled) {
-    background-color: var(--background-tertiary);
-    border-color: var(--border-secondary);
-}
-
-.btn-success {
-    background-color: var(--success-color);
-    color: white;
-    border-color: var(--success-color);
-}
-
-.btn-success:hover:not(:disabled) {
-    background-color: var(--success-600);
-    border-color: var(--success-600);
-}
-
 .btn-warning {
     background-color: var(--warning-color);
     color: white;
@@ -339,11 +189,6 @@
 }
 
 /* Button Sizes */
-.btn-small {
-    padding: var(--space-2) var(--space-3);
-    font-size: var(--font-size-xs);
-}
-
 .btn-large {
     padding: var(--space-4) var(--space-6);
     font-size: var(--font-size-base);
@@ -411,53 +256,11 @@
     color: var(--text-tertiary);
 }
 
-.form-error {
-    color: var(--error-color);
-    font-size: var(--font-size-sm);
-    margin-top: var(--space-1);
-}
 
 .form-help {
     color: var(--text-tertiary);
     font-size: var(--font-size-sm);
     margin-top: var(--space-1);
-}
-
-/* Cards */
-.card {
-    background-color: var(--background-secondary);
-    border: 1px solid var(--border-primary);
-    border-radius: var(--border-radius-lg);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-}
-
-.card-header {
-    padding: var(--space-6);
-    border-bottom: 1px solid var(--border-primary);
-}
-
-.card-title {
-    font-size: var(--font-size-lg);
-    font-weight: var(--font-weight-semibold);
-    color: var(--text-primary);
-    margin: 0;
-}
-
-.card-subtitle {
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-    margin: var(--space-1) 0 0 0;
-}
-
-.card-body {
-    padding: var(--space-6);
-}
-
-.card-footer {
-    padding: var(--space-6);
-    border-top: 1px solid var(--border-primary);
-    background-color: var(--background-tertiary);
 }
 
 /* Tables */
@@ -809,10 +612,6 @@
     font-size: 0.9em;
 }
 
-.btn-text {
-    font-weight: 500;
-}
-
 .expand-btn {
     background: none;
     border: none;
@@ -1019,36 +818,6 @@
     margin-bottom: var(--space-8);
 }
 
-.footer-section h3,
-.footer-section h4 {
-    color: var(--text-primary);
-    margin-bottom: var(--space-4);
-}
-
-.footer-section p {
-    color: var(--text-secondary);
-    margin-bottom: var(--space-2);
-}
-
-.footer-section a {
-    display: block;
-    color: var(--text-secondary);
-    margin-bottom: var(--space-2);
-    transition: color var(--transition-fast);
-}
-
-.footer-section a:hover {
-    color: var(--primary-color);
-}
-
-.footer-bottom {
-    padding-top: var(--space-6);
-    border-top: 1px solid var(--border-primary);
-    text-align: center;
-    color: var(--text-tertiary);
-    font-size: var(--font-size-sm);
-}
-
 /* Welcome Message */
 .welcome-message {
     text-align: center;
@@ -1229,10 +998,6 @@
     font-size: var(--font-size-sm);
 }
 
-.wallet-label {
-    color: var(--text-secondary);
-    font-weight: var(--font-weight-medium);
-}
 
 .wallet-address {
     font-family: var(--font-mono);
@@ -1248,9 +1013,6 @@
     font-style: italic;
 }
 
-.dashboard-stats {
-    margin: var(--space-8) 0;
-}
 
 .stat-card {
     text-align: center;
@@ -1278,9 +1040,6 @@
     margin: 0;
 }
 
-.staking-actions {
-    margin: var(--space-8) 0;
-}
 
 .action-card {
     transition: transform var(--transition-fast);
@@ -1358,10 +1117,6 @@
     line-height: 1.6;
 }
 
-.cta-section {
-    margin-top: var(--space-12);
-    text-align: center;
-}
 
 /* Liberdus LP Staking Interface - Exact Design Match */
 .liberdus-container {
@@ -2046,50 +1801,6 @@
 
 .claim-button:hover:not(.disabled) {
     background-color: var(--info-600);
-}
-
-/* Rewards Display */
-.rewards-display {
-    background-color: var(--background-secondary);
-    border: 2px solid var(--border-color);
-    border-radius: var(--border-radius-lg);
-    padding: var(--space-6);
-    text-align: center;
-    margin-bottom: var(--space-6);
-}
-
-.rewards-header {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-2);
-    margin-bottom: var(--space-4);
-}
-
-.rewards-header h3 {
-    margin: 0;
-    font-size: 1.25rem;
-    color: var(--text-primary);
-}
-
-.rewards-icon {
-    width: 32px;
-    height: 32px;
-    color: var(--primary-color);
-}
-
-.rewards-amount {
-    font-size: 2rem;
-    font-weight: 700;
-    color: var(--primary-color);
-    margin: 0;
-}
-
-/* Modal Divider */
-.modal-divider {
-    height: 1px;
-    background-color: var(--border-color);
-    margin: var(--space-6) 0;
 }
 
 /* Mobile Responsive */
@@ -2837,19 +2548,6 @@
 
 .staking-modal .claim-button:hover:not(.disabled) {
     background: var(--liberdus-purple-dark);
-}
-
-/* Accessibility Features */
-.sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
 }
 
 /* Focus Management */

@@ -40,15 +40,6 @@ class ContractManager {
         this.transactionStatus = null;
         this.multicallService = null; // Multicall2 for batch loading optimization
 
-        // Block explorer configuration
-        this.blockExplorer = {
-            name: 'Polygon Amoy Explorer',
-            baseUrl: 'https://amoy.polygonscan.com',
-            txPath: '/tx/',
-            addressPath: '/address/',
-            tokenPath: '/token/'
-        };
-
         // Configuration with enhanced provider fallback - OPTIMIZED FOR SPEED
         this.config = {
             maxRetries: 2, // Reduced from 3 for faster failure
@@ -1209,26 +1200,6 @@ class ContractManager {
     }
 
     /**
-     * Get staking contract instance
-     */
-    getStakingContract() {
-        if (!this.stakingContract) {
-            throw new Error('Staking contract not initialized');
-        }
-        return this.stakingContract;
-    }
-
-    /**
-     * Get reward token contract instance
-     */
-    getRewardTokenContract() {
-        if (!this.rewardTokenContract) {
-            throw new Error('Reward token contract not initialized');
-        }
-        return this.rewardTokenContract;
-    }
-
-    /**
      * Get LP token contract by pair name
      */
     getLPTokenContract(pairName) {
@@ -1252,66 +1223,6 @@ class ContractManager {
                 rewards: ethers.utils.formatEther(stakeInfo.pendingRewards || '0')
             };
         }, 'getUserStake');
-    }
-
-    /**
-     * Get user's pending rewards for a specific LP token (legacy method)
-     */
-    async getPendingRewards(userAddress, lpTokenAddress) {
-        return await this.executeWithRetry(async () => {
-            const stakeInfo = await this.stakingContract.getUserStakeInfo(userAddress, lpTokenAddress);
-            return ethers.utils.formatEther(stakeInfo.pendingRewards || '0');
-        }, 'getPendingRewards');
-    }
-
-    /**
-     * Get pool information for a specific LP token (using available contract methods)
-     */
-    // TODO: Implement or remove if not applicable  
-    async getPoolInfo(lpTokenAddress) {
-        return await this.executeWithRetry(async () => {
-            // Since getPoolInfo doesn't exist, we'll return basic info
-            // In a real implementation, you might calculate this from other contract data
-            return {
-                totalStaked: '0', // Would need to be calculated from contract state
-                rewardRate: '0',  // Would need to be calculated from contract state
-                lastUpdateTime: Date.now() / 1000,
-                apr: '0'
-            };
-        }, 'getPoolInfo');
-    }
-
-    /**
-     * Get TVL (Total Value Locked) for a specific LP token
-     * Matches React implementation: lib-lp-staking-frontend/src/providers/ContractProvider.tsx (Lines 562-573)
-     *
-     * @param {string} lpTokenAddress - LP token contract address
-     * @returns {Promise<BigNumber>} - Total LP tokens staked (in wei)
-     */
-    async getTVL(lpTokenAddress) {
-        return await this.executeWithRetry(async () => {
-            if (!this.provider) {
-                throw new Error('Provider not initialized');
-            }
-
-            // Create LP token contract instance
-            const lpTokenContract = new ethers.Contract(
-                lpTokenAddress,
-                [
-                    "function balanceOf(address owner) external view returns (uint256)"
-                ],
-                this.provider
-            );
-
-            // Get balance of staking contract (total LP tokens staked)
-            const stakingContractAddress = window.networkSelector?.getStakingContractAddress();
-            if (!stakingContractAddress) {
-                throw new Error('Staking contract address not configured');
-            }
-
-            const balance = await lpTokenContract.balanceOf(stakingContractAddress);
-            return balance;
-        }, 'getTVL');
     }
 
     /**
@@ -1523,30 +1434,7 @@ class ContractManager {
         }, 'getLPStakeBreakdown');
     }
 
-    /**
-     * Get all active LP token pairs
-     */
-    async getSupportedTokens() {
-        return await this.executeWithRetry(async () => {
-            return await this.stakingContract.getActivePairs();
-        }, 'getSupportedTokens');
-    }
-
     // ============ ADMIN CONTRACT FUNCTIONS ============
-
-    /**
-     * Get action counter for multi-signature proposals with RPC failover
-     */
-    async getActionCounter() {
-        return await this.safeContractCall(
-            async () => {
-                const counter = await this.stakingContract.actionCounter();
-                return counter.toNumber();
-            },
-            0, // Return 0 as fallback
-            'getActionCounter'
-        );
-    }
 
     /**
      * Get signers (like React version) with RPC failover
@@ -1560,110 +1448,6 @@ class ContractManager {
     }
 
     /**
-     * Get pairs (like React version) with RPC failover
-     */
-    async getPairs() {
-        return await this.safeContractCall(
-            () => this.stakingContract.getPairs(),
-            [], // Fallback empty array
-            'getPairs'
-        );
-    }
-
-    /**
-     * Get required approvals for multi-signature actions with RPC failover
-     */
-    async getRequiredApprovals() {
-        const requiredApprovals = await this.safeContractCall(
-            async () => {
-                if (!this.stakingContract) {
-                    throw new Error('Staking contract not initialized');
-                }
-
-                // Check if function exists first
-                if (typeof this.stakingContract.REQUIRED_APPROVALS !== 'function') {
-                    throw new Error('REQUIRED_APPROVALS function not available in contract');
-                }
-
-                const result = await this.stakingContract.REQUIRED_APPROVALS();
-                return result.toNumber();
-            },
-            null,
-            'getRequiredApprovals'
-        );
-
-        if (!Number.isFinite(requiredApprovals)) {
-            throw new Error('Failed to retrieve required approvals from staking contract');
-        }
-
-        return requiredApprovals;
-    }
-
-    /**
-     * Get single action with full details for UI updates (PERFORMANCE OPTIMIZATION)
-     * This method fetches only one action instead of all actions for efficient updates
-     */
-    async getSingleActionForUpdate(actionId) {
-        console.log(`[SINGLE ACTION] 🎯 Fetching single action ${actionId} for UI update...`);
-
-        try {
-            const numericActionId = parseInt(actionId);
-            if (isNaN(numericActionId)) {
-                throw new Error(`Invalid action ID: ${actionId}`);
-            }
-
-            // Fetch action details, pairs, weights, approvals, and expiration in parallel
-            const [action, pairs, weights, approvedBy, expiredOverride] = await Promise.all([
-                this.stakingContract.actions(BigInt(numericActionId)),
-                this.stakingContract.getActionPairs(numericActionId),
-                this.stakingContract.getActionWeights(numericActionId),
-                this.stakingContract.getActionApproval(numericActionId),
-                this.stakingContract.isActionExpired(numericActionId)
-            ]);
-
-            console.log(`[SINGLE ACTION] ✅ Successfully fetched action ${actionId}:`, {
-                actionType: action.actionType,
-                executed: action.executed,
-                approvals: action.approvals,
-                rejected: action.rejected
-            });
-
-            // Format the action data for UI consumption
-            const formattedAction = {
-                id: numericActionId,
-                actionType: action.actionType,
-                executed: action.executed,
-                rejected: action.rejected,
-                expired: expiredOverride !== undefined ? !!expiredOverride : action.expired,
-                approvals: action.approvals,
-                proposer: action.proposer,
-                createdAt: action.proposedTime ? action.proposedTime.toString() : Date.now().toString(),
-                pairs: pairs,
-                weights: weights.map(w => w.toString()),
-                newHourlyRewardRate: action.newHourlyRewardRate ? action.newHourlyRewardRate.toString() : null,
-                pairToAdd: action.pairToAdd,
-                pairNameToAdd: action.pairNameToAdd,
-                platformToAdd: action.platformToAdd,
-                weightToAdd: action.weightToAdd ? action.weightToAdd.toString() : null,
-                pairToRemove: action.pairToRemove,
-                recipient: action.recipient,
-                withdrawAmount: action.withdrawAmount ? action.withdrawAmount.toString() : null,
-                approvedBy: approvedBy,
-                // Additional UI-specific fields
-                status: this.determineActionStatus(action),
-                approvalCount: action.approvals,
-                canExecute: action.approvals >= (this.contractStats?.requiredApprovals || 2) && !action.executed && !action.rejected
-            };
-
-            return formattedAction;
-
-        } catch (error) {
-            console.error(`[SINGLE ACTION] ❌ Failed to fetch action ${actionId}:`, error);
-            throw new Error(`Failed to fetch action ${actionId}: ${error.message}`);
-        }
-    }
-
-    /**
      * Determine action status for UI display
      */
     determineActionStatus(action) {
@@ -1671,132 +1455,6 @@ class ContractManager {
         if (action.rejected) return 'rejected';
         if (action.expired) return 'expired';
         return 'pending';
-    }
-
-    /**
-     * Get action pairs by ID with RPC failover
-     */
-    async getActionPairs(actionId) {
-        return await this.safeContractCall(
-            () => this.stakingContract.getActionPairs(actionId),
-            [], // React version returns [] on error
-            `getActionPairs(${actionId})`
-        );
-    }
-
-    /**
-     * Get action weights by ID with RPC failover
-     */
-    async getActionWeights(actionId) {
-        return await this.safeContractCall(
-            async () => {
-                const weights = await this.stakingContract.getActionWeights(actionId);
-                return weights.map(w => w.toString());
-            },
-            [], // React version returns [] on error
-            `getActionWeights(${actionId})`
-        );
-    }
-
-    /**
-     * Get specific action by ID (like React version) with RPC failover
-     */
-    async getActions(actionId) {
-        return await this.safeContractCall(
-            async () => {
-                try {
-                    const [rawAction, expiredOverride] = await Promise.all([
-                        this.stakingContract.actions(BigInt(actionId)),
-                        this.stakingContract.isActionExpired(BigInt(actionId))
-                    ]);
-                    console.log(`🔍 Raw action ${actionId}:`, rawAction);
-
-                    const storedExpired = rawAction?.expired ?? (Array.isArray(rawAction) ? rawAction[10] : rawAction?.[10]);
-                    const finalExpired = expiredOverride !== undefined
-                        ? Boolean(expiredOverride)
-                        : (storedExpired !== undefined ? Boolean(storedExpired) : false);
-
-                    // Handle different return formats
-                    if (rawAction) {
-                        // If it's already an object with properties
-                        if (rawAction.actionType !== undefined) {
-                            console.log(`✅ Action ${actionId} is object format`);
-                            
-                            // If the object is frozen (immutable), create a new object to safely add/override properties
-                            if (Object.isFrozen(rawAction)) {
-                                return {
-                                    ...rawAction,
-                                    expired: finalExpired
-                                };
-                            } else {
-                                // If not frozen, we can safely modify the object directly
-                                rawAction.expired = finalExpired;
-                                return rawAction;
-                            }
-                        }
-
-                        // If it's a tuple array (correct ABI structure - 14 fields)
-                        if (Array.isArray(rawAction) && rawAction.length >= 14) {
-                            console.log(`✅ Action ${actionId} is tuple format, converting...`);
-                            return {
-                                actionType: rawAction[0],
-                                newHourlyRewardRate: rawAction[1],
-                                pairToAdd: rawAction[2],
-                                pairNameToAdd: rawAction[3],
-                                platformToAdd: rawAction[4],
-                                weightToAdd: rawAction[5],
-                                pairToRemove: rawAction[6],
-                                recipient: rawAction[7],
-                                withdrawAmount: rawAction[8],
-                                executed: rawAction[9],
-                                expired: finalExpired,
-                                approvals: rawAction[11],
-                                proposedTime: rawAction[12],
-                                rejected: rawAction[13],
-                                // Arrays need to be fetched separately
-                                pairs: [],
-                                weights: [],
-                                approvedBy: []
-                            };
-                        }
-
-                        // If it's a struct-like object (ethers.js sometimes returns this)
-                        if (typeof rawAction === 'object' && rawAction[0] !== undefined) {
-                            console.log(`✅ Action ${actionId} is indexed object format, converting...`);
-                            return {
-                                actionType: rawAction[0],
-                                newHourlyRewardRate: rawAction[1],
-                                pairToAdd: rawAction[2],
-                                pairNameToAdd: rawAction[3],
-                                platformToAdd: rawAction[4],
-                                weightToAdd: rawAction[5],
-                                pairToRemove: rawAction[6],
-                                recipient: rawAction[7],
-                                withdrawAmount: rawAction[8],
-                                executed: rawAction[9],
-                                expired: finalExpired,
-                                approvals: rawAction[11],
-                                proposedTime: rawAction[12],
-                                rejected: rawAction[13],
-                                // Arrays need to be fetched separately
-                                pairs: [],
-                                weights: [],
-                                approvedBy: []
-                            };
-                        }
-                    }
-
-                    console.error(`❌ Action ${actionId} unknown format:`, rawAction);
-                    return null;
-
-                } catch (error) {
-                    console.error(`❌ Failed to get action ${actionId}:`, error.message);
-                    throw error; // Let safeContractCall handle the retry logic
-                }
-            },
-            null, // Return null on error
-            `getActions(${actionId})`
-        );
     }
 
     /**
@@ -2330,75 +1988,10 @@ class ContractManager {
 
             return finalResult;
         } catch (error) {
-            console.log(`[PROPOSAL DEBUG] ❌ PROPOSAL CREATION FAILED!`);
-            console.log(`[PROPOSAL DEBUG] Error details:`, error);
-            console.log(`[PROPOSAL DEBUG] Error message:`, error.message);
-            console.log(`[PROPOSAL DEBUG] Error code:`, error.code);
-            console.log(`[PROPOSAL DEBUG] Error stack:`, error.stack);
-
-            // Special handling for Internal JSON-RPC errors
-            if (error.code === -32603 || error.message?.includes('Internal JSON-RPC error')) {
-                console.log(`[PROPOSAL DEBUG] 🚨 INTERNAL JSON-RPC ERROR DETECTED`);
-                console.log(`[PROPOSAL DEBUG] This usually indicates:`);
-                console.log(`[PROPOSAL DEBUG]   1. Contract method signature mismatch`);
-                console.log(`[PROPOSAL DEBUG]   2. Invalid parameters being passed`);
-                console.log(`[PROPOSAL DEBUG]   3. Network/RPC provider issues`);
-                console.log(`[PROPOSAL DEBUG]   4. MetaMask connection problems`);
-
-                // Check contract connection
-                console.log(`[PROPOSAL DEBUG] Contract connection check:`);
-                console.log(`[PROPOSAL DEBUG]   Contract address: ${this.stakingContract?.address || 'undefined'}`);
-                console.log(`[PROPOSAL DEBUG]   Signer address: ${await this.signer?.getAddress().catch(() => 'undefined')}`);
-                console.log(`[PROPOSAL DEBUG]   Provider network: ${await this.provider?.getNetwork().catch(() => 'undefined')}`);
-            }
-
             console.error('Failed to propose hourly rate:', error);
-
-            // Handle different types of errors
-            const errorMessage = error.message || error.technicalMessage || '';
-            const errorCode = error.code;
-
-            // Detect explicit wallet rejection regardless of provider wording
-            const normalizedMessage = typeof errorMessage === 'string' ? errorMessage.toLowerCase() : '';
-            if (errorCode === 4001 || errorCode === 'ACTION_REJECTED' || normalizedMessage.includes('user rejected')) {
-                console.warn('⚠️ User rejected transaction during proposeSetHourlyRewardRate');
-                return {
-                    success: false,
-                    error: 'Transaction was rejected by user',
-                    userRejected: true,
-                    originalError: error
-                };
-            }
-
-            // Check for RPC/Network errors
-            if (errorCode === -32603 || errorMessage.includes('Internal JSON-RPC error') ||
-                errorMessage.includes('missing trie node') || errorCode === 'NETWORK_ERROR') {
-                console.warn('⚠️ Network/RPC error detected during proposeSetHourlyRewardRate');
-                return {
-                    success: false,
-                    error: 'Network error occurred while creating hourly rate proposal. Please retry once the connection stabilizes.',
-                    networkError: true,
-                    originalError: error
-                };
-            }
-
-            // Check if this is a signer issue and provide better error message
-            if (errorCode === 'UNSUPPORTED_OPERATION' && errorMessage.includes('signer')) {
-                console.warn('⚠️ Signer error detected during proposeSetHourlyRewardRate');
-                return {
-                    success: false,
-                    error: 'Unable to access wallet signer. Please reconnect your wallet and try again.',
-                    signerUnavailable: true,
-                    originalError: error
-                };
-            }
-
-            console.warn('⚠️ Unknown error while creating hourly rate proposal:', errorMessage);
             return {
                 success: false,
-                error: errorMessage || 'Failed to create hourly rate proposal.',
-                unknownError: true,
-                originalError: error
+                error: error
             };
         }
     }
@@ -2444,86 +2037,9 @@ class ContractManager {
 
         } catch (error) {
             console.error('Failed to propose update pair weights:', error);
-
-            // Enhanced error analysis and handling (same pattern as other proposal methods)
-            const errorMessage = error.message || error.technicalMessage || error.reason || '';
-            const errorCode = error.code;
-
-            // Detect explicit wallet rejection regardless of provider wording
-            const normalizedMessage = typeof errorMessage === 'string' ? errorMessage.toLowerCase() : '';
-            if (errorCode === 4001 || errorCode === 'ACTION_REJECTED' || normalizedMessage.includes('user rejected')) {
-                return {
-                    success: false,
-                    error: 'Transaction was rejected by user',
-                    userRejected: true,
-                    originalError: error
-                };
-            }
-
-            // Check for access control errors
-            if (errorMessage.includes('AccessControl') || errorMessage.includes('ADMIN_ROLE') ||
-                errorMessage.includes('missing role') || errorMessage.includes('not authorized')) {
-                return {
-                    success: false,
-                    error: 'Access denied: You do not have admin privileges to create proposals',
-                    accessDenied: true
-                };
-            }
-
-            // Check for insufficient funds or gas errors
-            if (errorMessage.includes('insufficient funds') || errorMessage.includes('gas required exceeds allowance') ||
-                errorCode === 'INSUFFICIENT_FUNDS' || errorMessage.includes('out of gas')) {
-                return {
-                    success: false,
-                    error: 'Insufficient funds for gas or transaction amount. Please ensure you have enough MATIC for gas fees.',
-                    insufficientFunds: true
-                };
-            }
-
-            // Check for gas estimation errors
-            if (errorMessage.includes('gas') && (errorMessage.includes('estimate') || errorMessage.includes('limit'))) {
-                return {
-                    success: false,
-                    error: 'Gas estimation failed. The transaction may fail or network conditions are poor.',
-                    gasError: true
-                };
-            }
-
-            // Check for RPC/Network errors
-            if (errorCode === -32603 || errorMessage.includes('Internal JSON-RPC error') ||
-                errorMessage.includes('missing trie node') || errorCode === 'NETWORK_ERROR' ||
-                errorMessage.includes('network') || errorMessage.includes('connection')) {
-                return {
-                    success: false,
-                    error: 'Network error occurred. Please check your connection and try again.',
-                    networkError: true
-                };
-            }
-
-            // Check for nonce errors (stuck transactions)
-            if (errorMessage.includes('nonce') || errorMessage.includes('replacement transaction underpriced')) {
-                return {
-                    success: false,
-                    error: 'Transaction nonce error. You may have pending transactions. Try resetting your MetaMask account or wait for pending transactions to complete.',
-                    nonceError: true
-                };
-            }
-
-            // Check for signer issues
-            if (errorCode === 'UNSUPPORTED_OPERATION' && errorMessage.includes('signer')) {
-                return {
-                    success: false,
-                    error: 'Unable to access wallet signer. Please reconnect your wallet and try again.',
-                    signerUnavailable: true
-                };
-            }
-
-            // For any other error, provide detailed feedback
             return {
                 success: false,
-                error: `Transaction failed: ${errorMessage}. Please check the console for more details.`,
-                unknownError: true,
-                originalError: error
+                error: error
             };
         }
     }
@@ -2631,146 +2147,9 @@ class ContractManager {
             console.error(`[ADD PAIR FIX] ❌ Transaction failed:`, error);
             console.error('Failed to propose add pair:', error);
 
-            // Enhanced error analysis and handling
-            const errorMessage = error.message || error.technicalMessage || error.reason || '';
-            const errorCode = error.code;
-            const errorData = error.data;
-
-            console.log(`[ADD PAIR FIX] 🔍 Error Analysis:`);
-            console.log(`[ADD PAIR FIX]   Error message: ${errorMessage}`);
-            console.log(`[ADD PAIR FIX]   Error code: ${errorCode}`);
-            console.log(`[ADD PAIR FIX]   Error data:`, errorData);
-
-            // CRITICAL: Check for parameter validation errors from contract
-            if (errorMessage.includes('Invalid pair') || errorMessage.includes('Weight must be greater than 0') ||
-                errorMessage.includes('Weight exceeds maximum') || errorMessage.includes('Empty pair name') ||
-                errorMessage.includes('Pair name too long') || errorMessage.includes('Empty platform name') ||
-                errorMessage.includes('Platform name too long')) {
-                console.error(`[ADD PAIR FIX] 📋 Contract validation error: ${errorMessage}`);
-                return {
-                    success: false,
-                    error: `Contract validation failed: ${errorMessage}`,
-                    validationError: true
-                };
-            }
-
-            // Check for access control errors
-            if (errorMessage.includes('AccessControl') || errorMessage.includes('ADMIN_ROLE') ||
-                errorMessage.includes('missing role') || errorMessage.includes('not authorized')) {
-                console.error(`[ADD PAIR FIX] 🔐 Access control error: ${errorMessage}`);
-                return {
-                    success: false,
-                    error: 'Access denied: You do not have admin privileges to create proposals',
-                    accessDenied: true
-                };
-            }
-
-            // Check for user rejection
-            if (errorMessage.includes('user rejected') || errorMessage.includes('User denied') ||
-                errorCode === 4001 || errorCode === 'ACTION_REJECTED') {
-                console.warn(`[ADD PAIR FIX] 👤 User rejected transaction`);
-                return {
-                    success: false,
-                    error: 'Transaction was rejected by user',
-                    userRejected: true
-                };
-            }
-
-            // Check for insufficient funds or gas errors
-            if (errorMessage.includes('insufficient funds') || errorMessage.includes('gas required exceeds allowance') ||
-                errorCode === 'INSUFFICIENT_FUNDS' || errorMessage.includes('out of gas')) {
-                console.error(`[ADD PAIR FIX] 💰 Insufficient funds error: ${errorMessage}`);
-                return {
-                    success: false,
-                    error: 'Insufficient funds for gas or transaction amount. Please ensure you have enough MATIC for gas fees.',
-                    insufficientFunds: true
-                };
-            }
-
-            // Check for gas estimation errors
-            if (errorMessage.includes('gas') && (errorMessage.includes('estimate') || errorMessage.includes('limit'))) {
-                console.error(`[ADD PAIR FIX] ⛽ Gas estimation error: ${errorMessage}`);
-                return {
-                    success: false,
-                    error: 'Gas estimation failed. The transaction may fail or network conditions are poor.',
-                    gasError: true
-                };
-            }
-
-            // Check for RPC/Network errors
-            if (errorCode === -32603 || errorMessage.includes('Internal JSON-RPC error') ||
-                errorMessage.includes('missing trie node') || errorCode === 'NETWORK_ERROR' ||
-                errorMessage.includes('network') || errorMessage.includes('connection')) {
-                console.warn(`[ADD PAIR FIX] 🌐 Network/RPC error: ${errorMessage}`);
-                return {
-                    success: false,
-                    error: 'Network error occurred. Please check your connection and try again.',
-                    networkError: true
-                };
-            }
-
-            // Check for nonce errors (stuck transactions)
-            if (errorMessage.includes('nonce') || errorMessage.includes('replacement transaction underpriced')) {
-                console.error(`[ADD PAIR FIX] 🔢 Nonce error: ${errorMessage}`);
-                return {
-                    success: false,
-                    error: 'Transaction nonce error. You may have pending transactions. Try resetting your MetaMask account or wait for pending transactions to complete.',
-                    nonceError: true
-                };
-            }
-
-            // Check for signer-related errors and attempt recovery
-            if (errorMessage.includes('signer') || errorMessage.includes('provider') ||
-                errorCode === 'UNSUPPORTED_OPERATION' || errorMessage.includes('missing provider')) {
-                console.error(`[ADD PAIR FIX] 🔧 Signer connection issue: ${errorMessage}`);
-                console.error(`[ADD PAIR FIX] 🔧 Attempting signer recovery...`);
-
-                try {
-                    await this.ensureSigner();
-                    console.log(`[ADD PAIR FIX] ✅ Signer recovery successful, retrying transaction...`);
-
-                    // Retry with corrected parameters
-                    const result = await this.executeTransactionOnce(async () => {
-                        // CRITICAL FIX: Use uint256 for weight, not wei (this was the main bug)
-                        const weightUint256 = ethers.BigNumber.from(weight.toString());
-
-                        const contractWithSigner = this.stakingContract.connect(this.signer);
-                        const tx = await contractWithSigner.proposeAddPair(
-                            lpToken,
-                            pairName,
-                            platform,
-                            weightUint256 // FIXED: Use uint256, not wei
-                        );
-
-                        console.log(`[ADD PAIR FIX] ✅ Retry transaction submitted: ${tx.hash}`);
-                        // CRITICAL FIX: Return tx object, not receipt
-                        return tx;
-                    }, 'proposeAddPair');
-
-                    return {
-                        success: true,
-                        transactionHash: result.transactionHash,
-                        blockNumber: result.blockNumber,
-                        gasUsed: result.gasUsed.toString(),
-                        message: 'Add pair proposal created successfully (after retry)'
-                    };
-                } catch (retryError) {
-                    console.error(`[ADD PAIR FIX] ❌ Retry failed: ${retryError.message}`);
-                    return {
-                        success: false,
-                        error: `Signer recovery failed: ${retryError.message}`,
-                        signerError: true
-                    };
-                }
-            }
-
-            // For any other error, provide detailed feedback
-            console.error(`[ADD PAIR FIX] ❓ Unknown error: ${errorMessage}`);
             return {
                 success: false,
-                error: `Transaction failed: ${errorMessage}. Please check the console for more details.`,
-                unknownError: true,
-                originalError: error
+                error: error
             };
         }
     }
@@ -2936,53 +2315,9 @@ class ContractManager {
             console.error(`[REMOVE PAIR FIX] ❌ Transaction failed:`, error);
             console.error('Failed to propose remove pair:', error);
 
-            // Enhanced error handling
-            const errorMessage = error.message || error.technicalMessage || error.reason || '';
-            const errorCode = error.code;
-
-            console.log(`[REMOVE PAIR FIX] 🔍 Error Analysis:`);
-            console.log(`[REMOVE PAIR FIX]   Error message: ${errorMessage}`);
-            console.log(`[REMOVE PAIR FIX]   Error code: ${errorCode}`);
-
-            // Check for specific error types
-            if (errorMessage.includes('user rejected') || errorCode === 4001 || errorCode === 'ACTION_REJECTED') {
-                return {
-                    success: false,
-                    error: 'Transaction was rejected by user',
-                    userRejected: true
-                };
-            }
-
-            if (errorMessage.includes('insufficient funds') || errorCode === 'INSUFFICIENT_FUNDS') {
-                return {
-                    success: false,
-                    error: 'Insufficient funds for gas fees. Please ensure you have enough MATIC.',
-                    insufficientFunds: true
-                };
-            }
-
-            if (errorMessage.includes('AccessControl') || errorMessage.includes('ADMIN_ROLE')) {
-                return {
-                    success: false,
-                    error: 'Access denied: You do not have admin privileges to create proposals',
-                    accessDenied: true
-                };
-            }
-
-            if (errorCode === -32603 || errorMessage.includes('Internal JSON-RPC error')) {
-                return {
-                    success: false,
-                    error: 'Network error occurred. Please check your connection and try again.',
-                    networkError: true
-                };
-            }
-
-            // For any other error, provide detailed feedback
             return {
                 success: false,
-                error: `Transaction failed: ${errorMessage}. Please check the console for more details.`,
-                unknownError: true,
-                originalError: error
+                error: error
             };
         }
     }
@@ -3056,100 +2391,9 @@ class ContractManager {
             console.error(`[CHANGE SIGNER FIX] ❌ Transaction failed:`, error);
             console.error('Failed to propose change signer:', error);
 
-            // Enhanced error handling
-            const errorMessage = error.message || error.technicalMessage || error.reason || '';
-            const errorCode = error.code;
-
-            console.log(`[CHANGE SIGNER FIX] 🔍 Error Analysis:`);
-            console.log(`[CHANGE SIGNER FIX]   Error message: ${errorMessage}`);
-            console.log(`[CHANGE SIGNER FIX]   Error code: ${errorCode}`);
-
-            // Check for specific error types
-            if (errorMessage.includes('user rejected') || errorCode === 4001 || errorCode === 'ACTION_REJECTED') {
-                return {
-                    success: false,
-                    error: 'Transaction was rejected by user',
-                    userRejected: true
-                };
-            }
-
-            if (errorMessage.includes('insufficient funds') || errorCode === 'INSUFFICIENT_FUNDS') {
-                return {
-                    success: false,
-                    error: 'Insufficient funds for gas fees. Please ensure you have enough MATIC.',
-                    insufficientFunds: true
-                };
-            }
-
-            // TRANSACTION FAILURE FIX: Handle CALL_EXCEPTION errors specifically
-            if (errorCode === 'CALL_EXCEPTION' || errorMessage.includes('CALL_EXCEPTION')) {
-                console.log(`[CHANGE SIGNER FIX] 🔍 CALL_EXCEPTION detected, analyzing...`);
-
-                // Check if it's a revert with reason
-                if (error.reason) {
-                    console.log(`[CHANGE SIGNER FIX] 🔍 Revert reason: ${error.reason}`);
-                    return {
-                        success: false,
-                        error: `Contract call failed: ${error.reason}`,
-                        contractRevert: true
-                    };
-                }
-
-                // Check if it's a method not found error
-                if (errorMessage.includes('method') || errorMessage.includes('function')) {
-                    return {
-                        success: false,
-                        error: 'Contract method not found. Please verify the contract is deployed correctly.',
-                        methodNotFound: true
-                    };
-                }
-
-                // Generic CALL_EXCEPTION handling
-                return {
-                    success: false,
-                    error: 'Contract call failed. Please check your permissions and try again.',
-                    callException: true
-                };
-            }
-
-            if (errorMessage.includes('AccessControl') || errorMessage.includes('ADMIN_ROLE')) {
-                return {
-                    success: false,
-                    error: 'Access denied: You do not have admin privileges to create proposals',
-                    accessDenied: true
-                };
-            }
-
-            if (errorMessage.includes('Old signer not found')) {
-                return {
-                    success: false,
-                    error: 'The old signer address is not currently an admin. Please verify the address.',
-                    invalidOldSigner: true
-                };
-            }
-
-            if (errorMessage.includes('New signer already exists')) {
-                return {
-                    success: false,
-                    error: 'The new signer address is already an admin. Please choose a different address.',
-                    signerAlreadyExists: true
-                };
-            }
-
-            if (errorCode === -32603 || errorMessage.includes('Internal JSON-RPC error')) {
-                return {
-                    success: false,
-                    error: 'Network error occurred. Please check your connection and try again.',
-                    networkError: true
-                };
-            }
-
-            // For any other error, provide detailed feedback
             return {
                 success: false,
-                error: `Transaction failed: ${errorMessage}. Please check the console for more details.`,
-                unknownError: true,
-                originalError: error
+                error: error
             };
         }
     }
@@ -3194,13 +2438,9 @@ class ContractManager {
             console.error(`[WITHDRAW REWARDS FIX] ❌ Transaction failed:`, error);
             console.error('Failed to propose withdraw rewards:', error);
 
-            
-
-            // For any other error, provide detailed feedback
             return {
                 success: false,
-                error: error.userMessage?.title || 'Failed to propose withdraw rewards',
-                originalError: error
+                error: error
             };
         }
     }
@@ -3323,12 +2563,9 @@ class ContractManager {
 
             console.error('Failed to approve action:', error);
 
-            // Extract user-friendly error message
-            let errorMessage = error.userMessage?.title || 'Failed to approve action';
-
             return {
                 success: false,
-                error: errorMessage,
+                error: error,
                 originalError: error
             };
         }
@@ -3485,11 +2722,7 @@ class ContractManager {
         } catch (error) {
             console.error(`[EXECUTE DEBUG] ❌ Failed to execute action:`, error);
 
-            // Use userMessage if available
-            const errorMessage = error.userMessage?.title || 'Failed to execute action';
-
-
-            throw new Error(errorMessage);
+            throw error;
         }
     }
 
@@ -3517,12 +2750,10 @@ class ContractManager {
             };
 
         } catch (error) {
-            // REACT PATTERN: Simple error handling with error.reason
-            const errorMessage = error.reason || error.message || 'Failed to execute proposal';
 
             return {
                 success: false,
-                error: errorMessage
+                error: error
             };
         }
     }
@@ -3580,12 +2811,9 @@ class ContractManager {
         } catch (error) {
             console.error('Failed to reject action:', error);
 
-            // Extract user-friendly error message
-            let errorMessage = error.userMessage?.title || 'Failed to reject action';
-
             return {
                 success: false,
-                error: errorMessage,
+                error: error,
                 originalError: error
             };
         }
@@ -3627,57 +2855,6 @@ class ContractManager {
             // Like React version - return null instead of throwing
             return null;
         }
-    }
-
-    /**
-     * Check if an action is expired
-     */
-    async isActionExpired(actionId) {
-        return await this.executeWithRetry(async () => {
-            return await this.stakingContract.isActionExpired(actionId);
-        }, 'isActionExpired');
-    }
-
-    /**
-     * Clean up expired actions (admin only)
-     */
-    async cleanupExpiredActions() {
-        return await this.executeTransactionOnce(async () => {
-            const tx = await this.stakingContract.cleanupExpiredActions();
-            console.log('Cleanup expired actions transaction sent:', tx.hash);
-            // CRITICAL FIX: Return tx object, not receipt
-            return tx;
-        }, 'cleanupExpiredActions');
-    }
-
-    /**
-     * Get active pairs from the staking contract
-     */
-    async getActivePairs() {
-        return await this.executeWithRetry(async () => {
-            if (!this.stakingContract) {
-                throw new Error('Staking contract not initialized');
-            }
-            return await this.stakingContract.getActivePairs();
-        }, 'getActivePairs');
-    }
-
-    /**
-     * Get pair information for a specific LP token address
-     */
-    async getPairInfo(lpTokenAddress) {
-        return await this.executeWithRetry(async () => {
-            if (!this.stakingContract) {
-                throw new Error('Staking contract not initialized');
-            }
-            const [token, platform, weight, isActive] = await this.stakingContract.getPairInfo(lpTokenAddress);
-            return {
-                lpToken: token,
-                platform: platform,
-                weight: weight.toString(),
-                isActive: isActive
-            };
-        }, 'getPairInfo');
     }
 
     /**
@@ -3832,18 +3009,6 @@ class ContractManager {
         return userData;
     }
 
-    /**
-     * Get LP token allowance for staking contract
-     */
-    async getLPTokenAllowance(userAddress, pairName) {
-        return await this.executeWithRetry(async () => {
-            const lpContract = this.getLPTokenContract(pairName);
-            const stakingAddress = this.contractAddresses.get('STAKING');
-            const allowance = await lpContract.allowance(userAddress, stakingAddress);
-            return ethers.formatEther(allowance);
-        }, 'getLPTokenAllowance');
-    }
-
     // ==================== CONTRACT WRITE OPERATIONS ====================
 
     /**
@@ -3869,7 +3034,7 @@ class ContractManager {
             console.error('❌ Failed to approve LP token:', error);
             return {
                 success: false,
-                error: error.userMessage?.title || 'Failed to approve LP token'
+                error: error
             };
         }
     }
@@ -3914,7 +3079,7 @@ class ContractManager {
             console.error('❌ Failed to claim rewards:', error);
             return {
                 success: false,
-                error: error.userMessage?.title || 'Failed to claim rewards'
+                error: error
             };
         }
     }
@@ -3963,7 +3128,7 @@ class ContractManager {
             console.error('❌ Failed to stake:', error);
             return {
                 success: false,
-                error: error.userMessage?.title || 'Failed to stake tokens'
+                error: error
             };
         }
     }
@@ -4012,7 +3177,7 @@ class ContractManager {
             console.error('❌ Failed to unstake:', error);
             return {
                 success: false,
-                error: error.userMessage?.title || 'Failed to unstake tokens'
+                error: error
             };
         }
     }
@@ -4464,54 +3629,6 @@ class ContractManager {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // ==================== BLOCK EXPLORER INTEGRATION ====================
-
-    /**
-     * Get block explorer URL for transaction
-     */
-    getTransactionUrl(txHash) {
-        if (!txHash) return null;
-        return `${this.blockExplorer.baseUrl}${this.blockExplorer.txPath}${txHash}`;
-    }
-
-    /**
-     * Get block explorer URL for address
-     */
-    getAddressUrl(address) {
-        if (!address) return null;
-        return `${this.blockExplorer.baseUrl}${this.blockExplorer.addressPath}${address}`;
-    }
-
-    /**
-     * Get block explorer URL for token
-     */
-    getTokenUrl(tokenAddress) {
-        if (!tokenAddress) return null;
-        return `${this.blockExplorer.baseUrl}${this.blockExplorer.tokenPath}${tokenAddress}`;
-    }
-
-    /**
-     * Open transaction in block explorer
-     */
-    openTransactionInExplorer(txHash) {
-        const url = this.getTransactionUrl(txHash);
-        if (url) {
-            window.open(url, '_blank', 'noopener,noreferrer');
-            console.log('Opened transaction in explorer:', txHash);
-        }
-    }
-
-    /**
-     * Open address in block explorer
-     */
-    openAddressInExplorer(address) {
-        const url = this.getAddressUrl(address);
-        if (url) {
-            window.open(url, '_blank', 'noopener,noreferrer');
-            console.log('Opened address in explorer:', address);
-        }
-    }
-
     /**
      * Cleanup contract manager
      */
@@ -4697,55 +3814,8 @@ class ContractManager {
     }
 
     /**
-     * Get current signer address for transaction operations
-     * Requires signer setup and network context. Use for sending transactions.
-     * For permission checks only, use getCurrentSignerForPermissions() instead.
-     * 
-     * @returns {Promise<string|null>} The signer address or null if not available
-     */
-    async getCurrentSigner() {
-        try {
-            // First check if MetaMask is available and has connected accounts
-            if (typeof window.ethereum === 'undefined') {
-                console.log('[ContractManager] MetaMask not available');
-                return null;
-            }
-
-            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-            if (accounts.length === 0) {
-                console.log('[ContractManager] No connected accounts');
-                return null;
-            }
-
-            if (!this.signer) {
-                await this.ensureSigner();
-            }
-            
-            // Verify the signer is still valid
-            if (!this.signer) {
-                console.log('[ContractManager] No valid signer available');
-                return null;
-            }
-
-            return await this.signer.getAddress();
-        } catch (error) {
-            // Handle specific disconnection errors gracefully
-            if (error.code === 'UNSUPPORTED_OPERATION' || 
-                error.message?.includes('unknown account') ||
-                error.message?.includes('missing provider')) {
-                console.log('[ContractManager] Wallet disconnected or not available');
-                return null;
-            }
-            
-            console.error('Failed to get current signer address:', error);
-            return null;
-        }
-    }
-
-    /**
      * Get current signer address for permission checks (network-agnostic)
      * Directly queries wallet accounts without signer setup. Use for UI/permission checks.
-     * For transactions, use getCurrentSigner() instead.
      * 
      * @returns {Promise<string|null>} The connected wallet address or null if not connected
      */
@@ -4763,47 +3833,6 @@ class ContractManager {
             console.error('Failed to get current signer address for permissions:', error);
             return null;
         }
-    }
-
-    /**
-     * Load TVL (Total Value Locked) data for all LP pairs using multicall
-     * @param {Array} pairs - Array of LP pair objects
-     * @returns {Map} Map of pair address to TVL in wei
-     */
-    async getTVLForAllPairs(pairs) {
-        const calls = [];
-        const tvlMap = new Map();
-        const erc20Interface = new ethers.utils.Interface(this.contractABIs.get('ERC20'));
-
-        // Prepare multicall for each pair's LP token balance
-        pairs.forEach(pair => {
-            const pairAddress = pair.address;
-            if (pairAddress !== '0x0000000000000000000000000000000000000000') {
-                calls.push(this.multicallService.createCall(
-                    { address: pairAddress, interface: erc20Interface },
-                    'balanceOf',
-                    [this.contractAddresses.get('STAKING')]
-                ));
-            }
-        });
-
-        const results = await this.multicallService.tryAggregate(calls);
-        
-        // Parse results
-        let resultIndex = 0;
-        pairs.forEach(pair => {
-            const pairAddress = pair.address;
-            if (pairAddress !== '0x0000000000000000000000000000000000000000') {
-                const result = results[resultIndex++];
-                tvlMap.set(pairAddress, 
-                    result?.success 
-                        ? this.multicallService.decodeResult(erc20Interface, 'balanceOf', result.returnData) || ethers.BigNumber.from(0)
-                        : ethers.BigNumber.from(0)
-                );
-            }
-        });
-
-        return tvlMap;
     }
 
     /**

@@ -132,20 +132,20 @@ class NotificationManagerNew {
         notifications.forEach(notification => this.remove(notification));
     }
 
-    success(message, duration) {
-        return this.show(message, 'success', duration);
+    success(message, options) {
+        return this.show(message, 'success', options);
     }
 
-    error(message, duration) {
-        return this.show(message, 'error', duration);
+    error(message, options) {
+        return this.show(message, 'error', options);
     }
 
-    warning(message, duration) {
-        return this.show(message, 'warning', duration);
+    warning(message, options) {
+        return this.show(message, 'warning', options);
     }
 
-    info(message, duration) {
-        return this.show(message, 'info', duration);
+    info(message, options) {
+        return this.show(message, 'info', options);
     }
 }
 

@@ -1,13 +1,3 @@
-.loading-spinner {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border: 2px solid #ffffff;
-    border-radius: 50%;
-    border-top-color: transparent;
-    animation: spin 1s linear infinite;
-    margin-right: 5px;
-}
 
 /* Keyframe Animations */
 @keyframes statusPulse {
@@ -19,79 +9,6 @@
     100% { transform: translateX(100%); }
 }
 
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-/* Demo Data Indicator */
-.demo-data-indicator {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 1000;
-    background: linear-gradient(90deg, #ff6b35, #f7931e);
-    color: white;
-    padding: 0;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-}
-
-.demo-banner {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 1rem;
-    padding: 0.75rem 1rem;
-    font-weight: 500;
-    font-size: 0.9rem;
-}
-
-.demo-icon {
-    font-size: 1.2rem;
-}
-
-.demo-text {
-    flex: 1;
-    text-align: center;
-}
-
-.demo-retry-btn {
-    background: rgba(255, 255, 255, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    color: white;
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.85rem;
-    transition: all 0.2s ease;
-}
-
-.demo-retry-btn:hover {
-    background: rgba(255, 255, 255, 0.3);
-    border-color: rgba(255, 255, 255, 0.5);
-}
-
-/* Adjust admin panel top margin when demo indicator is present */
-.admin-panel:has(.demo-data-indicator) {
-    margin-top: 60px;
-}
-
-/* Data source indicator in panel stats */
-.data-source-indicator {
-    font-weight: 600 !important;
-    border: 1px solid rgba(255, 255, 255, 0.3) !important;
-}
-
-.data-source-indicator:contains('🔗 Live Data') {
-    background: linear-gradient(90deg, #00d4ff, #0099cc) !important;
-    color: white !important;
-}
-
-.data-source-indicator:contains('🎭 Demo Data') {
-    background: linear-gradient(90deg, #ff6b35, #f7931e) !important;
-    color: white !important;
-}
 
 /* Admin Panel Layout - MATCHING HOMEPAGE */
 .admin-panel {
@@ -101,13 +18,6 @@
     font-family: var(--font-family);
     padding: 0;
     margin: 0;
-}
-
-/* Main Content Grid Layout (matching React version) */
-.admin-main-content {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 2rem;
 }
 
 .admin-grid {
@@ -165,55 +75,6 @@
     border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-/* Development Mode Banner */
-.dev-mode-banner {
-    background: linear-gradient(90deg, #ff9800, #f57c00);
-    color: #000;
-    text-align: center;
-    padding: 10px;
-    font-weight: 600;
-    font-size: 14px;
-    border-bottom: 2px solid #e65100;
-    animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.8; }
-}
-
-
-.admin-user-info {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
-}
-
-.user-address {
-    font-family: 'Courier New', monospace;
-    font-size: 14px;
-    color: #a0a0a0;
-    background: rgba(255, 255, 255, 0.1);
-    padding: 4px 8px;
-    border-radius: 4px;
-}
-
-.user-role {
-    font-size: 12px;
-    color: #00ff88;
-    font-weight: 500;
-}
-
-/* Admin Navigation */
-.admin-navigation {
-    display: flex;
-    padding: 0 30px;
-    background: rgba(0, 0, 0, 0.2);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    overflow-x: auto;
-}
-
 .nav-btn {
     background: none;
     border: none;
@@ -236,12 +97,6 @@
     color: #00d4ff;
     border-bottom-color: #00d4ff;
     background: rgba(0, 212, 255, 0.1);
-}
-
-/* Admin Content */
-.admin-content {
-    padding: 30px;
-    min-height: calc(100vh - 200px);
 }
 
 /* Dashboard Styles */
@@ -278,13 +133,13 @@
 }
 
 .card-header {
+    background: transparent;
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: var(--spacing-2);
     border-bottom: 1px solid var(--divider);
     margin-bottom: 0;
-    background: transparent;
 }
 
 .card-header h3,
@@ -292,6 +147,11 @@
     margin: 0;
     font-size: 16px;
     font-weight: 600;
+    color: var(--text-primary);
+}
+
+.card-content {
+    padding: var(--spacing-2);
     color: var(--text-primary);
 }
 
@@ -574,6 +434,7 @@
 
 /* Loading States */
 .loading {
+    position: relative;
     text-align: center;
     padding: 40px;
     color: #a0a0a0;
@@ -582,31 +443,21 @@
 
 .loading::after {
     content: '';
+    position: absolute;
     display: inline-block;
+    top: 50%;
+    left: 50%;
     width: 20px;
     height: 20px;
-    border: 2px solid #a0a0a0;
+    margin: -10px 0 0 -10px;
+    border: 2px solid #ffffff;
     border-radius: 50%;
-    border-top-color: #00d4ff;
+    border-top: 2px solid #00d4ff;
     animation: spin 1s ease-in-out infinite;
-    margin-left: 10px;
-}
-
-@keyframes spin {
-    to { transform: rotate(360deg); }
 }
 
 /* Responsive Design */
 @media (max-width: 768px) {
-    .admin-user-info {
-        align-items: center;
-    }
-    
-    .admin-navigation {
-        padding: 0 20px;
-        justify-content: flex-start;
-    }
-    
     .nav-btn {
         padding: 12px 15px;
         font-size: 13px;
@@ -648,10 +499,6 @@
 }
 
 @media (max-width: 480px) {
-    .user-address {
-        font-size: 12px;
-    }
-    
     .dashboard-section h2 {
         font-size: 24px;
     }
@@ -1348,31 +1195,6 @@ table td:last-child {
     }
 }
 
-/* Loading States */
-.loading {
-    opacity: 0.6;
-    pointer-events: none;
-    position: relative;
-}
-
-.loading::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 20px;
-    height: 20px;
-    margin: -10px 0 0 -10px;
-    border: 2px solid #ffffff;
-    border-top: 2px solid #00d4ff;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
 
 /* React-Matching Styles for Exact Parity */
 /* Container maxWidth="lg" sx={{ py: 4 }} equivalent */
@@ -1837,18 +1659,6 @@ table td:last-child {
 
 
 
-/* PERFORMANCE OPTIMIZATION: Optimistic proposal styling */
-.optimistic-proposal {
-    background: linear-gradient(90deg, #e3f2fd 0%, #ffffff 100%) !important;
-    border-left: 4px solid #2196f3 !important;
-    animation: optimisticPulse 2s ease-in-out infinite;
-}
-
-.optimistic-proposal .status-badge {
-    background: #2196f3 !important;
-    color: white !important;
-    animation: statusPulse 1.5s ease-in-out infinite;
-}
 
 .new-proposal-highlight {
     background: linear-gradient(90deg, #e8f5e8 0%, #ffffff 100%) !important;
@@ -2206,13 +2016,6 @@ table td:last-child {
     color: #856404;
 }
 
-/* Proposal Details Styles */
-.proposal-details-content {
-    padding: 20px;
-    background: #f8f9fa;
-    border-radius: 4px;
-}
-
 .details-header {
     display: flex;
     justify-content: space-between;
@@ -2225,16 +2028,6 @@ table td:last-child {
 .details-header h4 {
     margin: 0;
     color: #1976d2;
-}
-
-.proposal-hash {
-    font-family: monospace;
-    font-size: 12px;
-    color: #666;
-    background: white;
-    padding: 4px 8px;
-    border-radius: 4px;
-    border: 1px solid #ddd;
 }
 
 /* Enhanced Form Validation Styles */
@@ -2289,20 +2082,6 @@ table td:last-child {
     gap: 8px;
 }
 
-.spinner {
-    width: 16px;
-    height: 16px;
-    border: 2px solid transparent;
-    border-top: 2px solid currentColor;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
 /* Weight Update Styles */
 .weight-pair-item {
     display: flex;
@@ -2329,19 +2108,6 @@ table td:last-child {
     color: var(--text-secondary);
     font-size: 12px;
     font-family: monospace;
-}
-
-.weight-input-group {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
-}
-
-.weight-input-group label {
-    font-size: 12px;
-    color: var(--text-secondary);
-    margin: 0;
 }
 
 .weight-input {
@@ -2392,16 +2158,6 @@ table td:last-child {
     color: white;
     font-size: 12px;
     font-weight: bold;
-}
-
-/* Loading Spinner */
-.loading-spinner {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: 20px;
-    color: #666;
 }
 
 /* Modal Loading Animation - Modern Circular Spinner */
@@ -2475,24 +2231,6 @@ table td:last-child {
     font-size: 14px;
     color: #856404;
     line-height: 1.4;
-}
-
-/* Button Outline Style */
-.btn-outline {
-    background-color: transparent;
-    border: 1px solid var(--primary-color, #007bff);
-    color: var(--primary-color, #007bff);
-}
-
-.btn-outline:hover {
-    background-color: var(--primary-color, #007bff);
-    color: white;
-}
-
-.btn-sm {
-    padding: var(--spacing-1) var(--spacing-2);
-    font-size: 12px;
-    min-height: 32px;
 }
 
 /* No Data / Error Messages */

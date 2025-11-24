@@ -62,18 +62,6 @@
     min-width: 0;
 }
 
-/* Admin page network selector styling - match homepage exactly */
-.network-indicator .network-selector {
-    margin-left: 0;
-    flex: 1;
-    min-width: 0;
-}
-
-.network-indicator .network-select-wrapper {
-    flex: 1;
-    min-width: 0;
-}
-
 /* Status indicators */
 .network-status-dot {
     width: 8px;

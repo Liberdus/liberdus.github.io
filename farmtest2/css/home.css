@@ -186,13 +186,6 @@ body {
     box-shadow: none !important;
 }
 
-/* Small button variant */
-.btn-small {
-    padding: 6px 12px;
-    font-size: 13px;
-    min-width: 80px;
-}
-
 /* Share and Earnings buttons in table */
 .btn-share,
 .btn-earnings {
@@ -222,12 +215,6 @@ body {
     background: var(--primary-light);
     color: var(--primary-main);
     border-color: var(--primary-main);
-}
-
-.chip-secondary {
-    background: rgba(220, 0, 78, 0.1);
-    color: var(--secondary-main);
-    border-color: var(--secondary-main);
 }
 
 /* Success color for APR */
@@ -385,11 +372,6 @@ body {
     display: none !important;
 }
 
-.loading {
-    opacity: 0.6;
-    pointer-events: none;
-}
-
 .text-center {
     text-align: center;
 }
@@ -412,10 +394,6 @@ body {
 
 .justify-center {
     justify-content: center;
-}
-
-.gap-2 {
-    gap: var(--spacing-2);
 }
 
 .network-indicator-home.has-permission {

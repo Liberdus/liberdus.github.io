@@ -85,7 +85,6 @@ class AdminPage {
             // making this redundant 20-second delay unnecessary. The system will gracefully handle network
             // issues when loading data, providing better user experience with faster initialization.
             console.log('🏥 Skipping network health check for faster initialization...');
-            // await this.performNetworkHealthCheck();
 
             // Wait for contract manager to be ready
             if (!window.contractManager?.isReady()) {
@@ -203,34 +202,6 @@ class AdminPage {
 
             checkReady();
         });
-    }
-
-    async performNetworkHealthCheck() {
-        try {
-            console.log('🏥 Performing network health check...');
-
-            // Check if NetworkHealthCheck is available
-            if (!window.NetworkHealthCheck) {
-                console.warn('⚠️ NetworkHealthCheck not available, skipping health check');
-                return;
-            }
-
-            const healthChecker = new window.NetworkHealthCheck();
-            const contractAddress = window.networkSelector?.getStakingContractAddress();
-
-            // Perform comprehensive health check
-            const isReady = await healthChecker.waitForNetworkReady(contractAddress, 20000); // 20 second timeout
-
-            if (!isReady) {
-                console.warn('⚠️ Network health check failed, but continuing with initialization');
-                // Don't throw error - let the system try to continue
-            } else {
-                console.log('✅ Network health check passed');
-            }
-        } catch (error) {
-            console.warn('⚠️ Network health check error:', error.message);
-            // Don't throw error - let the system try to continue
-        }
     }
 
     async waitForContractManager(timeout = 30000) {
@@ -1068,6 +1039,8 @@ class AdminPage {
     handleWalletDisconnected() {
         console.log('👋 Handling wallet disconnected');
 
+        this.closeModal();
+
         this.isAuthorized = false;
 
         // Update UI to reflect disconnected state
@@ -1084,6 +1057,9 @@ class AdminPage {
 
     async handleAccountsChanged(accounts) {
         console.log('🔄 Handling accounts changed:', accounts);
+
+        // Close any open modals when account changes
+        this.closeModal();
 
         if (accounts.length === 0) {
             // No accounts connected
@@ -1117,6 +1093,9 @@ class AdminPage {
 
     async handleChainChanged(chainId) {
         console.log('🌐 Handling chain changed:', chainId);
+
+        // Close any open modals when network changes
+        this.closeModal();
 
         // Update network indicator when chain changes
         const indicator = document.getElementById('network-indicator-home');
@@ -1295,15 +1274,6 @@ class AdminPage {
         console.log('⏸️ Auto-refresh paused (tab not active)');
     }
 
-    resumeAutoRefresh() {
-        this.autoRefreshPaused = false;
-        console.log('▶️ Auto-refresh resumed (tab active)');
-
-        // SELECTIVE UPDATE OPTIMIZATION: Don't refresh immediately on tab focus
-        // This eliminates unnecessary full refreshes when switching tabs
-        // Manual refresh button still works if user wants to refresh
-    }
-
     stopAutoRefresh() {
         if (this.refreshInterval) {
             clearInterval(this.refreshInterval);
@@ -1433,7 +1403,7 @@ class AdminPage {
                         <h2>Multi-Signature Proposals</h2>
                     </div>
                     <div class="loading-container" style="text-align: center; padding: 40px;">
-                        <div class="loading-spinner" style="display: inline-block; width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #007bff; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                        <div class="loading-spinner inline"></div>
                         <div style="margin-top: 15px; color: #666;">Loading proposals...</div>
                         <div style="margin-top: 5px; font-size: 0.9em; color: #999;">This may take a few seconds</div>
                     </div>
@@ -1704,96 +1674,6 @@ class AdminPage {
     }
 
     /**
-     * PERFORMANCE OPTIMIZATION: Add new proposal optimistically
-     */
-    addProposalOptimistically(proposalData, transactionHash) {
-        console.log('🚀 [OPTIMISTIC] Adding proposal optimistically:', proposalData);
-
-        const optimisticProposal = {
-            id: proposalData.id || `temp-${Date.now()}`,
-            actionType: proposalData.actionType,
-            status: 'PENDING',
-            proposer: this.userAddress,
-            createdAt: Date.now(),
-            transactionHash: transactionHash,
-            isOptimistic: true,
-            ...proposalData
-        };
-
-        // Add to cache
-        this.proposalsCache.set(optimisticProposal.id, optimisticProposal);
-        this.pendingOptimisticUpdates.set(optimisticProposal.id, {
-            proposal: optimisticProposal,
-            transactionHash: transactionHash,
-            timestamp: Date.now()
-        });
-
-        // Update UI immediately
-        this.renderSingleProposal(optimisticProposal, true);
-
-        console.log('✅ [OPTIMISTIC] Proposal added to UI instantly');
-        return optimisticProposal;
-    }
-
-    /**
-     * PERFORMANCE OPTIMIZATION: Update single proposal without full refresh
-     */
-    async updateSingleProposal(proposalId, forceRefresh = false) {
-        console.log(`🎯 [SINGLE UPDATE] Updating proposal ${proposalId}`);
-
-        try {
-            const contractManager = await this.ensureContractReady();
-            const proposalData = await contractManager.getAction(proposalId);
-
-            if (proposalData) {
-                const formattedProposal = this.formatRealProposals([proposalData])[0];
-
-                // Update cache
-                this.proposalsCache.set(proposalId, formattedProposal);
-
-                // Remove from optimistic updates if it exists
-                this.pendingOptimisticUpdates.delete(proposalId);
-
-                // Update UI for this specific proposal
-                this.renderSingleProposal(formattedProposal, false);
-
-                console.log(`✅ [SINGLE UPDATE] Proposal ${proposalId} updated successfully`);
-                return formattedProposal;
-            }
-        } catch (error) {
-            console.error(`❌ [SINGLE UPDATE] Failed to update proposal ${proposalId}:`, error);
-        }
-    }
-
-    /**
-     * PERFORMANCE OPTIMIZATION: Render single proposal in UI
-     */
-    renderSingleProposal(proposal, isNew = false) {
-        const proposalsTable = document.querySelector('#proposals-table tbody');
-        if (!proposalsTable) return;
-
-        const existingRow = document.querySelector(`[data-proposal-id="${proposal.id}"]`);
-
-        if (existingRow && !isNew) {
-            // Update existing row
-            existingRow.outerHTML = this.generateProposalRowHTML(proposal);
-        } else if (isNew) {
-            // Add new row at the top
-            const newRowHTML = this.generateProposalRowHTML(proposal);
-            proposalsTable.insertAdjacentHTML('afterbegin', newRowHTML);
-
-            // Highlight new proposal
-            const newRow = proposalsTable.querySelector(`[data-proposal-id="${proposal.id}"]`);
-            if (newRow) {
-                newRow.classList.add('new-proposal-highlight');
-                setTimeout(() => {
-                    newRow.classList.remove('new-proposal-highlight');
-                }, 3000);
-            }
-        }
-    }
-
-    /**
      * PERFORMANCE OPTIMIZATION: Generate HTML for single proposal row
      * This should match the format from renderProposalsRows for consistency
      * INCLUDES BOTH MAIN ROW AND DETAILS ROW
@@ -1978,101 +1858,6 @@ class AdminPage {
             this.hideLoadingState();
         }
     }
-
-    /**
-     * Refresh UI after transaction completion
-     * This ensures all data is up-to-date after approve/reject/execute actions
-     */
-    async refreshAfterTransaction() {
-        console.log('🔄 Refreshing UI after transaction...');
-
-        try {
-            // Refresh all data in parallel for speed
-            await Promise.all([
-                this.loadContractStats(),
-                this.loadContractInformation(),
-                this.loadMultiSignPanel()
-            ]);
-
-            console.log('✅ UI refreshed after transaction');
-        } catch (error) {
-            console.error('❌ Failed to refresh UI after transaction:', error);
-        }
-    }
-
-    /**
-     * SELECTIVE UPDATE OPTIMIZATION: Try to update proposals selectively
-     */
-    async trySelectiveProposalUpdate() {
-        try {
-            console.log('🎯 Attempting selective proposal update...');
-
-            // Get current proposals from contract
-            const contractManager = await this.ensureContractReady();
-            if (!contractManager || !contractManager.getAllActions) {
-                return false;
-            }
-
-            const currentProposals = await contractManager.getAllActions();
-            if (!currentProposals || !Array.isArray(currentProposals)) {
-                return false;
-            }
-
-            const formattedProposals = this.formatRealProposals(currentProposals);
-
-            // Check for new proposals first
-            const currentCount = formattedProposals.length;
-            if (currentCount > this.lastKnownProposalCount) {
-                console.log(`📋 Detected ${currentCount - this.lastKnownProposalCount} new proposals`);
-                // For now, fall back to full refresh for new proposals
-                // This ensures proper ordering and display
-                return false;
-            }
-
-            // Update only changed existing proposals
-            const updateSuccess = await this.updateChangedProposalsOnly(formattedProposals);
-
-            if (updateSuccess) {
-                // Update our tracking
-                this.lastKnownProposalCount = currentCount;
-                this.totalProposalCount = currentCount;
-                return true;
-            }
-
-            return false;
-
-        } catch (error) {
-            console.error('❌ Selective proposal update failed:', error);
-            return false;
-        }
-    }
-
-    /**
-     * SELECTIVE UPDATE OPTIMIZATION: Enable/disable selective updates
-     */
-    enableSelectiveUpdates(enabled = true) {
-        this.isSelectiveUpdateEnabled = enabled;
-        console.log(`🎯 Selective updates ${enabled ? 'enabled' : 'disabled'}`);
-
-        if (!enabled) {
-            // Clear cached states when disabling
-            this.proposalStates.clear();
-            console.log('🧹 Cleared proposal state cache');
-        }
-    }
-
-    /**
-     * SELECTIVE UPDATE OPTIMIZATION: Get selective update status
-     */
-    getSelectiveUpdateStatus() {
-        return {
-            enabled: this.isSelectiveUpdateEnabled,
-            cachedStates: this.proposalStates.size,
-            lastKnownCount: this.lastKnownProposalCount,
-            totalCount: this.totalProposalCount
-        };
-    }
-
 
     async loadProposals() {
         console.log('📋 Loading proposals...');
@@ -2383,114 +2168,6 @@ class AdminPage {
     }
 
     /**
-     * SELECTIVE UPDATE OPTIMIZATION: Add single new proposal without full refresh
-     */
-    async addSingleNewProposal() {
-        if (!this.isSelectiveUpdateEnabled) {
-            console.log('🔄 Selective updates disabled, falling back to full refresh');
-            return await this.refreshData();
-        }
-
-        try {
-            console.log('🎯 Adding single new proposal without full refresh...');
-
-            // Get current proposal count
-            const contractManager = await this.ensureContractReady();
-            if (!contractManager || !contractManager.stakingContract) {
-                throw new Error('Contract manager not available');
-            }
-
-            const counter = await contractManager.stakingContract.actionCounter();
-            const currentCount = counter.toNumber();
-
-            // Check if there's actually a new proposal
-            if (currentCount <= this.lastKnownProposalCount) {
-                console.log('ℹ️ No new proposals detected');
-                return;
-            }
-
-            // Get the newest proposal (highest ID)
-            const newProposalId = currentCount;
-            console.log(`📋 Fetching new proposal ID: ${newProposalId}`);
-
-            // Load only the new proposal data
-            const [action, pairs, weights] = await Promise.all([
-                contractManager.stakingContract.actions(BigInt(newProposalId)),
-                contractManager.stakingContract.getActionPairs(newProposalId),
-                contractManager.stakingContract.getActionWeights(newProposalId)
-            ]);
-
-            // Format the new proposal
-            const newProposal = {
-                id: newProposalId,
-                actionType: action.actionType,
-                newHourlyRewardRate: action.newHourlyRewardRate.toString(),
-                pairs: pairs.map(p => p.toString()),
-                weights: weights.map(w => w.toString()),
-                pairToAdd: action.pairToAdd,
-                pairNameToAdd: action.pairNameToAdd,
-                platformToAdd: action.platformToAdd,
-                weightToAdd: action.weightToAdd.toString(),
-                pairToRemove: action.pairToRemove,
-                recipient: action.recipient,
-                withdrawAmount: action.withdrawAmount.toString(),
-                executed: action.executed,
-                expired: action.expired,
-                approvals: action.approvals,
-                approvedBy: action.approvedBy,
-                proposedTime: action.proposedTime.toNumber(),
-                rejected: action.rejected
-            };
-
-            const formattedProposal = this.formatRealProposals([newProposal])[0];
-
-            // Add to proposals table at the top
-            const proposalsTbody = document.getElementById('proposals-tbody');
-            if (proposalsTbody) {
-                const newRowHTML = this.generateProposalRowHTML(formattedProposal);
-                proposalsTbody.insertAdjacentHTML('afterbegin', newRowHTML);
-
-                // Highlight the new proposal briefly
-                const newRow = proposalsTbody.querySelector(`[data-proposal-id="${newProposalId}"]`);
-                if (newRow) {
-                    newRow.style.backgroundColor = '#e8f5e8';
-                    setTimeout(() => {
-                        newRow.style.backgroundColor = '';
-                    }, 3000);
-                }
-            }
-
-            // Update counters
-            this.lastKnownProposalCount = currentCount;
-            this.loadedProposalCount++;
-            this.totalProposalCount = currentCount;
-
-            // Update proposal count display
-            const statChip = document.querySelector('.stat-chip');
-            if (statChip && statChip.textContent.includes('Total Proposals:')) {
-                statChip.textContent = `Total Proposals: ${currentCount}`;
-            }
-
-            // Cache the new proposal state
-            this.cacheProposalState(formattedProposal);
-
-            console.log(`✅ Successfully added new proposal ${newProposalId} without full refresh`);
-
-            // Show success notification
-            if (window.notificationManager) {
-                window.notificationManager.success(
-                    `Proposal #${newProposalId} added successfully`
-                );
-            }
-
-        } catch (error) {
-            console.error('❌ Failed to add single proposal:', error);
-            console.log('🔄 Falling back to full refresh...');
-            await this.refreshData();
-        }
-    }
-
-    /**
      * SELECTIVE UPDATE OPTIMIZATION: Cache proposal state for change detection
      */
     cacheProposalState(proposal) {
@@ -2566,63 +2243,6 @@ class AdminPage {
         });
     }
 
-    /**
-     * SELECTIVE UPDATE OPTIMIZATION: Update only changed proposals
-     */
-    async updateChangedProposalsOnly(newProposals) {
-        if (!this.isSelectiveUpdateEnabled || !newProposals || newProposals.length === 0) {
-            return false; // Fall back to full refresh
-        }
-
-        try {
-            console.log('🎯 Checking for proposal changes...');
-            let changedCount = 0;
-
-            for (const proposal of newProposals) {
-                if (this.hasProposalStateChanged(proposal)) {
-                    console.log(`📝 Proposal ${proposal.id} has changed, updating...`);
-
-                    // Update the specific proposal row
-                    const existingRow = document.querySelector(`[data-proposal-id="${proposal.id}"]`);
-                    if (existingRow) {
-                        const newRowHTML = this.generateProposalRowHTML(proposal);
-                        existingRow.outerHTML = newRowHTML;
-
-                        // Brief highlight to show the change
-                        const updatedRow = document.querySelector(`[data-proposal-id="${proposal.id}"]`);
-                        if (updatedRow) {
-                            updatedRow.style.backgroundColor = '#fff3cd';
-                            setTimeout(() => {
-                                updatedRow.style.backgroundColor = '';
-                            }, 2000);
-                        }
-                    }
-
-                    // Update cached state
-                    this.cacheProposalState(proposal);
-                    changedCount++;
-                }
-            }
-
-            if (changedCount > 0) {
-                console.log(`✅ Updated ${changedCount} changed proposals without full refresh`);
-
-                if (window.notificationManager) {
-                    window.notificationManager.info(
-                        `${changedCount} proposal${changedCount > 1 ? 's' : ''} updated`
-                    );
-                }
-            } else {
-                console.log('ℹ️ No proposal changes detected, skipping update');
-            }
-
-            return true; // Successfully handled with selective updates
-
-        } catch (error) {
-            console.error('❌ Failed to update changed proposals:', error);
-            return false; // Fall back to full refresh
-        }
-    }
     /**
      * Force attempt to load real proposals (for manual retry)
      */
@@ -2786,55 +2406,6 @@ class AdminPage {
         });
     }
 
-    getActionTypeName(actionType) {
-        const types = {
-            0: 'Set Hourly Reward Rate',
-            1: 'Update Pair Weights',
-            2: 'Add Pair',
-            3: 'Remove Pair',
-            4: 'Change Signer',
-            5: 'Withdraw Rewards'
-        };
-        return types[actionType] || `Unknown Action (${actionType})`;
-    }
-
-    formatActionDetails(action) {
-        switch (action.actionType) {
-            case 0: // SET_HOURLY_REWARD_RATE
-                return {
-                    newHourlyRewardRate: ethers.utils.formatEther(action.newHourlyRewardRate)
-                };
-            case 1: // UPDATE_PAIR_WEIGHTS
-                return {
-                    pairs: action.pairs,
-                    weights: action.weights.map(w => ethers.utils.formatEther(w))
-                };
-            case 2: // ADD_PAIR
-                return {
-                    pairToAdd: action.pairToAdd,
-                    pairNameToAdd: action.pairNameToAdd,
-                    platformToAdd: action.platformToAdd,
-                    weightToAdd: ethers.utils.formatEther(action.weightToAdd)
-                };
-            case 3: // REMOVE_PAIR
-                return {
-                    pairToRemove: action.pairToRemove
-                };
-            case 4: // CHANGE_SIGNER
-                return {
-                    // Note: old/new signer info would need to be extracted from pairs array
-                    pairs: action.pairs
-                };
-            case 5: // WITHDRAW_REWARDS
-                return {
-                    recipient: action.recipient,
-                    withdrawAmount: ethers.utils.formatEther(action.withdrawAmount)
-                };
-            default:
-                return {};
-        }
-    }
-
     /**
      * PERFORMANCE OPTIMIZATION: Render Load More button for pagination
      */
@@ -2886,123 +2457,6 @@ class AdminPage {
 
         console.log('🚫 Load More button not shown - conditions not met');
         return ''; // No Load More button needed
-    }
-
-    /**
-     * Debug method to check proposal loading status
-     */
-    debugProposalLoading() {
-        console.log('🔍 PROPOSAL LOADING DEBUG:');
-        console.log(`📊 Total proposals available: ${this.totalProposalCount}`);
-        console.log(`📊 Currently loaded: ${this.loadedProposalCount}`);
-        console.log(`📊 Cached proposals: ${this.proposalsCache.size}`);
-        console.log(`📊 Is loading more: ${this.isLoadingMore}`);
-
-        const filterSelect = document.getElementById('proposal-filter');
-        const filterValue = filterSelect ? filterSelect.value : (this.proposalFilter || 'pending');
-        console.log(`📊 Proposal filter: ${filterValue}`);
-
-        const proposalsTbody = document.getElementById('proposals-tbody');
-        const visibleRows = proposalsTbody ? proposalsTbody.querySelectorAll('tr').length : 0;
-        console.log(`📊 Visible rows in table: ${visibleRows}`);
-
-        if (this.proposalsCache.size > 0) {
-            const cachedProposals = Array.from(this.proposalsCache.values());
-            const executedCount = this.filterProposalsByStatus(cachedProposals, 'executed').length;
-            const pendingCount = this.filterProposalsByStatus(cachedProposals, 'pending').length;
-            const rejectedCount = this.filterProposalsByStatus(cachedProposals, 'rejected').length;
-            const expiredCount = this.filterProposalsByStatus(cachedProposals, 'expired').length;
-
-            console.log(`📊 Cached proposal breakdown:`);
-            console.log(`   - Executed: ${executedCount}`);
-            console.log(`   - Pending: ${pendingCount}`);
-            console.log(`   - Rejected: ${rejectedCount}`);
-            console.log(`   - Expired: ${expiredCount}`);
-        }
-    }
-
-    /**
-     * Force load all proposals (for debugging/testing)
-     */
-    async forceLoadAllProposals() {
-        console.log('🚀 Force loading ALL proposals...');
-
-        try {
-            const contractManager = await this.ensureContractReady();
-            if (!contractManager || !contractManager.stakingContract) {
-                throw new Error('Contract manager not available');
-            }
-
-            // Get total count
-            const counter = await contractManager.stakingContract.actionCounter();
-            const totalCount = counter.toNumber();
-            console.log(`📊 Total proposals in contract: ${totalCount}`);
-
-            if (totalCount === 0) {
-                console.log('📭 No proposals found in contract');
-                return;
-            }
-
-            // Load ALL proposals (not just recent ones)
-            console.log('🔄 Loading ALL proposals from contract...');
-            const allProposals = await this.loadAllProposalsFromContract(contractManager, totalCount);
-
-            if (allProposals && allProposals.length > 0) {
-                console.log(`✅ Loaded ${allProposals.length} proposals total`);
-
-                // Update cache and counts
-                this.totalProposalCount = totalCount;
-                this.loadedProposalCount = allProposals.length;
-
-                // Cache all proposals
-                allProposals.forEach(proposal => {
-                    this.proposalsCache.set(proposal.id, proposal);
-                    this.cacheProposalState(proposal);
-                });
-
-                // Refresh the display
-                await this.loadMultiSignPanel();
-            }
-
-        } catch (error) {
-            console.error('❌ Failed to force load all proposals:', error);
-            if (window.notificationManager) {
-                window.notificationManager.error(
-                    `Could not load all proposals: ${error.message}`
-                );
-            }
-        }
-    }
-
-    /**
-     * Load all proposals from contract (helper method)
-     */
-    async loadAllProposalsFromContract(contractManager, totalCount) {
-        const allActions = [];
-        const batchSize = 50; // Larger batch for bulk loading
-
-        // Load all proposals in batches
-        for (let i = 1; i <= totalCount; i += batchSize) {
-            const endIndex = Math.min(i + batchSize - 1, totalCount);
-            console.log(`🔄 Loading proposals ${i} to ${endIndex}...`);
-
-            const batchPromises = [];
-            for (let actionId = i; actionId <= endIndex; actionId++) {
-                batchPromises.push(this.loadSingleProposal(contractManager, actionId));
-            }
-
-            const batchResults = await Promise.allSettled(batchPromises);
-            batchResults.forEach(result => {
-                if (result.status === 'fulfilled' && result.value) {
-                    allActions.push(result.value);
-                }
-            });
-        }
-
-        // Sort by ID descending (newest first)
-        allActions.sort((a, b) => b.id - a.id);
-
-        return this.formatRealProposals(allActions);
     }
 
     /**
@@ -3706,40 +3160,6 @@ class AdminPage {
         return `${address.slice(0, 6)}...${address.slice(-4)}`;
     }
 
-
-    /**
-     * Retry contract connection
-     */
-    async retryContractConnection() {
-        console.log('🔄 Retrying contract connection...');
-
-        // Show loading state
-        if (window.notificationManager) {
-            window.notificationManager.info('Attempting to reconnect to contracts...');
-        }
-
-        try {
-            // Reinitialize contract manager
-            if (window.contractManager && window.contractManager.initializeReadOnly) {
-                await window.contractManager.initializeReadOnly();
-            }
-
-            // Reload admin data
-            await this.loadContractStats();
-            await this.loadMultiSignPanel();
-
-            if (window.notificationManager) {
-                window.notificationManager.success('Successfully reconnected to contracts!');
-            }
-        } catch (error) {
-            console.error('❌ Failed to reconnect:', error);
-            const errorMessage = error.message || 'Could not reconnect to contracts';
-            if (window.notificationManager) {
-                window.notificationManager.error(`Could not reconnect to contracts: ${errorMessage}`);
-            }
-        }
-    }
-
     startAutoRefresh() {
         // Prevent multiple auto-refresh timers
         if (this.autoRefreshActive) {
@@ -3838,60 +3258,6 @@ class AdminPage {
         }
     }
 
-    // Additional utility methods
-    async waitForElement(selector, timeout = 5000) {
-        return new Promise((resolve, reject) => {
-            const element = document.querySelector(selector);
-            if (element) {
-                resolve(element);
-                return;
-            }
-
-            const observer = new MutationObserver((mutations, obs) => {
-                const element = document.querySelector(selector);
-                if (element) {
-                    obs.disconnect();
-                    resolve(element);
-                }
-            });
-
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-
-            setTimeout(() => {
-                observer.disconnect();
-                reject(new Error(`Element ${selector} not found within ${timeout}ms`));
-            }, timeout);
-        });
-    }
-
-    debounce(func, wait) {
-        let timeout;
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
-            clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
-        };
-    }
-
-    throttle(func, limit) {
-        let inThrottle;
-        return function() {
-            const args = arguments;
-            const context = this;
-            if (!inThrottle) {
-                func.apply(context, args);
-                inThrottle = true;
-                setTimeout(() => inThrottle = false, limit);
-            }
-        };
-    }
-
     // Enhanced error handling
     handleError(error, context = 'Admin Panel') {
         console.error(`❌ ${context} Error:`, error);
@@ -3903,22 +3269,6 @@ class AdminPage {
         // Log additional error details for debugging
         if (error.stack) {
             console.error('Error stack:', error.stack);
-        }
-    }
-
-    // Network status checking
-    async checkNetworkStatus() {
-        try {
-            if (!window.ethereum) {
-                throw new Error('MetaMask not available');
-            }
-
-            const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-            const expectedChainId = window.networkManager?.getChainIdHex();
-            return chainId === expectedChainId;
-        } catch (error) {
-            console.error('❌ Network status check failed:', error);
-            return false;
         }
     }
 
@@ -3952,55 +3302,6 @@ class AdminPage {
         }
 
         return window.contractManager;
-    }
-
-    // Multi-signature utility methods
-    getTimeRemaining(expiryTimestamp) {
-        const now = Date.now();
-        const expiry = new Date(expiryTimestamp).getTime();
-        const remaining = expiry - now;
-
-        if (remaining <= 0) {
-            return { expired: true, text: 'Expired' };
-        }
-
-        const days = Math.floor(remaining / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((remaining % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
-
-        if (days > 0) {
-            return { expired: false, text: `${days}d ${hours}h remaining` };
-        } else if (hours > 0) {
-            return { expired: false, text: `${hours}h ${minutes}m remaining` };
-        } else {
-            return { expired: false, text: `${minutes}m remaining` };
-        }
-    }
-
-    renderDetailedSignatures(signers, signatures) {
-        if (!signers || signers.length === 0) {
-            return '<div class="no-signers">No signers configured</div>';
-        }
-
-        return signers.map(signer => {
-            const hasSigned = signatures && signatures.includes(signer);
-            const isCurrentUser = signer.toLowerCase() === (this.userAddress || '').toLowerCase();
-
-            return `
-                <div class="signature-item ${hasSigned ? 'signed' : 'pending'} ${isCurrentUser ? 'current-user' : ''}">
-                    <div class="signer-info">
-                        <span class="signer-address" data-address="${signer}" title="Click to copy address">${this.formatAddress(signer)}</span>
-                        ${isCurrentUser ? '<span class="user-badge">You</span>' : ''}
-                    </div>
-                    <div class="signature-status">
-                        ${hasSigned ?
-                            '<span class="signed-badge">✓ Signed</span>' :
-                            '<span class="pending-badge">○ Pending</span>'
-                        }
-                    </div>
-                </div>
-            `;
-        }).join('');
     }
 
     renderProposalParameters(type, proposal) {
@@ -4739,7 +4040,7 @@ class AdminPage {
                                 style="padding: 10px 24px; min-width: 180px; display: flex; align-items: center; justify-content: center; gap: 8px;">
                             <span class="btn-text">Create Proposal</span>
                             <span class="btn-loading" style="display: none;">
-                                <span class="spinner" style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block;"></span>
+                                <span class="spinner inline"></span>
                                 Creating...
                             </span>
                         </button>
@@ -4778,7 +4079,7 @@ class AdminPage {
                                     <span style="display: flex; align-items: center; gap: 8px;">
                                         🔗 Select Pair to Remove *
                                         <span id="pair-loading-indicator" style="display: none; font-size: 12px; color: var(--text-secondary);">
-                                            <span class="spinner" style="width: 12px; height: 12px; border-width: 2px;"></span>
+                                            <span class="spinner spinner-small"></span>
                                             Loading...
                                         </span>
                                     </span>
@@ -4828,7 +4129,7 @@ class AdminPage {
                                 style="padding: 10px 24px; min-width: 220px;">
                             <span class="btn-text">Submit Removal Proposal</span>
                             <span class="btn-loading" style="display: none;">
-                                <span class="spinner" style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; margin-right: 8px;"></span>
+                                <span class="spinner inline"></span>
                                 Creating...
                             </span>
                         </button>
@@ -4980,7 +4281,7 @@ class AdminPage {
                         <form id="withdrawal-form" onsubmit="adminPage.submitWithdrawalProposal(event)">
                             <div class="form-group">
                                 <label for="withdrawal-amount">Amount (${this.contractStats?.rewardTokenSymbol || 'USDC'})</label>
-                                <input type="number" id="withdrawal-amount" step="0.01" min="0" required
+                                <input type="number" id="withdrawal-amount" step="any" min="0" inputmode="decimal" required
                                        placeholder="Enter amount to withdraw">
                                 <small class="form-help">Available balance: ${this.contractStats?.rewardBalance ?? 'N/A'}</small>
                             </div>
@@ -5281,59 +4582,6 @@ class AdminPage {
         }
     }
 
-
-    // Display proposals in the UI (for manual testing)
-    displayProposals(proposals) {
-        console.log('🎭 Manually displaying proposals in UI...');
-
-        const container = document.getElementById('proposals-container') ||
-                         document.querySelector('.proposals-list') ||
-                         document.querySelector('#multisign-panel .table-body');
-
-        if (!container) {
-            console.warn('⚠️ Could not find proposals container');
-            return;
-        }
-
-        // Clear existing content
-        container.innerHTML = '';
-
-        // Add proposals
-        proposals.forEach(proposal => {
-            const proposalElement = this.createProposalElement(proposal);
-            container.appendChild(proposalElement);
-        });
-
-        console.log(`✅ Displayed ${proposals.length} proposals in UI`);
-    }
-
-    // Create a proposal element for the UI
-    createProposalElement(proposal) {
-        const div = document.createElement('div');
-        div.className = 'proposal-row';
-        div.innerHTML = `
-            <div class="proposal-item">
-                <div class="proposal-header">
-                    <span class="proposal-id">#${proposal.id}</span>
-                    <span class="proposal-type">${proposal.actionType}</span>
-                    <span class="proposal-status">${proposal.approvals}/${proposal.requiredApprovals} approvals</span>
-                </div>
-                <div class="proposal-details">
-                    ${proposal.details.description || 'No description'}
-                </div>
-                <div class="proposal-actions">
-                    <button class="approve-btn" data-action="approve" data-id="${proposal.id}">
-                        ✅ Approve
-                    </button>
-                    <button class="reject-btn" data-action="reject" data-id="${proposal.id}">
-                        ❌ Reject
-                    </button>
-                </div>
-            </div>
-        `;
-        return div;
-    }
-
     // Load contract information like React InfoCard component
     async loadContractInformation() {
         console.log('📊 Loading contract information from smart contract...');
@@ -5375,8 +4623,8 @@ class AdminPage {
                         throw new Error('Staking contract address not available');
                     }
                     const balance = await contractManager.rewardTokenContract.balanceOf(stakingContractAddress);
-                    const balanceValue = Number(ethers.utils.formatEther(balance));
-                    return `${balanceValue.toFixed(2)} ${rewardTokenSymbol}`;
+                    const balanceValue = ethers.utils.formatEther(balance);
+                    return `${balanceValue} ${rewardTokenSymbol}`;
                 },
                 null
             );
@@ -5694,31 +4942,10 @@ class AdminPage {
 
     showError(titleOrMessage, detail) {
         const hasDetail = typeof detail === 'string' && detail.trim().length > 0;
+        const message = hasDetail ? detail : (titleOrMessage || 'An unexpected error occurred');
+        const title = hasDetail ? (titleOrMessage || 'Error') : null;
 
-        if (hasDetail) {
-            const title = titleOrMessage || 'Error';
-            const message = detail;
-
-            console.error('❌ Error:', title, '-', message);
-
-            const container = document.getElementById('admin-section-content') || document.body;
-            container.innerHTML = `
-                <div class="error-display">
-                    <h3>❌ ${title}</h3>
-                    <p>${message}</p>
-                    <button class="btn btn-primary" onclick="adminPage.init()">
-                        Retry
-                    </button>
-                </div>
-            `;
-            return;
-        }
-
-        const message = typeof titleOrMessage === 'string' && titleOrMessage.trim().length > 0
-            ? titleOrMessage
-            : 'An unexpected error occurred';
-
-        console.error('❌ Error:', message);
+        console.error('❌ Error:', title ? `${title} - ${message}` : message);
 
         const canShowInline = typeof this.showMessage === 'function' && !!document.querySelector('.modal-body');
 
@@ -5726,11 +4953,8 @@ class AdminPage {
             this.showMessage(message, 'error');
         }
 
-        if (window.notificationManager) {
-            window.notificationManager.error(message);
-        } else if (!canShowInline) {
-            alert('❌ ' + message);
-        }
+        window.notificationManager.error(message, {title: title});
+
     }
 
     showMessage(message, type = 'info') {
@@ -5804,12 +5028,12 @@ class AdminPage {
                 // Refresh data once without causing loops
                 this.refreshAdminDataOnce();
             } else {
-                this.showError(result.error || 'Failed to create proposal');
+                this.showError(result.error.userMessage?.title || 'Failed to create proposal', result.error.userMessage?.message);
             }
 
         } catch (error) {
             console.error('Failed to create hourly rate proposal:', error);
-            this.showError('Failed to create proposal: ' + error.message);
+            this.showError(error.userMessage?.title || 'Failed to create proposal', error.userMessage?.message);
         }
     }
 
@@ -5867,12 +5091,12 @@ class AdminPage {
                 this.showSuccess(successMessage);
                 this.refreshAdminDataOnce();
             } else {
-                this.showError(result.error || 'Failed to create proposal');
+                this.showError(result.error.userMessage?.title || 'Failed to create proposal', result.error.userMessage?.message);
             }
 
         } catch (error) {
             console.error('Failed to create add pair proposal:', error);
-            this.showError('Failed to create proposal: ' + error.message);
+            this.showError(error.userMessage?.title || 'Failed to create proposal', error.userMessage?.message);
         }
     }
 
@@ -5907,12 +5131,12 @@ class AdminPage {
                 this.showSuccess(successMessage);
                 this.refreshAdminDataOnce();
             } else {
-                this.showError(result.error || 'Failed to create removal proposal');
+                this.showError(result.error.userMessage?.title || 'Failed to create removal proposal', result.error.userMessage?.message);
             }
 
         } catch (error) {
             console.error('Failed to create removal proposal:', error);
-            this.showError('Failed to create proposal: ' + error.message);
+            this.showError(error.userMessage?.title || 'Failed to create proposal', error.userMessage?.message);
         }
     }
 
@@ -5972,12 +5196,12 @@ class AdminPage {
                 this.showSuccess(successMessage);
                 this.refreshAdminDataOnce();
             } else {
-                this.showError(result.error || 'Failed to create weight update proposal');
+                this.showError(result.error.userMessage?.title || 'Failed to create weight update proposal', result.error.userMessage?.message);
             }
 
         } catch (error) {
             console.error('Failed to create weight update proposal:', error);
-            this.showError('Failed to create proposal: ' + error.message);
+            this.showError(error.userMessage?.title || 'Failed to create proposal', error.userMessage?.message);
         }
     }
 
@@ -6046,12 +5270,12 @@ class AdminPage {
                 this.showSuccess(successMessage);
                 this.refreshAdminDataOnce();
             } else {
-                this.showError(result.error || 'Failed to create change signer proposal');
+                this.showError(result.error.userMessage?.title || 'Failed to create change signer proposal', result.error.userMessage?.message);
             }
 
         } catch (error) {
             console.error('Failed to create signer change proposal:', error);
-            this.showError('Failed to create proposal: ' + error.message);
+            this.showError(error.userMessage?.title || 'Failed to create proposal', error.userMessage?.message);
         } finally {
             // DUPLICATE PREVENTION FIX: Always reset submission state and button
             this.isSubmittingChangeSigner = false;
@@ -6124,12 +5348,12 @@ class AdminPage {
                 this.showSuccess(successMessage);
                 this.refreshAdminDataOnce();
             } else {
-                this.showError(result.error || 'Failed to create withdrawal proposal');
+                this.showError(result.error.userMessage?.title || 'Failed to create withdrawal proposal', result.error.userMessage?.message);
             }
 
         } catch (error) {
             console.error('Failed to create withdrawal proposal:', error);
-            this.showError('Failed to create proposal: ' + error.message);
+            this.showError(error.userMessage?.title || 'Failed to create proposal', error.userMessage?.message);
         } finally {
             // DUPLICATE PREVENTION FIX: Always reset submission state and button
             this.isSubmittingWithdrawal = false;
@@ -6139,19 +5363,6 @@ class AdminPage {
                 submitBtn.textContent = 'Create Withdrawal Proposal';
             }
         }
-    }
-
-    // Utility methods for modals
-    renderPairOptions() {
-        if (!this.contractStats?.pairs || this.contractStats.pairs.length === 0) {
-            return '<option value="">No pairs available</option>';
-        }
-
-        return this.contractStats.pairs.map(pair => `
-            <option value="${pair.address}" data-weight="${pair.weight}">
-                ${pair.name || this.formatAddress(pair.address)} (Weight: ${pair.weight})
-            </option>
-        `).join('');
     }
 
     renderSignerOptions() {
@@ -6189,20 +5400,13 @@ class AdminPage {
                 this.showSuccess(`✅ Proposal #${proposalId} approved successfully! Your vote has been recorded on the blockchain.`);
                 this.refreshAdminDataOnce();
             } else {
-                // Handle specific contract errors like React version
-                const errorMessage = result.error || 'Failed to approve proposal';
-                if (errorMessage.includes('Already approved')) {
-                    this.showError('✋ You have already approved this proposal. Each signer can only vote once per proposal.');
-                } else if (errorMessage.includes('Cannot reject after approving')) {
-                    this.showError('✋ You cannot reject a proposal you have already approved. Each signer can only vote once.');
-                } else {
-                    this.showError(errorMessage);
-                }
+                throw result.error;
             }
 
         } catch (error) {
             console.error('❌ Failed to approve proposal:', error);
-            this.showError('Unexpected error occurred while approving proposal. Please try again.');
+            const errorMessage = error?.userMessage?.message || error?.message || 'Unexpected error occurred while approving proposal. Please try again.';
+            window.notificationManager.error(errorMessage, {title: error?.userMessage?.title});
         }
     }
 
@@ -6224,20 +5428,13 @@ class AdminPage {
                 this.showSuccess(`✅ Proposal #${proposalId} rejected successfully! Your vote has been recorded on the blockchain.`);
                 this.refreshAdminDataOnce();
             } else {
-                // Handle specific contract errors like React version
-                const errorMessage = result.error || 'Failed to reject proposal';
-                if (errorMessage.includes('Cannot reject after approving')) {
-                    this.showError('✋ You cannot reject a proposal you have already approved. Each signer can only vote once per proposal.');
-                } else if (errorMessage.includes('Already rejected')) {
-                    this.showError('✋ You have already rejected this proposal. Each signer can only vote once per proposal.');
-                } else {
-                    this.showError(errorMessage);
-                }
+                throw result.error;
             }
 
         } catch (error) {
             console.error('❌ Failed to reject proposal:', error);
-            this.showError('Unexpected error occurred while rejecting proposal. Please try again.');
+            const errorMessage = error?.userMessage?.message || error?.message || 'Unexpected error occurred while rejecting proposal. Please try again.';
+            window.notificationManager.error(errorMessage, {title: error?.userMessage?.title});
         }
     }
 
@@ -6254,14 +5451,13 @@ class AdminPage {
                 this.showSuccess(`✅ Proposal #${proposalId} executed successfully! The proposed action has been carried out on the blockchain.`);
                 this.refreshAdminDataOnce();
             } else {
-                throw new Error(result.error);
+                throw result.error;
             }
 
         } catch (error) {
             console.error('Failed to execute proposal:', error);
-            if (window.notificationManager) {
-                window.notificationManager.error(error.message);
-            }
+            const errorMessage = error?.userMessage?.message || error?.message || 'Unexpected error occurred while executing proposal. Please try again.';
+            window.notificationManager.error(errorMessage, {title: error?.userMessage?.title});
         }
     }
 
@@ -6295,33 +5491,6 @@ class AdminPage {
         this.contractStats = {};
 
         console.log('🧹 Admin Panel destroyed');
-    }
-
-    /**
-     * Display message when governance features are not available
-     */
-    displayNoGovernance() {
-        const governanceSection = document.querySelector('.governance-section');
-        if (governanceSection) {
-            governanceSection.innerHTML = `
-                <div class="no-governance-message" style="text-align: center; padding: 2rem; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border-color);">
-                    <h3 style="color: var(--text-primary); margin-bottom: 1rem;">🏛️ Governance Features</h3>
-                    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Governance features are not available for this contract.</p>
-                    <div style="text-align: left; max-width: 400px; margin: 0 auto;">
-                        <p style="color: var(--text-secondary); margin-bottom: 0.5rem;">This may be because:</p>
-                        <ul style="color: var(--text-secondary); padding-left: 1.5rem;">
-                            <li>The contract doesn't implement multi-signature governance</li>
-                            <li>Governance functions are not yet deployed</li>
-                            <li>You don't have the required permissions</li>
-                            <li>Network connectivity issues</li>
-                        </ul>
-                    </div>
-                    <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 1rem;">
-                        Basic staking functions should still work normally.
-                    </p>
-                </div>
-            `;
-        }
     }
 
     /**
