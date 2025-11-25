@@ -6,6 +6,9 @@
     backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--divider);
     transition: all 0.3s ease;
+    background-color: var(--liberdus-bg-secondary);
+    height: 80px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .header-toolbar {
@@ -35,6 +38,13 @@
     width: 44px;
     height: 44px;
     transition: transform 0.2s ease-in-out;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.25rem;
+    font-weight: var(--liberdus-font-semibold);
+    color: var(--liberdus-text-primary);
+    text-decoration: none;
 }
 
 .logo:hover {
@@ -63,6 +73,7 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-2);
+    background: transparent !important;
 }
 
 .nav-button {
@@ -155,6 +166,9 @@
 
 .wallet-icon {
     font-size: 1rem;
+    margin-right: var(--space-4);
+    min-width: 48px;
+    text-align: center;
 }
 
 .wallet-text {

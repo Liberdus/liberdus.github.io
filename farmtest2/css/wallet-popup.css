@@ -82,6 +82,12 @@
     align-items: center;
     justify-content: center;
     gap: var(--spacing-1);
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    background: var(--background-secondary);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-primary);
 }
 
 .address-text {
@@ -120,6 +126,8 @@
     display: flex;
     justify-content: center;
     margin-top: var(--spacing-2);
+    flex-direction: column;
+    gap: var(--space-3);
 }
 
 .disconnect-button {

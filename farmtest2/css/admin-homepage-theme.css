@@ -13,6 +13,10 @@ body.admin-page {
     background: var(--background-default) !important;
     color: var(--text-primary) !important;
     transition: background-color 0.3s ease, color 0.3s ease !important;
+    min-height: 100vh;
+    font-family: var(--font-family);
+    padding: 0;
+    margin: 0;
 }
 
 .admin-content {
@@ -54,19 +58,13 @@ body {
     color: var(--text-primary) !important;
 }
 
-.info-value {
-    color: var(--text-primary) !important;
-}
-
-.info-label {
-    color: var(--text-secondary) !important;
-}
-
 /* ========================================
    TABLES - HOMEPAGE STYLE
    ======================================== */
 .admin-table {
     background: transparent !important;
+    width: 100%;
+    border-collapse: collapse;
 }
 
 .admin-table th {
@@ -74,11 +72,15 @@ body {
     color: var(--text-primary) !important;
     font-weight: 600 !important;
     border-bottom: 1px solid var(--divider) !important;
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .admin-table td {
     color: var(--text-primary) !important;
     border-bottom: 1px solid var(--divider) !important;
+    font-size: 0.9375rem;
 }
 
 .admin-table tbody tr:hover {
@@ -115,6 +117,7 @@ body {
 /* Button type specific backgrounds */
 .btn-secondary {
     background: var(--secondary-main) !important;
+    color: white;
 }
 
 .btn-danger,
@@ -167,6 +170,25 @@ body {
 .proposal-btn {
     padding: 10px 20px !important;
     white-space: nowrap !important;
+    width: 100%;
+    font-weight: 500;
+    text-align: center;
+    border-radius: 4px;
+    border: none;
+    background: #1976d2;
+    color: #ffffff;
+    font-size: 0.875rem;
+    line-height: 1.75;
+    letter-spacing: 0.02857em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,
+                box-shadow 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,
+                border-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,
+                color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
+    box-shadow: 0px 3px 1px -2px rgba(0,0,0,0.2),
+                0px 2px 2px 0px rgba(0,0,0,0.14),
+                0px 1px 5px 0px rgba(0,0,0,0.12);
 }
 
 .proposal-btn:hover:not(:disabled) {
@@ -179,23 +201,39 @@ body {
 .modal-overlay {
     background: rgba(0, 0, 0, 0.5) !important;
     backdrop-filter: blur(4px) !important;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1100;
+    padding: var(--spacing-2);
+    width: 100%;
+    height: 100%;
+    -webkit-backdrop-filter: blur(8px);
+    pointer-events: auto;
+    animation: fadeIn 0.3s ease;
 }
 
 [data-theme="dark"] .modal-overlay {
     background: rgba(0, 0, 0, 0.7) !important;
 }
 
-.modal-content {
-    background: var(--background-paper) !important;
-    color: var(--text-primary) !important;
-    border-radius: 12px !important;
-    box-shadow: var(--shadow-8) !important;
-}
-
 .modal-header {
     background: var(--background-paper) !important;
     color: var(--text-primary) !important;
     border-bottom: 1px solid var(--divider) !important;
+    padding: 2rem 3.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-radius: 24px 24px 0 0;
+    position: relative;
+    min-height: 30px;
 }
 
 .modal-header h2,
@@ -206,10 +244,21 @@ body {
 .modal-body {
     background: var(--background-paper) !important;
     color: var(--text-primary) !important;
+    padding: 3rem 3.5rem;
+    overflow-y: auto;
+    max-height: calc(90vh - 140px);
+    flex: 1;
+    box-sizing: border-box;
 }
 
 .modal-body label {
     color: var(--text-primary) !important;
+    font-weight: 600;
+    font-size: 0.9375rem;
+    margin-bottom: 0.625rem;
+    margin-top: 0;
+    display: block;
+    line-height: 1.5;
 }
 
 .modal-body input,
@@ -218,6 +267,14 @@ body {
     background: var(--background-paper) !important;
     color: var(--text-primary) !important;
     border: 1px solid var(--divider) !important;
+    padding: 0.875rem 1.125rem;
+    border-radius: 8px;
+    font-size: 0.9375rem;
+    transition: all 0.3s ease;
+    width: 100%;
+    box-sizing: border-box;
+    font-family: inherit;
+    line-height: 1.5;
 }
 
 .modal-body input:focus,
@@ -225,11 +282,15 @@ body {
 .modal-body textarea:focus {
     border-color: var(--primary-main) !important;
     outline: none !important;
+    background: var(--background-paper) !important;
+    color: var(--text-primary) !important;
+    box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.12);
 }
 
 .modal-body select option {
     background: var(--background-paper) !important;
     color: var(--text-primary) !important;
+    padding: 0.5rem;
 }
 
 .modal-body small,
@@ -237,20 +298,35 @@ body {
     color: var(--text-secondary) !important;
 }
 
-.modal-footer {
-    background: var(--background-paper) !important;
-    border-top: 1px solid var(--divider) !important;
-}
-
 .modal-close {
     background: transparent !important;
     color: var(--text-secondary) !important;
     border: none !important;
+    cursor: pointer;
+    padding: var(--space-2);
+    font-size: var(--font-size-xl);
+    line-height: 1;
+    border-radius: var(--border-radius);
+    transition: all var(--transition-fast);
+    width: 32px;
+    height: 32px;
+    background-color: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    position: absolute;
+    top: 1.5rem;
+    right: 1.5rem;
 }
 
 .modal-close:hover {
     background: var(--action-hover) !important;
     color: var(--text-primary) !important;
+    background-color: var(--background-tertiary);
+    transform: rotate(90deg) scale(1.05);
+    box-shadow: 0 0 20px rgba(231, 76, 60, 0.6);
+    border-color: rgba(231, 76, 60, 0.5);
 }
 
 /* ========================================
@@ -298,18 +374,28 @@ body {
     background: rgba(25, 118, 210, 0.1) !important;
     color: var(--primary-main) !important;
     border: 1px solid var(--primary-main) !important;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    white-space: nowrap;
 }
 
 .action-type.add_pair {
     background: rgba(76, 175, 80, 0.1) !important;
     color: var(--success-main) !important;
     border: 1px solid var(--success-main) !important;
+    border-color: rgba(46, 204, 113, 0.3);
 }
 
 .action-type.remove_pair {
     background: rgba(244, 67, 54, 0.1) !important;
     color: var(--error-main) !important;
     border: 1px solid var(--error-main) !important;
+    border-color: rgba(231, 76, 60, 0.3);
 }
 
 .action-type.set_hourly_reward_rate,
@@ -347,24 +433,32 @@ body {
 
 .info-item {
     border-bottom: 1px solid var(--divider) !important;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .info-label {
     color: var(--text-secondary) !important;
+    font-weight: 500;
 }
 
 .info-value {
     color: var(--primary-main) !important;
-}
-
-
-.nav-section {
-    background: transparent !important;
+    font-weight: 500;
 }
 
 .nav-btn {
     color: var(--text-secondary) !important;
     background: transparent !important;
+    border: none;
+    padding: 15px 20px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    border-bottom: 3px solid transparent;
+    white-space: nowrap;
 }
 
 .nav-btn:hover {
@@ -375,6 +469,8 @@ body {
 .nav-btn.active {
     color: var(--primary-main) !important;
     background: var(--action-selected) !important;
+    border-bottom-color: #00d4ff;
+    box-shadow: 0 2px 8px rgba(0, 123, 255, 0.3);
 }
 
 
@@ -398,6 +494,9 @@ textarea.form-input {
     line-height: 1.5 !important;
     font-family: var(--font-family) !important;
     transition: all 0.2s ease !important;
+    width: 100%;
+    background-color: var(--background-secondary);
+    border-radius: var(--border-radius);
 }
 
 /* CRITICAL: Force text visibility in dark mode - HIGHEST PRIORITY */
@@ -489,6 +588,13 @@ textarea::placeholder {
     background: rgba(255, 152, 0, 0.1) !important;
     border: 1px solid var(--warning-main) !important;
     color: var(--text-primary) !important;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    border-radius: 4px;
+    padding: 15px;
+    margin: 15px 0;
+    background-color: #fff3cd;
 }
 
 .warning-box .material-icons {
@@ -518,6 +624,10 @@ textarea::placeholder {
 .proposal-id {
     background: rgba(0, 0, 0, 0.1) !important;
     color: var(--text-primary) !important;
+    font-weight: 600;
+    font-size: 0.9em;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
 }
 
 [data-theme="dark"] .proposal-id {
@@ -529,6 +639,11 @@ textarea::placeholder {
    ======================================== */
 .approval-bar {
     background: rgba(0, 0, 0, 0.1) !important;
+    width: 60px;
+    height: 6px;
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
 }
 
 [data-theme="dark"] .approval-bar {
@@ -537,6 +652,10 @@ textarea::placeholder {
 
 .approval-fill {
     background: linear-gradient(90deg, var(--primary-main), var(--success-main)) !important;
+    height: 100%;
+    transition: width 0.3s ease;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
 }
 
 /* ========================================
@@ -546,6 +665,11 @@ textarea::placeholder {
     background: var(--background-paper) !important;
     border-left: 3px solid var(--primary-main) !important;
     color: var(--text-primary) !important;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 15px;
+    border-radius: 8px;
 }
 
 .activity-item:hover {
@@ -559,6 +683,10 @@ textarea::placeholder {
     background: rgba(25, 118, 210, 0.05) !important;
     border: 1px solid rgba(25, 118, 210, 0.2) !important;
     color: var(--text-primary) !important;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 20px 0;
+    text-align: left;
 }
 
 /* ========================================
@@ -566,6 +694,7 @@ textarea::placeholder {
    ======================================== */
 .modal-content::-webkit-scrollbar-track {
     background: rgba(0, 0, 0, 0.05) !important;
+    border-radius: 10px;
 }
 
 [data-theme="dark"] .modal-content::-webkit-scrollbar-track {
@@ -574,6 +703,7 @@ textarea::placeholder {
 
 .modal-content::-webkit-scrollbar-thumb {
     background: var(--primary-main) !important;
+    border-radius: 10px;
 }
 
 .modal-content::-webkit-scrollbar-thumb:hover {
@@ -585,6 +715,7 @@ textarea::placeholder {
    ======================================== */
 .proposal-row {
     background: transparent !important;
+    transition: all 0.3s ease;
 }
 
 .proposal-row:hover {
@@ -691,6 +822,7 @@ select::after {
 /* Custom dropdown arrow using wrapper approach */
 .form-group {
     position: relative !important;
+    margin-bottom: var(--space-4);
 }
 
 select option,
@@ -889,16 +1021,28 @@ button[type="submit"] .btn-text,
     font-size: 14px !important;
     white-space: nowrap !important;
     min-width: fit-content !important;
+    line-height: 1;
+    border: 1px solid transparent;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    text-decoration: none;
+    user-select: none;
 }
 
 .btn-icon {
     font-size: 16px !important;
     line-height: 1 !important;
     flex-shrink: 0 !important;
+    padding: var(--space-3);
+    width: 40px;
+    height: 40px;
 }
 
 .btn-text {
     white-space: nowrap !important;
+    background: transparent;
+    color: var(--primary-main);
+    font-weight: bold;
 }
 
 /* Active states */
@@ -921,6 +1065,11 @@ button[type="submit"] .btn-text,
     font-size: 20px !important;
     font-weight: 600 !important;
     color: var(--text-primary) !important;
+    margin: 0;
+    justify-content: center;
+    text-align: center;
+    width: 100%;
+    letter-spacing: -0.02em;
 }
 
 .modal-footer {
@@ -929,6 +1078,18 @@ button[type="submit"] .btn-text,
     justify-content: flex-end !important;
     padding: 16px 24px !important;
     flex-wrap: wrap !important;
+    border-top: 1px solid var(--border-primary) !important;
+    background: var(--bg-primary) !important;
+    position: relative;
+    z-index: 1000;
+    min-height: 60px;
+    align-items: center;
+    bottom: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    border-radius: 0 0 24px 24px;
 }
 
 .modal-footer .btn {
@@ -981,6 +1142,26 @@ button[type="submit"] .btn-text,
 
 .modal-content {
     z-index: 999999 !important; /* Below toasts */
+    position: relative;
+    background-color: var(--background-secondary);
+    border-radius: var(--border-radius-xl);
+    box-shadow: var(--shadow-xl);
+    max-width: 750px;
+    width: 90%;
+    max-height: 90vh;
+    margin: 5vh auto;
+    overflow: hidden;
+    animation: slideInUp 0.3s ease-out;
+    overflow-y: auto;
+    background: #ffffff !important;
+    pointer-events: auto;
+    opacity: 1 !important;
+    visibility: visible !important;
+    display: flex !important;
+    flex-direction: column !important;
+    border: 2px solid rgba(0, 212, 255, 0.4);
+    padding: 20px !important;
+    color: var(--text-primary) !important;
 }
 
 /* ========================================

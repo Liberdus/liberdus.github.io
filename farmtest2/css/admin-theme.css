@@ -25,13 +25,6 @@ body {
 /* ========================================
    ADMIN PANEL LAYOUT - MATCHING HOMEPAGE
    ======================================== */
-.admin-container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 var(--spacing-3);
-}
-
-
 @media (max-width: 768px) {
     .version-badge {
         font-size: 10px;
@@ -56,22 +49,6 @@ body {
 /* ========================================
    BUTTONS - MATCHING HOMEPAGE EXACTLY
    ======================================== */
-.btn {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--spacing-1);
-    padding: var(--spacing-1) var(--spacing-2);
-    border: none;
-    border-radius: var(--border-radius);
-    font-weight: 600;
-    text-decoration: none;
-    cursor: pointer;
-    transition: all 0.2s;
-    font-size: 14px;
-    min-width: 64px;
-    justify-content: center;
-}
-
 .btn-primary {
     background: var(--primary-main);
     color: white;
@@ -83,21 +60,10 @@ body {
     box-shadow: var(--shadow-4);
 }
 
-.btn-secondary {
-    background: var(--secondary-main);
-    color: white;
-}
-
 .btn-secondary:hover {
     background: var(--secondary-hover);
     transform: translateY(-1px);
     box-shadow: var(--shadow-4);
-}
-
-.btn-text {
-    background: transparent;
-    color: var(--primary-main);
-    font-weight: bold;
 }
 
 .btn-text:hover {
@@ -114,16 +80,13 @@ body {
 /* ========================================
    FORMS - MATCHING HOMEPAGE
    ======================================== */
-.form-group {
-    margin-bottom: var(--spacing-2);
-}
-
 .form-label,
 label {
     display: block;
     margin-bottom: var(--spacing-1);
     font-weight: 600;
     color: var(--text-primary);
+    font-size: var(--font-size-sm);
 }
 
 .form-input,
@@ -162,14 +125,6 @@ select:disabled {
     cursor: not-allowed;
 }
 
-.form-help,
-small {
-    display: block;
-    margin-top: var(--spacing-1);
-    font-size: 13px;
-    color: var(--text-secondary);
-}
-
 /* ========================================
    TABLES - MATCHING HOMEPAGE EXACTLY
    ======================================== */
@@ -177,6 +132,10 @@ small {
 table {
     width: 100%;
     border-collapse: collapse;
+    background-color: var(--background-secondary);
+    border-radius: var(--border-radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow);
 }
 
 .table th,
@@ -196,6 +155,10 @@ table th {
     position: sticky;
     top: 0;
     z-index: 10;
+    background-color: var(--background-tertiary);
+    font-size: var(--font-size-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
 .table th .material-icons,
@@ -208,6 +171,7 @@ table th .material-icons {
 .table tbody tr:hover,
 table tbody tr:hover {
     background: var(--surface-hover);
+    background-color: var(--background-tertiary);
 }
 
 .table tbody tr:last-child td,
@@ -218,80 +182,8 @@ table tbody tr:last-child td {
 /* ========================================
    MODALS - MATCHING HOMEPAGE
    ======================================== */
-.modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1100;
-    padding: var(--spacing-2);
-}
-
 [data-theme="dark"] .modal-overlay {
     background-color: rgba(0, 0, 0, 0.7);
-}
-
-.modal-content {
-    background-color: var(--background-paper);
-    border-radius: 12px;
-    box-shadow: var(--shadow-8);
-    max-width: 600px;
-    width: 100%;
-    max-height: 90vh;
-    overflow-y: auto;
-    position: relative;
-}
-
-.modal-header {
-    padding: var(--spacing-2);
-    border-bottom: 1px solid var(--divider);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.modal-header h3 {
-    font-weight: 600;
-    color: var(--text-primary);
-    margin: 0;
-}
-
-.modal-close {
-    width: 32px;
-    height: 32px;
-    border: none;
-    background-color: transparent;
-    color: var(--text-secondary);
-    cursor: pointer;
-    border-radius: var(--border-radius);
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.modal-close:hover {
-    background-color: var(--action-hover);
-    color: var(--text-primary);
-}
-
-.modal-body {
-    padding: var(--spacing-2);
-}
-
-.modal-footer {
-    padding: var(--spacing-2);
-    border-top: 1px solid var(--divider);
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: var(--spacing-1);
 }
 
 /* ========================================

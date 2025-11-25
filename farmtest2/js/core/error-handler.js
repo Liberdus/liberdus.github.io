@@ -625,49 +625,6 @@ class ErrorHandler {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // ==================== ERROR DISPLAY ====================
-
-    /**
-     * Display error to user via notification system
-     */
-    displayError(error, options = {}) {
-        try {
-            const processedError = typeof error === 'object' && error.id ?
-                error : this.processError(error, options.context);
-
-            const { showTechnical = false, autoHide = true, duration = 5000 } = options;
-
-            // Create notification
-            const notification = {
-                id: processedError.id,
-                type: 'error',
-                title: processedError.userMessage.title,
-                message: processedError.userMessage.message,
-                action: processedError.userMessage.action,
-                timestamp: Date.now(),
-                autoHide,
-                duration,
-                metadata: {
-                    category: processedError.category,
-                    severity: processedError.severity,
-                    retryable: processedError.retryable,
-                    suggestions: processedError.suggestions
-                }
-            };
-
-            // Add technical details if requested
-            if (showTechnical) {
-                notification.technicalMessage = processedError.technicalMessage;
-            }
-
-            this.log('Error displayed to user:', processedError.id);
-            return notification;
-        } catch (displayError) {
-            this.logError('Error displaying error:', displayError);
-            return null;
-        }
-    }
-
     /**
      * Create fallback error when processing fails
      */
@@ -714,32 +671,6 @@ class ErrorHandler {
             context: processedError.context,
             technicalMessage: processedError.technicalMessage
         });
-    }
-
-    /**
-     * Get error history
-     */
-    getErrorHistory(limit = 20) {
-        return this.errorHistory.slice(-limit);
-    }
-
-    /**
-     * Get error statistics
-     */
-    getErrorStats() {
-        const stats = {
-            total: this.errorHistory.length,
-            byCategory: {},
-            bySeverity: {},
-            recent: this.errorHistory.filter(e => Date.now() - e.timestamp < 3600000).length // Last hour
-        };
-
-        for (const error of this.errorHistory) {
-            stats.byCategory[error.category] = (stats.byCategory[error.category] || 0) + 1;
-            stats.bySeverity[error.severity] = (stats.bySeverity[error.severity] || 0) + 1;
-        }
-
-        return stats;
     }
 
     /**

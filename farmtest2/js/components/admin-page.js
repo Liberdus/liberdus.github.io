@@ -1583,6 +1583,12 @@ class AdminPage {
                         </div>
                         <div class="info-item">
                             <div class="info-label-wrapper">
+                                <h6>Reward Runway</h6>
+                            </div>
+                            <h6 class="info-value" data-info="reward-runway">Loading...</h6>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label-wrapper">
                                 <h6>Hourly Distribution Rate</h6>
                             </div>
                             <h6 class="info-value" data-info="hourly-rate">Loading...</h6>
@@ -3716,7 +3722,7 @@ class AdminPage {
         const modalContent = modalContainer.querySelector('.modal-content');
 
         if (modalContent) {
-            modalContent.style.background = 'white';
+            modalContent.style.background = 'var(--background-paper)';
             modalContent.style.zIndex = '1000000';
             modalContent.style.opacity = '1';
             modalContent.style.visibility = 'visible';
@@ -4616,6 +4622,9 @@ class AdminPage {
             contractInfo.rewardTokenAddress = rewardTokenAddress;
             this.contractStats.rewardTokenAddress = rewardTokenAddress;
 
+            let balanceValue = null;
+            let rateValue = null;
+
             contractInfo.rewardBalance = await this.safeContractCall(
                 async () => {
                     const stakingContractAddress = contractManager.stakingContract?.address;
@@ -4623,7 +4632,7 @@ class AdminPage {
                         throw new Error('Staking contract address not available');
                     }
                     const balance = await contractManager.rewardTokenContract.balanceOf(stakingContractAddress);
-                    const balanceValue = ethers.utils.formatEther(balance);
+                    balanceValue = Number(ethers.utils.formatEther(balance));
                     return `${balanceValue} ${rewardTokenSymbol}`;
                 },
                 null
@@ -4634,10 +4643,23 @@ class AdminPage {
             contractInfo.hourlyRate = await this.safeContractCall(
                 async () => {
                     const rate = await contractManager.stakingContract.hourlyRewardRate();
-                    const rateValue = Number(ethers.utils.formatEther(rate));
+                    rateValue = Number(ethers.utils.formatEther(rate));
                     return `${rateValue.toFixed(4)} ${rewardTokenSymbol}/hour`;
                 },
                 null
+            );
+
+            // Calculate reward runway
+            contractInfo.rewardRunway = await this.safeContractCall(
+                async () => {
+                    if (balanceValue && rateValue && rateValue > 0) {
+                        const runwayHours = balanceValue / rateValue;
+                        const runwayDays = runwayHours / 24;
+                        return `${runwayHours.toFixed(1)} hours (${runwayDays.toFixed(1)} days)`;
+                    }
+                    return 'N/A';
+                },
+                'N/A'
             );
 
             contractInfo.totalWeight = await this.safeContractCall(
@@ -4677,6 +4699,7 @@ class AdminPage {
             // Show error state
             const errorInfo = {
                 rewardBalance: 'Error',
+                rewardRunway: 'Error',
                 hourlyRate: 'Error',
                 totalWeight: 'Error',
                 stakingAddress: 'Error',
@@ -4702,6 +4725,12 @@ class AdminPage {
         const rewardBalanceEl = document.querySelector('[data-info="reward-balance"]');
         if (rewardBalanceEl) {
             rewardBalanceEl.textContent = info.rewardBalance ?? 'N/A';
+        }
+
+        // Update reward runway
+        const rewardRunwayEl = document.querySelector('[data-info="reward-runway"]');
+        if (rewardRunwayEl) {
+            rewardRunwayEl.textContent = info.rewardRunway ?? 'N/A';
         }
 
         // Update hourly rate (already includes token symbol)
