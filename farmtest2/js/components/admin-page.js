@@ -3943,9 +3943,9 @@ class AdminPage {
 
                             <div class="form-group">
                                 <label for="pair-weight">Allocation Points *</label>
-                                <input type="number" id="pair-weight" class="form-input" step="1" min="1" max="10000" required
+                                <input type="number" id="pair-weight" class="form-input" step="1" min="1" max="1000" required
                                        placeholder="Enter weight (e.g., 100)">
-                                <small class="form-help">Weight determines reward allocation (1-10,000)</small>
+                                <small class="form-help">Weight determines reward allocation (1-1,000)</small>
                                 <div class="field-error" id="pair-weight-error"></div>
                             </div>
 
@@ -4418,9 +4418,9 @@ class AdminPage {
                 break;
             case 'pair-weight':
                 const weight = parseInt(value);
-                if (value && (isNaN(weight) || weight < 1 || weight > 10000)) {
+                if (value && (isNaN(weight) || weight < 1 || weight > 1000)) {
                     isValid = false;
-                    errorMessage = 'Weight must be between 1-10,000';
+                    errorMessage = 'Weight must be between 1-1,000';
                 }
                 break;
         }
@@ -4947,7 +4947,7 @@ class AdminPage {
                                        class="form-input weight-input"
                                        id="weight-${index}"
                                                placeholder="Enter new weight"
-                                       min="1" max="10000"
+                                       min="0" max="1000"
                                                style="padding: 10px 12px; border: 1px solid var(--divider); border-radius: 6px; background: var(--background-default); color: var(--text-primary); font-size: 16px; font-weight: 500; width: 100%; box-sizing: border-box;"
                                        data-pair="${pair.address}"
                                        data-current="${this.formatWeightForDisplay(pair.weight)}">
@@ -5126,8 +5126,8 @@ class AdminPage {
         }
 
         const weightNum = parseInt(weight);
-        if (isNaN(weightNum) || weightNum < 1 || weightNum > 10000) {
-            this.showError('Weight must be a number between 1 and 10,000');
+        if (isNaN(weightNum) || weightNum < 1 || weightNum > 1000) {
+            this.showError('Weight must be a number between 1 and 1,000');
             return;
         }
 
@@ -5221,8 +5221,8 @@ class AdminPage {
             const currentWeight = parseInt(input.dataset.current, 10);
             const newWeightNum = parseInt(newWeight, 10);
 
-            if (isNaN(newWeightNum) || newWeightNum < 0 || newWeightNum > 10000) {
-                this.showError(`Invalid weight value: ${newWeight}. Must be between 0-10,000`);
+            if (isNaN(newWeightNum) || newWeightNum < 0 || newWeightNum > 1000) {
+                this.showError(`Invalid weight value: ${newWeight}. Must be between 0-1,000`);
                 return;
             }
 
