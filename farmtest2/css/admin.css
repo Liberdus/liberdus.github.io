@@ -340,25 +340,6 @@
     font-weight: 500;
 }
 
-/* Error Display */
-.error-display {
-    text-align: center;
-    padding: 60px 20px;
-    background: rgba(244, 67, 54, 0.1);
-    border: 1px solid rgba(244, 67, 54, 0.3);
-    border-radius: 12px;
-}
-
-.error-display h3 {
-    margin: 0 0 15px 0;
-    color: #ff6b6b;
-    font-size: 20px;
-}
-
-.error-display p {
-    color: #a0a0a0;
-    margin-bottom: 25px;
-}
 
 /* Loading States */
 .loading {
@@ -1251,7 +1232,6 @@ table td:last-child {
 
 /* SUBMIT BUTTON VISIBILITY FIXES */
 .modal-footer .btn-danger,
-.modal-footer .btn-warning,
 .modal-footer button[type="submit"],
 .modal-footer button[form="remove-pair-form"],
 .modal-footer button[form="change-signer-form"] {
@@ -1270,11 +1250,6 @@ table td:last-child {
 
 
 
-.new-proposal-highlight {
-    background: linear-gradient(90deg, #e8f5e8 0%, #ffffff 100%) !important;
-    border-left: 4px solid #4caf50 !important;
-    animation: newProposalGlow 3s ease-out;
-}
 
 @keyframes optimisticPulse {
     0%, 100% { opacity: 1; }
@@ -1286,16 +1261,6 @@ table td:last-child {
     50% { transform: scale(1.05); }
 }
 
-@keyframes newProposalGlow {
-    0% {
-        background: linear-gradient(90deg, #c8e6c9 0%, #ffffff 100%);
-        transform: scale(1.02);
-    }
-    100% {
-        background: linear-gradient(90deg, #ffffff 0%, #ffffff 100%);
-        transform: scale(1);
-    }
-}
 
 .form-group label {
     display: block;

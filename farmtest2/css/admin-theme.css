@@ -90,7 +90,6 @@ label {
 }
 
 .form-input,
-.form-control,
 input[type="text"],
 input[type="number"],
 input[type="email"],
@@ -108,7 +107,6 @@ select {
 }
 
 .form-input:focus,
-.form-control:focus,
 input:focus,
 textarea:focus,
 select:focus {
@@ -117,7 +115,6 @@ select:focus {
 }
 
 .form-input:disabled,
-.form-control:disabled,
 input:disabled,
 textarea:disabled,
 select:disabled {

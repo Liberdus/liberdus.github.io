@@ -101,7 +101,6 @@ body {
 .btn-secondary,
 .btn-danger,
 .btn-error,
-.btn-warning,
 .btn-success {
     background: var(--primary-main) !important;
     border: none !important;
@@ -123,10 +122,6 @@ body {
 .btn-danger,
 .btn-error {
     background: var(--error-main) !important;
-}
-
-.btn-warning {
-    background: var(--warning-main) !important;
 }
 
 .btn-success {
@@ -154,11 +149,6 @@ body {
     box-shadow: 0 4px 12px rgba(244, 67, 54, 0.3) !important;
 }
 
-.btn-warning:hover:not(:disabled) {
-    background: #fb8c00 !important;
-    transform: translateY(-1px) !important;
-    box-shadow: var(--shadow-4) !important;
-}
 
 .btn-success:hover:not(:disabled) {
     background: #43a047 !important;
@@ -604,7 +594,6 @@ textarea::placeholder {
 /* ========================================
    ERROR STATES - HOMEPAGE STYLE
    ======================================== */
-.error-state,
 .error-message {
     background: rgba(244, 67, 54, 0.1) !important;
     border: 1px solid var(--error-main) !important;
@@ -924,22 +913,6 @@ select option:disabled,
     }
 }
 
-.loading-spinner-container {
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    padding: 40px !important;
-    color: var(--text-secondary) !important;
-}
-
-.loading-spinner-container .spinner {
-    width: 40px !important;
-    height: 40px !important;
-    border: 4px solid var(--divider) !important;
-    border-top-color: var(--primary-main) !important;
-    border-radius: 50% !important;
-    animation: spin 0.8s linear infinite !important;
-}
 
 .loading-text {
     margin-left: 12px !important;
@@ -964,7 +937,6 @@ select option:disabled,
 button[type="submit"] .btn-text,
 .btn-primary .btn-text,
 .btn-danger .btn-text,
-.btn-warning .btn-text,
 .btn-secondary .btn-text {
     color: white !important;
 }
@@ -1049,7 +1021,6 @@ button[type="submit"] .btn-text,
 .btn-primary:active:not(:disabled),
 .btn-danger:active:not(:disabled),
 .btn-error:active:not(:disabled),
-.btn-warning:active:not(:disabled),
 .btn-secondary:active:not(:disabled),
 .proposal-btn:active:not(:disabled) {
     transform: translateY(0) !important;

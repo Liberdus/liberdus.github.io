@@ -210,34 +210,6 @@
     color: #334155;
 }
 
-/* ========================================
-   DARK MODE THEME (Body class variant)
-   ======================================== */
-body.dark-mode .notification {
-    background: rgba(30, 41, 59, 0.95);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(71, 85, 105, 0.5);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-}
-
-body.dark-mode .notification-title {
-    color: #f1f5f9;
-}
-
-body.dark-mode .notification-message {
-    color: #cbd5e1;
-}
-
-body.dark-mode .notification-close {
-    background: rgba(71, 85, 105, 0.4);
-    color: #94a3b8;
-}
-
-body.dark-mode .notification-close:hover {
-    background: rgba(100, 116, 139, 0.6);
-    color: #e2e8f0;
-}
 
 @media (prefers-contrast: high) {
     .notification {

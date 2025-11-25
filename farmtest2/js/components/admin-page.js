@@ -1583,15 +1583,21 @@ class AdminPage {
                         </div>
                         <div class="info-item">
                             <div class="info-label-wrapper">
-                                <h6>Reward Runway</h6>
+                                <h6>Reward Obligation</h6>
                             </div>
-                            <h6 class="info-value" data-info="reward-runway">Loading...</h6>
+                            <h6 class="info-value" data-info="reward-obligation">Loading...</h6>
                         </div>
                         <div class="info-item">
                             <div class="info-label-wrapper">
                                 <h6>Hourly Distribution Rate</h6>
                             </div>
                             <h6 class="info-value" data-info="hourly-rate">Loading...</h6>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label-wrapper">
+                                <h6>Reward Runway</h6>
+                            </div>
+                            <h6 class="info-value" data-info="reward-runway">Loading...</h6>
                         </div>
                         <div class="info-item">
                             <div class="info-label-wrapper">
@@ -4640,6 +4646,17 @@ class AdminPage {
 
             this.contractStats.rewardBalance = contractInfo.rewardBalance;
 
+            contractInfo.rewardObligation = await this.safeContractCall(
+                async () => {
+                    const obligation = await contractManager.stakingContract.getTotalRewardObligation();
+                    const obligationValue = Number(ethers.utils.formatEther(obligation));
+                    return `${obligationValue} ${rewardTokenSymbol}`;
+                },
+                null
+            );
+
+            this.contractStats.rewardObligation = contractInfo.rewardObligation;
+
             contractInfo.hourlyRate = await this.safeContractCall(
                 async () => {
                     const rate = await contractManager.stakingContract.hourlyRewardRate();
@@ -4653,9 +4670,16 @@ class AdminPage {
             contractInfo.rewardRunway = await this.safeContractCall(
                 async () => {
                     if (balanceValue && rateValue && rateValue > 0) {
-                        const runwayHours = balanceValue / rateValue;
-                        const runwayDays = runwayHours / 24;
-                        return `${runwayHours.toFixed(1)} hours (${runwayDays.toFixed(1)} days)`;
+                        const obligation = await contractManager.stakingContract.getTotalRewardObligation();
+                        const obligationValue = Number(ethers.utils.formatEther(obligation));
+                        const effectiveBalance = balanceValue - obligationValue;
+                        if (effectiveBalance > 0) {
+                            const runwayHours = effectiveBalance / rateValue;
+                            const runwayDays = runwayHours / 24;
+                            return `${runwayHours.toFixed(1)} hours (${runwayDays.toFixed(1)} days)`;
+                        } else {
+                            return '0.0 hours (0.0 days)';
+                        }
                     }
                     return 'N/A';
                 },
@@ -4699,6 +4723,7 @@ class AdminPage {
             // Show error state
             const errorInfo = {
                 rewardBalance: 'Error',
+                rewardObligation: 'Error',
                 rewardRunway: 'Error',
                 hourlyRate: 'Error',
                 totalWeight: 'Error',
@@ -4710,6 +4735,7 @@ class AdminPage {
             this.contractStats = this.contractStats || {};
             this.contractStats.rewardTokenSymbol = this.contractStats.rewardTokenSymbol || 'USDC';
             this.contractStats.rewardBalance = errorInfo.rewardBalance;
+            this.contractStats.rewardObligation = errorInfo.rewardObligation;
             this.contractStats.stakingContractAddress = this.contractStats.stakingContractAddress || null;
             this.contractStats.rewardTokenAddress = this.contractStats.rewardTokenAddress || null;
             this.displayContractInfo(errorInfo);
@@ -4725,6 +4751,12 @@ class AdminPage {
         const rewardBalanceEl = document.querySelector('[data-info="reward-balance"]');
         if (rewardBalanceEl) {
             rewardBalanceEl.textContent = info.rewardBalance ?? 'N/A';
+        }
+
+        // Update reward obligation
+        const rewardObligationEl = document.querySelector('[data-info="reward-obligation"]');
+        if (rewardObligationEl) {
+            rewardObligationEl.textContent = info.rewardObligation ?? 'N/A';
         }
 
         // Update reward runway

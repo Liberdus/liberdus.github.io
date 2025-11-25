@@ -199,6 +199,7 @@ window.CONFIG.ABIS = {
         'function hourlyRewardRate() external view returns (uint256)',
         'function totalWeight() external view returns (uint256)',
         'function getSigners() external view returns (address[])',
+        'function getTotalRewardObligation() external view returns (uint256)',
 
         // Access control
         'function hasRole(bytes32 role, address account) external view returns (bool)',

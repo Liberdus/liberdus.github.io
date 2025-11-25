@@ -169,10 +169,6 @@
         padding: var(--spacing-2);
     }
 
-    .avatar-circle {
-        width: 56px;
-        height: 56px;
-    }
 
     .address-text {
         font-size: 0.875rem;
@@ -184,28 +180,6 @@
     }
 }
 
-/* Animation Classes */
-.wallet-popup-enter {
-    opacity: 0;
-    transform: translateY(-10px) scale(0.95);
-}
-
-.wallet-popup-enter-active {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-    transition: all 0.2s ease-out;
-}
-
-.wallet-popup-exit {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-}
-
-.wallet-popup-exit-active {
-    opacity: 0;
-    transform: translateY(-10px) scale(0.95);
-    transition: all 0.15s ease-in;
-}
 
 /* Focus States for Accessibility */
 .action-button:focus,
