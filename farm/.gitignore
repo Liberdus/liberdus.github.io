@@ -94,7 +94,7 @@ js/config/dev-config.js
 js/config/demo-config.js
 
 # Utility files for development only
-js/utils/ses-safe-handler.js
+# Note: ses-safe-handler.js is required for production, so it's not ignored
 
 # Documentation folder (if you want to exclude all docs)
 docs/
