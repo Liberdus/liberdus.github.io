@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LP Staking - Admin Panel</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="../assets/logo.png">
+    
+    <!-- Fonts -->
+    <link rel="stylesheet" href="../css/fonts.css">
+
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="../css/base.css">
+    <link rel="stylesheet" href="../css/components.css">
+    <link rel="stylesheet" href="../css/shared-header.css">
+    <link rel="stylesheet" href="../css/wallet-popup.css">
+    <link rel="stylesheet" href="../css/theme-toggle.css">
+    <link rel="stylesheet" href="../css/notifications.css">
+    <link rel="stylesheet" href="../css/network-indicator-selector.css">
+    <link rel="stylesheet" href="../css/admin-combined.css">
+    <link rel="stylesheet" href="../css/admin-loading.css">
+    
+    <!-- Meta Tags -->
+    <meta name="description" content="LP Staking Admin Panel - Manage liquidity provider staking contracts">
+    <meta name="keywords" content="DeFi, LP Staking, Admin, Blockchain, Ethereum, Polygon">
+    <meta name="author" content="LP Staking Protocol">
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="LP Staking - Admin Panel">
+    <meta property="og:description" content="Administrative interface for LP Staking Protocol">
+    <meta property="og:type" content="website">
+    
+    <!-- Security Headers -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+
+</head>
+<body>
+    <header class="header" role="banner">
+        <div class="container-lg">
+            <div class="header-toolbar">
+                <a href="../" class="logo-section" aria-label="Liberdus LP Staking - Home">
+                    <img src="../assets/logo.png" alt="Liberdus LP Staking" class="logo">
+                    <span class="logo-text">Liberdus LP Admin Panel</span>
+                    <span class="version-badge" id="app-version">v0.0.0</span>
+                </a>
+
+                <nav class="nav-section" role="navigation" aria-label="Main navigation">
+                    <a href="../" id="admin-panel-link" class="nav-button">
+                        <span class="material-icons" aria-hidden="true">home</span>
+                        <span>Home</span>
+                    </a>
+
+                    <div id="network-indicator-home" class="network-indicator-home" style="display:none;">
+                        <!-- Populated by JavaScript -->
+                    </div>
+
+                    <button id="connect-wallet-btn"
+                            class="connect-wallet-btn"
+                            aria-describedby="wallet-status"
+                            aria-live="polite"
+                            aria-busy="true"
+                            disabled>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"></path>
+                        </svg>
+                        <span class="wallet-status-text">Checking wallet status...</span>
+                    </button>
+
+                    <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark/light theme">
+                        <span class="material-icons-outlined" aria-hidden="true">light_mode</span>
+                    </button>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <main id="admin-main">
+        <!-- Admin Panel Container -->
+        <div id="admin-content">
+            <div class="admin-loading">
+                <div class="loading-container">
+                    <div class="loading-spinner"></div>
+                    <h2>🔐 Initializing Admin Panel</h2>
+                    <p>Verifying administrator privileges...</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal Container (ADDED) -->
+    <div id="modal-container" style="display: none;"></div>
+    <div id="notification-container" class="notification-container"></div>
+
+    <!-- Error Boundary -->
+    <div id="error-boundary" style="display: none;">
+        <div class="error-container">
+            <h2>❌ System Error</h2>
+            <p id="error-message">An unexpected error occurred.</p>
+            <button class="btn btn-primary" onclick="location.reload()">
+                Reload Page
+            </button>
+        </div>
+    </div>
+
+    <!-- Version Check System (runs first to ensure fresh cache) -->
+    <script src="../js/utils/version-check.js"></script>
+
+    <!-- Scripts -->
+    <!-- Configuration (load first) -->
+    <script src="../js/config/app-config.js"></script>
+    <!-- <script src="../js/config/dev-config.js"></script> -->
+
+    <!-- Theme System (load early to prevent flash) -->
+    <script src="../js/core/unified-theme-manager.js"></script>
+
+    <!-- Core System -->
+    <script src="../js/core/error-handler.js"></script>
+    
+    <!-- Wallet Integration -->
+    <script src="../js/wallet/wallet-manager.js"></script>
+    <script src="../js/wallet/metamask-connector.js"></script>
+    
+    <!-- Contract System -->
+    <script src="../js/contracts/contract-manager.js"></script>
+
+    <!-- Admin Components -->
+    <script src="../js/components/admin-page.js"></script>
+    <script src="../js/components/wallet-popup.js"></script>
+
+    <!-- Master Initializer -->
+    <script src="../js/master-initializer.js"></script>
+
+    <script>
+        // Debug initialization
+        console.log('🔧 ADMIN DEBUG: Page scripts loading...');
+
+        // Check dependencies periodically
+        let checkCount = 0;
+        const maxChecks = 20;
+
+        function checkDependencies() {
+            checkCount++;
+            console.log(`🔧 ADMIN DEBUG: Dependency check ${checkCount}/${maxChecks}`);
+            console.log('🔧 ADMIN DEBUG: Dependencies status:', {
+                ethers: typeof window.ethers !== 'undefined',
+                CONFIG: typeof window.CONFIG !== 'undefined',
+                contractManager: typeof window.contractManager !== 'undefined',
+                adminPage: typeof window.adminPage !== 'undefined'
+            });
+
+            if (typeof window.ethers !== 'undefined' &&
+                typeof window.CONFIG !== 'undefined' &&
+                typeof window.ContractManager !== 'undefined') {
+
+                // Try to initialize ContractManager if it doesn't exist
+                if (typeof window.contractManager === 'undefined') {
+                    console.log('🔧 ADMIN DEBUG: Initializing ContractManager...');
+                    try {
+                        window.contractManager = new ContractManager();
+                        console.log('✅ ADMIN DEBUG: ContractManager created');
+                    } catch (error) {
+                        console.error('❌ ADMIN DEBUG: Failed to create ContractManager:', error);
+                        console.error('❌ ADMIN DEBUG: Error details:', error.message);
+                        console.error('❌ ADMIN DEBUG: Error stack:', error.stack);
+                    }
+                }
+
+                if (typeof window.contractManager !== 'undefined') {
+                    console.log('✅ ADMIN DEBUG: All dependencies loaded!');
+                    return true;
+                }
+            } else {
+                // Enhanced debugging for missing dependencies
+                console.log('🔍 ADMIN DEBUG: Dependency check status:');
+                console.log('  - ethers:', typeof window.ethers !== 'undefined' ? '✅' : '❌');
+                console.log('  - CONFIG:', typeof window.CONFIG !== 'undefined' ? '✅' : '❌');
+                console.log('  - ContractManager class:', typeof window.ContractManager !== 'undefined' ? '✅' : '❌');
+            }
+
+            if (checkCount < maxChecks) {
+                setTimeout(checkDependencies, 500);
+            } else {
+                console.error('❌ ADMIN DEBUG: Dependencies failed to load after 10 seconds');
+            }
+            return false;
+        }
+
+        // Start checking after a short delay
+        setTimeout(checkDependencies, 500);
+
+        // Prevent duplicate script loading and initialization
+        if (window.adminPanelLoaded) {
+            console.log('⚠️ Admin panel already loaded, skipping initialization');
+        } else {
+            window.adminPanelLoaded = true;
+            console.log('🔐 Admin panel scripts loading...');
+        }
+
+        // Global error handler
+        window.addEventListener('error', (event) => {
+            console.error('Global error:', event.error);
+            showErrorBoundary(event.error.message);
+        });
+
+        window.addEventListener('unhandledrejection', (event) => {
+            console.error('Unhandled promise rejection:', event.reason);
+            showErrorBoundary(event.reason.message || 'Promise rejection');
+        });
+
+        function showErrorBoundary(message) {
+            document.getElementById('admin-content').style.display = 'none';
+            document.getElementById('error-boundary').style.display = 'flex';
+            document.getElementById('error-message').textContent = message;
+        }
+
+        // Admin Panel Initialization
+        let adminPage = null;
+
+        async function initializeAdminPanel() {
+            try {
+                console.log('🚀 Starting Admin Panel initialization...');
+
+                // Debug: Check what's available
+                console.log('🔍 System check:');
+                console.log('  - ethers:', !!window.ethers);
+                console.log('  - WalletManager class:', !!window.WalletManager);
+                console.log('  - walletManager instance:', !!window.walletManager);
+                console.log('  - masterInitializer:', !!window.masterInitializer);
+                console.log('  - AdminPage class:', !!window.AdminPage);
+
+                // ENHANCED: More flexible initialization with timeout
+                try {
+                    if (!window.masterInitializer) {
+                        console.log('⏳ Waiting for master initializer...');
+                        await waitForMasterInitializer(15000); // Shorter timeout
+                    }
+
+                    // Initialize master system
+                    if (window.masterInitializer && !window.masterInitializer.isInitialized) {
+                        console.log('🔧 Initializing master system...');
+                        await window.masterInitializer.init();
+                    }
+                } catch (initError) {
+                    console.warn('⚠️ Master initialization failed, proceeding with basic setup:', initError.message);
+
+                    // Basic fallback initialization
+                    if (!window.contractManager && window.ContractManager) {
+                        console.log('🔗 Creating contract manager directly...');
+                        window.contractManager = new ContractManager();
+                        await window.contractManager.init();
+                    }
+                }
+
+                // Debug: Check wallet manager after initialization
+                console.log('🔍 Post-init check:');
+                console.log('  - walletManager:', !!window.walletManager);
+                if (window.walletManager) {
+                    console.log('  - connectWallet method:', typeof window.walletManager.connectWallet);
+                    console.log('  - connectMetaMask method:', typeof window.walletManager.connectMetaMask);
+                    console.log('  - isConnected method:', typeof window.walletManager.isConnected);
+                }
+
+                // Check if AdminPage is available
+                if (typeof AdminPage === 'undefined') {
+                    throw new Error('AdminPage class not loaded. Check if admin-page.js is loading correctly.');
+                }
+
+                // Create admin page instance
+                console.log('🔐 Creating admin page...');
+                adminPage = new AdminPage();
+
+                // Make globally accessible
+                window.adminPage = adminPage;
+
+                console.log('✅ Admin Panel initialization complete');
+
+            } catch (error) {
+                console.error('❌ Admin Panel initialization failed:', error);
+                showErrorBoundary(`Initialization failed: ${error.message}`);
+            }
+        }
+
+        function waitForMasterInitializer(timeout = 30000) {
+            return new Promise((resolve, reject) => {
+                const startTime = Date.now();
+                
+                const checkInitializer = () => {
+                    if (window.masterInitializer) {
+                        resolve();
+                    } else if (Date.now() - startTime > timeout) {
+                        reject(new Error('Master initializer timeout'));
+                    } else {
+                        setTimeout(checkInitializer, 100);
+                    }
+                };
+                
+                checkInitializer();
+            });
+        }
+
+        // Connect wallet helper that delegates to the shared WalletManager
+        async function connectWallet(preferredWallet = 'metamask') {
+            try {
+                console.log('🔗 Attempting wallet connection via WalletManager...');
+                const result = await window.walletManager.connectWallet(preferredWallet);
+
+                // Snapshot connection details for legacy checks
+                const wm = window.walletManager;
+                const provider = wm.getProvider?.() || wm.provider;
+                const chainId = wm.getChainId?.() || result?.chainId;
+
+                window.walletConnection = {
+                    provider,
+                    signer: wm.getSigner?.() || wm.signer,
+                    address: wm.getAddress?.() || result?.address,
+                    network: provider ? await provider.getNetwork().catch(() => ({ chainId })) : { chainId },
+                    isConnected: true
+                };
+
+                console.log('✅ Wallet connected through WalletManager', window.walletConnection.address, chainId);
+
+                // Re-run admin initialization to unlock the panel
+                setTimeout(() => window.adminPage?.init?.(), 500);
+
+                return result;
+
+            } catch (error) {
+                console.error('❌ Wallet connection failed:', error);
+                const message = error?.message || 'An unexpected error occurred while connecting to the wallet.';
+                (window.notificationManager?.error || alert)(message);
+                throw error;
+            }
+        }
+
+        // Auto-initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('📄 DOM loaded, waiting for system initialization...');
+            // Allow master initializer microtasks to complete
+            setTimeout(() => {
+                console.log('🔐 Starting admin panel initialization...');
+
+                // Check if all required classes are loaded
+                const requiredClasses = ['AdminPage', 'ContractManager', 'WalletManager'];
+                const missingClasses = requiredClasses.filter(className => typeof window[className] === 'undefined');
+
+                if (missingClasses.length > 0) {
+                    console.error('❌ Missing required classes:', missingClasses);
+
+                    // Check if scripts are still loading
+                    const scripts = document.querySelectorAll('script[src*="admin-page.js"], script[src*="contract-manager.js"], script[src*="wallet-manager.js"]');
+                    console.log('📜 Script elements found:', scripts.length);
+
+                    // Try a few more times with increasing delays
+                    let retryCount = parseInt(sessionStorage.getItem('adminInitRetryCount') || '0');
+                    if (retryCount < 3) {
+                        sessionStorage.setItem('adminInitRetryCount', (retryCount + 1).toString());
+                        console.log(`🔄 Retry attempt ${retryCount + 1}/3 in ${(retryCount + 1) * 2} seconds...`);
+                        setTimeout(initializeAdminPanel, (retryCount + 1) * 2000);
+                    } else {
+                        console.error('❌ Max retries reached. Script loading failed.');
+                        showErrorBoundary('Failed to load required scripts. Please refresh the page.');
+                        sessionStorage.removeItem('adminInitRetryCount');
+                    }
+                } else {
+                    console.log('✅ All required classes loaded');
+                    sessionStorage.removeItem('adminInitRetryCount');
+                    initializeAdminPanel();
+                }
+            }, 0); // Kick off on next tick
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (adminPage) {
+                adminPage.destroy();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,160 @@
+/* Network Indicator and Selector Styles */
+
+/* Network Selector Styles */
+.network-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 12px;
+}
+
+.network-selector-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.network-select {
+    min-width: 160px;
+    height: 38px !important;
+    padding: 0 48px 0 16px !important;
+    font-size: 14px !important;
+    line-height: 38px !important;
+    background: var(--background-paper, rgba(0, 0, 0, 0.05));
+    color: var(--text-primary, #1f2937);
+    border: 1px solid var(--primary-main, #1976d2) !important;
+    border-radius: 8px !important;
+    cursor: pointer;
+    transition: all 0.2s ease !important;
+}
+
+.network-select:hover {
+    background: var(--surface-hover, rgba(25, 118, 210, 0.08));
+    border-color: var(--primary-main, #1976d2) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(25, 118, 210, 0.25);
+}
+
+.network-select:focus {
+    outline: none;
+    border-color: var(--primary-main, #1976d2) !important;
+    box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2);
+}
+
+.network-select option {
+    background: var(--background-paper, rgba(0, 0, 0, 0.05));
+    color: var(--text-primary, #1f2937);
+    padding: 8px 12px;
+}
+
+.network-select-wrapper {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    height: 38px;
+}
+
+/* Layout specific */
+.network-indicator-home .network-selector {
+    margin-left: 0;
+    flex: 1;
+    min-width: 0;
+}
+
+/* Status indicators */
+.network-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 0;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+}
+
+.network-status-dot.green {
+    background: #4CAF50;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.network-status-dot.red {
+    background: #f44336;
+    box-shadow: 0 0 0 2px rgba(244, 67, 54, 0.2);
+}
+
+.network-status-dot.gray {
+    background: #666;
+    border: 2px solid #666;
+    box-shadow: 0 0 0 2px rgba(102, 102, 102, 0.2);
+}
+
+.network-indicator-home {
+    height: 38px;
+    min-height: 32px;
+    border-radius: 4px;
+    padding: 0 8px 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+    cursor: default;
+    box-sizing: border-box;
+    position: relative;
+    max-width: 300px;
+    background: transparent;
+    border: none;
+}
+
+html[data-theme="dark"] .network-indicator-home {
+    background: transparent;
+    border: none;
+    color: #fff;
+}
+
+html[data-theme="light"] .network-indicator-home {
+    background: transparent;
+    border: none;
+    color: #000;
+}
+
+.network-indicator-home.no-wallet {
+    opacity: 0.8;
+}
+
+.network-indicator-home.loading {
+    opacity: 0.6;
+}
+
+.network-indicator-home.loading .network-status-dot {
+    background: #888;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .network-selector {
+        margin-left: 6px;
+    }
+    
+    .network-select {
+        height: 34px !important;
+        line-height: 34px !important;
+        font-size: 12px !important;
+        padding: 0 40px 0 12px !important;
+        min-width: 130px;
+    }
+}
+
+@media (max-width: 480px) {
+    .network-selector {
+        margin-left: 4px;
+    }
+    
+    .network-select {
+        height: 32px !important;
+        line-height: 32px !important;
+        font-size: 11px !important;
+        padding: 0 36px 0 10px !important;
+        min-width: 110px;
+    }
+}

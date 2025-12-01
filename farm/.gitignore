@@ -1,0 +1,105 @@
+# Development and temporary files
+node_modules/
+.env
+.env.local
+*.log
+.DS_Store
+Thumbs.db
+DEMO_SCRIPT.md
+FIXES_SUMMARY.md
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing and documentation files
+TESTING_GUIDE.md
+TEST_EXECUTION_REPORT.md
+INTEGRATION_VERIFICATION_SUMMARY.md
+URGENT_FIXES_APPLIED.md
+FEATURE_VERIFICATION_REPORT.md
+DAY6-REWARDS-SYSTEM-COMPLETE.md
+DAY7-HOMEPAGE-DASHBOARD-COMPLETE.md
+
+# Test files
+test-admin.html
+test-cache.html
+test-subdirectory-deployment.html
+*-test.html
+debug*.html
+temp*.html
+day6-rewards-system-test.html
+contract-verification-test.html
+quick-contract-test.html
+fixed-contract-test.html
+debug-dashboard.html
+rpc-test.html
+index-clean.html
+setup-subdirectory-test.ps1
+
+# Build and distribution files
+dist/
+build/
+*.min.js.map
+*.css.map
+
+# Cache and temporary directories
+.cache/
+.tmp/
+tmp/
+temp/
+test-deployment/
+test-server/
+
+# OS generated files
+*.tmp
+*.temp
+*~
+.fuse_hidden*
+
+# Package manager files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Development server files
+cors-server.js
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Documentation drafts
+*-DRAFT.md
+*-WIP.md
+*-TODO.md
+ADMIN_PANEL_DOCUMENTATION.md
+DEVELOPMENT_MODE_GUIDE.md
+milestones.md
+CACHING_*.md
+SUBDIRECTORY_*.md
+CLEANUP_*.md
+*_PLAN.md
+*_RESULTS.md
+
+# Development configuration backups
+*-config-backup.js
+dev-*.json
+
+# Development config files (keep template versions only)
+js/config/dev-config.js
+js/config/demo-config.js
+
+# Utility files for development only
+js/utils/ses-safe-handler.js
+
+# Documentation folder (if you want to exclude all docs)
+docs/
+
+# Local server files
+*.py
+serve.py
+server.py

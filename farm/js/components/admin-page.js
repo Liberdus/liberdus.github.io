@@ -1,0 +1,5285 @@
+/**
+ * AdminPage Component - Role-based Admin Panel
+ * Implements Phase 3, Day 8 requirements for admin panel with access control
+ */
+
+class AdminPage {
+    constructor() {
+        this.isInitialized = false;
+        this.isAuthorized = false;
+        this.userAddress = null;
+        this.adminRole = null;
+        this.contractStats = {};
+        this.refreshInterval = null;
+        this.isRefreshing = false; // Prevent overlapping refreshes
+        this.autoRefreshActive = false; // Prevent multiple auto-refresh timers
+
+        // PERFORMANCE OPTIMIZATION: Proposal state management
+        this.proposalsCache = new Map(); // Cache proposals by ID for O(1) access
+        this.lastProposalId = 0; // Track highest proposal ID for incremental loading
+        this.pendingOptimisticUpdates = new Map(); // Track optimistic updates
+
+        // PAGINATION OPTIMIZATION: Track loaded proposals for "Load More" functionality
+        this.loadedProposalCount = 0; // Track how many proposals are currently loaded
+        this.totalProposalCount = 0; // Track total available proposals
+        this.isLoadingMore = false; // Prevent multiple simultaneous load more requests
+
+        // SELECTIVE UPDATE OPTIMIZATION: Track proposal states for smart updates
+        this.proposalStates = new Map(); // Cache proposal states for change detection
+        this.lastKnownProposalCount = 0; // Track last known total proposal count
+        this.isSelectiveUpdateEnabled = true; // Enable selective update system
+
+        // UI state: remember proposal filter preference across refreshes
+        this.proposalFilter = 'pending';
+
+        // Shared selectors for address copy functionality
+        this.addressCopySelectors = [
+            '.address-display',
+            '.parameter-value.address-display',
+            '.pair-address',
+            '.signer-address',
+            '[data-info="staking-address"]',
+            '[data-info="reward-token-address"]'
+        ].join(', ');
+
+        // Initialize asynchronously (don't await in constructor)
+        this.init().catch(error => {
+            console.error('❌ AdminPage initialization failed:', error);
+            this.showInitializationError(error);
+        });
+    }
+
+    /**
+     * Show initialization error to user
+     */
+    showInitializationError(error) {
+        const adminContent = document.getElementById('admin-content');
+        if (adminContent) {
+            adminContent.innerHTML = `
+                <div class="error-container">
+                    <div class="error-icon">❌</div>
+                    <h2>Initialization Failed</h2>
+                    <p>The admin panel failed to initialize properly.</p>
+                    <div class="error-details">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                    <button class="btn btn-primary" onclick="location.reload()">
+                        Reload Page
+                    </button>
+                </div>
+            `;
+        }
+    }
+
+    async init() {
+        try {
+            // Production mode - wait for contract manager and wallet
+            await this.waitForSystemReady();
+
+            // Network health check removed for performance optimization
+            // The contract manager already includes network connectivity checks and RPC failover mechanisms,
+            // making this redundant 20-second delay unnecessary. The system will gracefully handle network
+            // issues when loading data, providing better user experience with faster initialization.
+            console.log('🏥 Skipping network health check for faster initialization...');
+
+            // Wait for contract manager to be ready
+            if (!window.contractManager?.isReady()) {
+                await this.waitForContractManager();
+                console.log('✅ Contract manager ready');
+            } else {
+                console.log('✅ Contract manager already ready');
+            }
+
+            // Check if wallet manager exists and is properly initialized
+            if (!window.walletManager) {
+                console.warn('⚠️ Wallet manager not available, showing connect prompt');
+                this.showConnectWalletPrompt();
+                return;
+            }
+
+            // Check if wallet is connected (with proper error handling)
+            let isConnected = false;
+            try {
+                isConnected = typeof window.walletManager.isConnected === 'function'
+                    ? window.walletManager.isConnected()
+                    : false;
+            } catch (walletError) {
+                console.error('⚠️ Wallet manager error:', walletError.message);
+                this.showConnectWalletPrompt();
+                return;
+            }
+
+            if (!isConnected) {
+                console.warn('⚠️ Wallet not connected, showing connect prompt');
+                this.showConnectWalletPrompt();
+                return;
+            }
+
+            // Setup wallet listeners to handle account changes
+            this.setupWalletListeners();
+
+            // Verify admin access
+            await this.verifyAdminAccess();
+
+            if (this.isAuthorized) {
+                await this.loadAdminInterface();
+                this.startAutoRefresh();
+            } else {
+                console.error('❌ User not authorized, showing unauthorized access');
+                this.showUnauthorizedAccess();
+            }
+
+            this.isInitialized = true;
+
+        } catch (error) {
+            console.error('❌ Admin Panel initialization failed:', error);
+            this.showError('Failed to initialize admin panel', error.message);
+        }
+    }
+
+    async waitForSystemReady(timeout = 30000) {
+        const startTime = Date.now();
+
+        return new Promise((resolve, reject) => {
+            const checkReady = () => {
+                const elapsed = Date.now() - startTime;
+
+                // Check if timeout exceeded
+                if (elapsed > timeout) {
+                    console.warn(`⚠️ System readiness timeout after ${timeout}ms - proceeding with available components`);
+                    // Don't reject, just resolve with what we have
+                    resolve();
+                    return;
+                }
+
+                // Check system components (ENHANCED: More flexible requirements)
+                const ethersAvailable = !!window.ethers;
+                const configAvailable = !!window.CONFIG;
+
+                // ENHANCED: More flexible requirements - proceed if we have basic components
+                if (ethersAvailable && configAvailable) {
+                    resolve();
+                } else {
+                    // Show what's missing
+                    const missing = [];
+                    if (!ethersAvailable) missing.push('ethers');
+                    if (!configAvailable) missing.push('config');
+
+                    console.warn(`⏳ Still waiting for: ${missing.join(', ')}`);
+
+                    // Continue checking with shorter interval
+                    setTimeout(checkReady, 1000);
+                }
+            };
+
+            checkReady();
+        });
+    }
+
+    async waitForContractManager(timeout = 30000) {
+        return new Promise((resolve, reject) => {
+            const startTime = Date.now();
+
+            const checkReady = () => {
+                if (window.contractManager?.isReady()) {
+                    resolve();
+                } else if (Date.now() - startTime > timeout) {
+                    reject(new Error('Contract manager timeout'));
+                } else {
+                    setTimeout(checkReady, 1000);
+                }
+            };
+
+            checkReady();
+        });
+    }
+
+    async verifyAdminAccess() {
+        try {
+            // Get current user address
+            if (window.walletManager?.isConnected()) {
+                this.userAddress = await window.walletManager.getAddress();
+            } else {
+                throw new Error('Wallet not connected');
+            }
+
+            // Check against authorized admin list first (development/fallback)
+            if (window.DEV_CONFIG?.AUTHORIZED_ADMINS) {
+                const isAuthorizedAdmin = window.DEV_CONFIG.AUTHORIZED_ADMINS.some(
+                    adminAddress => adminAddress.toLowerCase() === this.userAddress.toLowerCase()
+                );
+
+                if (isAuthorizedAdmin) {
+                    this.isAuthorized = true;
+                    return;
+                }
+            }
+
+            // Check if user has admin role via contract
+            if (window.contractManager?.stakingContract) {
+                try {
+                    // Try to call hasRole function
+                    const hasAdminRole = await window.contractManager.hasAdminRole(this.userAddress);
+
+                    if (hasAdminRole) {
+                        this.isAuthorized = true;
+                        return;
+                    }
+
+                    if (typeof window.contractManager.hasOwnerApproverRole === 'function') {
+                        const hasOwnerRole = await window.contractManager.hasOwnerApproverRole(this.userAddress);
+                        this.isAuthorized = hasOwnerRole;
+
+                        if (this.isAuthorized) return;
+                    } else {
+                        this.isAuthorized = false;
+                    }
+
+                } catch (roleError) {
+                    console.error('⚠️ Role check failed, checking owner approver role as fallback:', roleError.message);
+
+                    if (typeof window.contractManager?.hasOwnerApproverRole === 'function') {
+                        try {
+                            const hasOwnerRole = await window.contractManager.hasOwnerApproverRole(this.userAddress);
+                            this.isAuthorized = hasOwnerRole;
+                            console.warn(`🔐 Owner approver role fallback: ${hasOwnerRole ? 'AUTHORIZED' : 'DENIED'}`);
+
+                            if (this.isAuthorized) return;
+
+                        } catch (ownerRoleError) {
+                            console.error('⚠️ Owner approver fallback failed:', ownerRoleError.message);
+                        }
+                    }
+                }
+            } else {
+                console.warn('⚠️ Staking contract not available for role verification');
+            }
+
+            // Final fallback - deny access
+            this.isAuthorized = false;
+            console.warn('❌ Admin access denied: No authorization method succeeded');
+
+        } catch (error) {
+            console.error('❌ Admin access verification failed:', error);
+            this.isAuthorized = false;
+            throw error;
+        }
+    }
+
+    showConnectWalletPrompt() {
+        const container = document.getElementById('admin-content') || document.body;
+        container.innerHTML = `
+            <div class="admin-connect-prompt">
+                <div class="connect-card">
+                    <button class="btn btn-back" onclick="window.location.href='../'">
+                        <span class="material-icons-outlined">arrow_back</span>
+                        <span>Back to Home</span>
+                    </button>
+                    
+                    <h2>🔐 Admin Panel Access</h2>
+                    <p>Please connect your wallet to access the admin panel.</p>
+                    <button class="btn btn-primary" onclick="connectWallet()">
+                        Connect Wallet
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+
+    showUnauthorizedAccess() {
+        const container = document.getElementById('admin-content') || document.body;
+        const currentNetwork = window.networkSelector?.getCurrentNetworkName();
+        const currentChainId = window.networkSelector?.getCurrentChainId();
+        const currentContract = window.networkSelector?.getStakingContractAddress();
+        
+        container.innerHTML = `
+            <div class="admin-unauthorized">
+                <div class="unauthorized-card">
+                    <button class="btn btn-back" onclick="window.location.href='../'">
+                        <span class="material-icons-outlined">arrow_back</span>
+                        <span>Back to Home</span>
+                    </button>
+                    
+                    <h2>🚫 Access Denied</h2>
+                    <p><strong>Switch to an account with admin privileges for this contract.</strong></p>
+                    
+                    <div class="account-switcher">
+                        <h3>👤 Switch Admin Account</h3>
+                        <p>Use your wallet to switch to an account that has admin permissions for this contract.</p>
+                        <div class="network-info">
+                            <div class="network-details">
+                                <p><strong>Current Network:</strong> ${currentNetwork} (Chain ID: ${currentChainId})</p>
+                                <p><strong>Contract:</strong> ${currentContract}</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="network-switcher">
+                        <h3>🌐 Alternative: Switch Network</h3>
+                        <p>Or try switching to a network where you have admin permissions:</p>
+                        <div class="network-selector-container">
+                            <select id="unauthorized-network-select" class="network-select">
+                                <option value="AMOY" ${(window.networkSelector.getSelectedNetworkKey() || '') === 'AMOY' ? 'selected' : ''}>Amoy Testnet</option>
+                                <option value="POLYGON_MAINNET" ${(window.networkSelector.getSelectedNetworkKey() || '') === 'POLYGON_MAINNET' ? 'selected' : ''}>Polygon Mainnet</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="access-details">
+                        <p><strong>Your Address:</strong> ${this.userAddress}</p>
+                        <p><strong>Required Role:</strong> ADMIN_ROLE or OWNER_APPROVER_ROLE</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Set up network selector for unauthorized access
+        this.setupUnauthorizedNetworkSelector();
+    }
+
+    /**
+     * Set up network selector for unauthorized access screen
+     */
+    setupUnauthorizedNetworkSelector() {
+        const networkSelect = document.getElementById('unauthorized-network-select');
+        if (!networkSelect) {
+            console.warn('⚠️ Unauthorized network selector not found');
+            return;
+        }
+
+        networkSelect.addEventListener('change', async (event) => {
+            const selectedNetwork = event.target.value;
+            
+            try {
+                // Use the existing network selector functionality
+                if (window.networkSelector) {
+                    await window.networkSelector.handleNetworkChange(selectedNetwork, 'admin');
+                } else {
+                    console.error('❌ Network selector not available');
+                }
+            } catch (error) {
+                console.error('❌ Error switching network from unauthorized access:', error);
+            }
+        });
+    }
+
+
+
+    async loadAdminInterface() {
+        // Create admin layout
+        this.createAdminLayout();
+
+        // Setup event listeners once layout elements exist
+        this.setupEventListeners();
+
+        // Load contract statistics
+        await this.loadContractStats();
+
+        // Load main components
+        await this.loadMultiSignPanel();
+
+        // Load info card (initializes layout and pulls live contract data)
+        await this.loadInfoCard();
+
+        // Setup network selector
+        this.setupNetworkSelector();
+
+        // Start auto-refresh
+        this.startAutoRefresh();
+    }
+
+    /**
+     * Setup event listeners for admin panel interactions
+     */
+    setupEventListeners() {
+        try {
+            this.setProposalButtonsEnabled(false);
+
+            // Theme toggle event listener
+            this.setupThemeToggle();
+
+            // Navigation event listeners
+            this.setupNavigationListeners();
+
+            // Contract interaction event listeners
+            this.setupContractListeners();
+
+            // Modal and form event listeners
+            this.setupModalListeners();
+
+            // Refresh and update event listeners
+            this.setupRefreshListeners();
+
+            // Address copy-to-clipboard event delegation
+            this.setupAddressCopyListeners();
+
+        } catch (error) {
+            console.error('❌ Failed to setup event listeners:', error);
+        }
+    }
+
+    /**
+     * Setup event delegation for address copy-to-clipboard functionality
+     */
+    setupAddressCopyListeners() {
+        // Use event delegation on document to handle dynamically rendered addresses
+        document.addEventListener('click', (event) => {
+            const addressElement = event.target.closest(this.addressCopySelectors);
+            if (!addressElement) {
+                return;
+            }
+
+            // Get address from data-address attribute or text content
+            const address = addressElement.getAttribute('data-address') || addressElement.textContent?.trim();
+            if (!this.isCopyableAddress(address)) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            this.copyAddressToClipboard(address.trim());
+        });
+    }
+
+    /**
+     * Determine if an address value should be copyable
+     * @param {string} address
+     * @returns {boolean}
+     */
+    isCopyableAddress(address) {
+        if (!address) return false;
+
+        const normalized = address.trim();
+        if (!normalized || normalized === 'N/A' || normalized === 'Not specified') {
+            return false;
+        }
+
+        return normalized.startsWith('0x') && normalized.length > 20;
+    }
+
+    /**
+     * Set up network selector
+     */
+    setupNetworkSelector() {
+        if (!window.networkSelector) {
+            console.warn('⚠️ Network selector not available');
+            return;
+        }
+
+        // Initialize network selector with change handler
+        window.networkSelector.init(async (networkKey, context) => {
+            console.log(`🌐 Network changed to ${networkKey} in ${context}`);
+            
+            // Refresh contract data for new network
+            if (window.contractManager) {
+                try {
+                    await window.contractManager.initialize();
+                    await this.refreshData();
+                } catch (error) {
+                    console.error('❌ Error refreshing contract data:', error);
+                }
+            }
+
+            // Update network indicator
+            window.NetworkIndicator?.update('network-indicator-home', 'admin-network-selector', 'admin');
+        });
+
+    }
+
+    /**
+     * Setup theme toggle button with enhanced admin panel support
+     */
+    setupThemeToggle() {
+        if (window.unifiedThemeManager) {
+            this.applyThemeToAllElements();
+
+            // Listen for theme changes and reapply
+            document.addEventListener('themeChanged', () => {
+                this.applyThemeToAllElements();
+            });
+        } else {
+            console.warn('⚠️ UnifiedThemeManager not available');
+        }
+    }
+
+    /**
+     * Apply theme to all admin panel elements
+     */
+    applyThemeToAllElements() {
+        const theme = document.documentElement.getAttribute('data-theme') || 'light';
+
+        // Apply to body
+        document.body.setAttribute('data-theme', theme);
+
+        // Apply to admin panel
+        const adminPanel = document.querySelector('.admin-panel');
+        if (adminPanel) {
+            adminPanel.setAttribute('data-theme', theme);
+        }
+
+        // Apply to all modals
+        document.querySelectorAll('.modal-content, .modal-overlay').forEach(el => {
+            el.setAttribute('data-theme', theme);
+        });
+
+        // Apply to all cards
+        document.querySelectorAll('.info-card, .admin-grid-main, .admin-grid-sidebar').forEach(el => {
+            el.setAttribute('data-theme', theme);
+        });
+
+        // Apply to all notifications
+        document.querySelectorAll('.notification').forEach(el => {
+            el.setAttribute('data-theme', theme);
+        });
+
+        // Force CSS variable update
+        this.updateCSSVariables(theme);
+    }
+
+    /**
+     * Show loading state for contract data
+     */
+    showLoadingState() {
+        const contractInfoSections = document.querySelectorAll('.info-card, .admin-grid-main, .admin-grid-sidebar');
+        contractInfoSections.forEach(section => {
+            section.classList.add('contract-info-loading');
+        });
+    }
+
+    /**
+     * Hide loading state for contract data
+     */
+    hideLoadingState() {
+        const contractInfoSections = document.querySelectorAll('.info-card, .admin-grid-main, .admin-grid-sidebar');
+        contractInfoSections.forEach(section => {
+            section.classList.remove('contract-info-loading');
+        });
+    }
+
+    /**
+     * Update CSS variables for theme
+     */
+    updateCSSVariables(theme) {
+        const root = document.documentElement;
+
+        if (theme === 'dark') {
+            root.style.setProperty('--background-default', '#121212');
+            root.style.setProperty('--background-paper', '#1e1e1e');
+            root.style.setProperty('--text-primary', '#ffffff');
+            root.style.setProperty('--text-secondary', 'rgba(255, 255, 255, 0.7)');
+            root.style.setProperty('--divider', 'rgba(255, 255, 255, 0.12)');
+            root.style.setProperty('--surface-hover', 'rgba(255, 255, 255, 0.08)');
+        } else {
+            root.style.setProperty('--background-default', '#ffffff');
+            root.style.setProperty('--background-paper', '#ffffff');
+            root.style.setProperty('--text-primary', 'rgba(0, 0, 0, 0.87)');
+            root.style.setProperty('--text-secondary', 'rgba(0, 0, 0, 0.6)');
+            root.style.setProperty('--divider', 'rgba(0, 0, 0, 0.12)');
+            root.style.setProperty('--surface-hover', 'rgba(0, 0, 0, 0.04)');
+        }
+    }
+
+    /**
+     * Setup navigation event listeners
+     */
+    setupNavigationListeners() {
+        // Navigation buttons
+        const navButtons = document.querySelectorAll('.nav-btn');
+        navButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.preventDefault();
+                const section = button.getAttribute('data-section');
+                if (section) {
+                    this.navigateToSection(section);
+                }
+            });
+        });
+
+        // Active navigation highlighting
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('nav-btn')) {
+                // Remove active class from all nav buttons
+                navButtons.forEach(btn => btn.classList.remove('active'));
+                // Add active class to clicked button
+                e.target.classList.add('active');
+            }
+        });
+    }
+
+    /**
+     * Setup wallet connection event listeners
+     */
+    setupWalletListeners() {
+        // Listen for wallet connection events
+        document.addEventListener('walletConnected', (event) => {
+            this.handleWalletConnected(event.detail);
+        });
+
+        document.addEventListener('walletDisconnected', () => {
+            this.handleWalletDisconnected();
+        });
+
+        // Listen for account changes
+        if (window.ethereum) {
+            window.ethereum.on('accountsChanged', async (accounts) => {
+                try {
+                    await this.handleAccountsChanged(accounts);
+                } catch (error) {
+                    console.error('❌ Error handling account change:', error);
+                    this.showError('Account Switch Error', 'Failed to switch accounts. Please refresh the page.');
+                }
+            });
+
+            window.ethereum.on('chainChanged', async (chainId) => {
+                try {
+                    await this.handleChainChanged(chainId);
+                } catch (error) {
+                    console.error('❌ Error handling chain changed:', error);
+                }
+            });
+        }
+    }
+
+    /**
+     * Setup contract interaction event listeners
+     */
+    setupContractListeners() {
+        // Listen for contract events
+        window.addEventListener('contractReady', async () => {
+            await this.handleContractReady();
+        });
+
+        window.addEventListener('contractError', (event) => {
+            this.handleContractError(event.detail);
+        });
+
+        // Listen for transaction events
+        window.addEventListener('transactionStarted', (event) => {
+            this.handleTransactionStarted(event.detail);
+        });
+
+        window.addEventListener('transactionCompleted', (event) => {
+            this.handleTransactionCompleted(event.detail);
+        });
+
+        window.addEventListener('transactionFailed', (event) => {
+            this.handleTransactionFailed(event.detail);
+        });
+    }
+
+    /**
+     * Setup modal and form event listeners
+     */
+    setupModalListeners() {
+        // Global modal close on escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                this.closeModal();
+            }
+        });
+
+        // ENHANCED: Global click handler for modal buttons
+        document.addEventListener('click', (e) => {
+            // Proposal buttons (main admin panel buttons)
+            if (e.target.classList.contains('proposal-btn') && e.target.dataset.modal) {
+                e.preventDefault();
+                const modalType = e.target.dataset.modal;
+
+                // Call the appropriate modal method
+                switch (modalType) {
+                    case 'hourly-rate':
+                        this.showHourlyRateModal();
+                        break;
+                    case 'add-pair':
+                        this.showAddPairModal();
+                        break;
+                    case 'remove-pair':
+                        this.showRemovePairModal();
+                        break;
+                    case 'update-weights':
+                        this.showUpdateWeightsModal();
+                        break;
+                    case 'change-signer':
+                        this.showChangeSignerModal();
+                        break;
+                    case 'withdraw-rewards':
+                        this.showWithdrawalModal();
+                        break;
+                    default:
+                        console.warn(`Unknown modal type: ${modalType}`);
+                }
+                return;
+            }
+
+            // Modal overlay click (close modal)
+            if (e.target.classList.contains('modal-overlay')) {
+                e.preventDefault();
+                this.closeModal();
+                return;
+            }
+
+            // Cancel buttons in modals
+            if (e.target.classList.contains('modal-cancel') ||
+                (e.target.classList.contains('btn-secondary') && e.target.closest('.modal-content'))) {
+                e.preventDefault();
+                this.closeModal();
+                return;
+            }
+
+            // Action buttons in modals (for backward compatibility)
+            if (e.target.classList.contains('btn') && e.target.closest('.modal-content')) {
+                const buttonText = e.target.textContent.trim();
+
+                if (buttonText === 'Cancel') {
+                    e.preventDefault();
+                    this.closeModal();
+                    return;
+                }
+            }
+        });
+
+        // Form validation listeners
+        document.addEventListener('input', (e) => {
+            if (e.target.classList.contains('form-input')) {
+                this.validateFormInput(e.target);
+            }
+        });
+
+        // ENHANCED: Form submission handling
+        document.addEventListener('submit', (e) => {
+            const form = e.target;
+
+            // Handle admin forms
+            if (form.classList.contains('admin-form') || form.closest('.modal-content')) {
+                e.preventDefault(); // Always prevent default first
+
+                // Add small delay to ensure DOM is ready
+                setTimeout(async () => {
+                    // Validate form using form ID
+                    if (!this.validateForm(form.id)) {
+                        console.warn('⚠️ Form validation failed');
+                        return;
+                    }
+
+                    // Handle specific form types with proper error handling
+                    try {
+                        switch (form.id) {
+                            case 'hourly-rate-form':
+                                await this.submitHourlyRateProposal(e);
+                                break;
+                            case 'add-pair-form':
+                                await this.submitAddPairProposal(e);
+                                break;
+                            case 'remove-pair-form':
+                                await this.submitRemovePairProposal(e);
+                                break;
+                            case 'update-weights-form':
+                                await this.submitUpdateWeightsProposal(e);
+                                break;
+                            case 'change-signer-form':
+                                await this.submitChangeSignerProposal(e);
+                                break;
+                            case 'withdrawal-form':
+                                await this.submitWithdrawalProposal(e);
+                                break;
+                            default:
+                                console.error('📝 Unhandled form submission:', form.id);
+                        }
+                    } catch (error) {
+                        console.error('❌ Form submission failed:', error);
+                        this.showError(error.message || 'Failed to submit form');
+                    }
+                }, 100);
+            }
+        });
+    }
+
+    /**
+     * Setup refresh and update event listeners
+     */
+    setupRefreshListeners() {
+        // Manual refresh button
+        document.addEventListener('click', (e) => {
+            const refreshTrigger = e.target.closest?.('.refresh-button, .refresh-btn');
+            if (refreshTrigger) {
+                e.preventDefault();
+                this.handleRefreshButtonClick(refreshTrigger);
+            }
+        });
+
+        // Auto-refresh toggle
+        document.addEventListener('change', (e) => {
+            if (e.target.id === 'auto-refresh-toggle') {
+                if (e.target.checked) {
+                    this.startAutoRefresh();
+                } else {
+                    this.stopAutoRefresh();
+                }
+            }
+        });
+
+        // SELECTIVE UPDATE OPTIMIZATION: Disable automatic refresh on tab switching
+        // Page visibility change (pause refresh when tab not active) - NO AUTO REFRESH ON FOCUS
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                this.pauseAutoRefresh();
+            } else {
+                // OPTIMIZATION: Resume auto-refresh but don't trigger immediate refresh
+                // This eliminates unnecessary full refreshes when switching tabs
+                this.autoRefreshPaused = false;
+            }
+        });
+    }
+
+    handleRefreshButtonClick(trigger) {
+        if (!trigger) {
+            return;
+        }
+
+        const target = (trigger.dataset.refreshTarget || trigger.dataset.refresh || '').toLowerCase();
+
+        switch (target) {
+            case 'contract':
+                if (document.querySelector('.info-card')?.getAttribute('aria-busy') === 'true') {
+                    return;
+                }
+                this.refreshContractInfo();
+                break;
+            case 'proposals':
+                this.refreshData();
+                break;
+            default:
+                this.refreshData();
+        }
+    }
+
+    setInfoCardRefreshing(isRefreshing, message = 'Refreshing contract data...') {
+        const infoCard = document.querySelector('.info-card');
+        if (!infoCard) {
+            return;
+        }
+
+        infoCard.classList.toggle('contract-info-loading', isRefreshing);
+        infoCard.classList.toggle('section-refreshing', isRefreshing);
+        infoCard.setAttribute('aria-busy', isRefreshing ? 'true' : 'false');
+
+        let overlay = infoCard.querySelector('.section-loading-overlay');
+        if (!overlay && isRefreshing) {
+            overlay = document.createElement('div');
+            overlay.className = 'section-loading-overlay';
+            overlay.innerHTML = `
+                <div class="section-loading-content" role="status" aria-live="polite">
+                    <span class="section-loading-spinner" aria-hidden="true"></span>
+                    <span class="loading-message">${message}</span>
+                </div>
+            `;
+            infoCard.appendChild(overlay);
+        }
+
+        if (overlay) {
+            const messageEl = overlay.querySelector('.loading-message');
+            if (messageEl) {
+                messageEl.textContent = message;
+            }
+            overlay.style.display = isRefreshing ? 'flex' : 'none';
+            overlay.setAttribute('aria-hidden', isRefreshing ? 'false' : 'true');
+        }
+
+        const refreshButton = infoCard.querySelector('[data-refresh-target="contract"]');
+        if (refreshButton) {
+            refreshButton.disabled = isRefreshing;
+            refreshButton.setAttribute('aria-busy', isRefreshing ? 'true' : 'false');
+            refreshButton.setAttribute('aria-label', isRefreshing ? 'Refreshing contract info' : 'Refresh contract info');
+            refreshButton.setAttribute('title', isRefreshing ? 'Refreshing contract info' : 'Refresh contract info');
+        }
+    }
+
+    /**
+     * Event handler methods
+     */
+    navigateToSection(section) {
+        // Update active navigation
+        const navButtons = document.querySelectorAll('.nav-btn');
+        navButtons.forEach(btn => {
+            btn.classList.remove('active');
+            if (btn.getAttribute('data-section') === section) {
+                btn.classList.add('active');
+            }
+        });
+
+        // Load section content
+        switch (section) {
+            case 'dashboard':
+                this.showDashboard();
+                break;
+            case 'pairs':
+                this.showPairsManagement();
+                break;
+            case 'users':
+                this.showUsersManagement();
+                break;
+            case 'settings':
+                this.showSettings();
+                break;
+            default:
+                console.warn(`Unknown section: ${section}`);
+                this.showDashboard();
+        }
+    }
+
+    handleWalletConnected(detail) {
+        // Update UI to reflect connected state
+        const connectButtons = document.querySelectorAll('.connect-wallet-btn');
+        connectButtons.forEach(btn => {
+            btn.textContent = 'Wallet Connected';
+            btn.disabled = true;
+            btn.classList.add('connected');
+        });
+
+        // Refresh admin data
+        this.refreshData();
+
+        // Re-verify admin access
+        this.verifyAdminAccess();
+    }
+
+    handleWalletDisconnected() {
+        this.closeModal();
+
+        this.isAuthorized = false;
+
+        // Update UI to reflect disconnected state
+        const connectButtons = document.querySelectorAll('.connect-wallet-btn');
+        connectButtons.forEach(btn => {
+            btn.textContent = 'Connect Wallet';
+            btn.disabled = false;
+            btn.classList.remove('connected');
+        });
+
+        // Show connect prompt
+        this.showConnectWalletPrompt();
+    }
+
+    async handleAccountsChanged(accounts) {
+        // Close any open modals when account changes
+        this.closeModal();
+
+        if (accounts.length === 0) {
+            // No accounts connected
+            this.handleWalletDisconnected();
+            this.stopAutoRefresh();
+        } else {
+            // Account switched
+            const newAddress = accounts[0];
+
+            // Update wallet connection info
+            if (window.walletConnection) {
+                window.walletConnection.address = newAddress;
+            }
+
+            // Re-verify admin access with new account
+            await this.verifyAdminAccess();
+            
+            // Stop auto-refresh and update UI based on authorization
+            this.stopAutoRefresh();
+            if (this.isAuthorized) {
+                await this.loadAdminInterface();
+                this.startAutoRefresh();
+            } else {
+                this.showUnauthorizedAccess();
+            }
+        }
+    }
+
+    async handleChainChanged(chainId) {
+        // Close any open modals when network changes
+        this.closeModal();
+
+        // Update network indicator when chain changes
+        const indicator = document.getElementById('network-indicator-home');
+        if (indicator) {
+            // Check permission asynchronously and update
+            if (window.networkManager) {
+                window.networkManager.hasRequiredNetworkPermission().then(hasPermission => {
+                    window.NetworkIndicator?.update('network-indicator-home', 'admin-network-selector', 'admin');
+                }).catch(error => {
+                    const networkName = window.networkSelector?.getCurrentNetworkName();
+                    console.error(`Error checking permission after chain change: ${networkName}`, error);
+                });
+            }
+        }
+
+        // CRITICAL: Re-verify admin access when network changes
+        // This ensures users are kicked out if they don't have admin permissions on the new network
+        try {
+            await this.verifyAdminAccess();
+            
+            if (this.isAuthorized) {
+                // Reload the admin interface to ensure it's working with the new network
+                await this.loadAdminInterface();
+            } else {
+                console.error('❌ Admin access denied for new network - showing unauthorized access');
+                this.showUnauthorizedAccess();
+            }
+        } catch (error) {
+            console.error('❌ Error re-verifying admin access after network change:', error);
+            this.showUnauthorizedAccess();
+        }
+    }
+
+    async handleContractReady() {
+        // Refresh contract data
+        await this.refreshData();
+    }
+
+    handleContractError(error) {
+        console.error('❌ Handling contract error:', error);
+
+        this.showError('Contract Error', error.message || 'Contract interaction failed');
+    }
+
+    handleTransactionStarted(detail) {
+        // Show loading indicator
+        this.showTransactionStatus('pending', 'Transaction submitted...', detail.hash);
+    }
+
+    handleTransactionCompleted(detail) {
+        // Show success message
+        this.showTransactionStatus('success', 'Transaction completed!', detail.hash);
+
+        // Refresh data
+        setTimeout(() => {
+            this.refreshData();
+        }, 2000);
+    }
+
+    handleTransactionFailed(detail) {
+        console.error('❌ Handling transaction failed:', detail);
+
+        // Show error message
+        this.showTransactionStatus('error', 'Transaction failed', detail.hash, detail.error);
+    }
+
+    validateFormInput(input) {
+        const value = input.value.trim();
+        const type = input.getAttribute('data-validation');
+
+        let isValid = true;
+        let errorMessage = '';
+
+        switch (type) {
+            case 'address':
+                isValid = /^0x[a-fA-F0-9]{40}$/.test(value);
+                errorMessage = 'Please enter a valid Ethereum address';
+                break;
+            case 'number':
+                isValid = !isNaN(value) && parseFloat(value) > 0;
+                errorMessage = 'Please enter a valid positive number';
+                break;
+            case 'required':
+                isValid = value.length > 0;
+                errorMessage = 'This field is required';
+                break;
+        }
+
+        // Update input styling
+        if (isValid) {
+            input.classList.remove('invalid');
+            input.classList.add('valid');
+        } else {
+            input.classList.remove('valid');
+            input.classList.add('invalid');
+        }
+
+        // Show/hide error message
+        const errorElement = input.parentNode.querySelector('.error-message');
+        if (errorElement) {
+            errorElement.textContent = isValid ? '' : errorMessage;
+            errorElement.style.display = isValid ? 'none' : 'block';
+        }
+
+        return isValid;
+    }
+
+    showTransactionStatus(status, message, hash, error = null) {
+        const statusContainer = document.getElementById('transaction-status') || this.createTransactionStatusContainer();
+
+        let statusClass = '';
+        let icon = '';
+
+        switch (status) {
+            case 'pending':
+                statusClass = 'status-pending';
+                icon = '⏳';
+                break;
+            case 'success':
+                statusClass = 'status-success';
+                icon = '✅';
+                break;
+            case 'error':
+                statusClass = 'status-error';
+                icon = '❌';
+                break;
+        }
+
+        statusContainer.className = `transaction-status ${statusClass}`;
+        statusContainer.innerHTML = `
+            <div class="status-content">
+                <span class="status-icon">${icon}</span>
+                <span class="status-message">${message}</span>
+                ${hash ? `<a href="https://amoy.polygonscan.com/tx/${hash}" target="_blank" class="tx-link">View Transaction</a>` : ''}
+                ${error ? `<div class="error-details">${error}</div>` : ''}
+            </div>
+            <button class="close-status" onclick="this.parentNode.style.display='none'">×</button>
+        `;
+
+        statusContainer.style.display = 'block';
+
+        // Auto-hide success messages after 5 seconds
+        if (status === 'success') {
+            setTimeout(() => {
+                statusContainer.style.display = 'none';
+            }, 5000);
+        }
+    }
+
+    createTransactionStatusContainer() {
+        const container = document.createElement('div');
+        container.id = 'transaction-status';
+        container.className = 'transaction-status';
+
+        // Insert at top of admin content
+        const adminContent = document.getElementById('admin-content');
+        if (adminContent) {
+            adminContent.insertBefore(container, adminContent.firstChild);
+        } else {
+            document.body.appendChild(container);
+        }
+
+        return container;
+    }
+
+    pauseAutoRefresh() {
+        this.autoRefreshPaused = true;
+        console.log('⏸️ Auto-refresh paused (tab not active)');
+    }
+
+    stopAutoRefresh() {
+        if (this.refreshInterval) {
+            clearInterval(this.refreshInterval);
+            this.refreshInterval = null;
+            this.autoRefreshActive = false; // Reset auto-refresh flag
+        }
+    }
+
+    createAdminLayout() {
+        const container = document.getElementById('admin-content') || document.body;
+
+        container.innerHTML = `
+            <div class="admin-panel">
+
+                <div class="admin-container">
+
+                    <!-- Grid container spacing={3} -->
+                    <div class="admin-grid">
+                        <!-- Grid item xs={12} md={9} - MultiSign Panel -->
+                        <div class="admin-grid-main">
+                            <div id="multisign-panel">
+                                <!-- MultiSign Panel will be loaded here -->
+                            </div>
+                        </div>
+
+                        <!-- Grid item xs={12} md={3} - New Proposal -->
+                        <div class="admin-grid-sidebar">
+                            <!-- Typography variant="h5" gutterBottom -->
+                            <h2 class="proposal-title">New Proposal</h2>
+
+                            <!-- Stack direction="column" spacing={2} -->
+                            <div class="proposal-actions">
+                                <!-- Button variant="contained" color="primary" -->
+                                <button class="proposal-btn" data-modal="hourly-rate" type="button">
+                                    Update Hourly Rate
+                                </button>
+                                <button class="proposal-btn" data-modal="add-pair" type="button">
+                                    Add Pair
+                                </button>
+                                <button class="proposal-btn" data-modal="remove-pair" type="button">
+                                    Remove Pair
+                                </button>
+                                <button class="proposal-btn" data-modal="update-weights" type="button">
+                                    Update Pair Weight
+                                </button>
+                                <button class="proposal-btn" data-modal="change-signer" type="button">
+                                    Change Signer
+                                </button>
+                                <button class="proposal-btn" data-modal="withdraw-rewards" type="button">
+                                    Withdraw Rewards
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Box sx={{ mt: 4 }} - Info Card Section -->
+                    <div class="info-card-section">
+                        <div id="info-card">
+                            <!-- Info Card will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        `;
+
+        // Prevent proposal actions until the underlying data is ready
+        this.setProposalButtonsEnabled(false);
+        
+        this.attachAdminHeaderHelpers();
+    }
+
+    attachAdminHeaderHelpers() {
+        const adminLink = document.getElementById('admin-panel-link');
+        if (adminLink) {
+            adminLink.style.display = 'flex';
+            adminLink.classList.remove('admin-checking');
+        }
+        window.masterInitializer?.updateAdminPanelLink('home');
+
+        if (window.getCurrentVersion) {
+            window.getCurrentVersion()
+                .then((version) => {
+                    const versionBadge = document.getElementById('app-version');
+                    if (versionBadge) {
+                        versionBadge.textContent = 'v' + version;
+                    }
+                })
+                .catch(() => {});
+        }
+
+        window.NetworkIndicator?.update('network-indicator-home', 'admin-network-selector', 'admin');
+    }
+
+    /**
+     * Toggle the proposal buttons so they stay inactive until data is ready
+     */
+    setProposalButtonsEnabled(enabled) {
+        const proposalButtons = document.querySelectorAll('.proposal-btn');
+
+        proposalButtons.forEach(button => {
+            button.disabled = !enabled;
+            button.setAttribute('aria-disabled', (!enabled).toString());
+            if (enabled) {
+                button.removeAttribute('title');
+            } else if (!button.hasAttribute('title')) {
+                button.title = 'Unavailable while proposals load';
+            }
+        });
+    }
+
+    async loadMultiSignPanel() {
+        const panelDiv = document.getElementById('multisign-panel');
+
+        if (!panelDiv) {
+            console.warn('⚠️ Network status container not found');
+            return;
+        }
+
+        try {
+            // Show loading indicator
+            panelDiv.innerHTML = `
+                <div class="multisign-panel">
+                    <div class="panel-header">
+                        <h2>Multi-Signature Proposals</h2>
+                    </div>
+                    <div class="loading-container" style="text-align: center; padding: 40px;">
+                        <div class="loading-spinner inline"></div>
+                        <div style="margin-top: 15px; color: #666;">Loading proposals...</div>
+                        <div style="margin-top: 5px; font-size: 0.9em; color: #999;">This may take a few seconds</div>
+                    </div>
+                </div>
+                <style>
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                </style>
+            `;
+
+            // Load proposals data
+            const proposals = await this.loadProposals();
+
+            // Set loaded proposal count for pagination
+            this.loadedProposalCount = proposals.length;
+
+            // Filter proposals based on stored selection (default: show pending)
+            const filterValue = this.proposalFilter || 'pending';
+            const filteredProposals = this.filterProposalsByStatus(proposals, filterValue);
+
+            panelDiv.innerHTML = `
+                <div class="multisign-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-row">
+                            <h2>Multi-Signature Proposals</h2>
+                            <div class="panel-refresh">
+                                <button class="refresh-button" type="button" data-refresh-target="proposals" aria-label="Refresh proposals" title="Refresh proposals">
+                                    <span class="material-icons" aria-hidden="true">refresh</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="panel-controls">
+                            <label class="checkbox-label" for="proposal-filter">
+                                Filter proposals
+                                <select id="proposal-filter" class="proposal-filter">
+                                    <option value="pending">Show pending proposals</option>
+                                    <option value="executed">Show executed proposals</option>
+                                    <option value="rejected">Show rejected proposals</option>
+                                    <option value="expired">Show expired proposals</option>
+                                    <option value="all">Show all proposals</option>
+                                </select>
+                            </label>
+                            <div class="panel-stats">
+                                <span class="stat-chip" data-stat="total-proposals">Total Proposals: ${this.totalProposalCount}</span>
+                                <span class="stat-chip" data-stat="showing-proposals">Showing: ${filteredProposals.length}</span>
+                                <span class="stat-chip" data-stat="required-approvals">Required Approvals: ${this.contractStats?.requiredApprovals ?? 3}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="proposals-table">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th></th>
+                                    <th>ID</th>
+                                    <th>Action Type</th>
+                                    <th>Approvals</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="proposals-tbody">
+                                ${this.renderProposalsRows(filteredProposals)}
+                            </tbody>
+                        </table>
+                        ${this.renderLoadMoreButton(proposals)}
+                    </div>
+                </div>
+            `;
+
+            this.updateProposalStatsUI({
+                total: this.totalProposalCount,
+                showing: filteredProposals.length,
+                required: this.contractStats?.requiredApprovals ?? 3
+            });
+
+            // Proposals are ready, enable actions now that data exists
+            this.setProposalButtonsEnabled(true);
+
+            // Add event listener for proposal filter dropdown
+            const filterSelect = document.getElementById('proposal-filter');
+            if (filterSelect) {
+                filterSelect.value = filterValue;
+                filterSelect.addEventListener('change', () => {
+                    this.proposalFilter = filterSelect.value || 'pending';
+                    this.applyProposalFilter();
+                });
+            }
+
+        } catch (error) {
+            console.error('❌ Failed to load MultiSign Panel:', error);
+
+            // Provide more detailed error information and fallback UI
+            const isContractError = error.message.includes('Contract') || error.message.includes('not available');
+            const isNetworkError = error.message.includes('network') || error.message.includes('RPC');
+
+            let errorTitle = '⚠️ Failed to load proposals';
+            let errorMessage = error.message;
+            let suggestions = '';
+
+            if (isContractError) {
+                errorTitle = '🔗 Contract Connection Issue';
+                suggestions = `
+                    <div class="error-suggestions">
+                        <p><strong>Possible solutions:</strong></p>
+                        <ul>
+                            <li>Check if your wallet is connected to the correct network</li>
+                            <li>Verify contract addresses in configuration</li>
+                            <li>Try refreshing the page</li>
+                        </ul>
+                    </div>
+                `;
+            } else if (isNetworkError) {
+                errorTitle = '🌐 Network Connection Issue';
+                suggestions = `
+                    <div class="error-suggestions">
+                        <p><strong>Possible solutions:</strong></p>
+                        <ul>
+                            <li>Check your internet connection</li>
+                            <li>Try switching to a different RPC endpoint</li>
+                            <li>Wait a moment and retry</li>
+                        </ul>
+                    </div>
+                `;
+            }
+
+            if (panelDiv) {
+                panelDiv.innerHTML = `
+                    <div class="error-panel">
+                        <h3>${errorTitle}</h3>
+                        <p class="error-message">${errorMessage}</p>
+                        ${suggestions}
+                        <div class="error-actions">
+                            <button class="btn btn-secondary" onclick="adminPage.loadMultiSignPanel()">
+                                🔄 Retry
+                            </button>
+                            <button class="btn btn-outline" onclick="adminPage.checkNetworkConnectivity().then(ok => console.log('Network check result:', ok))">
+                            🌐 Check Network
+                        </button>
+                        <button class="btn btn-outline" onclick="adminPage.forceLoadRealProposals()">
+                            🔗 Try Real Data
+                        </button>
+                    </div>
+                </div>
+            `;
+            }
+
+            // Keep proposal actions disabled until recovery
+            this.setProposalButtonsEnabled(false);
+        }
+    }
+
+    getInfoCardSkeleton() {
+        return `
+            <div class="info-card">
+                <div class="card-header">
+                    <h5>Contract Information</h5>
+                    <button class="refresh-button" type="button" data-refresh-target="contract" aria-label="Refresh contract info" title="Refresh contract info">
+                        <span class="material-icons" aria-hidden="true">refresh</span>
+                    </button>
+                </div>
+
+                <div class="card-content">
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <div class="info-label-wrapper">
+                                <h6>Reward Token Balance</h6>
+                            </div>
+                            <h6 class="info-value" data-info="reward-balance">Loading...</h6>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label-wrapper">
+                                <h6>Reward Obligation</h6>
+                            </div>
+                            <h6 class="info-value" data-info="reward-obligation">Loading...</h6>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label-wrapper">
+                                <h6>Hourly Distribution Rate</h6>
+                            </div>
+                            <h6 class="info-value" data-info="hourly-rate">Loading...</h6>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label-wrapper">
+                                <h6>Reward Runway</h6>
+                            </div>
+                            <h6 class="info-value" data-info="reward-runway">Loading...</h6>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label-wrapper">
+                                <h6>Total Weight</h6>
+                            </div>
+                            <h6 class="info-value" data-info="total-weight">Loading...</h6>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label-wrapper">
+                                <h6>Staking Contract</h6>
+                            </div>
+                            <h6 class="info-value" data-info="staking-address">Loading...</h6>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label-wrapper">
+                                <h6>Reward Token Contract</h6>
+                            </div>
+                            <h6 class="info-value" data-info="reward-token-address">Loading...</h6>
+                        </div>
+                    </div>
+
+                    <hr class="contract-info-separator">
+
+                    <div class="pairs-section">
+                        <div class="section-header">
+                            <h6>Eligible Pairs</h6>
+                        </div>
+                        <div class="pairs-list" data-info="lp-pairs">
+                            <div class="info-value">Loading pairs...</div>
+                        </div>
+                    </div>
+
+                    <hr class="contract-info-separator">
+
+                    <div class="signers-section">
+                        <div class="section-header">
+                            <h6>Current Signers</h6>
+                        </div>
+                        <div class="signers-list" data-info="signers">
+                            <div class="info-value">Loading signers...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    async loadInfoCard() {
+        const cardDiv = document.getElementById('info-card');
+
+        if (!cardDiv) {
+            console.warn('⚠️ Info card container not found.');
+            return;
+        }
+
+        // Render layout with loading placeholders so the UI stays responsive while data loads
+        cardDiv.innerHTML = this.getInfoCardSkeleton();
+
+        try {
+            const result = await this.loadContractInformation();
+            if (!result || result.success === false) {
+                const errorMessage = (result && result.error && result.error.message) || 'An unknown error occurred.';
+                cardDiv.innerHTML = `
+                    <div class="error-panel">
+                        <h3>⚠️ Failed to load contract info</h3>
+                        <p>${errorMessage}</p>
+                        <button class="btn btn-secondary" onclick="adminPage.loadInfoCard()">
+                            🔄 Retry
+                        </button>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('❌ Failed to load Info Card:', error);
+            cardDiv.innerHTML = `
+                <div class="error-panel">
+                    <h3>⚠️ Failed to load contract info</h3>
+                    <p>${error.message}</p>
+                    <button class="btn btn-secondary" onclick="adminPage.loadInfoCard()">
+                        🔄 Retry
+                    </button>
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * PERFORMANCE OPTIMIZATION: Generate HTML for single proposal row
+     * This should match the format from renderProposalsRows for consistency
+     * INCLUDES BOTH MAIN ROW AND DETAILS ROW
+     */
+    generateProposalRowHTML(proposal) {
+        // Ensure required fields have defaults
+        proposal.approvals = proposal.approvals || proposal.currentApprovals || 0;
+        proposal.requiredApprovals = proposal.requiredApprovals || 2;
+        proposal.executed = proposal.executed || false;
+        proposal.rejected = proposal.rejected || false;
+        proposal.id = proposal.id || 'unknown';
+        proposal.approvedBy = proposal.approvedBy || [];
+
+        const canExecute = proposal.approvals >= proposal.requiredApprovals && !proposal.executed && !proposal.rejected && !proposal.expired;
+        const statusClass = proposal.executed ? 'executed' : proposal.rejected ? 'rejected' : proposal.expired ? 'expired' : canExecute ? 'ready' : 'pending';
+        const statusText = proposal.executed ? '✅ Executed' : proposal.rejected ? '❌ Rejected' : proposal.expired ? '⏰ Expired' : canExecute ? '🚀 Ready to Execute' : '⏳ Pending';
+
+        // Enhanced action type display with icons
+        const actionTypeDisplay = this.getActionTypeDisplay(proposal.actionType);
+
+        // Enhanced proposal summary
+        const proposalSummary = this.getProposalSummary(proposal);
+
+        return `
+            <tr class="proposal-row ${statusClass}">
+                <td>
+                    <button class="expand-btn" onclick="adminPage.toggleProposal('${proposal.id}')" title="View Details">
+                        <span class="expand-icon">▼</span>
+                    </button>
+                </td>
+                <td>
+                    <div class="proposal-id-container">
+                        <span class="proposal-id">#${proposal.id}</span>
+                        <div class="proposal-summary">${proposalSummary}</div>
+                    </div>
+                </td>
+                <td>
+                    <div class="action-type-container">
+                        <span class="action-type ${proposal.actionType.toLowerCase()}">${actionTypeDisplay}</span>
+                    </div>
+                </td>
+                <td>
+                    <div class="approvals-container">
+                        <div class="approval-progress">
+                            <div class="approval-bar">
+                                <div class="approval-fill" style="width: ${(proposal.approvals / proposal.requiredApprovals) * 100}%"></div>
+                            </div>
+                            <span class="approval-text">${proposal.approvals} / ${proposal.requiredApprovals}</span>
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <span class="status-badge ${statusClass}">${statusText}</span>
+                </td>
+                <td>
+                    <div class="action-buttons">
+                        ${!proposal.executed && !proposal.rejected && !proposal.expired ? this.renderProposalActionButtons(proposal, canExecute) : ''}
+                    </div>
+                </td>
+            </tr>
+            <tr id="details-${proposal.id}" class="proposal-details-row" style="display: none;">
+                <td colspan="6">
+                    <div class="proposal-details">
+                        <div class="details-header">
+                            <h4>📋 Proposal Details</h4>
+                        </div>
+                        <div class="details-content">
+                            ${this.renderProposalParameters(proposal.actionType, proposal)}
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }
+
+    /**
+     * Render action buttons for proposal with already-voted check
+     * Matches React implementation: Disables voting for users who have already approved
+     */
+    renderProposalActionButtons(proposal, canExecute = false) {
+        if (proposal.isOptimistic) {
+            return '<span class="text-muted">Processing...</span>';
+        }
+
+        // Check if current user has already approved this proposal
+        const userAddress = this.userAddress?.toLowerCase();
+        const approvedBy = (proposal.approvedBy || []).map(addr => addr.toLowerCase());
+        const hasAlreadyApproved = userAddress && approvedBy.includes(userAddress);
+
+        // The first approver is the proposer (auto-approved when created)
+        const proposerAddress = approvedBy.length > 0 ? approvedBy[0] : null;
+        const isProposer = userAddress && proposerAddress && userAddress === proposerAddress;
+
+
+        return `
+            <button
+                class="btn btn-icon-compact btn-success ${hasAlreadyApproved ? 'disabled' : ''}"
+                onclick="adminPage.approveAction('${proposal.id}')"
+                title="${hasAlreadyApproved ? 'You have already approved this proposal' : 'Approve Proposal'}"
+                ${hasAlreadyApproved ? 'disabled' : ''}
+            >
+                ✓
+            </button>
+            <button
+                class="btn btn-icon-compact btn-danger ${hasAlreadyApproved ? 'disabled' : ''}"
+                onclick="adminPage.rejectAction('${proposal.id}')"
+                title="${hasAlreadyApproved ? 'You cannot reject after approving this proposal' : 'Reject Proposal'}"
+                ${hasAlreadyApproved ? 'disabled' : ''}
+            >
+                ✕
+            </button>
+            ${canExecute ? `
+                <button
+                    class="btn btn-icon-compact btn-primary"
+                    onclick="adminPage.executeAction('${proposal.id}')"
+                    title="Execute Proposal"
+                >
+                    ▶
+                </button>
+            ` : ''}
+            ${hasAlreadyApproved ? `
+                <span class="approval-badge" title="You ${isProposer ? 'created and ' : ''}approved this">👤</span>
+            ` : ''}
+        `;
+    }
+
+    /**
+     * Refresh admin panel data (optimized version with selective updates)
+     */
+    async refreshData() {
+        if (this.isRefreshing) {
+            return;
+        }
+
+        // Show loading state
+        this.showLoadingState();
+        this.setProposalButtonsEnabled(false);
+
+        this.isRefreshing = true;
+
+        try {
+            // IMPORTANT: Clear proposal cache to force fresh data
+            this.proposalsCache.clear();
+            this.proposalStates.clear();
+
+            // Always refresh contract stats AND contract information (lightweight)
+            await Promise.all([
+                this.loadContractStats(),
+                this.loadContractInformation()
+            ]);
+
+            // ALWAYS do full refresh to ensure we get latest data from blockchain
+            // Selective updates are disabled during manual refresh to guarantee fresh data
+            await this.loadMultiSignPanel();
+
+        } catch (error) {
+            console.error('❌ Failed to refresh data:', error);
+
+            // Show error notification
+            if (window.notificationManager) {
+                window.notificationManager.error(
+                    'Could not load contract data. Please check your connection.'
+                );
+            }
+        } finally {
+            this.isRefreshing = false;
+
+            // Hide loading state
+            this.hideLoadingState();
+        }
+    }
+
+    async loadProposals() {
+        try {
+            // First try to load real proposals from the contract
+            const contractManager = await this.ensureContractReady();
+
+            if (contractManager && contractManager.getAllActions) {
+                // Check if staking contract is available
+                if (!contractManager.isStakingContractReady || !contractManager.isStakingContractReady()) {
+                    throw new Error('Staking contract not properly initialized');
+                }
+
+                const realProposals = await contractManager.getAllActions();
+
+                if (realProposals && Array.isArray(realProposals)) {
+                    console.log(`✅ Loaded ${realProposals.length} real proposals from contract`);
+
+                    // PERFORMANCE OPTIMIZATION: Initialize optimized state with proposals
+                    const formattedProposals = this.formatRealProposals(realProposals);
+
+                    // Update total count for pagination with multiple fallback strategies
+                    if (window.contractManager && window.contractManager.stakingContract) {
+                        try {
+                            // Try multiple methods to get the total count
+                            let totalCount = 0;
+
+                            // Method 1: Direct actionCounter call
+                            try {
+                                const counter = await window.contractManager.stakingContract.actionCounter();
+                                totalCount = counter.toNumber();
+                            } catch (counterError) {
+                                console.warn('⚠️ actionCounter failed:', counterError.message);
+
+                                // Method 2: Try with different provider
+                                try {
+                                    const result = await window.contractManager.executeWithProviderFallback(async (provider) => {
+                                        const contractWithProvider = new ethers.Contract(
+                                            window.contractManager.contractAddresses.get('STAKING'),
+                                            window.contractManager.contractABIs.get('STAKING'),
+                                            provider
+                                        );
+                                        const counter = await contractWithProvider.actionCounter();
+                                        return counter.toNumber();
+                                    }, 'getActionCounter');
+
+                                    totalCount = result;
+                                } catch (fallbackError) {
+                                    console.warn('⚠️ Fallback actionCounter also failed:', fallbackError.message);
+
+                                    // Method 3: Estimate based on loaded proposals
+                                    const maxLoadedId = Math.max(...formattedProposals.map(p => p.id));
+                                    totalCount = maxLoadedId; // Estimate
+                                }
+                            }
+
+                            this.totalProposalCount = totalCount;
+                        } catch (error) {
+                            console.warn('⚠️ All methods to get total proposal count failed:', error.message);
+                            // Set to 0 to indicate unknown, but still show Load More button
+                            this.totalProposalCount = 0;
+                        }
+                    }
+
+                    // SELECTIVE UPDATE OPTIMIZATION: Initialize proposal state cache
+                    this.lastKnownProposalCount = this.totalProposalCount;
+                    formattedProposals.forEach(proposal => {
+                        this.cacheProposalState(proposal);
+                        // Also cache the full proposal for filtering
+                        this.proposalsCache.set(proposal.id, proposal);
+                    });
+                    console.log(`🎯 Cached states for ${formattedProposals.length} proposals`);
+
+                    return formattedProposals;
+                } else {
+                    console.log('⚠️ Invalid response from getAllActions:', realProposals);
+                    throw new Error('Invalid response from contract getAllActions method');
+                }
+            } else {
+                throw new Error('Contract manager or getAllActions method not available');
+            }
+        } catch (error) {
+            console.warn('⚠️ Failed to load real proposals:', error.message);
+            console.error('❌ Full error details:', error);
+
+            // Check if it's a network-related error
+            let errorMessage = error.message;
+            if (error.message.includes('could not detect network') || error.message.includes('NETWORK_ERROR')) {
+                errorMessage = 'Network connection issue - please check your wallet connection and network settings';
+            } else if (error.message.includes('call revert exception')) {
+                errorMessage = 'Contract call failed - contract may not be deployed or accessible';
+            }
+
+            // Show error notification
+            if (window.notificationManager) {
+                window.notificationManager.error(
+                    `Failed to load proposals: ${errorMessage}`
+                );
+            }
+        }
+
+        // Return empty array if proposals can't be loaded
+        console.log('❌ Could not load proposals from contract');
+        return [];
+    }
+
+    /**
+     * PERFORMANCE OPTIMIZATION: Load more proposals for pagination
+     */
+    async loadMoreProposals() {
+        if (this.isLoadingMore) {
+            console.log('⚠️ Load more already in progress');
+            return;
+        }
+
+        this.isLoadingMore = true;
+        const loadMoreBtn = document.getElementById('load-more-btn');
+        if (loadMoreBtn) {
+            loadMoreBtn.disabled = true;
+            loadMoreBtn.innerHTML = '⏳ Loading...';
+        }
+
+        try {
+            console.log('📋 Loading more proposals...');
+
+            // Get contract manager
+            const contractManager = await this.ensureContractReady();
+            if (!contractManager || !contractManager.getAllActionsWithPagination) {
+                throw new Error('Contract manager not available for pagination');
+            }
+
+            // Load next batch (10 more proposals)
+            console.log(`📋 Loading next batch: skip=${this.loadedProposalCount}, limit=10`);
+            let nextBatch;
+
+            try {
+                nextBatch = await contractManager.getAllActionsWithPagination(this.loadedProposalCount, 10);
+            } catch (paginationError) {
+                console.warn('⚠️ Pagination failed, trying alternative method:', paginationError.message);
+
+                // Fallback: Load older proposals by ID
+                nextBatch = await this.loadOlderProposalsByID(contractManager, 10);
+            }
+
+            if (nextBatch && nextBatch.length > 0) {
+                // Format and append to existing proposals
+                const formattedBatch = this.formatRealProposals(nextBatch);
+
+                // Cache the new proposals
+                formattedBatch.forEach(proposal => {
+                    this.proposalsCache.set(proposal.id, proposal);
+                    this.cacheProposalState(proposal);
+                });
+
+                // Check if we should show these proposals based on filter
+                const filterSelect = document.getElementById('proposal-filter');
+                const filterValue = filterSelect ? filterSelect.value : (this.proposalFilter || 'pending');
+
+                const visibleBatch = this.filterProposalsByStatus(formattedBatch, filterValue);
+
+                // Append to proposals table
+                const proposalsTbody = document.getElementById('proposals-tbody');
+                if (proposalsTbody && visibleBatch.length > 0) {
+                    const newRowsHTML = visibleBatch.map(proposal =>
+                        this.generateProposalRowHTML(proposal)
+                    ).join('');
+                    proposalsTbody.insertAdjacentHTML('beforeend', newRowsHTML);
+                }
+
+                // Update loaded count
+                this.loadedProposalCount += formattedBatch.length;
+
+                const allCachedProposals = this.proposalsCache
+                    ? Array.from(this.proposalsCache.values())
+                    : [];
+                const currentVisibleCount = this.filterProposalsByStatus(allCachedProposals, filterValue).length;
+
+                this.updateProposalStatsUI({
+                    total: this.totalProposalCount,
+                    showing: currentVisibleCount,
+                    required: this.contractStats?.requiredApprovals ?? 2
+                });
+
+                // Update Load More button
+                this.updateLoadMoreButton();
+
+                // Show success notification
+                if (window.notificationManager) {
+                    window.notificationManager.success(
+                        `Loaded ${formattedBatch.length} additional proposals`
+                    );
+                }
+            } else {
+                console.log('ℹ️ No more proposals to load - hiding Load More button');
+
+                // Hide the Load More button by removing it
+                const loadMoreContainer = document.querySelector('.load-more-container');
+                if (loadMoreContainer) {
+                    loadMoreContainer.style.display = 'none';
+                }
+
+                // Show a message that all proposals are loaded
+                const proposalsTable = document.querySelector('.proposals-table');
+                if (proposalsTable) {
+                    const existingMessage = proposalsTable.querySelector('.all-loaded-message');
+                    if (!existingMessage) {
+                        const messageDiv = document.createElement('div');
+                        messageDiv.className = 'all-loaded-message';
+                        messageDiv.style.cssText = 'text-align: center; padding: 20px; color: #666; font-style: italic;';
+                        messageDiv.innerHTML = '✅ All proposals loaded';
+                        proposalsTable.appendChild(messageDiv);
+                    }
+                }
+            }
+
+        } catch (error) {
+            console.error('❌ Failed to load more proposals:', error);
+
+            if (window.notificationManager) {
+                window.notificationManager.error(
+                    `Could not load additional proposals: ${error.message}`
+                );
+            }
+        } finally {
+            this.isLoadingMore = false;
+
+            // Reset button state
+            if (loadMoreBtn) {
+                loadMoreBtn.disabled = false;
+
+                // Recalculate remaining proposals
+                const remainingText = this.totalProposalCount > 0 && this.totalProposalCount > this.loadedProposalCount
+                    ? `(${this.totalProposalCount - this.loadedProposalCount} remaining)`
+                    : '(more may be available)';
+
+                loadMoreBtn.innerHTML = `📋 Load More Proposals ${remainingText}`;
+            }
+        }
+    }
+
+    /**
+     * Update Load More button state
+     */
+    updateLoadMoreButton() {
+        const loadMoreContainer = document.querySelector('.load-more-container');
+        if (loadMoreContainer) {
+            // Reset isLoadingMore flag before rendering
+            this.isLoadingMore = false;
+            loadMoreContainer.outerHTML = this.renderLoadMoreButton([]);
+        }
+    }
+
+    updateProposalStatsUI(stats = {}) {
+        const statsContainer = document.querySelector('.panel-stats');
+        if (!statsContainer) {
+            return;
+        }
+
+        const updateChip = (selector, label, value) => {
+            if (value === undefined || value === null) {
+                return;
+            }
+
+            const numericValue = Number(value);
+            if (!Number.isFinite(numericValue)) {
+                return;
+            }
+
+            const chip = statsContainer.querySelector(selector);
+            if (chip) {
+                chip.textContent = `${label}: ${numericValue}`;
+            }
+        };
+
+        updateChip('[data-stat="total-proposals"]', 'Total Proposals', stats.total);
+        updateChip('[data-stat="showing-proposals"]', 'Showing', stats.showing);
+        updateChip('[data-stat="required-approvals"]', 'Required Approvals', stats.required);
+    }
+
+    /**
+     * SELECTIVE UPDATE OPTIMIZATION: Cache proposal state for change detection
+     */
+    cacheProposalState(proposal) {
+        const stateKey = `${proposal.id}`;
+        const state = {
+            approvals: proposal.approvals,
+            executed: proposal.executed,
+            rejected: proposal.rejected,
+            expired: proposal.expired,
+            status: proposal.status
+        };
+        this.proposalStates.set(stateKey, state);
+    }
+
+    /**
+     * SELECTIVE UPDATE OPTIMIZATION: Check if proposal state has changed
+     */
+    hasProposalStateChanged(proposal) {
+        const stateKey = `${proposal.id}`;
+        const cachedState = this.proposalStates.get(stateKey);
+
+        if (!cachedState) {
+            return true; // New proposal, consider it changed
+        }
+
+        const currentState = {
+            approvals: proposal.approvals,
+            executed: proposal.executed,
+            rejected: proposal.rejected,
+            expired: proposal.expired,
+            status: proposal.status
+        };
+
+        // Compare states
+        return (
+            cachedState.approvals !== currentState.approvals ||
+            cachedState.executed !== currentState.executed ||
+            cachedState.rejected !== currentState.rejected ||
+            cachedState.expired !== currentState.expired ||
+            cachedState.status !== currentState.status
+        );
+    }
+
+    filterProposalsByStatus(proposals, filterValue = 'pending') {
+        if (!Array.isArray(proposals)) {
+            return [];
+        }
+
+        const normalizedFilter = filterValue || 'pending';
+
+        return proposals.filter(proposal => {
+            if (!proposal || typeof proposal !== 'object') {
+                return false;
+            }
+
+            const executed = proposal.executed === true;
+            const rejected = proposal.rejected === true;
+            const expired = proposal.expired === true;
+
+            switch (normalizedFilter) {
+                case 'executed':
+                    return executed;
+                case 'rejected':
+                    return rejected;
+                case 'expired':
+                    return expired && !executed && !rejected;
+                case 'all':
+                    return true;
+                case 'pending':
+                default:
+                    return !executed && !rejected && !expired;
+            }
+        });
+    }
+
+    /**
+     * Force attempt to load real proposals (for manual retry)
+     */
+    async forceLoadRealProposals() {
+        try {
+            // Show loading notification
+            if (window.notificationManager) {
+                window.notificationManager.info('Checking network connectivity...');
+            }
+
+            // Check if wallet is connected
+            if (!window.walletManager || !window.walletManager.isConnected()) {
+                throw new Error('Wallet not connected');
+            }
+
+            if (window.notificationManager) {
+                window.notificationManager.info('Network OK - loading proposals from blockchain...');
+            }
+
+            const contractManager = await this.ensureContractReady();
+
+            if (!contractManager || !contractManager.getAllActions) {
+                throw new Error('Contract manager or getAllActions method not available');
+            }
+
+            // Force check contract readiness
+            if (!contractManager.isStakingContractReady || !contractManager.isStakingContractReady()) {
+                throw new Error('Staking contract not properly initialized');
+            }
+
+            const realProposals = await contractManager.getAllActions();
+
+            if (realProposals && realProposals.length >= 0) {
+                const formattedProposals = this.formatRealProposals(realProposals);
+
+                // Update the UI
+                await this.loadMultiSignPanel();
+
+                return formattedProposals;
+            } else {
+                throw new Error('No proposals returned from contract');
+            }
+
+        } catch (error) {
+            console.error('❌ Failed to force load real proposals:', error);
+
+            if (window.notificationManager) {
+                window.notificationManager.error(
+                    `Could not load real proposals: ${error.message}`
+                );
+            }
+
+            // Fall back to empty state
+            await this.loadMultiSignPanel();
+        }
+    }
+
+    /**
+     * Format real contract proposals for UI display
+     */
+    formatRealProposals(realProposals) {
+        if (!Array.isArray(realProposals)) {
+            console.error('❌ realProposals is not an array:', realProposals);
+            return [];
+        }
+
+        if (realProposals.length === 0) {
+            console.log('📭 No proposals to format - returning empty array');
+            return [];
+        }
+
+        return realProposals.map(proposal => {
+            // Map contract action types to UI-friendly names
+            const actionTypeMap = {
+                0: 'SET_HOURLY_REWARD_RATE',
+                1: 'UPDATE_PAIR_WEIGHTS',
+                2: 'ADD_PAIR',
+                3: 'REMOVE_PAIR',
+                4: 'CHANGE_SIGNER',
+                5: 'WITHDRAW_REWARDS'
+            };
+
+            const actionType = actionTypeMap[proposal.actionType] || 'UNKNOWN';
+
+            // Convert BigNumber values to regular numbers/strings safely
+            const formatBigNumber = (value) => {
+                if (!value) return 0;
+                if (typeof value === 'object' && value._isBigNumber) {
+                    // Use toString() instead of toNumber() to avoid overflow
+                    const strValue = value.toString();
+                    const numValue = parseFloat(strValue);
+                    // Return as string if too large for safe integer
+                    return numValue > Number.MAX_SAFE_INTEGER ? strValue : numValue;
+                }
+                if (typeof value === 'string' && value.startsWith('0x')) {
+                    const bigIntValue = BigInt(value);
+                    const numValue = Number(bigIntValue);
+                    return numValue > Number.MAX_SAFE_INTEGER ? bigIntValue.toString() : numValue;
+                }
+                return value;
+            };
+
+            const approvals = formatBigNumber(proposal.approvals) || 0;
+            const requiredApprovals = this.contractStats?.requiredApprovals || 3;
+            const executed = proposal.executed || false;
+            const rejected = proposal.rejected || false;
+            const expired = proposal.expired || false;
+
+            // Determine status based on proposal state
+            let status = 'PENDING';
+            if (executed) {
+                status = 'EXECUTED';
+            } else if (rejected) {
+                status = 'REJECTED';
+            } else if (expired) {
+                status = 'EXPIRED';
+            } else if (approvals >= requiredApprovals) {
+                status = 'APPROVED';
+            }
+
+            const formattedProposal = {
+                id: proposal.id || formatBigNumber(proposal.actionId),
+                actionType: actionType,
+                approvals: approvals,
+                currentApprovals: approvals, // Add currentApprovals for consistency
+                requiredApprovals: requiredApprovals,
+                executed: executed,
+                rejected: rejected,
+                expired: expired,
+                status: status, // Add status field for consistency
+                proposedTime: formatBigNumber(proposal.proposedTime) || Math.floor(Date.now() / 1000),
+                approvedBy: proposal.approvedBy || [],
+                proposer: proposal.proposer || null, // CRITICAL: Include proposer address for own-proposal check
+
+                // Action-specific details
+                newHourlyRewardRate: proposal.newHourlyRewardRate ?
+                    ethers.utils.formatEther(proposal.newHourlyRewardRate) : null,
+                pairToAdd: proposal.pairToAdd || null,
+                pairNameToAdd: proposal.pairNameToAdd || null,
+                platformToAdd: proposal.platformToAdd || null,
+                weightToAdd: formatBigNumber(proposal.weightToAdd) || null,
+                pairToRemove: proposal.pairToRemove || null,
+                recipient: proposal.recipient || null,
+                withdrawAmount: proposal.withdrawAmount ?
+                    ethers.utils.formatEther(proposal.withdrawAmount) : null,
+                pairs: proposal.pairs || [],
+                weights: proposal.weights ? proposal.weights.map(w => formatBigNumber(w)) : []
+            };
+
+            return formattedProposal;
+        });
+    }
+
+    /**
+     * PERFORMANCE OPTIMIZATION: Render Load More button for pagination
+     */
+    renderLoadMoreButton(proposals) {
+        // Don't update loaded count here - it should be managed by loadProposals and loadMoreProposals
+        // this.loadedProposalCount is already set correctly
+
+        // Show Load More button if:
+        // 1. Either we know there are more proposals OR we can't determine total count (show optimistically)
+        const hasMoreProposals = this.totalProposalCount > this.loadedProposalCount;
+        const unknownTotal = this.totalProposalCount === 0 || this.totalProposalCount === undefined;
+
+        const shouldShowLoadMore = this.loadedProposalCount > 0 &&
+                                  (hasMoreProposals || unknownTotal);
+
+        if (shouldShowLoadMore) {
+            const remainingText = this.totalProposalCount > 0 && hasMoreProposals
+                ? `(${this.totalProposalCount - this.loadedProposalCount} remaining)`
+                : '(more may be available)';
+
+            return `
+                <div class="load-more-container" style="text-align: center; padding: 20px;">
+                    <button class="btn btn-outline" id="load-more-btn" onclick="adminPage.loadMoreProposals()" ${this.isLoadingMore ? 'disabled' : ''}>
+                        ${this.isLoadingMore ? '⏳ Loading...' : `📋 Load More Proposals ${remainingText}`}
+                    </button>
+                    <div class="load-more-info" style="margin-top: 10px; color: #666; font-size: 0.9em;">
+                        ${this.totalProposalCount > 0
+                            ? `Showing ${this.loadedProposalCount} of ${this.totalProposalCount} proposals`
+                            : `Showing ${this.loadedProposalCount} proposals`
+                        }
+                    </div>
+                </div>
+            `;
+        }
+
+        return ''; // No Load More button needed
+    }
+
+    /**
+     * Load older proposals by ID (fallback method for pagination)
+     */
+    async loadOlderProposalsByID(contractManager, limit = 10) {
+        try {
+            // Find the lowest ID we currently have
+            const cachedProposals = Array.from(this.proposalsCache.values());
+            const minLoadedId = cachedProposals.length > 0
+                ? Math.min(...cachedProposals.map(p => p.id))
+                : 999999; // Start high if no cache
+
+            const olderProposals = [];
+            const batchPromises = [];
+
+            // Load proposals with IDs lower than our minimum
+            for (let id = minLoadedId - 1; id >= Math.max(1, minLoadedId - limit); id--) {
+                // Skip if we already have this proposal
+                if (this.proposalsCache.has(id)) {
+                    continue;
+                }
+
+                batchPromises.push(this.loadSingleProposal(contractManager, id));
+            }
+
+            if (batchPromises.length === 0) {
+                console.log('📭 No older proposals to load');
+                return [];
+            }
+
+            const results = await Promise.allSettled(batchPromises);
+            results.forEach(result => {
+                if (result.status === 'fulfilled' && result.value) {
+                    olderProposals.push(result.value);
+                }
+            });
+
+            // Sort by ID descending (newest first)
+            olderProposals.sort((a, b) => b.id - a.id);
+
+            return olderProposals;
+
+        } catch (error) {
+            console.error('❌ Failed to load older proposals by ID:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Load a single proposal (helper method)
+     */
+    async loadSingleProposal(contractManager, actionId) {
+        try {
+            const [action, pairs, weights] = await Promise.all([
+                contractManager.stakingContract.actions(BigInt(actionId)),
+                contractManager.stakingContract.getActionPairs(actionId),
+                contractManager.stakingContract.getActionWeights(actionId)
+            ]);
+
+            return {
+                id: actionId,
+                actionType: action.actionType,
+                newHourlyRewardRate: action.newHourlyRewardRate.toString(),
+                pairs: pairs.map(p => p.toString()),
+                weights: weights.map(w => w.toString()),
+                pairToAdd: action.pairToAdd,
+                pairNameToAdd: action.pairNameToAdd,
+                platformToAdd: action.platformToAdd,
+                weightToAdd: action.weightToAdd.toString(),
+                pairToRemove: action.pairToRemove,
+                recipient: action.recipient,
+                withdrawAmount: action.withdrawAmount.toString(),
+                executed: action.executed,
+                expired: action.expired,
+                approvals: action.approvals,
+                approvedBy: action.approvedBy,
+                proposedTime: action.proposedTime.toNumber(),
+                rejected: action.rejected
+            };
+        } catch (error) {
+            console.warn(`⚠️ Failed to load proposal ${actionId}:`, error.message);
+            return null;
+        }
+    }
+
+    /**
+     * Apply proposal filter based on dropdown selection
+     */
+    async applyProposalFilter() {
+        const filterSelect = document.getElementById('proposal-filter');
+        const proposalsTbody = document.getElementById('proposals-tbody');
+
+        if (!filterSelect || !proposalsTbody) {
+            console.warn('⚠️ Could not find proposal filter dropdown or proposals table');
+            return;
+        }
+
+        const filterValue = filterSelect.value || 'pending';
+        this.proposalFilter = filterValue;
+
+        // Get all current proposals from cache or reload
+        let allProposals = [];
+        if (this.proposalsCache && this.proposalsCache.size > 0) {
+            allProposals = Array.from(this.proposalsCache.values());
+        } else {
+            // Reload proposals if cache is empty
+            allProposals = await this.loadProposals();
+        }
+
+        const filteredProposals = this.filterProposalsByStatus(allProposals, filterValue);
+
+        // Update the table
+        proposalsTbody.innerHTML = this.renderProposalsRows(filteredProposals);
+
+        // Update stats to reflect filtered count
+        this.updateProposalStatsUI({ showing: filteredProposals.length });
+    }
+
+    renderProposalsRows(proposals) {
+        if (!proposals || proposals.length === 0) {
+            console.log('📭 No proposals to render');
+            return '<tr><td colspan="6" class="no-data">No proposals found</td></tr>';
+        }
+
+        return proposals.map(proposal => {
+            // Ensure actionType is defined with fallback - more robust checking
+            if (!proposal || typeof proposal !== 'object') {
+                console.warn('⚠️ Invalid proposal object:', proposal);
+                return '<tr><td colspan="6" class="error-row">Invalid proposal data</td></tr>';
+            }
+
+            // Ensure actionType is always a string
+            if (!proposal.actionType || typeof proposal.actionType !== 'string') {
+                console.warn('⚠️ Proposal missing or invalid actionType:', proposal);
+                proposal.actionType = 'UNKNOWN';
+            }
+
+            // Ensure other required fields have defaults
+            proposal.approvals = proposal.approvals || 0;
+            proposal.requiredApprovals = proposal.requiredApprovals || 2;
+            proposal.executed = proposal.executed || false;
+            proposal.rejected = proposal.rejected || false;
+            proposal.id = proposal.id || 'unknown';
+            proposal.approvedBy = proposal.approvedBy || [];
+
+            const canExecute = proposal.approvals >= proposal.requiredApprovals && !proposal.executed && !proposal.rejected && !proposal.expired;
+            const statusClass = proposal.executed ? 'executed' : proposal.rejected ? 'rejected' : proposal.expired ? 'expired' : canExecute ? 'ready' : 'pending';
+            const statusText = proposal.executed ? '✅ Executed' : proposal.rejected ? '❌ Rejected' : proposal.expired ? '⏰ Expired' : canExecute ? '🚀 Ready to Execute' : '⏳ Pending';
+
+
+            // Enhanced action type display with icons
+            const actionTypeDisplay = this.getActionTypeDisplay(proposal.actionType);
+
+            // Enhanced proposal summary
+            const proposalSummary = this.getProposalSummary(proposal);
+
+            return `
+                <tr class="proposal-row ${statusClass}">
+                    <td>
+                        <button class="expand-btn" onclick="adminPage.toggleProposal('${proposal.id}')" title="View Details">
+                            <span class="expand-icon">▼</span>
+                        </button>
+                    </td>
+                    <td>
+                        <div class="proposal-id-container">
+                            <span class="proposal-id">#${proposal.id}</span>
+                            <div class="proposal-summary">${proposalSummary}</div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="action-type-container">
+                            <span class="action-type ${proposal.actionType.toLowerCase()}">${actionTypeDisplay}</span>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="approvals-container">
+                            <div class="approval-progress">
+                                <div class="approval-bar">
+                                    <div class="approval-fill" style="width: ${(proposal.approvals / proposal.requiredApprovals) * 100}%"></div>
+                                </div>
+                                <span class="approval-text">${proposal.approvals} / ${proposal.requiredApprovals}</span>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="status-badge ${statusClass}">${statusText}</span>
+                    </td>
+                    <td>
+                        <div class="action-buttons">
+                            ${!proposal.executed && !proposal.rejected && !proposal.expired ? this.renderProposalActionButtons(proposal, canExecute) : ''}
+                        </div>
+                    </td>
+                </tr>
+                <tr id="details-${proposal.id}" class="proposal-details-row" style="display: none;">
+                    <td colspan="6">
+                        <div class="proposal-details">
+                            <div class="details-header">
+                                <h4>📋 Proposal Details</h4>
+                            </div>
+                            <div class="details-content">
+                                ${this.renderProposalParameters(proposal.actionType, proposal)}
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    /**
+     * Get enhanced action type display with icons
+     */
+    getActionTypeDisplay(actionType) {
+        const actionTypes = {
+            'ADD_PAIR': '➕ Add Pair',
+            'REMOVE_PAIR': '➖ Remove Pair',
+            'UPDATE_PAIR_WEIGHTS': '⚖️ Update Weights',
+            'CHANGE_SIGNER': '🔑 Change Signer',
+            'UPDATE_HOURLY_RATE': '💰 Update Rate',
+            'SET_HOURLY_REWARD_RATE': '💰 Set Reward Rate',
+            'WITHDRAW_REWARDS': '💸 Withdraw',
+            'HOURLY_RATE': '💰 Update Rate',
+            'HOURLY-RATE': '💰 Update Rate',
+            'UNKNOWN': '❓ Unknown Action'
+        };
+
+        return actionTypes[actionType] || `❓ ${actionType || 'Unknown'}`;
+    }
+
+    /**
+     * Get detailed proposal summary showing actual form inputs
+     */
+    getProposalSummary(proposal) {
+        try {
+            switch (proposal.actionType) {
+                case 'ADD_PAIR':
+                    // Show detailed pair information from form inputs
+                    let summary = '';
+                    if (proposal.pairNameToAdd) {
+                        summary = `Add ${proposal.pairNameToAdd} LP pair`;
+                        if (proposal.platformToAdd) {
+                            summary += ` from ${proposal.platformToAdd}`;
+                        }
+                        if (proposal.weightToAdd) {
+                            const weight = typeof proposal.weightToAdd === 'bigint'
+                                ? proposal.weightToAdd.toString()
+                                : proposal.weightToAdd;
+                            summary += ` (weight: ${this.formatWeightForDisplay(weight)})`;
+                        }
+                    } else if (proposal.pairToAdd) {
+                        summary = `Add LP pair ${this.formatAddress(proposal.pairToAdd)}`;
+                    } else {
+                        summary = 'Add new LP trading pair';
+                    }
+                    return summary;
+
+                case 'REMOVE_PAIR':
+                    if (proposal.pairToRemove) {
+                        // Try to get pair name from existing pairs or show address
+                        const pairName = proposal.pairNameToAdd;
+                        if (pairName) {
+                            return `Remove ${pairName} LP pair`;
+                        } else {
+                            return `Remove LP pair ${this.formatAddress(proposal.pairToRemove)}`;
+                        }
+                    }
+                    return 'Remove LP trading pair';
+
+                case 'UPDATE_PAIR_WEIGHTS':
+                    if (proposal.pairs && proposal.weights && proposal.pairs.length > 0) {
+                        const pairCount = proposal.pairs.length;
+                        if (pairCount === 1) {
+                            const pairName = this.getPairNameByAddress(proposal.pairs[0]);
+                            const weight = proposal.weights[0];
+                            return `Update ${pairName || this.formatAddress(proposal.pairs[0])} weight to ${this.formatWeightForDisplay(weight)}`;
+                        } else {
+                            return `Update weights for ${pairCount} LP pairs`;
+                        }
+                    }
+                    return 'Update LP pair weights';
+
+                case 'CHANGE_SIGNER':
+                    if (proposal.newSigner) {
+                        return `Change signer to ${this.formatAddress(proposal.newSigner)}`;
+                    }
+                    return 'Change authorized signer';
+
+                case 'SET_HOURLY_REWARD_RATE':
+                case 'UPDATE_HOURLY_RATE':
+                case 'HOURLY_RATE':
+                case 'HOURLY-RATE':
+                    if (proposal.newHourlyRewardRate) {
+                        const rate = typeof proposal.newHourlyRewardRate === 'bigint'
+                            ? ethers.utils.formatEther(proposal.newHourlyRewardRate)
+                            : proposal.newHourlyRewardRate;
+                        return `Set reward rate to ${rate} tokens/hour`;
+                    }
+                    return 'Governance proposal';
+
+                case 'WITHDRAW_REWARDS':
+                    let withdrawSummary = 'Withdraw rewards';
+                    if (proposal.withdrawAmount) {
+                        const amount = typeof proposal.withdrawAmount === 'bigint'
+                            ? ethers.utils.formatEther(proposal.withdrawAmount)
+                            : proposal.withdrawAmount;
+                        withdrawSummary = `Withdraw ${amount} tokens`;
+                    }
+                    if (proposal.recipient) {
+                        withdrawSummary += ` to ${this.formatAddress(proposal.recipient)}`;
+                    }
+                    return withdrawSummary;
+
+                default:
+                    return proposal.description || 'Governance proposal';
+            }
+        } catch (error) {
+            console.warn('Error generating proposal summary:', error);
+            return proposal.description || 'Governance proposal';
+        }
+    }
+
+
+    /**
+     * Get pair name by address from existing pairs or contract data
+     */
+    getPairNameByAddress(address) {
+        try {
+            // Try to find in existing contract pairs
+            if (this.contractStats && this.contractStats.pairs) {
+                const pair = this.contractStats.pairs.find(p =>
+                    p.address && p.address.toLowerCase() === address.toLowerCase()
+                );
+                if (pair && pair.name) {
+                    return pair.name;
+                }
+            }
+
+            return null;
+        } catch (error) {
+            console.warn('Error getting pair name by address:', error);
+            return null;
+        }
+    }
+
+    renderPairsList(pairs, totalWeight) {
+        if (!pairs || pairs.length === 0) {
+            return '<div class="no-data">No pairs configured</div>';
+        }
+
+        // Calculate total weight and parse pair weights
+        const parseWeight = (weight) => {
+            if (!weight || (typeof weight === 'object' && weight === null)) return null;
+            try {
+                const num = typeof weight === 'string' ? parseFloat(weight) : Number(weight);
+                return !isNaN(num) ? num : null;
+            } catch {
+                return null;
+            }
+        };
+
+        const pairData = pairs.map(pair => {
+            const weight = parseWeight(pair?.weight);
+            let displayWeight;
+            if (weight != null) {
+                displayWeight = window.Formatter?.formatSmallNumberWithSubscript(weight) || weight.toString();
+            } else {
+                displayWeight = this.formatWeightForDisplay(pair?.weight) || '0';
+            }
+            
+            return {
+                name: pair?.name || (pair?.address ? this.getPairNameByAddress(pair.address) : null) || 'Unknown Pair',
+                address: pair?.address || 'Unknown',
+                platform: pair?.platform || '',
+                weight: weight,
+                displayWeight: displayWeight
+            };
+        });
+        
+        // if totalWeight not provided, calculate it
+        if (totalWeight === undefined || totalWeight === null) {
+            totalWeight = pairData.reduce((sum, p) => sum + (p.weight || 0), 0);
+        }
+
+        return pairData.map(pair => {
+            const percentageValue = totalWeight > 0 && pair.weight != null 
+                ? (pair.weight / totalWeight) * 100 
+                : 0;
+            const percentage = Math.round(percentageValue);
+
+            return `
+                <div class="pair-item-card">
+                    <div class="pair-header-section">
+                        <div class="pair-name-section">
+                            <h6 class="pair-name">${window.Formatter?.formatPairName(pair.name, pair.address, pair.platform) || pair.name}</h6>
+                            <div class="pair-address-wrapper">
+                                <span class="address-label">Address:</span>
+                                <code class="pair-address" data-address="${pair.address}" title="Click to copy address">${pair.address}</code>
+                            </div>
+                        </div>
+                        <div class="pair-weight-badge">
+                            <div class="weight-label">Weight</div>
+                            <span class="weight-value">${pair.displayWeight}</span>
+                            <div class="percentage-label">Share</div>
+                            <span class="weight-percentage">${percentage}%</span>
+                        </div>
+                    </div>
+                    <div class="pair-details-section">
+                        <div class="weight-bar-container">
+                            <div class="weight-bar" style="width: ${percentageValue}%"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    renderSignersList(signers) {
+        if (!signers || signers.length === 0) {
+            return '<div class="no-data">No signers configured</div>';
+        }
+
+        return signers.map(signer => `
+            <p class="signer-address" data-address="${signer}" title="Click to copy address">${signer}</p>
+        `).join('');
+    }
+
+    async showDashboard() {
+        const contentDiv = document.getElementById('admin-section-content');
+        
+        // Initialize contractStats if null (from previous failed load)
+        if (!this.contractStats) {
+            this.contractStats = {
+                activePairs: 0,      // This can stay 0 since it's loaded from contract
+                totalPairs: 0,       // This can stay 0 since it's loaded from contract
+                totalTVL: null,      // Not available without price feeds
+                totalStakers: null,  // Not available without event parsing
+                totalRewards: null   // Not available without additional data
+            };
+        }
+        
+        contentDiv.innerHTML = `
+            <div class="dashboard-section">
+                <h2>📊 Contract Statistics</h2>
+                
+                <div class="stats-grid">
+                    <div class="info-card">
+                        <div class="card-header">
+                            <h3>🔗 Active LP Pairs</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="stat-value" id="active-pairs-count">
+                                ${this.contractStats.activePairs ?? 0}
+                            </div>
+                            <div class="stat-label">Active Pairs</div>
+                        </div>
+                    </div>
+                    
+                    <div class="info-card">
+                        <div class="card-header">
+                            <h3>💰 Total Value Locked</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="stat-value" id="total-tvl">
+                                ${this.contractStats.totalTVL != null 
+                                    ? `$${this.formatNumber(this.contractStats.totalTVL)}` 
+                                    : 'N/A'}
+                            </div>
+                            <div class="stat-label">USD Value</div>
+                        </div>
+                    </div>
+                    
+                    <div class="info-card">
+                        <div class="card-header">
+                            <h3>👥 Total Stakers</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="stat-value" id="total-stakers">
+                                ${this.contractStats.totalStakers != null 
+                                    ? this.contractStats.totalStakers 
+                                    : 'N/A'}
+                            </div>
+                            <div class="stat-label">Unique Users</div>
+                        </div>
+                    </div>
+                    
+                    <div class="info-card">
+                        <div class="card-header">
+                            <h3>🏆 Total Rewards</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="stat-value" id="total-rewards">
+                                ${this.contractStats.totalRewards != null 
+                                    ? this.formatNumber(this.contractStats.totalRewards) 
+                                    : 'N/A'}
+                            </div>
+                            <div class="stat-label">LIB Tokens</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="recent-activity">
+                    <h3>📈 Recent Activity</h3>
+                    <div class="activity-list" id="recent-activity-list">
+                        <div class="activity-item">
+                            <span class="activity-time">Loading...</span>
+                            <span class="activity-desc">Fetching recent transactions...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Load real-time data
+        await this.loadDashboardData();
+    }
+
+    async loadContractStats() {
+        try {
+            // Ensure contract manager is ready
+            const contractManager = await this.ensureContractReady();
+
+            // Initialize stats object
+            this.contractStats = {
+                activePairs: 0,
+                totalPairs: 0,
+                totalTVL: null,
+                totalStakers: null,
+                totalRewards: null,
+                rewardBalance: null,
+                rewardToken: null,
+                rewardTokenSymbol: '',
+                hourlyRewardRate: 0,
+                requiredApprovals: 0,
+                actionCounter: 0
+            };
+
+            // Check RPC health first (like React version)
+            const isRpcDown = await this.checkRpcHealth(contractManager);
+
+            if (isRpcDown) {
+                console.error('❌ RPC node issues detected, cannot load contract statistics');
+                throw new Error('RPC connection failed. Please check your network connection and try again.');
+            }
+
+            // Try multicall for better performance (5 calls -> 1 call)
+            const stats = await contractManager.getContractStatsWithMulticall();
+
+            if (stats) {
+                // Use multicall results with config defaults
+                const defaults = window.CONFIG?.DEFAULTS || {};
+                this.contractStats.rewardToken = stats.rewardToken || defaults.REWARD_TOKEN;
+                this.contractStats.hourlyRewardRate = stats.hourlyRewardRate ? 
+                    Number(ethers.utils.formatEther(stats.hourlyRewardRate)) : defaults.HOURLY_REWARD_RATE;
+                this.contractStats.requiredApprovals = stats.requiredApprovals?.toNumber() || defaults.REQUIRED_APPROVALS;
+                this.contractStats.actionCounter = stats.actionCounter?.toNumber() || defaults.ACTION_COUNTER;
+            } else {
+                // Fallback to individual calls with config defaults
+                const defaults = window.CONFIG?.DEFAULTS || {};
+                this.contractStats.rewardToken = await this.safeContractCall(
+                    () => contractManager.stakingContract.rewardToken(), 
+                    defaults.REWARD_TOKEN
+                );
+                this.contractStats.hourlyRewardRate = this.convertBigIntToNumber(
+                    await this.safeContractCall(
+                        () => contractManager.stakingContract.hourlyRewardRate(), 
+                        defaults.HOURLY_REWARD_RATE
+                    )
+                );
+                this.contractStats.requiredApprovals = this.convertBigIntToNumber(
+                    await this.safeContractCall(
+                        () => contractManager.stakingContract.REQUIRED_APPROVALS(), 
+                        defaults.REQUIRED_APPROVALS
+                    )
+                );
+                this.contractStats.actionCounter = this.convertBigIntToNumber(
+                    await this.safeContractCall(
+                        () => contractManager.stakingContract.actionCounter(), 
+                        defaults.ACTION_COUNTER
+                    )
+                );
+
+                const symbol = await this.safeContractCall(
+                    () => contractManager.rewardTokenContract.symbol(),
+                    this.contractStats.rewardTokenSymbol || 'USDC'
+                );
+                this.contractStats.rewardTokenSymbol = symbol;
+
+                this.contractStats.rewardBalance = await this.safeContractCall(
+                    async () => {
+                        const stakingAddress = contractManager.stakingContract?.address;
+                        if (!stakingAddress) {
+                            throw new Error('Staking contract address not available');
+                        }
+                        const balance = await contractManager.rewardTokenContract.balanceOf(stakingAddress);
+                        const balanceValue = Number(ethers.utils.formatEther(balance));
+                        return `${balanceValue.toFixed(2)} ${symbol}`;
+                    },
+                    null
+                );
+            }
+
+            // Get pairs information (with error handling)
+            try {
+                const allPairs = await contractManager.stakingContract.getPairs();
+                this.contractStats.totalPairs = allPairs.length;
+                this.contractStats.activePairs = allPairs.filter(pair => pair.isActive).length;
+            } catch (error) {
+                console.warn('⚠️ Could not load pairs info:', error.message);
+                this.contractStats.totalPairs = this.contractStats.activePairs;
+            }
+            
+        } catch (error) {
+            console.error('❌ Failed to load contract stats:', error);
+
+            // Set contractStats to null to indicate failure
+            this.contractStats = null;
+
+            // Show error to user
+            const errorMessage = error.message || 'Failed to load contract statistics';
+            this.showError('Failed to load contract statistics', errorMessage);
+
+            // Also show notification
+            if (window.notificationManager) {
+                window.notificationManager.error('Failed to load contract statistics. Please try again.');
+            }
+        }
+    }
+
+    async loadDashboardData() {
+        // Refresh contract stats
+        await this.loadContractStats();
+        
+        // Update dashboard display
+        this.updateDashboardDisplay();
+        
+        // Update last refresh time
+        document.getElementById('last-refresh').textContent = 
+            `Last updated: ${new Date().toLocaleTimeString()}`;
+    }
+
+    updateDashboardDisplay() {
+        // Don't update display if stats failed to load (error already shown)
+        if (!this.contractStats) {
+            return;
+        }
+
+        // Update stat values
+        const elements = {
+            'active-pairs-count': this.contractStats.activePairs ?? 0,
+            'total-tvl': this.contractStats.totalTVL != null 
+                ? `$${this.formatNumber(this.contractStats.totalTVL)}` 
+                : 'N/A',
+            'total-stakers': this.contractStats.totalStakers != null 
+                ? this.contractStats.totalStakers 
+                : 'N/A',
+            'total-rewards': this.contractStats.totalRewards != null 
+                ? this.formatNumber(this.contractStats.totalRewards) 
+                : 'N/A'
+        };
+        
+        Object.entries(elements).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.textContent = value;
+            }
+        });
+    }
+
+    // Utility methods
+    formatAddress(address) {
+        if (!address) return 'Unknown';
+        return `${address.slice(0, 6)}...${address.slice(-4)}`;
+    }
+
+    startAutoRefresh() {
+        // Prevent multiple auto-refresh timers
+        if (this.autoRefreshActive) {
+            console.log('🔄 Auto-refresh already active, skipping...');
+            return;
+        }
+
+        // Clear existing interval if any
+        if (this.refreshInterval) {
+            clearInterval(this.refreshInterval);
+        }
+
+        // Mark auto-refresh as active
+        this.autoRefreshActive = true;
+        this.autoRefreshPaused = false;
+
+        // Refresh data every 30 seconds
+        this.refreshInterval = setInterval(() => {
+            // Only refresh if authorized, content exists, and not paused
+            if (this.isAuthorized &&
+                document.getElementById('admin-section-content') &&
+                !this.autoRefreshPaused) {
+                this.refreshData();
+            }
+        }, 30000);
+    }
+
+
+
+    // Placeholder methods for other sections (to be implemented)
+    async showPairsManagement() {
+        document.getElementById('admin-section-content').innerHTML = `
+            <div class="section-placeholder">
+                <h2>🔗 LP Pairs Management</h2>
+                <p>This section will allow administrators to:</p>
+                <ul>
+                    <li>Add new LP pairs</li>
+                    <li>Configure reward rates</li>
+                    <li>Enable/disable pairs</li>
+                    <li>Monitor pair performance</li>
+                </ul>
+                <p><em>Implementation coming in next phase...</em></p>
+            </div>
+        `;
+    }
+
+    async showUsersManagement() {
+        document.getElementById('admin-section-content').innerHTML = `
+            <div class="section-placeholder">
+                <h2>👥 Users Management</h2>
+                <p>This section will allow administrators to:</p>
+                <ul>
+                    <li>View all stakers</li>
+                    <li>Monitor user activities</li>
+                    <li>Handle user support issues</li>
+                    <li>Generate user reports</li>
+                </ul>
+                <p><em>Implementation coming in next phase...</em></p>
+            </div>
+        `;
+    }
+
+    async showSettings() {
+        document.getElementById('admin-section-content').innerHTML = `
+            <div class="section-placeholder">
+                <h2>⚙️ Contract Settings</h2>
+                <p>This section will allow administrators to:</p>
+                <ul>
+                    <li>Update contract parameters</li>
+                    <li>Manage admin roles</li>
+                    <li>Configure system settings</li>
+                    <li>Emergency controls</li>
+                </ul>
+                <p><em>Implementation coming in next phase...</em></p>
+            </div>
+        `;
+    }
+
+    toggleProposal(proposalId) {
+        const detailsRow = document.getElementById(`details-${proposalId}`);
+        const expandBtn = document.querySelector(`[onclick="adminPage.toggleProposal('${proposalId}')"]`) ||
+                         document.querySelector(`[onclick="adminPage.toggleProposal(${proposalId})"]`);
+
+        if (detailsRow) {
+            const isVisible = detailsRow.style.display !== 'none';
+            detailsRow.style.display = isVisible ? 'none' : 'table-row';
+
+            // Add/remove expanded class for additional styling
+            const proposalRow = expandBtn?.closest('.proposal-row');
+            if (proposalRow) {
+                proposalRow.classList.toggle('expanded', !isVisible);
+            }
+        }
+    }
+
+    // Enhanced error handling
+    handleError(error, context = 'Admin Panel') {
+        console.error(`❌ ${context} Error:`, error);
+
+        // Show user-friendly error message
+        const errorMessage = error.message || 'An unexpected error occurred';
+        this.showError(context, errorMessage);
+
+        // Log additional error details for debugging
+        if (error.stack) {
+            console.error('Error stack:', error.stack);
+        }
+    }
+
+    // Contract readiness check with graceful fallback
+    async ensureContractReady() {
+        if (!window.contractManager) {
+            console.warn('⚠️ Contract manager not available');
+            throw new Error('Contract manager not available');
+        }
+
+        // Get detailed contract status
+        const status = window.contractManager.getContractStatus ?
+                      window.contractManager.getContractStatus() :
+                      { isReady: window.contractManager.isReady() };
+
+        if (!status.isReady) {
+            try {
+                await this.waitForContractManager();
+            } catch (error) {
+                console.error('⚠️ Contract manager failed to initialize');
+                throw new Error('Contract manager initialization failed');
+            }
+        }
+
+        // Additional check for specific contract availability
+        if (!status.stakingContract && !status.rewardTokenContract) {
+            console.warn('⚠️ No contracts initialized, operations may fail');
+        }
+
+        return window.contractManager;
+    }
+
+    renderProposalParameters(type, proposal) {
+        // Use the full proposal object instead of just parameters
+        if (!proposal) return '<div class="no-parameters">📋 No additional parameters</div>';
+
+        switch (type.toLowerCase()) {
+            case 'hourly-rate':
+            case 'update-hourly-rate':
+            case 'hourly_rate':
+            case 'set_hourly_reward_rate':
+            case 'set-hourly-reward-rate':
+                const rate = proposal.newHourlyRewardRate
+                    ? (typeof proposal.newHourlyRewardRate === 'bigint'
+                        ? ethers.utils.formatEther(proposal.newHourlyRewardRate)
+                        : proposal.newHourlyRewardRate)
+                    : 'Not specified';
+
+                let hourlyRateHTML = `
+                    <div class="parameters-container">
+                        <div class="parameter-card">
+                            <div class="parameter-icon">💰</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">New Hourly Rate</div>
+                                <div class="parameter-value highlight">${rate} tokens/hour</div>
+                            </div>
+                        </div>`;
+
+                // Add description/reason if available
+                if (proposal.description) {
+                    hourlyRateHTML += `
+                        <div class="parameter-card">
+                            <div class="parameter-icon">📝</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Description / Reason</div>
+                                <div class="parameter-value">${proposal.description}</div>
+                            </div>
+                        </div>`;
+                }
+
+                hourlyRateHTML += `</div>`;
+                return hourlyRateHTML;
+
+            case 'add-pair':
+            case 'add_pair':
+                // Format weight for display without rounding
+                const weight = proposal.weightToAdd
+                    ? this.formatWeightForDisplay(proposal.weightToAdd)
+                    : 'Not specified';
+
+                // Show full address for LP token
+                const lpTokenAddress = proposal.pairToAdd || 'Not specified';
+
+                let addPairHTML = `
+                    <div class="parameters-container">
+                        <div class="parameter-card">
+                            <div class="parameter-icon">🏷️</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Pair Name</div>
+                                <div class="parameter-value">${proposal.pairNameToAdd || 'Not specified'}</div>
+                            </div>
+                        </div>
+                        <div class="parameter-card">
+                            <div class="parameter-icon">📍</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">LP Token Address</div>
+                                <div class="parameter-value address-display" 
+                                     data-address="${lpTokenAddress}" 
+                                     style="font-family: monospace; font-size: 0.85em; word-break: break-all; cursor: pointer;" 
+                                     title="Click to copy address">${lpTokenAddress}</div>
+                            </div>
+                        </div>
+                        <div class="parameter-card">
+                            <div class="parameter-icon">⚖️</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Allocation Weight</div>
+                                <div class="parameter-value highlight">${weight}</div>
+                            </div>
+                        </div>
+                        <div class="parameter-card">
+                            <div class="parameter-icon">🏢</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Platform</div>
+                                <div class="parameter-value">${proposal.platformToAdd || 'Not specified'}</div>
+                            </div>
+                        </div>`;
+
+                // Add description/reason if available
+                if (proposal.description) {
+                    addPairHTML += `
+                        <div class="parameter-card">
+                            <div class="parameter-icon">📝</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Description / Reason</div>
+                                <div class="parameter-value">${proposal.description}</div>
+                            </div>
+                        </div>`;
+                }
+
+                addPairHTML += `</div>`;
+                return addPairHTML;
+
+            case 'remove-pair':
+            case 'remove_pair':
+                let removePairHTML = `
+                    <div class="parameters-container">
+                        <div class="parameter-card">
+                            <div class="parameter-icon">🏷️</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Pair to Remove</div>
+                                <div class="parameter-value">${proposal?.pairNameToAdd}</div>
+                            </div>
+                        </div>
+                        <div class="parameter-card">
+                            <div class="parameter-icon">📍</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">LP Token Address</div>
+                                <div class="parameter-value address-display" 
+                                     data-address="${proposal?.pairToRemove}" 
+                                     style="font-family: monospace; font-size: 0.85em; word-break: break-all; cursor: pointer;" 
+                                     title="Click to copy address">${proposal?.pairToRemove}</div>
+                            </div>
+                        </div>`;
+
+                // Add description/reason if available
+                if (proposal.description) {
+                    removePairHTML += `
+                        <div class="parameter-card">
+                            <div class="parameter-icon">📝</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Description / Reason</div>
+                                <div class="parameter-value">${proposal.description}</div>
+                            </div>
+                        </div>`;
+                }
+
+                removePairHTML += `</div>`;
+                return removePairHTML;
+
+            case 'update-weights':
+            case 'update-pair-weight':
+            case 'update_weights':
+            case 'update_pair_weights':
+                if (proposal.pairs && proposal.weights && proposal.pairs.length > 0) {
+                    const pairCards = proposal.pairs.map((pairAddress, index) => {
+                        const pairName = this.getPairNameByAddress(pairAddress);
+                        const rawWeight = proposal.weights[index];
+                        // Format weight for display without rounding
+                        const weight = rawWeight ? this.formatWeightForDisplay(rawWeight) : 'Not specified';
+                        return `
+                            <div class="parameter-card">
+                                <div class="parameter-icon">⚖️</div>
+                                <div class="parameter-content">
+                                    <div class="parameter-label">${pairName || this.formatAddress(pairAddress)}</div>
+                                    <div class="parameter-value highlight">Weight: ${weight}</div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+
+                    let updateWeightsHTML = `<div class="parameters-container">${pairCards}`;
+
+                    // Add description/reason if available
+                    if (proposal.description) {
+                        updateWeightsHTML += `
+                            <div class="parameter-card">
+                                <div class="parameter-icon">📝</div>
+                                <div class="parameter-content">
+                                    <div class="parameter-label">Description / Reason</div>
+                                    <div class="parameter-value">${proposal.description}</div>
+                                </div>
+                            </div>`;
+                    }
+
+                    updateWeightsHTML += `</div>`;
+                    return updateWeightsHTML;
+                } else {
+                    return `
+                        <div class="parameters-container">
+                            <div class="parameter-card">
+                                <div class="parameter-icon">⚖️</div>
+                                <div class="parameter-content">
+                                    <div class="parameter-label">Weight Updates</div>
+                                    <div class="parameter-value">No weight data available</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+            case 'change-signer':
+            case 'change_signer':
+                const newSignerAddress = proposal.pairToRemove || 'Not specified';
+                const signerToRemove = proposal.pairToAdd || 'Not specified';
+
+                let changeSignerHTML = `
+                    <div class="parameters-container">
+                        <div class="parameter-card">
+                            <div class="parameter-icon">➖</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Signer To Remove</div>
+                                <div class="parameter-value address-display" 
+                                     data-address="${signerToRemove}" 
+                                     style="font-family: monospace; font-size: 0.85em; word-break: break-all; cursor: pointer;" 
+                                     title="Click to copy address">${signerToRemove}</div>
+                            </div>
+                        </div>
+                        <div class="parameter-card">
+                            <div class="parameter-icon">➕</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Signer To Add</div>
+                                <div class="parameter-value address-display" 
+                                     data-address="${newSignerAddress}" 
+                                     style="font-family: monospace; font-size: 0.85em; word-break: break-all; cursor: pointer;" 
+                                     title="Click to copy address">${newSignerAddress}</div>
+                            </div>
+                        </div>`;
+
+                // Add description/reason if available
+                if (proposal.description) {
+                    changeSignerHTML += `
+                        <div class="parameter-card">
+                            <div class="parameter-icon">📝</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Description / Reason</div>
+                                <div class="parameter-value">${proposal.description}</div>
+                            </div>
+                        </div>`;
+                }
+
+                changeSignerHTML += `</div>`;
+                return changeSignerHTML;
+
+            case 'withdraw-rewards':
+            case 'withdrawal':
+            case 'withdraw_rewards':
+                const withdrawAmount = proposal.withdrawAmount
+                    ? (typeof proposal.withdrawAmount === 'bigint'
+                        ? ethers.utils.formatEther(proposal.withdrawAmount)
+                        : proposal.withdrawAmount)
+                    : 'Not specified';
+
+                const recipientAddress = proposal.recipient || 'Not specified';
+
+                let withdrawHTML = `
+                    <div class="parameters-container">
+                        <div class="parameter-card">
+                            <div class="parameter-icon">💰</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Withdrawal Amount</div>
+                                <div class="parameter-value highlight">${withdrawAmount} tokens</div>
+                            </div>
+                        </div>
+                        <div class="parameter-card">
+                            <div class="parameter-icon">📍</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Recipient Address</div>
+                                <div class="parameter-value address-display" 
+                                     data-address="${recipientAddress}" 
+                                     style="font-family: monospace; font-size: 0.85em; word-break: break-all; cursor: pointer;" 
+                                     title="Click to copy address">${recipientAddress}</div>
+                            </div>
+                        </div>`;
+
+                // Add description/reason if available
+                if (proposal.description) {
+                    withdrawHTML += `
+                        <div class="parameter-card">
+                            <div class="parameter-icon">📝</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Description / Reason</div>
+                                <div class="parameter-value">${proposal.description}</div>
+                            </div>
+                        </div>`;
+                }
+
+                withdrawHTML += `</div>`;
+                return withdrawHTML;
+
+            default:
+                // For unknown types, show all available proposal data
+                // Filter out null, undefined, empty strings, zero addresses, and zero values
+                const relevantData = {};
+                Object.keys(proposal).forEach(key => {
+                    const value = proposal[key];
+
+                    // Skip metadata fields
+                    if (key === 'id' || key === 'actionType' || key === 'executed' ||
+                        key === 'expired' || key === 'approvals' || key === 'rejected' ||
+                        key === 'proposedTime' || key === 'requiredApprovals' ||
+                        key === 'approvedBy' || key === 'currentApprovals' || key === 'status' ||
+                        key === 'description') {
+                        return;
+                    }
+
+                    // Skip null, undefined, or empty values
+                    if (value === null || value === undefined || value === '') {
+                        return;
+                    }
+
+                    // Skip zero addresses (0x0000...0000)
+                    if (typeof value === 'string' && value.startsWith('0x')) {
+                        if (value === '0x0000000000000000000000000000000000000000' ||
+                            /^0x0+$/.test(value)) {
+                            return;
+                        }
+                    }
+
+                    // Skip zero numeric values
+                    if (typeof value === 'number' && value === 0) {
+                        return;
+                    }
+
+                    // Skip zero bigint values
+                    if (typeof value === 'bigint' && value === 0n) {
+                        return;
+                    }
+
+                    // Skip string "0" or "0.0"
+                    if (typeof value === 'string' && (value === '0' || value === '0.0')) {
+                        return;
+                    }
+
+                    relevantData[key] = value;
+                });
+
+                if (Object.keys(relevantData).length === 0 && !proposal.description) {
+                    return '<div class="no-parameters">📋 No additional parameters</div>';
+                }
+
+                let defaultHTML = '<div class="parameters-container">';
+
+                // Display relevant data with smart formatting
+                Object.entries(relevantData).forEach(([key, value]) => {
+                    let displayValue = value;
+
+                    // Format weights if key contains "weight"
+                    if (key.toLowerCase().includes('weight') && !Array.isArray(value)) {
+                        displayValue = this.formatWeightForDisplay(value);
+                    }
+                    // Format arrays (like pairs or weights arrays)
+                    else if (Array.isArray(value)) {
+                        if (key.toLowerCase() === 'weights') {
+                            // Format weight arrays
+                            displayValue = value.map(w => this.formatWeightForDisplay(w)).join(', ');
+                        } else if (key.toLowerCase() === 'pairs') {
+                            // Format pair addresses
+                            displayValue = value.map(addr => {
+                                const pairName = this.getPairNameByAddress(addr);
+                                return pairName || this.formatAddress(addr);
+                            }).join(', ');
+                        } else {
+                            displayValue = value.join(', ');
+                        }
+                    }
+                    // Format addresses
+                    const isAddress = typeof value === 'string' && this.isCopyableAddress(value);
+                    if (isAddress) {
+                        displayValue = value;
+                    }
+                    // Add address-display class and data-address attribute if it is an address
+                    const addressClass = isAddress ? ' address-display' : '';
+                    const addressAttributes = isAddress
+                        ? ` data-address="${value}" title="Click to copy address"`
+                        : '';
+
+                    defaultHTML += `
+                        <div class="parameter-card">
+                            <div class="parameter-icon">📋</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">${key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</div>
+                                <div class="parameter-value${addressClass}"${addressAttributes}>${displayValue}</div>
+                            </div>
+                        </div>`;
+                });
+
+                // Add description/reason if available
+                if (proposal.description) {
+                    defaultHTML += `
+                        <div class="parameter-card">
+                            <div class="parameter-icon">📝</div>
+                            <div class="parameter-content">
+                                <div class="parameter-label">Description / Reason</div>
+                                <div class="parameter-value">${proposal.description}</div>
+                            </div>
+                        </div>`;
+                }
+
+                defaultHTML += '</div>';
+                return defaultHTML;
+        }
+    }
+
+    // Universal modal visibility fix
+    applyModalVisibilityFixes(modalContainer) {
+        // Container fixes
+        modalContainer.style.display = 'flex';
+        modalContainer.style.zIndex = '999999';
+        modalContainer.style.position = 'fixed';
+        modalContainer.style.top = '0';
+        modalContainer.style.left = '0';
+        modalContainer.style.width = '100%';
+        modalContainer.style.height = '100%';
+        modalContainer.style.pointerEvents = 'auto';
+        modalContainer.style.opacity = '1';
+        modalContainer.style.visibility = 'visible';
+
+        // Content fixes
+        const modalOverlay = modalContainer.querySelector('.modal-overlay');
+        const modalContent = modalContainer.querySelector('.modal-content');
+
+        if (modalContent) {
+            modalContent.style.background = 'var(--background-paper)';
+            modalContent.style.zIndex = '1000000';
+            modalContent.style.opacity = '1';
+            modalContent.style.visibility = 'visible';
+            modalContent.style.display = 'block';
+            modalContent.style.pointerEvents = 'auto';
+            modalContent.style.padding = '0'; // Let CSS handle padding
+            modalContent.style.borderRadius = '8px';
+            modalContent.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.3)';
+            modalContent.style.maxHeight = '90vh';
+            modalContent.style.overflowY = 'auto';
+
+            // Force modal footer visibility
+            const modalFooter = modalContent.querySelector('.modal-footer');
+            if (modalFooter) {
+                modalFooter.style.display = 'flex';
+                modalFooter.style.justifyContent = 'flex-end';
+                modalFooter.style.gap = '10px';
+                modalFooter.style.padding = '20px';
+                modalFooter.style.borderTop = '1px solid #e0e0e0';
+                modalFooter.style.background = 'white';
+                modalFooter.style.position = 'sticky';
+                modalFooter.style.bottom = '0';
+                modalFooter.style.zIndex = '1000001';
+                modalFooter.style.opacity = '1';
+                modalFooter.style.visibility = 'visible';
+                modalFooter.style.minHeight = '60px';
+
+                // Force all buttons in footer to be visible
+                const buttons = modalFooter.querySelectorAll('button');
+                buttons.forEach((btn, index) => {
+                    // Add explicit click handler for cancel buttons
+                    if (btn.classList.contains('modal-cancel') ||
+                        btn.classList.contains('btn-secondary') ||
+                        btn.textContent.trim() === 'Cancel') {
+                        btn.onclick = (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            this.closeModal();
+                        };
+                    }
+                });
+            }
+        }
+
+        if (modalOverlay) {
+            modalOverlay.style.zIndex = '999999';
+            modalOverlay.style.opacity = '1';
+            modalOverlay.style.visibility = 'visible';
+            modalOverlay.style.display = 'flex';
+            modalOverlay.style.pointerEvents = 'auto';
+            modalOverlay.style.background = 'rgba(0, 0, 0, 0.8)';
+
+            // Add click handler to overlay (close on click outside)
+            modalOverlay.onclick = (e) => {
+                if (e.target === modalOverlay) {
+                    this.closeModal();
+                }
+            };
+        }
+    }
+
+    // Multi-signature modal components
+    showHourlyRateModal() {
+        const modalContainer = document.getElementById('modal-container');
+        if (!modalContainer) {
+            console.error('❌ Modal container not found');
+            return;
+        }
+
+        modalContainer.innerHTML = `
+            <div class="modal-overlay">
+                <div class="modal-content" onclick="event.stopPropagation()">
+                    <div class="modal-header">
+                        <h3>Update Hourly Rate</h3>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
+                    </div>
+
+                    <div class="modal-body">
+                        <form id="hourly-rate-form" class="admin-form">
+                            <div class="form-group">
+                                <label for="new-rate">New Hourly Rate (${this.contractStats?.rewardTokenSymbol || 'USDC'})</label>
+                                <input type="number" id="new-rate" class="form-input" step="0.01" min="0" required
+                                       placeholder="Enter new hourly rate">
+                                <small class="form-help">Current rate: ${this.contractStats?.hourlyRewardRate != null ? `${this.contractStats.hourlyRewardRate} ${this.contractStats?.rewardTokenSymbol || 'USDC'}/hour` : 'N/A'}</small>
+                            </div>
+
+                            <div class="proposal-info">
+                                <div class="info-item">
+                                    <span class="info-label">Required Approvals:</span>
+                                    <span class="info-value">3 of 4 signers</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Proposal Expiry:</span>
+                                    <span class="info-value">7 days from creation</span>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary modal-cancel">
+                            Cancel
+                        </button>
+                        <button type="submit" form="hourly-rate-form" class="btn btn-primary">
+                            Create Proposal
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Apply universal modal visibility fixes
+        this.applyModalVisibilityFixes(modalContainer);
+    }
+
+    showAddPairModal() {
+        const modalContainer = document.getElementById('modal-container');
+        if (!modalContainer) {
+            console.error('❌ Modal container not found');
+            return;
+        }
+
+        modalContainer.innerHTML = `
+            <div class="modal-overlay">
+                <div class="modal-content" onclick="event.stopPropagation()">
+                    <div class="modal-header">
+                        <h3>Add New Pair</h3>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
+                    </div>
+
+                    <div class="modal-body">
+                        <div id="validation-messages" class="validation-messages"></div>
+                        <form id="add-pair-form" class="admin-form">
+                            <div class="form-group">
+                                <label for="pair-address">LP Token Address *</label>
+                                <input type="text" id="pair-address" class="form-input" required
+                                       placeholder="0x..." pattern="^0x[a-fA-F0-9]{40}$">
+                                <small class="form-help">Enter the LP token contract address</small>
+                                <div class="field-error" id="pair-address-error"></div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="pair-name">Pair Name *</label>
+                                <input type="text" id="pair-name" class="form-input" required
+                                       placeholder="e.g., LIB/USDC" maxlength="50">
+                                <small class="form-help">Descriptive name for the trading pair</small>
+                                <div class="field-error" id="pair-name-error"></div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="pair-platform">Platform *</label>
+                                <select id="pair-platform" class="form-input" required>
+                                    <option value="">Select platform...</option>
+                                    ${(window.CONFIG?.PLATFORMS?.OPTIONS || []).map(platform => 
+                                        `<option value="${platform}">${platform}</option>`
+                                    ).join('')}
+                                </select>
+                                <small class="form-help">Select the DEX platform where this pair trades</small>
+                                <div class="field-error" id="pair-platform-error"></div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="pair-weight">Allocation Points *</label>
+                                <input type="number" id="pair-weight" class="form-input" step="1" min="1" max="1000" required
+                                       placeholder="Enter weight (e.g., 100)">
+                                <small class="form-help">Weight determines reward allocation (1-1,000)</small>
+                                <div class="field-error" id="pair-weight-error"></div>
+                            </div>
+
+                            <div class="proposal-info">
+                                <div class="info-item">
+                                    <span class="info-label">Required Approvals:</span>
+                                    <span class="info-value">3 of 4 signers</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Proposal Expiry:</span>
+                                    <span class="info-value">7 days from creation</span>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary modal-cancel">
+                            Cancel
+                        </button>
+                        <button type="submit" form="add-pair-form" class="btn btn-primary" id="add-pair-btn">
+                            <span class="btn-text">Create Proposal</span>
+                            <span class="btn-loading" style="display: none;">
+                                <span class="spinner"></span> Creating...
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Apply universal modal visibility fixes
+        this.applyModalVisibilityFixes(modalContainer);
+
+        console.log('✅ Add pair modal opened');
+
+        // Initialize form validation AFTER a delay to prevent immediate triggering
+        setTimeout(() => {
+            try {
+                // Set flag to prevent immediate validation
+                this.modalJustOpened = true;
+                this.initializeFormValidation('add-pair-form');
+
+                // Clear flag after a short delay
+                setTimeout(() => {
+                    this.modalJustOpened = false;
+                }, 1000);
+            } catch (error) {
+                console.error('❌ Form validation initialization failed:', error);
+            }
+        }, 100);
+    }
+
+    showUpdateWeightsModal() {
+        const modalContainer = document.getElementById('modal-container');
+        if (!modalContainer) {
+            console.error('❌ Modal container not found');
+            return;
+        }
+
+        modalContainer.innerHTML = `
+            <div class="modal-overlay">
+                <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 700px;">
+                    <div class="modal-header" style="padding: 24px; border-bottom: 1px solid var(--divider);">
+                        <h3>
+                            Update Pair Weights</h3>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
+                    </div>
+
+                    <div class="modal-body" style="padding: 24px; max-height: 600px; overflow-y: auto;">
+                        <div id="validation-messages" class="validation-messages"></div>
+                        <form id="update-weights-form" class="admin-form">
+                            <div class="form-group">
+                                <label style="display: block; margin-bottom: 12px; font-weight: 600; font-size: 16px;">Pair Weight Updates</label>
+                                <div id="weights-list" style="margin-bottom: 16px;">
+                                    <div class="modal-loading-container" style="padding: 40px; text-align: center;">
+                                        <div class="modal-loading-spinner" style="width: 40px; height: 40px; border: 4px solid rgba(33, 150, 243, 0.3); border-top-color: var(--primary-main); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto;"></div>
+                                        <p style="margin-top: 16px; color: var(--text-secondary);">Loading pairs...</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="proposal-info" style="background: rgba(33, 150, 243, 0.05); border: 1px solid rgba(33, 150, 243, 0.2); border-radius: 8px; padding: 16px; margin-top: 24px;">
+                                <div class="info-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0;">
+                                    <span class="info-label" style="color: var(--text-secondary); font-size: 14px;">Required Approvals:</span>
+                                    <span class="info-value" style="color: var(--primary-main); font-weight: 600; font-size: 14px;">3 of 4 signers</span>
+                                </div>
+                                <div class="info-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-top: 1px solid var(--divider);">
+                                    <span class="info-label" style="color: var(--text-secondary); font-size: 14px;">Proposal Expiry:</span>
+                                    <span class="info-value" style="color: var(--text-primary); font-weight: 600; font-size: 14px;">7 days from creation</span>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="modal-footer" style="display: flex; gap: 12px; justify-content: flex-end; padding: 20px 24px; border-top: 1px solid var(--divider);">
+                        <button type="button" class="btn btn-secondary modal-cancel" style="padding: 10px 24px; min-width: 100px;">
+                            Cancel
+                        </button>
+                        <button type="submit" form="update-weights-form" class="btn btn-primary" id="update-weights-btn"
+                                style="padding: 10px 24px; min-width: 180px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                            <span class="btn-text">Create Proposal</span>
+                            <span class="btn-loading" style="display: none;">
+                                <span class="spinner inline"></span>
+                                Creating...
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Apply universal modal visibility fixes
+        this.applyModalVisibilityFixes(modalContainer);
+
+        // Initialize form validation and load pairs
+        this.initializeFormValidation('update-weights-form');
+        this.loadPairsForWeightUpdate();
+    }
+
+    showRemovePairModal() {
+        const modalContainer = document.getElementById('modal-container');
+        if (!modalContainer) return;
+
+        modalContainer.innerHTML = `
+            <div class="modal-overlay" onclick="adminPage.closeModal()">
+                <div class="modal-content" onclick="event.stopPropagation()">
+                    <div class="modal-header">
+                        <h3>Remove LP Pair</h3>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
+                    </div>
+
+                    <div class="modal-body">
+                        <div id="validation-messages" class="validation-messages"></div>
+                        <form id="remove-pair-form" class="admin-form">
+                            <div class="form-group">
+                                <label for="remove-pair-select">
+                                    <span style="display: flex; align-items: center; gap: 8px;">
+                                        🔗 Select Pair to Remove *
+                                        <span id="pair-loading-indicator" style="display: none; font-size: 12px; color: var(--text-secondary);">
+                                            <span class="spinner spinner-small"></span>
+                                            Loading...
+                                        </span>
+                                    </span>
+                                </label>
+                                <select id="remove-pair-select" class="form-input modern-dropdown" required>
+                                    <option value="">Loading pairs...</option>
+                                </select>
+                                <small class="form-help">Choose the LP pair to remove from staking rewards</small>
+                                <div class="field-error" id="remove-pair-select-error"></div>
+                            </div>
+
+                            <div class="warning-box" style="background: rgba(255, 152, 0, 0.1); border: 1px solid rgba(255, 152, 0, 0.3); border-radius: 8px; padding: 16px; display: flex; gap: 12px; margin: 20px 0;">
+                                <div class="warning-icon" style="font-size: 24px; flex-shrink: 0;">⚠️</div>
+                                <div class="warning-text" style="flex: 1; color: var(--text-primary);">
+                                    <strong style="display: block; margin-bottom: 6px;">Warning:</strong>
+                                    <p style="margin: 0; font-size: 14px; line-height: 1.5;">Removing a pair will stop all reward distributions for that pair. Existing stakers will need to unstake before removal can be completed.</p>
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin: 20px 0;">
+                                <label class="checkbox-container" style="display: flex; align-items: flex-start; cursor: pointer; user-select: none; padding: 12px; background: rgba(33, 150, 243, 0.05); border-radius: 8px; border: 1px solid rgba(33, 150, 243, 0.2); transition: all 0.2s;">
+                                    <input type="checkbox" id="confirm-removal" required style="width: 20px; height: 20px; margin-right: 12px; margin-top: 2px; cursor: pointer; accent-color: var(--primary-main);">
+                                    <span style="flex: 1; font-size: 14px; line-height: 1.5; font-weight: 500;">I understand the consequences of removing this pair</span>
+                                </label>
+                                <div class="field-error" id="confirm-removal-error"></div>
+                            </div>
+
+                            <div class="proposal-info" style="background: rgba(33, 150, 243, 0.05); border: 1px solid rgba(33, 150, 243, 0.2); border-radius: 8px; padding: 16px; margin-top: 20px;">
+                                <div class="info-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0;">
+                                    <span class="info-label" style="color: var(--text-secondary); font-size: 14px;">Required Approvals:</span>
+                                    <span class="info-value" style="color: var(--primary-main); font-weight: 600; font-size: 14px;">3 of 4 signers</span>
+                                </div>
+                                <div class="info-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-top: 1px solid var(--divider);">
+                                    <span class="info-label" style="color: var(--text-secondary); font-size: 14px;">Proposal Expiry:</span>
+                                    <span class="info-value" style="color: var(--text-primary); font-weight: 600; font-size: 14px;">7 days from creation</span>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="modal-footer" style="display: flex; gap: 12px; justify-content: flex-end; padding: 20px 24px; border-top: 1px solid var(--divider);">
+                        <button type="button" class="btn btn-secondary modal-cancel" style="padding: 10px 24px; min-width: 100px;">
+                            Cancel
+                        </button>
+                        <button type="submit" form="remove-pair-form" class="btn btn-primary" id="remove-pair-btn"
+                                title="Please select a pair and confirm to enable"
+                                style="padding: 10px 24px; min-width: 220px;">
+                            <span class="btn-text">Submit Removal Proposal</span>
+                            <span class="btn-loading" style="display: none;">
+                                <span class="spinner inline"></span>
+                                Creating...
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Apply universal modal visibility fixes
+        this.applyModalVisibilityFixes(modalContainer);
+
+        // Apply current theme to modal
+        const theme = document.documentElement.getAttribute('data-theme') || 'light';
+        const modal = modalContainer.querySelector('.modal-content');
+        if (modal) {
+            modal.setAttribute('data-theme', theme);
+        }
+
+        // Initialize form validation and load pairs
+        this.initializeFormValidation('remove-pair-form');
+        this.loadPairsForRemoval();
+
+        // Setup button state management
+        this.setupRemovePairButtonState();
+    }
+
+    /**
+     * Setup Remove Pair button state management
+     */
+    setupRemovePairButtonState() {
+        const select = document.getElementById('remove-pair-select');
+        const button = document.getElementById('remove-pair-btn');
+        const checkbox = document.getElementById('confirm-removal');
+
+        if (!select || !button) return;
+
+        const updateButtonState = () => {
+            const hasSelection = select.value && select.value !== '';
+            const isConfirmed = checkbox ? checkbox.checked : false;
+            const isEnabled = hasSelection && isConfirmed;
+
+            button.disabled = !isEnabled;
+
+            if (!hasSelection) {
+                button.setAttribute('title', 'Please select a pair to remove');
+                button.style.opacity = '0.6';
+                button.style.cursor = 'not-allowed';
+            } else if (!isConfirmed) {
+                button.setAttribute('title', 'Please check the confirmation box');
+                button.style.opacity = '0.6';
+                button.style.cursor = 'not-allowed';
+            } else {
+                button.setAttribute('title', 'Click to create removal proposal');
+                button.style.opacity = '1';
+                button.style.cursor = 'pointer';
+            }
+        };
+
+        select.addEventListener('change', updateButtonState);
+        if (checkbox) {
+            checkbox.addEventListener('change', updateButtonState);
+        }
+
+        // Initial state
+        updateButtonState();
+    }
+
+    showChangeSignerModal() {
+        const modalContainer = document.getElementById('modal-container');
+        if (!modalContainer) return;
+
+        modalContainer.innerHTML = `
+            <div class="modal-overlay" onclick="adminPage.closeModal()">
+                <div class="modal-content" onclick="event.stopPropagation()">
+                    <div class="modal-header">
+                        <h3>Change Signer</h3>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
+                    </div>
+
+                    <div class="modal-body">
+                        <form id="change-signer-form" onsubmit="adminPage.submitChangeSignerProposal(event)">
+                            <div class="form-group">
+                                <label for="old-signer">Current Signer to Replace</label>
+                                <select id="old-signer" required>
+                                    <option value="">Choose current signer...</option>
+                                    ${this.renderSignerOptions()}
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="new-signer">New Signer Address</label>
+                                <input type="text" id="new-signer" required
+                                       placeholder="0x..." pattern="^0x[a-fA-F0-9]{40}$">
+                                <small class="form-help">Enter the new signer's wallet address</small>
+                            </div>
+
+                            <div class="warning-box">
+                                <div class="warning-icon">⚠️</div>
+                                <div class="warning-text">
+                                    <strong>Important:</strong> The new signer will have full admin privileges.
+                                    Ensure the address is correct and trusted.
+                                </div>
+                            </div>
+
+                            <div class="proposal-info">
+                                <div class="info-item">
+                                    <span class="info-label">Required Approvals:</span>
+                                    <span class="info-value">3 of 4 signers</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Proposal Expiry:</span>
+                                    <span class="info-value">7 days from creation</span>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary modal-cancel">
+                            Cancel
+                        </button>
+                        <button type="submit" form="change-signer-form" class="btn btn-primary">
+                            Create Signer Change Proposal
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Apply universal modal visibility fixes
+        this.applyModalVisibilityFixes(modalContainer);
+    }
+
+    showWithdrawalModal() {
+        const modalContainer = document.getElementById('modal-container');
+        if (!modalContainer) return;
+
+        modalContainer.innerHTML = `
+            <div class="modal-overlay" onclick="adminPage.closeModal()">
+                <div class="modal-content" onclick="event.stopPropagation()">
+                    <div class="modal-header">
+                        <h3>Withdraw Rewards</h3>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
+                    </div>
+
+                    <div class="modal-body">
+                        <form id="withdrawal-form" onsubmit="adminPage.submitWithdrawalProposal(event)">
+                            <div class="form-group">
+                                <label for="withdrawal-amount">Amount (${this.contractStats?.rewardTokenSymbol || 'USDC'})</label>
+                                <input type="number" id="withdrawal-amount" step="any" min="0" inputmode="decimal" required
+                                       placeholder="Enter amount to withdraw">
+                                <small class="form-help">Available balance: ${this.contractStats?.rewardBalance ?? 'N/A'}</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="withdrawal-address">Recipient Address</label>
+                                <input type="text" id="withdrawal-address" required
+                                       placeholder="0x..." pattern="^0x[a-fA-F0-9]{40}$">
+                                <small class="form-help">Address to receive the withdrawn funds</small>
+                            </div>
+
+                            <div class="warning-box">
+                                <div class="warning-icon">💰</div>
+                                <div class="warning-text">
+                                    <strong>Note:</strong> Withdrawn funds will reduce the available reward pool.
+                                    Ensure sufficient balance remains for ongoing rewards.
+                                </div>
+                            </div>
+
+                            <div class="proposal-info">
+                                <div class="info-item">
+                                    <span class="info-label">Required Approvals:</span>
+                                    <span class="info-value">3 of 4 signers</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Proposal Expiry:</span>
+                                    <span class="info-value">7 days from creation</span>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary modal-cancel">
+                            Cancel
+                        </button>
+                        <button type="submit" form="withdrawal-form" class="btn btn-primary">
+                            Create Withdrawal Proposal
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Apply universal modal visibility fixes
+        this.applyModalVisibilityFixes(modalContainer);
+    }
+
+    closeModal() {
+        const modalContainer = document.getElementById('modal-container');
+        if (modalContainer) {
+            modalContainer.style.display = 'none';
+            modalContainer.innerHTML = '';
+        }
+    }
+
+    // Missing function that's called from HTML
+    async refreshContractInfo() {
+        this.setInfoCardRefreshing(true);
+        try {
+            const result = await this.loadContractInformation();
+            if (result && result.success) {
+                console.log('✅ Contract info refreshed');
+            } else {
+                const errorMessage = (result && result.error && result.error.message) || 'Unknown issue';
+                console.warn('⚠️ Contract info refresh completed with warnings:', errorMessage);
+            }
+        } catch (error) {
+            console.error('❌ Failed to refresh contract info:', error);
+        } finally {
+            this.setInfoCardRefreshing(false);
+        }
+    }
+
+    // Form validation system
+    initializeFormValidation(formId) {
+        const form = document.getElementById(formId);
+        if (!form) return;
+
+        // Add real-time validation
+        form.addEventListener('input', (e) => {
+            this.validateField(e.target);
+        });
+
+        // NOTE: Form submission is handled by the main document event listener
+        // No need for individual form listeners to avoid conflicts
+    }
+
+    validateField(field) {
+        const fieldId = field.id;
+        const value = field.value.trim();
+        const errorElement = document.getElementById(`${fieldId}-error`);
+        let isValid = true;
+        let errorMessage = '';
+
+        // Clear previous error
+        if (errorElement) {
+            errorElement.textContent = '';
+            field.classList.remove('error');
+        }
+
+        // Required field validation
+        if (field.hasAttribute('required') && !value) {
+            isValid = false;
+            errorMessage = 'This field is required';
+        }
+
+        // Specific field validations
+        switch (fieldId) {
+            case 'pair-address':
+                if (value && !this.isValidAddress(value)) {
+                    isValid = false;
+                    errorMessage = 'Invalid Ethereum address format';
+                }
+                break;
+            case 'pair-name':
+                if (value && (value.length < 2 || value.length > 50)) {
+                    isValid = false;
+                    errorMessage = 'Pair name must be between 2-50 characters';
+                }
+                break;
+            case 'pair-weight':
+                const weight = parseInt(value);
+                if (value && (isNaN(weight) || weight < 1 || weight > 1000)) {
+                    isValid = false;
+                    errorMessage = 'Weight must be between 1-1,000';
+                }
+                break;
+        }
+
+        // Display error if invalid
+        if (!isValid && errorElement) {
+            errorElement.textContent = errorMessage;
+            field.classList.add('error');
+        }
+
+        return isValid;
+    }
+
+    validateForm(formId) {
+        const form = document.getElementById(formId);
+        if (!form) {
+            return false;
+        }
+
+        let isValid = true;
+        const inputs = form.querySelectorAll('input, select, textarea');
+
+        // Check if any required fields are empty
+        inputs.forEach(input => {
+            const value = input.value.trim();
+            const isRequired = input.hasAttribute('required');
+
+            if (isRequired && !value) {
+                // Show custom error message instead of browser default
+                const errorElement = document.getElementById(`${input.id}-error`);
+                if (errorElement) {
+                    errorElement.textContent = 'This field is required';
+                    errorElement.style.display = 'block';
+                }
+
+                // Add error styling
+                input.classList.add('error');
+                input.classList.remove('valid');
+
+                isValid = false;
+            } else if (isRequired && value) {
+                // Clear error if field is now filled
+                const errorElement = document.getElementById(`${input.id}-error`);
+                if (errorElement) {
+                    errorElement.textContent = '';
+                    errorElement.style.display = 'none';
+                }
+
+                // Add valid styling
+                input.classList.remove('error');
+                input.classList.add('valid');
+            }
+
+            // Additional validation for specific field types
+            if (value && input.type === 'email' && !value.includes('@')) {
+                console.warn(`❌ Invalid email: ${input.id || input.name}`);
+                isValid = false;
+            }
+
+            if (value && input.pattern) {
+                const regex = new RegExp(input.pattern);
+                if (!regex.test(value)) {
+                    console.warn(`❌ Pattern mismatch: ${input.id || input.name}`);
+                    isValid = false;
+                }
+            }
+        });
+
+        return isValid;
+    }
+
+    isValidAddress(address) {
+        return /^0x[a-fA-F0-9]{40}$/.test(address);
+    }
+
+    // React-like safe contract call with RPC failover and fallback values
+    async safeContractCall(contractCall, fallbackValue) {
+        try {
+            const contractManager = await this.ensureContractReady();
+
+            // Use ContractManager's RPC failover system if available
+            if (contractManager.safeContractCall) {
+                return await contractManager.safeContractCall(
+                    contractCall,
+                    fallbackValue,
+                    'AdminPage-safeContractCall'
+                );
+            } else {
+                // Fallback to simple try-catch
+                const result = await contractCall();
+                return result;
+            }
+        } catch (error) {
+            console.warn('⚠️ Contract call failed, using fallback:', error.message);
+            return fallbackValue;
+        }
+    }
+
+    // Convert BigInt to number safely without overflow
+    convertBigIntToNumber(value) {
+        if (typeof value === 'bigint') {
+            const numValue = Number(value);
+            return numValue > Number.MAX_SAFE_INTEGER ? value.toString() : numValue;
+        } else if (value && typeof value.toNumber === 'function') {
+            try {
+                // Check if the value is too large before calling toNumber()
+                const strValue = value.toString();
+                const bigIntValue = BigInt(strValue);
+                if (bigIntValue > BigInt(Number.MAX_SAFE_INTEGER)) {
+                    return strValue;
+                }
+                return value.toNumber();
+            } catch (error) {
+                console.warn('BigNumber conversion failed, using string representation:', error);
+                return value.toString();
+            }
+        } else if (value && typeof value.toString === 'function') {
+            const strValue = value.toString();
+            const numValue = parseInt(strValue);
+            return isNaN(numValue) ? 0 : numValue;
+        }
+        return value;
+    }
+
+    // Check RPC health like React version
+    async checkRpcHealth(contractManager) {
+        try {
+            // Try a simple contract call to test RPC health with timeout
+            const healthPromise = contractManager.stakingContract.rewardToken();
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Health check timeout')), 3000)
+            );
+
+            await Promise.race([healthPromise, timeoutPromise]);
+            return false; // RPC is healthy
+        } catch (error) {
+            const errorMessage = error.message || '';
+            const isRpcError = error.code === -32603 ||
+                             (error.error && error.error.code === -32603) ||
+                             errorMessage.includes('Internal JSON-RPC error') ||
+                             errorMessage.includes('missing trie node') ||
+                             errorMessage.includes('missing revert data') ||
+                             errorMessage.includes('CALL_EXCEPTION') ||
+                             errorMessage.includes('could not detect network') ||
+                             errorMessage.includes('Health check timeout');
+
+            if (isRpcError) {
+                console.log('🔍 RPC health check failed - network issues detected:', error.code || errorMessage);
+                return true; // RPC is down
+            }
+            return false;
+        }
+    }
+
+    // Load contract information like React InfoCard component
+    async loadContractInformation() {
+        const cardDiv = document.getElementById('info-card');
+        if (cardDiv && !cardDiv.querySelector('[data-info="reward-balance"]')) {
+            cardDiv.innerHTML = this.getInfoCardSkeleton();
+        }
+
+        try {
+            const contractManager = await this.ensureContractReady();
+
+            // Load real contract data
+            const contractInfo = {};
+
+            const fallbackSymbol = this.contractStats?.rewardTokenSymbol || 'USDC';
+            const rewardTokenSymbol = await this.safeContractCall(
+                () => contractManager.rewardTokenContract.symbol(),
+                fallbackSymbol
+            );
+            if (!this.contractStats) {
+                this.contractStats = {};
+            }
+            this.contractStats.rewardTokenSymbol = rewardTokenSymbol;
+
+            const stakingAddress = contractManager.stakingContract?.address || null;
+            contractInfo.stakingAddress = stakingAddress;
+            this.contractStats.stakingContractAddress = stakingAddress;
+
+            const rewardTokenAddress = contractManager.rewardTokenContract?.address || null;
+            contractInfo.rewardTokenAddress = rewardTokenAddress;
+            this.contractStats.rewardTokenAddress = rewardTokenAddress;
+
+            let balanceBig = null;
+            let rateBig = null;
+            let obligationBig = null;
+
+            contractInfo.rewardBalance = await this.safeContractCall(
+                async () => {
+                    const stakingContractAddress = contractManager.stakingContract?.address;
+                    if (!stakingContractAddress) {
+                        throw new Error('Staking contract address not available');
+                    }
+                    const balance = await contractManager.rewardTokenContract.balanceOf(stakingContractAddress);
+                    balanceBig = balance;
+                    const balanceStr = ethers.utils.formatEther(balance);
+                    return `${balanceStr} ${rewardTokenSymbol}`;
+                },
+                null
+            );
+
+            this.contractStats.rewardBalance = contractInfo.rewardBalance;
+
+            contractInfo.rewardObligation = await this.safeContractCall(
+                async () => {
+                    const obligation = await contractManager.stakingContract.getTotalRewardObligation();
+                    obligationBig = obligation;
+                    const obligationStr = ethers.utils.formatEther(obligation);
+                    return `${obligationStr} ${rewardTokenSymbol}`;
+                },
+                null
+            );
+
+            this.contractStats.rewardObligation = contractInfo.rewardObligation;
+
+            contractInfo.hourlyRate = await this.safeContractCall(
+                async () => {
+                    const rate = await contractManager.stakingContract.hourlyRewardRate();
+                    rateBig = rate;
+                    const rateValue = Number(ethers.utils.formatEther(rate));
+                    return `${rateValue.toFixed(4)} ${rewardTokenSymbol}/hour`;
+                },
+                null
+            );
+
+            // Calculate reward runway
+            contractInfo.rewardRunway = await this.safeContractCall(
+                async () => {
+                    if (balanceBig && obligationBig && rateBig && rateBig.gt(0)) {
+                        const effectiveBalance = balanceBig.sub(obligationBig);
+                        if (effectiveBalance.gt(0)) {
+                            const runwayHoursBig = effectiveBalance.div(rateBig);
+                            const runwayHours = Number(ethers.utils.formatEther(runwayHoursBig));
+                            const runwayDays = runwayHours / 24;
+                            return `${runwayHours.toFixed(1)} hours (${runwayDays.toFixed(1)} days)`;
+                        } else {
+                            return '0.0 hours (0.0 days)';
+                        }
+                    }
+                    return 'N/A';
+                },
+                'N/A'
+            );
+
+            contractInfo.totalWeight = await this.safeContractCall(
+                async () => {
+                    const totalWeight = await contractManager.getTotalWeight();
+                    // consistent formatting without rounding
+                    return this.formatWeightForDisplay(totalWeight);
+                },
+                null
+            );
+
+            // Get pairs with full information - real data only
+            contractInfo.pairs = await this.safeContractCall(
+                async () => {
+                    const pairsInfo = await contractManager.getAllPairsInfo();
+                    return pairsInfo || [];
+                },
+                []
+            );
+
+            // Get signers - real data only
+            contractInfo.signers = await this.safeContractCall(
+                async () => {
+                    const signers = await contractManager.getSigners();
+                    return signers || [];
+                },
+                []
+            );
+            this.contractStats.signers = contractInfo.signers;
+
+            this.displayContractInfo(contractInfo);
+            return { success: true, data: contractInfo };
+
+        } catch (error) {
+            console.error('❌ Failed to load contract information:', error);
+            // Show error state
+            const errorInfo = {
+                rewardBalance: 'Error',
+                rewardObligation: 'Error',
+                rewardRunway: 'Error',
+                hourlyRate: 'Error',
+                totalWeight: 'Error',
+                stakingAddress: 'Error',
+                rewardTokenAddress: 'Error',
+                pairs: [],
+                signers: []
+            };
+            this.contractStats = this.contractStats || {};
+            this.contractStats.rewardTokenSymbol = this.contractStats.rewardTokenSymbol || 'USDC';
+            this.contractStats.rewardBalance = errorInfo.rewardBalance;
+            this.contractStats.rewardObligation = errorInfo.rewardObligation;
+            this.contractStats.stakingContractAddress = this.contractStats.stakingContractAddress || null;
+            this.contractStats.rewardTokenAddress = this.contractStats.rewardTokenAddress || null;
+            this.displayContractInfo(errorInfo);
+            return { success: false, error };
+        }
+    }
+
+    // Display contract information in the UI
+    displayContractInfo(info = {}) {
+        // Update reward balance (already includes token symbol)
+        const rewardBalanceEl = document.querySelector('[data-info="reward-balance"]');
+        if (rewardBalanceEl) {
+            rewardBalanceEl.textContent = info.rewardBalance ?? 'N/A';
+        }
+
+        // Update reward obligation
+        const rewardObligationEl = document.querySelector('[data-info="reward-obligation"]');
+        if (rewardObligationEl) {
+            rewardObligationEl.textContent = info.rewardObligation ?? 'N/A';
+        }
+
+        // Update reward runway
+        const rewardRunwayEl = document.querySelector('[data-info="reward-runway"]');
+        if (rewardRunwayEl) {
+            rewardRunwayEl.textContent = info.rewardRunway ?? 'N/A';
+        }
+
+        // Update hourly rate (already includes token symbol)
+        const hourlyRateEl = document.querySelector('[data-info="hourly-rate"]');
+        if (hourlyRateEl) {
+            hourlyRateEl.textContent = info.hourlyRate ?? 'N/A';
+        }
+
+        // Update total weight (use innerHTML to render subscript HTML)
+        const totalWeightEl = document.querySelector('[data-info="total-weight"]');
+        if (totalWeightEl) {
+            totalWeightEl.innerHTML = info.totalWeight ?? 'N/A';
+        }
+
+        const stakingAddressEl = document.querySelector('[data-info="staking-address"]');
+        if (stakingAddressEl) {
+            const stakingAddress = info.stakingAddress ?? 'N/A';
+            stakingAddressEl.textContent = stakingAddress;
+            // Add styling and data attribute for click-to-copy (handled by event delegation)
+            if (stakingAddress !== 'N/A') {
+                stakingAddressEl.style.cursor = 'pointer';
+                stakingAddressEl.title = 'Click to copy address';
+                stakingAddressEl.setAttribute('data-address', stakingAddress);
+            }
+        }
+
+        const rewardTokenAddressEl = document.querySelector('[data-info="reward-token-address"]');
+        if (rewardTokenAddressEl) {
+            const rewardTokenAddress = info.rewardTokenAddress ?? 'N/A';
+            rewardTokenAddressEl.textContent = rewardTokenAddress;
+            // Add styling and data attribute for click-to-copy (handled by event delegation)
+            if (rewardTokenAddress !== 'N/A') {
+                rewardTokenAddressEl.style.cursor = 'pointer';
+                rewardTokenAddressEl.title = 'Click to copy address';
+                rewardTokenAddressEl.setAttribute('data-address', rewardTokenAddress);
+            }
+        }
+
+        // Update LP pairs with real contract data
+        const pairsContainer = document.querySelector('[data-info="lp-pairs"]');
+        if (pairsContainer) {
+            if (info.pairs && info.pairs.length > 0) {
+                // Sort pairs by weight (highest first)
+                const sortedPairs = [...info.pairs].sort((a, b) => {
+                    const weightA = parseFloat(a.weight || '0');
+                    const weightB = parseFloat(b.weight || '0');
+                    return weightB - weightA; // Descending order (highest first)
+                });
+                pairsContainer.innerHTML = this.renderPairsList(sortedPairs, info.totalWeight);
+            } else {
+                pairsContainer.innerHTML = '<div class="no-data">No LP pairs configured</div>';
+            }
+        }
+
+        // Update signers with real contract data
+        const signersContainer = document.querySelector('[data-info="signers"]');
+        if (signersContainer) {
+            signersContainer.innerHTML = this.renderSignersList(info.signers);
+        }
+    }
+
+    // Refresh admin data once (prevent multiple refreshes)
+    refreshAdminDataOnce() {
+        if (this.refreshTimeout) {
+            clearTimeout(this.refreshTimeout);
+        }
+
+        this.refreshTimeout = setTimeout(() => {
+            this.loadMultiSignPanel();
+            this.loadContractInformation();
+            this.refreshTimeout = null;
+        }, 1000);
+    }
+
+    // Dynamic data loading methods
+    async loadPairsForRemoval() {
+        const select = document.getElementById('remove-pair-select');
+        const loadingIndicator = document.getElementById('pair-loading-indicator');
+
+        if (!select) return;
+
+        try {
+            // Show loading indicator
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'inline-flex';
+            }
+
+            // Disable select while loading
+            select.disabled = true;
+            select.innerHTML = '<option value="">Loading pairs...</option>';
+            select.innerHTML = '<option value="">Loading pairs...</option>';
+
+            // Get pairs from contract with timeout
+            const contractManager = await this.ensureContractReady();
+
+            // Add timeout to prevent hanging
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Loading timeout')), 10000)
+            );
+
+            const pairs = await Promise.race([
+                contractManager.getAllPairsInfo(),
+                timeoutPromise
+            ]);
+
+            select.innerHTML = '<option value="">Select a pair to remove...</option>';
+
+            if (pairs && pairs.length > 0) {
+                pairs.forEach(pair => {
+                    const option = document.createElement('option');
+                    option.value = pair.address;
+                    // Enhanced display with emoji and better formatting
+                    option.textContent = `🔗 ${pair.name} (${pair.address.substring(0, 6)}...${pair.address.substring(38)})`;
+                    option.setAttribute('data-pair-name', pair.name);
+                    option.setAttribute('data-pair-address', pair.address);
+                    select.appendChild(option);
+                });
+            } else {
+                select.innerHTML = '<option value="">No pairs available</option>';
+                console.warn('⚠️ No pairs available for removal');
+            }
+
+            // Enable select
+            select.disabled = false;
+
+        } catch (error) {
+            console.error('❌ Failed to load pairs:', error);
+            select.innerHTML = '<option value="">⚠️ Failed to load pairs - Please refresh</option>';
+            select.disabled = false;
+
+            // Show error notification
+            if (window.notificationManager) {
+                window.notificationManager.error(
+                    'Could not load LP pairs. Please refresh and try again.'
+                );
+            }
+        } finally {
+            // Hide loading indicator
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'none';
+            }
+        }
+    }
+
+    async loadPairsForWeightUpdate() {
+        const container = document.getElementById('weights-list');
+        if (!container) return;
+
+        try {
+            // Show loading spinner
+            container.innerHTML = '<div class="modal-loading-container" style="padding: 20px; text-align: center;"><div class="modal-loading-spinner"></div><p style="margin-top: 10px; color: var(--text-secondary);">Loading pairs...</p></div>';
+
+            // Get pairs from contract
+            const contractManager = await this.ensureContractReady();
+            const pairs = await contractManager.getAllPairsInfo();
+
+            if (pairs && pairs.length > 0) {
+                let html = '';
+                pairs.forEach((pair, index) => {
+                    html += `
+                        <div class="weight-pair-item" data-pair="${pair.address}" style="margin-bottom: 16px; padding: 16px; border: 1px solid var(--divider); border-radius: 8px; background: var(--background-paper); overflow: hidden;">
+                            <div style="display: flex; flex-direction: column; gap: 12px;">
+                                <div class="pair-info" style="overflow: hidden;">
+                                    <div style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">${pair.name}</div>
+                                    <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace; word-break: break-all; line-height: 1.4;">${pair.address}</div>
+                            </div>
+                                <div style="display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;">
+                                    <div style="display: flex; flex-direction: column; min-width: 100px;">
+                                        <span style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">Current</span>
+                                        <span style="font-size: 20px; font-weight: 600; color: var(--primary-main);">${this.formatWeightForDisplay(pair.weight)}</span>
+                                    </div>
+                                    <div style="display: flex; flex-direction: column; flex: 1; min-width: 180px;">
+                                        <label for="weight-${index}" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">New Weight</label>
+                                <input type="number"
+                                       class="form-input weight-input"
+                                       id="weight-${index}"
+                                               placeholder="Enter new weight"
+                                       min="0" max="1000"
+                                               style="padding: 10px 12px; border: 1px solid var(--divider); border-radius: 6px; background: var(--background-default); color: var(--text-primary); font-size: 16px; font-weight: 500; width: 100%; box-sizing: border-box;"
+                                       data-pair="${pair.address}"
+                                       data-current="${this.formatWeightForDisplay(pair.weight)}">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<p class="no-data" style="text-align: center; padding: 20px; color: var(--text-secondary);">No pairs available for weight updates</p>';
+            }
+        } catch (error) {
+            console.error('Failed to load pairs for weight update:', error);
+            container.innerHTML = '<p class="error-message">Failed to load pairs. Please try again.</p>';
+        }
+    }
+
+    // Helper methods for user feedback
+    showSuccess(message) {
+        const text = message || 'Action completed successfully';
+        const canShowInline = typeof this.showMessage === 'function' && !!document.querySelector('.modal-body');
+
+        // Show inline feedback when a modal is open
+        if (canShowInline) {
+            this.showMessage(text, 'success');
+        }
+
+        // Surface toast-style feedback when the notification manager exists
+        if (window.notificationManager) {
+            window.notificationManager.success(text);
+        } else if (!canShowInline) {
+            alert('✅ ' + text);
+        }
+    }
+
+    /**
+     * Copy address to clipboard and show notification
+     * @param {string} address - The address to copy
+     */
+    async copyAddressToClipboard(address) {
+        if (!this.isCopyableAddress(address)) {
+            return;
+        }
+
+        try {
+            const normalized = address.trim();
+            await navigator.clipboard.writeText(normalized);
+            window.notificationManager.success('Address copied to clipboard');
+        } catch (error) {
+            console.error('Failed to copy address:', error);
+            window.notificationManager.error('Failed to copy address');
+        }
+    }
+
+    showError(titleOrMessage, detail) {
+        const hasDetail = typeof detail === 'string' && detail.trim().length > 0;
+        const message = hasDetail ? detail : (titleOrMessage || 'An unexpected error occurred');
+        const title = hasDetail ? (titleOrMessage || 'Error') : null;
+
+        console.error('❌ Error:', title ? `${title} - ${message}` : message);
+
+        const canShowInline = typeof this.showMessage === 'function' && !!document.querySelector('.modal-body');
+
+        if (canShowInline) {
+            this.showMessage(message, 'error');
+        }
+
+        window.notificationManager.error(message, {title: title});
+
+    }
+
+    showMessage(message, type = 'info') {
+        // Create or update validation messages container
+        let container = document.getElementById('validation-messages');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'validation-messages';
+            container.className = 'validation-messages';
+
+            // Insert at top of modal body
+            const modalBody = document.querySelector('.modal-body');
+            if (modalBody) {
+                modalBody.insertBefore(container, modalBody.firstChild);
+            }
+        }
+
+        container.innerHTML = `
+            <div class="message ${type}">
+                <span class="message-icon">${type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'}</span>
+                <span class="message-text">${message}</span>
+            </div>
+        `;
+
+        // Auto-hide success messages
+        if (type === 'success') {
+            setTimeout(() => {
+                if (container) container.innerHTML = '';
+            }, 3000);
+        }
+    }
+
+    // Proposal submission methods
+    async submitHourlyRateProposal(event) {
+        if (event) event.preventDefault();
+
+        const rate = document.getElementById('new-rate').value;
+
+        // Validate inputs
+        if (!rate) {
+            this.showError('Please fill in the new hourly rate');
+            return;
+        }
+
+        const rateNum = parseFloat(rate);
+        if (isNaN(rateNum) || rateNum < 0) {
+            this.showError('Rate cannot be negative');
+            return;
+        }
+
+        try {
+            if (window.notificationManager) {
+                window.notificationManager.info('Submitting hourly rate change proposal');
+            }
+
+            // Call contract method to create proposal
+            const contractManager = await this.ensureContractReady();
+            const result = await contractManager.proposeSetHourlyRewardRate(rateNum);
+
+            if (result.success) {
+                // Close modal first
+                this.closeModal();
+
+                // Show success message
+                let successMessage = '✅ Hourly rate change proposal submitted successfully!';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
+                }
+                this.showSuccess(successMessage);
+
+                // Refresh data once without causing loops
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error.userMessage?.title || 'Failed to create proposal', result.error.userMessage?.message);
+            }
+
+        } catch (error) {
+            console.error('Failed to create hourly rate proposal:', error);
+            this.showError(error.userMessage?.title || 'Failed to create proposal', error.userMessage?.message);
+        }
+    }
+
+    async submitAddPairProposal(event = null) {
+        if (event) event.preventDefault();
+
+        const pairAddress = document.getElementById('pair-address').value;
+        const weight = document.getElementById('pair-weight').value;
+        const pairName = document.getElementById('pair-name').value;
+        const platform = document.getElementById('pair-platform').value;
+
+        // Enhanced validation with detailed feedback
+        if (!pairAddress || !weight || !pairName || !platform) {
+            this.showError('Please fill in all required fields: LP Address, Weight, Pair Name, and Platform');
+            return;
+        }
+
+        if (!this.isValidAddress(pairAddress)) {
+            this.showError('Invalid LP token address format. Please enter a valid Ethereum address starting with 0x');
+            return;
+        }
+
+        const weightNum = parseInt(weight);
+        if (isNaN(weightNum) || weightNum < 1 || weightNum > 1000) {
+            this.showError('Weight must be a number between 1 and 1,000');
+            return;
+        }
+
+        if (pairName.length < 2 || pairName.length > 50) {
+            this.showError('Pair name must be between 2 and 50 characters');
+            return;
+        }
+
+        if (platform.length < 2 || platform.length > 30) {
+            this.showError('Platform name must be between 2 and 30 characters');
+            return;
+        }
+
+        try {
+            const contractManager = await this.ensureContractReady();
+            const result = await contractManager.proposeAddPair(pairAddress, pairName, platform, weightNum);
+
+            if (result.success) {
+                this.closeModal();
+
+                let successMessage = '✅ Add Pair proposal created successfully!';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
+                }
+                this.showSuccess(successMessage);
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error.userMessage?.title || 'Failed to create proposal', result.error.userMessage?.message);
+            }
+
+        } catch (error) {
+            console.error('Failed to create add pair proposal:', error);
+            this.showError(error.userMessage?.title || 'Failed to create proposal', error.userMessage?.message);
+        }
+    }
+
+    async submitRemovePairProposal(event = null) {
+        if (event) event.preventDefault();
+
+        try {
+            const pairAddress = document.getElementById('remove-pair-select')?.value;
+            const confirmRemoval = document.getElementById('confirm-removal')?.checked;
+
+            // Validate required fields
+            if (!pairAddress) {
+                this.showError('Please select a pair to remove');
+                return;
+            }
+
+            if (!confirmRemoval) {
+                this.showError('Please confirm that you understand the consequences of removing this pair');
+                return;
+            }
+
+            const contractManager = await this.ensureContractReady();
+            const result = await contractManager.proposeRemovePair(pairAddress);
+
+            if (result.success) {
+                this.closeModal();
+
+                let successMessage = '✅ Remove Pair proposal created successfully!';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
+                }
+                this.showSuccess(successMessage);
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error.userMessage?.title || 'Failed to create removal proposal', result.error.userMessage?.message);
+            }
+
+        } catch (error) {
+            console.error('Failed to create removal proposal:', error);
+            this.showError(error.userMessage?.title || 'Failed to create proposal', error.userMessage?.message);
+        }
+    }
+
+    async submitUpdateWeightsProposal(event = null) {
+        if (event) event.preventDefault();
+
+        const weightInputs = document.querySelectorAll('.weight-input');
+
+        // Collect weight updates
+        const weightUpdates = [];
+        for (const input of weightInputs) {
+            const newWeight = input.value.trim();
+            if (!newWeight) {
+                continue;
+            }
+
+            const pairAddress = input.dataset.pair;
+            const currentWeight = parseInt(input.dataset.current, 10);
+            const newWeightNum = parseInt(newWeight, 10);
+
+            if (isNaN(newWeightNum) || newWeightNum < 0 || newWeightNum > 1000) {
+                this.showError(`Invalid weight value: ${newWeight}. Must be between 0-1,000`);
+                return;
+            }
+
+            if (newWeightNum !== currentWeight) {
+                weightUpdates.push({
+                    pairAddress,
+                    newWeight: newWeightNum,
+                    currentWeight
+                });
+            }
+        }
+
+        if (weightUpdates.length === 0) {
+            this.showError('Please specify at least one weight change');
+            return;
+        }
+
+        try {
+            const contractManager = await this.ensureContractReady();
+
+            // Extract addresses and weights for contract call
+            const lpTokens = weightUpdates.map(update => update.pairAddress);
+            const weights = weightUpdates.map(update => update.newWeight);
+
+            // Create batch weight update proposal
+            const result = await contractManager.proposeUpdatePairWeights(lpTokens, weights);
+
+            if (result.success) {
+                this.closeModal();
+
+                let successMessage = '✅ Weight update proposal created successfully!';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
+                }
+                this.showSuccess(successMessage);
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error.userMessage?.title || 'Failed to create weight update proposal', result.error.userMessage?.message);
+            }
+
+        } catch (error) {
+            console.error('Failed to create weight update proposal:', error);
+            this.showError(error.userMessage?.title || 'Failed to create proposal', error.userMessage?.message);
+        }
+    }
+
+    async submitChangeSignerProposal(event) {
+        event.preventDefault();
+
+        // DUPLICATE PREVENTION FIX: Check if already submitting
+        if (this.isSubmittingChangeSigner) {
+            console.warn('⚠️ Already submitting change signer proposal, ignoring duplicate request');
+            return;
+        }
+
+        const oldSigner = document.getElementById('old-signer').value;
+        const newSigner = document.getElementById('new-signer').value;
+
+        // DUPLICATE PREVENTION FIX: Set submission flag and disable submit button
+        this.isSubmittingChangeSigner = true;
+        const submitBtn = document.querySelector('#change-signer-form button[type="submit"], button[form="change-signer-form"]');
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Creating Proposal...';
+        }
+
+        try {
+            // Enhanced validation
+            if (!oldSigner || !newSigner) {
+                this.showError('Please fill in both old and new signer addresses');
+                return;
+            }
+
+            if (!ethers.utils.isAddress(oldSigner)) {
+                this.showError('Invalid old signer address format');
+                return;
+            }
+
+            if (!ethers.utils.isAddress(newSigner)) {
+                this.showError('Invalid new signer address format');
+                return;
+            }
+
+            if (oldSigner.toLowerCase() === newSigner.toLowerCase()) {
+                this.showError('Old and new signer addresses cannot be the same');
+                return;
+            }
+
+            if (window.notificationManager) {
+                window.notificationManager.info('Submitting signer change proposal');
+            }
+
+            const contractManager = await this.ensureContractReady();
+            const result = await contractManager.proposeChangeSigner(oldSigner, newSigner);
+
+            if (result.success) {
+                this.closeModal();
+
+                let successMessage = '✅ Change signer proposal created successfully!';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
+                }
+                this.showSuccess(successMessage);
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error.userMessage?.title || 'Failed to create change signer proposal', result.error.userMessage?.message);
+            }
+
+        } catch (error) {
+            console.error('Failed to create signer change proposal:', error);
+            this.showError(error.userMessage?.title || 'Failed to create proposal', error.userMessage?.message);
+        } finally {
+            // DUPLICATE PREVENTION FIX: Always reset submission state and button
+            this.isSubmittingChangeSigner = false;
+            const submitBtn = document.querySelector('#change-signer-form button[type="submit"], button[form="change-signer-form"]');
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Create Signer Change Proposal';
+            }
+        }
+    }
+
+    async submitWithdrawalProposal(event) {
+        event.preventDefault();
+
+        // DUPLICATE PREVENTION FIX: Check if already submitting
+        if (this.isSubmittingWithdrawal) {
+            console.warn('⚠️ Already submitting withdrawal proposal, ignoring duplicate request');
+            return;
+        }
+
+        const amount = document.getElementById('withdrawal-amount').value;
+        const toAddress = document.getElementById('withdrawal-address').value;
+
+        // DUPLICATE PREVENTION FIX: Set submission flag and disable submit button
+        this.isSubmittingWithdrawal = true;
+        const submitBtn = document.querySelector('#withdrawal-form button[type="submit"], button[form="withdrawal-form"]');
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Creating Proposal...';
+        }
+
+        try {
+            // Enhanced validation
+            if (!amount || !toAddress) {
+                this.showError('Please fill in both amount and recipient address');
+                return;
+            }
+
+            if (!ethers.utils.isAddress(toAddress)) {
+                this.showError('Invalid recipient address format');
+                return;
+            }
+
+            const amountNum = parseFloat(amount);
+            if (isNaN(amountNum) || amountNum <= 0) {
+                this.showError('Amount must be a positive number');
+                return;
+            }
+
+            if (window.notificationManager) {
+                window.notificationManager.info('Submitting withdrawal proposal');
+            }
+
+            const contractManager = await this.ensureContractReady();
+            const result = await contractManager.proposeWithdrawRewards(toAddress, amount);
+
+            if (result.success) {
+                this.closeModal();
+
+                let successMessage = '✅ Withdrawal proposal created successfully!';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
+                }
+                this.showSuccess(successMessage);
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error.userMessage?.title || 'Failed to create withdrawal proposal', result.error.userMessage?.message);
+            }
+
+        } catch (error) {
+            console.error('Failed to create withdrawal proposal:', error);
+            this.showError(error.userMessage?.title || 'Failed to create proposal', error.userMessage?.message);
+        } finally {
+            // DUPLICATE PREVENTION FIX: Always reset submission state and button
+            this.isSubmittingWithdrawal = false;
+            const submitBtn = document.querySelector('#withdrawal-form button[type="submit"], button[form="withdrawal-form"]');
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Create Withdrawal Proposal';
+            }
+        }
+    }
+
+    renderSignerOptions() {
+        const signers = this.contractStats?.signers || [];
+
+        if (signers.length === 0) {
+            return '<option value="">No signers available</option>';
+        }
+
+        return signers.map(signer => `
+            <option value="${signer}">
+                ${this.formatAddress(signer)}
+            </option>
+        `).join('');
+    }
+
+    // Proposal action methods
+    async approveAction(proposalId) {
+        try {
+            if (window.notificationManager) {
+                window.notificationManager.info(`Submitting approval for proposal #${proposalId}`);
+            }
+
+            // Use real contract for approval (like React version)
+            const contractManager = await this.ensureContractReady();
+            const result = await contractManager.approveAction(proposalId);
+
+            if (result.success) {
+                this.showSuccess(`✅ Proposal #${proposalId} approved successfully! Your vote has been recorded on the blockchain.`);
+                this.refreshAdminDataOnce();
+            } else {
+                throw result.error;
+            }
+
+        } catch (error) {
+            console.error('❌ Failed to approve proposal:', error);
+            const errorMessage = error?.userMessage?.message || error?.message || 'Unexpected error occurred while approving proposal. Please try again.';
+            window.notificationManager.error(errorMessage, {title: error?.userMessage?.title});
+        }
+    }
+
+    async rejectAction(proposalId) {
+        try {
+            if (window.notificationManager) {
+                window.notificationManager.info(`Submitting rejection for proposal #${proposalId}`);
+            }
+
+            // Use real contract for rejection (like React version)
+            const contractManager = await this.ensureContractReady();
+            const result = await contractManager.rejectAction(proposalId);
+
+            if (result.success) {
+                this.showSuccess(`✅ Proposal #${proposalId} rejected successfully! Your vote has been recorded on the blockchain.`);
+                this.refreshAdminDataOnce();
+            } else {
+                throw result.error;
+            }
+
+        } catch (error) {
+            console.error('❌ Failed to reject proposal:', error);
+            const errorMessage = error?.userMessage?.message || error?.message || 'Unexpected error occurred while rejecting proposal. Please try again.';
+            window.notificationManager.error(errorMessage, {title: error?.userMessage?.title});
+        }
+    }
+
+    async executeAction(proposalId) {
+        try {
+            if (window.notificationManager) {
+                window.notificationManager.info(`Executing proposal #${proposalId}`);
+            }
+
+            const result = await window.contractManager.executeProposal(proposalId);
+
+            if (result.success) {
+                this.showSuccess(`✅ Proposal #${proposalId} executed successfully! The proposed action has been carried out on the blockchain.`);
+                this.refreshAdminDataOnce();
+            } else {
+                throw result.error;
+            }
+
+        } catch (error) {
+            console.error('Failed to execute proposal:', error);
+            const errorMessage = error?.userMessage?.message || error?.message || 'Unexpected error occurred while executing proposal. Please try again.';
+            window.notificationManager.error(errorMessage, {title: error?.userMessage?.title});
+        }
+    }
+
+    // Cleanup
+    destroy() {
+        // Clear intervals
+        if (this.refreshInterval) {
+            clearInterval(this.refreshInterval);
+            this.refreshInterval = null;
+        }
+
+        // Remove event listeners
+        if (window.ethereum) {
+            try {
+                window.ethereum.removeAllListeners('accountsChanged');
+                window.ethereum.removeAllListeners('chainChanged');
+            } catch (error) {
+                console.warn('⚠️ Error removing ethereum listeners:', error);
+            }
+        }
+
+        // Remove custom event listeners
+        document.removeEventListener('walletConnected', this.handleWalletConnected);
+        document.removeEventListener('walletDisconnected', this.handleWalletDisconnected);
+        window.removeEventListener('contractReady', this.handleContractReady);
+        window.removeEventListener('contractError', this.handleContractError);
+
+        // Clear references
+        this.isInitialized = false;
+        this.isAuthorized = false;
+        this.contractStats = {};
+    }
+
+    /**
+     * Format numbers for display
+     */
+    formatNumber(num) {
+        if (num >= 1000000) {
+            return (num / 1000000).toFixed(2) + 'M';
+        } else if (num >= 1000) {
+            return (num / 1000).toFixed(2) + 'K';
+        }
+        return num.toFixed(2);
+    }
+
+    /**
+     * Format weight for display without rounding, using formatSmallNumberWithSubscript if available
+     */
+    formatWeightForDisplay(weight) {
+        if (!weight && weight !== 0) return '0';
+
+        try {
+            let weightString;
+            
+            // Handle BigNumber values - preserve precision by using string representation
+            if (typeof weight === 'object' && weight._isBigNumber) {
+                weightString = ethers.utils.formatEther(weight);
+            }
+            // Handle string values that look like wei
+            else if (typeof weight === 'string') {
+                const weightStr = weight.trim();
+                weightString = (/^\d+$/.test(weightStr) && weightStr.length >= 18)
+                    ? ethers.utils.formatUnits(weightStr, 18)
+                    : weightStr;
+            }
+            // Handle numbers and other types
+            else {
+                weightString = weight.toString();
+            }
+
+            // Validate and format
+            if (isNaN(parseFloat(weightString))) return '0';
+
+            // Apply formatSmallNumberWithSubscript if available
+            // Pass the string representation to preserve precision for very small decimals
+            return window.Formatter?.formatSmallNumberWithSubscript(weightString) || weightString;
+        } catch (error) {
+            console.error('[FORMAT ERROR] Weight formatting failed:', error);
+            return '0';
+        }
+    }
+
+}
+
+// Export for global access
+window.AdminPage = AdminPage;

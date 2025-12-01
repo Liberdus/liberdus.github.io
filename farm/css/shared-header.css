@@ -1,0 +1,219 @@
+.header {
+    position: sticky;
+    top: 0;
+    z-index: 1100;
+    background: var(--background-paper) !important;
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--divider);
+    transition: all 0.3s ease;
+    background-color: var(--liberdus-bg-secondary);
+    height: 80px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.header-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-2) 0;
+    min-height: 64px;
+}
+
+.logo-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-decoration: none;
+    color: inherit;
+    transition: opacity 0.2s;
+}
+
+.logo-section:hover {
+    opacity: 0.8;
+    color: inherit;
+    text-decoration: none;
+}
+
+.logo {
+    width: 44px;
+    height: 44px;
+    transition: transform 0.2s ease-in-out;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.25rem;
+    font-weight: var(--liberdus-font-semibold);
+    color: var(--liberdus-text-primary);
+    text-decoration: none;
+}
+
+.logo:hover {
+    transform: scale(1.05);
+}
+
+.logo-text {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.version-badge {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-left: 12px;
+    padding: 2px 8px;
+    background: var(--action-hover);
+    border-radius: 12px;
+    white-space: nowrap;
+}
+
+.nav-section {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    background: transparent !important;
+}
+
+.nav-button {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    padding: var(--spacing-1) var(--spacing-2);
+    border: none;
+    border-radius: var(--border-radius-lg);
+    background: transparent;
+    color: var(--text-primary);
+    text-decoration: none;
+    font-weight: 500;
+    transition: all 0.2s;
+    cursor: pointer;
+    font-size: var(--font-size);
+}
+
+.nav-button:hover {
+    background: var(--action-hover);
+    transform: translateY(-2px);
+    text-decoration: none;
+    color: var(--text-primary);
+}
+
+.nav-button.active {
+    background: var(--action-selected);
+    color: var(--primary-main);
+}
+
+.nav-button .material-icons {
+    font-size: 18px;
+    opacity: 0.8;
+}
+
+.nav-button span {
+    font-weight: 600;
+}
+
+/* Connect Wallet Button */
+.connect-wallet-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 38px;
+    padding: 0 16px;
+    min-width: 160px;
+    background: var(--background-paper);
+    border: 1px solid var(--primary-main);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: none;
+    text-decoration: none;
+}
+
+.connect-wallet-btn:hover {
+    background: var(--surface-hover);
+    border-color: var(--primary-main);
+    transform: translateY(-1px);
+}
+
+.connect-wallet-btn svg {
+    opacity: 0.8;
+    color: var(--primary-main);
+}
+
+.connect-wallet-btn .wallet-address-text {
+    font-family: "Monaco", "Courier New", monospace;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+}
+
+.connect-wallet-btn .wallet-status-text {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.connect-wallet-btn.connected {
+    border-color: var(--primary-main);
+    background: var(--background-paper);
+}
+
+.connect-wallet-btn.connected:hover {
+    background: var(--surface-hover);
+}
+
+.wallet-icon {
+    font-size: 1rem;
+    margin-right: var(--space-4);
+    min-width: 48px;
+    text-align: center;
+}
+
+.wallet-text {
+    font-weight: var(--liberdus-font-medium);
+}
+
+.theme-icon {
+  font-size: 1.125rem;
+}
+
+@media (max-width: 768px) {
+    .nav-section {
+        width: 100%;
+        justify-content: space-between;
+    }
+}
+
+@media (max-width: 480px) {
+    .header {
+        padding: 12px 0;
+    }
+
+    .nav-section {
+        gap: 8px;
+    }
+
+    .nav-button {
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+
+    .nav-button .material-icons {
+        font-size: 18px;
+    }
+
+    .connect-wallet-btn {
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+}
+
+@media (hover: none) and (pointer: coarse) {
+    .nav-button,
+    .connect-wallet-btn {
+        min-height: 44px;
+        min-width: 44px;
+    }
+}

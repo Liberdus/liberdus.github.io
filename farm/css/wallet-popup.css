@@ -1,0 +1,211 @@
+/**
+ * Wallet Popup Styles - Matches React RainbowKit ConnectButton design
+ */
+
+.wallet-popup {
+    position: absolute;
+    background: var(--background-paper);
+    border: 1px solid var(--divider);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-8);
+    width: 280px;
+    z-index: 10001;
+    /* backdrop-filter: blur(20px); */
+    overflow: hidden;
+    color: var(--text-primary);
+    font-family: var(--font-family);
+}
+
+.wallet-popup-content {
+    padding: var(--spacing-3);
+    text-align: center;
+    position: relative;
+    background: var(--background-paper);
+}
+
+.wallet-balance {
+    margin-top: var(--spacing-1);
+    margin-bottom: var(--spacing-2);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.wallet-balance .balance-label {
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.wallet-balance .balance-value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    transition: color 0.2s ease;
+}
+
+.wallet-balance .balance-value.error {
+    color: var(--error-main);
+}
+
+/* Close Button */
+.wallet-popup-close {
+    position: absolute;
+    top: var(--spacing-2);
+    right: var(--spacing-2);
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: var(--border-radius);
+    transition: all 0.2s ease;
+    z-index: 1;
+}
+
+.wallet-popup-close:hover {
+    color: var(--text-primary);
+    background: var(--surface-hover);
+}
+
+.wallet-popup-close .material-icons {
+    font-size: 18px;
+}
+
+/* Wallet Address */
+.wallet-address {
+    margin-top: var(--spacing-2);
+    margin-bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-1);
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    background: var(--background-secondary);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-primary);
+}
+
+.address-text {
+    font-family: 'Courier New', monospace;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.5px;
+}
+
+.copy-icon-button {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: var(--border-radius);
+    transition: all 0.2s ease;
+    min-width: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.copy-icon-button:hover {
+    color: var(--text-primary);
+    background: var(--surface-hover);
+}
+
+.copy-icon-button .material-icons {
+    font-size: 18px;
+}
+
+/* Action Buttons */
+.wallet-actions {
+    display: flex;
+    justify-content: center;
+    margin-top: var(--spacing-2);
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.disconnect-button {
+    min-width: 120px;
+    padding: calc(var(--spacing-2) - 4px) var(--spacing-3);
+    background: color-mix(in srgb, var(--error-main) 8%, transparent);
+    color: var(--error-main);
+    border: 1px solid var(--divider);
+    border-radius: var(--border-radius);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+    font-family: inherit;
+}
+
+.disconnect-button:hover {
+    border-color: var(--error-main);
+    background: color-mix(in srgb, var(--error-main) 18%, transparent);
+    transform: translateY(-1px);
+}
+
+.disconnect-button .material-icons {
+    font-size: 16px;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    .wallet-popup {
+        width: 260px;
+        margin: 0 8px;
+    }
+
+    .wallet-popup-content {
+        padding: var(--spacing-2);
+    }
+
+
+    .address-text {
+        font-size: 0.875rem;
+    }
+
+    .action-button {
+        padding: var(--spacing-1) var(--spacing-2);
+        font-size: 0.75rem;
+    }
+}
+
+
+/* Focus States for Accessibility */
+.action-button:focus,
+.wallet-popup-close:focus {
+    outline: 2px solid var(--primary-main);
+    outline-offset: 2px;
+}
+
+/* Success State for Copy */
+.copy-icon-button.success {
+    color: var(--success-main);
+    background: color-mix(in srgb, var(--success-main) 15%, transparent);
+}
+
+.copy-icon-button.success .material-icons {
+    animation: checkmark 0.3s ease;
+}
+
+@keyframes checkmark {
+    0% {
+        transform: scale(0.8);
+    }
+    50% {
+        transform: scale(1.2);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
