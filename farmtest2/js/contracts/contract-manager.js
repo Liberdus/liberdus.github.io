@@ -1,14 +1,13 @@
 ﻿(function(global) {
     'use strict';
 
-    console.log('🔧 ContractManager script starting to load...');
 
     if (global.ContractManager) {
-        console.log('⚠️ ContractManager already exists, skipping...');
+        console.warn('⚠️ ContractManager already exists, skipping...');
         return;
     }
     if (global.contractManager) {
-        console.log('⚠️ contractManager instance already exists, skipping...');
+        console.warn('⚠️ contractManager instance already exists, skipping...');
         return;
     }
 
@@ -47,7 +46,6 @@ class ContractManager {
             providerTimeout: 2000 // Reduced from 5000ms for faster failover
         };
 
-        console.log('ContractManager initialized with comprehensive features');
     }
 
     /**
@@ -65,7 +63,6 @@ class ContractManager {
         }
 
         this.isInitializing = true;
-        console.log('🔄 Starting ContractManager read-only initialization...');
 
         try {
             this.initializationPromise = this._initializeReadOnlyInternal();
@@ -87,8 +84,6 @@ class ContractManager {
      */
     async _initializeReadOnlyInternal() {
         try {
-            console.log('🔄 Starting read-only initialization...');
-
             // Check if app config is available
             if (!window.CONFIG) {
                 console.error('❌ CONFIG not available - cannot initialize contracts');
@@ -100,11 +95,6 @@ class ContractManager {
                 console.error('❌ Ethers.js not available - cannot initialize contracts');
                 throw new Error('Ethers.js not loaded');
             }
-
-            // Try MetaMask provider first (bypasses CORS issues)
-            // BUGFIX: Don't use MetaMask provider with 'any' network - causes corrupted BigNumber data
-            // when wallet is on different network. Always use dedicated network RPC for read-only mode.
-            console.log('🌐 Read-only mode: Using dedicated network RPC (prevents BigNumber corruption)...');
             
             // Use the current network's RPC URLs (resolved from CONFIG each time)
             const configuredRpcUrls = this.getAllRPCUrls();
@@ -121,44 +111,34 @@ class ContractManager {
             console.log('✅ Using working provider:', this.provider.connection?.url || 'Unknown');
 
             // Initialize fallback providers (read-only)
-            console.log('📡 Initializing fallback providers...');
             await this.initializeFallbackProviders();
-            console.log('📡 Fallback providers initialized:', this.fallbackProviders.length);
 
             // Initialize Multicall service for batch loading optimization
             if (window.MulticallService && this.provider) {
-                console.log('📦 Initializing Multicall service...');
                 try {
                     this.multicallService = new window.MulticallService();
                     const network = await this.provider.getNetwork();
                     const initialized = await this.multicallService.initialize(this.provider, network.chainId);
                     if (!initialized) {
-                        console.log('⚠️ Multicall service not available - using fallback methods');
+                        console.warn('⚠️ Multicall service not available - using fallback methods');
                     }
                 } catch (error) {
-                    console.log('⚠️ Failed to initialize Multicall:', error.message);
+                    console.error('⚠️ Failed to initialize Multicall:', error.message);
                 }
             }
 
             // Load contract ABIs
-            console.log('📋 Loading contract ABIs...');
             await this.loadContractABIs();
-            console.log('📋 Contract ABIs loaded:', this.contractABIs.size);
 
             // Seed staking address from configuration so we can build the contract instance next
-            console.log('🏗️ Loading staking contract address from config...');
             this.loadStakingAddressFromConfig();
 
             // Initialize contract instances (read-only)
-            console.log('🔗 Initializing contract instances (read-only)...');
             await this.initializeContractsReadOnly();
-            console.log('🔗 Contract instances initialized');
 
             // Verify contract function availability (with graceful fallback)
-            console.log('🔍 Verifying contract functions...');
             try {
                 await this.verifyContractFunctions();
-                console.log('🔍 Contract functions verified');
             } catch (error) {
                 console.error('⚠️ Contract function verification failed, but continuing:', error.message);
                 // Don't throw - allow system to continue with limited functionality
@@ -173,7 +153,7 @@ class ContractManager {
 
             // Still mark as ready with limited functionality
             this.isReadyFlag = true;
-            console.log('⚠️ ContractManager marked as ready with limited functionality');
+            console.error('⚠️ ContractManager marked as ready with limited functionality');
 
             throw error;
         }
@@ -184,62 +164,46 @@ class ContractManager {
      */
     async initializeContractsReadOnly() {
         try {
-            console.log('Initializing smart contract instances (read-only)...');
             let contractsInitialized = 0;
 
             // Initialize staking contract
             const stakingAddress = this.contractAddresses.get('STAKING');
             const stakingABI = this.contractABIs.get('STAKING');
 
-            console.log('🔍 Staking contract details:');
-            console.log('   - Address:', stakingAddress);
-            console.log('   - ABI available:', !!stakingABI);
-            console.log('   - ABI length:', stakingABI?.length);
-            console.log('   - Address valid:', this.isValidContractAddress(stakingAddress));
-            console.log('   - Provider available:', !!this.provider);
-
             if (stakingAddress && stakingABI && this.isValidContractAddress(stakingAddress)) {
                 try {
-                    console.log('🔄 Creating staking contract instance...');
                     this.stakingContract = new ethers.Contract(stakingAddress, stakingABI, this.provider);
-                    console.log('   - Contract methods available:', Object.keys(this.stakingContract.interface.functions).length);
                     contractsInitialized++;
                 } catch (contractError) {
                     console.error('❌ Failed to create staking contract:', contractError.message);
                     console.error('❌ Contract error stack:', contractError.stack);
-                    console.log('Continuing without staking contract...');
+                    console.error('Continuing without staking contract...');
                 }
             } else {
-                console.log('❌ Staking contract address invalid or missing, skipping:', stakingAddress);
+                console.error('Staking contract address invalid or missing, skipping:', stakingAddress);
             }
 
             try {
                 await this.loadContractAddresses();
             } catch (addressError) {
-                console.log('⚠️ Failed to refresh reward/LP addresses from contract (read-only):', addressError.message);
+                console.error('Failed to refresh reward/LP addresses from contract (read-only):', addressError.message);
             }
 
             // Initialize reward token contract
             const rewardTokenAddress = this.contractAddresses.get('REWARD_TOKEN');
             const erc20ABI = this.contractABIs.get('ERC20');
 
-            console.log('🔍 Reward token contract details:');
-            console.log('   - Address:', rewardTokenAddress);
-            console.log('   - ABI available:', !!erc20ABI);
-            console.log('   - Address valid:', this.isValidContractAddress(rewardTokenAddress));
-
             if (rewardTokenAddress && erc20ABI && this.isValidContractAddress(rewardTokenAddress)) {
                 try {
-                    console.log('🔄 Creating reward token contract instance...');
                     this.rewardTokenContract = new ethers.Contract(rewardTokenAddress, erc20ABI, this.provider);
                     contractsInitialized++;
                 } catch (contractError) {
                     console.error('❌ Failed to create reward token contract:', contractError.message);
                     console.error('❌ Contract error stack:', contractError.stack);
-                    console.log('Continuing without reward token contract...');
+                    console.error('Continuing without reward token contract...');
                 }
             } else {
-                console.log('❌ Reward token address invalid or missing, skipping:', rewardTokenAddress);
+                console.error('Reward token address invalid or missing, skipping:', rewardTokenAddress);
             }
 
             console.log(`📊 Contract instances initialized: ${contractsInitialized}`);
@@ -260,7 +224,6 @@ class ContractManager {
      */
     async upgradeToWalletMode(provider, signer) {
         try {
-            console.log('🔄 Upgrading ContractManager to wallet mode...');
             this.isInitializing = true;
 
             // Update provider and signer, then delegate to shared initialization path
@@ -317,19 +280,15 @@ class ContractManager {
      */
     async _performInitialization(provider, signer) {
         try {
-            console.log('🔄 Starting ContractManager initialization...');
-
             // Set primary provider and signer
             this.provider = provider;
             this.signer = signer;
 
             // Initialize fallback providers
-            console.log('📡 Initializing fallback providers...');
             await this.initializeFallbackProviders();
 
             // Initialize Multicall service for batch loading optimization
             if (window.MulticallService) {
-                console.log('📦 Initializing Multicall service...');
                 this.multicallService = new window.MulticallService();
                 const chainId = await this.provider.getNetwork().then(n => n.chainId);
                 const initialized = await this.multicallService.initialize(this.provider, chainId);
@@ -339,15 +298,12 @@ class ContractManager {
             }
 
             // Load contract ABIs
-            console.log('📋 Loading contract ABIs...');
             await this.loadContractABIs();
 
             // Seed staking address from configuration before building the contract instance
-            console.log('🏗️ Loading staking contract address from config...');
             this.loadStakingAddressFromConfig();
 
             // Initialize contract instances
-            console.log('🔗 Initializing contract instances...');
             await this.initializeContracts();
 
             // Verify contract connections
@@ -416,13 +372,13 @@ class ContractManager {
             } catch (error) {
                 // Handle specific error types
                 if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
-                    console.log(`❌ RPC ${i + 1} failed: Authentication error (401) - ${rpcUrl}`);
+                    console.error(`❌ RPC ${i + 1} failed: Authentication error (401) - ${rpcUrl}`);
                 } else if (error.message?.includes('403') || error.message?.includes('Forbidden')) {
-                    console.log(`❌ RPC ${i + 1} failed: Access forbidden (403) - ${rpcUrl}`);
+                    console.error(`❌ RPC ${i + 1} failed: Access forbidden (403) - ${rpcUrl}`);
                 } else if (error.message?.includes('429') || error.message?.includes('rate limit')) {
-                    console.log(`❌ RPC ${i + 1} failed: Rate limited (429) - ${rpcUrl}`);
+                    console.error(`❌ RPC ${i + 1} failed: Rate limited (429) - ${rpcUrl}`);
                 } else {
-                    console.log(`❌ RPC ${i + 1} failed: ${error.message}`);
+                    console.error(`❌ RPC ${i + 1} failed: ${error.message}`);
                 }
                 continue;
             }
@@ -447,7 +403,6 @@ class ContractManager {
         }
 
         const uniqueRpcUrls = [...new Set(rpcUrls.filter(Boolean))];
-        console.log('📡 Resolved RPC URLs from CONFIG:', uniqueRpcUrls.length);
         return uniqueRpcUrls;
     }
 
@@ -460,8 +415,6 @@ class ContractManager {
             this.currentProviderIndex = 0;
 
             const rpcUrls = this.getAllRPCUrls();
-            console.log('📡 Total unique RPC URLs to test:', rpcUrls.length);
-            console.log('📡 RPC URLs:', rpcUrls);
 
             if (rpcUrls.length === 0) {
                 throw new Error('No RPC URLs available for fallback providers');
@@ -517,7 +470,7 @@ class ContractManager {
 
                 } catch (error) {
                     testResult.error = error.message;
-                    console.log(`❌ RPC ${i + 1} FAILED:`, rpcUrl, '→', error.message);
+                    console.error(`❌ RPC ${i + 1} FAILED:`, rpcUrl, '→', error.message);
                 }
 
                 testResults.push(testResult);
@@ -553,8 +506,6 @@ class ContractManager {
      */
     async loadContractABIs() {
         try {
-            console.log('Loading contract ABIs...');
-
             // FIXED: Use ABI from CONFIG instead of hardcoded
             let stakingABI;
 
@@ -668,8 +619,6 @@ class ContractManager {
      */
     async loadContractAddresses() {
         try {
-            console.log('Loading contract addresses...');
-
             if (!this.stakingContract) {
                 console.log('Staking contract not initialized; skipping contract-derived addresses');
                 return;
@@ -677,11 +626,9 @@ class ContractManager {
 
             const stakingAddress = this.contractAddresses.get('STAKING');
             if (!stakingAddress || !this.isValidContractAddress(stakingAddress)) {
-                console.log('⚠️ Staking address missing or invalid; cannot load contract-derived addresses');
+                console.warn('⚠️ Staking address missing or invalid; cannot load contract-derived addresses');
                 return;
             }
-
-            console.log('🔄 Fetching reward token and LP token addresses from staking contract');
 
             try {
                 const rewardTokenAddress = await this.stakingContract.rewardToken();
@@ -739,10 +686,10 @@ class ContractManager {
                         activeLPKeys.add(mapKey);
                     });
                 } else {
-                    console.log('⚠️ getPairs() did not return an array');
+                    console.warn('⚠️ getPairs() did not return an array');
                 }
             } catch (error) {
-                console.log('⚠️ getPairs() call failed:', error.message);
+                console.error('⚠️ getPairs() call failed:', error.message);
             }
 
             // Remove stale LP entries that are no longer returned by the contract
@@ -763,7 +710,6 @@ class ContractManager {
      */
     async initializeContracts() {
         try {
-            console.log('Initializing smart contract instances...');
             let contractsInitialized = 0;
 
             // Initialize staking contract
@@ -780,7 +726,7 @@ class ContractManager {
                     contractsInitialized++;
                 } catch (contractError) {
                     console.error('Failed to create staking contract:', contractError.message);
-                    console.log('Continuing without staking contract...');
+                    console.error('⚠️ Continuing without staking contract...');
                 }
             } else {
                 console.log('Staking contract address invalid or missing, skipping:', stakingAddress);
@@ -789,7 +735,7 @@ class ContractManager {
             try {
                 await this.loadContractAddresses();
             } catch (addressError) {
-                console.log('⚠️ Failed to refresh reward/LP addresses from contract (wallet mode):', addressError.message);
+                console.error('⚠️ Failed to refresh reward/LP addresses from contract (wallet mode):', addressError.message);
             }
 
             // Initialize reward token contract
@@ -806,7 +752,7 @@ class ContractManager {
                     contractsInitialized++;
                 } catch (contractError) {
                     console.error('Failed to create reward token contract:', contractError.message);
-                    console.log('Continuing without reward token contract...');
+                    console.error('⚠️ Continuing without reward token contract...');
                 }
             } else {
                 console.log('Reward token address invalid or missing, skipping:', rewardTokenAddress);
@@ -958,8 +904,6 @@ class ContractManager {
      */
     async verifyContractFunctions() {
         try {
-            console.log('🔍 Verifying contract functions...');
-
             if (!this.stakingContract) {
                 throw new Error('Staking contract not initialized');
             }
@@ -988,7 +932,7 @@ class ContractManager {
                         console.error(`❌ Required function ${func.name} failed:`, error.message);
                         throw new Error(`Required function ${func.name} not available: ${error.message}`);
                     } else {
-                        console.log(`⚠️ Optional function ${func.name} not available:`, error.message);
+                        console.warn(`⚠️ Optional function ${func.name} not available:`, error.message);
                         this.disabledFeatures.add(func.name);
                     }
                 }
@@ -997,7 +941,7 @@ class ContractManager {
             return true;
         } catch (error) {
             console.error('❌ Contract function verification failed:', error);
-            console.log('⚠️ Contract function verification failed, but continuing:', error.message);
+            console.error('⚠️ Contract function verification failed, but continuing:', error.message);
             // Don't throw error - allow system to continue with limited functionality
             return false;
         }
@@ -1008,14 +952,12 @@ class ContractManager {
      */
     async verifyContractConnections() {
         try {
-            console.log('🔍 Verifying contract connections...');
-
             // Call the new verification methods
             await this.verifyContractFunctions();
         } catch (error) {
             console.error('❌ Contract verification failed:', error);
             // Don't throw here as this is just verification - let the system continue
-            console.log('⚠️ Continuing with limited functionality...');
+            console.error('⚠️ Continuing with limited functionality...');
         }
     }
 
@@ -1085,7 +1027,6 @@ class ContractManager {
 
             // Reset MulticallService
             if (this.multicallService) {
-                console.log('🔄 Resetting MulticallService for network switch...');
                 this.multicallService.reset();
                 this.multicallService = null;
             }
@@ -1093,18 +1034,15 @@ class ContractManager {
             // Update RPC URLs for the new network
             const network = window.CONFIG.NETWORKS[networkKey];
             if (network) {
-                const updatedRpcUrls = [network.RPC_URL, ...(network.FALLBACK_RPCS || [])].filter(Boolean);
-                console.log(`📡 Updated RPC URLs for ${network.NAME}:`, updatedRpcUrls.length);
                 // Reset provider rotation for new network
                 this.currentProviderIndex = 0;
-                console.log('🔄 Reset provider index for network switch');
             }
 
             // Check if the new network has valid contract addresses
             const contractAddress = window.networkSelector?.getStakingContractAddress();
             if (!contractAddress || contractAddress.trim() === '') {
                 const networkName = window.networkSelector?.getCurrentNetworkName() || networkKey || 'current network';
-                console.log(`⚠️ No contracts deployed on ${networkName} - skipping initialization`);
+                console.warn(`⚠️ No contracts deployed on ${networkName} - skipping initialization`);
                 this.isInitialized = true; // Mark as initialized but with no contracts
                 return true;
             }
@@ -1510,7 +1448,6 @@ class ContractManager {
                 actionIds.push(i);
             }
 
-            console.log(`[MULTICALL] 📦 Preparing ${actionIds.length} actions for batch load... (block: ${blockTag || 'default'})`);
 
             // Prepare all calls: action + pairs + weights + approvals + expired for each ID
             const calls = [];
@@ -1522,7 +1459,6 @@ class ContractManager {
                 calls.push(this.multicallService.createCall(contract, 'isActionExpired', [actionId]));
             });
 
-            console.log(`[MULTICALL] 🚀 Executing ${calls.length} calls in single batch...`);
 
             // Execute all calls in single RPC request with blockTag for fresh data
             const multicallOptions = { timeout: 20000 };
@@ -1532,7 +1468,7 @@ class ContractManager {
             const results = await this.multicallService.batchCall(calls, multicallOptions);
 
             if (!results) {
-                console.log('[MULTICALL] ⚠️ Batch call returned null');
+                console.warn('[MULTICALL] ⚠️ Batch call returned null');
                 return null;
             }
 
@@ -1602,7 +1538,7 @@ class ContractManager {
                         });
                     }
                 } catch (error) {
-                    console.warn(`[MULTICALL] ⚠️ Failed to parse action ${actionId}:`, error.message);
+                    console.error(`[MULTICALL] ⚠️ Failed to parse action ${actionId}:`, error.message);
                 }
             });
 
@@ -1622,18 +1558,16 @@ class ContractManager {
      * Internal method to get all actions - OPTIMIZED FOR SPEED WITH MULTICALL
      */
     async _getAllActionsInternal(contract, blockTag = null) {
-        console.log('[ACTIONS] 🔍 Loading actions using optimized pagination...');
 
         // Always try Multicall if available (90% faster) - pass blockTag through
         if (this.multicallService && this.multicallService.isReady()) {
             try {
                 const result = await this._getAllActionsWithMulticall(contract, blockTag);
                 if (result) {
-                    console.log('[ACTIONS] ⚡ Used Multicall optimization');
                     return result;
                 }
             } catch (error) {
-                console.log('[ACTIONS] ⚠️ Multicall failed, using fallback:', error.message);
+                console.error('[ACTIONS] ⚠️ Multicall failed, using fallback:', error.message);
             }
         }
 
@@ -1642,7 +1576,6 @@ class ContractManager {
             ? await contract.actionCounter({ blockTag })
             : await contract.actionCounter();
         const actionCount = counter.toNumber();
-        console.log(`[ACTIONS] 📊 Total actions: ${actionCount}`);
 
         if (actionCount === 0) {
             console.log('[ACTIONS] 📭 No actions found');
@@ -1658,7 +1591,6 @@ class ContractManager {
             actionIds.push(i);
         }
 
-        console.log(`[ACTIONS] 🚀 Loading ${actionIds.length} actions (optimized for speed)...`);
 
         // Cache for loaded actions to avoid duplicates
         const actionCache = new Map();
@@ -1668,7 +1600,6 @@ class ContractManager {
         const batchSize = 30; // Increased for better parallelization and faster loading
         for (let batchStart = 0; batchStart < actionIds.length; batchStart += batchSize) {
             const batchIds = actionIds.slice(batchStart, batchStart + batchSize);
-            console.log(`[ACTIONS] 🔄 Processing batch ${Math.floor(batchStart/batchSize) + 1}/${Math.ceil(actionIds.length/batchSize)} (${batchIds.length} actions)...`);
 
             // Create parallel promises for this batch
             const batchPromises = batchIds.map(async (actionId) => {
@@ -1723,7 +1654,7 @@ class ContractManager {
                     return formattedAction;
 
                 } catch (error) {
-                    console.warn(`[ACTIONS] ⚠️ Failed to get action ${actionId}:`, error.message);
+                    console.error(`[ACTIONS] ⚠️ Failed to get action ${actionId}:`, error.message);
                     return null; // Return null for failed actions
                 }
             });
@@ -1740,10 +1671,7 @@ class ContractManager {
                 }
             });
 
-            console.log(`[ACTIONS] ✅ Batch ${Math.floor(batchStart/batchSize) + 1} completed: ${batchResults.filter(r => r.status === 'fulfilled' && r.value !== null).length}/${batchIds.length} successful`);
         }
-
-        console.log(`[ACTIONS] 🎉 Parallel loading complete: ${actions.length} actions loaded successfully`);
         return actions;
     }
 
@@ -1752,7 +1680,6 @@ class ContractManager {
      */
     async getAllActionsWithPagination(skip = 0, limit = 15) {
         try {
-            console.log(`[ACTIONS] 📄 Loading paginated actions: skip=${skip}, limit=${limit}`);
 
             return await this.executeWithProviderFallback(async (provider, blockTag) => {
                 const contractWithProvider = new ethers.Contract(
@@ -1775,7 +1702,6 @@ class ContractManager {
      * Internal method for paginated action loading
      */
     async _getAllActionsWithPaginationInternal(contract, blockTag = null, skip = 0, limit = 15) {
-        console.log(`[ACTIONS] 🔍 Loading paginated actions: skip=${skip}, limit=${limit}`);
 
         // Get action counter
         const counter = blockTag
@@ -1802,7 +1728,6 @@ class ContractManager {
             actionIds.push(i);
         }
 
-        console.log(`[ACTIONS] 🚀 Loading ${actionIds.length} paginated actions...`);
 
         const actions = [];
         const batchSize = 30; // Use same optimized batch size for consistency
@@ -1853,7 +1778,7 @@ class ContractManager {
                         rejected: action.rejected
                     };
                 } catch (error) {
-                    console.warn(`[ACTIONS] ⚠️ Failed to get paginated action ${actionId}:`, error.message);
+                    console.error(`[ACTIONS] ⚠️ Failed to get paginated action ${actionId}:`, error.message);
                     return null;
                 }
             });
@@ -1867,7 +1792,6 @@ class ContractManager {
             });
         }
 
-        console.log(`[ACTIONS] ✅ Paginated loading complete: ${actions.length} actions loaded`);
         return actions;
     }
 
@@ -1877,7 +1801,7 @@ class ContractManager {
     async hasAdminRole(address = null) {
         // Check if contract is properly initialized
         if (!this.stakingContract) {
-            console.log('⚠️ Staking contract not initialized - admin role check skipped');
+            console.warn('⚠️ Staking contract not initialized - admin role check skipped');
             return false;
         }
 
@@ -1899,7 +1823,7 @@ class ContractManager {
 
     async hasOwnerApproverRole(address = null) {
         if (!this.stakingContract) {
-            console.log('⚠️ Staking contract not initialized - owner role check skipped');
+            console.warn('⚠️ Staking contract not initialized - owner role check skipped');
             return false;
         }
 
@@ -1924,56 +1848,26 @@ class ContractManager {
      * Propose setting hourly reward rate
      */
     async proposeSetHourlyRewardRate(newRate) {
-        // Add comprehensive debug logging for proposal creation
-        const timestamp = new Date().toISOString();
-        console.log(`[${timestamp}] 🚀 PROPOSAL CREATION STARTED: proposeSetHourlyRewardRate`);
-        console.log(`[PROPOSAL DEBUG] 📋 STEP 1: Function entry`);
-        console.log(`[PROPOSAL DEBUG]   Parameters: newRate = ${newRate}`);
-        console.log(`[PROPOSAL DEBUG]   Signer address: ${await this.signer?.getAddress() || 'Not available'}`);
-
         try {
-            console.log(`[PROPOSAL DEBUG] 📋 STEP 2: Ensuring signer availability`);
             // Ensure we have a proper signer
             await this.ensureSigner();
-            console.log(`[PROPOSAL DEBUG] ✅ STEP 2: Signer confirmed`);
 
-            console.log(`[PROPOSAL DEBUG] 📋 STEP 3: Starting transaction execution`);
             const result = await this.executeTransactionOnce(async () => {
-                console.log(`[PROPOSAL DEBUG] 📋 STEP 4: Converting parameters`);
                 const rateWei = ethers.utils.parseEther(newRate.toString());
-                console.log(`[PROPOSAL DEBUG]   Rate in wei: ${rateWei.toString()}`);
-
-                console.log(`[PROPOSAL DEBUG] 📋 STEP 5: Using MetaMask gas estimation`);
-
-                console.log(`[PROPOSAL DEBUG] 📋 STEP 6: Calling contract method`);
-                console.log(`[PROPOSAL DEBUG]   Contract address: ${this.stakingContract.address}`);
-                console.log(`[PROPOSAL DEBUG]   Method: proposeSetHourlyRewardRate`);
 
                 // CRITICAL FIX: Ensure contract is connected with signer (React pattern)
                 const contractWithSigner = this.stakingContract.connect(this.signer);
-                console.log(`[PROPOSAL DEBUG]   About to show MetaMask popup...`);
 
                 const tx = await contractWithSigner.proposeSetHourlyRewardRate(rateWei);
 
-                console.log(`[PROPOSAL DEBUG] ✅ STEP 7: Transaction submitted!`);
-                console.log(`[PROPOSAL DEBUG]   Transaction hash: ${tx.hash}`);
-                console.log(`[PROPOSAL DEBUG]   Nonce: ${tx.nonce}`);
-                console.log(`[PROPOSAL DEBUG]   Gas price: ${ethers.utils.formatUnits(tx.gasPrice, 'gwei')} gwei`);
-                console.log(`[PROPOSAL DEBUG]   Gas limit: ${tx.gasLimit.toString()}`);
-
                 console.log('Propose hourly rate transaction sent:', tx.hash);
-
-                console.log(`[PROPOSAL DEBUG] 📋 STEP 8: Returning transaction object for monitoring...`);
-                console.log(`[PROPOSAL DEBUG]   Transaction will be monitored by executeTransactionOnce`);
 
                 // CRITICAL FIX: Return tx object, not receipt
                 // The executeTransactionOnce will call tx.wait() via monitorTransactionWithTimeout
                 return tx;
             }, 'proposeSetHourlyRewardRate');
 
-            console.log(`[PROPOSAL DEBUG] 📋 STEP 9: Processing result`);
             const proposalId = result.events?.find(e => e.event === 'ProposalCreated')?.args?.actionId?.toString() || 'Unknown';
-            console.log(`[PROPOSAL DEBUG]   Proposal ID: ${proposalId}`);
 
             const finalResult = {
                 success: true,
@@ -1982,9 +1876,6 @@ class ContractManager {
                 gasUsed: result.gasUsed.toString(),
                 proposalId: proposalId
             };
-
-            console.log(`[PROPOSAL DEBUG] ✅ STEP 10: Proposal creation completed successfully!`);
-            console.log(`[PROPOSAL DEBUG] 🎉 Final result:`, finalResult);
 
             return finalResult;
         } catch (error) {
@@ -2001,10 +1892,6 @@ class ContractManager {
      */
     async proposeUpdatePairWeights(lpTokens, weights) {
         try {
-            console.log(`[UPDATE WEIGHTS] 🔧 Starting proposeUpdatePairWeights (Working Method)`);
-            console.log(`[UPDATE WEIGHTS]   LP Tokens: ${lpTokens.length} pairs`);
-            console.log(`[UPDATE WEIGHTS]   Weights: ${weights.join(', ')}`);
-
             // Ensure we have a proper signer
             await this.ensureSigner();
 
@@ -2017,15 +1904,12 @@ class ContractManager {
 
                 const tx = await contractWithSigner.proposeUpdatePairWeights(lpTokens, weightsWei);
 
-                console.log(`[UPDATE WEIGHTS] ✅ Transaction submitted: ${tx.hash}`);
                 console.log('Propose update weights transaction sent:', tx.hash);
 
                 // CRITICAL FIX: Return tx object, not receipt
                 // The executeTransactionOnce will call tx.wait() via monitorTransactionWithTimeout
                 return tx;
             }, 'proposeUpdatePairWeights');
-
-            console.log(`[UPDATE WEIGHTS] ✅ Weight update proposal completed successfully`);
 
             return {
                 success: true,
@@ -2049,12 +1933,6 @@ class ContractManager {
      */
     async proposeAddPair(lpToken, pairName, platform, weight) {
         try {
-            console.log(`[ADD PAIR FIX] 🚀 Starting proposeAddPair with parameters:`);
-            console.log(`[ADD PAIR FIX]   lpToken: ${lpToken}`);
-            console.log(`[ADD PAIR FIX]   pairName: ${pairName}`);
-            console.log(`[ADD PAIR FIX]   platform: ${platform}`);
-            console.log(`[ADD PAIR FIX]   weight: ${weight} (type: ${typeof weight})`);
-
             // STEP 1: Validate inputs with proper address checksumming
             lpToken = this.validateAndChecksumAddress(lpToken, 'LP Token Address');
 
@@ -2070,12 +1948,11 @@ class ContractManager {
 
             // STEP 2: Ensure we have a proper signer
             await this.ensureSigner();
-            console.log(`[ADD PAIR FIX] ✅ Signer confirmed: ${await this.signer.getAddress()}`);
 
             // STEP 3: Check if function exists in contract
             if (typeof this.stakingContract.proposeAddPair !== 'function') {
-                console.log('⚠️ proposeAddPair function not available in deployed contract');
-                console.log('🔧 This contract may not have governance functions implemented');
+                console.warn('⚠️ proposeAddPair function not available in deployed contract');
+                console.warn('🔧 This contract may not have governance functions implemented');
 
                 return {
                     success: false,
@@ -2089,30 +1966,10 @@ class ContractManager {
                 // Use wei to match update pair weights logic and what the front end expects
                 const weightUint256 = ethers.utils.parseEther(weight.toString());
 
-                console.log(`[ADD PAIR FIX] 📋 Parameter conversion:`);
-                console.log(`[ADD PAIR FIX]   Original weight: ${weight}`);
-                console.log(`[ADD PAIR FIX]   Weight as uint256: ${weightUint256.toString()}`);
-                console.log(`[ADD PAIR FIX]   Weight NOT converted to wei (this was the bug)`);
-
-                // STEP 5: Using MetaMask gas estimation
-                console.log(`[ADD PAIR FIX] 🔄 Using MetaMask gas estimation`);
-
-                // STEP 6: Prepare contract call with proper signer connection
-                console.log(`[ADD PAIR FIX] 📋 Preparing contract call:`);
-                console.log(`[ADD PAIR FIX]   Contract address: ${this.stakingContract.address}`);
-                console.log(`[ADD PAIR FIX]   Method: proposeAddPair`);
-                console.log(`[ADD PAIR FIX]   Parameters:`);
-                console.log(`[ADD PAIR FIX]     lpToken: ${lpToken} (address)`);
-                console.log(`[ADD PAIR FIX]     pairName: "${pairName}" (string)`);
-                console.log(`[ADD PAIR FIX]     platform: "${platform}" (string)`);
-                console.log(`[ADD PAIR FIX]     weight: ${weightUint256.toString()} (uint256)`);
-
                 // CRITICAL FIX: Ensure contract is connected with signer (React pattern)
                 const contractWithSigner = this.stakingContract.connect(this.signer);
-                console.log(`[ADD PAIR FIX] 🔧 Contract connected with signer`);
-                console.log(`[ADD PAIR FIX]   About to show MetaMask popup...`);
 
-                // STEP 7: Execute the transaction
+                // Execute the transaction
                 const tx = await contractWithSigner.proposeAddPair(
                     lpToken,
                     pairName,
@@ -2120,17 +1977,7 @@ class ContractManager {
                     weightUint256 // FIXED: Use uint256, not wei
                 );
 
-                console.log(`[ADD PAIR FIX] ✅ Transaction submitted successfully!`);
-                console.log(`[ADD PAIR FIX]   Transaction hash: ${tx.hash}`);
-                console.log(`[ADD PAIR FIX]   Nonce: ${tx.nonce}`);
-                console.log(`[ADD PAIR FIX]   Gas price: ${ethers.utils.formatUnits(tx.gasPrice, 'gwei')} gwei`);
-                console.log(`[ADD PAIR FIX]   Gas limit: ${tx.gasLimit.toString()}`);
-
                 console.log('Propose add pair transaction sent:', tx.hash);
-
-                // STEP 8: Return transaction object for monitoring
-                console.log(`[ADD PAIR FIX] 📋 Returning transaction object for monitoring...`);
-                console.log(`[ADD PAIR FIX]   Transaction will be monitored by executeTransactionOnce`);
 
                 // CRITICAL FIX: Return tx object, not receipt
                 return tx;
@@ -2179,7 +2026,6 @@ class ContractManager {
             }
 
             // Always create a fresh Web3Provider for transactions (CRITICAL FIX)
-            console.log('🔧 Creating Web3Provider for MetaMask transactions...');
 
             // Create Web3Provider directly from MetaMask
             const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
@@ -2229,7 +2075,6 @@ class ContractManager {
 
                 // If verification fails, try to recreate signer
                 if (window.ethereum) {
-                    console.log('🔧 Recreating signer...');
                     const provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
                     this.signer = provider.getSigner();
                     this.provider = provider;
@@ -2254,11 +2099,10 @@ class ContractManager {
 
         // Recreate contracts with signer - CRITICAL FIX
         try {
-            console.log('🔧 Recreating contracts with signer...');
             await this.initializeContracts();
         } catch (error) {
             console.error('❌ Failed to recreate contracts with signer:', error);
-            console.log('⚠️ Continuing without signer update - transactions may not be available');
+            console.error('⚠️ Continuing without signer update - transactions may not be available');
         }
     }
 
@@ -2267,18 +2111,15 @@ class ContractManager {
      */
     async proposeRemovePair(lpToken) {
         try {
-            console.log(`[REMOVE PAIR FIX] 🚀 Starting proposeRemovePair with lpToken: ${lpToken}`);
-
             // STEP 1: Validate input with proper address checksumming
             lpToken = this.validateAndChecksumAddress(lpToken, 'LP Token Address');
 
             // STEP 2: Ensure we have a proper signer
             await this.ensureSigner();
-            console.log(`[REMOVE PAIR FIX] ✅ Signer confirmed: ${await this.signer.getAddress()}`);
 
             // STEP 3: Check if function exists in contract
             if (typeof this.stakingContract.proposeRemovePair !== 'function') {
-                console.log('⚠️ proposeRemovePair function not available in deployed contract');
+                console.warn('⚠️ proposeRemovePair function not available in deployed contract');
                 return {
                     success: false,
                     error: 'proposeRemovePair function is not available on the deployed contract.',
@@ -2290,12 +2131,10 @@ class ContractManager {
             const result = await this.executeTransactionOnce(async () => {
                 // Prepare contract call with proper signer connection
                 const contractWithSigner = this.stakingContract.connect(this.signer);
-                console.log(`[REMOVE PAIR FIX] 🔧 Contract connected with signer`);
 
                 // Execute the transaction
                 const tx = await contractWithSigner.proposeRemovePair(lpToken);
 
-                console.log(`[REMOVE PAIR FIX] ✅ Transaction submitted: ${tx.hash}`);
                 console.log('Propose remove pair transaction sent:', tx.hash);
 
                 // CRITICAL FIX: Return tx object, not receipt
@@ -2327,10 +2166,6 @@ class ContractManager {
      */
     async proposeChangeSigner(oldSigner, newSigner) {
         try {
-            console.log(`[CHANGE SIGNER FIX] 🚀 Starting proposeChangeSigner`);
-            console.log(`[CHANGE SIGNER FIX]   Old Signer: ${oldSigner}`);
-            console.log(`[CHANGE SIGNER FIX]   New Signer: ${newSigner}`);
-
             // STEP 1: Validate input parameters with proper address checksumming
             oldSigner = this.validateAndChecksumAddress(oldSigner, 'Old Signer Address');
             newSigner = this.validateAndChecksumAddress(newSigner, 'New Signer Address');
@@ -2341,13 +2176,12 @@ class ContractManager {
 
             // STEP 2: Ensure we have a proper signer
             await this.ensureSigner();
-            console.log(`[CHANGE SIGNER FIX] ✅ Signer confirmed: ${await this.signer.getAddress()}`);
 
             // STEP 3: Check if function exists in contract
             if (!this.stakingContract || typeof this.stakingContract.proposeChangeSigner !== 'function') {
-                console.log('⚠️ proposeChangeSigner function not available in deployed contract');
-                console.log('⚠️ Contract instance:', this.stakingContract);
-                console.log('⚠️ Available functions:', this.stakingContract ? Object.getOwnPropertyNames(this.stakingContract.functions || {}) : 'No contract');
+                console.warn('⚠️ proposeChangeSigner function not available in deployed contract');
+                console.warn('⚠️ Contract instance:', this.stakingContract);
+                console.warn('⚠️ Available functions:', this.stakingContract ? Object.getOwnPropertyNames(this.stakingContract.functions || {}) : 'No contract');
                 return {
                     success: false,
                     error: 'proposeChangeSigner function is not available on the deployed contract.',
@@ -2355,23 +2189,14 @@ class ContractManager {
                 };
             }
 
-            // STEP 4: Skip explicit admin role check - let contract handle access control
-            // This matches the behavior of other working proposals (addPair, removePair, etc.)
-            const signerAddress = await this.signer.getAddress();
-            console.log(`[CHANGE SIGNER FIX] 🔍 Signer address: ${signerAddress}`);
-            console.log(`[CHANGE SIGNER FIX] 🔍 Skipping explicit admin check - letting contract handle access control like other proposals`);
-
             // STEP 4: Execute transaction with proper error handling
             const result = await this.executeTransactionOnce(async () => {
-
                 // CRITICAL FIX: Prepare contract call with proper signer connection
                 const contractWithSigner = this.stakingContract.connect(this.signer);
-                console.log(`[CHANGE SIGNER FIX] 🔧 Contract connected with signer`);
 
                 // Execute the transaction with correct parameter order
                 const tx = await contractWithSigner.proposeChangeSigner(oldSigner, newSigner);
 
-                console.log(`[CHANGE SIGNER FIX] ✅ Transaction submitted: ${tx.hash}`);
                 console.log('Propose change signer transaction sent:', tx.hash);
 
                 // CRITICAL FIX: Return tx object, not receipt
@@ -2405,7 +2230,6 @@ class ContractManager {
         try {
             // Validate recipient address with proper checksumming
             recipient = this.validateAndChecksumAddress(recipient, 'Recipient Address');
-            console.log(`[WITHDRAW DEBUG] ✅ Recipient address validated: ${recipient}`);
 
             // Ensure we have a proper signer
             await this.ensureSigner();
@@ -2415,11 +2239,9 @@ class ContractManager {
 
                 // CRITICAL FIX: Prepare contract call with proper signer connection
                 const contractWithSigner = this.stakingContract.connect(this.signer);
-                console.log(`[WITHDRAW REWARDS FIX] 🔧 Contract connected with signer`);
 
                 const tx = await contractWithSigner.proposeWithdrawRewards(recipient, amountWei);
 
-                console.log(`[WITHDRAW REWARDS FIX] ✅ Transaction submitted: ${tx.hash}`);
                 console.log('Propose withdraw rewards transaction sent:', tx.hash);
 
                 // CRITICAL FIX: Return tx object, not receipt
@@ -2452,26 +2274,13 @@ class ContractManager {
      */
     async approveAction(actionId) {
         try {
-            console.log(`[APPROVE DEBUG] 📋 STEP 1: Function entry`);
-            console.log(`[APPROVE DEBUG]   Original actionId: ${actionId}`);
-            console.log(`[APPROVE DEBUG]   Original actionId type: ${typeof actionId}`);
-
             // CRITICAL FIX: Convert string actionId to number for contract
             const numericActionId = parseInt(actionId);
             if (isNaN(numericActionId)) {
                 throw new Error(`Invalid action ID: ${actionId}. Must be a valid number.`);
             }
 
-            console.log(`[APPROVE DEBUG] ✅ STEP 1: Parameter type conversion`);
-            console.log(`[APPROVE DEBUG]   Converted actionId: ${numericActionId}`);
-            console.log(`[APPROVE DEBUG]   Converted actionId type: ${typeof numericActionId}`);
-            console.log(`[APPROVE DEBUG]   Contract expects: uint256 (number)`);
-
             // CRITICAL: Contract method discovery and verification
-            console.log(`[APPROVE DEBUG] 📋 STEP 1.5: Contract method discovery`);
-            console.log(`[APPROVE DEBUG]   Contract address: ${this.stakingContract.address}`);
-            console.log(`[APPROVE DEBUG]   Available contract methods:`, Object.keys(this.stakingContract.functions || {}));
-
             // Check for different possible method names
             const possibleMethods = ['approveAction', 'approve', 'voteForAction', 'confirmAction', 'approveProposal'];
             let methodToUse = null;
@@ -2479,54 +2288,30 @@ class ContractManager {
             for (const method of possibleMethods) {
                 if (typeof this.stakingContract[method] === 'function') {
                     methodToUse = method;
-                    console.log(`[APPROVE DEBUG] ✅ Found working method: ${method}`);
                     break;
                 }
             }
 
             if (!methodToUse) {
-                console.log(`[APPROVE DEBUG] ❌ No approval method found. Available methods:`, Object.keys(this.stakingContract.functions || {}));
+                console.error(`❌ No approval method found. Available methods:`, Object.keys(this.stakingContract.functions || {}));
                 throw new Error('No approval method available in deployed contract. Check contract ABI.');
             }
 
-            console.log(`[APPROVE DEBUG] 🎯 Using method: ${methodToUse}`);
-
             // CRITICAL: Ensure we have a proper signer with MetaMask connection
-            console.log(`[APPROVE DEBUG] 📋 STEP 2: Ensuring signer availability`);
             await this.ensureSigner();
 
             // Verify signer is actually available
             if (!this.signer) {
-                console.log(`[APPROVE DEBUG] ❌ No signer available after ensureSigner()`);
                 throw new Error('No signer available. Please connect MetaMask and ensure you are on Polygon Amoy network.');
             }
 
-            const signerAddress = await this.signer.getAddress();
-            console.log(`[APPROVE DEBUG] ✅ STEP 2: Signer confirmed: ${signerAddress}`);
-
             const result = await this.executeTransactionOnce(async () => {
-                console.log(`[APPROVE DEBUG] 📋 STEP 6: Calling contract method`);
-                console.log(`[APPROVE DEBUG]   Contract address: ${this.stakingContract.address}`);
-                console.log(`[APPROVE DEBUG]   Method: ${methodToUse}`);
-                console.log(`[APPROVE DEBUG]   Parameter: ${numericActionId} (type: ${typeof numericActionId})`);
-
                 // CRITICAL FIX: Ensure contract is connected with signer (like React pattern)
-                console.log(`[APPROVE DEBUG] 🔧 STEP 6.1: Ensuring contract has signer attached`);
-                console.log(`[APPROVE DEBUG]   Current contract signer:`, !!this.stakingContract.signer);
-                console.log(`[APPROVE DEBUG]   Available signer:`, !!this.signer);
-
                 // Create signer-connected contract instance (React pattern)
                 const contractWithSigner = this.stakingContract.connect(this.signer);
-                console.log(`[APPROVE DEBUG] ✅ STEP 6.1: Contract connected with signer`);
-                console.log(`[APPROVE DEBUG]   Contract with signer:`, !!contractWithSigner.signer);
-                console.log(`[APPROVE DEBUG]   About to show MetaMask popup...`);
 
                 // Use the signer-connected contract (React pattern)
                 const tx = await contractWithSigner[methodToUse](numericActionId);
-
-                console.log(`[APPROVE DEBUG] ✅ STEP 7: Transaction submitted!`);
-                console.log(`[APPROVE DEBUG]   Transaction hash: ${tx.hash}`);
-                console.log(`[APPROVE DEBUG]   Action ID used: ${numericActionId} (numeric)`);
 
                 console.log('Approve action transaction sent:', tx.hash, 'Action ID:', numericActionId);
                 // CRITICAL FIX: Return tx object, not receipt
@@ -2540,20 +2325,20 @@ class ContractManager {
                 blockNumber: result.blockNumber
             };
         } catch (error) {
-            console.log(`[APPROVE DEBUG] ❌ APPROVE ACTION FAILED!`);
-            console.log(`[APPROVE DEBUG] Error details:`, error);
-            console.log(`[APPROVE DEBUG] Error message:`, error.message);
-            console.log(`[APPROVE DEBUG] Error code:`, error.code);
-            console.log(`[APPROVE DEBUG] Error stack:`, error.stack);
+            console.error(`[APPROVE DEBUG] ❌ APPROVE ACTION FAILED!`);
+            console.error(`[APPROVE DEBUG] Error details:`, error);
+            console.error(`[APPROVE DEBUG] Error message:`, error.message);
+            console.error(`[APPROVE DEBUG] Error code:`, error.code);
+            console.error(`[APPROVE DEBUG] Error stack:`, error.stack);
 
             // Special handling for Internal JSON-RPC errors
             if (error.code === -32603 || error.message?.includes('Internal JSON-RPC error')) {
-                console.log(`[APPROVE DEBUG] 🚨 INTERNAL JSON-RPC ERROR DETECTED`);
-                console.log(`[APPROVE DEBUG] This usually indicates:`);
-                console.log(`[APPROVE DEBUG]   1. Contract method signature mismatch`);
-                console.log(`[APPROVE DEBUG]   2. Invalid action ID parameter`);
-                console.log(`[APPROVE DEBUG]   3. Network/RPC provider issues`);
-                console.log(`[APPROVE DEBUG]   4. MetaMask connection problems`);
+                console.error(`[APPROVE DEBUG] 🚨 INTERNAL JSON-RPC ERROR DETECTED`);
+                console.error(`[APPROVE DEBUG] This usually indicates:`);
+                console.error(`[APPROVE DEBUG]   1. Contract method signature mismatch`);
+                console.error(`[APPROVE DEBUG]   2. Invalid action ID parameter`);
+                console.error(`[APPROVE DEBUG]   3. Network/RPC provider issues`);
+                console.error(`[APPROVE DEBUG]   4. MetaMask connection problems`);
 
                 // Check contract connection
                 console.log(`[APPROVE DEBUG] Contract connection check:`);
@@ -2576,8 +2361,6 @@ class ContractManager {
      */
     async executeAction(actionId) {
         try {
-            console.log(`[EXECUTE DEBUG] 🚀 Starting executeAction for action ID: ${actionId}`);
-
             // Simple validation and conversion like React
             if (!this.stakingContract) {
                 throw new Error('Contract not initialized');
@@ -2588,30 +2371,13 @@ class ContractManager {
                 throw new Error(`Invalid action ID: ${actionId}. Must be a valid number.`);
             }
 
-            console.log(`[EXECUTE DEBUG]   Converted actionId: ${numericActionId}`);
-            console.log(`[EXECUTE DEBUG]   Contract address: ${this.stakingContract.address}`);
-
             // Ensure we have a proper signer
             await this.ensureSigner();
-            const signerAddress = await this.signer.getAddress();
-            console.log(`[EXECUTE DEBUG] ✅ Signer confirmed: ${signerAddress}`);
 
             // CRITICAL: Check if action can be executed before attempting
-            console.log(`[EXECUTE DEBUG] 🔍 Pre-execution checks for action ${numericActionId}...`);
-
-            // Debug: Log available contract functions
-            console.log(`[EXECUTE DEBUG] 📋 Available contract functions:`, Object.keys(this.stakingContract.functions || {}).slice(0, 20));
-
             try {
                 // Get action details
                 const action = await this.stakingContract.actions(numericActionId);
-                console.log(`[EXECUTE DEBUG] 📋 Action Details:`);
-                console.log(`[EXECUTE DEBUG]   Action Type: ${action.actionType?.toString() || 'N/A'}`);
-                console.log(`[EXECUTE DEBUG]   Approvals: ${action.approvals?.toString() || 'N/A'}`);
-                console.log(`[EXECUTE DEBUG]   Executed: ${action.executed}`);
-                console.log(`[EXECUTE DEBUG]   Rejected: ${action.rejected}`);
-                console.log(`[EXECUTE DEBUG]   Expired (flag): ${action.expired}`);
-                console.log(`[EXECUTE DEBUG]   Proposed Time: ${action.proposedTime?.toString() || 'N/A'}`);
 
                 // Check if already executed
                 if (action.executed) {
@@ -2635,10 +2401,6 @@ class ContractManager {
                     const proposedTime = parseInt(action.proposedTime.toString());
                     const expiryTime = proposedTime + 604800; // 7 days
 
-                    console.log(`[EXECUTE DEBUG]   Current Time: ${currentTime}`);
-                    console.log(`[EXECUTE DEBUG]   Expiry Time: ${expiryTime}`);
-                    console.log(`[EXECUTE DEBUG]   Time Remaining: ${expiryTime - currentTime} seconds`);
-
                     if (currentTime > expiryTime) {
                         throw new Error(`Action ${numericActionId} has expired (time-based check)`);
                     }
@@ -2656,24 +2418,20 @@ class ContractManager {
                     } else if (typeof this.stakingContract.getRequiredApprovals === 'function') {
                         requiredApprovals = await this.stakingContract.getRequiredApprovals();
                     } else {
-                        console.log(`[EXECUTE DEBUG] ⚠️ Cannot find requiredApprovals function, skipping approval count check`);
+                        console.warn(`[EXECUTE DEBUG] ⚠️ Cannot find requiredApprovals function, skipping approval count check`);
                         requiredApprovals = null;
                     }
 
                     if (requiredApprovals) {
-                        console.log(`[EXECUTE DEBUG]   Required Approvals: ${requiredApprovals.toString()}`);
-
                         // Check if has enough approvals
                         if (action.approvals && action.approvals.lt(requiredApprovals)) {
                             throw new Error(`Action ${numericActionId} does not have enough approvals. Has ${action.approvals.toString()}, needs ${requiredApprovals.toString()}`);
                         }
                     }
                 } catch (approvalError) {
-                    console.log(`[EXECUTE DEBUG] ⚠️ Could not check approval count:`, approvalError.message);
-                    console.log(`[EXECUTE DEBUG] ⚠️ Proceeding with execution attempt...`);
+                    console.error(`[EXECUTE DEBUG] ⚠️ Could not check approval count:`, approvalError.message);
+                    console.error(`[EXECUTE DEBUG] ⚠️ Proceeding with execution attempt...`);
                 }
-
-                console.log(`[EXECUTE DEBUG] ✅ Pre-execution checks passed!`);
 
             } catch (checkError) {
                 console.error(`[EXECUTE DEBUG] ❌ Pre-execution check failed:`, checkError.message);
@@ -2687,25 +2445,16 @@ class ContractManager {
                 }
 
                 // For other errors, log and continue
-                console.log(`[EXECUTE DEBUG] ⚠️ Non-critical check error, proceeding with execution attempt...`);
+                console.warn(`[EXECUTE DEBUG] ⚠️ Non-critical check error, proceeding with execution attempt...`);
             }
 
             // Execute without retry (user can manually retry by pressing button again)
             const result = await this.executeTransactionOnce(async () => {
                 // CRITICAL FIX: Ensure contract is connected with signer (like all other methods)
                 const contractWithSigner = this.stakingContract.connect(this.signer);
-                console.log(`[EXECUTE DEBUG] 🔧 Contract connected with signer`);
-                console.log(`[EXECUTE DEBUG]   About to show MetaMask popup...`);
 
                 // Execute the transaction
                 const tx = await contractWithSigner.executeAction(numericActionId);
-
-                console.log(`[EXECUTE DEBUG] ✅ Transaction submitted!`);
-                console.log(`[EXECUTE DEBUG]   Transaction hash: ${tx.hash}`);
-                console.log(`[EXECUTE DEBUG]   Nonce: ${tx.nonce}`);
-
-                console.log(`[EXECUTE DEBUG] 📋 Returning transaction object for monitoring...`);
-                console.log(`[EXECUTE DEBUG]   Transaction will be monitored by executeTransactionOnce`);
 
                 // CRITICAL FIX: Return tx object, not receipt
                 // The executeTransactionOnce will call tx.wait() via monitorTransactionWithTimeout
@@ -2763,39 +2512,20 @@ class ContractManager {
      */
     async rejectAction(actionId) {
         try {
-            console.log(`[REJECT DEBUG] 📋 STEP 1: Function entry`);
-            console.log(`[REJECT DEBUG]   Original actionId: ${actionId}`);
-            console.log(`[REJECT DEBUG]   Original actionId type: ${typeof actionId}`);
-
             // CRITICAL FIX: Convert string actionId to number for contract
             const numericActionId = parseInt(actionId);
             if (isNaN(numericActionId)) {
                 throw new Error(`Invalid action ID: ${actionId}. Must be a valid number.`);
             }
 
-            console.log(`[REJECT DEBUG] ✅ STEP 1: Parameter type conversion`);
-            console.log(`[REJECT DEBUG]   Converted actionId: ${numericActionId}`);
-            console.log(`[REJECT DEBUG]   Converted actionId type: ${typeof numericActionId}`);
-            console.log(`[REJECT DEBUG]   Contract expects: uint256 (number)`);
-
             // Ensure we have a proper signer
             await this.ensureSigner();
 
             const result = await this.executeTransactionOnce(async () => {
-                console.log(`[REJECT DEBUG] 📋 STEP 6: Calling contract method`);
-                console.log(`[REJECT DEBUG]   Contract address: ${this.stakingContract.address}`);
-                console.log(`[REJECT DEBUG]   Method: rejectAction`);
-                console.log(`[REJECT DEBUG]   Parameter: ${numericActionId} (type: ${typeof numericActionId})`);
-
                 // CRITICAL FIX: Ensure contract is connected with signer (React pattern)
                 const contractWithSigner = this.stakingContract.connect(this.signer);
-                console.log(`[REJECT DEBUG]   About to show MetaMask popup...`);
 
                 const tx = await contractWithSigner.rejectAction(numericActionId);
-
-                console.log(`[REJECT DEBUG] ✅ STEP 7: Transaction submitted!`);
-                console.log(`[REJECT DEBUG]   Transaction hash: ${tx.hash}`);
-                console.log(`[REJECT DEBUG]   Action ID used: ${numericActionId} (numeric)`);
 
                 console.log('Reject action transaction sent:', tx.hash, 'Action ID:', numericActionId);
                 // CRITICAL FIX: Return tx object, not receipt
@@ -2915,7 +2645,7 @@ class ContractManager {
                     pairs = await this.stakingContract.getPairs();
                     console.log('✅ Got pairs from getPairs():', pairs.length);
                 } catch (error) {
-                    console.log('⚠️ getPairs() not available:', error.message);
+                    console.error('⚠️ getPairs() not available:', error.message);
                 }
 
                 // Method 2: If no pairs, try getActivePairs()
@@ -2924,7 +2654,7 @@ class ContractManager {
                         pairs = await this.stakingContract.getActivePairs();
                         console.log('✅ Got pairs from getActivePairs():', pairs.length);
                     } catch (error) {
-                        console.log('⚠️ getActivePairs() not available:', error.message);
+                        console.error('⚠️ getActivePairs() not available:', error.message);
                     }
                 }
 
@@ -3015,8 +2745,6 @@ class ContractManager {
      * Approve LP token for staking with enhanced gas estimation
      */
     async approveLPToken(pairName, amount) {
-        console.log(`Executing transaction approveLPToken`);
-
         try {
             // Get LP token contract
             const lpContract = this.getLPTokenContract(pairName);
@@ -3043,8 +2771,6 @@ class ContractManager {
      * Claim rewards for LP token with enhanced gas estimation
      */
     async claimRewards(lpTokenAddress) {
-        console.log(`🎁 Executing claimRewards for LP token: ${lpTokenAddress}`);
-
         // Ensure we have a signer for transactions
         await this.ensureSigner();
 
@@ -3088,8 +2814,6 @@ class ContractManager {
      * Stake LP tokens
      */
     async stake(lpTokenAddress, amount) {
-        console.log(`📈 Executing stake for LP token: ${lpTokenAddress}, amount: ${amount}`);
-
         // Ensure we have a signer for transactions
         await this.ensureSigner();
 
@@ -3137,8 +2861,6 @@ class ContractManager {
      * Unstake LP tokens
      */
     async unstake(lpTokenAddress, amount, claimRewards) {
-        console.log(`📉 Executing unstake for LP token: ${lpTokenAddress}, amount: ${amount}`);
-
         // Ensure we have a signer for transactions
         await this.ensureSigner();
 
@@ -3243,8 +2965,6 @@ class ContractManager {
      * Execute operation with provider fallback and block number strategies - PERFORMANCE OPTIMIZED
      */
     async executeWithProviderFallback(operation, operationName, retries = 3) {
-        console.log(`⚡ Executing ${operationName} with optimized provider fallback...`);
-
         // Get working RPC providers in order of preference
         const workingProviders = await this.getWorkingProvidersForHistoricalState();
 
@@ -3260,10 +2980,7 @@ class ContractManager {
                 const strategyDesc = blockTag || 'no-block-tag';
 
                 try {
-                    console.log(`🔄 Provider ${i + 1}/${workingProviders.length} (${providerUrl}) with ${strategyDesc}`);
-
                     const result = await operation(provider, blockTag);
-                    console.log(`✅ ${operationName} succeeded with ${providerUrl} using ${strategyDesc}`);
                     return result;
 
                 } catch (error) {
@@ -3272,7 +2989,7 @@ class ContractManager {
 
                     // If this is a "missing trie node" error, try next block strategy
                     if (errorMsg.includes && errorMsg.includes('missing trie node')) {
-                        console.log(`🔄 Trying next block strategy for missing trie node...`);
+                        console.error('Missing trie node error, trying next block strategy');
                         continue;
                     }
 
@@ -3308,10 +3025,9 @@ class ContractManager {
                 // Quick connectivity test with shorter timeout
                 await provider.getBlockNumber();
                 providers.push(provider);
-                console.log(`⚡ Fast provider ready: ${rpcUrl}`);
 
             } catch (error) {
-                console.log(`⚠️ Provider not available: ${rpcUrl} - ${error.message}`);
+                console.error(`⚠️ Provider not available: ${rpcUrl} - ${error.message}`);
                 continue;
             }
         }
@@ -3354,7 +3070,7 @@ class ContractManager {
                                  (error.message && error.message.includes('could not detect network'));
 
                 if (isRpcError && attempt <= retries) {
-                    console.log(`🔄 RPC error detected in fallback, switching provider and retrying...`);
+                    console.warn(`🔄 RPC error detected in fallback, switching provider and retrying...`);
                     await this.switchToNextProvider();
 
                     // Recreate signer with new provider for transactions
@@ -3421,7 +3137,7 @@ class ContractManager {
                 window.dispatchEvent(legacyEvent);
             }
         } catch (error) {
-            console.log(`⚠️ Failed to dispatch transaction phase event for ${operationName}: ${error.message}`);
+            console.error(`⚠️ Failed to dispatch transaction phase event for ${operationName}: ${error.message}`);
         }
     }
 
@@ -3430,20 +3146,12 @@ class ContractManager {
      */
     async monitorTransactionWithTimeout(tx, operationName, timeoutMs = 60000) {
         const startTime = Date.now();
-        console.log(`[TX MONITOR] 🔄 Starting transaction monitoring`);
-        console.log(`[TX MONITOR]   Transaction hash: ${tx.hash}`);
-        console.log(`[TX MONITOR]   Operation: ${operationName}`);
-        console.log(`[TX MONITOR]   Timeout: ${timeoutMs/1000}s`);
-
-        console.log(`⏱️ Monitoring transaction ${tx.hash} with ${timeoutMs/1000}s timeout`);
+        console.log(`[TX MONITOR] Monitoring transaction ${tx.hash} (timeout: ${timeoutMs/1000}s)`);
 
         return new Promise((resolve, reject) => {
             // Set up timeout
             const timeoutId = setTimeout(() => {
-                console.log(`[TX MONITOR] ⏰ TIMEOUT REACHED after ${timeoutMs/1000} seconds`);
-                console.log(`[TX MONITOR]   Transaction may still be pending on network`);
-
-                console.log(`⏰ Transaction ${operationName} timed out after ${timeoutMs/1000} seconds`);
+                console.error(`[TX MONITOR] ⏰ TIMEOUT REACHED after ${timeoutMs/1000} seconds`);
                 reject(new Error(`Transaction timeout after ${timeoutMs/1000} seconds.`));
             }, timeoutMs);
 
@@ -3455,14 +3163,8 @@ class ContractManager {
                     const checkInterval = setInterval(() => {
                         checkCount++;
                         const elapsed = Math.round((Date.now() - startTime) / 1000);
-                        console.log(`[TX MONITOR] ⏳ Check #${checkCount}: Transaction pending for ${elapsed}s`);
-                        console.log(`[TX MONITOR]   Status: Still waiting for confirmation...`);
-                        console.log(`⏳ Transaction ${operationName} pending... ${elapsed}s elapsed`);
+                        console.log(`[TX MONITOR] ⏳ Transaction pending for ${elapsed}s...`);
                     }, 10000); // Log every 10 seconds
-
-                    // Wait for transaction confirmation
-                    console.log(`[TX MONITOR] 🔄 Calling tx.wait() for confirmation...`);
-                    console.log(`🔄 Waiting for blockchain confirmation...`);
 
                     const receipt = await tx.wait();
 
@@ -3474,16 +3176,8 @@ class ContractManager {
 
                     // Check if transaction succeeded or failed
                     if (receipt.status === 0) {
-                        console.log(`[TX MONITOR] ❌ TRANSACTION FAILED ON BLOCKCHAIN!`);
-                        console.log(`[TX MONITOR]   Receipt received but status is 0 (failed)`);
-                        console.log(`[TX MONITOR] 📊 Transaction Statistics:`);
-                        console.log(`[TX MONITOR]   Total time: ${totalTime}s`);
-                        console.log(`[TX MONITOR]   Block number: ${receipt.blockNumber}`);
-                        console.log(`[TX MONITOR]   Gas used: ${receipt.gasUsed.toString()} (low gas = early revert)`);
-                        console.log(`[TX MONITOR]   Status: FAILED (0)`);
-                        console.log(`[TX MONITOR]   Transaction fee: ${ethers.utils.formatEther(receipt.gasUsed.mul(tx.gasPrice || receipt.effectiveGasPrice))} MATIC`);
-
-                        console.log(`❌ Transaction reverted on blockchain - Block: ${receipt.blockNumber}, Gas: ${receipt.gasUsed}`);
+                        console.error(`[TX MONITOR] ❌ TRANSACTION FAILED ON BLOCKCHAIN!`);
+                        console.error(`[TX MONITOR] Block: ${receipt.blockNumber}, Gas: ${receipt.gasUsed.toString()}, Status: FAILED (0)`);
 
                         // Throw error with helpful message
                         const error = new Error(`Transaction failed on blockchain. The smart contract rejected the transaction.`);
@@ -3492,31 +3186,22 @@ class ContractManager {
                         throw error;
                     }
 
-                    console.log(`[TX MONITOR] ✅ TRANSACTION CONFIRMED!`);
-                    console.log(`[TX MONITOR]   Receipt received:`, receipt);
-                    console.log(`[TX MONITOR] 📊 Transaction Statistics:`);
-                    console.log(`[TX MONITOR]   Total time: ${totalTime}s`);
-                    console.log(`[TX MONITOR]   Block number: ${receipt.blockNumber}`);
-                    console.log(`[TX MONITOR]   Gas used: ${receipt.gasUsed.toString()}`);
-                    console.log(`[TX MONITOR]   Status: SUCCESS (1)`);
-                    console.log(`[TX MONITOR]   Transaction fee: ${ethers.utils.formatEther(receipt.gasUsed.mul(tx.gasPrice || receipt.effectiveGasPrice))} MATIC`);
-
                     // add success to receipt. needed for ui to detect and display success.
                     receipt.success = true;
 
-                    console.log(`✅ Transaction confirmed in ${totalTime}s - Block: ${receipt.blockNumber}, Gas: ${receipt.gasUsed}`);
+                    console.log(`[TX MONITOR] ✅ Transaction confirmed in ${totalTime}s - Block: ${receipt.blockNumber}, Gas: ${receipt.gasUsed}`);
 
                     resolve(receipt);
 
                 } catch (error) {
-                    console.log(`[TX MONITOR] ❌ TRANSACTION MONITORING ERROR!`);
-                    console.log(`[TX MONITOR]   Error type: ${error.constructor.name}`);
-                    console.log(`[TX MONITOR]   Error message: ${error.message}`);
-                    console.log(`[TX MONITOR]   Error code: ${error.code}`);
-                    console.log(`[TX MONITOR]   Error details:`, error);
+                    console.error(`[TX MONITOR] ❌ TRANSACTION MONITORING ERROR!`);
+                    console.error(`[TX MONITOR]   Error type: ${error.constructor.name}`);
+                    console.error(`[TX MONITOR]   Error message: ${error.message}`);
+                    console.error(`[TX MONITOR]   Error code: ${error.code}`);
+                    console.error(`[TX MONITOR]   Error details:`, error);
 
                     clearTimeout(timeoutId);
-                    console.log(`❌ Transaction monitoring failed: ${error.message}`);
+                    console.error(`❌ Transaction monitoring failed: ${error.message}`);
                     reject(error);
                 }
             })();
@@ -3535,7 +3220,6 @@ class ContractManager {
      */
     async executeTransactionOnce(operation, operationName) {
         try {
-            console.log(`🚀 Starting transaction ${operationName}`);
 
             // Execute the operation (this sends the transaction)
             this.notifyTransactionPhase(operationName, 'user_approval');
@@ -3550,7 +3234,6 @@ class ContractManager {
             const result = await this.monitorTransactionWithTimeout(tx, operationName, 300000); // 5 minute timeout
             this.notifyTransactionPhase(operationName, 'confirmed');
 
-            console.log(`🎉 Transaction ${operationName} completed successfully in block ${result.blockNumber}`);
 
             return result;
         } catch (error) {
@@ -3607,7 +3290,7 @@ class ContractManager {
                     this.signer = provider.getSigner();
                     console.log('✅ Signer obtained from MetaMask during provider switch');
                 } catch (error) {
-                    console.log('⚠️ Could not get signer during provider switch:', error.message);
+                    console.error('⚠️ Could not get signer during provider switch:', error.message);
                 }
             }
 
@@ -3801,9 +3484,6 @@ class ContractManager {
             // Return checksummed address to prevent checksum errors
             const checksummedAddress = ethers.utils.getAddress(address);
 
-            console.log(`[ADDRESS VALIDATION] ✅ ${fieldName} validated and checksummed:`);
-            console.log(`[ADDRESS VALIDATION]   Input: ${address}`);
-            console.log(`[ADDRESS VALIDATION]   Output: ${checksummedAddress}`);
 
             return checksummedAddress;
 
@@ -3837,19 +3517,41 @@ class ContractManager {
 
     /**
      * Load basic contract data (hourly reward rate and total weight) using multicall
+     * Falls back to individual contract calls if multicall is not available
      * @returns {Object} Object containing hourlyRewardRate and totalWeight in wei
      */
     async getBasicContractData() {
-        const calls = [
-            this.multicallService.createCall(this.stakingContract, 'hourlyRewardRate', []),
-            this.multicallService.createCall(this.stakingContract, 'totalWeight', [])
-        ];
+        // Wait up to 2 seconds for multicall to initialize if it exists but isn't ready (race condition fix)
+        if (!this.multicallService?.isReady()) {
+            for (let i = 0; i < 40 && !this.multicallService?.isReady(); i++) {
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+        }
 
-        const results = await this.multicallService.tryAggregate(calls);
+        // Try multicall if available
+        if (this.multicallService?.isReady()) {
+            const calls = [
+                this.multicallService.createCall(this.stakingContract, 'hourlyRewardRate', []),
+                this.multicallService.createCall(this.stakingContract, 'totalWeight', [])
+            ];
+            const results = await this.multicallService.tryAggregate(calls);
+            
+            if (results?.length >= 2) {
+                return {
+                    hourlyRewardRate: results[0]?.success ? this.multicallService.decodeResult(this.stakingContract, 'hourlyRewardRate', results[0].returnData) || ethers.BigNumber.from(0) : ethers.BigNumber.from(0),
+                    totalWeight: results[1]?.success ? this.multicallService.decodeResult(this.stakingContract, 'totalWeight', results[1].returnData) || ethers.BigNumber.from(0) : ethers.BigNumber.from(0)
+                };
+            }
+        }
+        console.warn('Multicall service not available, falling back to individual contract calls');
+        const [hourlyRewardRate, totalWeight] = await Promise.all([
+            this.stakingContract.hourlyRewardRate().catch(() => ethers.BigNumber.from(0)),
+            this.stakingContract.totalWeight().catch(() => ethers.BigNumber.from(0))
+        ]);
         
         return {
-            hourlyRewardRate: results[0]?.success ? this.multicallService.decodeResult(this.stakingContract, 'hourlyRewardRate', results[0].returnData) || ethers.BigNumber.from(0) : ethers.BigNumber.from(0),
-            totalWeight: results[1]?.success ? this.multicallService.decodeResult(this.stakingContract, 'totalWeight', results[1].returnData) || ethers.BigNumber.from(0) : ethers.BigNumber.from(0)
+            hourlyRewardRate: hourlyRewardRate || ethers.BigNumber.from(0),
+            totalWeight: totalWeight || ethers.BigNumber.from(0)
         };
     }
 
@@ -3886,7 +3588,7 @@ class ContractManager {
                 totalWeight: results[4]?.success ? this.multicallService.decodeResult(this.stakingContract, 'totalWeight', results[4].returnData) : null
             };
         } catch (error) {
-            console.log(`⚠️ Multicall failed for contract stats: ${error.message}`);
+            console.error(`⚠️ Multicall failed for contract stats: ${error.message}`);
             return null;
         }
     }

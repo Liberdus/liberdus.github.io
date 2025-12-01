@@ -73,12 +73,8 @@ class AdminPage {
 
     async init() {
         try {
-            console.log('🔐 Initializing Admin Panel...');
-
             // Production mode - wait for contract manager and wallet
-            console.log('🚀 Production mode: Waiting for contract manager and wallet...');
             await this.waitForSystemReady();
-            console.log('✅ System ready check completed');
 
             // Network health check removed for performance optimization
             // The contract manager already includes network connectivity checks and RPC failover mechanisms,
@@ -88,7 +84,6 @@ class AdminPage {
 
             // Wait for contract manager to be ready
             if (!window.contractManager?.isReady()) {
-                console.log('⏳ Waiting for contract manager...');
                 await this.waitForContractManager();
                 console.log('✅ Contract manager ready');
             } else {
@@ -96,57 +91,45 @@ class AdminPage {
             }
 
             // Check if wallet manager exists and is properly initialized
-            console.log('🔍 Checking wallet manager...');
             if (!window.walletManager) {
-                console.log('⚠️ Wallet manager not available, showing connect prompt');
+                console.warn('⚠️ Wallet manager not available, showing connect prompt');
                 this.showConnectWalletPrompt();
                 return;
             }
-            console.log('✅ Wallet manager found');
 
             // Check if wallet is connected (with proper error handling)
-            console.log('🔍 Checking wallet connection...');
             let isConnected = false;
             try {
                 isConnected = typeof window.walletManager.isConnected === 'function'
                     ? window.walletManager.isConnected()
                     : false;
-                console.log('🔍 Wallet connected:', isConnected);
             } catch (walletError) {
-                console.warn('⚠️ Wallet manager error:', walletError.message);
+                console.error('⚠️ Wallet manager error:', walletError.message);
                 this.showConnectWalletPrompt();
                 return;
             }
 
             if (!isConnected) {
-                console.log('⚠️ Wallet not connected, showing connect prompt');
+                console.warn('⚠️ Wallet not connected, showing connect prompt');
                 this.showConnectWalletPrompt();
                 return;
             }
-            console.log('✅ Wallet is connected');
 
             // Setup wallet listeners to handle account changes
             this.setupWalletListeners();
 
             // Verify admin access
-            console.log('🔍 Verifying admin access...');
             await this.verifyAdminAccess();
-            console.log('✅ Admin access verification completed');
 
-            console.log('🔍 Authorization status:', this.isAuthorized);
             if (this.isAuthorized) {
-                console.log('✅ User authorized, loading admin interface...');
                 await this.loadAdminInterface();
-                console.log('✅ Admin interface loaded, starting auto-refresh...');
                 this.startAutoRefresh();
-                console.log('✅ Auto-refresh started');
             } else {
-                console.log('❌ User not authorized, showing unauthorized access');
+                console.error('❌ User not authorized, showing unauthorized access');
                 this.showUnauthorizedAccess();
             }
 
             this.isInitialized = true;
-            console.log('✅ Admin Panel initialization completed successfully');
 
         } catch (error) {
             console.error('❌ Admin Panel initialization failed:', error);
@@ -155,8 +138,6 @@ class AdminPage {
     }
 
     async waitForSystemReady(timeout = 30000) {
-        console.log('⏳ Waiting for system components to be ready...');
-
         const startTime = Date.now();
 
         return new Promise((resolve, reject) => {
@@ -174,18 +155,9 @@ class AdminPage {
                 // Check system components (ENHANCED: More flexible requirements)
                 const ethersAvailable = !!window.ethers;
                 const configAvailable = !!window.CONFIG;
-                const contractManagerExists = !!window.contractManager;
-
-                console.log(`🔍 System check (${Math.round(elapsed/1000)}s):`, {
-                    ethers: ethersAvailable,
-                    config: configAvailable,
-                    contractManager: contractManagerExists,
-                    contractManagerReady: contractManagerExists ? window.contractManager.isReady() : false
-                });
 
                 // ENHANCED: More flexible requirements - proceed if we have basic components
                 if (ethersAvailable && configAvailable) {
-                    console.log('✅ Basic system components ready - proceeding with initialization');
                     resolve();
                 } else {
                     // Show what's missing
@@ -193,7 +165,7 @@ class AdminPage {
                     if (!ethersAvailable) missing.push('ethers');
                     if (!configAvailable) missing.push('config');
 
-                    console.log(`⏳ Still waiting for: ${missing.join(', ')}`);
+                    console.warn(`⏳ Still waiting for: ${missing.join(', ')}`);
 
                     // Continue checking with shorter interval
                     setTimeout(checkReady, 1000);
@@ -224,16 +196,12 @@ class AdminPage {
 
     async verifyAdminAccess() {
         try {
-            console.log('🔍 Verifying admin access...');
-
             // Get current user address
             if (window.walletManager?.isConnected()) {
                 this.userAddress = await window.walletManager.getAddress();
             } else {
                 throw new Error('Wallet not connected');
             }
-
-            console.log('👤 User address:', this.userAddress);
 
             // Check against authorized admin list first (development/fallback)
             if (window.DEV_CONFIG?.AUTHORIZED_ADMINS) {
@@ -243,7 +211,6 @@ class AdminPage {
 
                 if (isAuthorizedAdmin) {
                     this.isAuthorized = true;
-                    console.log('✅ Admin access granted: Address in authorized list');
                     return;
                 }
             }
@@ -256,14 +223,12 @@ class AdminPage {
 
                     if (hasAdminRole) {
                         this.isAuthorized = true;
-                        console.log('🔐 Contract role check: AUTHORIZED (ADMIN_ROLE)');
                         return;
                     }
 
                     if (typeof window.contractManager.hasOwnerApproverRole === 'function') {
                         const hasOwnerRole = await window.contractManager.hasOwnerApproverRole(this.userAddress);
                         this.isAuthorized = hasOwnerRole;
-                        console.log(`🔐 Owner approver role check: ${hasOwnerRole ? 'AUTHORIZED' : 'DENIED'}`);
 
                         if (this.isAuthorized) return;
                     } else {
@@ -271,18 +236,18 @@ class AdminPage {
                     }
 
                 } catch (roleError) {
-                    console.warn('⚠️ Role check failed, checking owner approver role as fallback:', roleError.message);
+                    console.error('⚠️ Role check failed, checking owner approver role as fallback:', roleError.message);
 
                     if (typeof window.contractManager?.hasOwnerApproverRole === 'function') {
                         try {
                             const hasOwnerRole = await window.contractManager.hasOwnerApproverRole(this.userAddress);
                             this.isAuthorized = hasOwnerRole;
-                            console.log(`🔐 Owner approver role fallback: ${hasOwnerRole ? 'AUTHORIZED' : 'DENIED'}`);
+                            console.warn(`🔐 Owner approver role fallback: ${hasOwnerRole ? 'AUTHORIZED' : 'DENIED'}`);
 
                             if (this.isAuthorized) return;
 
                         } catch (ownerRoleError) {
-                            console.warn('⚠️ Owner approver fallback failed:', ownerRoleError.message);
+                            console.error('⚠️ Owner approver fallback failed:', ownerRoleError.message);
                         }
                     }
                 }
@@ -292,7 +257,7 @@ class AdminPage {
 
             // Final fallback - deny access
             this.isAuthorized = false;
-            console.log('❌ Admin access denied: No authorization method succeeded');
+            console.warn('❌ Admin access denied: No authorization method succeeded');
 
         } catch (error) {
             console.error('❌ Admin access verification failed:', error);
@@ -385,13 +350,11 @@ class AdminPage {
 
         networkSelect.addEventListener('change', async (event) => {
             const selectedNetwork = event.target.value;
-            console.log(`🔄 Unauthorized access: Switching to ${selectedNetwork} network...`);
             
             try {
                 // Use the existing network selector functionality
                 if (window.networkSelector) {
                     await window.networkSelector.handleNetworkChange(selectedNetwork, 'admin');
-                    console.log(`✅ Network switched to ${selectedNetwork} from unauthorized access screen`);
                 } else {
                     console.error('❌ Network selector not available');
                 }
@@ -399,15 +362,11 @@ class AdminPage {
                 console.error('❌ Error switching network from unauthorized access:', error);
             }
         });
-
-        console.log('✅ Unauthorized network selector set up');
     }
 
 
 
     async loadAdminInterface() {
-        console.log('🎨 Loading admin interface...');
-
         // Create admin layout
         this.createAdminLayout();
 
@@ -434,8 +393,6 @@ class AdminPage {
      * Setup event listeners for admin panel interactions
      */
     setupEventListeners() {
-        console.log('🎧 Setting up admin panel event listeners...');
-
         try {
             this.setProposalButtonsEnabled(false);
 
@@ -456,8 +413,6 @@ class AdminPage {
 
             // Address copy-to-clipboard event delegation
             this.setupAddressCopyListeners();
-
-            console.log('✅ Admin panel event listeners setup complete');
 
         } catch (error) {
             console.error('❌ Failed to setup event listeners:', error);
@@ -541,11 +496,8 @@ class AdminPage {
 
             // Listen for theme changes and reapply
             document.addEventListener('themeChanged', () => {
-                console.log('🎨 Theme changed, reapplying to admin panel...');
                 this.applyThemeToAllElements();
             });
-
-            console.log('✅ Theme toggle button setup complete with admin panel support');
         } else {
             console.warn('⚠️ UnifiedThemeManager not available');
         }
@@ -556,7 +508,6 @@ class AdminPage {
      */
     applyThemeToAllElements() {
         const theme = document.documentElement.getAttribute('data-theme') || 'light';
-        console.log(`🎨 Applying theme to all admin elements: ${theme}`);
 
         // Apply to body
         document.body.setAttribute('data-theme', theme);
@@ -662,19 +613,16 @@ class AdminPage {
     setupWalletListeners() {
         // Listen for wallet connection events
         document.addEventListener('walletConnected', (event) => {
-            console.log('🎉 Wallet connected event received:', event.detail);
             this.handleWalletConnected(event.detail);
         });
 
         document.addEventListener('walletDisconnected', () => {
-            console.log('👋 Wallet disconnected event received');
             this.handleWalletDisconnected();
         });
 
         // Listen for account changes
         if (window.ethereum) {
             window.ethereum.on('accountsChanged', async (accounts) => {
-                console.log('🔄 Accounts changed:', accounts);
                 try {
                     await this.handleAccountsChanged(accounts);
                 } catch (error) {
@@ -684,7 +632,6 @@ class AdminPage {
             });
 
             window.ethereum.on('chainChanged', async (chainId) => {
-                console.log('🌐 Chain changed:', chainId);
                 try {
                     await this.handleChainChanged(chainId);
                 } catch (error) {
@@ -700,28 +647,23 @@ class AdminPage {
     setupContractListeners() {
         // Listen for contract events
         window.addEventListener('contractReady', async () => {
-            console.log('📋 Contract ready event received');
             await this.handleContractReady();
         });
 
         window.addEventListener('contractError', (event) => {
-            console.log('❌ Contract error event received:', event.detail);
             this.handleContractError(event.detail);
         });
 
         // Listen for transaction events
         window.addEventListener('transactionStarted', (event) => {
-            console.log('🚀 Transaction started:', event.detail);
             this.handleTransactionStarted(event.detail);
         });
 
         window.addEventListener('transactionCompleted', (event) => {
-            console.log('✅ Transaction completed:', event.detail);
             this.handleTransactionCompleted(event.detail);
         });
 
         window.addEventListener('transactionFailed', (event) => {
-            console.log('❌ Transaction failed:', event.detail);
             this.handleTransactionFailed(event.detail);
         });
     }
@@ -739,25 +681,15 @@ class AdminPage {
 
         // ENHANCED: Global click handler for modal buttons
         document.addEventListener('click', (e) => {
-            // Debug: Log all clicks to see what's being clicked
-            console.log('🔘 Click detected:', {
-                target: e.target.tagName,
-                classes: e.target.className,
-                id: e.target.id,
-                dataset: e.target.dataset
-            });
             // Proposal buttons (main admin panel buttons)
             if (e.target.classList.contains('proposal-btn') && e.target.dataset.modal) {
                 e.preventDefault();
                 const modalType = e.target.dataset.modal;
-                console.log(`🔘 Proposal button clicked: ${modalType}`);
 
                 // Call the appropriate modal method
                 switch (modalType) {
                     case 'hourly-rate':
-                        console.log('🔧 DEBUG: About to call showHourlyRateModal()');
                         this.showHourlyRateModal();
-                        console.log('🔧 DEBUG: showHourlyRateModal() completed');
                         break;
                     case 'add-pair':
                         this.showAddPairModal();
@@ -780,19 +712,9 @@ class AdminPage {
                 return;
             }
 
-            // Modal close buttons
-            if (e.target.classList.contains('modal-close') ||
-                e.target.closest('.modal-close')) {
-                e.preventDefault();
-                console.log('🔘 Modal close button clicked');
-                this.closeModal();
-                return;
-            }
-
             // Modal overlay click (close modal)
             if (e.target.classList.contains('modal-overlay')) {
                 e.preventDefault();
-                console.log('🔘 Modal overlay clicked');
                 this.closeModal();
                 return;
             }
@@ -801,7 +723,6 @@ class AdminPage {
             if (e.target.classList.contains('modal-cancel') ||
                 (e.target.classList.contains('btn-secondary') && e.target.closest('.modal-content'))) {
                 e.preventDefault();
-                console.log('🔘 Modal cancel button clicked');
                 this.closeModal();
                 return;
             }
@@ -812,7 +733,6 @@ class AdminPage {
 
                 if (buttonText === 'Cancel') {
                     e.preventDefault();
-                    console.log('🔘 Modal cancel button clicked (text match)');
                     this.closeModal();
                     return;
                 }
@@ -833,7 +753,6 @@ class AdminPage {
             // Handle admin forms
             if (form.classList.contains('admin-form') || form.closest('.modal-content')) {
                 e.preventDefault(); // Always prevent default first
-                console.log('📝 Form submitted:', form.id);
 
                 // Add small delay to ensure DOM is ready
                 setTimeout(async () => {
@@ -842,8 +761,6 @@ class AdminPage {
                         console.warn('⚠️ Form validation failed');
                         return;
                     }
-
-                    console.log('✅ Form validation passed, proceeding with submission');
 
                     // Handle specific form types with proper error handling
                     try {
@@ -867,7 +784,7 @@ class AdminPage {
                                 await this.submitWithdrawalProposal(e);
                                 break;
                             default:
-                                console.log('📝 Unhandled form submission:', form.id);
+                                console.error('📝 Unhandled form submission:', form.id);
                         }
                     } catch (error) {
                         console.error('❌ Form submission failed:', error);
@@ -911,7 +828,6 @@ class AdminPage {
                 // OPTIMIZATION: Resume auto-refresh but don't trigger immediate refresh
                 // This eliminates unnecessary full refreshes when switching tabs
                 this.autoRefreshPaused = false;
-                console.log('▶️ Auto-refresh resumed (tab active) - no immediate refresh');
             }
         });
     }
@@ -925,19 +841,15 @@ class AdminPage {
 
         switch (target) {
             case 'contract':
-                console.log('🔁 Refreshing contract info via refresh button');
                 if (document.querySelector('.info-card')?.getAttribute('aria-busy') === 'true') {
-                    console.log('⏳ Contract info refresh already in progress');
                     return;
                 }
                 this.refreshContractInfo();
                 break;
             case 'proposals':
-                console.log('🔁 Refreshing proposals via refresh button');
                 this.refreshData();
                 break;
             default:
-                console.log('🔁 Refresh trigger without explicit target, defaulting to full admin refresh');
                 this.refreshData();
         }
     }
@@ -987,8 +899,6 @@ class AdminPage {
      * Event handler methods
      */
     navigateToSection(section) {
-        console.log(`🧭 Navigating to section: ${section}`);
-
         // Update active navigation
         const navButtons = document.querySelectorAll('.nav-btn');
         navButtons.forEach(btn => {
@@ -1019,8 +929,6 @@ class AdminPage {
     }
 
     handleWalletConnected(detail) {
-        console.log('🎉 Handling wallet connected:', detail);
-
         // Update UI to reflect connected state
         const connectButtons = document.querySelectorAll('.connect-wallet-btn');
         connectButtons.forEach(btn => {
@@ -1037,8 +945,6 @@ class AdminPage {
     }
 
     handleWalletDisconnected() {
-        console.log('👋 Handling wallet disconnected');
-
         this.closeModal();
 
         this.isAuthorized = false;
@@ -1056,8 +962,6 @@ class AdminPage {
     }
 
     async handleAccountsChanged(accounts) {
-        console.log('🔄 Handling accounts changed:', accounts);
-
         // Close any open modals when account changes
         this.closeModal();
 
@@ -1068,7 +972,6 @@ class AdminPage {
         } else {
             // Account switched
             const newAddress = accounts[0];
-            console.log('🔄 Account switched to:', newAddress);
 
             // Update wallet connection info
             if (window.walletConnection) {
@@ -1081,19 +984,15 @@ class AdminPage {
             // Stop auto-refresh and update UI based on authorization
             this.stopAutoRefresh();
             if (this.isAuthorized) {
-                console.log('✅ New account authorized, reloading interface...');
                 await this.loadAdminInterface();
                 this.startAutoRefresh();
             } else {
-                console.log('❌ New account unauthorized, access denied');
                 this.showUnauthorizedAccess();
             }
         }
     }
 
     async handleChainChanged(chainId) {
-        console.log('🌐 Handling chain changed:', chainId);
-
         // Close any open modals when network changes
         this.closeModal();
 
@@ -1113,16 +1012,14 @@ class AdminPage {
 
         // CRITICAL: Re-verify admin access when network changes
         // This ensures users are kicked out if they don't have admin permissions on the new network
-        console.log('🔐 Re-verifying admin access after network change...');
         try {
             await this.verifyAdminAccess();
             
             if (this.isAuthorized) {
-                console.log('✅ Admin access verified for new network');
                 // Reload the admin interface to ensure it's working with the new network
                 await this.loadAdminInterface();
             } else {
-                console.log('❌ Admin access denied for new network - showing unauthorized access');
+                console.error('❌ Admin access denied for new network - showing unauthorized access');
                 this.showUnauthorizedAccess();
             }
         } catch (error) {
@@ -1132,8 +1029,6 @@ class AdminPage {
     }
 
     async handleContractReady() {
-        console.log('📋 Handling contract ready');
-
         // Refresh contract data
         await this.refreshData();
     }
@@ -1145,15 +1040,11 @@ class AdminPage {
     }
 
     handleTransactionStarted(detail) {
-        console.log('🚀 Handling transaction started:', detail);
-
         // Show loading indicator
         this.showTransactionStatus('pending', 'Transaction submitted...', detail.hash);
     }
 
     handleTransactionCompleted(detail) {
-        console.log('✅ Handling transaction completed:', detail);
-
         // Show success message
         this.showTransactionStatus('success', 'Transaction completed!', detail.hash);
 
@@ -1279,7 +1170,6 @@ class AdminPage {
             clearInterval(this.refreshInterval);
             this.refreshInterval = null;
             this.autoRefreshActive = false; // Reset auto-refresh flag
-            console.log('⏹️ Auto-refresh stopped');
         }
     }
 
@@ -1387,7 +1277,6 @@ class AdminPage {
     }
 
     async loadMultiSignPanel() {
-        console.log('📋 Loading MultiSign Panel...');
         const panelDiv = document.getElementById('multisign-panel');
 
         if (!panelDiv) {
@@ -1421,14 +1310,10 @@ class AdminPage {
 
             // Set loaded proposal count for pagination
             this.loadedProposalCount = proposals.length;
-            console.log(`📊 Set loadedProposalCount to ${this.loadedProposalCount}`);
 
             // Filter proposals based on stored selection (default: show pending)
             const filterValue = this.proposalFilter || 'pending';
             const filteredProposals = this.filterProposalsByStatus(proposals, filterValue);
-
-            console.log(`📊 Filtered proposals: ${filteredProposals.length} using filter "${filterValue}" (original total ${proposals.length})`);
-            console.log('📊 First 5 filtered proposals:', filteredProposals.slice(0, 5).map(p => ({ id: p.id, executed: p.executed, rejected: p.rejected, expired: p.expired, actionType: p.actionType })));
 
             panelDiv.innerHTML = `
                 <div class="multisign-panel">
@@ -1646,7 +1531,6 @@ class AdminPage {
     }
 
     async loadInfoCard() {
-        console.log('📊 Loading Info Card...');
         const cardDiv = document.getElementById('info-card');
 
         if (!cardDiv) {
@@ -1779,15 +1663,6 @@ class AdminPage {
         const proposerAddress = approvedBy.length > 0 ? approvedBy[0] : null;
         const isProposer = userAddress && proposerAddress && userAddress === proposerAddress;
 
-        // Debug logging
-        console.log(`🔍 Proposal #${proposal.id} voting check:`, {
-            userAddress,
-            proposerAddress,
-            isProposer,
-            hasAlreadyApproved,
-            approvedBy,
-            proposalId: proposal.id
-        });
 
         return `
             <button
@@ -1826,7 +1701,6 @@ class AdminPage {
      */
     async refreshData() {
         if (this.isRefreshing) {
-            console.log('🔄 Refresh already in progress, skipping...');
             return;
         }
 
@@ -1835,7 +1709,6 @@ class AdminPage {
         this.setProposalButtonsEnabled(false);
 
         this.isRefreshing = true;
-        console.log('🔄 Refreshing admin panel data...');
 
         try {
             // IMPORTANT: Clear proposal cache to force fresh data
@@ -1850,9 +1723,7 @@ class AdminPage {
 
             // ALWAYS do full refresh to ensure we get latest data from blockchain
             // Selective updates are disabled during manual refresh to guarantee fresh data
-            console.log('🔄 Using full refresh to get latest blockchain data...');
             await this.loadMultiSignPanel();
-            console.log('✅ Admin panel data refreshed with fresh blockchain data');
 
         } catch (error) {
             console.error('❌ Failed to refresh data:', error);
@@ -1872,44 +1743,23 @@ class AdminPage {
     }
 
     async loadProposals() {
-        console.log('📋 Loading proposals...');
-        console.log('🚀 loadProposals method called - starting proposal loading process');
-
         try {
             // First try to load real proposals from the contract
             const contractManager = await this.ensureContractReady();
 
-            console.log('🔍 Contract Manager Debug:', {
-                contractManager: !!contractManager,
-                hasGetAllActions: !!(contractManager && contractManager.getAllActions),
-                hasIsStakingContractReady: !!(contractManager && contractManager.isStakingContractReady),
-                stakingContractReady: contractManager && contractManager.isStakingContractReady ? contractManager.isStakingContractReady() : 'N/A',
-                stakingContract: !!(contractManager && contractManager.stakingContract)
-            });
-
             if (contractManager && contractManager.getAllActions) {
-                console.log('🔗 Attempting to load real proposals from contract...');
-
                 // Check if staking contract is available
                 if (!contractManager.isStakingContractReady || !contractManager.isStakingContractReady()) {
                     throw new Error('Staking contract not properly initialized');
                 }
 
-                console.log('📞 Calling contractManager.getAllActions()...');
                 const realProposals = await contractManager.getAllActions();
-                console.log('📊 getAllActions result:', {
-                    type: typeof realProposals,
-                    isArray: Array.isArray(realProposals),
-                    length: realProposals ? realProposals.length : 'N/A',
-                    firstItem: realProposals && realProposals[0] ? realProposals[0] : 'N/A'
-                });
 
                 if (realProposals && Array.isArray(realProposals)) {
                     console.log(`✅ Loaded ${realProposals.length} real proposals from contract`);
 
                     // PERFORMANCE OPTIMIZATION: Initialize optimized state with proposals
                     const formattedProposals = this.formatRealProposals(realProposals);
-                    console.log(`🔄 Formatted ${formattedProposals.length} proposals for display`);
 
                     // Update total count for pagination with multiple fallback strategies
                     if (window.contractManager && window.contractManager.stakingContract) {
@@ -1921,7 +1771,6 @@ class AdminPage {
                             try {
                                 const counter = await window.contractManager.stakingContract.actionCounter();
                                 totalCount = counter.toNumber();
-                                console.log(`📊 Got total count via actionCounter: ${totalCount}`);
                             } catch (counterError) {
                                 console.warn('⚠️ actionCounter failed:', counterError.message);
 
@@ -1938,21 +1787,16 @@ class AdminPage {
                                     }, 'getActionCounter');
 
                                     totalCount = result;
-                                    console.log(`📊 Got total count via fallback provider: ${totalCount}`);
                                 } catch (fallbackError) {
                                     console.warn('⚠️ Fallback actionCounter also failed:', fallbackError.message);
 
                                     // Method 3: Estimate based on loaded proposals
                                     const maxLoadedId = Math.max(...formattedProposals.map(p => p.id));
                                     totalCount = maxLoadedId; // Estimate
-                                    console.log(`📊 Estimated total count from max ID: ${totalCount}`);
                                 }
                             }
 
                             this.totalProposalCount = totalCount;
-                            console.log(`📊 Final total proposals available: ${this.totalProposalCount}`);
-                            console.log(`📊 Currently loaded: ${formattedProposals.length}`);
-                            console.log(`📊 Remaining: ${this.totalProposalCount - formattedProposals.length}`);
                         } catch (error) {
                             console.warn('⚠️ All methods to get total proposal count failed:', error.message);
                             // Set to 0 to indicate unknown, but still show Load More button
@@ -2041,8 +1885,6 @@ class AdminPage {
             }
 
             if (nextBatch && nextBatch.length > 0) {
-                console.log(`✅ Loaded ${nextBatch.length} additional proposals`);
-
                 // Format and append to existing proposals
                 const formattedBatch = this.formatRealProposals(nextBatch);
 
@@ -2069,8 +1911,6 @@ class AdminPage {
 
                 // Update loaded count
                 this.loadedProposalCount += formattedBatch.length;
-
-                console.log(`📊 Added ${formattedBatch.length} proposals to cache, ${visibleBatch.length} visible`);
 
                 const allCachedProposals = this.proposalsCache
                     ? Array.from(this.proposalsCache.values())
@@ -2259,8 +2099,6 @@ class AdminPage {
      * Force attempt to load real proposals (for manual retry)
      */
     async forceLoadRealProposals() {
-        console.log('🔗 Force attempting to load real proposals...');
-
         try {
             // Show loading notification
             if (window.notificationManager) {
@@ -2290,8 +2128,6 @@ class AdminPage {
             const realProposals = await contractManager.getAllActions();
 
             if (realProposals && realProposals.length >= 0) {
-                console.log(`✅ Successfully loaded ${realProposals.length} real proposals`);
-
                 const formattedProposals = this.formatRealProposals(realProposals);
 
                 // Update the UI
@@ -2320,11 +2156,6 @@ class AdminPage {
      * Format real contract proposals for UI display
      */
     formatRealProposals(realProposals) {
-        console.log('🔄 Formatting real proposals for UI...', {
-            count: realProposals.length,
-            proposals: realProposals
-        });
-
         if (!Array.isArray(realProposals)) {
             console.error('❌ realProposals is not an array:', realProposals);
             return [];
@@ -2413,7 +2244,6 @@ class AdminPage {
                 weights: proposal.weights ? proposal.weights.map(w => formatBigNumber(w)) : []
             };
 
-            console.log(`📋 Formatted proposal ${formattedProposal.id}:`, formattedProposal);
             return formattedProposal;
         });
     }
@@ -2425,13 +2255,6 @@ class AdminPage {
         // Don't update loaded count here - it should be managed by loadProposals and loadMoreProposals
         // this.loadedProposalCount is already set correctly
 
-        console.log(`🔍 Load More Button Logic:`, {
-            totalProposalCount: this.totalProposalCount,
-            loadedProposalCount: this.loadedProposalCount,
-            proposalsLength: proposals ? proposals.length : 0,
-            proposalsCacheSize: this.proposalsCache.size
-        });
-
         // Show Load More button if:
         // 1. Either we know there are more proposals OR we can't determine total count (show optimistically)
         const hasMoreProposals = this.totalProposalCount > this.loadedProposalCount;
@@ -2439,13 +2262,6 @@ class AdminPage {
 
         const shouldShowLoadMore = this.loadedProposalCount > 0 &&
                                   (hasMoreProposals || unknownTotal);
-
-        console.log(`🔍 Load More Decision:`, {
-            shouldShowLoadMore,
-            hasMoreProposals,
-            unknownTotal,
-            calculation: `${this.totalProposalCount} > ${this.loadedProposalCount} = ${hasMoreProposals}`
-        });
 
         if (shouldShowLoadMore) {
             const remainingText = this.totalProposalCount > 0 && hasMoreProposals
@@ -2467,7 +2283,6 @@ class AdminPage {
             `;
         }
 
-        console.log('🚫 Load More button not shown - conditions not met');
         return ''; // No Load More button needed
     }
 
@@ -2475,16 +2290,12 @@ class AdminPage {
      * Load older proposals by ID (fallback method for pagination)
      */
     async loadOlderProposalsByID(contractManager, limit = 10) {
-        console.log(`📋 Loading older proposals by ID (fallback method)...`);
-
         try {
             // Find the lowest ID we currently have
             const cachedProposals = Array.from(this.proposalsCache.values());
             const minLoadedId = cachedProposals.length > 0
                 ? Math.min(...cachedProposals.map(p => p.id))
                 : 999999; // Start high if no cache
-
-            console.log(`📊 Lowest loaded ID: ${minLoadedId}, loading ${limit} older proposals`);
 
             const olderProposals = [];
             const batchPromises = [];
@@ -2514,7 +2325,6 @@ class AdminPage {
             // Sort by ID descending (newest first)
             olderProposals.sort((a, b) => b.id - a.id);
 
-            console.log(`✅ Loaded ${olderProposals.length} older proposals via ID method`);
             return olderProposals;
 
         } catch (error) {
@@ -2574,7 +2384,6 @@ class AdminPage {
 
         const filterValue = filterSelect.value || 'pending';
         this.proposalFilter = filterValue;
-        console.log(`🔄 Applying proposal filter: ${filterValue}`);
 
         // Get all current proposals from cache or reload
         let allProposals = [];
@@ -2587,8 +2396,6 @@ class AdminPage {
 
         const filteredProposals = this.filterProposalsByStatus(allProposals, filterValue);
 
-        console.log(`📊 Showing ${filteredProposals.length} of ${allProposals.length} proposals after filter`);
-
         // Update the table
         proposalsTbody.innerHTML = this.renderProposalsRows(filteredProposals);
 
@@ -2597,14 +2404,10 @@ class AdminPage {
     }
 
     renderProposalsRows(proposals) {
-        console.log(`🎨 Rendering ${proposals ? proposals.length : 0} proposal rows`);
-
         if (!proposals || proposals.length === 0) {
             console.log('📭 No proposals to render');
             return '<tr><td colspan="6" class="no-data">No proposals found</td></tr>';
         }
-
-        console.log(`🎨 Rendering proposals:`, proposals.map(p => ({ id: p.id, actionType: p.actionType, executed: p.executed })));
 
         return proposals.map(proposal => {
             // Ensure actionType is defined with fallback - more robust checking
@@ -2631,10 +2434,6 @@ class AdminPage {
             const statusClass = proposal.executed ? 'executed' : proposal.rejected ? 'rejected' : proposal.expired ? 'expired' : canExecute ? 'ready' : 'pending';
             const statusText = proposal.executed ? '✅ Executed' : proposal.rejected ? '❌ Rejected' : proposal.expired ? '⏰ Expired' : canExecute ? '🚀 Ready to Execute' : '⏳ Pending';
 
-            // Add visual indicator for ready-to-execute proposals
-            if (canExecute) {
-                console.log(`🚀 ATTENTION: Proposal #${proposal.id} is ready for execution!`);
-            }
 
             // Enhanced action type display with icons
             const actionTypeDisplay = this.getActionTypeDisplay(proposal.actionType);
@@ -3004,12 +2803,8 @@ class AdminPage {
 
     async loadContractStats() {
         try {
-            console.log('📊 Loading contract statistics...');
-
             // Ensure contract manager is ready
             const contractManager = await this.ensureContractReady();
-
-            console.log('📊 Contract manager ready, loading stats...');
 
             // Initialize stats object
             this.contractStats = {
@@ -3091,23 +2886,15 @@ class AdminPage {
                 );
             }
 
-            console.log(`📊 rewardToken: ${this.contractStats.rewardToken}`);
-            console.log(`📊 hourlyRewardRate: ${this.contractStats.hourlyRewardRate}`);
-            console.log(`📊 requiredApprovals: ${this.contractStats.requiredApprovals}`);
-            console.log(`📊 actionCounter: ${this.contractStats.actionCounter}`);
-
             // Get pairs information (with error handling)
             try {
                 const allPairs = await contractManager.stakingContract.getPairs();
                 this.contractStats.totalPairs = allPairs.length;
                 this.contractStats.activePairs = allPairs.filter(pair => pair.isActive).length;
-                console.log('📊 Total pairs:', allPairs.length, 'Active:', this.contractStats.activePairs);
             } catch (error) {
                 console.warn('⚠️ Could not load pairs info:', error.message);
                 this.contractStats.totalPairs = this.contractStats.activePairs;
             }
-            
-            console.log('✅ Contract stats loaded:', this.contractStats);
             
         } catch (error) {
             console.error('❌ Failed to load contract stats:', error);
@@ -3197,8 +2984,6 @@ class AdminPage {
                 this.refreshData();
             }
         }, 30000);
-
-        console.log('🔄 Auto-refresh started (30s interval)');
     }
 
 
@@ -3253,7 +3038,6 @@ class AdminPage {
     }
 
     toggleProposal(proposalId) {
-        console.log(`🔄 Toggling proposal ${proposalId} details`);
         const detailsRow = document.getElementById(`details-${proposalId}`);
         const expandBtn = document.querySelector(`[onclick="adminPage.toggleProposal('${proposalId}')"]`) ||
                          document.querySelector(`[onclick="adminPage.toggleProposal(${proposalId})"]`);
@@ -3287,7 +3071,7 @@ class AdminPage {
     // Contract readiness check with graceful fallback
     async ensureContractReady() {
         if (!window.contractManager) {
-            console.log('⚠️ Contract manager not available');
+            console.warn('⚠️ Contract manager not available');
             throw new Error('Contract manager not available');
         }
 
@@ -3296,14 +3080,11 @@ class AdminPage {
                       window.contractManager.getContractStatus() :
                       { isReady: window.contractManager.isReady() };
 
-        console.log('🔍 Contract status check:', status);
-
         if (!status.isReady) {
-            console.log('⏳ Waiting for contract manager to be ready...');
             try {
                 await this.waitForContractManager();
             } catch (error) {
-                console.log('⚠️ Contract manager failed to initialize');
+                console.error('⚠️ Contract manager failed to initialize');
                 throw new Error('Contract manager initialization failed');
             }
         }
@@ -3709,8 +3490,6 @@ class AdminPage {
 
     // Universal modal visibility fix
     applyModalVisibilityFixes(modalContainer) {
-        console.log('🔧 DEBUG: Applying universal modal visibility fixes');
-
         // Container fixes
         modalContainer.style.display = 'flex';
         modalContainer.style.zIndex = '999999';
@@ -3759,28 +3538,6 @@ class AdminPage {
                 // Force all buttons in footer to be visible
                 const buttons = modalFooter.querySelectorAll('button');
                 buttons.forEach((btn, index) => {
-                    btn.style.display = 'inline-block';
-                    btn.style.opacity = '1';
-                    btn.style.visibility = 'visible';
-                    btn.style.pointerEvents = 'auto';
-                    btn.style.minHeight = '40px';
-                    btn.style.padding = '10px 20px';
-                    btn.style.margin = '0 5px';
-                    btn.style.borderRadius = '4px';
-                    btn.style.cursor = 'pointer';
-                    btn.style.fontSize = '14px';
-                    btn.style.zIndex = '1000002';
-
-                    if (btn.classList.contains('btn-primary')) {
-                        btn.style.background = '#007bff';
-                        btn.style.color = 'white';
-                        btn.style.border = '1px solid #007bff';
-                    } else if (btn.classList.contains('btn-secondary')) {
-                        btn.style.background = '#6c757d';
-                        btn.style.color = 'white';
-                        btn.style.border = '1px solid #6c757d';
-                    }
-
                     // Add explicit click handler for cancel buttons
                     if (btn.classList.contains('modal-cancel') ||
                         btn.classList.contains('btn-secondary') ||
@@ -3788,29 +3545,11 @@ class AdminPage {
                         btn.onclick = (e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            console.log('🔘 Cancel button clicked via explicit handler');
                             this.closeModal();
                         };
-                        console.log(`🔧 DEBUG: Added click handler to cancel button ${index + 1}`);
                     }
-
-                    console.log(`🔧 DEBUG: Button ${index + 1} forced visible:`, btn.textContent.trim());
                 });
-
-                console.log('🔧 DEBUG: Modal footer visibility forced with', buttons.length, 'buttons');
             }
-        }
-
-        // Also add click handler to modal close button (X)
-        const closeButton = modalContent?.querySelector('.modal-close');
-        if (closeButton) {
-            closeButton.onclick = (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('🔘 Close button (X) clicked via explicit handler');
-                this.closeModal();
-            };
-            console.log('🔧 DEBUG: Added click handler to close button (X)');
         }
 
         if (modalOverlay) {
@@ -3824,33 +3563,28 @@ class AdminPage {
             // Add click handler to overlay (close on click outside)
             modalOverlay.onclick = (e) => {
                 if (e.target === modalOverlay) {
-                    console.log('🔘 Modal overlay clicked - closing modal');
                     this.closeModal();
                 }
             };
-            console.log('🔧 DEBUG: Added click handler to modal overlay');
         }
-
-        console.log('✅ Universal modal visibility fixes applied');
     }
 
     // Multi-signature modal components
     showHourlyRateModal() {
-        console.log('🔧 DEBUG: showHourlyRateModal called');
         const modalContainer = document.getElementById('modal-container');
-        console.log('🔧 DEBUG: modalContainer found:', !!modalContainer);
         if (!modalContainer) {
             console.error('❌ Modal container not found');
             return;
         }
 
-        console.log('🔧 DEBUG: Setting modal HTML content...');
         modalContainer.innerHTML = `
             <div class="modal-overlay">
                 <div class="modal-content" onclick="event.stopPropagation()">
                     <div class="modal-header">
                         <h3>Update Hourly Rate</h3>
-                        <button class="modal-close" type="button">×</button>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
                     </div>
 
                     <div class="modal-body">
@@ -3889,25 +3623,23 @@ class AdminPage {
 
         // Apply universal modal visibility fixes
         this.applyModalVisibilityFixes(modalContainer);
-
-        console.log('✅ Hourly rate modal opened');
     }
 
     showAddPairModal() {
-        console.log('🔧 DEBUG: showAddPairModal called');
         const modalContainer = document.getElementById('modal-container');
         if (!modalContainer) {
             console.error('❌ Modal container not found');
             return;
         }
-        console.log('🔧 DEBUG: Add Pair modal container found');
 
         modalContainer.innerHTML = `
             <div class="modal-overlay">
                 <div class="modal-content" onclick="event.stopPropagation()">
                     <div class="modal-header">
                         <h3>Add New Pair</h3>
-                        <button class="modal-close" type="button">×</button>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
                     </div>
 
                     <div class="modal-body">
@@ -3988,7 +3720,6 @@ class AdminPage {
                 // Set flag to prevent immediate validation
                 this.modalJustOpened = true;
                 this.initializeFormValidation('add-pair-form');
-                console.log('✅ Add pair form validation initialized');
 
                 // Clear flag after a short delay
                 setTimeout(() => {
@@ -4011,11 +3742,11 @@ class AdminPage {
             <div class="modal-overlay">
                 <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 700px;">
                     <div class="modal-header" style="padding: 24px; border-bottom: 1px solid var(--divider);">
-                        <h3 style="margin: 0; font-size: 24px; font-weight: 600; display: flex; align-items: center; gap: 10px;">
-                            <span style="font-size: 28px;">⚖️</span>
-                            Update Pair Weights
-                        </h3>
-                        <button class="modal-close" type="button" style="font-size: 28px; color: var(--text-secondary);">×</button>
+                        <h3>
+                            Update Pair Weights</h3>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
                     </div>
 
                     <div class="modal-body" style="padding: 24px; max-height: 600px; overflow-y: auto;">
@@ -4064,8 +3795,6 @@ class AdminPage {
         // Apply universal modal visibility fixes
         this.applyModalVisibilityFixes(modalContainer);
 
-        console.log('✅ Update weights modal opened');
-
         // Initialize form validation and load pairs
         this.initializeFormValidation('update-weights-form');
         this.loadPairsForWeightUpdate();
@@ -4079,8 +3808,10 @@ class AdminPage {
             <div class="modal-overlay" onclick="adminPage.closeModal()">
                 <div class="modal-content" onclick="event.stopPropagation()">
                     <div class="modal-header">
-                        <h3>✨ Remove LP Pair</h3>
-                        <button class="modal-close" onclick="adminPage.closeModal()">×</button>
+                        <h3>Remove LP Pair</h3>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
                     </div>
 
                     <div class="modal-body">
@@ -4160,8 +3891,6 @@ class AdminPage {
             modal.setAttribute('data-theme', theme);
         }
 
-        console.log('✅ Remove pair modal opened');
-
         // Initialize form validation and load pairs
         this.initializeFormValidation('remove-pair-form');
         this.loadPairsForRemoval();
@@ -4220,7 +3949,9 @@ class AdminPage {
                 <div class="modal-content" onclick="event.stopPropagation()">
                     <div class="modal-header">
                         <h3>Change Signer</h3>
-                        <button class="modal-close" onclick="adminPage.closeModal()">×</button>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
                     </div>
 
                     <div class="modal-body">
@@ -4286,7 +4017,9 @@ class AdminPage {
                 <div class="modal-content" onclick="event.stopPropagation()">
                     <div class="modal-header">
                         <h3>Withdraw Rewards</h3>
-                        <button class="modal-close" onclick="adminPage.closeModal()">×</button>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
                     </div>
 
                     <div class="modal-body">
@@ -4352,7 +4085,6 @@ class AdminPage {
 
     // Missing function that's called from HTML
     async refreshContractInfo() {
-        console.log('🔄 Refreshing contract info...');
         this.setInfoCardRefreshing(true);
         try {
             const result = await this.loadContractInformation();
@@ -4435,25 +4167,11 @@ class AdminPage {
     }
 
     validateForm(formId) {
-        console.log('🔧 DEBUG: Looking for form with ID:', formId);
-
         const form = document.getElementById(formId);
         if (!form) {
-            console.log('🔧 DEBUG: Form not found:', formId);
-
-            // Check if modal is open
-            const modal = document.getElementById('modal-container');
-            console.log('🔧 DEBUG: Modal container exists:', !!modal);
-            console.log('🔧 DEBUG: Modal display:', modal ? modal.style.display : 'N/A');
-
-            // Check all forms in the document
-            const allForms = document.querySelectorAll('form');
-            console.log('🔧 DEBUG: All forms in document:', Array.from(allForms).map(f => f.id));
-
             return false;
         }
 
-        console.log('🔧 DEBUG: Validating form:', formId);
         let isValid = true;
         const inputs = form.querySelectorAll('input, select, textarea');
 
@@ -4462,11 +4180,7 @@ class AdminPage {
             const value = input.value.trim();
             const isRequired = input.hasAttribute('required');
 
-            console.log(`🔧 DEBUG: Field ${input.id || input.name}: "${value}" (required: ${isRequired})`);
-
             if (isRequired && !value) {
-                console.log(`❌ Required field empty: ${input.id || input.name}`);
-
                 // Show custom error message instead of browser default
                 const errorElement = document.getElementById(`${input.id}-error`);
                 if (errorElement) {
@@ -4494,20 +4208,19 @@ class AdminPage {
 
             // Additional validation for specific field types
             if (value && input.type === 'email' && !value.includes('@')) {
-                console.log(`❌ Invalid email: ${input.id || input.name}`);
+                console.warn(`❌ Invalid email: ${input.id || input.name}`);
                 isValid = false;
             }
 
             if (value && input.pattern) {
                 const regex = new RegExp(input.pattern);
                 if (!regex.test(value)) {
-                    console.log(`❌ Pattern mismatch: ${input.id || input.name}`);
+                    console.warn(`❌ Pattern mismatch: ${input.id || input.name}`);
                     isValid = false;
                 }
             }
         });
 
-        console.log(`🔧 DEBUG: Form validation result: ${isValid ? 'PASSED' : 'FAILED'}`);
         return isValid;
     }
 
@@ -4596,8 +4309,6 @@ class AdminPage {
 
     // Load contract information like React InfoCard component
     async loadContractInformation() {
-        console.log('📊 Loading contract information from smart contract...');
-
         const cardDiv = document.getElementById('info-card');
         if (cardDiv && !cardDiv.querySelector('[data-info="reward-balance"]')) {
             cardDiv.innerHTML = this.getInfoCardSkeleton();
@@ -4614,7 +4325,6 @@ class AdminPage {
                 () => contractManager.rewardTokenContract.symbol(),
                 fallbackSymbol
             );
-            console.log('💰 Reward token symbol:', rewardTokenSymbol);
             if (!this.contractStats) {
                 this.contractStats = {};
             }
@@ -4717,7 +4427,6 @@ class AdminPage {
             );
             this.contractStats.signers = contractInfo.signers;
 
-            console.log('✅ Contract information loaded:', contractInfo);
             this.displayContractInfo(contractInfo);
             return { success: true, data: contractInfo };
 
@@ -4748,8 +4457,6 @@ class AdminPage {
 
     // Display contract information in the UI
     displayContractInfo(info = {}) {
-        console.log('🎭 Displaying contract information in UI...');
-
         // Update reward balance (already includes token symbol)
         const rewardBalanceEl = document.querySelector('[data-info="reward-balance"]');
         if (rewardBalanceEl) {
@@ -4825,8 +4532,6 @@ class AdminPage {
         if (signersContainer) {
             signersContainer.innerHTML = this.renderSignersList(info.signers);
         }
-
-        console.log('✅ Contract information displayed in UI');
     }
 
     // Refresh admin data once (prevent multiple refreshes)
@@ -4836,7 +4541,6 @@ class AdminPage {
         }
 
         this.refreshTimeout = setTimeout(() => {
-            console.log('🔄 Refreshing admin data...');
             this.loadMultiSignPanel();
             this.loadContractInformation();
             this.refreshTimeout = null;
@@ -4886,7 +4590,6 @@ class AdminPage {
                     option.setAttribute('data-pair-address', pair.address);
                     select.appendChild(option);
                 });
-                console.log(`✅ Loaded ${pairs.length} pairs for removal`);
             } else {
                 select.innerHTML = '<option value="">No pairs available</option>';
                 console.warn('⚠️ No pairs available for removal');
@@ -5104,15 +4807,10 @@ class AdminPage {
     async submitAddPairProposal(event = null) {
         if (event) event.preventDefault();
 
-        console.log('[ADD PAIR UI] 🚀 Starting Add Pair Proposal submission');
-
         const pairAddress = document.getElementById('pair-address').value;
         const weight = document.getElementById('pair-weight').value;
         const pairName = document.getElementById('pair-name').value;
         const platform = document.getElementById('pair-platform').value;
-        console.log('[ADD PAIR UI] 📋 Form data collected:', {
-            pairAddress, weight, pairName, platform
-        });
 
         // Enhanced validation with detailed feedback
         if (!pairAddress || !weight || !pairName || !platform) {
@@ -5272,20 +4970,14 @@ class AdminPage {
     async submitChangeSignerProposal(event) {
         event.preventDefault();
 
-        console.log('[CHANGE SIGNER UI] 🚀 Starting Change Signer Proposal submission');
-
         // DUPLICATE PREVENTION FIX: Check if already submitting
         if (this.isSubmittingChangeSigner) {
-            console.log('[CHANGE SIGNER UI] ⚠️ Already submitting change signer proposal, ignoring duplicate request');
+            console.warn('⚠️ Already submitting change signer proposal, ignoring duplicate request');
             return;
         }
 
         const oldSigner = document.getElementById('old-signer').value;
         const newSigner = document.getElementById('new-signer').value;
-
-        console.log('[CHANGE SIGNER UI] 📋 Form data collected:', {
-            oldSigner, newSigner
-        });
 
         // DUPLICATE PREVENTION FIX: Set submission flag and disable submit button
         this.isSubmittingChangeSigner = true;
@@ -5354,20 +5046,14 @@ class AdminPage {
     async submitWithdrawalProposal(event) {
         event.preventDefault();
 
-        console.log('[WITHDRAWAL UI] 🚀 Starting Withdrawal Proposal submission');
-
         // DUPLICATE PREVENTION FIX: Check if already submitting
         if (this.isSubmittingWithdrawal) {
-            console.log('[WITHDRAWAL UI] ⚠️ Already submitting withdrawal proposal, ignoring duplicate request');
+            console.warn('⚠️ Already submitting withdrawal proposal, ignoring duplicate request');
             return;
         }
 
         const amount = document.getElementById('withdrawal-amount').value;
         const toAddress = document.getElementById('withdrawal-address').value;
-
-        console.log('[WITHDRAWAL UI] 📋 Form data collected:', {
-            amount, toAddress
-        });
 
         // DUPLICATE PREVENTION FIX: Set submission flag and disable submit button
         this.isSubmittingWithdrawal = true;
@@ -5432,8 +5118,6 @@ class AdminPage {
     renderSignerOptions() {
         const signers = this.contractStats?.signers || [];
 
-        console.log('🔧 DEBUG: Available signers:', signers);
-
         if (signers.length === 0) {
             return '<option value="">No signers available</option>';
         }
@@ -5448,8 +5132,6 @@ class AdminPage {
     // Proposal action methods
     async approveAction(proposalId) {
         try {
-            console.log(`🗳️ Approving proposal: ${proposalId}`);
-
             if (window.notificationManager) {
                 window.notificationManager.info(`Submitting approval for proposal #${proposalId}`);
             }
@@ -5457,10 +5139,8 @@ class AdminPage {
             // Use real contract for approval (like React version)
             const contractManager = await this.ensureContractReady();
             const result = await contractManager.approveAction(proposalId);
-            console.log('✅ Real contract approval result:', result);
 
             if (result.success) {
-                console.log('✅ Proposal approved successfully');
                 this.showSuccess(`✅ Proposal #${proposalId} approved successfully! Your vote has been recorded on the blockchain.`);
                 this.refreshAdminDataOnce();
             } else {
@@ -5476,8 +5156,6 @@ class AdminPage {
 
     async rejectAction(proposalId) {
         try {
-            console.log(`🗳️ Rejecting proposal: ${proposalId}`);
-
             if (window.notificationManager) {
                 window.notificationManager.info(`Submitting rejection for proposal #${proposalId}`);
             }
@@ -5485,10 +5163,8 @@ class AdminPage {
             // Use real contract for rejection (like React version)
             const contractManager = await this.ensureContractReady();
             const result = await contractManager.rejectAction(proposalId);
-            console.log('✅ Real contract rejection result:', result);
 
             if (result.success) {
-                console.log('✅ Proposal rejected successfully');
                 this.showSuccess(`✅ Proposal #${proposalId} rejected successfully! Your vote has been recorded on the blockchain.`);
                 this.refreshAdminDataOnce();
             } else {
@@ -5511,7 +5187,6 @@ class AdminPage {
             const result = await window.contractManager.executeProposal(proposalId);
 
             if (result.success) {
-                console.log('✅ Proposal executed successfully');
                 this.showSuccess(`✅ Proposal #${proposalId} executed successfully! The proposed action has been carried out on the blockchain.`);
                 this.refreshAdminDataOnce();
             } else {
@@ -5553,8 +5228,6 @@ class AdminPage {
         this.isInitialized = false;
         this.isAuthorized = false;
         this.contractStats = {};
-
-        console.log('🧹 Admin Panel destroyed');
     }
 
     /**

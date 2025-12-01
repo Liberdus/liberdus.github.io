@@ -73,21 +73,6 @@
     font-size: 14px;
 }
 
-.modal-close {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-    padding: var(--spacing-1);
-    border-radius: 50%;
-    transition: all 0.2s;
-}
-
-.modal-close:hover {
-    background: var(--action-hover);
-    color: var(--text-primary);
-}
-
 /* Modal Tabs */
 .modal-tabs {
     display: flex;

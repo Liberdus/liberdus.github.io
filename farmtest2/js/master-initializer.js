@@ -14,7 +14,6 @@ class MasterInitializer {
         // Make instance globally available for testing
         window.masterInitializer = this;
 
-        console.log(`🔧 MasterInitializer created (${this.isAdminPage ? 'admin mode' : 'homepage mode'})`);
         // Note: init() will be called manually from DOMContentLoaded event
     }
 
@@ -50,8 +49,6 @@ class MasterInitializer {
     }
 
     async loadConfiguration() {
-        console.log('⚙️ Loading application configuration...');
-
         // Load SES-safe handler
         await this.loadScript('js/utils/ses-safe-handler.js');
 
@@ -88,18 +85,15 @@ class MasterInitializer {
 
     async loadEthersLibrary() {
         if (typeof window.ethers !== 'undefined') {
-            console.log('Ethers.js already available, skipping load');
+            console.warn('Ethers.js library already loaded');
             return;
         }
 
-        console.log('Loading Ethers.js library...');
         await this.loadScript('libs/ethers.umd.min.js');
 
         if (typeof window.ethers === 'undefined') {
             throw new Error('Failed to load Ethers.js library');
         }
-
-        console.log('Ethers.js loaded successfully:', window.ethers.version);
     }
 
     async loadCoreUtilities() {
@@ -126,7 +120,6 @@ class MasterInitializer {
         // Only load rewards calculator on homepage
         if (!this.isAdminPage) {
             walletScripts.push('js/utils/rewards-calculator.js');
-            console.log('📊 Loading homepage-specific utilities (rewards calculator)');
         } else {
             console.log('⏭️ Skipping homepage utilities (admin mode)');
         }
@@ -175,16 +168,13 @@ class MasterInitializer {
             'js/components/home-page.js',
             'js/components/staking-modal-new.js'
         ];
-
-        console.log('🏠 Loading homepage UI components');
+        console.log('Loading homepage UI components');
         for (const script of uiScripts) {
             await this.loadScript(script);
         }
     }
 
     async initializeComponents() {
-        console.log('🔧 Initializing components...');
-
         // Initialize unified theme manager
         if (window.UnifiedThemeManager) {
             try {
@@ -216,11 +206,6 @@ class MasterInitializer {
         }
 
         // Initialize wallet manager - check multiple sources
-        console.log('🔍 Checking wallet manager availability...');
-        console.log('  - WalletManagerNew:', !!window.WalletManagerNew);
-        console.log('  - WalletManager:', !!window.WalletManager);
-        console.log('  - walletManager instance:', !!window.walletManager);
-
         // Try WalletManagerNew first (from theme-manager-new.js)
         if (window.WalletManagerNew && !window.walletManager) {
             try {
@@ -264,16 +249,10 @@ class MasterInitializer {
         // If wallet manager instance already exists, just register it
         if (window.walletManager && !this.components.has('walletManager')) {
             this.components.set('walletManager', window.walletManager);
-            console.log('✅ Existing WalletManager instance registered');
         }
 
         // Final verification
-        if (window.walletManager) {
-            console.log('🔍 WalletManager final check:');
-            console.log('  - Instance exists:', !!window.walletManager);
-            console.log('  - connectMetaMask method:', typeof window.walletManager.connectMetaMask);
-            console.log('  - isConnected method:', typeof window.walletManager.isConnected);
-        } else {
+        if (!window.walletManager) {
             console.warn('⚠️ No wallet manager available after initialization attempts');
         }
 
@@ -281,7 +260,6 @@ class MasterInitializer {
         if (window.ContractManager) {
             window.contractManager = new window.ContractManager();
             this.components.set('contractManager', window.contractManager);
-            console.log('✅ Contract Manager created');
 
             // Set up permission change listener (now handled by network manager)
             if (window.networkManager && typeof window.networkManager.setupPermissionChangeListener === 'function') {
@@ -292,7 +270,6 @@ class MasterInitializer {
             try {
                 const isWalletConnected = !!(window.walletManager && typeof window.walletManager.isConnected === 'function' && window.walletManager.isConnected());
                 if (isWalletConnected && typeof window.ethereum !== 'undefined' && window.ethers) {
-                    console.log('🔄 Wallet detected as connected on load - initializing in wallet mode...');
                     const provider = new window.ethers.providers.Web3Provider(window.ethereum);
                     const signer = provider.getSigner();
                     await window.contractManager.upgradeToWalletMode(provider, signer);
@@ -323,19 +300,11 @@ class MasterInitializer {
 
         // Initialize rewards calculator (homepage only)
         if (!this.isAdminPage) {
-            console.log('🔍 Checking RewardsCalculator availability:', {
-                RewardsCalculatorClass: !!window.RewardsCalculator,
-                rewardsCalculatorInstance: !!window.rewardsCalculator,
-                contractManager: !!window.contractManager
-            });
-
             if (window.RewardsCalculator && !window.rewardsCalculator && window.contractManager) {
                 try {
-                    console.log('🔄 Creating RewardsCalculator instance...');
                     window.rewardsCalculator = new window.RewardsCalculator();
 
-                    console.log('🔄 Initializing RewardsCalculator...');
-                    const initResult = await window.rewardsCalculator.initialize({
+                    await window.rewardsCalculator.initialize({
                         contractManager: window.contractManager
                     });
 
@@ -345,8 +314,8 @@ class MasterInitializer {
                     console.error('   Error stack:', error.stack);
                 }
             } else if (window.rewardsCalculator) {
-                console.log('ℹ️ RewardsCalculator instance already exists');
-            } else {
+                console.warn('⚠️ RewardsCalculator instance already exists');
+            } else if (!window.RewardsCalculator || !window.contractManager) {
                 console.error('❌ RewardsCalculator prerequisites not met!');
             }
         } else {
@@ -377,8 +346,6 @@ class MasterInitializer {
                 window.stakingModal = new window.StakingModalNew();
                 this.components.set('stakingModal', window.stakingModal);
             }
-        } else {
-            console.log('⏭️ Skipping homepage UI components initialization (admin mode)');
         }
 
         if (window.WalletPopup && !window.walletPopup) {
@@ -426,8 +393,6 @@ class MasterInitializer {
      * @returns {Promise<boolean>} Success status
      */
     async requestNetworkPermission(button) {
-        console.log('🔐 Wallet connected but missing network permission, requesting...');
-        
         this.renderConnectButton(button, {
             text: 'Requesting permission...',
             isLoading: true,
@@ -446,15 +411,12 @@ class MasterInitializer {
     setupWalletIntegration() {
         // Ensure MetaMask detection works
         if (typeof window.ethereum !== 'undefined') {
-            console.log('✅ MetaMask detected');
-
             // Add wallet detection to global scope for tests
             window.isMetaMaskAvailable = true;
 
             // Setup account change listeners
             if (window.ethereum.on) {
                 window.ethereum.on('accountsChanged', (accounts) => {
-                    console.log('Accounts changed:', accounts);
                     if (window.walletManager) {
                         if (accounts.length === 0) {
                             window.walletManager.disconnect?.();
@@ -466,14 +428,13 @@ class MasterInitializer {
                 });
 
                 window.ethereum.on('chainChanged', (chainId) => {
-                    console.log('Chain changed:', chainId);
                     if (window.notificationManager) {
                         window.notificationManager.info('Network Changed');
                     }
                 });
             }
         } else {
-            console.log('❌ MetaMask not detected');
+            console.warn('⚠️ MetaMask not detected');
             window.isMetaMaskAvailable = false;
         }
 
@@ -485,8 +446,6 @@ class MasterInitializer {
             const newConnectBtn = document.getElementById('connect-wallet-btn');
 
             newConnectBtn.addEventListener('click', async (e) => {
-                console.log('Connect wallet button clicked');
-
                 // Check if wallet is connected
                 const isConnected = window.walletManager.isWalletConnected ?
                                   window.walletManager.isWalletConnected() :
@@ -514,7 +473,7 @@ class MasterInitializer {
 
                 // Prevent rapid connection attempts
                 if (window.walletManager.isConnecting) {
-                    console.log('Connection already in progress, please wait...');
+                    console.warn('⚠️ Connection already in progress, please wait...');
                     this.renderConnectButton(newConnectBtn, {
                         text: 'Checking wallet status...',
                         isLoading: true,
@@ -550,7 +509,6 @@ class MasterInitializer {
                     const hasPermission = await this.checkNetworkPermission();
                     
                     if (!hasPermission) {
-                        console.log('🔐 Wallet connected, now requesting network permission...');
                         await this.requestNetworkPermission(newConnectBtn);
                     }
 
@@ -576,8 +534,6 @@ class MasterInitializer {
                     await this.updateConnectButtonStatus();
                 }
             });
-
-            console.log('✅ Connect button event listener attached');
 
             // Initial button status update
             setTimeout(() => {
@@ -622,16 +578,12 @@ class MasterInitializer {
 
         // Listen for wallet connection events
         document.addEventListener('walletConnected', (event) => {
-            console.log('Wallet connected event received:', event.detail);
             this.updateConnectButtonStatus();
         });
 
         document.addEventListener('walletDisconnected', (event) => {
-            console.log('Wallet disconnected event received');
             this.updateConnectButtonStatus();
         });
-
-        console.log('✅ Wallet status monitoring set up');
     }
 
     async updateConnectButtonStatus() {
@@ -774,12 +726,12 @@ class MasterInitializer {
     setupContractManagerIntegration() {
         // Listen for wallet connection events
         document.addEventListener('walletConnected', (event) => {
-            console.log('🔗 Wallet connected event received:', event.detail);
+            console.log('🔗 Wallet connected:', event.detail?.address || 'address unknown');
             this.handleWalletConnection(event.detail);
         });
 
         document.addEventListener('walletDisconnected', async (event) => {
-            console.log('🔌 Wallet disconnected event received');
+            console.log('🔌 Wallet disconnected');
             await this.handleWalletDisconnection();
         });
     }
@@ -789,8 +741,6 @@ class MasterInitializer {
      */
     async handleWalletConnection(walletDetails) {
         try {
-            console.log('🔄 Handling wallet connection and initializing contracts...');
-
             if (window.contractManager && window.walletManager) {
                 // Check if wallet is on configured network before upgrading to wallet mode
                 // Use chainId from event data to avoid timing issues
@@ -799,9 +749,6 @@ class MasterInitializer {
                     : false;
                 
                 if (!isOnRequiredNetwork) {
-                    const networkName = window.networkSelector?.getCurrentNetworkName();
-                    console.log(`📊 Wallet connected but not on ${networkName} - staying in read-only mode`);
-                    console.log(`💡 ContractManager will upgrade when switched to ${networkName}`);
                     // Don't upgrade yet - stay in read-only mode
                     // User will see pools but not their personal data
                     return;
@@ -811,14 +758,15 @@ class MasterInitializer {
                 const signer = window.walletManager.signer;
 
                 if (provider && signer) {
-                    console.log('🔗 Upgrading ContractManager to wallet mode...');
 
                     if (window.contractManager.isReady()) {
                         // Already initialized in read-only mode, upgrade to wallet mode
                         await window.contractManager.upgradeToWalletMode(provider, signer);
+                        console.log('ContractManager upgraded to wallet mode');
                     } else {
                         // Initialize with wallet provider
                         await window.contractManager.initialize(provider, signer);
+                        console.log('ContractManager initialized with wallet');
                     }
 
                     this.pendingContractManagerError = null;
@@ -848,15 +796,12 @@ class MasterInitializer {
      */
     async handleWalletDisconnection() {
         try {
-            console.log('🔌 Handling wallet disconnection...');
-
             if (window.contractManager) {
                 // Downgrade to read-only mode: recreate provider and contracts
                 window.contractManager.signer = null;
             // Reinitialize ContractManager in read-only mode using configured RPCs
             await window.contractManager.initializeReadOnly();
                 this.pendingContractManagerError = null;
-                
                 console.log('✅ ContractManager downgraded to read-only mode');
             }
 
@@ -913,7 +858,7 @@ class MasterInitializer {
         });
         if (existingLink) {
             this.loadedScripts.add(href);
-            console.log(`ℹ️ CSS already present: ${href}`);
+            console.warn(`⚠️ CSS already present: ${href}`);
             return Promise.resolve();
         }
 
@@ -968,8 +913,6 @@ class MasterInitializer {
 
     // Retry initialization without full page reload
     async retryInitialization() {
-        console.log('🔄 Retrying system initialization...');
-
         // Reset initialization state
         this.isReady = false;
         this.initializationPromise = null;
@@ -977,7 +920,6 @@ class MasterInitializer {
         // Retry initialization
         try {
             await this.init();
-            console.log('✅ System initialization retry successful');
         } catch (error) {
             console.error('❌ System initialization retry failed:', error);
             this.handleInitializationError(error);
@@ -988,11 +930,10 @@ class MasterInitializer {
 // Auto-initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
     if (window.masterInitializer?.isReady) {
-        console.log('⚠️ System already initialized, skipping...');
+        console.warn('⚠️ System already initialized, skipping...');
         return;
     }
 
-    console.log('🚀 DOM loaded, starting system initialization...');
     window.masterInitializer = new MasterInitializer();
 
     try {

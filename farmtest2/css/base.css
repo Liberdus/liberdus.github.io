@@ -387,6 +387,11 @@ ol {
     transition: width 0.3s ease, height 0.3s ease;
 }
 
+.btn:focus {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+}
+
 .btn-primary {
     background: var(--primary-main);
     color: #fff;
@@ -666,4 +671,35 @@ ol {
     stroke-linecap: round;
     stroke-linejoin: round;
     fill: none;
+}
+
+/* Shared Modal Styles */
+.modal-close {
+  background: transparent !important;
+  color: var(--text-secondary) !important;
+  border: none !important;
+  cursor: pointer;
+  padding: var(--space-2);
+  font-size: var(--font-size-xl);
+  line-height: 1;
+  border-radius: var(--border-radius);
+  transition: all var(--transition-fast);
+  width: 32px;
+  height: 32px;
+  background-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
+}
+
+.modal-close:hover {
+  background: var(--action-hover) !important;
+  color: var(--text-primary) !important;
+  background-color: var(--background-tertiary);
+  box-shadow: 0 0 20px rgba(231, 76, 60, 0.6);
+  border-color: rgba(231, 76, 60, 0.5);
 }

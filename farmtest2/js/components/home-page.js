@@ -190,8 +190,25 @@ class HomePage {
     attachRetryHandler() {
         const retryBtn = document.getElementById('retry-load');
         if (retryBtn) {
-            retryBtn.onclick = () => {
-                this.loadData().catch(() => {});
+            retryBtn.onclick = () => this.loadData().catch(() => {});
+        }
+        
+        // on click, connect wallet
+        const connectWalletBtn = document.getElementById('connect-wallet-error');
+        if (connectWalletBtn) {
+            connectWalletBtn.onclick = async () => {
+                try {
+                    if (window.walletManager?.connectMetaMask) {
+                        await window.walletManager.connectMetaMask();
+                    } else if (document.getElementById('connect-wallet-btn')?.click) {
+                        document.getElementById('connect-wallet-btn').click();
+                    } else {
+                        window.notificationManager?.error('Wallet connection not available. Please refresh the page.');
+                    }
+                } catch (error) {
+                    console.error('❌ Failed to connect wallet:', error);
+                    window.notificationManager?.error('Failed to connect wallet. Please try again.');
+                }
             };
         }
     }
@@ -251,17 +268,66 @@ class HomePage {
     }
 
     renderError() {
+        const isConnected = this.isWalletConnected();
+        const isRpcError = this.isRpcError(this.error);
+        
+        // Determine message and button based on wallet connection and error type
+        const config = (!isConnected && isRpcError) ? {
+            title: 'Connect Your Wallet',
+            message: 'Please connect your wallet to load staking data.',
+            buttonText: 'Connect Wallet',
+            buttonId: 'connect-wallet-error',
+            buttonIcon: 'account_balance_wallet'
+        } : (isConnected && isRpcError) ? {
+            title: 'Network Taking Too Long',
+            message: 'The network is taking too long to respond. Please try again after a few seconds.',
+            buttonText: 'Retry',
+            buttonId: 'retry-load',
+            buttonIcon: 'refresh'
+        } : {
+            title: 'Failed to load staking data',
+            message: this.error || 'Unable to load staking data right now.',
+            buttonText: 'Retry',
+            buttonId: 'retry-load',
+            buttonIcon: 'refresh'
+        };
+        
         return `
             <div class="error-container" style="text-align: center; padding: 48px; color: var(--error-main);">
                 <span class="material-icons" style="font-size: 48px; margin-bottom: 16px;">error</span>
-                <h3>Failed to load staking data</h3>
-                <p>${this.error}</p>
-                <button class="btn btn-primary" id="retry-load" type="button" style="margin-top: 16px;">
-                    <span class="material-icons">refresh</span>
-                    Retry
+                <h3>${config.title}</h3>
+                <p>${config.message}</p>
+                <button class="btn btn-primary" id="${config.buttonId}" type="button" style="margin-top: 16px;">
+                    <span class="material-icons">${config.buttonIcon}</span>
+                    ${config.buttonText}
                 </button>
             </div>
         `;
+    }
+    
+    /**
+     * Check if error is RPC-related (network timeout, connection issues, etc.)
+     */
+    isRpcError(errorMessage) {
+        if (!errorMessage) return false;
+        
+        const errorLower = errorMessage.toLowerCase();
+        const rpcErrorIndicators = [
+            'network',
+            'rpc',
+            'timeout',
+            'connection',
+            'fetch',
+            'failed to fetch',
+            'network error',
+            'could not detect network',
+            'underlying network changed',
+            'provider',
+            'ethereum',
+            'metamask'
+        ];
+        
+        return rpcErrorIndicators.some(indicator => errorLower.includes(indicator));
     }
 
     renderTable() {
@@ -525,7 +591,9 @@ class HomePage {
 
         } catch (error) {
             console.error('❌ Failed to load staking data:', error);
-            this.error = 'Unable to load staking data right now.';
+            // Preserve error message for better error detection
+            const errorMessage = error?.message || error?.toString() || 'Unable to load staking data right now.';
+            this.error = errorMessage;
             this.loading = false;
             this.render();
             throw error;
@@ -742,7 +810,9 @@ class HomePage {
                 return;
             }
             
-            throw error;
+            // Preserve error message for better error detection
+            const errorMessage = error?.message || error?.toString() || 'Failed to load blockchain data';
+            throw new Error(errorMessage);
         }
     }
 

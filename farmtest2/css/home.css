@@ -147,45 +147,6 @@ body {
     justify-content: center;
 }
 
-.btn-primary {
-    background: var(--primary-main);
-    color: white;
-}
-
-.btn-primary:hover {
-    background: var(--primary-hover);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-4);
-}
-
-.btn-secondary {
-    background: var(--secondary-main);
-    color: white;
-}
-
-.btn-secondary:hover {
-    background: var(--secondary-hover);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-4);
-}
-
-.btn-text {
-    background: transparent;
-    color: var(--primary-main);
-    font-weight: bold;
-}
-
-.btn-text:hover {
-    background: var(--action-hover);
-}
-
-.btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none !important;
-    box-shadow: none !important;
-}
-
 /* Share and Earnings buttons in table */
 .btn-share,
 .btn-earnings {
