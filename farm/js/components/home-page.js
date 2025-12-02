@@ -224,10 +224,6 @@ class HomePage {
                                 Pair
                             </th>
                             <th>
-                                <span class="material-icons">business</span>
-                                Platform
-                            </th>
-                            <th>
                                 <span class="material-icons">trending_up</span>
                                 APR
                             </th>
@@ -253,7 +249,6 @@ class HomePage {
                         ${Array(3).fill(0).map(() => `
                             <tr>
                                 <td><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
-                                <td><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
                                 <td><div class="skeleton" style="height: 20px; width: 60px;"></div></td>
                                 <td><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
                                 <td><div class="skeleton" style="height: 20px; width: 100px;"></div></td>
@@ -337,7 +332,7 @@ class HomePage {
             // Show "no data" row when there are no pairs
             tbodyContent = `
                 <tr>
-                    <td colspan="7" style="text-align: center; padding: 48px 24px; color: var(--text-secondary);">
+                    <td colspan="6" style="text-align: center; padding: 48px 24px; color: var(--text-secondary);">
                         <div style="display: flex; flex-direction: column; align-items: center; gap: 16px;">
                             <span class="material-icons" style="font-size: 48px; color: var(--text-secondary); opacity: 0.5;">inbox</span>
                             <div>
@@ -384,10 +379,6 @@ class HomePage {
                                 Pair
                             </th>
                             <th>
-                                <span class="material-icons">business</span>
-                                Platform
-                            </th>
-                            <th>
                                 <span class="material-icons">trending_up</span>
                                 APR
                             </th>
@@ -423,13 +414,16 @@ class HomePage {
         const userShares = pair.userShares || '0.00';
         const userEarnings = pair.userEarnings || '0.00';
         
+        const pairNameHtml = window.Formatter?.formatPairName(pair.name, pair.address, pair.platform) || pair.name;
+        const platformHtml = pair.platform ? `<div style="font-size: 12px; color: var(--text-secondary);">${pair.platform}</div>` : '';
+        
         return `
             <tr class="pair-row" data-pair-id="${pair.id}" style="cursor: pointer;">
                 <td>
-                    ${window.Formatter?.formatPairName(pair.name, pair.address, pair.platform) || pair.name}
-                </td>
-                <td>
-                    ${pair.platform ? `<span style="font-weight: 600; font-size: smaller;">${pair.platform}</span>` : '<span>-</span>'}
+                    <div style="display: flex; flex-direction: column;">
+                        ${pairNameHtml}
+                        ${platformHtml}
+                    </div>
                 </td>
                 <td>
                     <span style="color: var(--success-main); font-weight: bold;">${pair.apr || '0.00'}%</span>

@@ -109,7 +109,6 @@ table th {
 .table th .material-icons,
 table th .material-icons {
   vertical-align: middle;
-  margin-right: var(--spacing-1);
   color: var(--primary-main);
 }
 
