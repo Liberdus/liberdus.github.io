@@ -13,7 +13,6 @@ window.CONFIG = {
             NAME: 'Amoy',
             RPC_URL: 'https://polygon-amoy.drpc.org',
             FALLBACK_RPCS: [
-                'https://rpc.ankr.com/polygon_amoy',
                 'https://polygon-amoy-bor-rpc.publicnode.com',
                 'https://rpc-amoy.polygon.technology',
                 'https://polygon-amoy.g.alchemy.com/v2/CjcioLVYYWW0tsHWorEfC'
@@ -36,7 +35,6 @@ window.CONFIG = {
             NAME: 'Polygon Mainnet',
             RPC_URL: 'https://polygon-rpc.com',
             FALLBACK_RPCS: [
-                'https://polygon-mainnet.infura.io/',
                 'https://polygon.drpc.org',
                 'https://polygon-bor-rpc.publicnode.com'
             ],
