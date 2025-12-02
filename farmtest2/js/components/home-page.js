@@ -326,10 +326,11 @@ class HomePage {
     }
 
     renderTable() {
+        const displayPairs = this.getDisplayPairs();
         // Generate table rows - either data rows or "no data" row
         let tbodyContent = '';
-        if (this.pairs.length === 0) {
-            // Show "no data" row when there are no pairs
+        if (displayPairs.length === 0) {
+            // Show "no data" row when there are no pairs to display (after filtering)
             tbodyContent = `
                 <tr>
                     <td colspan="6" style="text-align: center; padding: 48px 24px; color: var(--text-secondary);">
@@ -351,7 +352,7 @@ class HomePage {
             `;
         } else {
             // Show data rows
-            tbodyContent = [...this.pairs].sort((a, b) => {
+            tbodyContent = [...displayPairs].sort((a, b) => {
                 const parseValue = (value) => {
                     const num = parseFloat(value ?? '0');
                     return Number.isFinite(num) ? num : 0;
@@ -406,6 +407,23 @@ class HomePage {
                 </table>
             </div>
         `;
+    }
+
+    getDisplayPairs() {
+        // Filter zero-weight pairs unless the user has an active position
+        return this.pairs.filter(pair => this.shouldDisplayPair(pair));
+    }
+
+    shouldDisplayPair(pair) {
+        if (pair.hasNonZeroWeight) {
+            return true;
+        }
+
+        if (!this.isWalletConnected()) {
+            return false;
+        }
+
+        return Boolean(pair.hasUserPosition);
     }
 
     renderPairRow(pair) {
@@ -680,8 +698,10 @@ class HomePage {
                 const basicPairs = allPairsInfo
                     .filter(pairInfo => pairInfo.address && pairInfo.address !== '0x0000000000000000000000000000000000000000')
                     .map((pairInfo, i) => {
+                        const rawWeight = parseFloat(pairInfo.weight || '0');
+                        const hasNonZeroWeight = rawWeight > 0;
                         const weightPercentage = this.totalWeight > 0 ?
-                            ((parseFloat(pairInfo.weight || '0') * 100) / parseFloat(this.totalWeight)).toFixed(2) :
+                            ((rawWeight * 100) / parseFloat(this.totalWeight)).toFixed(2) :
                             '0.00';
 
                         // Use address as fallback for name if missing, but don't create fake names
@@ -700,7 +720,9 @@ class HomePage {
                             rewardRate: pairInfo.rewardRate || '0',
                             stakingEnabled: pairInfo.isActive !== false,
                             weight: pairInfo.weight || '0',
-                            weightPercentage: weightPercentage
+                            weightPercentage: weightPercentage,
+                            hasNonZeroWeight,
+                            hasUserPosition: false
                         };
                     });
 
@@ -779,6 +801,11 @@ class HomePage {
                             // Format user earnings
                             const earnings = parseFloat(userStake.rewards || '0');
                             this.pairs[pairIndex].userEarnings = earnings.toFixed(4);  // React uses .toFixed(4)
+
+                            const hasUserPosition =
+                                userStakeAmount > 0 ||
+                                earnings > 0;
+                            this.pairs[pairIndex].hasUserPosition = hasUserPosition;
 
                             console.log(`📊 Pair ${pairIndex}: SharePercentage=${this.pairs[pairIndex].userShares}%, Earnings=${this.pairs[pairIndex].userEarnings} LIB`);
                         }
