@@ -376,11 +376,11 @@ class AdminPage {
         // Load contract statistics
         await this.loadContractStats();
 
-        // Load main components
-        await this.loadMultiSignPanel();
-
         // Load info card (initializes layout and pulls live contract data)
         await this.loadInfoCard();
+
+        // Load main components after contract info so pair metadata is ready
+        await this.loadMultiSignPanel();
 
         // Setup network selector
         this.setupNetworkSelector();
@@ -4416,6 +4416,7 @@ class AdminPage {
                 },
                 []
             );
+            this.contractStats.pairs = contractInfo.pairs;
 
             // Get signers - real data only
             contractInfo.signers = await this.safeContractCall(
@@ -4540,9 +4541,21 @@ class AdminPage {
             clearTimeout(this.refreshTimeout);
         }
 
-        this.refreshTimeout = setTimeout(() => {
-            this.loadMultiSignPanel();
-            this.loadContractInformation();
+        this.refreshTimeout = setTimeout(async () => {
+            console.log('🔄 Refreshing admin data...');
+
+            try {
+                await this.loadContractInformation();
+            } catch (error) {
+                console.warn('⚠️ Failed to refresh contract info before reloading proposals:', error.message);
+            }
+
+            try {
+                await this.loadMultiSignPanel();
+            } catch (error) {
+                console.error('❌ Failed to refresh proposal list:', error);
+            }
+
             this.refreshTimeout = null;
         }, 1000);
     }
