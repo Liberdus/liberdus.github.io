@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'f'
+const version = 'g'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1273,6 +1273,7 @@ const contactsScreen = new ContactsScreen();
 class WalletScreen {
   constructor() {
     this.firstTimeLoad = true;
+    this.isFaucetRequestInProgress = false;
   }
 
   load() {
@@ -1287,6 +1288,9 @@ class WalletScreen {
     this.openSendAssetFormModalButton = document.getElementById('openSendAssetFormModal');
     this.openReceiveModalButton = document.getElementById('openReceiveModal');
     this.openHistoryModalButton = document.getElementById('openHistoryModal');
+    this.openBuyButton = document.getElementById('openBuyButton');
+    this.openSellButton = document.getElementById('openSellButton');
+    this.openFaucetBridgeButton = document.getElementById('openFaucetBridgeButton');
 
     this.openSendAssetFormModalButton.addEventListener('click', () => {
       sendAssetFormModal.open();
@@ -1296,6 +1300,39 @@ class WalletScreen {
     });
     this.openHistoryModalButton.addEventListener('click', () => {
       historyModal.open();
+    });
+
+    // dynamic Faucet/Bridge button label and icon based on mainnet status
+    const faucetBridgeLabel = this.openFaucetBridgeButton.querySelector('.action-label');
+    const isMainnet = this.isMainnet();
+
+    if (faucetBridgeLabel) {
+      faucetBridgeLabel.textContent = isMainnet ? 'Bridge' : 'Faucet';
+    }
+    // Update icon: add/remove bridge-mode class
+    if (isMainnet) {
+      this.openFaucetBridgeButton.classList.add('bridge-mode');
+    } else {
+      this.openFaucetBridgeButton.classList.remove('bridge-mode');
+    }
+
+    this.openBuyButton.addEventListener('click', () => {
+      window.open('https://liberdus.com/buy', '_blank');
+    });
+
+    this.openSellButton.addEventListener('click', () => {
+      window.open('https://liberdus.com/sell', '_blank');
+    });
+
+    // Faucet/Bridge button handler
+    this.openFaucetBridgeButton.addEventListener('click', async () => {
+      if (this.isMainnet()) {
+        // Mainnet: open bridge modal
+        bridgeModal.open();
+      } else {
+        // Not mainnet: request from faucet API
+        await this.requestFromFaucet();
+      }
     });
 
     // Add refresh balance button handler
@@ -1325,6 +1362,11 @@ class WalletScreen {
 
   isActive() {
     return this.screen.classList.contains('active');
+  }
+
+  // Check if the current network is mainnet
+  isMainnet() {
+    return network?.name === 'Mainnet';
   }
 
   // Update wallet view; refresh wallet
@@ -1435,6 +1477,67 @@ class WalletScreen {
     // Update total wallet balance
     myData.wallet.networth = totalWalletNetworth;
     myData.wallet.timestamp = now;
+  }
+
+  /**
+   * Request funds from the faucet for normal users
+   * @returns {Promise<void>}
+   */
+  async requestFromFaucet() {
+    if (this.isFaucetRequestInProgress) {
+      return;
+    }
+
+    if (!myAccount?.keys?.address) {
+      console.error('Account address not available');
+      showToast('Account address not available', 0, 'error');
+      return;
+    }
+
+    if (!isOnline) {
+      showToast('You must be online to request from faucet', 0, 'error');
+      return;
+    }
+
+    const toastId = showToast('Requesting from faucet...', 0, 'loading');
+    try {
+      this.isFaucetRequestInProgress = true;
+      this.openFaucetBridgeButton.disabled = true;
+      
+      const payload = {
+        username: myAccount.username,
+        userAddress: longAddress(myAccount.keys.address),
+        networkId: network.netid,
+      };
+      await signObj(payload, myAccount.keys);
+      
+      const faucetUrl = network.faucetUrl || 'https://dev.liberdus.com:3355/faucet';
+      
+      const response = await fetch(faucetUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        showToast('Faucet request successful! The LIB will be sent to your wallet.', 5000, 'success');
+      } else {
+        const errorMessage = result.message || result.error || `HTTP ${response.status}: ${response.statusText}`;
+        showToast(`Faucet error: ${errorMessage}`, 0, 'error');
+      }
+      
+    } catch (error) {
+      console.error('Faucet request error:', error);
+      showToast(`Faucet request failed: ${error.message || 'Unknown error'}`, 0, 'error');
+    } finally {
+      hideToast(toastId);
+      this.isFaucetRequestInProgress = false;
+      this.openFaucetBridgeButton.disabled = false;
+    }
   }
 }
 
@@ -4285,7 +4388,7 @@ async function postAssetTransfer(to, amount, memo, keys) {
 }
 
 // TODO - backend - when account is being registered, ensure that loserCase(alias)=alias and hash(alias)==aliasHash
-async function postRegisterAlias(alias, keys) {
+async function postRegisterAlias(alias, keys, isPrivate = false) {
   const aliasBytes = utf82bin(alias);
   const aliasHash = hashBytes(aliasBytes);
   const { publicKey } = generatePQKeys(keys.pqSeed);
@@ -4299,6 +4402,7 @@ async function postRegisterAlias(alias, keys) {
     pqPublicKey: pqPublicKey,
     timestamp: getCorrectedTimestamp(),
     networkId: network.netid,
+    private: isPrivate,
   };
   const txid = await signObj(tx, keys);
   const res = await injectTx(tx, txid);
@@ -8281,9 +8385,10 @@ class StakeValidatorModal {
       this.faucetButton.disabled = true;
       
       const payload = {
-        nodeAddress: this.nodeAddressInput.value.trim(),
-        userAddress: longAddress(myAccount.keys.address),
         username: myAccount.username,
+        userAddress: longAddress(myAccount.keys.address),
+        networkId: network.netid,
+        nodeAddress: this.nodeAddressInput.value.trim(),
       };
       await signObj(payload, myAccount.keys);
       
@@ -13028,6 +13133,9 @@ class CreateAccountModal {
     this.migrateAccountsButton = document.getElementById('migrateAccountsButton');
     this.toggleMoreOptions = document.getElementById('toggleMoreOptions');
     this.moreOptionsSection = document.getElementById('moreOptionsSection');
+    this.privateAccountCheckbox = document.getElementById('togglePrivateAccount');
+    this.privateAccountHelpButton = document.getElementById('privateAccountHelpButton');
+    this.privateAccountTemplate = document.getElementById('privateAccountHelpMessageTemplate');
 
     // Setup event listeners
     this.form.addEventListener('submit', (e) => this.handleSubmit(e));
@@ -13043,6 +13151,14 @@ class CreateAccountModal {
       this.privateKeyInput.setAttribute('type', type);
       // Toggle the visual state class on the button
       this.togglePrivateKeyVisibility.classList.toggle('toggled-visible');
+    });
+
+    // Add listener for the private account help button
+    this.privateAccountHelpButton.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const message = this.getPrivateAccountHelpMessage();
+      showToast(message, 0, 'info', true);
     });
 
     this.migrateAccountsButton.addEventListener('click', async () => await migrateAccountsModal.open());
@@ -13085,9 +13201,19 @@ class CreateAccountModal {
     this.moreOptionsSection.style.display = 'none';
     this.toggleButton.checked = false;
     this.privateKeySection.style.display = 'none';
+    this.privateAccountCheckbox.checked = false;
     
     // Open the modal
     this.open();
+  }
+
+  /**
+   * Get the private account help message HTML
+   * @returns {string}
+   */
+  getPrivateAccountHelpMessage() {
+    return this.privateAccountTemplate?.innerHTML || 
+      '<strong>What is a Private Account?</strong><br>Private accounts can only interact with other private accounts.';
   }
 
   /**
@@ -13210,6 +13336,7 @@ class CreateAccountModal {
     this.usernameInput.disabled = true;
     this.privateKeyInput.disabled = true;
     this.backButton.disabled = true;
+    this.privateAccountCheckbox.disabled = true;
 
     event.preventDefault();
     
@@ -13303,19 +13430,8 @@ class CreateAccountModal {
       }
     }
 
-    // Create new account entry
-    myAccount = {
-      netid,
-      username,
-      chatTimestamp: 0,
-      keys: {
-        address: addressHex,
-        public: publicKeyHex,
-        secret: privateKeyHex,
-        type: 'secp256k1',
-        pqSeed: pqSeed, // store only the 64 byte seed instead of 32,000 byte public and secret keys
-      },
-    };
+    // Get or create account entry
+    const isPrivateAccount = this.privateAccountCheckbox.checked;
     let waitingToastId = showToast('Creating account...', 0, 'loading');
     let res;
 
@@ -13323,13 +13439,27 @@ class CreateAccountModal {
       await getNetworkParams();
       const storedKey = `${username}_${netid}`;
       myData = loadState(storedKey)
-      if (myData) {
+      if (myData && myData.account) {
         myAccount = myData.account;
       } else {
+        // Create new account entry
+        myAccount = {
+          netid,
+          username,
+          chatTimestamp: 0,
+          private: isPrivateAccount,
+          keys: {
+            address: addressHex,
+            public: publicKeyHex,
+            secret: privateKeyHex,
+            type: 'secp256k1',
+            pqSeed: pqSeed, // store only the 64 byte seed instead of 32,000 byte public and secret keys
+          },
+        };
         // create new data record if it doesn't exist
         myData = newDataRecord(myAccount);
       }
-      res = await postRegisterAlias(username, myAccount.keys);
+      res = await postRegisterAlias(username, myAccount.keys, myAccount.private || false);
     } catch (error) {
       this.reEnableControls();
       if (waitingToastId) hideToast(waitingToastId);
@@ -13416,6 +13546,7 @@ class CreateAccountModal {
     this.privateKeyInput.disabled = false;
     this.backButton.disabled = false;
     this.migrateAccountsButton.disabled = false;
+    this.privateAccountCheckbox.disabled = false;
   }
 }
 // Initialize the create account modal
@@ -15322,7 +15453,8 @@ class MigrateAccountsModal {
       } else if (section === 'available') {
         myData = loadState(username+'_'+netid)
         if (myData){ 
-          const res = await postRegisterAlias(username, myData.account.keys)
+          const isPrivate = myData.account?.private || false;
+          const res = await postRegisterAlias(username, myData.account.keys, isPrivate)
           if (res !== null){
             res.submittedts = getCorrectedTimestamp()
             res.netid = netid
