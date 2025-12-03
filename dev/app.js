@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -4104,8 +4104,14 @@ async function processChats(chats, keys) {
 
         //   Process transfer messages; this is a payment with an optional memo 
         else if (tx.type == 'transfer') {
-          const payload = tx.xmemo;
-          if (useTxTimestamp){ 
+          // Handle transfers without xmemo (e.g., faucet transfers)
+          // Ensure payload is always an object, even if xmemo is null/undefined
+          let payload = tx.xmemo;
+          if (!payload || typeof payload !== 'object') {
+            payload = {};
+          }
+          // Set sent_timestamp - use tx.timestamp if useTxTimestamp is true, otherwise use payload.sent_timestamp or tx.timestamp
+          if (useTxTimestamp || !payload.sent_timestamp) {
             payload.sent_timestamp = tx.timestamp;
           }
           if (mine) {
