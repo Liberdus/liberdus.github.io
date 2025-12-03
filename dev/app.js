@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'g'
+const version = 'h'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1499,6 +1499,17 @@ class WalletScreen {
       return;
     }
 
+    // Check LIB balance - faucet only works if balance is less than 100 LIB
+    const libAsset = myData.wallet.assets.find((asset) => asset.symbol === 'LIB');
+    if (libAsset) {
+      const balanceInWei = BigInt(libAsset.balance);
+      const minBalanceForFaucet = 100n * wei; // 100 LIB in wei
+      if (balanceInWei >= minBalanceForFaucet) {
+        showToast('Balance exceeds 100 LIB, so you cannot claim more tokens from the faucet.', 0, 'warning');
+        return;
+      }
+    }
+
     const toastId = showToast('Requesting from faucet...', 0, 'loading');
     try {
       this.isFaucetRequestInProgress = true;
@@ -1524,7 +1535,7 @@ class WalletScreen {
       const result = await response.json();
       
       if (response.ok) {
-        showToast('Faucet request successful! The LIB will be sent to your wallet.', 5000, 'success');
+        showToast('Faucet request successful! The LIB will be sent to your wallet. Refresh your balance in 10 seconds.', 5000, 'success');
       } else {
         const errorMessage = result.message || result.error || `HTTP ${response.status}: ${response.statusText}`;
         showToast(`Faucet error: ${errorMessage}`, 0, 'error');
