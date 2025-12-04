@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'm'
+const version = 'n'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -10081,6 +10081,8 @@ console.warn('in send message', txid)
         console.warn('Failed to generate thumbnail for attached image:', error);
       }
     }
+
+    const capturedThumbnailBlob = thumbnailBlob;
     
     try {
       this.isEncrypting = true;
@@ -10134,9 +10136,9 @@ console.warn('in send message', txid)
               selfKey
             });
             
-            // Cache thumbnail if we generated one
-            if (thumbnailBlob && isImage) {
-              thumbnailCache.save(attachmentUrl, thumbnailBlob, file.type).catch(err => {
+            // Cache thumbnail if we generated one - use captured variable
+            if (capturedThumbnailBlob && isImage) {
+              thumbnailCache.save(attachmentUrl, capturedThumbnailBlob, file.type).catch(err => {
                 console.warn('Failed to cache thumbnail for attached image:', err);
               });
             }
@@ -10194,7 +10196,6 @@ console.warn('in send message', txid)
     } finally {
       hideToast(loadingToastId);
       event.target.value = ''; // Reset the file input value
-      thumbnailBlob = null;
     }
   }
 
