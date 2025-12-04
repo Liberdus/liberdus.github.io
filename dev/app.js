@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'n'
+const version = 'o'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -5953,18 +5953,22 @@ class RemoveAccountsModal {
 const removeAccountsModal = new RemoveAccountsModal();
 
 class BackupAccountModal {
-  constructor() {}
+  constructor() {
+    this.GOOGLE_TOKEN_STORAGE_KEY = 'google_drive_token';
+  }
 
   load() {
     // called when the DOM is loaded; can setup event handlers here
     this.modal = document.getElementById('backupModal');
     this.passwordInput = document.getElementById('backupPassword');
     this.passwordWarning = document.getElementById('backupPasswordWarning');
+    this.passwordRequired = document.getElementById('backupPasswordRequired');
     this.passwordConfirmInput = document.getElementById('backupPasswordConfirm');
     this.passwordConfirmWarning = document.getElementById('backupPasswordConfirmWarning');
     this.submitButton = document.getElementById('backupForm').querySelector('button[type="submit"]');
     this.backupAllAccountsCheckbox = document.getElementById('backupAllAccounts');
     this.backupAllAccountsGroup = document.getElementById('backupAllAccountsGroup');
+    this.storageLocationSelect = document.getElementById('backupStorageLocation');
     
     document.getElementById('closeBackupForm').addEventListener('click', () => this.close());
     document.getElementById('backupForm').addEventListener('submit', (event) => {
@@ -5973,6 +5977,10 @@ class BackupAccountModal {
 
     this.passwordInput.addEventListener('input', () => this.updateButtonState());
     this.passwordConfirmInput.addEventListener('input', () => this.updateButtonState());
+    this.storageLocationSelect.addEventListener('change', () => this.handleStorageLocationChange());
+
+    // Handle legacy OAuth callback (in case someone lands on page with OAuth hash)
+    this.handleGoogleOAuthCallback();
   }
 
   open() {
@@ -6001,6 +6009,314 @@ class BackupAccountModal {
     this.passwordConfirmInput.value = '';
     // Reset checkbox
     this.backupAllAccountsCheckbox.checked = false;
+    // Reset storage location to default
+    this.storageLocationSelect.value = 'local';
+    this.handleStorageLocationChange();
+  }
+
+  // ======================================
+  // GOOGLE DRIVE TOKEN MANAGEMENT
+  // ======================================
+  storeGoogleToken(tokenData) {
+    localStorage.setItem(this.GOOGLE_TOKEN_STORAGE_KEY, JSON.stringify(tokenData));
+  }
+
+  getStoredGoogleToken() {
+    const raw = localStorage.getItem(this.GOOGLE_TOKEN_STORAGE_KEY);
+    if (!raw) return null;
+    try {
+      const tokenData = JSON.parse(raw);
+      if (!tokenData.accessToken || !tokenData.expiresAt) return null;
+      if (Date.now() >= tokenData.expiresAt) {
+        console.log('Google Drive token expired, clearing.');
+        localStorage.removeItem(this.GOOGLE_TOKEN_STORAGE_KEY);
+        return null;
+      }
+      return tokenData;
+    } catch (e) {
+      console.error('Failed to parse stored Google token, clearing.', e);
+      localStorage.removeItem(this.GOOGLE_TOKEN_STORAGE_KEY);
+      return null;
+    }
+  }
+
+  clearGoogleToken() {
+    localStorage.removeItem(this.GOOGLE_TOKEN_STORAGE_KEY);
+  }
+
+  // ======================================
+  // GOOGLE OAUTH FLOW (Popup-based)
+  // ======================================
+  buildGoogleAuthUrl() {
+    const config = network.googleDrive;
+    const state = crypto.randomUUID();
+    const params = new URLSearchParams({
+      client_id: config.clientId,
+      redirect_uri: config.redirectUri,
+      response_type: 'token', // implicit flow
+      scope: config.scope,
+      include_granted_scopes: 'true',
+      state
+    });
+    return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  }
+
+  /**
+   * Start Google Drive authentication in a popup window.
+   * Returns a promise that resolves with the token data or rejects on error/cancel.
+   */
+  startGoogleDriveAuth() {
+    return new Promise((resolve, reject) => {
+      const url = this.buildGoogleAuthUrl();
+      console.log('Opening Google OAuth popup...');
+      
+      // Calculate popup position (centered)
+      const width = 500;
+      const height = 600;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      
+      // Open popup
+      const popup = window.open(
+        url,
+        'google_oauth_popup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+      );
+      
+      if (!popup) {
+        reject(new Error('Popup blocked. Please allow popups for this site.'));
+        return;
+      }
+
+      // Poll the popup for the OAuth response
+      const pollInterval = setInterval(() => {
+        try {
+          // Check if popup is closed
+          if (popup.closed) {
+            clearInterval(pollInterval);
+            reject(new Error('Authentication cancelled.'));
+            return;
+          }
+          
+          // Try to read the popup's URL (will throw if cross-origin)
+          const popupUrl = popup.location.href;
+          
+          // Check if we're back on our origin with a hash containing the token
+          if (popupUrl.startsWith(network.googleDrive.redirectUri)) {
+            const hash = popup.location.hash;
+            
+            // If hash is empty, the page might still be loading - keep polling
+            if (!hash || hash.length <= 1) {
+              // Check if token was stored by the popup's own callback handler
+              const storedToken = this.getStoredGoogleToken();
+              if (storedToken) {
+                clearInterval(pollInterval);
+                popup.close();
+                console.log('Token found in storage (stored by popup callback).');
+                resolve(storedToken);
+                return;
+              }
+              // Otherwise keep polling - page might still be loading
+              return;
+            }
+            
+            clearInterval(pollInterval);
+            popup.close();
+            
+            const hashParams = new URLSearchParams(hash.substring(1));
+            const accessToken = hashParams.get('access_token');
+            const tokenType = hashParams.get('token_type');
+            const expiresIn = hashParams.get('expires_in');
+            const error = hashParams.get('error');
+            
+            if (error) {
+              reject(new Error('Google authentication failed: ' + error));
+              return;
+            }
+            
+            if (!accessToken) {
+              // One more check - token might have been stored by popup
+              const storedToken = this.getStoredGoogleToken();
+              if (storedToken) {
+                console.log('Token found in storage after redirect.');
+                resolve(storedToken);
+                return;
+              }
+              reject(new Error('No access token received.'));
+              return;
+            }
+            
+            const now = Date.now();
+            const expiresAt = now + parseInt(expiresIn || '3600', 10) * 1000;
+            
+            const tokenData = {
+              accessToken,
+              tokenType: tokenType || 'Bearer',
+              expiresAt
+            };
+            
+            this.storeGoogleToken(tokenData);
+            console.log('Received access token from Google.');
+            resolve(tokenData);
+          }
+        } catch (e) {
+          // Cross-origin error - popup is still on Google's domain, keep polling
+        }
+      }, 200);
+      
+      // Timeout after 5 minutes
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        if (!popup.closed) {
+          popup.close();
+        }
+        reject(new Error('Authentication timed out.'));
+      }, 5 * 60 * 1000);
+    });
+  }
+
+  handleGoogleOAuthCallback() {
+    // This is now handled by the popup polling, but we keep this for backwards compatibility
+    // in case someone lands on the page with an OAuth hash (e.g., from a previous redirect flow)
+    if (!window.location.hash || window.location.hash.length <= 1) return;
+
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const accessToken = hashParams.get('access_token');
+    
+    // Only process if this looks like an OAuth callback
+    if (!accessToken) return;
+    
+    const tokenType = hashParams.get('token_type');
+    const expiresIn = hashParams.get('expires_in');
+    const error = hashParams.get('error');
+
+    if (error) {
+      console.error('OAuth error from Google:', error);
+      showToast('Google Drive authentication failed: ' + error, 5000, 'error');
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+      return;
+    }
+
+    const now = Date.now();
+    const expiresAt = now + parseInt(expiresIn || '3600', 10) * 1000;
+
+    const tokenData = {
+      accessToken,
+      tokenType: tokenType || 'Bearer',
+      expiresAt
+    };
+    this.storeGoogleToken(tokenData);
+    console.log('Received access token from Google (legacy redirect).');
+
+    // Clean the URL
+    window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+  }
+
+  // ======================================
+  // GOOGLE DRIVE FOLDER HELPERS
+  // ======================================
+  async ensureBackupFolder(tokenData) {
+    const folderName = network.googleDrive.backupFolder;
+    console.log(`Checking for existing '${folderName}' folder...`);
+
+    const queryParams = new URLSearchParams({
+      q: `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'root' in parents`,
+      fields: 'files(id, name)'
+    });
+
+    const listRes = await fetch(
+      'https://www.googleapis.com/drive/v3/files?' + queryParams.toString(),
+      {
+        headers: {
+          Authorization: `${tokenData.tokenType} ${tokenData.accessToken}`
+        }
+      }
+    );
+
+    if (!listRes.ok) {
+      const text = await listRes.text();
+      throw new Error(`Drive folder search failed: ${listRes.status} ${text}`);
+    }
+
+    const listData = await listRes.json();
+    if (listData.files && listData.files.length > 0) {
+      console.log(`Found existing ${folderName} folder.`, listData.files[0]);
+      return listData.files[0].id;
+    }
+
+    console.log(`No existing ${folderName} folder, creating one...`);
+
+    const folderMetadata = {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: ['root']
+    };
+
+    const createRes = await fetch(
+      'https://www.googleapis.com/drive/v3/files',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `${tokenData.tokenType} ${tokenData.accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(folderMetadata)
+      }
+    );
+
+    if (!createRes.ok) {
+      const text = await createRes.text();
+      throw new Error(`Drive folder create failed: ${createRes.status} ${text}`);
+    }
+
+    const folderData = await createRes.json();
+    console.log(`Created ${folderName} folder.`, folderData);
+    return folderData.id;
+  }
+
+  // ======================================
+  // GOOGLE DRIVE UPLOAD
+  // ======================================
+  async uploadToGoogleDrive(data, filename, tokenData) {
+    console.log('Preparing upload to Google Drive...', { filename, sizeBytes: data.length });
+
+    // Ensure backup folder exists and get its ID
+    const folderId = await this.ensureBackupFolder(tokenData);
+    console.log('Using backup folder', { folderId });
+
+    // Set metadata to put file in that folder
+    const metadata = {
+      name: filename,
+      parents: [folderId]
+    };
+
+    const blob = new Blob([data], { type: 'application/json' });
+    const form = new FormData();
+    form.append(
+      'metadata',
+      new Blob([JSON.stringify(metadata)], { type: 'application/json' })
+    );
+    form.append('file', blob, filename);
+
+    const res = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `${tokenData.tokenType} ${tokenData.accessToken}`
+        },
+        body: form
+      }
+    );
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Drive upload failed: ${res.status} ${text}`);
+    }
+
+    const result = await res.json();
+    console.log('Upload success.', result);
+    return result;
   }
 
   /**
@@ -6040,20 +6356,23 @@ class BackupAccountModal {
       return;
     }
 
+    const isGoogleDrive = this.storageLocationSelect.value === 'google-drive';
+
     // Determine which backup method to use
     if (myData && !this.backupAllAccountsCheckbox.checked) {
       // User is signed in and wants to backup only current account
-      await this.handleSubmitOne();
+      await this.handleSubmitOne(isGoogleDrive);
     } else {
       // User wants to backup all accounts (either not signed in or checkbox checked)
-      await this.handleSubmitAll();
+      await this.handleSubmitAll(isGoogleDrive);
     }
   }
 
   /**
    * Handle the submission of a single account backup.
+   * @param {boolean} toGoogleDrive - Whether to upload to Google Drive
    */
-  async handleSubmitOne() {
+  async handleSubmitOne(toGoogleDrive = false) {
     // Disable button to prevent multiple submissions
     this.submitButton.disabled = true;
 
@@ -6082,40 +6401,44 @@ class BackupAccountModal {
     try {
       // Encrypt data if password is provided
       const finalData = password ? encryptData(jsonData, password) : jsonData;
-
-      // Create and trigger download
-      const blob = new Blob([finalData], { type: 'application/json' });
       const filename = this.generateBackupFilename(myAccount.username);
-      // Detect if running inside React Native WebView
-      if (window.ReactNativeWebView?.postMessage) {
-        // ✅ React Native WebView: Send base64 via postMessage
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64DataUrl = reader.result;
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'EXPORT_BACKUP',
-            filename,
-            dataUrl: base64DataUrl,
-          }));
-        };
-        reader.readAsDataURL(blob);
-      } else {
-        // Regular browser download
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
 
-      // Close backup modal
-      this.close();
+      if (toGoogleDrive) {
+        // Google Drive upload flow
+        await this.handleGoogleDriveUpload(finalData, filename);
+      } else {
+        // Local download flow
+        const blob = new Blob([finalData], { type: 'application/json' });
+        // Detect if running inside React Native WebView
+        if (window.ReactNativeWebView?.postMessage) {
+          // ✅ React Native WebView: Send base64 via postMessage
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64DataUrl = reader.result;
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'EXPORT_BACKUP',
+              filename,
+              dataUrl: base64DataUrl,
+            }));
+          };
+          reader.readAsDataURL(blob);
+        } else {
+          // Regular browser download
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+        // Close backup modal
+        this.close();
+      }
     } catch (error) {
-      console.error('Encryption failed:', error);
-      showToast('Failed to encrypt data. Please try again.', 0, 'error');
+      console.error('Backup failed:', error);
+      showToast('Failed to create backup. Please try again.', 0, 'error');
       // Re-enable button so user can try again
       this.updateButtonState();
     }
@@ -6123,8 +6446,9 @@ class BackupAccountModal {
 
   /**
    * Handle the submission of a backup for all accounts.
+   * @param {boolean} toGoogleDrive - Whether to upload to Google Drive
    */
-  async handleSubmitAll() {
+  async handleSubmitAll(toGoogleDrive = false) {
 
     // Disable button to prevent multiple submissions
     this.submitButton.disabled = true;
@@ -6137,42 +6461,98 @@ class BackupAccountModal {
     try {
       // Encrypt data if password is provided
       const finalData = password ? encryptData(jsonData, password) : jsonData;
-
-      // Create and trigger download
-      const blob = new Blob([finalData], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
       const filename = this.generateBackupFilename();
-      // Detect if running inside React Native WebView
-      if (window.ReactNativeWebView?.postMessage) {
-        // ✅ React Native WebView: Send base64 via postMessage
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64DataUrl = reader.result;
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'EXPORT_BACKUP',
-            filename,
-            dataUrl: base64DataUrl,
-          }));
-        };
-        reader.readAsDataURL(blob);
-      } else {
-        // Regular browser download
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
 
-      // Close backup modal
-      this.close();
+      if (toGoogleDrive) {
+        // Google Drive upload flow
+        await this.handleGoogleDriveUpload(finalData, filename);
+      } else {
+        // Local download flow
+        const blob = new Blob([finalData], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        // Detect if running inside React Native WebView
+        if (window.ReactNativeWebView?.postMessage) {
+          // ✅ React Native WebView: Send base64 via postMessage
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64DataUrl = reader.result;
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'EXPORT_BACKUP',
+              filename,
+              dataUrl: base64DataUrl,
+            }));
+          };
+          reader.readAsDataURL(blob);
+        } else {
+          // Regular browser download
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+        // Close backup modal
+        this.close();
+      }
     } catch (error) {
-      console.error('Encryption failed:', error);
-      showToast('Failed to encrypt data. Please try again.', 0, 'error');
+      console.error('Backup failed:', error);
+      showToast('Failed to create backup. Please try again.', 0, 'error');
       // Re-enable button so user can try again
       this.updateButtonState();
+    }
+  }
+
+  /**
+   * Handle Google Drive upload - checks for token or initiates OAuth flow
+   * @param {string} data - The backup data to upload
+   * @param {string} filename - The filename for the backup
+   */
+  async handleGoogleDriveUpload(data, filename) {
+    let tokenData = this.getStoredGoogleToken();
+
+    // If no valid token, authenticate first via popup
+    if (!tokenData) {
+      try {
+        showToast('Please authenticate with Google Drive...', 3000, 'info');
+        tokenData = await this.startGoogleDriveAuth();
+      } catch (error) {
+        console.error('Google Drive authentication failed:', error);
+        showToast(error.message || 'Authentication failed.', 5000, 'error');
+        this.updateButtonState();
+        return;
+      }
+    }
+
+    // Now upload with the token
+    try {
+      showToast('Uploading backup to Google Drive...', 3000, 'info');
+      await this.uploadToGoogleDrive(data, filename, tokenData);
+      showToast('Backup uploaded to Google Drive successfully!', 3000, 'success');
+      this.close();
+    } catch (error) {
+      console.error('Google Drive upload failed:', error);
+      // Token might be invalid, clear it and retry auth
+      if (error.message.includes('401') || error.message.includes('403')) {
+        this.clearGoogleToken();
+        showToast('Google Drive session expired. Please authenticate again.', 3000, 'warning');
+        // Retry with fresh authentication
+        try {
+          tokenData = await this.startGoogleDriveAuth();
+          showToast('Uploading backup to Google Drive...', 3000, 'info');
+          await this.uploadToGoogleDrive(data, filename, tokenData);
+          showToast('Backup uploaded to Google Drive successfully!', 3000, 'success');
+          this.close();
+        } catch (retryError) {
+          console.error('Retry failed:', retryError);
+          showToast(retryError.message || 'Upload failed.', 5000, 'error');
+          this.updateButtonState();
+        }
+      } else {
+        showToast('Failed to upload to Google Drive: ' + error.message, 5000, 'error');
+        this.updateButtonState();
+      }
     }
   }
 
@@ -6188,16 +6568,24 @@ class BackupAccountModal {
   updateButtonState() {
     const password = this.passwordInput.value;
     const confirmPassword = this.passwordConfirmInput.value;
+    const isGoogleDrive = this.storageLocationSelect.value === 'google-drive';
     
-    // Password is optional, but if provided, it must be at least 4 characters
+    // Password is required for Google Drive, optional for local
     let isValid = true;
     
-    // Validate password length
-    if (password.length > 0 && password.length < 4) {
+    // Check if password is required (Google Drive)
+    if (isGoogleDrive && password.length === 0) {
+      isValid = false;
+      this.passwordRequired.style.display = 'inline';
+      this.passwordWarning.style.display = 'none';
+    } else if (password.length > 0 && password.length < 4) {
+      // Validate password length
       isValid = false;
       this.passwordWarning.style.display = 'inline';
+      this.passwordRequired.style.display = 'none';
     } else {
       this.passwordWarning.style.display = 'none';
+      this.passwordRequired.style.display = 'none';
     }
     
     // Validate password confirmation
@@ -6217,6 +6605,20 @@ class BackupAccountModal {
     
     // Update button state
     this.submitButton.disabled = !isValid;
+  }
+
+  handleStorageLocationChange() {
+    const isGoogleDrive = this.storageLocationSelect.value === 'google-drive';
+    
+    // Update placeholder text based on storage location
+    if (isGoogleDrive) {
+      this.passwordInput.placeholder = 'Password required for Google Drive';
+    } else {
+      this.passwordInput.placeholder = 'Leave empty for unencrypted backup';
+    }
+    
+    // Re-validate form
+    this.updateButtonState();
   }
 }
 const backupAccountModal = new BackupAccountModal();
