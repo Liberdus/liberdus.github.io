@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -440,6 +440,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // LocalStorage Monitor
   localStorageMonitor.load();
+
+  // Thumbnail Cache
+  thumbnailCache.load();
 
   // Voice Recording Modal
   voiceRecordingModal.load();
@@ -9007,6 +9010,15 @@ class ChatModal {
     // Stop all playing voice messages
     this.messagesList?.querySelectorAll('.voice-message').forEach(vm => this.stopVoiceMessage(vm));
 
+    // Clean up thumbnail blob URLs
+    this.messagesList?.querySelectorAll('[data-thumbnail-url]').forEach(row => {
+      const thumbnailUrl = row.dataset.thumbnailUrl;
+      if (thumbnailUrl) {
+        URL.revokeObjectURL(thumbnailUrl);
+        delete row.dataset.thumbnailUrl;
+      }
+    });
+
     // clear file attachments
     this.fileAttachments = [];
     this.showAttachmentPreview(); // clear listeners
@@ -9734,23 +9746,28 @@ console.warn('in send message', txid)
           let attachmentsHTML = '';
           if (item.xattach && Array.isArray(item.xattach) && item.xattach.length > 0) {
             attachmentsHTML = item.xattach.map(att => {
-              const emoji = this.getFileEmoji(att.type || '', att.name || '');
               const fileUrl = att.url || '#';
               const fileName = att.name || 'Attachment';
               const fileSize = att.size ? this.formatFileSize(att.size) : '';
               const fileType = att.type ? att.type.split('/').pop().toUpperCase() : '';
+              const isImage = att.type && att.type.startsWith('image/');
+              const fileTypeIcon = this.getFileTypeForIcon(att.type || '', fileName);
+              const paddingStyle = isImage ? 'padding: 5px 5px;' : 'padding: 10px 12px;';
               return `
-                <div class="attachment-row" style="display: flex; align-items: center; background: #f5f5f7; border-radius: 12px; padding: 10px 12px; margin-bottom: 6px;"
+                <div class="attachment-row" style="display: flex; ${isImage ? 'flex-direction: column;' : 'align-items: center;'} background: #f5f5f7; border-radius: 12px; ${paddingStyle} margin-bottom: 6px;"
                   data-url="${fileUrl}"
                   data-name="${encodeURIComponent(fileName)}"
                   data-type="${att.type || ''}"
                   data-pqEncSharedKey="${att.pqEncSharedKey || ''}"
                   data-selfKey="${att.selfKey || ''}"
                   data-msg-idx="${i}"
+                  ${isImage ? 'data-image-attachment="true"' : ''}
                 >
-                  <span style="font-size: 2.2em; margin-right: 14px;">${emoji}</span>
+                  <div class="attachment-icon-container" style="${isImage ? 'margin-bottom: 10px;' : 'margin-right: 14px; flex-shrink: 0;'}">
+                    <div class="attachment-icon" data-file-type="${fileTypeIcon}"></div>
+                  </div>
                   <div style="min-width:0;">
-                    <span class="attachment-label" style="font-weight:500;color:#222;word-break:break-all;">
+                    <span class="attachment-label" style="font-weight:500;color:#222;font-size:0.7em;display:block;word-wrap:break-word;">
                       ${fileName}
                     </span><br>
                     <span style="font-size: 0.93em; color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
@@ -9843,6 +9860,9 @@ console.warn('in send message', txid)
       this.messagesList.insertAdjacentHTML('beforeend', messageHTML);
       // The newest received element will be found after the loop completes
     }
+
+    // --- 4.5. Load thumbnails for image attachments (async, non-blocking) ---
+    this.loadThumbnailsForAttachments();
 
     // --- 5. Find the corresponding DOM element after rendering ---
     // This happens inside the setTimeout to ensure elements are in the DOM
@@ -10243,18 +10263,74 @@ console.warn('in send message', txid)
   }
 
   /**
-   * Returns an appropriate emoji based on file type and name
+   * Get the file type for icon display
    * @param {string} type - MIME type of the file
    * @param {string} name - Name of the file
-   * @returns {string} Emoji representing the file type
+   * @returns {string} File type identifier for icon
    */
-  getFileEmoji(type, name) {
-    if (type && type.startsWith('image/')) return '🖼️';
-    if (type && type.startsWith('audio/')) return '🎵';
-    if (type && type.startsWith('video/')) return '🎬';
-    if ((type === 'application/pdf') || (name && name.toLowerCase().endsWith('.pdf'))) return '📄';
-    if (type && type.startsWith('text/')) return '📄';
-    return '📎';
+  getFileTypeForIcon(type, name) {
+    if (type && type.startsWith('image/')) return 'image';
+    if (type && type.startsWith('audio/')) return 'audio';
+    if (type && type.startsWith('video/')) return 'video';
+    if ((type === 'application/pdf') || (name && name.toLowerCase().endsWith('.pdf'))) return 'pdf';
+    if (type && type.startsWith('text/')) return 'text';
+    return 'file';
+  }
+
+  /**
+   * Update an attachment row with a thumbnail image
+   * @param {HTMLElement} attachmentRow - The attachment row element
+   * @param {Blob} thumbnailBlob - The thumbnail blob to display
+   * @returns {boolean} True if update was successful, false otherwise
+   */
+  updateThumbnailInPlace(attachmentRow, thumbnailBlob) {
+    if (!attachmentRow || !attachmentRow.parentNode || !thumbnailBlob) {
+      return false;
+    }
+
+    const thumbnailUrl = URL.createObjectURL(thumbnailBlob);
+    const iconContainer = attachmentRow.querySelector('.attachment-icon-container');
+    
+    if (iconContainer && iconContainer.parentNode) {
+      // Clean up old thumbnail blob URL if it exists
+      const oldThumbnailUrl = attachmentRow.dataset.thumbnailUrl;
+      if (oldThumbnailUrl) {
+        URL.revokeObjectURL(oldThumbnailUrl);
+      }
+      
+      // Replace icon with thumbnail image
+      iconContainer.innerHTML = `<img src="${thumbnailUrl}" alt="Thumbnail" class="attachment-thumbnail">`;
+      
+      // Store blob URL for cleanup
+      attachmentRow.dataset.thumbnailUrl = thumbnailUrl;
+      return true;
+    } else {
+      // Element was removed, revoke the blob URL
+      URL.revokeObjectURL(thumbnailUrl);
+      return false;
+    }
+  }
+
+  /**
+   * Load thumbnails for image attachments asynchronously
+   * @returns {void}
+   */
+  async loadThumbnailsForAttachments() {
+    const imageAttachments = this.messagesList.querySelectorAll('[data-image-attachment="true"]');
+    
+    for (const attachmentRow of imageAttachments) {
+      const url = attachmentRow.dataset.url;
+      if (!url || url === '#') continue;
+
+      try {
+        const thumbnailBlob = await thumbnailCache.get(url);
+        if (thumbnailBlob) {
+          this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
+        }
+      } catch (error) {
+        console.warn('Failed to load thumbnail for', url, error);
+      }
+    }
   }
 
   /**
@@ -10349,6 +10425,26 @@ console.warn('in send message', txid)
       const blob    = new Blob([clearBin], { type: linkEl.dataset.type || 'application/octet-stream' });
       const blobUrl = URL.createObjectURL(blob);
       const filename = decodeURIComponent(linkEl.dataset.name || 'download');
+
+      // Generate and cache thumbnail for images, then update in place
+      if (blob.type.startsWith('image/')) {
+        const attachmentUrl = linkEl.dataset.url;
+        const attachmentRow = linkEl.closest('.attachment-row') || linkEl.closest('[data-image-attachment="true"]');
+        
+        thumbnailCache.generateThumbnail(blob).then(thumbnail => {
+          return thumbnailCache.save(attachmentUrl, thumbnail, blob.type);
+        }).then(async () => {
+          // Update thumbnail in place
+          if (attachmentRow) {
+            const thumbnailBlob = await thumbnailCache.get(attachmentUrl);
+            if (thumbnailBlob) {
+              this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
+            }
+          }
+        }).catch(err => {
+          console.warn('Failed to generate or cache thumbnail:', err);
+        });
+      }
 
       hideToast(loadingToastId);
       if (window.ReactNativeWebView?.postMessage) {
@@ -17709,6 +17805,280 @@ class LocalStorageMonitor {
 
 // Create localStorage monitor instance
 const localStorageMonitor = new LocalStorageMonitor();
+
+/**
+ * ThumbnailCache - Handles IndexedDB storage for image thumbnails
+ */
+class ThumbnailCache {
+  constructor() {
+    this.dbName = 'liberdus_thumbnails';
+    this.storeName = 'thumbnails';
+    this.dbVersion = 1;
+    this.db = null;
+    this.maxCacheSize = 50 * 1024 * 1024; // 50MB in bytes
+  }
+
+  /**
+   * Load and initialize the thumbnail cache
+   * @returns {Promise<void>}
+   */
+  async load() {
+    try {
+      await this.init();
+      // Cleanup by size if cache is too large
+      const sizeDeletedCount = await this.cleanupBySize();
+      if (sizeDeletedCount > 0) {
+        console.log(`Cleaned up ${sizeDeletedCount} thumbnail(s) by size limit`);
+      }
+    } catch (err) {
+      console.warn('Failed to load thumbnail cache:', err);
+    }
+  }
+
+  /**
+   * Initialize IndexedDB database connection
+   * @returns {Promise<void>}
+   */
+  async init() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, this.dbVersion);
+
+      request.onerror = () => {
+        console.error('Failed to open thumbnail database:', request.error);
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        this.db = request.result;
+        console.log('Thumbnail cache initialized');
+        resolve();
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        // Create object store if it doesn't exist
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          const store = db.createObjectStore(this.storeName, { keyPath: 'url' });
+          store.createIndex('cachedAt', 'cachedAt', { unique: false });
+        }
+      };
+    });
+  }
+
+  /**
+   * Generate a thumbnail from an image blob
+   * @param {Blob} imageBlob - The image blob to create thumbnail from
+   * @param {number} maxSize - Maximum dimension in pixels (default: 500)
+   * @param {number} quality - JPEG quality 0-1 (default: 0.96)
+   * @returns {Promise<Blob>} The thumbnail blob
+   */
+  async generateThumbnail(imageBlob, maxSize = 500, quality = 0.96) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const blobUrl = URL.createObjectURL(imageBlob);
+
+      img.onload = () => {
+        URL.revokeObjectURL(blobUrl);
+
+        // Calculate dimensions maintaining aspect ratio
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const width = Math.floor(img.width * scale);
+        const height = Math.floor(img.height * scale);
+
+        // Create canvas and draw scaled image with high quality rendering
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        
+        // Enable high-quality image smoothing for better thumbnail quality
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Convert to blob (use JPEG for efficiency, PNG if transparency needed)
+        const outputType = imageBlob.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to create thumbnail blob'));
+            }
+          },
+          outputType,
+          outputType === 'image/jpeg' ? quality : undefined
+        );
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(blobUrl);
+        reject(new Error('Failed to load image for thumbnail generation'));
+      };
+
+      img.src = blobUrl;
+    });
+  }
+
+  /**
+   * Get the current total size of all cached thumbnails
+   * @returns {Promise<number>} Total size in bytes
+   */
+  async getCacheSize() {
+    if (!this.db) {
+      await this.init();
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const results = request.result;
+        const totalSize = results.reduce((sum, item) => {
+          return sum + (item.thumbnail ? item.thumbnail.size : 0);
+        }, 0);
+        resolve(totalSize);
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to get cache size:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Remove oldest thumbnails until cache size is under limit
+   * @returns {Promise<number>} Number of thumbnails removed
+   */
+  async cleanupBySize() {
+    if (!this.db) {
+      await this.init();
+    }
+
+    const currentSize = await this.getCacheSize();
+    // Target 90% of max to leave headroom and avoid frequent cleanups
+    const targetSize = this.maxCacheSize * 0.9;
+    
+    if (currentSize <= targetSize) {
+      return 0;
+    }
+
+    const sizeToRemove = currentSize - targetSize;
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      const index = store.index('cachedAt');
+      const request = index.openCursor(null, 'next'); // Oldest first
+
+      let deletedCount = 0;
+      let removedSize = 0;
+
+      request.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor && removedSize < sizeToRemove) {
+          const item = cursor.value;
+          const itemSize = item.thumbnail ? item.thumbnail.size : 0;
+          
+          cursor.delete();
+          deletedCount++;
+          removedSize += itemSize;
+          cursor.continue();
+        } else {
+          resolve(deletedCount);
+        }
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to cleanup thumbnails by size:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Save a thumbnail to IndexedDB
+   * @param {string} attachmentUrl - The attachment URL (used as key)
+   * @param {Blob} thumbnailBlob - The thumbnail blob to store
+   * @param {string} originalType - Original MIME type
+   * @returns {Promise<void>}
+   */
+  async save(attachmentUrl, thumbnailBlob, originalType) {
+    if (!this.db) {
+      await this.init();
+    }
+
+    // Check if adding this thumbnail would exceed size limit
+    const currentSize = await this.getCacheSize();
+    const newThumbnailSize = thumbnailBlob.size;
+    
+    // If adding this thumbnail would exceed limit, cleanup first
+    if (currentSize + newThumbnailSize > this.maxCacheSize) {
+      await this.cleanupBySize();
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readwrite');
+      const store = tx.objectStore(this.storeName);
+
+      const data = {
+        url: attachmentUrl,
+        thumbnail: thumbnailBlob,
+        originalType: originalType,
+        cachedAt: Date.now()
+      };
+
+      const request = store.put(data);
+
+      request.onsuccess = () => {
+        resolve();
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to save thumbnail:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Retrieve a cached thumbnail from IndexedDB
+   * @param {string} attachmentUrl - The attachment URL
+   * @returns {Promise<Blob|null>} The thumbnail blob or null if not found
+   */
+  async get(attachmentUrl) {
+    if (!this.db) {
+      await this.init();
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const request = store.get(attachmentUrl);
+
+      request.onsuccess = () => {
+        const result = request.result;
+        if (result && result.thumbnail) {
+          resolve(result.thumbnail);
+        } else {
+          resolve(null);
+        }
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to get thumbnail:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+}
+
+// Create thumbnail cache instance
+const thumbnailCache = new ThumbnailCache();
 
 function getStabilityFactor() {
   return parseFloat(parameters.current.stabilityFactorStr);
