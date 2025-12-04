@@ -27,7 +27,14 @@ const network = {
       "username": "bridgebsc",
     },
   ],
+  "faucetUrl": "https://dev.liberdus.com:3355/faucet",
+  "faucetAddress": "38dbd8eb569658b2a13cef9d159e54e302da8f17",
   "farmUrl": "https://liberdus.com/farm",
   "validatorUrl": "https://liberdus.com/validator",
   "bridgeUrl": "./bridge",
+  // App version requirements for native apps (format: YYYY.MMDD.HHmm)
+  "app_version": {
+    "ios": "2025.0916.1621",
+    "android": "2025.0916.1621"
+  }
 }
