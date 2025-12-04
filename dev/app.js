@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'l'
+const version = 'm'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -10070,6 +10070,18 @@ console.warn('in send message', txid)
     }
 
     let loadingToastId;
+    let thumbnailBlob = null;
+    
+    // Generate thumbnail for images before encryption
+    const isImage = file.type && file.type.startsWith('image/');
+    if (isImage) {
+      try {
+        thumbnailBlob = await thumbnailCache.generateThumbnail(file);
+      } catch (error) {
+        console.warn('Failed to generate thumbnail for attached image:', error);
+      }
+    }
+    
     try {
       this.isEncrypting = true;
       this.sendButton.disabled = true; // Disable send button during encryption
@@ -10111,14 +10123,24 @@ console.warn('in send message', txid)
             const { id } = await response.json();
             if (!id) throw new Error('No file ID returned from upload');
 
+            const attachmentUrl = `${uploadUrl}/get/${id}`;
+            
             this.fileAttachments.push({
-              url: `${uploadUrl}/get/${id}`,
+              url: attachmentUrl,
               name: file.name,
               size: file.size,
               type: file.type,
               pqEncSharedKey: bin2base64(pqEncSharedKey),
               selfKey
             });
+            
+            // Cache thumbnail if we generated one
+            if (thumbnailBlob && isImage) {
+              thumbnailCache.save(attachmentUrl, thumbnailBlob, file.type).catch(err => {
+                console.warn('Failed to cache thumbnail for attached image:', err);
+              });
+            }
+            
             hideToast(loadingToastId);
             this.showAttachmentPreview(file);
             this.sendButton.disabled = false; // Re-enable send button
@@ -10172,6 +10194,7 @@ console.warn('in send message', txid)
     } finally {
       hideToast(loadingToastId);
       event.target.value = ''; // Reset the file input value
+      thumbnailBlob = null;
     }
   }
 
