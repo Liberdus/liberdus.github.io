@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Liberdus OAuth Bridge</title>
+    <script>
+      (function () {
+        // We use the *hash* here because implicit flow returns tokens in the hash
+        var query = window.location.search || "";
+        var hash = window.location.hash || "";  // ← contains access_token
+
+        var deepLink = "exp+liberdus://oauth#" + query + hash;
+        // Jump to the app
+        window.location = deepLink;
+
+        // Optional: fallback if app isn't installed
+        setTimeout(function () {
+        }, 2000);
+      })();
+    </script>
+  </head>
+  <body>Redirecting to Liberdus App…</body>
+</html>
