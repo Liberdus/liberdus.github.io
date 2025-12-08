@@ -351,22 +351,11 @@ class HomePage {
                 </tr>
             `;
         } else {
-            // Show data rows
+            // Show data rows sorted alphabetically by pair name
             tbodyContent = [...displayPairs].sort((a, b) => {
-                const parseValue = (value) => {
-                    const num = parseFloat(value ?? '0');
-                    return Number.isFinite(num) ? num : 0;
-                };
-
-                const aprA = parseValue(a.apr);
-                const aprB = parseValue(b.apr);
-                if (aprB !== aprA) {
-                    return aprB - aprA;
-                }
-
-                const tvlA = parseValue(a.tvl ?? a.totalStaked);
-                const tvlB = parseValue(b.tvl ?? b.totalStaked);
-                return tvlB - tvlA;
+                const nameA = (a.name || '').toLowerCase();
+                const nameB = (b.name || '').toLowerCase();
+                return nameA.localeCompare(nameB);
             }).map(pair => this.renderPairRow(pair)).join('');
         }
 
