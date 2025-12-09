@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'p'
+const version = 'q'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1117,6 +1117,40 @@ class ChatsScreen {
         // Use the determined latest timestamp for display
         const timeDisplay = formatTime(latestItemTimestamp, false);
 
+        // Determine what to show in the preview
+        let displayPreview = previewHTML;
+        let displayPrefix = latestActivity.my ? 'You: ' : '';
+        let hasDraftAttachment = false;
+        
+        // Check for draft attachments
+        if (contact.draftAttachments && Array.isArray(contact.draftAttachments) && contact.draftAttachments.length > 0) {
+          hasDraftAttachment = true;
+        }
+        
+        // If there's draft text, show that (prioritize draft text over reply preview)
+        if (contact.draft && contact.draft.trim() !== '') {
+          displayPreview = truncateMessage(escapeHtml(contact.draft), 50);
+          displayPrefix = 'You: ';
+        } else if (contact.draftReplyTxid) {
+          // If there's only reply content (no text), show "Replying to: [message]"
+          const replyMessage = contact.draftReplyMessage || '';
+          if (replyMessage.trim()) {
+            // Always escape on display for defense in depth
+            displayPreview = `${truncateMessage(escapeHtml(replyMessage), 40)}`;
+          } else {
+            // Fallback: shouldn't happen, but handle gracefully
+            displayPreview = '[message]';
+          }
+          displayPrefix = 'Replying to: ';
+        } else if (hasDraftAttachment && !contact.draft) {
+          // If there's only attachment draft (no text, no reply), show attachment indicator
+          const attachmentCount = contact.draftAttachments.length;
+          displayPreview = attachmentCount === 1 
+            ? '📎 Attachment' 
+            : `📎 ${attachmentCount} attachments`;
+          displayPrefix = 'You: ';
+        }
+
         // Create the list item element
         const li = document.createElement('li');
         li.classList.add('chat-item');
@@ -1130,8 +1164,8 @@ class ChatsScreen {
                     <div class="chat-time">${timeDisplay} <span class="chat-time-chevron"></span></div>
                 </div>
                 <div class="chat-message">
-                  ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : (contact.draft ? `<span class="chat-draft" title="Draft"></span>` : '')}
-                  ${latestActivity.my ? 'You: ' : ''}${previewHTML}
+                  ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : ((contact.draft || contact.draftReplyTxid || hasDraftAttachment) ? `<span class="chat-draft" title="Draft"></span>` : '')}
+                  ${displayPrefix}${displayPreview}
                 </div>
             </div>
         `;
@@ -4028,6 +4062,15 @@ async function processChats(chats, keys) {
                 } else if (parsedMessage.type === 'message') {
                   // Regular message format processing
                   payload.message = parsedMessage.message;
+                  if (parsedMessage.replyId) {
+                    payload.replyId = parsedMessage.replyId;
+                  }
+                  if (parsedMessage.replyMessage) {
+                    payload.replyMessage = parsedMessage.replyMessage;
+                  }
+                  if (typeof parsedMessage.replyOwnerIsMine !== 'undefined') {
+                    payload.replyOwnerIsMine = parsedMessage.replyOwnerIsMine;
+                  }
                   
                   // Handle attachments field (replacing xattach)
                   if (parsedMessage.attachments) {
@@ -4672,18 +4715,8 @@ class SearchMessagesModal {
       chatModal.open(result.contactAddress);
 
       // Scroll to and highlight the message
-      // could move this into chat modal class as scrollToMessage
       setTimeout(() => {
-        const messageSelector = `[data-txid="${result.messageId}"]`;
-        const messageElement = document.querySelector(messageSelector);
-        if (messageElement) {
-          messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          messageElement.classList.add('highlighted');
-          setTimeout(() => messageElement.classList.remove('highlighted'), 2000);
-        } else {
-          console.error('Message element not found for selector:', messageSelector);
-          // Could add a toast notification here
-        }
+        chatModal.scrollToMessage(result.messageId);
       }, 300);
     } catch (error) {
       console.error('Error handling search result:', error);
@@ -6045,139 +6078,145 @@ class BackupAccountModal {
   }
 
   // ======================================
-  // GOOGLE OAUTH FLOW (Popup-based)
+  // GOOGLE OAUTH FLOW (via OAuth Server with PKCE)
   // ======================================
-  buildGoogleAuthUrl() {
+  buildOAuthServerUrl(sessionId) {
     const config = network.googleDrive;
-    const state = crypto.randomUUID();
     const params = new URLSearchParams({
-      client_id: config.clientId,
-      redirect_uri: config.redirectUri,
-      response_type: 'token', // implicit flow
-      scope: config.scope,
-      include_granted_scopes: 'true',
-      state
+      sessionId,
+      provider: 'google',
+      flow: 'code' // Use PKCE flow (server-side)
     });
-    return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+    return `${config.oauthServerUrl}/auth?${params.toString()}`;
   }
 
   /**
-   * Start Google Drive authentication in a popup window.
+   * Start Google Drive authentication via OAuth server with PKCE flow.
    * Returns a promise that resolves with the token data or rejects on error/cancel.
    */
-  startGoogleDriveAuth() {
-    return new Promise((resolve, reject) => {
-      const url = this.buildGoogleAuthUrl();
-      console.log('Opening Google OAuth popup...');
-      
-      // Calculate popup position (centered)
-      const width = 500;
-      const height = 600;
-      const left = window.screenX + (window.outerWidth - width) / 2;
-      const top = window.screenY + (window.outerHeight - height) / 2;
-      
-      // Open popup
-      const popup = window.open(
-        url,
-        'google_oauth_popup',
-        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
-      );
-      
-      if (!popup) {
-        reject(new Error('Popup blocked. Please allow popups for this site.'));
-        return;
+  async startGoogleDriveAuth() {
+    const sessionId = crypto.randomUUID();
+    const url = this.buildOAuthServerUrl(sessionId);
+    const isReactNative = reactNativeApp.isReactNativeWebView;
+    
+    console.log('Opening Google OAuth via OAuth server...', { sessionId, isReactNative });
+    
+    // Calculate popup position (centered)
+    const width = 500;
+    const height = 600;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    
+    // Open popup to OAuth server
+    const popup = window.open(
+      url,
+      'google_oauth_popup',
+      `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+    
+    // In regular browser, check if popup was blocked
+    if (!isReactNative && !popup) {
+      throw new Error('Popup blocked. Please allow popups for this site.');
+    }
+
+    // Poll the OAuth server for the token
+    const config = network.googleDrive;
+    const maxRetries = 10;
+    let popupClosed = false;
+
+    // Monitor popup closure (only for regular browser where we have a valid popup reference)
+    let popupCheckInterval = null;
+    if (popup && !isReactNative) {
+      popupCheckInterval = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(popupCheckInterval);
+          popupCheckInterval = null;
+          popupClosed = true;
+        }
+      }, 500);
+    }
+
+    // In React Native, wait a bit before polling to give Safari time to open and create the session
+    if (isReactNative) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    try {
+      for (let i = 0; i < maxRetries; i++) {
+        // Only check for cancellation in regular browser mode where we can track popup
+        if (!isReactNative && popupClosed) {
+          throw new Error('Authentication cancelled.');
+        }
+
+        try {
+          console.log('Polling OAuth server for token...', { attempt: i + 1, sessionId });
+          const response = await fetch(
+            `${config.oauthServerUrl}/auth/poll?sessionId=${sessionId}`
+          );
+
+          if (response.ok) {
+            const data = await response.json();
+            
+            if (data.success && data.token) {
+              if (popupCheckInterval) {
+                clearInterval(popupCheckInterval);
+              }
+              if (popup && !popup.closed) {
+                popup.close();
+              }
+              
+              // Store token with expiration (assume 1 hour if not provided)
+              const now = Date.now();
+              const tokenData = {
+                accessToken: data.token,
+                tokenType: 'Bearer',
+                expiresAt: now + 3600 * 1000 // 1 hour expiration
+              };
+              
+              this.storeGoogleToken(tokenData);
+              console.log('Received access token from OAuth server.');
+              return tokenData;
+            }
+          } else if (response.status === 408) {
+            // Timeout from server, retry
+            console.log('Poll timeout, retrying...', { attempt: i + 1 });
+            continue;
+          } else {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `Poll failed: ${response.status}`);
+          }
+        } catch (fetchError) {
+          // Network error, retry unless it's the last attempt
+          if (i === maxRetries - 1) {
+            throw fetchError;
+          }
+          console.log('Poll fetch error, retrying...', fetchError.message);
+        }
       }
 
-      // Poll the popup for the OAuth response
-      const pollInterval = setInterval(() => {
-        try {
-          // Check if popup is closed
-          if (popup.closed) {
-            clearInterval(pollInterval);
-            reject(new Error('Authentication cancelled.'));
-            return;
-          }
-          
-          // Try to read the popup's URL (will throw if cross-origin)
-          const popupUrl = popup.location.href;
-          
-          // Check if we're back on our origin with a hash containing the token
-          if (popupUrl.startsWith(network.googleDrive.redirectUri)) {
-            const hash = popup.location.hash;
-            
-            // If hash is empty, the page might still be loading - keep polling
-            if (!hash || hash.length <= 1) {
-              // Check if token was stored by the popup's own callback handler
-              const storedToken = this.getStoredGoogleToken();
-              if (storedToken) {
-                clearInterval(pollInterval);
-                popup.close();
-                console.log('Token found in storage (stored by popup callback).');
-                resolve(storedToken);
-                return;
-              }
-              // Otherwise keep polling - page might still be loading
-              return;
-            }
-            
-            clearInterval(pollInterval);
-            popup.close();
-            
-            const hashParams = new URLSearchParams(hash.substring(1));
-            const accessToken = hashParams.get('access_token');
-            const tokenType = hashParams.get('token_type');
-            const expiresIn = hashParams.get('expires_in');
-            const error = hashParams.get('error');
-            
-            if (error) {
-              reject(new Error('Google authentication failed: ' + error));
-              return;
-            }
-            
-            if (!accessToken) {
-              // One more check - token might have been stored by popup
-              const storedToken = this.getStoredGoogleToken();
-              if (storedToken) {
-                console.log('Token found in storage after redirect.');
-                resolve(storedToken);
-                return;
-              }
-              reject(new Error('No access token received.'));
-              return;
-            }
-            
-            const now = Date.now();
-            const expiresAt = now + parseInt(expiresIn || '3600', 10) * 1000;
-            
-            const tokenData = {
-              accessToken,
-              tokenType: tokenType || 'Bearer',
-              expiresAt
-            };
-            
-            this.storeGoogleToken(tokenData);
-            console.log('Received access token from Google.');
-            resolve(tokenData);
-          }
-        } catch (e) {
-          // Cross-origin error - popup is still on Google's domain, keep polling
-        }
-      }, 200);
-      
-      // Timeout after 5 minutes
-      setTimeout(() => {
-        clearInterval(pollInterval);
-        if (!popup.closed) {
-          popup.close();
-        }
-        reject(new Error('Authentication timed out.'));
-      }, 5 * 60 * 1000);
-    });
+      // Max retries exhausted
+      if (popupCheckInterval) {
+        clearInterval(popupCheckInterval);
+      }
+      if (popup && !popup.closed) {
+        popup.close();
+      }
+      throw new Error('Failed to get token after max retries. Please try again.');
+    } catch (error) {
+      if (popupCheckInterval) {
+        clearInterval(popupCheckInterval);
+      }
+      if (popup && !popup.closed) {
+        popup.close();
+      }
+      throw error;
+    }
   }
 
   handleGoogleOAuthCallback() {
-    // This is now handled by the popup polling, but we keep this for backwards compatibility
-    // in case someone lands on the page with an OAuth hash (e.g., from a previous redirect flow)
+    // Legacy OAuth callback handler - kept for backwards compatibility
+    // The new PKCE flow uses the OAuth server, so this is only needed
+    // if someone lands on the page with an old OAuth hash
     if (!window.location.hash || window.location.hash.length <= 1) return;
 
     const hashParams = new URLSearchParams(window.location.hash.substring(1));
@@ -6529,7 +6568,7 @@ class BackupAccountModal {
     try {
       showToast('Uploading backup to Google Drive...', 3000, 'info');
       await this.uploadToGoogleDrive(data, filename, tokenData);
-      showToast('Backup uploaded to Google Drive successfully!', 3000, 'success');
+      showToast('Backup uploaded to Google Drive successfully!', 5000, 'success');
       this.close();
     } catch (error) {
       console.error('Google Drive upload failed:', error);
@@ -6542,7 +6581,7 @@ class BackupAccountModal {
           tokenData = await this.startGoogleDriveAuth();
           showToast('Uploading backup to Google Drive...', 3000, 'info');
           await this.uploadToGoogleDrive(data, filename, tokenData);
-          showToast('Backup uploaded to Google Drive successfully!', 3000, 'success');
+          showToast('Backup uploaded to Google Drive successfully!', 5000, 'success');
           this.close();
         } catch (retryError) {
           console.error('Retry failed:', retryError);
@@ -8940,6 +8979,13 @@ class ChatModal {
     this.sendMoneyButton = document.getElementById('chatSendMoneyButton');
     this.retryOfTxId = document.getElementById('retryOfTxId');
     this.messageInput = document.querySelector('.message-input');
+    this.replyPreview = document.getElementById('replyPreview');
+    this.replyPreviewContent = document.querySelector('#replyPreview .reply-preview-content');
+    this.replyPreviewText = document.querySelector('#replyPreview .reply-preview-text');
+    this.replyPreviewClose = document.getElementById('replyPreviewClose');
+    this.replyToTxId = document.getElementById('replyToTxId');
+    this.replyToMessage = document.getElementById('replyToMessage');
+    this.replyOwnerIsMine = document.getElementById('replyOwnerIsMine');
     this.chatSendMoneyButton = document.getElementById('chatSendMoneyButton');
     this.messageByteCounter = document.querySelector('.message-byte-counter');
     this.tollTemplate = document.getElementById('tollInfoMessageTemplate');
@@ -9080,6 +9126,17 @@ class ChatModal {
       friendModal.open();
     });
 
+    if (this.replyPreviewClose) {
+      this.replyPreviewClose.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.cancelReply();
+      });
+    }
+
+    if (this.replyPreview) {
+      this.replyPreview.addEventListener('click', (e) => this.handleReplyPreviewClick(e));
+    }
+
     if (this.addAttachmentButton) {
       this.addAttachmentButton.addEventListener('click', () => {
         this.triggerFileSelection();
@@ -9132,6 +9189,19 @@ class ChatModal {
       if (playButton) {
         e.preventDefault();
         this.playVoiceMessage(playButton);
+      }
+    });
+
+    // Reply quote click delegation
+    this.messagesList.addEventListener('click', (e) => {
+      const replyQuote = e.target.closest('.reply-quote');
+      if (replyQuote) {
+        const targetTxid = replyQuote.dataset.replyTxid;
+        if (targetTxid) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.scrollToMessage(targetTxid);
+        }
       }
     });
 
@@ -9365,10 +9435,6 @@ class ChatModal {
 
     this.clearNotificationsIfAllRead();
 
-    // clear file attachments
-    this.fileAttachments = [];
-    this.showAttachmentPreview(); // Hide preview
-
     // Setup state for appendChatModal and perform initial render
     this.address = address;
 
@@ -9403,8 +9469,8 @@ class ChatModal {
       console.warn('Offline: toll not processed');
     }
 
-    // Save any unsaved draft before closing
-    this.debouncedSaveDraft(this.messageInput.value);
+    // Save any unsaved draft before closing (save immediately, not debounced)
+    this.saveDraft(this.messageInput.value);
 
     // Cancel all ongoing file operations
     this.cancelAllOperations();
@@ -9733,11 +9799,19 @@ class ChatModal {
             text: message
         };
       } else {
+        const replyIdVal = this.replyToTxId?.value?.trim?.() || '';
+        const replyMsgVal = this.replyToMessage?.value?.trim?.() || '';
+        const replyOwnerIsMineVal = this.replyOwnerIsMine?.value === '1';
         // Convert message to new JSON format with type and optional attachments
         messageObj = {
           type: 'message',
           message: message
         };
+        if (replyIdVal) {
+          messageObj.replyId = replyIdVal;
+          messageObj.replyMessage = replyMsgVal || '';
+          messageObj.replyOwnerIsMine = replyOwnerIsMineVal;
+        }
       }
 
       // Handle attachments - add them to the JSON structure instead of using xattach
@@ -9844,6 +9918,11 @@ console.warn('in send message', txid)
           status: 'sent',
           ...(this.fileAttachments && this.fileAttachments.length > 0 && { xattach: this.fileAttachments }), // Only include if there are attachments
         };
+        if (messageObj.replyId) {
+          newMessage.replyId = messageObj.replyId;
+          newMessage.replyMessage = messageObj.replyMessage;
+          newMessage.replyOwnerIsMine = messageObj.replyOwnerIsMine;
+        }
         insertSorted(chatsData.contacts[currentAddress].messages, newMessage, 'timestamp');
       }
 
@@ -9852,6 +9931,9 @@ console.warn('in send message', txid)
         this.fileAttachments = [];
         this.showAttachmentPreview();
       }
+
+      // Clear reply state after sending
+      this.cancelReply();
 
       // Update or add to chats list, maintaining chronological order
       const chatUpdate = {
@@ -9878,6 +9960,10 @@ console.warn('in send message', txid)
       // Call debounced save directly with empty string
       this.debouncedSaveDraft('');
       contact.draft = '';
+      // Clear reply draft state
+      this.clearReplyState(contact);
+      // Clear attachment draft state
+      this.clearAttachmentState(contact);
 
       // Update the chat modal UI immediately
       if (!isEdit) this.appendChatModal(); // This should now display the 'sending' message
@@ -10134,6 +10220,9 @@ console.warn('in send message', txid)
         // --- Render Chat Message ---
         const messageClass = item.my ? 'sent' : 'received'; // Use item.my directly
         
+        // Initialize replyHTML at this scope so it's always defined
+        let replyHTML = '';
+        
         // Check if message was deleted
         if (item?.deleted > 0) {
           // Render deleted message with special styling
@@ -10144,6 +10233,30 @@ console.warn('in send message', txid)
                     </div>
                 `;
         } else {
+          // --- Render Reply Quote if present ---
+          if (item.replyId) {
+              const replyText = escapeHtml(item.replyMessage || 'View original message');
+              // Determine owner label: "You" if the referenced message is ours, else contact name
+              const ownerIsMineHint = item.replyOwnerIsMine;
+              const hasHint = typeof ownerIsMineHint !== 'undefined';
+              let isOwnerMine = false;
+              if (hasHint) {
+                isOwnerMine = ownerIsMineHint === true || ownerIsMineHint === '1';
+              } else {
+                const targetMsg = contact.messages?.find((m) => m.txid === item.replyId);
+                isOwnerMine = !!(targetMsg && targetMsg.my);
+              }
+              const ownerText = isOwnerMine ? 'You' : (getContactDisplayName(contact) || 'Contact');
+              const ownerClass = isOwnerMine ? 'reply-owner-me' : 'reply-owner-contact';
+              const replyOwnerLabel = `<span class="reply-quote-label ${ownerClass}">${escapeHtml(ownerText)}</span>`;
+
+              replyHTML = `
+                <div class="reply-quote ${ownerClass}" data-reply-txid="${escapeHtml(item.replyId)}">
+                  ${replyOwnerLabel}
+                  <div class="reply-quote-text">${replyText}</div>
+                </div>
+              `;
+          }
           // --- Render Attachments if present ---
           let attachmentsHTML = '';
           if (item.xattach && Array.isArray(item.xattach) && item.xattach.length > 0) {
@@ -10249,6 +10362,7 @@ console.warn('in send message', txid)
       const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !item.deleted;
       messageHTML = `
             <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute} ${callTimeAttribute}>
+              ${replyHTML}
               ${attachmentsHTML}
               ${messageTextHTML}
               <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}${showEditedDot ? ' <span class="edited-new-dot" title="Edited since last read"></span>' : ''}</div>
@@ -10366,6 +10480,51 @@ console.warn('in send message', txid)
   }
 
   /**
+   * Saves reply state to a contact object
+   * @param {Object} contact - The contact object to save reply state to
+   */
+  saveReplyState(contact) {
+    const replyTxid = this.replyToTxId.value.trim();
+    if (replyTxid) {
+      contact.draftReplyTxid = replyTxid;
+      contact.draftReplyMessage = this.replyToMessage.value.trim();
+      contact.draftReplyOwnerIsMine = this.replyOwnerIsMine.value;
+    } else {
+      this.clearReplyState(contact);
+    }
+  }
+
+  /**
+   * Clears reply state from a contact object
+   * @param {Object} contact - The contact object to clear reply state from
+   */
+  clearReplyState(contact) {
+    delete contact.draftReplyTxid;
+    delete contact.draftReplyMessage;
+    delete contact.draftReplyOwnerIsMine;
+  }
+
+  /**
+   * Saves attachment state to a contact object
+   * @param {Object} contact - The contact object to save attachment state to
+   */
+  saveAttachmentState(contact) {
+    if (this.fileAttachments && this.fileAttachments.length > 0) {
+      contact.draftAttachments = JSON.parse(JSON.stringify(this.fileAttachments));
+    } else {
+      this.clearAttachmentState(contact);
+    }
+  }
+
+  /**
+   * Clears attachment state from a contact object
+   * @param {Object} contact - The contact object to clear attachment state from
+   */
+  clearAttachmentState(contact) {
+    delete contact.draftAttachments;
+  }
+
+  /**
    * Saves a draft message for the current contact
    * @param {string} text - The draft message text to save
    */
@@ -10374,6 +10533,12 @@ console.warn('in send message', txid)
       // Sanitize the text before saving
       const sanitizedText = escapeHtml(text);
       myData.contacts[this.address].draft = sanitizedText;
+      
+      // Save or clear reply state
+      this.saveReplyState(myData.contacts[this.address]);
+      
+      // Save or clear attachment state
+      this.saveAttachmentState(myData.contacts[this.address]);
     }
   }
 
@@ -10384,6 +10549,13 @@ console.warn('in send message', txid)
     // Always clear the input first
     this.messageInput.value = '';
     this.messageInput.style.height = '48px';
+    
+    // Clear any existing reply state
+    this.cancelReply();
+    
+    // Clear any existing attachments
+    this.fileAttachments = [];
+    this.showAttachmentPreview();
 
     // Load draft if exists
     const contact = myData.contacts[address];
@@ -10393,6 +10565,27 @@ console.warn('in send message', txid)
       this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
       // trigger input event to update the byte counter
       this.messageInput.dispatchEvent(new Event('input'));
+    }
+    
+    // Restore reply state if it exists
+    if (contact?.draftReplyTxid) {
+      this.replyToTxId.value = contact.draftReplyTxid;
+      this.replyToMessage.value = contact.draftReplyMessage || '';
+      this.replyOwnerIsMine.value = contact.draftReplyOwnerIsMine || '';
+      
+      // Show the reply preview
+      if (this.replyPreviewText) {
+        this.replyPreviewText.textContent = contact.draftReplyMessage || '';
+      }
+      if (this.replyPreview) {
+        this.replyPreview.style.display = '';
+      }
+    }
+    
+    // Restore attachment state if it exists
+    if (contact?.draftAttachments && Array.isArray(contact.draftAttachments) && contact.draftAttachments.length > 0) {
+      this.fileAttachments = JSON.parse(JSON.stringify(contact.draftAttachments));
+      this.showAttachmentPreview();
     }
   }
 
@@ -10547,6 +10740,11 @@ console.warn('in send message', txid)
             
             hideToast(loadingToastId);
             this.showAttachmentPreview(file);
+
+            if (this.address && myData.contacts[this.address]) {
+              this.saveAttachmentState(myData.contacts[this.address]);
+            }
+            
             this.sendButton.disabled = false; // Re-enable send button
             this.addAttachmentButton.disabled = false;
             showToast(`File "${file.name}" attached successfully`, 2000, 'success');
@@ -10614,13 +10812,16 @@ console.warn('in send message', txid)
       return;
     }
   
-    const attachmentItems = this.fileAttachments.map((attachment, index) => `
+    const attachmentItems = this.fileAttachments.map((attachment, index) => {
+      const fileTypeIcon = this.getFileTypeForIcon(attachment.type || '', attachment.name);
+      return `
       <div class="attachment-item">
-        <span class="attachment-icon">📎</span>
+        <div class="attachment-icon" data-file-type="${fileTypeIcon}"></div>
         <span class="attachment-name">${attachment.name}</span>
         <button class="remove-attachment" data-index="${index}">×</button>
       </div>
-    `).join('');
+    `;
+    }).join('');
   
     preview.innerHTML = attachmentItems;
     
@@ -10660,6 +10861,10 @@ console.warn('in send message', txid)
       const removedFile = this.fileAttachments.splice(index, 1)[0];
       this.showAttachmentPreview(); // Refresh the preview
       showToast(`"${removedFile.name}" removed`, 2000, 'info');
+
+      if (this.address && myData.contacts[this.address]) {
+        this.saveAttachmentState(myData.contacts[this.address]);
+      }
     }
   }
 
@@ -10986,6 +11191,7 @@ console.warn('in send message', txid)
     if (e.target.closest('.voice-message-play-button')) return;
     if (e.target.closest('.voice-message-speed-button')) return;
     if (e.target.closest('.voice-message-seek')) return;
+    if (e.target.closest('.reply-quote')) return;
 
     // Check if keyboard is open - if so, don't show context menu
     if (this.isKeyboardOpen()) {
@@ -11021,6 +11227,9 @@ console.warn('in send message', txid)
   showMessageContextMenu(e, messageEl) {
     e.preventDefault();
     e.stopPropagation();
+
+    // Do not open context menu when clicking on reply quote
+    if (e.target.closest('.reply-quote')) return;
     
     this.currentContextMessage = messageEl;
     
@@ -11038,6 +11247,7 @@ console.warn('in send message', txid)
     const copyOption = this.contextMenu.querySelector('[data-action="copy"]');
     const joinOption = this.contextMenu.querySelector('[data-action="join"]');
     const inviteOption = this.contextMenu.querySelector('[data-action="call-invite"]');
+    const replyOption = this.contextMenu.querySelector('[data-action="reply"]');
     const editResendOption = this.contextMenu.querySelector('[data-action="edit-resend"]');
     const editOption = this.contextMenu.querySelector('[data-action="edit"]');
     const isFailedPayment = messageEl.dataset.status === 'failed' && messageEl.classList.contains('payment-info');
@@ -11059,14 +11269,17 @@ console.warn('in send message', txid)
       if (inviteOption) inviteOption.style.display = isExpired ? 'none' : 'flex';
       if (editResendOption) editResendOption.style.display = 'none';
       if (editOption) editOption.style.display = 'none';
+      if (replyOption) replyOption.style.display = isFuture ? 'flex' : 'none';
     } else if (isVoice) {
       if (copyOption) copyOption.style.display = 'none';
       if (inviteOption) inviteOption.style.display = 'none';
       if (joinOption) joinOption.style.display = 'none';
+      if (replyOption) replyOption.style.display = 'flex';
     } else {
       if (copyOption) copyOption.style.display = 'flex';
       if (joinOption) joinOption.style.display = 'none';
       if (inviteOption) inviteOption.style.display = 'none';
+      if (replyOption) replyOption.style.display = 'flex';
       if (editResendOption) editResendOption.style.display = isFailedPayment ? 'flex' : 'none';
       // Determine if edit should be shown
       if (editOption) {
@@ -11150,6 +11363,9 @@ console.warn('in send message', txid)
         this.closeContextMenu();
         callInviteModal.open(messageEl);
         break;
+      case 'reply':
+        this.startReplyToMessage(messageEl);
+        break;
       case 'delete':
         if (messageEl.dataset.status === 'failed' && messageEl.classList.contains('payment-info')) {
           this.deleteFailedPayment(messageEl);
@@ -11177,6 +11393,7 @@ console.warn('in send message', txid)
    */
   startEditMessage(messageEl) {
     try {
+      this.cancelReply();
       const txid = messageEl.dataset.txid;
       const timestamp = parseInt(messageEl.dataset.messageTimestamp || '0', 10);
       if (!txid) return;
@@ -11203,6 +11420,155 @@ console.warn('in send message', txid)
     } catch (err) {
       console.error('startEditMessage error', err);
     }
+  }
+
+  /**
+   * Starts reply flow: shows preview bar and stores reply metadata
+   * @param {HTMLElement} messageEl
+   */
+  startReplyToMessage(messageEl) {
+    if (!messageEl) return;
+    const txid = messageEl.dataset.txid;
+    if (!txid) {
+      return showToast('Cannot reply: missing message id', 2000, 'error');
+    }
+
+    const previewText = this.truncateReplyText(this.getMessageTextForReply(messageEl));
+    if (!previewText) {
+      return showToast('Cannot reply to an empty message', 2000, 'error');
+    }
+
+    this.replyToTxId.value = txid;
+    this.replyToMessage.value = previewText;
+    this.replyOwnerIsMine.value = messageEl.classList.contains('sent') ? '1' : '0';
+
+    if (this.replyPreviewText) this.replyPreviewText.textContent = previewText;
+    if (this.replyPreview) this.replyPreview.style.display = '';
+
+    this.debouncedSaveDraft(this.messageInput.value);
+
+    // focus input
+    this.messageInput.focus();
+    this.messageInput.selectionStart = this.messageInput.selectionEnd = this.messageInput.value.length;
+  }
+
+  /**
+   * Clears reply state and hides the preview bar
+   * Note: Hidden input elements are guaranteed to exist in the DOM
+   */
+  cancelReply() {
+    if (this.replyToTxId) this.replyToTxId.value = '';
+    if (this.replyToMessage) this.replyToMessage.value = '';
+    if (this.replyOwnerIsMine) this.replyOwnerIsMine.value = '';
+    if (this.replyPreview) this.replyPreview.style.display = 'none';
+    if (this.replyPreviewText) this.replyPreviewText.textContent = '';
+
+    this.debouncedSaveDraft(this.messageInput.value);
+  }
+
+  /**
+   * Returns cleaned text for reply preview from a message element
+   * @param {HTMLElement} messageEl
+   * @returns {string}
+   */
+  getMessageTextForReply(messageEl) {
+    if (!messageEl) return '';
+    const voice = messageEl.querySelector('.voice-message');
+    if (voice) {
+      const ts = parseInt(messageEl.dataset.messageTimestamp || '', 10);
+      const tsLabel = Number.isFinite(ts) ? formatTime(ts, true) : '';
+      return tsLabel ? `Voice message · ${tsLabel}` : 'Voice message';
+    }
+    const call = messageEl.querySelector('.call-message-text');
+    if (call) {
+      const callTimeAttr = Number(messageEl.getAttribute('data-call-time') || 0);
+      if (callTimeAttr > 0) {
+        const schedDate = new Date(callTimeAttr);
+        const dateStr = schedDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        const timeStr = schedDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        return `Call at ${timeStr}, ${dateStr}`;
+      }
+      const baseText = (call.textContent || '').trim() || 'Call';
+      return baseText;
+    }
+    const isPayment = messageEl.classList.contains('payment-info');
+    const paymentMemoEl = messageEl.querySelector('.payment-memo');
+    if (isPayment && !paymentMemoEl) {
+      const dir = (messageEl.querySelector('.payment-direction')?.textContent || '').trim();
+      const amount = (messageEl.querySelector('.payment-amount')?.textContent || '').trim();
+      const ts = parseInt(messageEl.dataset.messageTimestamp || '', 10);
+      const dateStr = Number.isFinite(ts) ? new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+      const timeStr = Number.isFinite(ts) ? new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+      if (dir && amount) {
+        if (dateStr && timeStr) return `${dir}${amount} · ${timeStr}, ${dateStr}`;
+        return `${dir}${amount}`;
+      }
+    }
+    const memo = messageEl.querySelector('.payment-memo');
+    if (memo) return memo.textContent || '';
+    const content = messageEl.querySelector('.message-content');
+    if (content) return content.textContent || '';
+    return messageEl.textContent || '';
+  }
+
+  /**
+   * Truncates reply text to 40 chars with ellipsis
+   * @param {string} text
+   * @returns {string}
+   */
+  truncateReplyText(text) {
+    const clean = (text || '').replace(/\s+/g, ' ').trim();
+    if (clean.length <= 40) return clean;
+    return clean.slice(0, 40) + '...';
+  }
+
+  /**
+   * Handles click on reply preview bar to scroll to the original message
+   * @param {Event} e - Click event
+   */
+  handleReplyPreviewClick(e) {
+    // Don't scroll if clicking the close button (it has stopPropagation)
+    if (e.target === this.replyPreviewClose || e.target.closest('.reply-preview-close')) {
+      return;
+    }
+    
+    const replyTxid = this.replyToTxId?.value?.trim();
+    if (replyTxid) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.scrollToMessage(replyTxid);
+    }
+  }
+
+  /**
+   * Scroll to a message by txid and highlight it
+   * @param {string} txid
+   */
+  scrollToMessage(txid) {
+    if (!txid || !this.messagesList) return;
+    const target = this.messagesList.querySelector(`[data-txid="${txid}"]`);
+    if (!target) {
+      showToast('Message not found', 2000, 'info');
+      return;
+    }
+
+    const container = this.messagesContainer;
+    if (container) {
+      const rect = target.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      const fullyVisible = rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
+      if (!fullyVisible) {
+        const scrollTarget = Math.max(0, target.offsetTop - container.clientHeight / 3);
+        if (typeof container.scrollTo === 'function') {
+          container.scrollTo({ top: scrollTarget, behavior: 'smooth' });
+        } else {
+          container.scrollTop = scrollTarget;
+        }
+      }
+    }
+
+    target.classList.add('highlighted');
+    setTimeout(() => target.classList.remove('highlighted'), 2000);
   }
 
   /**
