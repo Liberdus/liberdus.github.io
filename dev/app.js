@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'
+const version = 'r'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -6050,9 +6050,10 @@ class BackupAccountModal {
   // ======================================
   // GOOGLE DRIVE TOKEN MANAGEMENT
   // ======================================
-  storeGoogleToken(tokenData) {
+  // Not using below because we are requiring user to confirm account to use each time
+  /* storeGoogleToken(tokenData) {
     localStorage.setItem(this.GOOGLE_TOKEN_STORAGE_KEY, JSON.stringify(tokenData));
-  }
+  } */
 
   getStoredGoogleToken() {
     const raw = localStorage.getItem(this.GOOGLE_TOKEN_STORAGE_KEY);
@@ -6101,22 +6102,42 @@ class BackupAccountModal {
     
     console.log('Opening Google OAuth via OAuth server...', { sessionId, isReactNative });
     
-    // Calculate popup position (centered)
-    const width = 500;
-    const height = 600;
-    const left = window.screenX + (window.outerWidth - width) / 2;
-    const top = window.screenY + (window.outerHeight - height) / 2;
+    let popup = null;
     
-    // Open popup to OAuth server
-    const popup = window.open(
-      url,
-      'google_oauth_popup',
-      `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
-    );
-    
-    // In regular browser, check if popup was blocked
-    if (!isReactNative && !popup) {
-      throw new Error('Popup blocked. Please allow popups for this site.');
+    // In React Native, send message to native app to open in-app browser
+    if (isReactNative) {
+      if (window.ReactNativeWebView?.postMessage) {
+        console.log('Sending GOOGLE_OAUTH_REQUEST to native app');
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'GOOGLE_OAUTH_REQUEST',
+          url: url,
+          sessionId: sessionId
+        }));
+        // Don't use window.open() in React Native - let native app handle it
+      } else {
+        console.warn('ReactNativeWebView.postMessage not available, falling back to window.open()');
+        // Fallback to window.open if postMessage is not available
+        popup = window.open(url, '_blank');
+      }
+    } else {
+      // Regular browser flow - open popup
+      // Calculate popup position (centered)
+      const width = 500;
+      const height = 600;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      
+      // Open popup to OAuth server
+      popup = window.open(
+        url,
+        'google_oauth_popup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+      );
+      
+      // Check if popup was blocked
+      if (!popup) {
+        throw new Error('Popup blocked. Please allow popups for this site.');
+      }
     }
 
     // Poll the OAuth server for the token
@@ -6136,10 +6157,8 @@ class BackupAccountModal {
       }, 500);
     }
 
-    // In React Native, wait a bit before polling to give Safari time to open and create the session
-    if (isReactNative) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    }
+    // Wait a bit before polling to give OAuth server time to create the session
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     try {
       for (let i = 0; i < maxRetries; i++) {
@@ -6158,6 +6177,25 @@ class BackupAccountModal {
             const data = await response.json();
             
             if (data.success && data.token) {
+              // Check if token is actually an error message from OAuth server
+              if (typeof data.token === 'string' && data.token.startsWith('error:')) {
+                // User cancelled or denied access
+                const errorMessage = data.token.replace('error:', '').trim();
+                const userFriendlyMessage = errorMessage === 'access_denied' 
+                  ? 'Authentication was cancelled or denied. Please try again if you want to connect Google Drive.'
+                  : `Authentication failed: ${errorMessage}`;
+                
+                if (popupCheckInterval) {
+                  clearInterval(popupCheckInterval);
+                }
+                if (popup && !popup.closed) {
+                  popup.close();
+                }
+                
+                console.log('OAuth error received from server:', errorMessage);
+                throw new Error(userFriendlyMessage);
+              }
+              
               if (popupCheckInterval) {
                 clearInterval(popupCheckInterval);
               }
@@ -6173,13 +6211,17 @@ class BackupAccountModal {
                 expiresAt: now + 3600 * 1000 // 1 hour expiration
               };
               
-              this.storeGoogleToken(tokenData);
+              //this.storeGoogleToken(tokenData);
               console.log('Received access token from OAuth server.');
               return tokenData;
             }
           } else if (response.status === 408) {
             // Timeout from server, retry
             console.log('Poll timeout, retrying...', { attempt: i + 1 });
+            continue;
+          } else if (response.status === 404) {
+            // Session not found, retry
+            console.log('Session not found, retrying...', { attempt: i + 1 });
             continue;
           } else {
             const errorData = await response.json().catch(() => ({}));
@@ -6244,7 +6286,7 @@ class BackupAccountModal {
       tokenType: tokenType || 'Bearer',
       expiresAt
     };
-    this.storeGoogleToken(tokenData);
+    //this.storeGoogleToken(tokenData);
     console.log('Received access token from Google (legacy redirect).');
 
     // Clean the URL
@@ -6558,7 +6600,7 @@ class BackupAccountModal {
         tokenData = await this.startGoogleDriveAuth();
       } catch (error) {
         console.error('Google Drive authentication failed:', error);
-        showToast(error.message || 'Authentication failed.', 5000, 'error');
+        showToast(error.message || 'Authentication failed.', 0, 'error');
         this.updateButtonState();
         return;
       }
@@ -6585,7 +6627,7 @@ class BackupAccountModal {
           this.close();
         } catch (retryError) {
           console.error('Retry failed:', retryError);
-          showToast(retryError.message || 'Upload failed.', 5000, 'error');
+          showToast(retryError.message || 'Upload failed.', 0, 'error');
           this.updateButtonState();
         }
       } else {
@@ -9714,7 +9756,7 @@ class ChatModal {
         return;
       }
 
-      const amount = this.tollRequiredToSend ? this.toll : 0n;
+      const amount = myData.contacts[this.address].tollRequiredToSend == 1 ? this.toll : 0n;
       const sufficientBalance = await validateBalance(amount);
       if (!sufficientBalance) {
         const msg = `Insufficient balance for fee${amount > 0n ? ' and toll' : ''}`;
@@ -11859,9 +11901,14 @@ console.warn('in send message', txid)
       text = `${usdValue.toFixed(6)} USD (≈ ${libValue.toFixed(6)} LIB)`;
     }
 
+    // Calculate libWei using BigInt arithmetic to preserve precision
     let libWei;
-    if (tollUnit === 'USD' && factorValid && !isNaN(usdValue)) {
-      libWei = bigxnum2big(wei, (usdValue / factor).toString());
+    if (tollUnit === 'USD' && factorValid) {
+      // Convert USD wei to LIB wei by dividing by factor using scaled BigInt math
+      // libWei = safeToll / factor, but we use: libWei = (safeToll * PRECISION) / scaledFactor
+      const PRECISION = 10n ** 18n;
+      const scaledFactor = BigInt(Math.round(factor * 1e18));
+      libWei = (safeToll * PRECISION) / scaledFactor;
     } else if (tollUnit === 'LIB') {
       libWei = safeToll;
     } else {
