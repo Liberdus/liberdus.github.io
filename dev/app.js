@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'
+const version = 'u'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1526,6 +1526,16 @@ class WalletScreen {
    * @returns {Promise<void>}
    */
   async requestFromFaucet() {
+    // Disable button immediately to prevent spam clicking
+    if (this.openFaucetBridgeButton.disabled) {
+      return;
+    }
+    this.openFaucetBridgeButton.disabled = true;
+    // Re-enable button after 5 seconds
+    setTimeout(() => {
+      this.openFaucetBridgeButton.disabled = false;
+    }, 5000);
+
     if (this.isFaucetRequestInProgress) {
       return;
     }
@@ -1555,7 +1565,6 @@ class WalletScreen {
     const toastId = showToast('Requesting from faucet...', 0, 'loading');
     try {
       this.isFaucetRequestInProgress = true;
-      this.openFaucetBridgeButton.disabled = true;
       
       const payload = {
         username: myAccount.username,
@@ -1589,7 +1598,6 @@ class WalletScreen {
     } finally {
       hideToast(toastId);
       this.isFaucetRequestInProgress = false;
-      this.openFaucetBridgeButton.disabled = false;
     }
   }
 }
@@ -5105,7 +5113,7 @@ class AvatarEditModal {
     this.initialOffsetX = 0;
     this.initialOffsetY = 0;
     this.zoomRange = null;
-    this.circleSize = 180;
+    this.circleSize = 218;
     this.squareSize = 220;
     this.enableTransform = false;
     this.coverOverscan = 16; // extra pixels to ensure circle is always fully covered
@@ -5264,7 +5272,7 @@ class AvatarEditModal {
     const displayInfo = contact ? createDisplayInfo(contact) : { address: this.currentAddress, hasAvatar: false };
 
     if (this.pendingDelete) {
-      this.previewContainer.innerHTML = generateIdenticon(this.currentAddress, 180);
+      this.previewContainer.innerHTML = generateIdenticon(this.currentAddress, 218);
       this.enableTransform = false;
       this.updateZoomUI();
       if (this.previewBg) this.previewBg.style.display = 'none';
@@ -5291,7 +5299,7 @@ class AvatarEditModal {
     }
 
     // Fallback to identicon if no avatar blob
-    const avatarHtml = await getContactAvatarHtml(displayInfo, 180);
+    const avatarHtml = await getContactAvatarHtml(displayInfo, 218);
     this.previewContainer.innerHTML = avatarHtml;
     this.enableTransform = false;
     this.updateZoomUI();
@@ -13018,6 +13026,13 @@ console.warn('in send message', txid)
     await signObj(chatMessageObj, myAccount.keys);
     const txid = getTxid(chatMessageObj);
 
+    // If retrying a failed message, remove the old failed tx from local stores
+    const retryTxId = this.retryOfTxId?.value;
+    if (retryTxId) {
+      removeFailedTx(retryTxId, this.address);
+      this.retryOfTxId.value = '';
+    }
+
     // Optimistic UI update
     const newMessage = {
       message: '', // Voice messages don't have text
@@ -13057,13 +13072,27 @@ console.warn('in send message', txid)
       }
     }
 
-    // Send to network
+    // Send to network (injectTx may either throw OR return { result: { success:false } })
     try {
-      await injectTx(chatMessageObj, txid);
-      newMessage.status = 'sent';
+      const response = await injectTx(chatMessageObj, txid);
+
+      if (!response || !response.result || !response.result.success) {
+        console.log('voice message failed to send', response);
+
+        const reason = response?.result?.reason || '';
+        if (/toll/i.test(reason)) {
+          await this.reopen();
+        }
+
+        newMessage.status = 'failed';
+        updateTransactionStatus(txid, this.address, 'failed', 'message');
+      } else {
+        newMessage.status = 'sent';
+      }
     } catch (error) {
       console.error('Failed to send voice message to network:', error);
       newMessage.status = 'failed';
+      updateTransactionStatus(txid, this.address, 'failed', 'message');
       showToast('Voice message failed to send', 0, 'error');
     }
 
@@ -13945,16 +13974,47 @@ class FailedMessageMenu {
    * @returns {void}
    */
   handleFailedMessageRetry(messageEl) {
-    const messageContent = messageEl.querySelector('.message-content')?.textContent;
     const txid = messageEl.dataset.txid;
+    const voiceEl = messageEl.querySelector('.voice-message');
 
+    // Voice message retry: resend the same voice message (no re-upload)
+    if (voiceEl) {
+      const voiceUrl = voiceEl.dataset.voiceUrl || '';
+      const duration = Number(voiceEl.dataset.duration || 0);
+      const pqEncSharedKeyB64 = voiceEl.dataset.pqencsharedkey || '';
+      const selfKey = voiceEl.dataset.selfkey || '';
+
+      if (!txid || !voiceUrl || !duration || !pqEncSharedKeyB64 || !selfKey) {
+        console.error('Error preparing voice message retry: Necessary elements or data missing.');
+        return;
+      }
+
+      try {
+        chatModal.retryOfTxId.value = txid;
+        const pqEncSharedKey = base642bin(pqEncSharedKeyB64);
+        void chatModal
+          .sendVoiceMessageTx(voiceUrl, duration, pqEncSharedKey, selfKey)
+          .catch((err) => {
+            console.error('Voice message retry failed:', err);
+            showToast('Failed to retry voice message', 0, 'error');
+          });
+      } catch (err) {
+        console.error('Voice message retry failed:', err);
+        showToast('Failed to retry voice message', 0, 'error');
+      }
+      return;
+    }
+
+    // Text message retry: prefill input and store txid so next send removes failed tx
+    const messageContent = messageEl.querySelector('.message-content')?.textContent;
     if (chatModal.messageInput && chatModal.retryOfTxId && messageContent && txid) {
       chatModal.messageInput.value = messageContent;
       chatModal.retryOfTxId.value = txid;
       chatModal.messageInput.focus();
-    } else {
-      console.error('Error preparing message retry: Necessary elements or data missing.');
+      return;
     }
+
+    console.error('Error preparing message retry: Necessary elements or data missing.');
   }
 
   /**
