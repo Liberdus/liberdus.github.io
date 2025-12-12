@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'v'
+const version = 'w'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -440,6 +440,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // LocalStorage Monitor
   localStorageMonitor.load();
+
+  // Avatar Edit Modal
+  avatarEditModal.load();
+
+  // Contact Avatar Cache
+  contactAvatarCache.load();
+
+  // Thumbnail Cache
+  thumbnailCache.load();
 
   // Voice Recording Modal
   voiceRecordingModal.load();
@@ -898,9 +907,12 @@ class Footer {
       // Update header with username if signed in
       const appName = document.querySelector('.app-name');
       if (myAccount && myAccount.username) {
+        const isPrivateAccount = myAccount?.private === true || myData?.account?.private === true;
         appName.textContent = `${myAccount.username}`;
+        appName.classList.toggle('is-private', isPrivateAccount);
       } else {
         appName.textContent = '';
+        appName.classList.remove('is-private');
       }
   
       // Show/hide new chat button
@@ -1033,7 +1045,7 @@ class ChatsScreen {
   }
 
   // Update chat list UI
-  updateChatList() {
+  async updateChatList() {
     const chatList = this.chatList;
     const contacts = myData.contacts;
     const chats = myData.chats;
@@ -1047,99 +1059,130 @@ class ChatsScreen {
     // Clear existing chat items before adding new ones
     chatList.innerHTML = '';
 
-    const chatElements =
-      chats.map((chat) => {
-        const identicon = generateIdenticon(chat.address);
-        const contact = contacts[chat.address];
-
-        // If contact doesn't exist, skip this chat item
-        if (!contact) return null;
-
-        const latestActivity = contact.messages && contact.messages.length > 0 ? contact.messages[0] : null;
-
-        // If there's no latest activity (no messages), skip this chat item
-        if (!latestActivity) return null;
-
-        let previewHTML = ''; // Default
-        const latestItemTimestamp = latestActivity.timestamp;
-        const contactName = getContactDisplayName(contact);
-
-        // Check if the latest activity is a payment/transfer message
-        if (latestActivity.deleted === 1) {
-          previewHTML = `<span><i>${latestActivity.message}</i></span>`;
-        } else if (typeof latestActivity.amount === 'bigint') {
-          // Latest item is a payment/transfer
-          const amountStr = parseFloat(big2str(latestActivity.amount, 18)).toFixed(6);
-          const amountDisplay = `${amountStr} ${latestActivity.symbol || 'LIB'}`;
-          const directionText = latestActivity.my ? '-' : '+';
-          // Create payment preview text
-          previewHTML = `<span class="payment-preview">${directionText} ${amountDisplay}</span>`;
-          // Optionally add memo preview
-          if (latestActivity.message) {
-            // Memo is stored in the 'message' field for transfers
-            previewHTML += ` <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 50)}</span>`;
-          }
-        } else if (latestActivity.type === 'call') {
-          const callStartForPreview = Number(latestActivity.callTime || 0) > 0
-            ? Number(latestActivity.callTime)
-            : Number(latestActivity.timestamp || latestActivity.sent_timestamp || 0);
-          const isExpired = chatModal.isCallExpired(callStartForPreview);
-
-          if (isExpired) {
-            // Over 2 hours since call time: show as plain text without join button
-            const label = latestActivity.my
-              ? `You called ${escapeHtml(contactName)}`
-              : `${escapeHtml(contactName)} called you`;
-            previewHTML = `<span><i>${label}</i></span>`;
-          } else {
-            previewHTML = `<span><i>Join call</i></span>`;
-          }
-        } else if (latestActivity.type === 'vm') {
-          previewHTML = `<span><i>Voice message</i></span>`;
-        } else if ((!latestActivity.message || String(latestActivity.message).trim() === '') && latestActivity.xattach) {
-          previewHTML = `<span><i>Attachment</i></span>`;
-        } else if (latestActivity.xattach && latestActivity.message && String(latestActivity.message).trim() !== '') {
-          previewHTML = `<span><i>Attachment</i></span> <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 40)}</span>`;
-        } else {
-          // Latest item is a regular message
-          const messageText = escapeHtml(latestActivity.message);
-          previewHTML = `${truncateMessage(messageText, 50)}`; // Truncate for preview
-        }
-
-        // Use the determined latest timestamp for display
-        const timeDisplay = formatTime(latestItemTimestamp, false);
-
-        // Create the list item element
-        const li = document.createElement('li');
-        li.classList.add('chat-item');
-
-        // Set its inner HTML
-        li.innerHTML = `
-            <div class="chat-avatar">${identicon}</div>
-            <div class="chat-content">
-                <div class="chat-header">
-                    <div class="chat-name">${escapeHtml(contactName)}</div>
-                    <div class="chat-time">${timeDisplay} <span class="chat-time-chevron"></span></div>
-                </div>
-                <div class="chat-message">
-                  ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : (contact.draft ? `<span class="chat-draft" title="Draft"></span>` : '')}
-                  ${latestActivity.my ? 'You: ' : ''}${previewHTML}
-                </div>
-            </div>
-        `;
-
-        // Add the onclick handler directly to the element
-        li.onclick = () => chatModal.open(chat.address);
-
-        return li; // Return the created DOM element
-      })
-
-    // Append the created (and non-null) list item elements to the chatList
-    chatElements.forEach((element) => {
-      if (element) {
-        // Only append if the element is not null
-        chatList.appendChild(element);
+    const chatItems = [];
+    for (const chat of chats) {
+      if (isFaucetAddress(chat.address)) {
+        continue;
       }
+      
+      const contact = contacts[chat.address];
+      if (!contact) continue;
+
+      const latestActivity = contact.messages && contact.messages.length > 0 ? contact.messages[0] : null;
+      // If there's no latest activity (no messages), skip this chat item
+      if (!latestActivity) continue;
+
+      chatItems.push({ chat, contact, latestActivity });
+    }
+
+    const avatarHtmlList = await Promise.all(
+      chatItems.map(({ contact }) => getContactAvatarHtml(contact))
+    );
+
+    chatItems.forEach(({ chat, contact, latestActivity }, index) => {
+      const avatarHtml = avatarHtmlList[index];
+      const latestItemTimestamp = latestActivity.timestamp;
+      const contactName = getContactDisplayName(contact);
+
+      let previewHTML = '';
+      // Check if the latest activity is a payment/transfer message
+      if (latestActivity.deleted === 1) {
+        previewHTML = `<span><i>${latestActivity.message}</i></span>`;
+      } else if (typeof latestActivity.amount === 'bigint') {
+        // Latest item is a payment/transfer
+        const amountStr = parseFloat(big2str(latestActivity.amount, 18)).toFixed(6);
+        const amountDisplay = `${amountStr} ${latestActivity.symbol || 'LIB'}`;
+        const directionText = latestActivity.my ? '-' : '+';
+        // Create payment preview text
+        previewHTML = `<span class="payment-preview">${directionText} ${amountDisplay}</span>`;
+        // Optionally add memo preview
+        if (latestActivity.message) {
+          // Memo is stored in the 'message' field for transfers
+          previewHTML += ` <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 50)}</span>`;
+        }
+      } else if (latestActivity.type === 'call') {
+        const callStartForPreview = Number(latestActivity.callTime || 0) > 0
+          ? Number(latestActivity.callTime)
+          : Number(latestActivity.timestamp || latestActivity.sent_timestamp || 0);
+        const isExpired = chatModal.isCallExpired(callStartForPreview);
+
+        if (isExpired) {
+          // Over 2 hours since call time: show as plain text without join button
+          const label = latestActivity.my
+            ? `You called ${escapeHtml(contactName)}`
+            : `${escapeHtml(contactName)} called you`;
+          previewHTML = `<span><i>${label}</i></span>`;
+        } else {
+          previewHTML = `<span><i>Join call</i></span>`;
+        }
+      } else if (latestActivity.type === 'vm') {
+        previewHTML = `<span><i>Voice message</i></span>`;
+      } else if ((!latestActivity.message || String(latestActivity.message).trim() === '') && latestActivity.xattach) {
+        previewHTML = `<span><i>Attachment</i></span>`;
+      } else if (latestActivity.xattach && latestActivity.message && String(latestActivity.message).trim() !== '') {
+        previewHTML = `<span><i>Attachment</i></span> <span class="memo-preview"> | ${truncateMessage(escapeHtml(latestActivity.message), 40)}</span>`;
+      } else {
+        // Latest item is a regular message
+        const messageText = escapeHtml(latestActivity.message);
+        previewHTML = `${truncateMessage(messageText, 50)}`;
+      }
+      // Use the determined latest timestamp for display
+      const timeDisplay = formatTime(latestItemTimestamp, false);
+      // Determine what to show in the preview
+
+      let displayPreview = previewHTML;
+      let displayPrefix = latestActivity.my ? 'You: ' : '';
+      let hasDraftAttachment = false;
+
+      // Check for draft attachments
+      if (contact.draftAttachments && Array.isArray(contact.draftAttachments) && contact.draftAttachments.length > 0) {
+        hasDraftAttachment = true;
+      }
+      
+      // If there's draft text, show that (prioritize draft text over reply preview)
+      if (contact.draft && contact.draft.trim() !== '') {
+        displayPreview = truncateMessage(escapeHtml(contact.draft), 50);
+        displayPrefix = 'You: ';
+      } else if (contact.draftReplyTxid) {
+        // If there's only reply content (no text), show "Replying to: [message]"
+        const replyMessage = contact.draftReplyMessage || '';
+        if (replyMessage.trim()) {
+          // Always escape on display for defense in depth
+          displayPreview = `${truncateMessage(escapeHtml(replyMessage), 40)}`;
+        } else {
+          // Fallback: shouldn't happen, but handle gracefully
+          displayPreview = '[message]';
+        }
+        displayPrefix = 'Replying to: ';
+      } else if (hasDraftAttachment && !contact.draft) {
+        // If there's only attachment draft (no text, no reply), show attachment indicator
+        const attachmentCount = contact.draftAttachments.length;
+        displayPreview = attachmentCount === 1 
+          ? '📎 Attachment' 
+          : `📎 ${attachmentCount} attachments`;
+        displayPrefix = 'You: ';
+      }
+      // Create the list item element
+      const li = document.createElement('li');
+      li.classList.add('chat-item');
+      // Set its inner HTML
+      li.innerHTML = `
+          <div class="chat-avatar">${avatarHtml}</div>
+          <div class="chat-content">
+              <div class="chat-header">
+                  <div class="chat-name">${escapeHtml(contactName)}</div>
+                  <div class="chat-time">${timeDisplay} <span class="chat-time-chevron"></span></div>
+              </div>
+              <div class="chat-message">
+                ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : ((contact.draft || contact.draftReplyTxid || hasDraftAttachment) ? `<span class="chat-draft" title="Draft"></span>` : '')}
+                ${displayPrefix}${displayPreview}
+              </div>
+          </div>
+      `;
+      // Set click handler to open chat modal
+      li.onclick = () => chatModal.open(chat.address);
+
+      chatList.appendChild(li);
     });
   }
 }
@@ -1183,8 +1226,10 @@ class ContactsScreen {
       return;
     }
 
-    // Convert contacts object to array and sort
-    const contactsArray = Object.values(contacts);
+    // Convert contacts object to array, filter out faucet address, and sort
+    const contactsArray = Object.values(contacts).filter(
+      (contact) => !isFaucetAddress(contact.address)
+    );
 
     // Split into status groups in a single pass
     const statusGroups = contactsArray.reduce(
@@ -1226,11 +1271,11 @@ class ContactsScreen {
 
     // Helper to render a contact item
     const renderContactItem = async (contact, itemClass) => {
-      const identicon = generateIdenticon(contact.address);
+      const avatarHtml = await getContactAvatarHtml(contact);
       const contactName = getContactDisplayName(contact);
       return `
             <li class="${itemClass}">
-                <div class="chat-avatar">${identicon}</div>
+                <div class="chat-avatar">${avatarHtml}</div>
                 <div class="chat-content">
                     <div class="chat-header">
                         <div class="chat-name">${contactName}</div>
@@ -1273,6 +1318,7 @@ const contactsScreen = new ContactsScreen();
 class WalletScreen {
   constructor() {
     this.firstTimeLoad = true;
+    this.isFaucetRequestInProgress = false;
   }
 
   load() {
@@ -1287,6 +1333,9 @@ class WalletScreen {
     this.openSendAssetFormModalButton = document.getElementById('openSendAssetFormModal');
     this.openReceiveModalButton = document.getElementById('openReceiveModal');
     this.openHistoryModalButton = document.getElementById('openHistoryModal');
+    this.openBuyButton = document.getElementById('openBuyButton');
+    this.openSellButton = document.getElementById('openSellButton');
+    this.openFaucetBridgeButton = document.getElementById('openFaucetBridgeButton');
 
     this.openSendAssetFormModalButton.addEventListener('click', () => {
       sendAssetFormModal.open();
@@ -1296,6 +1345,39 @@ class WalletScreen {
     });
     this.openHistoryModalButton.addEventListener('click', () => {
       historyModal.open();
+    });
+
+    // dynamic Faucet/Bridge button label and icon based on mainnet status
+    const faucetBridgeLabel = this.openFaucetBridgeButton.querySelector('.action-label');
+    const isMainnet = this.isMainnet();
+
+    if (faucetBridgeLabel) {
+      faucetBridgeLabel.textContent = isMainnet ? 'Bridge' : 'Faucet';
+    }
+    // Update icon: add/remove bridge-mode class
+    if (isMainnet) {
+      this.openFaucetBridgeButton.classList.add('bridge-mode');
+    } else {
+      this.openFaucetBridgeButton.classList.remove('bridge-mode');
+    }
+
+    this.openBuyButton.addEventListener('click', () => {
+      window.open('https://liberdus.com/buy', '_blank');
+    });
+
+    this.openSellButton.addEventListener('click', () => {
+      window.open('https://liberdus.com/sell', '_blank');
+    });
+
+    // Faucet/Bridge button handler
+    this.openFaucetBridgeButton.addEventListener('click', async () => {
+      if (this.isMainnet()) {
+        // Mainnet: open bridge modal
+        bridgeModal.open();
+      } else {
+        // Not mainnet: request from faucet API
+        await this.requestFromFaucet();
+      }
     });
 
     // Add refresh balance button handler
@@ -1325,6 +1407,11 @@ class WalletScreen {
 
   isActive() {
     return this.screen.classList.contains('active');
+  }
+
+  // Check if the current network is mainnet
+  isMainnet() {
+    return network?.name === 'Mainnet';
   }
 
   // Update wallet view; refresh wallet
@@ -1435,6 +1522,86 @@ class WalletScreen {
     // Update total wallet balance
     myData.wallet.networth = totalWalletNetworth;
     myData.wallet.timestamp = now;
+  }
+
+  /**
+   * Request funds from the faucet for normal users
+   * @returns {Promise<void>}
+   */
+  async requestFromFaucet() {
+    // Disable button immediately to prevent spam clicking
+    if (this.openFaucetBridgeButton.disabled) {
+      return;
+    }
+    this.openFaucetBridgeButton.disabled = true;
+    // Re-enable button after 5 seconds
+    setTimeout(() => {
+      this.openFaucetBridgeButton.disabled = false;
+    }, 5000);
+
+    if (this.isFaucetRequestInProgress) {
+      return;
+    }
+
+    if (!myAccount?.keys?.address) {
+      console.error('Account address not available');
+      showToast('Account address not available', 0, 'error');
+      return;
+    }
+
+    if (!isOnline) {
+      showToast('You must be online to request from faucet', 0, 'error');
+      return;
+    }
+
+    // Check LIB balance - faucet only works if balance is less than 100 LIB
+    const libAsset = myData.wallet.assets.find((asset) => asset.symbol === 'LIB');
+    if (libAsset) {
+      const balanceInWei = BigInt(libAsset.balance);
+      const minBalanceForFaucet = 100n * wei; // 100 LIB in wei
+      if (balanceInWei >= minBalanceForFaucet) {
+        showToast('Balance exceeds 100 LIB, so you cannot claim more tokens from the faucet.', 0, 'warning');
+        return;
+      }
+    }
+
+    const toastId = showToast('Requesting from faucet...', 0, 'loading');
+    try {
+      this.isFaucetRequestInProgress = true;
+      
+      const payload = {
+        username: myAccount.username,
+        userAddress: longAddress(myAccount.keys.address),
+        networkId: network.netid,
+      };
+      await signObj(payload, myAccount.keys);
+      
+      const faucetUrl = network.faucetUrl || 'https://dev.liberdus.com:3355/faucet';
+      
+      const response = await fetch(faucetUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        showToast('Faucet request successful! The LIB will be sent to your wallet. Refresh your balance in 10 seconds.', 5000, 'success');
+      } else {
+        const errorMessage = result.message || result.error || `HTTP ${response.status}: ${response.statusText}`;
+        showToast(`Faucet error: ${errorMessage}`, 0, 'error');
+      }
+      
+    } catch (error) {
+      console.error('Faucet request error:', error);
+      showToast(`Faucet request failed: ${error.message || 'Unknown error'}`, 0, 'error');
+    } finally {
+      hideToast(toastId);
+      this.isFaucetRequestInProgress = false;
+    }
   }
 }
 
@@ -1636,12 +1803,16 @@ function createNewContact(addr, username, friendStatus = 1) {
   } // already exists
   const c = (myData.contacts[address] = {});
   c.address = address;
-  if (username) {
+  // Set username to "Liberdus Faucet" if this is the faucet address
+  if (isFaucetAddress(address)) {
+    c.username = 'Liberdus Faucet';
+  } else if (username) {
     c.username = normalizeUsername(username);
   }
   c.messages = [];
   c.timestamp = 0;
   c.unread = 0;
+  c.hasAvatar = false;
   c.toll = 0n;
   c.tollRequiredToReceive = 1;
   c.tollRequiredToSend = 1;
@@ -1965,6 +2136,7 @@ class SignInModal {
     const signInData = signInModal.getSignInUsernames() || {};
     const usernames = Array.isArray(signInData.usernames) ? signInData.usernames : [];
     const netidAccounts = signInData.netidAccounts || { usernames: {} };
+    const { netid } = network;
 
     // Get the notified addresses and sort usernames to prioritize them
     const notifiedAddresses = reactNativeApp.isReactNativeWebView ? reactNativeApp.getNotificationAddresses() : [];
@@ -1989,13 +2161,25 @@ class SignInModal {
       sortedUsernames = [...notifiedUsernames, ...otherUsernames];
     }
 
-    // Populate select with sorted usernames and add an emoji to the username if it owns a notified address
+    // Populate select with sorted usernames
     this.usernameSelect.innerHTML = `
       <option value="" disabled selected hidden>Select an account</option>
       ${sortedUsernames.map((username) => {
         const isNotifiedAccount = notifiedUsernameSet.has(username);
         const dotIndicator = isNotifiedAccount ? ' 🔔' : '';
-        return `<option value="${username}">${username}${dotIndicator}</option>`;
+
+        // Private accounts are stored in per-account state (${username}_${netid}).
+        let isPrivateAccount = false;
+        try {
+          const localState = loadState(`${username}_${netid}`);
+          isPrivateAccount = localState?.account?.private === true;
+        } catch (e) {
+          isPrivateAccount = false;
+        }
+
+        // Explicitly style each <option> to avoid color inheritance quirks.
+        const optionColor = isPrivateAccount ? 'var(--danger-color)' : 'var(--text-color)';
+        return `<option value="${username}" style="color: ${optionColor};">${username}${dotIndicator}</option>`;
       }).join('')}
     `;
 
@@ -2004,7 +2188,27 @@ class SignInModal {
       this.usernameSelect.value = selectedUsername;
     }
 
+    // Update selected styling (so chosen private account shows red when the dropdown is closed)
+    this.updateSelectedAccountPrivateIndicator(netid);
+
     return { usernames, netidAccounts, sortedUsernames };
+  }
+
+  updateSelectedAccountPrivateIndicator(netid) {
+    const username = this.usernameSelect.value;
+    if (!username) {
+      this.usernameSelect.classList.remove('is-private');
+      return;
+    }
+
+    let isPrivateAccount = false;
+    try {
+      const localState = loadState(`${username}_${netid}`);
+      isPrivateAccount = localState?.account?.private === true;
+    } catch (e) {
+      isPrivateAccount = false;
+    }
+    this.usernameSelect.classList.toggle('is-private', isPrivateAccount);
   }
 
   async open(preselectedUsername_) {
@@ -2154,6 +2358,9 @@ class SignInModal {
       this.notFoundMessage.style.display = 'none';
       return;
     }
+
+    // Update selected styling
+    this.updateSelectedAccountPrivateIndicator(netid);
     //        const address = netidAccounts.usernames[username].keys.address;
     const address = netidAccounts.usernames[username].address;
     let availability = await checkUsernameAvailability(username, address);
@@ -2372,6 +2579,9 @@ class ContactInfoModal {
     this.nameDiv = this.avatarSection.querySelector('.name');
     this.subtitleDiv = this.avatarSection.querySelector('.subtitle');
     this.usernameDiv = document.getElementById('contactInfoUsername');
+    this.avatarEditButton = document.createElement('button');
+    this.avatarEditButton.className = 'icon-button edit-icon avatar-edit-button';
+    this.avatarEditButton.setAttribute('aria-label', 'Edit photo');
 
     // Back button
     this.backButton.addEventListener('click', () => this.close());
@@ -2399,15 +2609,25 @@ class ContactInfoModal {
       if (!this.currentContactAddress) return;
       friendModal.open();
     });
+
+    // Avatar edit button
+    this.avatarEditButton.addEventListener('click', () => {
+      if (!this.currentContactAddress) return;
+      avatarEditModal.open(this.currentContactAddress);
+    });
+
+    // Attach edit button to the avatar section (top-right)
+    if (!this.avatarSection.contains(this.avatarEditButton)) {
+      this.avatarSection.appendChild(this.avatarEditButton);
+    }
   }
 
   // Update contact info values
   async updateContactInfo(displayInfo) {
-    // Generate identicon for the contact
-    const identicon = generateIdenticon(displayInfo.address, 96);
+    const avatarHtml = await getContactAvatarHtml(displayInfo, 96);
 
     // Update the avatar section
-    this.avatarDiv.innerHTML = identicon;
+    this.avatarDiv.innerHTML = avatarHtml;
     this.nameDiv.textContent = displayInfo.name !== 'Not Entered' ? displayInfo.name : displayInfo.username;
     this.subtitleDiv.textContent = displayInfo.address;
 
@@ -3075,6 +3295,10 @@ class HistoryModal {
     }
     
     const address = item.dataset.address;
+    // Don't open chat modal for faucet address
+    if (address && isFaucetAddress(address)) {
+      return;
+    }
     if (address && myData.contacts[address]) {
       // Close contact info modal if open
       if (contactInfoModal.isActive()) {
@@ -3683,6 +3907,10 @@ async function processChats(chats, keys) {
         createNewContact(from);
       }
       const contact = myData.contacts[from];
+      // Set username to "Liberdus Faucet" if there is no username for the faucet address contact
+      if (isFaucetAddress(from) && !contact.username) {
+        contact.username = 'Liberdus Faucet';
+      }
       //            contact.address = from        // not needed since createNewContact does this
       let added = 0;
       let hasNewTransfer = false;
@@ -3893,6 +4121,15 @@ async function processChats(chats, keys) {
                 } else if (parsedMessage.type === 'message') {
                   // Regular message format processing
                   payload.message = parsedMessage.message;
+                  if (parsedMessage.replyId) {
+                    payload.replyId = parsedMessage.replyId;
+                  }
+                  if (parsedMessage.replyMessage) {
+                    payload.replyMessage = parsedMessage.replyMessage;
+                  }
+                  if (typeof parsedMessage.replyOwnerIsMine !== 'undefined') {
+                    payload.replyOwnerIsMine = parsedMessage.replyOwnerIsMine;
+                  }
                   
                   // Handle attachments field (replacing xattach)
                   if (parsedMessage.attachments) {
@@ -3990,8 +4227,14 @@ async function processChats(chats, keys) {
 
         //   Process transfer messages; this is a payment with an optional memo 
         else if (tx.type == 'transfer') {
-          const payload = tx.xmemo;
-          if (useTxTimestamp){ 
+          // Handle transfers without xmemo (e.g., faucet transfers)
+          // Ensure payload is always an object, even if xmemo is null/undefined
+          let payload = tx.xmemo;
+          if (!payload || typeof payload !== 'object') {
+            payload = {};
+          }
+          // Set sent_timestamp - use tx.timestamp if useTxTimestamp is true, otherwise use payload.sent_timestamp or tx.timestamp
+          if (useTxTimestamp || !payload.sent_timestamp) {
             payload.sent_timestamp = tx.timestamp;
           }
           if (mine) {
@@ -4137,10 +4380,9 @@ async function processChats(chats, keys) {
 
         // Add bubble to chats tab if we are not on it
         // Only suppress notification if we're ACTIVELY viewing this chat and if not a transfer
-        if (!inActiveChatWithSender) {
-          if (!chatsScreen.isActive()) {
-            footer.chatButton.classList.add('has-notification');
-          }
+        // Don't add notification for faucet address
+        if (!inActiveChatWithSender && !chatsScreen.isActive() && !isFaucetAddress(from)) {
+          footer.chatButton.classList.add('has-notification');
         }
       }
 
@@ -4160,7 +4402,8 @@ async function processChats(chats, keys) {
         if (!inActiveChatWithSender) {
           contact.unread = (contact.unread || 0) + editIncrements;
           // Add notification bubble if chats screen not active
-          if (!chatsScreen.isActive()) {
+          // Don't add notification for faucet address
+          if (!chatsScreen.isActive() && !isFaucetAddress(from)) {
             footer.chatButton.classList.add('has-notification');
           }
           // Refresh list if user is currently viewing chat list so unread counts update
@@ -4285,7 +4528,7 @@ async function postAssetTransfer(to, amount, memo, keys) {
 }
 
 // TODO - backend - when account is being registered, ensure that loserCase(alias)=alias and hash(alias)==aliasHash
-async function postRegisterAlias(alias, keys) {
+async function postRegisterAlias(alias, keys, isPrivate = false) {
   const aliasBytes = utf82bin(alias);
   const aliasHash = hashBytes(aliasBytes);
   const { publicKey } = generatePQKeys(keys.pqSeed);
@@ -4299,6 +4542,7 @@ async function postRegisterAlias(alias, keys) {
     pqPublicKey: pqPublicKey,
     timestamp: getCorrectedTimestamp(),
     networkId: network.netid,
+    private: isPrivate,
   };
   const txid = await signObj(tx, keys);
   const res = await injectTx(tx, txid);
@@ -4530,18 +4774,8 @@ class SearchMessagesModal {
       chatModal.open(result.contactAddress);
 
       // Scroll to and highlight the message
-      // could move this into chat modal class as scrollToMessage
       setTimeout(() => {
-        const messageSelector = `[data-txid="${result.messageId}"]`;
-        const messageElement = document.querySelector(messageSelector);
-        if (messageElement) {
-          messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          messageElement.classList.add('highlighted');
-          setTimeout(() => messageElement.classList.remove('highlighted'), 2000);
-        } else {
-          console.error('Message element not found for selector:', messageSelector);
-          // Could add a toast notification here
-        }
+        chatModal.scrollToMessage(result.messageId);
       }, 300);
     } catch (error) {
       console.error('Error handling search result:', error);
@@ -4558,8 +4792,7 @@ class SearchMessagesModal {
       const resultElement = document.createElement('li');
       resultElement.className = 'chat-item search-result-item';
 
-      // Generate identicon for the contact
-      const identicon = generateIdenticon(result.contactAddress);
+      const avatarHtml = await getContactAvatarHtml(result.contactAddress);
 
       // Format message preview with "You:" prefix if it's a sent message
       // make this textContent?
@@ -4567,7 +4800,7 @@ class SearchMessagesModal {
 
       resultElement.innerHTML = `
               <div class="chat-avatar">
-                  ${identicon}
+                  ${avatarHtml}
               </div>
               <div class="chat-content">
                   <div class="chat-header">
@@ -4749,6 +4982,11 @@ class SearchContactsModal {
 
     // Search through all contacts
     Object.entries(myData.contacts).forEach(([address, contact]) => {
+      // Skip faucet address
+      if (isFaucetAddress(address)) {
+        return;
+      }
+      
       // Fields to search through
       const searchableFields = this.getSearchableFields(contact);
       const searchFields = searchableFields.map((f) => f.value);
@@ -4826,8 +5064,7 @@ class SearchContactsModal {
       const contactElement = document.createElement('div');
       contactElement.className = 'chat-item contact-item';
 
-      // Generate identicon for the contact
-      const identicon = generateIdenticon(contact.address);
+      const avatarHtml = await getContactAvatarHtml(contact);
 
       // Create match preview with label and highlighted matched value prioritizing exact and starts-with matches
       const matchPreview = this.createMatchPreview(contact, searchText);
@@ -4835,7 +5072,7 @@ class SearchContactsModal {
 
       contactElement.innerHTML = `
               <div class="chat-avatar">
-                  ${identicon}
+                  ${avatarHtml}
               </div>
               <div class="chat-content">
                   <div class="chat-header">
@@ -4876,8 +5113,599 @@ function createDisplayInfo(contact) {
     linkedin: contact.senderInfo?.linkedin || 'Not provided',
     x: contact.senderInfo?.x || 'Not provided',
     address: contact.address,
+    hasAvatar: !!contact.hasAvatar,
   };
 }
+
+/**
+ * AvatarEditModal manages the upload/edit/delete flow for contact avatars,
+ * including pan/zoom preview, cropping, and persistence hooks.
+ */
+class AvatarEditModal {
+  constructor() {
+    this.modal = null;
+    this.backButton = null;
+    this.uploadButton = null;
+    this.deleteButton = null;
+    this.fileInput = null;
+    this.previewContainer = null;
+    this.previewSquare = null;
+    this.previewBg = null;
+    this.foregroundImg = null;
+    this.currentAddress = null;
+    this.previewUrl = null;
+    this.pendingBlob = null;
+    this.activeImageBlob = null;
+    this.imageNaturalWidth = 0;
+    this.imageNaturalHeight = 0;
+    this.baseScale = 1;
+    this.zoom = 1;
+    this.minZoom = 1;
+    this.maxZoom = 3;
+    this.offsetX = 0;
+    this.offsetY = 0;
+    this.dragging = false;
+    this.dragStartX = 0;
+    this.dragStartY = 0;
+    this.initialOffsetX = 0;
+    this.initialOffsetY = 0;
+    this.zoomRange = null;
+    this.circleSize = 218;
+    this.squareSize = 220;
+    this.enableTransform = false;
+    this.coverOverscan = 16; // extra pixels to ensure circle is always fully covered
+  }
+
+  load() {
+    this.modal = document.getElementById('avatarEditModal');
+    this.backButton = document.getElementById('closeAvatarEditModal');
+    this.uploadButton = document.getElementById('avatarEditUploadButton');
+    this.deleteButton = document.getElementById('avatarEditDeleteButton');
+    this.saveActionButton = document.getElementById('avatarEditSaveButton');
+    this.cancelButton = document.getElementById('avatarEditCancelButton');
+    this.fileInput = document.getElementById('avatarEditFileInput');
+    this.previewContainer = document.getElementById('avatarEditPreview');
+    this.previewSquare = document.getElementById('avatarEditSquare');
+    this.zoomRange = document.getElementById('avatarZoomRange');
+    this.zoomControls = document.querySelector('.avatar-edit-controls');
+
+    if (!this.modal || !this.backButton || !this.uploadButton || !this.deleteButton || !this.saveActionButton || !this.cancelButton || !this.fileInput || !this.previewContainer || !this.previewSquare || !this.zoomRange) {
+      console.warn('AvatarEditModal elements not found');
+      return;
+    }
+
+    // Ensure background img layer exists
+    this.previewBg = document.createElement('img');
+    this.previewBg.className = 'avatar-edit-bg-img';
+    this.previewBg.setAttribute('aria-hidden', 'true');
+    this.previewBg.draggable = false;
+    this.previewSquare.prepend(this.previewBg);
+
+    // Ensure foreground img element exists
+    this.foregroundImg = document.createElement('img');
+    this.foregroundImg.className = 'avatar-edit-img';
+    this.foregroundImg.setAttribute('alt', '');
+    this.foregroundImg.draggable = false;
+    this.previewContainer.innerHTML = '';
+    this.previewContainer.appendChild(this.foregroundImg);
+
+    this.backButton.addEventListener('click', () => this.close());
+    this.uploadButton.addEventListener('click', () => this.fileInput.click());
+    this.deleteButton.addEventListener('click', () => this.handleDelete());
+    this.saveActionButton.addEventListener('click', () => this.handleSave());
+    this.cancelButton.addEventListener('click', () => this.handleCancel());
+    this.fileInput.addEventListener('change', (e) => this.handleFileSelected(e));
+
+    this.zoomRange.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      if (this.enableTransform) {
+        this.setZoom(val);
+      }
+    });
+
+    // Pointer events for panning
+    const startDrag = (clientX, clientY) => {
+      if (!this.enableTransform) return;
+      this.dragging = true;
+      this.dragStartX = clientX;
+      this.dragStartY = clientY;
+      this.initialOffsetX = this.offsetX;
+      this.initialOffsetY = this.offsetY;
+    };
+
+    const moveDrag = (clientX, clientY) => {
+      if (!this.dragging) return;
+      const dx = clientX - this.dragStartX;
+      const dy = clientY - this.dragStartY;
+      this.setOffsets(this.initialOffsetX + dx, this.initialOffsetY + dy);
+    };
+
+    const endDrag = () => {
+      this.dragging = false;
+    };
+
+    this.previewSquare.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      startDrag(e.clientX, e.clientY);
+    });
+
+    window.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
+    window.addEventListener('mouseup', endDrag);
+
+    this.previewSquare.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      startDrag(t.clientX, t.clientY);
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      moveDrag(t.clientX, t.clientY);
+    }, { passive: true });
+
+    window.addEventListener('touchend', endDrag);
+  }
+
+  async open(address) {
+    this.currentAddress = normalizeAddress(address);
+    this.pendingBlob = null;
+    this.activeImageBlob = null;
+    this.enableTransform = false;
+    await this.refreshPreview();
+    this.modal.classList.add('active');
+    enterFullscreen();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    this.clearPreviewUrl();
+    this.pendingBlob = null;
+    this.activeImageBlob = null;
+    this.enableTransform = false;
+    this.imageNaturalWidth = 0;
+    this.imageNaturalHeight = 0;
+    this.offsetX = 0;
+    this.offsetY = 0;
+    this.dragging = false;
+    this.fileInput.value = '';
+    enterFullscreen();
+  }
+
+  /**
+   * Revoke the current preview object URL, if any.
+   */
+  revokePreviewUrl() {
+    if (this.previewUrl) {
+      URL.revokeObjectURL(this.previewUrl);
+      this.previewUrl = null;
+    }
+  }
+
+  /**
+   * Clear preview URLs and hide image elements when not editing.
+   */
+  clearPreviewUrl() {
+    this.revokePreviewUrl();
+    // Clear sources to release memory when not editing
+    if (!this.enableTransform) {
+      if (this.foregroundImg) {
+        this.foregroundImg.src = '';
+        this.foregroundImg.style.display = 'none';
+      }
+      if (this.previewBg) {
+        this.previewBg.src = '';
+        this.previewBg.style.display = 'none';
+      }
+    }
+  }
+
+  /**
+   * Refresh the preview based on pending state, cached avatar, or identicon fallback.
+   */
+  async refreshPreview() {
+    this.clearPreviewUrl();
+    const contact = myData?.contacts?.[this.currentAddress];
+    const displayInfo = contact ? createDisplayInfo(contact) : { address: this.currentAddress, hasAvatar: false };
+
+    if (this.pendingBlob) {
+      await this.setImageFromBlob(this.pendingBlob, true);
+      return;
+    }
+
+    // Try to get avatar blob from cache
+    let avatarBlob = null;
+    try {
+      avatarBlob = await contactAvatarCache.get(this.currentAddress);
+    } catch (e) {
+      avatarBlob = null;
+    }
+
+    if (avatarBlob) {
+      await this.setImageFromBlob(avatarBlob, false);
+      return;
+    }
+
+    // Fallback to identicon if no avatar blob
+    const avatarHtml = await getContactAvatarHtml(displayInfo, 218);
+    this.previewContainer.innerHTML = avatarHtml;
+    this.enableTransform = false;
+    this.updateZoomUI();
+    if (this.previewBg) this.previewBg.style.display = 'none';
+    if (this.foregroundImg) this.foregroundImg.style.display = 'none';
+    this.updateButtonVisibility();
+  }
+
+  /**
+   * Update button visibility based on whether a new image is uploaded.
+   * Only shows Save/Cancel when user uploads a new photo, not when viewing existing avatar.
+   */
+  updateButtonVisibility() {
+    const hasNewUpload = !!this.pendingBlob; // Only true when user uploads a new photo
+    
+    if (hasNewUpload) {
+      // Show Save/Cancel buttons, hide Upload/Delete buttons
+      this.uploadButton.style.display = 'none';
+      this.deleteButton.style.display = 'none';
+      this.saveActionButton.style.display = 'inline-flex';
+      this.cancelButton.style.display = 'inline-flex';
+    } else {
+      // Show Upload/Delete buttons, hide Save/Cancel buttons
+      this.uploadButton.style.display = 'inline-flex';
+      const contact = myData?.contacts?.[this.currentAddress];
+      const hasAvatar = !!contact?.hasAvatar;
+      this.deleteButton.style.display = hasAvatar ? 'inline-flex' : 'none';
+      this.saveActionButton.style.display = 'none';
+      this.cancelButton.style.display = 'none';
+    }
+  }
+
+  /**
+   * Handle file chooser selection for avatar upload.
+   * @param {Event} event Input change event
+   */
+  handleFileSelected(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type || !file.type.startsWith('image/')) {
+      showToast('Please select an image file.', 2000, 'error');
+      return;
+    }
+    this.pendingBlob = file;
+    // Allow selecting the same file again after delete by clearing input value post-read
+    if (this.fileInput) {
+      this.fileInput.value = '';
+    }
+    this.setImageFromBlob(file, true);
+    this.updateButtonVisibility();
+  }
+
+  /**
+   * Handle cancel - discard uploaded image and revert to original state.
+   */
+  async handleCancel() {
+    // Clear any pending uploads but keep existing avatar
+    this.pendingBlob = null;
+    if (this.fileInput) {
+      this.fileInput.value = '';
+    }
+    // Refresh to show original state
+    await this.refreshPreview();
+  }
+
+  /**
+   * Delete the current avatar immediately and save.
+   */
+  async handleDelete() {
+    if (!this.currentAddress) {
+      this.close();
+      return;
+    }
+
+    const contact = myData?.contacts?.[this.currentAddress];
+    if (!contact) {
+      this.close();
+      return;
+    }
+
+    try {
+      // Delete avatar from cache
+      await contactAvatarCache.delete(this.currentAddress);
+      contact.hasAvatar = false;
+      saveState();
+
+      // Update UI
+      contactInfoModal.updateContactInfo(createDisplayInfo(contact));
+      contactInfoModal.needsContactListUpdate = true;
+      if (chatModal.isActive() && chatModal.address === this.currentAddress) {
+        chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+      }
+
+      // Update preview in the modal to show identicon
+      await this.refreshPreview();
+    } catch (err) {
+      console.warn('Failed to delete avatar:', err);
+      showToast('Failed to delete avatar', 2000, 'error');
+    }
+  }
+
+  /**
+   * Load a blob into the preview, enabling transforms only for user uploads.
+   * @param {Blob} blob Image blob
+   * @param {boolean} isUserUpload Whether this is a new user upload
+   */
+  async setImageFromBlob(blob, isUserUpload = false) {
+    try {
+      this.revokePreviewUrl();
+      const blobUrl = URL.createObjectURL(blob);
+      const img = await this.loadImage(blobUrl);
+      // Ensure foreground container is clean (remove any identicon innerHTML)
+      if (this.previewContainer) {
+        this.previewContainer.innerHTML = '';
+        this.previewContainer.appendChild(this.foregroundImg);
+      }
+
+      this.activeImageBlob = blob;
+      this.previewUrl = blobUrl;
+      this.imageNaturalWidth = img.naturalWidth;
+      this.imageNaturalHeight = img.naturalHeight;
+      this.enableTransform = !!isUserUpload;
+      this.resetTransform();
+      this.applyImageSources(blobUrl);
+
+      // If user uploaded, enable pan/zoom with background context image
+      if (this.enableTransform) {
+        if (this.previewBg) this.previewBg.style.display = 'block';
+        if (this.foregroundImg) this.foregroundImg.style.display = 'block';
+        this.applyTransform();
+      } else {
+        // Existing avatar preview: fit image to circle, hide background
+        if (this.previewBg) {
+          this.previewBg.style.display = 'none';
+        }
+        if (this.foregroundImg) {
+          this.foregroundImg.style.display = 'block';
+          this.foregroundImg.style.width = '100%';
+          this.foregroundImg.style.height = '100%';
+          this.foregroundImg.style.left = '50%';
+          this.foregroundImg.style.top = '50%';
+          this.foregroundImg.style.transform = 'translate(-50%, -50%)';
+        }
+      }
+      this.updateButtonVisibility();
+    } catch (e) {
+      console.warn('Failed to load image for avatar editing:', e);
+      showToast('Could not load image', 2000, 'error');
+    }
+  }
+
+  /**
+   * Load an image and resolve when ready.
+   * @param {string} url Object URL to load
+   * @returns {Promise<HTMLImageElement>}
+   */
+  loadImage(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
+  resetTransform() {
+    // Calculate base scale to ensure circle is covered with overscan
+    if (!this.imageNaturalWidth || !this.imageNaturalHeight) {
+      this.baseScale = 1;
+    } else {
+      const minW = this.circleSize + this.coverOverscan * 2;
+      const minH = this.circleSize + this.coverOverscan * 2;
+      this.baseScale = Math.max(minW / this.imageNaturalWidth, minH / this.imageNaturalHeight);
+      // Ensure tiny images at least cover the square
+      const squareScale = Math.max(this.squareSize / this.imageNaturalWidth, this.squareSize / this.imageNaturalHeight);
+      this.baseScale = Math.max(this.baseScale, squareScale);
+    }
+    this.minZoom = this.baseScale;
+    this.maxZoom = this.baseScale * 3;
+    this.zoom = this.baseScale;
+    this.offsetX = 0;
+    this.offsetY = 0;
+    this.updateZoomUI();
+  }
+
+  /**
+   * Update zoom slider bounds/state and disable when transform is off.
+   */
+  updateZoomUI() {
+    if (this.zoomRange) {
+      this.zoomRange.min = this.minZoom.toFixed(2);
+      this.zoomRange.max = this.maxZoom.toFixed(2);
+      this.zoomRange.value = this.zoom.toFixed(2);
+      this.zoomRange.disabled = !this.enableTransform;
+    }
+    // Show/hide zoom controls based on whether transform is enabled
+    if (this.zoomControls) {
+      this.zoomControls.style.display = this.enableTransform ? 'flex' : 'none';
+    }
+  }
+
+  /**
+   * Set zoom level and re-apply transform.
+   * @param {number} value Requested zoom
+   */
+  setZoom(value) {
+    const clamped = Math.min(this.maxZoom, Math.max(this.minZoom, value));
+    this.zoom = clamped;
+    this.applyTransform();
+    this.updateZoomUI();
+  }
+
+  /**
+   * Set pan offsets and re-apply transform.
+   * @param {number} x Offset in px
+   * @param {number} y Offset in px
+   */
+  setOffsets(x, y) {
+    this.offsetX = x;
+    this.offsetY = y;
+    this.applyTransform();
+  }
+
+  /**
+   * Clamp offsets to ensure circle stays covered when panning.
+   * @param {number} displayWidth Rendered image width
+   * @param {number} displayHeight Rendered image height
+   */
+  clampOffsets(displayWidth, displayHeight) {
+    const circleRadius = this.circleSize / 2 + this.coverOverscan;
+    const halfW = displayWidth / 2;
+    const halfH = displayHeight / 2;
+
+    const maxOffsetX = Math.max(0, halfW - circleRadius);
+    const maxOffsetY = Math.max(0, halfH - circleRadius);
+
+    this.offsetX = Math.min(Math.max(this.offsetX, -maxOffsetX), maxOffsetX);
+    this.offsetY = Math.min(Math.max(this.offsetY, -maxOffsetY), maxOffsetY);
+  }
+
+  /**
+   * Apply current zoom/offset transforms to the preview images.
+   */
+  applyTransform() {
+    if (!this.enableTransform) return;
+    if (!this.imageNaturalWidth || !this.imageNaturalHeight) return;
+
+    const displayWidth = this.imageNaturalWidth * this.zoom;
+    const displayHeight = this.imageNaturalHeight * this.zoom;
+
+    this.clampOffsets(displayWidth, displayHeight);
+
+    const translateX = `calc(-50% + ${this.offsetX}px)`;
+    const translateY = `calc(-50% + ${this.offsetY}px)`;
+
+    if (this.foregroundImg) {
+      this.foregroundImg.style.width = `${displayWidth}px`;
+      this.foregroundImg.style.height = `${displayHeight}px`;
+      this.foregroundImg.style.left = '50%';
+      this.foregroundImg.style.top = '50%';
+      this.foregroundImg.style.transform = `translate(${translateX}, ${translateY})`;
+    }
+
+    if (this.previewBg) {
+      this.previewBg.style.width = `${displayWidth}px`;
+      this.previewBg.style.height = `${displayHeight}px`;
+      this.previewBg.style.left = '50%';
+      this.previewBg.style.top = '50%';
+      this.previewBg.style.transform = `translate(${translateX}, ${translateY})`;
+    }
+  }
+
+  /**
+   * Set src attributes for both background and foreground layers.
+   * @param {string} url Object URL for the image
+   */
+  applyImageSources(url) {
+    if (this.previewBg) {
+      this.previewBg.src = url;
+    }
+    if (this.foregroundImg) {
+      this.foregroundImg.src = url;
+    }
+  }
+
+  /**
+   * Save current avatar state: delete, or export cropped thumbnail and persist.
+   */
+  async handleSave() {
+    if (!this.currentAddress) {
+      this.close();
+      return;
+    }
+
+    const contact = myData?.contacts?.[this.currentAddress];
+    if (!contact) {
+      this.close();
+      return;
+    }
+
+    try {
+      // Need an image source to save
+      if (this.pendingBlob || this.activeImageBlob) {
+        const sourceBlob = this.pendingBlob || this.activeImageBlob;
+        const thumbnail = await this.exportCroppedThumbnail(sourceBlob);
+        await contactAvatarCache.save(this.currentAddress, thumbnail);
+        contact.hasAvatar = true;
+        saveState();
+        contactInfoModal.updateContactInfo(createDisplayInfo(contact));
+        contactInfoModal.needsContactListUpdate = true;
+        if (chatModal.isActive() && chatModal.address === this.currentAddress) {
+          chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to save avatar:', err);
+      showToast('Failed to save avatar', 2000, 'error');
+    } finally {
+      this.close();
+    }
+  }
+
+  /**
+   * Export the current view as a circular thumbnail blob.
+   * Falls back to basic thumbnail generation if dimensions are unavailable.
+   * @param {Blob} sourceBlob Original image blob
+   * @returns {Promise<Blob>}
+   */
+  async exportCroppedThumbnail(sourceBlob) {
+    // Ensure image is loaded
+    if (!this.imageNaturalWidth || !this.imageNaturalHeight) {
+      return contactAvatarCache.generateThumbnail(sourceBlob);
+    }
+
+    const canvasSize = this.circleSize; // 180
+    const canvas = document.createElement('canvas');
+    canvas.width = canvasSize;
+    canvas.height = canvasSize;
+    const ctx = canvas.getContext('2d');
+
+    // Clip to circle
+    ctx.beginPath();
+    ctx.arc(canvasSize / 2, canvasSize / 2, canvasSize / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+
+    const displayWidth = this.imageNaturalWidth * this.zoom;
+    const displayHeight = this.imageNaturalHeight * this.zoom;
+    const squareCenter = this.squareSize / 2; // 110
+    const imgDrawX = (squareCenter + this.offsetX) - (displayWidth / 2);
+    const imgDrawY = (squareCenter + this.offsetY) - (displayHeight / 2);
+    const circleLeft = (this.squareSize - this.circleSize) / 2; // 20
+    const circleTop = (this.squareSize - this.circleSize) / 2; // 20
+
+    // Draw using the loaded image element
+    const imageForDraw = await this.loadImage(this.previewUrl || URL.createObjectURL(sourceBlob));
+
+    ctx.drawImage(
+      imageForDraw,
+      imgDrawX - circleLeft,
+      imgDrawY - circleTop,
+      displayWidth,
+      displayHeight
+    );
+
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error('Failed to export avatar thumbnail'));
+        }
+      }, 'image/jpeg', 0.9);
+    });
+  }
+}
+
+const avatarEditModal = new AvatarEditModal();
 
 // Safely escape user-entered search text before building regex-based highlights.
 function escapeRegExp(string = '') {
@@ -5806,18 +6634,22 @@ class RemoveAccountsModal {
 const removeAccountsModal = new RemoveAccountsModal();
 
 class BackupAccountModal {
-  constructor() {}
+  constructor() {
+    this.GOOGLE_TOKEN_STORAGE_KEY = 'google_drive_token';
+  }
 
   load() {
     // called when the DOM is loaded; can setup event handlers here
     this.modal = document.getElementById('backupModal');
     this.passwordInput = document.getElementById('backupPassword');
     this.passwordWarning = document.getElementById('backupPasswordWarning');
+    this.passwordRequired = document.getElementById('backupPasswordRequired');
     this.passwordConfirmInput = document.getElementById('backupPasswordConfirm');
     this.passwordConfirmWarning = document.getElementById('backupPasswordConfirmWarning');
     this.submitButton = document.getElementById('backupForm').querySelector('button[type="submit"]');
     this.backupAllAccountsCheckbox = document.getElementById('backupAllAccounts');
     this.backupAllAccountsGroup = document.getElementById('backupAllAccountsGroup');
+    this.storageLocationSelect = document.getElementById('backupStorageLocation');
     
     document.getElementById('closeBackupForm').addEventListener('click', () => this.close());
     document.getElementById('backupForm').addEventListener('submit', (event) => {
@@ -5826,6 +6658,10 @@ class BackupAccountModal {
 
     this.passwordInput.addEventListener('input', () => this.updateButtonState());
     this.passwordConfirmInput.addEventListener('input', () => this.updateButtonState());
+    this.storageLocationSelect.addEventListener('change', () => this.handleStorageLocationChange());
+
+    // Handle legacy OAuth callback (in case someone lands on page with OAuth hash)
+    this.handleGoogleOAuthCallback();
   }
 
   open() {
@@ -5854,6 +6690,443 @@ class BackupAccountModal {
     this.passwordConfirmInput.value = '';
     // Reset checkbox
     this.backupAllAccountsCheckbox.checked = false;
+    // Reset storage location to default
+    this.storageLocationSelect.value = 'local';
+    this.handleStorageLocationChange();
+  }
+
+  // ======================================
+  // GOOGLE DRIVE TOKEN MANAGEMENT
+  // ======================================
+  // Not using below because we are requiring user to confirm account to use each time
+  /* storeGoogleToken(tokenData) {
+    localStorage.setItem(this.GOOGLE_TOKEN_STORAGE_KEY, JSON.stringify(tokenData));
+  } */
+
+  getStoredGoogleToken() {
+    const raw = localStorage.getItem(this.GOOGLE_TOKEN_STORAGE_KEY);
+    if (!raw) return null;
+    try {
+      const tokenData = JSON.parse(raw);
+      if (!tokenData.accessToken || !tokenData.expiresAt) return null;
+      if (Date.now() >= tokenData.expiresAt) {
+        console.log('Google Drive token expired, clearing.');
+        localStorage.removeItem(this.GOOGLE_TOKEN_STORAGE_KEY);
+        return null;
+      }
+      return tokenData;
+    } catch (e) {
+      console.error('Failed to parse stored Google token, clearing.', e);
+      localStorage.removeItem(this.GOOGLE_TOKEN_STORAGE_KEY);
+      return null;
+    }
+  }
+
+  clearGoogleToken() {
+    localStorage.removeItem(this.GOOGLE_TOKEN_STORAGE_KEY);
+  }
+
+  // ======================================
+  // GOOGLE OAUTH FLOW (via OAuth Server with PKCE)
+  // ======================================
+  buildOAuthServerUrl(sessionId) {
+    const config = network.googleDrive;
+    const params = new URLSearchParams({
+      sessionId,
+      provider: 'google',
+      flow: 'code' // Use PKCE flow (server-side)
+    });
+    return `${config.oauthServerUrl}/auth?${params.toString()}`;
+  }
+
+  /**
+   * Start Google Drive authentication via OAuth server with PKCE flow.
+   * Opens a popup (or delegates to React Native), polls the OAuth server for a token,
+   * and resolves with token data or rejects on cancel/deny/timeout/error.
+   *
+   * @returns {Promise<{accessToken: string, tokenType: string, expiresAt: number}>}
+   *          Resolves with token data on success; rejects with Error on cancel/deny/timeout/error.
+   */
+  async startGoogleDriveAuth() {
+    const sessionId = crypto.randomUUID();
+    const url = this.buildOAuthServerUrl(sessionId);
+    const isReactNative = reactNativeApp.isReactNativeWebView;
+    
+    console.log('Opening Google OAuth via OAuth server...', { sessionId, isReactNative });
+    
+    let popup = null;
+    let waitingToastId = null;
+    let currentAbortController = null;
+    
+    // In React Native, send message to native app to open in-app browser
+    if (isReactNative) {
+      if (window.ReactNativeWebView?.postMessage) {
+        console.log('Sending GOOGLE_OAUTH_REQUEST to native app');
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'GOOGLE_OAUTH_REQUEST',
+          url: url,
+          sessionId: sessionId
+        }));
+        // Don't use window.open() in React Native - let native app handle it
+      } else {
+        console.warn('ReactNativeWebView.postMessage not available, falling back to window.open()');
+        // Fallback to window.open if postMessage is not available
+        popup = window.open(url, '_blank');
+      }
+    } else {
+      // Regular browser flow - open popup
+      // Calculate popup position (centered)
+      const width = 500;
+      const height = 600;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      
+      // Open popup to OAuth server
+      popup = window.open(
+        url,
+        'google_oauth_popup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+      );
+      
+      // Check if popup was blocked
+      if (!popup) {
+        throw new Error('Popup blocked. Please allow popups for this site.');
+      }
+    }
+
+    // Poll the OAuth server for the token
+    const config = network.googleDrive;
+    const deadline = Date.now() + 120_000; // 120s overall timeout
+    let popupClosed = false;
+
+    // Wait ~2s before first poll, but abort early if popup closes.
+    const waitInitialDelay = async () => {
+      await Promise.race([
+        new Promise(resolve => setTimeout(resolve, 2000)),
+        new Promise(resolve => {
+          const earlyInterval = setInterval(() => {
+            if (popupClosed) {
+              clearInterval(earlyInterval);
+              resolve();
+            }
+          }, 100);
+        })
+      ]);
+    };
+
+    // Detect terminal (non-retryable) auth errors surfaced from the server.
+    const shouldStopRetry = (err) =>
+      err?.message && (
+        err.message.includes('Authentication was cancelled') ||
+        err.message.startsWith('Authentication failed:')
+      );
+
+    // Watch the popup for closure; on close, mark state and abort in-flight poll.
+    const startPopupWatcher = () => {
+      if (popup && !isReactNative) {
+        popupCheckInterval = setInterval(() => {
+          if (popup.closed) {
+            clearInterval(popupCheckInterval);
+            popupCheckInterval = null;
+            popupClosed = true;
+            if (currentAbortController) {
+              currentAbortController.abort();
+            }
+          }
+        }, 500);
+      }
+    };
+
+    // Single poll request with AbortController and attempt logging.
+    const fetchPollResponse = async (attempt) => {
+      currentAbortController = new AbortController();
+      console.log('Polling OAuth server for token...', { attempt, sessionId });
+      const response = await fetch(
+        `${config.oauthServerUrl}/auth/poll?sessionId=${sessionId}`,
+        { signal: currentAbortController.signal }
+      );
+      currentAbortController = null;
+      return response;
+    };
+
+    // Monitor popup closure (only for regular browser where we have a valid popup reference)
+    let popupCheckInterval = null;
+    startPopupWatcher();
+
+    // Wait a bit before polling, but allow early exit on close/cancel
+    await waitInitialDelay();
+
+    const cleanup = () => {
+      if (popupCheckInterval) {
+        clearInterval(popupCheckInterval);
+      }
+      if (waitingToastId) {
+        hideToast(waitingToastId);
+      }
+      if (popup && !popup.closed) {
+        popup.close();
+      }
+    };
+
+    const finalPollIfNeeded = async () => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const response = await fetch(
+          `${config.oauthServerUrl}/auth/poll?sessionId=${sessionId}`,
+          { signal: controller.signal }
+        );
+        clearTimeout(timeoutId);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.token && !(typeof data.token === 'string' && data.token.startsWith('error:'))) {
+            const now = Date.now();
+            const tokenData = {
+              accessToken: data.token,
+              tokenType: 'Bearer',
+              expiresAt: now + 3600 * 1000
+            };
+            cleanup();
+            return tokenData;
+          }
+        }
+      } catch (e) {
+        // ignore final poll errors; fall through to cancellation
+      }
+      return null;
+    };
+
+    try {
+      let attempt = 0;
+      while (Date.now() < deadline) {
+        attempt += 1;
+        // Check for cancellation/closure before polling
+        if (!isReactNative && popupClosed) {
+          const maybeToken = await finalPollIfNeeded();
+          if (maybeToken) {
+            return maybeToken;
+          }
+          throw new Error('Authentication cancelled.');
+        }
+
+        try {
+          const response = await fetchPollResponse(attempt);
+
+          if (response.ok) {
+            const data = await response.json();
+            
+            if (data.success && data.token) {
+              // Check if token is actually an error message from OAuth server
+              if (typeof data.token === 'string' && data.token.startsWith('error:')) {
+                // User cancelled or denied access
+                const errorMessage = data.token.replace('error:', '').trim();
+                const userFriendlyMessage = errorMessage === 'access_denied' 
+                  ? 'Authentication was cancelled or denied. Please try again if you want to connect Google Drive.'
+                  : `Authentication failed: ${errorMessage}`;
+                
+                console.log('OAuth error received from server:', errorMessage);
+                cleanup();
+                throw new Error(userFriendlyMessage);
+              }
+              
+              // Store token with expiration (assume 1 hour if not provided)
+              const now = Date.now();
+              const tokenData = {
+                accessToken: data.token,
+                tokenType: 'Bearer',
+                expiresAt: now + 3600 * 1000 // 1 hour expiration
+              };
+              
+              //this.storeGoogleToken(tokenData);
+              console.log('Received access token from OAuth server.');
+              cleanup();
+              return tokenData;
+            }
+          } else if (response.status === 408) {
+            // Timeout from server, retry
+            console.log('Poll timeout, retrying...', { attempt });
+            continue;
+          } else if (response.status === 404) {
+            // Session not found, retry
+            console.log('Session not found, retrying...', { attempt });
+            continue;
+          } else {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `Poll failed: ${response.status}`);
+          }
+        } catch (fetchError) {
+          // If user closed/cancelled during fetch, surface immediately
+          if (!isReactNative && popupClosed) {
+            const maybeToken = await finalPollIfNeeded();
+            if (maybeToken) {
+              return maybeToken;
+            }
+            throw new Error('Authentication cancelled.');
+          }
+          // If server indicated cancel/denied, stop retrying
+          if (shouldStopRetry(fetchError)) {
+            throw fetchError;
+          }
+          // Abort -> just retry until deadline
+          if (fetchError?.name === 'AbortError') {
+            continue;
+          }
+          console.log('Poll fetch error, retrying...', fetchError.message);
+        }
+      }
+
+      // Deadline exhausted
+      cleanup();
+      throw new Error('Failed to get token before timeout. Please try again.');
+    } catch (error) {
+      cleanup();
+      throw error;
+    }
+  }
+
+  handleGoogleOAuthCallback() {
+    // Legacy OAuth callback handler - kept for backwards compatibility
+    // The new PKCE flow uses the OAuth server, so this is only needed
+    // if someone lands on the page with an old OAuth hash
+    if (!window.location.hash || window.location.hash.length <= 1) return;
+
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const accessToken = hashParams.get('access_token');
+    
+    // Only process if this looks like an OAuth callback
+    if (!accessToken) return;
+    
+    const tokenType = hashParams.get('token_type');
+    const expiresIn = hashParams.get('expires_in');
+    const error = hashParams.get('error');
+
+    if (error) {
+      console.error('OAuth error from Google:', error);
+      showToast('Google Drive authentication failed: ' + error, 5000, 'error');
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+      return;
+    }
+
+    const now = Date.now();
+    const expiresAt = now + parseInt(expiresIn || '3600', 10) * 1000;
+
+    const tokenData = {
+      accessToken,
+      tokenType: tokenType || 'Bearer',
+      expiresAt
+    };
+    //this.storeGoogleToken(tokenData);
+    console.log('Received access token from Google (legacy redirect).');
+
+    // Clean the URL
+    window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+  }
+
+  // ======================================
+  // GOOGLE DRIVE FOLDER HELPERS
+  // ======================================
+  async ensureBackupFolder(tokenData) {
+    const folderName = network.googleDrive.backupFolder;
+    console.log(`Checking for existing '${folderName}' folder...`);
+
+    const queryParams = new URLSearchParams({
+      q: `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'root' in parents`,
+      fields: 'files(id, name)'
+    });
+
+    const listRes = await fetch(
+      'https://www.googleapis.com/drive/v3/files?' + queryParams.toString(),
+      {
+        headers: {
+          Authorization: `${tokenData.tokenType} ${tokenData.accessToken}`
+        }
+      }
+    );
+
+    if (!listRes.ok) {
+      const text = await listRes.text();
+      throw new Error(`Drive folder search failed: ${listRes.status} ${text}`);
+    }
+
+    const listData = await listRes.json();
+    if (listData.files && listData.files.length > 0) {
+      console.log(`Found existing ${folderName} folder.`, listData.files[0]);
+      return listData.files[0].id;
+    }
+
+    console.log(`No existing ${folderName} folder, creating one...`);
+
+    const folderMetadata = {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: ['root']
+    };
+
+    const createRes = await fetch(
+      'https://www.googleapis.com/drive/v3/files',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `${tokenData.tokenType} ${tokenData.accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(folderMetadata)
+      }
+    );
+
+    if (!createRes.ok) {
+      const text = await createRes.text();
+      throw new Error(`Drive folder create failed: ${createRes.status} ${text}`);
+    }
+
+    const folderData = await createRes.json();
+    console.log(`Created ${folderName} folder.`, folderData);
+    return folderData.id;
+  }
+
+  // ======================================
+  // GOOGLE DRIVE UPLOAD
+  // ======================================
+  async uploadToGoogleDrive(data, filename, tokenData) {
+    console.log('Preparing upload to Google Drive...', { filename, sizeBytes: data.length });
+
+    // Ensure backup folder exists and get its ID
+    const folderId = await this.ensureBackupFolder(tokenData);
+    console.log('Using backup folder', { folderId });
+
+    // Set metadata to put file in that folder
+    const metadata = {
+      name: filename,
+      parents: [folderId]
+    };
+
+    const blob = new Blob([data], { type: 'application/json' });
+    const form = new FormData();
+    form.append(
+      'metadata',
+      new Blob([JSON.stringify(metadata)], { type: 'application/json' })
+    );
+    form.append('file', blob, filename);
+
+    const res = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `${tokenData.tokenType} ${tokenData.accessToken}`
+        },
+        body: form
+      }
+    );
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Drive upload failed: ${res.status} ${text}`);
+    }
+
+    const result = await res.json();
+    console.log('Upload success.', result);
+    return result;
   }
 
   /**
@@ -5893,20 +7166,23 @@ class BackupAccountModal {
       return;
     }
 
+    const isGoogleDrive = this.storageLocationSelect.value === 'google-drive';
+
     // Determine which backup method to use
     if (myData && !this.backupAllAccountsCheckbox.checked) {
       // User is signed in and wants to backup only current account
-      await this.handleSubmitOne();
+      await this.handleSubmitOne(isGoogleDrive);
     } else {
       // User wants to backup all accounts (either not signed in or checkbox checked)
-      await this.handleSubmitAll();
+      await this.handleSubmitAll(isGoogleDrive);
     }
   }
 
   /**
    * Handle the submission of a single account backup.
+   * @param {boolean} toGoogleDrive - Whether to upload to Google Drive
    */
-  async handleSubmitOne() {
+  async handleSubmitOne(toGoogleDrive = false) {
     // Disable button to prevent multiple submissions
     this.submitButton.disabled = true;
 
@@ -5935,40 +7211,44 @@ class BackupAccountModal {
     try {
       // Encrypt data if password is provided
       const finalData = password ? encryptData(jsonData, password) : jsonData;
-
-      // Create and trigger download
-      const blob = new Blob([finalData], { type: 'application/json' });
       const filename = this.generateBackupFilename(myAccount.username);
-      // Detect if running inside React Native WebView
-      if (window.ReactNativeWebView?.postMessage) {
-        // ✅ React Native WebView: Send base64 via postMessage
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64DataUrl = reader.result;
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'EXPORT_BACKUP',
-            filename,
-            dataUrl: base64DataUrl,
-          }));
-        };
-        reader.readAsDataURL(blob);
-      } else {
-        // Regular browser download
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
 
-      // Close backup modal
-      this.close();
+      if (toGoogleDrive) {
+        // Google Drive upload flow
+        await this.handleGoogleDriveUpload(finalData, filename);
+      } else {
+        // Local download flow
+        const blob = new Blob([finalData], { type: 'application/json' });
+        // Detect if running inside React Native WebView
+        if (window.ReactNativeWebView?.postMessage) {
+          // ✅ React Native WebView: Send base64 via postMessage
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64DataUrl = reader.result;
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'EXPORT_BACKUP',
+              filename,
+              dataUrl: base64DataUrl,
+            }));
+          };
+          reader.readAsDataURL(blob);
+        } else {
+          // Regular browser download
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+        // Close backup modal
+        this.close();
+      }
     } catch (error) {
-      console.error('Encryption failed:', error);
-      showToast('Failed to encrypt data. Please try again.', 0, 'error');
+      console.error('Backup failed:', error);
+      showToast('Failed to create backup. Please try again.', 0, 'error');
       // Re-enable button so user can try again
       this.updateButtonState();
     }
@@ -5976,8 +7256,9 @@ class BackupAccountModal {
 
   /**
    * Handle the submission of a backup for all accounts.
+   * @param {boolean} toGoogleDrive - Whether to upload to Google Drive
    */
-  async handleSubmitAll() {
+  async handleSubmitAll(toGoogleDrive = false) {
 
     // Disable button to prevent multiple submissions
     this.submitButton.disabled = true;
@@ -5990,42 +7271,98 @@ class BackupAccountModal {
     try {
       // Encrypt data if password is provided
       const finalData = password ? encryptData(jsonData, password) : jsonData;
-
-      // Create and trigger download
-      const blob = new Blob([finalData], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
       const filename = this.generateBackupFilename();
-      // Detect if running inside React Native WebView
-      if (window.ReactNativeWebView?.postMessage) {
-        // ✅ React Native WebView: Send base64 via postMessage
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64DataUrl = reader.result;
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'EXPORT_BACKUP',
-            filename,
-            dataUrl: base64DataUrl,
-          }));
-        };
-        reader.readAsDataURL(blob);
-      } else {
-        // Regular browser download
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
 
-      // Close backup modal
-      this.close();
+      if (toGoogleDrive) {
+        // Google Drive upload flow
+        await this.handleGoogleDriveUpload(finalData, filename);
+      } else {
+        // Local download flow
+        const blob = new Blob([finalData], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        // Detect if running inside React Native WebView
+        if (window.ReactNativeWebView?.postMessage) {
+          // ✅ React Native WebView: Send base64 via postMessage
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64DataUrl = reader.result;
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'EXPORT_BACKUP',
+              filename,
+              dataUrl: base64DataUrl,
+            }));
+          };
+          reader.readAsDataURL(blob);
+        } else {
+          // Regular browser download
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+        // Close backup modal
+        this.close();
+      }
     } catch (error) {
-      console.error('Encryption failed:', error);
-      showToast('Failed to encrypt data. Please try again.', 0, 'error');
+      console.error('Backup failed:', error);
+      showToast('Failed to create backup. Please try again.', 0, 'error');
       // Re-enable button so user can try again
       this.updateButtonState();
+    }
+  }
+
+  /**
+   * Handle Google Drive upload - checks for token or initiates OAuth flow
+   * @param {string} data - The backup data to upload
+   * @param {string} filename - The filename for the backup
+   */
+  async handleGoogleDriveUpload(data, filename) {
+    let tokenData = this.getStoredGoogleToken();
+
+    // If no valid token, authenticate first via popup
+    if (!tokenData) {
+      try {
+        showToast('Approve Drive access in the Google window.', 3000, 'info');
+        tokenData = await this.startGoogleDriveAuth();
+      } catch (error) {
+        console.error('Google Drive authentication failed:', error);
+        showToast(error.message || 'Authentication failed.', 0, 'error');
+        this.updateButtonState();
+        return;
+      }
+    }
+
+    // Now upload with the token
+    try {
+      showToast('Uploading backup to Google Drive...', 3000, 'info');
+      await this.uploadToGoogleDrive(data, filename, tokenData);
+      showToast('Backup uploaded to Google Drive successfully!', 5000, 'success');
+      this.close();
+    } catch (error) {
+      console.error('Google Drive upload failed:', error);
+      // Token might be invalid, clear it and retry auth
+      if (error.message.includes('401') || error.message.includes('403')) {
+        this.clearGoogleToken();
+        showToast('Google Drive session expired. Please authenticate again.', 3000, 'warning');
+        // Retry with fresh authentication
+        try {
+          tokenData = await this.startGoogleDriveAuth();
+          showToast('Uploading backup to Google Drive...', 3000, 'info');
+          await this.uploadToGoogleDrive(data, filename, tokenData);
+          showToast('Backup uploaded to Google Drive successfully!', 5000, 'success');
+          this.close();
+        } catch (retryError) {
+          console.error('Retry failed:', retryError);
+          showToast(retryError.message || 'Upload failed.', 0, 'error');
+          this.updateButtonState();
+        }
+      } else {
+        showToast('Failed to upload to Google Drive: ' + error.message, 5000, 'error');
+        this.updateButtonState();
+      }
     }
   }
 
@@ -6041,16 +7378,24 @@ class BackupAccountModal {
   updateButtonState() {
     const password = this.passwordInput.value;
     const confirmPassword = this.passwordConfirmInput.value;
+    const isGoogleDrive = this.storageLocationSelect.value === 'google-drive';
     
-    // Password is optional, but if provided, it must be at least 4 characters
+    // Password is required for Google Drive, optional for local
     let isValid = true;
     
-    // Validate password length
-    if (password.length > 0 && password.length < 4) {
+    // Check if password is required (Google Drive)
+    if (isGoogleDrive && password.length === 0) {
+      isValid = false;
+      this.passwordRequired.style.display = 'inline';
+      this.passwordWarning.style.display = 'none';
+    } else if (password.length > 0 && password.length < 4) {
+      // Validate password length
       isValid = false;
       this.passwordWarning.style.display = 'inline';
+      this.passwordRequired.style.display = 'none';
     } else {
       this.passwordWarning.style.display = 'none';
+      this.passwordRequired.style.display = 'none';
     }
     
     // Validate password confirmation
@@ -6070,6 +7415,20 @@ class BackupAccountModal {
     
     // Update button state
     this.submitButton.disabled = !isValid;
+  }
+
+  handleStorageLocationChange() {
+    const isGoogleDrive = this.storageLocationSelect.value === 'google-drive';
+    
+    // Update placeholder text based on storage location
+    if (isGoogleDrive) {
+      this.passwordInput.placeholder = 'Password required for Google Drive';
+    } else {
+      this.passwordInput.placeholder = 'Leave empty for unencrypted backup';
+    }
+    
+    // Re-validate form
+    this.updateButtonState();
   }
 }
 const backupAccountModal = new BackupAccountModal();
@@ -8281,9 +9640,10 @@ class StakeValidatorModal {
       this.faucetButton.disabled = true;
       
       const payload = {
-        nodeAddress: this.nodeAddressInput.value.trim(),
-        userAddress: longAddress(myAccount.keys.address),
         username: myAccount.username,
+        userAddress: longAddress(myAccount.keys.address),
+        networkId: network.netid,
+        nodeAddress: this.nodeAddressInput.value.trim(),
       };
       await signObj(payload, myAccount.keys);
       
@@ -8347,6 +9707,9 @@ class ChatModal {
     // Track whether we've locked background/modal scroll
     this.scrollLocked = false;
     this._touchMoveBlocker = null; // blocks touch outside messages container
+
+    // Track which voice message element is playing
+    this.playingVoiceMessageElement = null;
   }
 
   /**
@@ -8387,6 +9750,13 @@ class ChatModal {
     this.sendMoneyButton = document.getElementById('chatSendMoneyButton');
     this.retryOfTxId = document.getElementById('retryOfTxId');
     this.messageInput = document.querySelector('.message-input');
+    this.replyPreview = document.getElementById('replyPreview');
+    this.replyPreviewContent = document.querySelector('#replyPreview .reply-preview-content');
+    this.replyPreviewText = document.querySelector('#replyPreview .reply-preview-text');
+    this.replyPreviewClose = document.getElementById('replyPreviewClose');
+    this.replyToTxId = document.getElementById('replyToTxId');
+    this.replyToMessage = document.getElementById('replyToMessage');
+    this.replyOwnerIsMine = document.getElementById('replyOwnerIsMine');
     this.chatSendMoneyButton = document.getElementById('chatSendMoneyButton');
     this.messageByteCounter = document.querySelector('.message-byte-counter');
     this.tollTemplate = document.getElementById('tollInfoMessageTemplate');
@@ -8511,18 +9881,32 @@ class ChatModal {
     });
 
     this.chatSendMoneyButton.addEventListener('click', () => {
+      this.pauseVoiceMessages();
       sendAssetFormModal.username = this.chatSendMoneyButton.dataset.username;
       sendAssetFormModal.open();
     });
 
     this.callButton.addEventListener('click', () => {
+      this.pauseVoiceMessages();
       this.handleCallUser();
     });
 
     this.addFriendButtonChat.addEventListener('click', () => {
+      this.pauseVoiceMessages();
       if (!friendModal.getCurrentContactAddress()) return;
       friendModal.open();
     });
+
+    if (this.replyPreviewClose) {
+      this.replyPreviewClose.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.cancelReply();
+      });
+    }
+
+    if (this.replyPreview) {
+      this.replyPreview.addEventListener('click', (e) => this.handleReplyPreviewClick(e));
+    }
 
     if (this.addAttachmentButton) {
       this.addAttachmentButton.addEventListener('click', () => {
@@ -8576,6 +9960,19 @@ class ChatModal {
       if (playButton) {
         e.preventDefault();
         this.playVoiceMessage(playButton);
+      }
+    });
+
+    // Reply quote click delegation
+    this.messagesList.addEventListener('click', (e) => {
+      const replyQuote = e.target.closest('.reply-quote');
+      if (replyQuote) {
+        const targetTxid = replyQuote.dataset.replyTxid;
+        if (targetTxid) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.scrollToMessage(targetTxid);
+        }
       }
     });
 
@@ -8634,6 +10031,94 @@ class ChatModal {
     };
 
   /**
+   * Set voice message button icon (play or pause)
+   * @param {HTMLElement} voiceMessageElement - Voice message element
+   * @param {boolean} isPlaying - True for pause icon, false for play icon
+   */
+  setVoiceMessageButton(voiceMessageElement, isPlaying) {
+    const button = voiceMessageElement?.querySelector('.voice-message-play-button');
+    if (!button) return;
+    button.disabled = false;
+    button.innerHTML = isPlaying 
+      ? '<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>'
+      : '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+  }
+
+  /**
+   * Reset voice message UI to initial state
+   */
+  resetVoiceMessageUI(voiceMessageElement) {
+    if (!voiceMessageElement) return;
+    this.setVoiceMessageButton(voiceMessageElement, false);
+    const seekEl = voiceMessageElement.querySelector('.voice-message-seek');
+    const timeDisplay = voiceMessageElement.querySelector('.voice-message-time-display');
+    if (seekEl) seekEl.value = 0;
+    if (timeDisplay && voiceMessageElement.dataset.duration) {
+      const duration = this.formatDuration(Number(voiceMessageElement.dataset.duration) || 0);
+      timeDisplay.textContent = `0:00 / ${duration}`;
+    }
+  }
+
+  /**
+   * Clean up voice message audio resources
+   */
+  cleanupVoiceMessageResources(voiceMessageElement) {
+    if (!voiceMessageElement) return;
+    // Revoke blob URL to prevent memory leak (critical - blobs aren't auto-cleaned)
+    if (voiceMessageElement.audioUrl) URL.revokeObjectURL(voiceMessageElement.audioUrl);
+    // TODO: delete these when we set up listeners properly since we don't have to remove them manually and will be set up during load()
+    // Remove event listeners from seekEl by cloning (removes all listeners at once)
+    const seekEl = voiceMessageElement.querySelector('.voice-message-seek');
+    if (seekEl && voiceMessageElement.seekSetup) {
+      const newSeekEl = seekEl.cloneNode(true);
+      seekEl.parentNode?.replaceChild(newSeekEl, seekEl);
+    }
+    // Delete references to help GC
+    delete voiceMessageElement.audioElement;
+    delete voiceMessageElement.audioUrl;
+    delete voiceMessageElement.pendingSeekTime;
+    delete voiceMessageElement.isScrubbing;
+    delete voiceMessageElement.seekSetup;
+  }
+
+  /**
+   * Pause voice message without cleanup (keeps audio cached for quick resume)
+   */
+  pauseVoiceMessage(voiceMessageElement) {
+    if (!voiceMessageElement) return;
+    const audio = voiceMessageElement.audioElement;
+    if (audio && !audio.paused) {
+      audio.pause();
+      this.setVoiceMessageButton(voiceMessageElement, false);
+      if (this.playingVoiceMessageElement === voiceMessageElement) {
+        this.playingVoiceMessageElement = null;
+      }
+    }
+  }
+
+  /**
+   * Pause voice messages when clicking any header action button
+   */
+  pauseVoiceMessages() {
+    if (this.playingVoiceMessageElement) {
+      this.pauseVoiceMessage(this.playingVoiceMessageElement);
+    }
+  }
+
+  /**
+   * Stop and cleanup a voice message (frees all resources)
+   */
+  stopVoiceMessage(voiceMessageElement) {
+    if (!voiceMessageElement) return;
+    if (voiceMessageElement.audioElement) voiceMessageElement.audioElement.pause();
+    this.resetVoiceMessageUI(voiceMessageElement);
+    this.cleanupVoiceMessageResources(voiceMessageElement);
+    if (this.playingVoiceMessageElement === voiceMessageElement) {
+      this.playingVoiceMessageElement = null;
+    }
+  }
+
+  /**
    * Opens the chat modal for the given address.
    * @param {string} address - The address of the contact to open the chat modal for.
    * @returns {Promise<void>}
@@ -8672,7 +10157,10 @@ class ChatModal {
     // Add data attributes to store the username and address
     this.sendMoneyButton.dataset.username = contact.username || address;
 
-    this.modalAvatar.innerHTML = generateIdenticon(contact.address, 40);
+    this.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+
+    // Stop and cleanup all voice messages from previous conversation
+    this.messagesList?.querySelectorAll('.voice-message').forEach(vm => this.stopVoiceMessage(vm));
 
     // Clear previous messages from the UI
     this.messagesList.innerHTML = '';
@@ -8686,6 +10174,7 @@ class ChatModal {
     // TODO: create event listener instead of onclick here
     const userInfo = this.modal.querySelector('.chat-user-info');
     userInfo.onclick = () => {
+      this.pauseVoiceMessages();
       const contact = myData.contacts[address];
       if (contact) {
         contactInfoModal.open(createDisplayInfo(contact));
@@ -8695,6 +10184,7 @@ class ChatModal {
     // Add click handler for edit button
     // TODO: create event listener instead of onclick here
     this.editButton.onclick = () => {
+      this.pauseVoiceMessages();
       const contact = myData.contacts[address];
       if (contact) {
         contactInfoModal.open(createDisplayInfo(contact));
@@ -8715,10 +10205,6 @@ class ChatModal {
     }
 
     this.clearNotificationsIfAllRead();
-
-    // clear file attachments
-    this.fileAttachments = [];
-    this.showAttachmentPreview(); // Hide preview
 
     // Setup state for appendChatModal and perform initial render
     this.address = address;
@@ -8754,11 +10240,23 @@ class ChatModal {
       console.warn('Offline: toll not processed');
     }
 
-    // Save any unsaved draft before closing
-    this.debouncedSaveDraft(this.messageInput.value);
+    // Save any unsaved draft before closing (save immediately, not debounced)
+    this.saveDraft(this.messageInput.value);
 
     // Cancel all ongoing file operations
     this.cancelAllOperations();
+
+    // Stop all playing voice messages
+    this.messagesList?.querySelectorAll('.voice-message').forEach(vm => this.stopVoiceMessage(vm));
+
+    // Clean up thumbnail blob URLs
+    this.messagesList?.querySelectorAll('[data-thumbnail-url]').forEach(row => {
+      const thumbnailUrl = row.dataset.thumbnailUrl;
+      if (thumbnailUrl) {
+        URL.revokeObjectURL(thumbnailUrl);
+        delete row.dataset.thumbnailUrl;
+      }
+    });
 
     // clear file attachments
     this.fileAttachments = [];
@@ -8987,7 +10485,7 @@ class ChatModal {
         return;
       }
 
-      const amount = this.tollRequiredToSend ? this.toll : 0n;
+      const amount = myData.contacts[this.address].tollRequiredToSend == 1 ? this.toll : 0n;
       const sufficientBalance = await validateBalance(amount);
       if (!sufficientBalance) {
         const msg = `Insufficient balance for fee${amount > 0n ? ' and toll' : ''}`;
@@ -9072,11 +10570,19 @@ class ChatModal {
             text: message
         };
       } else {
+        const replyIdVal = this.replyToTxId?.value?.trim?.() || '';
+        const replyMsgVal = this.replyToMessage?.value?.trim?.() || '';
+        const replyOwnerIsMineVal = this.replyOwnerIsMine?.value === '1';
         // Convert message to new JSON format with type and optional attachments
         messageObj = {
           type: 'message',
           message: message
         };
+        if (replyIdVal) {
+          messageObj.replyId = replyIdVal;
+          messageObj.replyMessage = replyMsgVal || '';
+          messageObj.replyOwnerIsMine = replyOwnerIsMineVal;
+        }
       }
 
       // Handle attachments - add them to the JSON structure instead of using xattach
@@ -9183,6 +10689,11 @@ console.warn('in send message', txid)
           status: 'sent',
           ...(this.fileAttachments && this.fileAttachments.length > 0 && { xattach: this.fileAttachments }), // Only include if there are attachments
         };
+        if (messageObj.replyId) {
+          newMessage.replyId = messageObj.replyId;
+          newMessage.replyMessage = messageObj.replyMessage;
+          newMessage.replyOwnerIsMine = messageObj.replyOwnerIsMine;
+        }
         insertSorted(chatsData.contacts[currentAddress].messages, newMessage, 'timestamp');
       }
 
@@ -9191,6 +10702,9 @@ console.warn('in send message', txid)
         this.fileAttachments = [];
         this.showAttachmentPreview();
       }
+
+      // Clear reply state after sending
+      this.cancelReply();
 
       // Update or add to chats list, maintaining chronological order
       const chatUpdate = {
@@ -9217,6 +10731,10 @@ console.warn('in send message', txid)
       // Call debounced save directly with empty string
       this.debouncedSaveDraft('');
       contact.draft = '';
+      // Clear reply draft state
+      this.clearReplyState(contact);
+      // Clear attachment draft state
+      this.clearAttachmentState(contact);
 
       // Update the chat modal UI immediately
       if (!isEdit) this.appendChatModal(); // This should now display the 'sending' message
@@ -9473,6 +10991,9 @@ console.warn('in send message', txid)
         // --- Render Chat Message ---
         const messageClass = item.my ? 'sent' : 'received'; // Use item.my directly
         
+        // Initialize replyHTML at this scope so it's always defined
+        let replyHTML = '';
+        
         // Check if message was deleted
         if (item?.deleted > 0) {
           // Render deleted message with special styling
@@ -9483,27 +11004,61 @@ console.warn('in send message', txid)
                     </div>
                 `;
         } else {
+          // --- Render Reply Quote if present ---
+          if (item.replyId) {
+              const replyText = escapeHtml(item.replyMessage || 'View original message');
+              // Determine owner label: "You" if the referenced message is ours, else contact name
+              const ownerIsMineHint = item.replyOwnerIsMine;
+              const hasHint = typeof ownerIsMineHint !== 'undefined';
+              let isOwnerMine = false;
+              if (hasHint) {
+                // Use both item.my and replyOwnerIsMine to determine from current viewer's perspective
+                // item.my: true if reply is from current user (viewer's perspective)
+                // replyOwnerIsMine: true if original message was from sender's perspective
+                // If they match (both true or both false), original message is from current user's perspective
+                const isSelfReply = ownerIsMineHint === true || ownerIsMineHint === '1';
+                isOwnerMine = item.my === isSelfReply;
+              } else {
+                const targetMsg = contact.messages?.find((m) => m.txid === item.replyId);
+                isOwnerMine = !!(targetMsg && targetMsg.my);
+              }
+              const ownerText = isOwnerMine ? 'You' : (getContactDisplayName(contact) || 'Contact');
+              const ownerClass = isOwnerMine ? 'reply-owner-me' : 'reply-owner-contact';
+              const replyOwnerLabel = `<span class="reply-quote-label ${ownerClass}">${escapeHtml(ownerText)}</span>`;
+
+              replyHTML = `
+                <div class="reply-quote ${ownerClass}" data-reply-txid="${escapeHtml(item.replyId)}">
+                  ${replyOwnerLabel}
+                  <div class="reply-quote-text">${replyText}</div>
+                </div>
+              `;
+          }
           // --- Render Attachments if present ---
           let attachmentsHTML = '';
           if (item.xattach && Array.isArray(item.xattach) && item.xattach.length > 0) {
             attachmentsHTML = item.xattach.map(att => {
-              const emoji = this.getFileEmoji(att.type || '', att.name || '');
               const fileUrl = att.url || '#';
               const fileName = att.name || 'Attachment';
               const fileSize = att.size ? this.formatFileSize(att.size) : '';
               const fileType = att.type ? att.type.split('/').pop().toUpperCase() : '';
+              const isImage = att.type && att.type.startsWith('image/');
+              const fileTypeIcon = this.getFileTypeForIcon(att.type || '', fileName);
+              const paddingStyle = isImage ? 'padding: 5px 5px;' : 'padding: 10px 12px;';
               return `
-                <div class="attachment-row" style="display: flex; align-items: center; background: #f5f5f7; border-radius: 12px; padding: 10px 12px; margin-bottom: 6px;"
+                <div class="attachment-row" style="display: flex; ${isImage ? 'flex-direction: column;' : 'align-items: center;'} background: #f5f5f7; border-radius: 12px; ${paddingStyle} margin-bottom: 6px;"
                   data-url="${fileUrl}"
                   data-name="${encodeURIComponent(fileName)}"
                   data-type="${att.type || ''}"
                   data-pqEncSharedKey="${att.pqEncSharedKey || ''}"
                   data-selfKey="${att.selfKey || ''}"
                   data-msg-idx="${i}"
+                  ${isImage ? 'data-image-attachment="true"' : ''}
                 >
-                  <span style="font-size: 2.2em; margin-right: 14px;">${emoji}</span>
+                  <div class="attachment-icon-container" style="${isImage ? 'margin-bottom: 10px;' : 'margin-right: 14px; flex-shrink: 0;'}">
+                    <div class="attachment-icon" data-file-type="${fileTypeIcon}"></div>
+                  </div>
                   <div style="min-width:0;">
-                    <span class="attachment-label" style="font-weight:500;color:#222;word-break:break-all;">
+                    <span class="attachment-label" style="font-weight:500;color:#222;font-size:0.7em;display:block;word-wrap:break-word;">
                       ${fileName}
                     </span><br>
                     <span style="font-size: 0.93em; color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
@@ -9583,6 +11138,7 @@ console.warn('in send message', txid)
       const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !item.deleted;
       messageHTML = `
             <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute} ${callTimeAttribute}>
+              ${replyHTML}
               ${attachmentsHTML}
               ${messageTextHTML}
               <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}${showEditedDot ? ' <span class="edited-new-dot" title="Edited since last read"></span>' : ''}</div>
@@ -9596,6 +11152,9 @@ console.warn('in send message', txid)
       this.messagesList.insertAdjacentHTML('beforeend', messageHTML);
       // The newest received element will be found after the loop completes
     }
+
+    // --- 4.5. Load thumbnails for image attachments (async, non-blocking) ---
+    this.loadThumbnailsForAttachments();
 
     // --- 5. Find the corresponding DOM element after rendering ---
     // This happens inside the setTimeout to ensure elements are in the DOM
@@ -9697,6 +11256,51 @@ console.warn('in send message', txid)
   }
 
   /**
+   * Saves reply state to a contact object
+   * @param {Object} contact - The contact object to save reply state to
+   */
+  saveReplyState(contact) {
+    const replyTxid = this.replyToTxId.value.trim();
+    if (replyTxid) {
+      contact.draftReplyTxid = replyTxid;
+      contact.draftReplyMessage = this.replyToMessage.value.trim();
+      contact.draftReplyOwnerIsMine = this.replyOwnerIsMine.value;
+    } else {
+      this.clearReplyState(contact);
+    }
+  }
+
+  /**
+   * Clears reply state from a contact object
+   * @param {Object} contact - The contact object to clear reply state from
+   */
+  clearReplyState(contact) {
+    delete contact.draftReplyTxid;
+    delete contact.draftReplyMessage;
+    delete contact.draftReplyOwnerIsMine;
+  }
+
+  /**
+   * Saves attachment state to a contact object
+   * @param {Object} contact - The contact object to save attachment state to
+   */
+  saveAttachmentState(contact) {
+    if (this.fileAttachments && this.fileAttachments.length > 0) {
+      contact.draftAttachments = JSON.parse(JSON.stringify(this.fileAttachments));
+    } else {
+      this.clearAttachmentState(contact);
+    }
+  }
+
+  /**
+   * Clears attachment state from a contact object
+   * @param {Object} contact - The contact object to clear attachment state from
+   */
+  clearAttachmentState(contact) {
+    delete contact.draftAttachments;
+  }
+
+  /**
    * Saves a draft message for the current contact
    * @param {string} text - The draft message text to save
    */
@@ -9705,6 +11309,12 @@ console.warn('in send message', txid)
       // Sanitize the text before saving
       const sanitizedText = escapeHtml(text);
       myData.contacts[this.address].draft = sanitizedText;
+      
+      // Save or clear reply state
+      this.saveReplyState(myData.contacts[this.address]);
+      
+      // Save or clear attachment state
+      this.saveAttachmentState(myData.contacts[this.address]);
     }
   }
 
@@ -9715,6 +11325,13 @@ console.warn('in send message', txid)
     // Always clear the input first
     this.messageInput.value = '';
     this.messageInput.style.height = '48px';
+    
+    // Clear any existing reply state
+    this.cancelReply();
+    
+    // Clear any existing attachments
+    this.fileAttachments = [];
+    this.showAttachmentPreview();
 
     // Load draft if exists
     const contact = myData.contacts[address];
@@ -9724,6 +11341,27 @@ console.warn('in send message', txid)
       this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
       // trigger input event to update the byte counter
       this.messageInput.dispatchEvent(new Event('input'));
+    }
+    
+    // Restore reply state if it exists
+    if (contact?.draftReplyTxid) {
+      this.replyToTxId.value = contact.draftReplyTxid;
+      this.replyToMessage.value = contact.draftReplyMessage || '';
+      this.replyOwnerIsMine.value = contact.draftReplyOwnerIsMine || '';
+      
+      // Show the reply preview
+      if (this.replyPreviewText) {
+        this.replyPreviewText.textContent = contact.draftReplyMessage || '';
+      }
+      if (this.replyPreview) {
+        this.replyPreview.style.display = '';
+      }
+    }
+    
+    // Restore attachment state if it exists
+    if (contact?.draftAttachments && Array.isArray(contact.draftAttachments) && contact.draftAttachments.length > 0) {
+      this.fileAttachments = JSON.parse(JSON.stringify(contact.draftAttachments));
+      this.showAttachmentPreview();
     }
   }
 
@@ -9803,6 +11441,20 @@ console.warn('in send message', txid)
     }
 
     let loadingToastId;
+    let thumbnailBlob = null;
+    
+    // Generate thumbnail for images before encryption
+    const isImage = file.type && file.type.startsWith('image/');
+    if (isImage) {
+      try {
+        thumbnailBlob = await thumbnailCache.generateThumbnail(file);
+      } catch (error) {
+        console.warn('Failed to generate thumbnail for attached image:', error);
+      }
+    }
+
+    const capturedThumbnailBlob = thumbnailBlob;
+    
     try {
       this.isEncrypting = true;
       this.sendButton.disabled = true; // Disable send button during encryption
@@ -9844,16 +11496,31 @@ console.warn('in send message', txid)
             const { id } = await response.json();
             if (!id) throw new Error('No file ID returned from upload');
 
+            const attachmentUrl = `${uploadUrl}/get/${id}`;
+            
             this.fileAttachments.push({
-              url: `${uploadUrl}/get/${id}`,
+              url: attachmentUrl,
               name: file.name,
               size: file.size,
               type: file.type,
               pqEncSharedKey: bin2base64(pqEncSharedKey),
               selfKey
             });
+            
+            // Cache thumbnail if we generated one - use captured variable
+            if (capturedThumbnailBlob && isImage) {
+              thumbnailCache.save(attachmentUrl, capturedThumbnailBlob, file.type).catch(err => {
+                console.warn('Failed to cache thumbnail for attached image:', err);
+              });
+            }
+            
             hideToast(loadingToastId);
             this.showAttachmentPreview(file);
+
+            if (this.address && myData.contacts[this.address]) {
+              this.saveAttachmentState(myData.contacts[this.address]);
+            }
+            
             this.sendButton.disabled = false; // Re-enable send button
             this.addAttachmentButton.disabled = false;
             showToast(`File "${file.name}" attached successfully`, 2000, 'success');
@@ -9921,13 +11588,16 @@ console.warn('in send message', txid)
       return;
     }
   
-    const attachmentItems = this.fileAttachments.map((attachment, index) => `
+    const attachmentItems = this.fileAttachments.map((attachment, index) => {
+      const fileTypeIcon = this.getFileTypeForIcon(attachment.type || '', attachment.name);
+      return `
       <div class="attachment-item">
-        <span class="attachment-icon">📎</span>
+        <div class="attachment-icon" data-file-type="${fileTypeIcon}"></div>
         <span class="attachment-name">${attachment.name}</span>
         <button class="remove-attachment" data-index="${index}">×</button>
       </div>
-    `).join('');
+    `;
+    }).join('');
   
     preview.innerHTML = attachmentItems;
     
@@ -9967,6 +11637,10 @@ console.warn('in send message', txid)
       const removedFile = this.fileAttachments.splice(index, 1)[0];
       this.showAttachmentPreview(); // Refresh the preview
       showToast(`"${removedFile.name}" removed`, 2000, 'info');
+
+      if (this.address && myData.contacts[this.address]) {
+        this.saveAttachmentState(myData.contacts[this.address]);
+      }
     }
   }
 
@@ -9996,18 +11670,74 @@ console.warn('in send message', txid)
   }
 
   /**
-   * Returns an appropriate emoji based on file type and name
+   * Get the file type for icon display
    * @param {string} type - MIME type of the file
    * @param {string} name - Name of the file
-   * @returns {string} Emoji representing the file type
+   * @returns {string} File type identifier for icon
    */
-  getFileEmoji(type, name) {
-    if (type && type.startsWith('image/')) return '🖼️';
-    if (type && type.startsWith('audio/')) return '🎵';
-    if (type && type.startsWith('video/')) return '🎬';
-    if ((type === 'application/pdf') || (name && name.toLowerCase().endsWith('.pdf'))) return '📄';
-    if (type && type.startsWith('text/')) return '📄';
-    return '📎';
+  getFileTypeForIcon(type, name) {
+    if (type && type.startsWith('image/')) return 'image';
+    if (type && type.startsWith('audio/')) return 'audio';
+    if (type && type.startsWith('video/')) return 'video';
+    if ((type === 'application/pdf') || (name && name.toLowerCase().endsWith('.pdf'))) return 'pdf';
+    if (type && type.startsWith('text/')) return 'text';
+    return 'file';
+  }
+
+  /**
+   * Update an attachment row with a thumbnail image
+   * @param {HTMLElement} attachmentRow - The attachment row element
+   * @param {Blob} thumbnailBlob - The thumbnail blob to display
+   * @returns {boolean} True if update was successful, false otherwise
+   */
+  updateThumbnailInPlace(attachmentRow, thumbnailBlob) {
+    if (!attachmentRow || !attachmentRow.parentNode || !thumbnailBlob) {
+      return false;
+    }
+
+    const thumbnailUrl = URL.createObjectURL(thumbnailBlob);
+    const iconContainer = attachmentRow.querySelector('.attachment-icon-container');
+    
+    if (iconContainer && iconContainer.parentNode) {
+      // Clean up old thumbnail blob URL if it exists
+      const oldThumbnailUrl = attachmentRow.dataset.thumbnailUrl;
+      if (oldThumbnailUrl) {
+        URL.revokeObjectURL(oldThumbnailUrl);
+      }
+      
+      // Replace icon with thumbnail image
+      iconContainer.innerHTML = `<img src="${thumbnailUrl}" alt="Thumbnail" class="attachment-thumbnail">`;
+      
+      // Store blob URL for cleanup
+      attachmentRow.dataset.thumbnailUrl = thumbnailUrl;
+      return true;
+    } else {
+      // Element was removed, revoke the blob URL
+      URL.revokeObjectURL(thumbnailUrl);
+      return false;
+    }
+  }
+
+  /**
+   * Load thumbnails for image attachments asynchronously
+   * @returns {void}
+   */
+  async loadThumbnailsForAttachments() {
+    const imageAttachments = this.messagesList.querySelectorAll('[data-image-attachment="true"]');
+    
+    for (const attachmentRow of imageAttachments) {
+      const url = attachmentRow.dataset.url;
+      if (!url || url === '#') continue;
+
+      try {
+        const thumbnailBlob = await thumbnailCache.get(url);
+        if (thumbnailBlob) {
+          this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
+        }
+      } catch (error) {
+        console.warn('Failed to load thumbnail for', url, error);
+      }
+    }
   }
 
   /**
@@ -10102,6 +11832,26 @@ console.warn('in send message', txid)
       const blob    = new Blob([clearBin], { type: linkEl.dataset.type || 'application/octet-stream' });
       const blobUrl = URL.createObjectURL(blob);
       const filename = decodeURIComponent(linkEl.dataset.name || 'download');
+
+      // Generate and cache thumbnail for images, then update in place
+      if (blob.type.startsWith('image/')) {
+        const attachmentUrl = linkEl.dataset.url;
+        const attachmentRow = linkEl.closest('.attachment-row') || linkEl.closest('[data-image-attachment="true"]');
+        
+        thumbnailCache.generateThumbnail(blob).then(thumbnail => {
+          return thumbnailCache.save(attachmentUrl, thumbnail, blob.type);
+        }).then(async () => {
+          // Update thumbnail in place
+          if (attachmentRow) {
+            const thumbnailBlob = await thumbnailCache.get(attachmentUrl);
+            if (thumbnailBlob) {
+              this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
+            }
+          }
+        }).catch(err => {
+          console.warn('Failed to generate or cache thumbnail:', err);
+        });
+      }
 
       hideToast(loadingToastId);
       if (window.ReactNativeWebView?.postMessage) {
@@ -10217,6 +11967,7 @@ console.warn('in send message', txid)
     if (e.target.closest('.voice-message-play-button')) return;
     if (e.target.closest('.voice-message-speed-button')) return;
     if (e.target.closest('.voice-message-seek')) return;
+    if (e.target.closest('.reply-quote')) return;
 
     // Check if keyboard is open - if so, don't show context menu
     if (this.isKeyboardOpen()) {
@@ -10252,6 +12003,9 @@ console.warn('in send message', txid)
   showMessageContextMenu(e, messageEl) {
     e.preventDefault();
     e.stopPropagation();
+
+    // Do not open context menu when clicking on reply quote
+    if (e.target.closest('.reply-quote')) return;
     
     this.currentContextMessage = messageEl;
     
@@ -10269,6 +12023,7 @@ console.warn('in send message', txid)
     const copyOption = this.contextMenu.querySelector('[data-action="copy"]');
     const joinOption = this.contextMenu.querySelector('[data-action="join"]');
     const inviteOption = this.contextMenu.querySelector('[data-action="call-invite"]');
+    const replyOption = this.contextMenu.querySelector('[data-action="reply"]');
     const editResendOption = this.contextMenu.querySelector('[data-action="edit-resend"]');
     const editOption = this.contextMenu.querySelector('[data-action="edit"]');
     const isFailedPayment = messageEl.dataset.status === 'failed' && messageEl.classList.contains('payment-info');
@@ -10290,14 +12045,17 @@ console.warn('in send message', txid)
       if (inviteOption) inviteOption.style.display = isExpired ? 'none' : 'flex';
       if (editResendOption) editResendOption.style.display = 'none';
       if (editOption) editOption.style.display = 'none';
+      if (replyOption) replyOption.style.display = isFuture ? 'flex' : 'none';
     } else if (isVoice) {
       if (copyOption) copyOption.style.display = 'none';
       if (inviteOption) inviteOption.style.display = 'none';
       if (joinOption) joinOption.style.display = 'none';
+      if (replyOption) replyOption.style.display = 'flex';
     } else {
       if (copyOption) copyOption.style.display = 'flex';
       if (joinOption) joinOption.style.display = 'none';
       if (inviteOption) inviteOption.style.display = 'none';
+      if (replyOption) replyOption.style.display = 'flex';
       if (editResendOption) editResendOption.style.display = isFailedPayment ? 'flex' : 'none';
       // Determine if edit should be shown
       if (editOption) {
@@ -10381,6 +12139,9 @@ console.warn('in send message', txid)
         this.closeContextMenu();
         callInviteModal.open(messageEl);
         break;
+      case 'reply':
+        this.startReplyToMessage(messageEl);
+        break;
       case 'delete':
         if (messageEl.dataset.status === 'failed' && messageEl.classList.contains('payment-info')) {
           this.deleteFailedPayment(messageEl);
@@ -10408,6 +12169,7 @@ console.warn('in send message', txid)
    */
   startEditMessage(messageEl) {
     try {
+      this.cancelReply();
       const txid = messageEl.dataset.txid;
       const timestamp = parseInt(messageEl.dataset.messageTimestamp || '0', 10);
       if (!txid) return;
@@ -10434,6 +12196,155 @@ console.warn('in send message', txid)
     } catch (err) {
       console.error('startEditMessage error', err);
     }
+  }
+
+  /**
+   * Starts reply flow: shows preview bar and stores reply metadata
+   * @param {HTMLElement} messageEl
+   */
+  startReplyToMessage(messageEl) {
+    if (!messageEl) return;
+    const txid = messageEl.dataset.txid;
+    if (!txid) {
+      return showToast('Cannot reply: missing message id', 2000, 'error');
+    }
+
+    const previewText = this.truncateReplyText(this.getMessageTextForReply(messageEl));
+    if (!previewText) {
+      return showToast('Cannot reply to an empty message', 2000, 'error');
+    }
+
+    this.replyToTxId.value = txid;
+    this.replyToMessage.value = previewText;
+    this.replyOwnerIsMine.value = messageEl.classList.contains('sent') ? '1' : '0';
+
+    if (this.replyPreviewText) this.replyPreviewText.textContent = previewText;
+    if (this.replyPreview) this.replyPreview.style.display = '';
+
+    this.debouncedSaveDraft(this.messageInput.value);
+
+    // focus input
+    this.messageInput.focus();
+    this.messageInput.selectionStart = this.messageInput.selectionEnd = this.messageInput.value.length;
+  }
+
+  /**
+   * Clears reply state and hides the preview bar
+   * Note: Hidden input elements are guaranteed to exist in the DOM
+   */
+  cancelReply() {
+    if (this.replyToTxId) this.replyToTxId.value = '';
+    if (this.replyToMessage) this.replyToMessage.value = '';
+    if (this.replyOwnerIsMine) this.replyOwnerIsMine.value = '';
+    if (this.replyPreview) this.replyPreview.style.display = 'none';
+    if (this.replyPreviewText) this.replyPreviewText.textContent = '';
+
+    this.debouncedSaveDraft(this.messageInput.value);
+  }
+
+  /**
+   * Returns cleaned text for reply preview from a message element
+   * @param {HTMLElement} messageEl
+   * @returns {string}
+   */
+  getMessageTextForReply(messageEl) {
+    if (!messageEl) return '';
+    const voice = messageEl.querySelector('.voice-message');
+    if (voice) {
+      const ts = parseInt(messageEl.dataset.messageTimestamp || '', 10);
+      const tsLabel = Number.isFinite(ts) ? formatTime(ts, true) : '';
+      return tsLabel ? `Voice message · ${tsLabel}` : 'Voice message';
+    }
+    const call = messageEl.querySelector('.call-message-text');
+    if (call) {
+      const callTimeAttr = Number(messageEl.getAttribute('data-call-time') || 0);
+      if (callTimeAttr > 0) {
+        const schedDate = new Date(callTimeAttr);
+        const dateStr = schedDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        const timeStr = schedDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        return `Call at ${timeStr}, ${dateStr}`;
+      }
+      const baseText = (call.textContent || '').trim() || 'Call';
+      return baseText;
+    }
+    const isPayment = messageEl.classList.contains('payment-info');
+    const paymentMemoEl = messageEl.querySelector('.payment-memo');
+    if (isPayment && !paymentMemoEl) {
+      const dir = (messageEl.querySelector('.payment-direction')?.textContent || '').trim();
+      const amount = (messageEl.querySelector('.payment-amount')?.textContent || '').trim();
+      const ts = parseInt(messageEl.dataset.messageTimestamp || '', 10);
+      const dateStr = Number.isFinite(ts) ? new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+      const timeStr = Number.isFinite(ts) ? new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+      if (dir && amount) {
+        if (dateStr && timeStr) return `${dir}${amount} · ${timeStr}, ${dateStr}`;
+        return `${dir}${amount}`;
+      }
+    }
+    const memo = messageEl.querySelector('.payment-memo');
+    if (memo) return memo.textContent || '';
+    const content = messageEl.querySelector('.message-content');
+    if (content) return content.textContent || '';
+    return messageEl.textContent || '';
+  }
+
+  /**
+   * Truncates reply text to 40 chars with ellipsis
+   * @param {string} text
+   * @returns {string}
+   */
+  truncateReplyText(text) {
+    const clean = (text || '').replace(/\s+/g, ' ').trim();
+    if (clean.length <= 40) return clean;
+    return clean.slice(0, 40) + '...';
+  }
+
+  /**
+   * Handles click on reply preview bar to scroll to the original message
+   * @param {Event} e - Click event
+   */
+  handleReplyPreviewClick(e) {
+    // Don't scroll if clicking the close button (it has stopPropagation)
+    if (e.target === this.replyPreviewClose || e.target.closest('.reply-preview-close')) {
+      return;
+    }
+    
+    const replyTxid = this.replyToTxId?.value?.trim();
+    if (replyTxid) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.scrollToMessage(replyTxid);
+    }
+  }
+
+  /**
+   * Scroll to a message by txid and highlight it
+   * @param {string} txid
+   */
+  scrollToMessage(txid) {
+    if (!txid || !this.messagesList) return;
+    const target = this.messagesList.querySelector(`[data-txid="${txid}"]`);
+    if (!target) {
+      showToast('Message not found', 2000, 'info');
+      return;
+    }
+
+    const container = this.messagesContainer;
+    if (container) {
+      const rect = target.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      const fullyVisible = rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
+      if (!fullyVisible) {
+        const scrollTarget = Math.max(0, target.offsetTop - container.clientHeight / 3);
+        if (typeof container.scrollTo === 'function') {
+          container.scrollTo({ top: scrollTarget, behavior: 'smooth' });
+        } else {
+          container.scrollTop = scrollTarget;
+        }
+      }
+    }
+
+    target.classList.add('highlighted');
+    setTimeout(() => target.classList.remove('highlighted'), 2000);
   }
 
   /**
@@ -10724,9 +12635,14 @@ console.warn('in send message', txid)
       text = `${usdValue.toFixed(6)} USD (≈ ${libValue.toFixed(6)} LIB)`;
     }
 
+    // Calculate libWei using BigInt arithmetic to preserve precision
     let libWei;
-    if (tollUnit === 'USD' && factorValid && !isNaN(usdValue)) {
-      libWei = bigxnum2big(wei, (usdValue / factor).toString());
+    if (tollUnit === 'USD' && factorValid) {
+      // Convert USD wei to LIB wei by dividing by factor using scaled BigInt math
+      // libWei = safeToll / factor, but we use: libWei = (safeToll * PRECISION) / scaledFactor
+      const PRECISION = 10n ** 18n;
+      const scaledFactor = BigInt(Math.round(factor * 1e18));
+      libWei = (safeToll * PRECISION) / scaledFactor;
     } else if (tollUnit === 'LIB') {
       libWei = safeToll;
     } else {
@@ -11158,6 +13074,13 @@ console.warn('in send message', txid)
     await signObj(chatMessageObj, myAccount.keys);
     const txid = getTxid(chatMessageObj);
 
+    // If retrying a failed message, remove the old failed tx from local stores
+    const retryTxId = this.retryOfTxId?.value;
+    if (retryTxId) {
+      removeFailedTx(retryTxId, this.address);
+      this.retryOfTxId.value = '';
+    }
+
     // Optimistic UI update
     const newMessage = {
       message: '', // Voice messages don't have text
@@ -11197,13 +13120,27 @@ console.warn('in send message', txid)
       }
     }
 
-    // Send to network
+    // Send to network (injectTx may either throw OR return { result: { success:false } })
     try {
-      await injectTx(chatMessageObj, txid);
-      newMessage.status = 'sent';
+      const response = await injectTx(chatMessageObj, txid);
+
+      if (!response || !response.result || !response.result.success) {
+        console.log('voice message failed to send', response);
+
+        const reason = response?.result?.reason || '';
+        if (/toll/i.test(reason)) {
+          await this.reopen();
+        }
+
+        newMessage.status = 'failed';
+        updateTransactionStatus(txid, this.address, 'failed', 'message');
+      } else {
+        newMessage.status = 'sent';
+      }
     } catch (error) {
       console.error('Failed to send voice message to network:', error);
       newMessage.status = 'failed';
+      updateTransactionStatus(txid, this.address, 'failed', 'message');
       showToast('Voice message failed to send', 0, 'error');
     }
 
@@ -11220,6 +13157,10 @@ console.warn('in send message', txid)
   async playVoiceMessage(buttonElement) {
     const voiceMessageElement = buttonElement.closest('.voice-message');
     if (!voiceMessageElement) return;
+    // Pause only if playing a different voice message
+    if (this.playingVoiceMessageElement !== voiceMessageElement) {
+      this.pauseVoiceMessages();
+    }
 
     // Check if audio is already playing/paused
     const existingAudio = voiceMessageElement.audioElement;
@@ -11235,19 +13176,13 @@ console.warn('in send message', txid)
           }
         }
         existingAudio.play();
-        buttonElement.innerHTML = `
-          <svg viewBox="0 0 24 24">
-            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-          </svg>
-        `;
+        this.setVoiceMessageButton(voiceMessageElement, true);
+        this.playingVoiceMessageElement = voiceMessageElement;
       } else {
         // Pause playback
         existingAudio.pause();
-        buttonElement.innerHTML = `
-          <svg viewBox="0 0 24 24">
-            <path d="M8 5v14l11-7z"/>
-          </svg>
-        `;
+        this.setVoiceMessageButton(voiceMessageElement, false);
+        this.playingVoiceMessageElement = null;
       }
       return;
     }
@@ -11339,12 +13274,10 @@ console.warn('in send message', txid)
       }, { once: true });
       
       // Update UI to show playing state and enable button for pause functionality
-      buttonElement.innerHTML = `
-        <svg viewBox="0 0 24 24">
-          <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-        </svg>
-      `;
-      buttonElement.disabled = false; // Enable button for pause functionality
+      this.setVoiceMessageButton(voiceMessageElement, true);
+      
+      // Track this as the currently playing voice message
+      this.playingVoiceMessageElement = voiceMessageElement;
       
       // Time & progress tracking
       audio.ontimeupdate = () => {
@@ -11396,36 +13329,17 @@ console.warn('in send message', txid)
       }
       
       audio.onended = () => {
-        // Reset UI
-        buttonElement.innerHTML = `
-          <svg viewBox="0 0 24 24">
-            <path d="M8 5v14l11-7z"/>
-          </svg>
-        `;
-        buttonElement.disabled = false;
-        if (timeDisplayElement) {
-          // Get the original duration from the voice message data
-          const originalDuration = this.formatDuration(totalDurationSeconds);
-          timeDisplayElement.textContent = `0:00 / ${originalDuration}`;
-        }
-        if (seekEl) seekEl.value = 0;
-        // Clean up audio element and URL
-        delete voiceMessageElement.audioElement;
-        URL.revokeObjectURL(voiceMessageElement.audioUrl);
-        delete voiceMessageElement.audioUrl;
+        this.resetVoiceMessageUI(voiceMessageElement);
+        this.cleanupVoiceMessageResources(voiceMessageElement);
+        this.playingVoiceMessageElement = null;
       };
       
       audio.onerror = (error) => {
         console.error('Error playing voice message:', error);
         showToast('Error playing voice message', 0, 'error');
-        buttonElement.disabled = false;
-        if (seekEl) seekEl.value = 0;
-        // Clean up on error
-        delete voiceMessageElement.audioElement;
-        if (voiceMessageElement.audioUrl) {
-          URL.revokeObjectURL(voiceMessageElement.audioUrl);
-          delete voiceMessageElement.audioUrl;
-        }
+        this.resetVoiceMessageUI(voiceMessageElement);
+        this.cleanupVoiceMessageResources(voiceMessageElement);
+        this.playingVoiceMessageElement = null;
       };
       
       // Start playing
@@ -12108,16 +14022,47 @@ class FailedMessageMenu {
    * @returns {void}
    */
   handleFailedMessageRetry(messageEl) {
-    const messageContent = messageEl.querySelector('.message-content')?.textContent;
     const txid = messageEl.dataset.txid;
+    const voiceEl = messageEl.querySelector('.voice-message');
 
+    // Voice message retry: resend the same voice message (no re-upload)
+    if (voiceEl) {
+      const voiceUrl = voiceEl.dataset.voiceUrl || '';
+      const duration = Number(voiceEl.dataset.duration || 0);
+      const pqEncSharedKeyB64 = voiceEl.dataset.pqencsharedkey || '';
+      const selfKey = voiceEl.dataset.selfkey || '';
+
+      if (!txid || !voiceUrl || !duration || !pqEncSharedKeyB64 || !selfKey) {
+        console.error('Error preparing voice message retry: Necessary elements or data missing.');
+        return;
+      }
+
+      try {
+        chatModal.retryOfTxId.value = txid;
+        const pqEncSharedKey = base642bin(pqEncSharedKeyB64);
+        void chatModal
+          .sendVoiceMessageTx(voiceUrl, duration, pqEncSharedKey, selfKey)
+          .catch((err) => {
+            console.error('Voice message retry failed:', err);
+            showToast('Failed to retry voice message', 0, 'error');
+          });
+      } catch (err) {
+        console.error('Voice message retry failed:', err);
+        showToast('Failed to retry voice message', 0, 'error');
+      }
+      return;
+    }
+
+    // Text message retry: prefill input and store txid so next send removes failed tx
+    const messageContent = messageEl.querySelector('.message-content')?.textContent;
     if (chatModal.messageInput && chatModal.retryOfTxId && messageContent && txid) {
       chatModal.messageInput.value = messageContent;
       chatModal.retryOfTxId.value = txid;
       chatModal.messageInput.focus();
-    } else {
-      console.error('Error preparing message retry: Necessary elements or data missing.');
+      return;
     }
+
+    console.error('Error preparing message retry: Necessary elements or data missing.');
   }
 
   /**
@@ -12649,6 +14594,13 @@ class NewChatModal {
     this.usernameInputCheckTimeout = null;
   }
 
+  // Backend canonical shape: { account: { private: boolean } }
+  // If the field is missing entirely (older accounts), default to public (false).
+  getIsPrivateFromAccountResponse(accountRes) {
+    const isPrivate = accountRes?.account?.private;
+    return typeof isPrivate === 'boolean' ? isPrivate : false;
+  }
+
   /**
    * Loads the new chat modal event listeners
    * @returns {void}
@@ -12756,6 +14708,28 @@ class NewChatModal {
         this.showRecipientError('Error looking up username');
         return;
       }
+    }
+
+    // Prevent starting chats between private/public account types.
+    // Note: username lookup may succeed regardless of type; enforce on submit.
+    try {
+      const myIsPrivate = !!myData?.account?.private;
+      const recipientAccountRes = await queryNetwork(`/account/${longAddress(recipientAddress)}`);
+
+      if (!recipientAccountRes?.account) {
+        showToast('Account not found, try again.', 0, 'error');
+        return;
+      }
+      const recipientIsPrivate = recipientAccountRes?.account?.private === true;
+
+      if (recipientIsPrivate !== myIsPrivate) {
+        showToast(`${myIsPrivate ? 'Private' : 'Public'} accounts can only chat with other ${myIsPrivate ? 'private' : 'public'} accounts.`, 0, 'error');
+        return;
+      }
+    } catch (error) {
+      console.log('Error checking account type:', error);
+      showToast('Error checking account type', 0, 'error');
+      return;
     }
 
     // Get or create chat data
@@ -12949,6 +14923,9 @@ class CreateAccountModal {
     this.migrateAccountsButton = document.getElementById('migrateAccountsButton');
     this.toggleMoreOptions = document.getElementById('toggleMoreOptions');
     this.moreOptionsSection = document.getElementById('moreOptionsSection');
+    this.privateAccountCheckbox = document.getElementById('togglePrivateAccount');
+    this.privateAccountHelpButton = document.getElementById('privateAccountHelpButton');
+    this.privateAccountTemplate = document.getElementById('privateAccountHelpMessageTemplate');
 
     // Setup event listeners
     this.form.addEventListener('submit', (e) => this.handleSubmit(e));
@@ -12964,6 +14941,14 @@ class CreateAccountModal {
       this.privateKeyInput.setAttribute('type', type);
       // Toggle the visual state class on the button
       this.togglePrivateKeyVisibility.classList.toggle('toggled-visible');
+    });
+
+    // Add listener for the private account help button
+    this.privateAccountHelpButton.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const message = this.getPrivateAccountHelpMessage();
+      showToast(message, 0, 'info', true);
     });
 
     this.migrateAccountsButton.addEventListener('click', async () => await migrateAccountsModal.open());
@@ -13006,9 +14991,19 @@ class CreateAccountModal {
     this.moreOptionsSection.style.display = 'none';
     this.toggleButton.checked = false;
     this.privateKeySection.style.display = 'none';
+    this.privateAccountCheckbox.checked = false;
     
     // Open the modal
     this.open();
+  }
+
+  /**
+   * Get the private account help message HTML
+   * @returns {string}
+   */
+  getPrivateAccountHelpMessage() {
+    return this.privateAccountTemplate?.innerHTML || 
+      '<strong>What is a Private Account?</strong><br>Private accounts can only interact with other private accounts.';
   }
 
   /**
@@ -13131,6 +15126,7 @@ class CreateAccountModal {
     this.usernameInput.disabled = true;
     this.privateKeyInput.disabled = true;
     this.backButton.disabled = true;
+    this.privateAccountCheckbox.disabled = true;
 
     event.preventDefault();
     
@@ -13224,19 +15220,8 @@ class CreateAccountModal {
       }
     }
 
-    // Create new account entry
-    myAccount = {
-      netid,
-      username,
-      chatTimestamp: 0,
-      keys: {
-        address: addressHex,
-        public: publicKeyHex,
-        secret: privateKeyHex,
-        type: 'secp256k1',
-        pqSeed: pqSeed, // store only the 64 byte seed instead of 32,000 byte public and secret keys
-      },
-    };
+    // Get or create account entry
+    const isPrivateAccount = this.privateAccountCheckbox.checked;
     let waitingToastId = showToast('Creating account...', 0, 'loading');
     let res;
 
@@ -13244,13 +15229,27 @@ class CreateAccountModal {
       await getNetworkParams();
       const storedKey = `${username}_${netid}`;
       myData = loadState(storedKey)
-      if (myData) {
+      if (myData && myData.account) {
         myAccount = myData.account;
       } else {
+        // Create new account entry
+        myAccount = {
+          netid,
+          username,
+          chatTimestamp: 0,
+          private: isPrivateAccount,
+          keys: {
+            address: addressHex,
+            public: publicKeyHex,
+            secret: privateKeyHex,
+            type: 'secp256k1',
+            pqSeed: pqSeed, // store only the 64 byte seed instead of 32,000 byte public and secret keys
+          },
+        };
         // create new data record if it doesn't exist
         myData = newDataRecord(myAccount);
       }
-      res = await postRegisterAlias(username, myAccount.keys);
+      res = await postRegisterAlias(username, myAccount.keys, myAccount.private || false);
     } catch (error) {
       this.reEnableControls();
       if (waitingToastId) hideToast(waitingToastId);
@@ -13337,6 +15336,7 @@ class CreateAccountModal {
     this.privateKeyInput.disabled = false;
     this.backButton.disabled = false;
     this.migrateAccountsButton.disabled = false;
+    this.privateAccountCheckbox.disabled = false;
   }
 }
 // Initialize the create account modal
@@ -15243,7 +17243,8 @@ class MigrateAccountsModal {
       } else if (section === 'available') {
         myData = loadState(username+'_'+netid)
         if (myData){ 
-          const res = await postRegisterAlias(username, myData.account.keys)
+          const isPrivate = myData.account?.private || false;
+          const res = await postRegisterAlias(username, myData.account.keys, isPrivate)
           if (res !== null){
             res.submittedts = getCorrectedTimestamp()
             res.netid = netid
@@ -17233,6 +19234,25 @@ function getContactDisplayName(contact) {
          `${contact?.address?.slice(0, 8)}…${contact?.address?.slice(-6)}`;
 }
 
+/**
+ * Checks if an address matches the network's faucet address
+ * @param {string} address - The address to check
+ * @returns {boolean} - True if the address matches the faucet address
+ */
+function isFaucetAddress(address) {
+  if (!address || !network.faucetAddress) {
+    return false;
+  }
+  const normalizedAddress = normalizeAddress(address);
+  // Support both single string and array of addresses
+  const faucetAddresses = Array.isArray(network.faucetAddress) 
+    ? network.faucetAddress 
+    : [network.faucetAddress];
+  return faucetAddresses.some(faucetAddr => 
+    normalizeAddress(faucetAddr) === normalizedAddress
+  );
+}
+
 function isMobile() {
   return /Android|webOS|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
@@ -17446,6 +19466,542 @@ class LocalStorageMonitor {
 
 // Create localStorage monitor instance
 const localStorageMonitor = new LocalStorageMonitor();
+
+// Contact avatar thumbnail sizing defaults
+const CONTACT_AVATAR_MAX_THUMB_SIZE = 128;
+const CONTACT_AVATAR_JPEG_QUALITY = 0.85;
+
+/**
+ * ContactAvatarCache - Handles IndexedDB storage for contact avatar thumbnails
+ */
+class ContactAvatarCache {
+  constructor() {
+    this.dbName = 'liberdus_contact_avatars';
+    this.storeName = 'avatars';
+    this.dbVersion = 1;
+    this.db = null;
+    this.blobUrlCache = new Map();
+  }
+
+  /**
+   * Load and initialize the contact avatar cache
+   * @returns {Promise<void>}
+   */
+  async load() {
+    try {
+      await this.init();
+    } catch (err) {
+      console.warn('Failed to load contact avatar cache:', err);
+    }
+  }
+
+  /**
+   * Initialize IndexedDB database connection
+   * @returns {Promise<void>}
+   */
+  async init() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, this.dbVersion);
+
+      request.onerror = () => {
+        console.error('Failed to open contact avatar database:', request.error);
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        this.db = request.result;
+        console.log('Contact avatar cache initialized');
+        resolve();
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          const store = db.createObjectStore(this.storeName, { keyPath: 'address' });
+          store.createIndex('savedAt', 'savedAt', { unique: false });
+        }
+      };
+    });
+  }
+
+  /**
+   * Generate a thumbnail from an image blob (optimized for avatars)
+   * @param {Blob} imageBlob - The image blob to create thumbnail from
+   * @param {number} maxSize - Maximum dimension in pixels (default: CONTACT_AVATAR_MAX_THUMB_SIZE)
+   * @param {number} quality - JPEG quality 0-1 (default: CONTACT_AVATAR_JPEG_QUALITY)
+   * @returns {Promise<Blob>} The thumbnail blob
+   */
+  async generateThumbnail(imageBlob, maxSize = CONTACT_AVATAR_MAX_THUMB_SIZE, quality = CONTACT_AVATAR_JPEG_QUALITY) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const blobUrl = URL.createObjectURL(imageBlob);
+
+      img.onload = () => {
+        URL.revokeObjectURL(blobUrl);
+
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const width = Math.floor(img.width * scale);
+        const height = Math.floor(img.height * scale);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const outputType = imageBlob.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to create avatar thumbnail blob'));
+            }
+          },
+          outputType,
+          outputType === 'image/jpeg' ? quality : undefined
+        );
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(blobUrl);
+        reject(new Error('Failed to load image for avatar thumbnail generation'));
+      };
+
+      img.src = blobUrl;
+    });
+  }
+
+  /**
+   * Save a contact avatar to IndexedDB
+   * @param {string} address - The contact's address (used as key)
+   * @param {Blob} avatarBlob - The avatar blob to store
+   * @returns {Promise<void>}
+   */
+  async save(address, avatarBlob) {
+    if (!this.db) {
+      await this.init();
+    }
+
+    if (this.blobUrlCache.has(address)) {
+      URL.revokeObjectURL(this.blobUrlCache.get(address));
+      this.blobUrlCache.delete(address);
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readwrite');
+      const store = tx.objectStore(this.storeName);
+
+      const data = {
+        address,
+        avatar: avatarBlob,
+      };
+
+      const request = store.put(data);
+
+      request.onsuccess = () => {
+        resolve();
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to save contact avatar:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Retrieve a contact avatar blob from IndexedDB
+   * @param {string} address - The contact's address
+   * @returns {Promise<Blob|null>} The avatar blob or null if not found
+   */
+  async get(address) {
+    if (!this.db) {
+      await this.init();
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const request = store.get(address);
+
+      request.onsuccess = () => {
+        const result = request.result;
+        if (result && result.avatar) {
+          resolve(result.avatar);
+        } else {
+          resolve(null);
+        }
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to get contact avatar:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Get a blob URL for a contact avatar
+   * @param {string} address - The contact's address
+   * @returns {Promise<string|null>} Blob URL or null if not found
+   */
+  async getBlobUrl(address) {
+    if (this.blobUrlCache.has(address)) {
+      return this.blobUrlCache.get(address);
+    }
+
+    const blob = await this.get(address);
+    if (blob) {
+      const blobUrl = URL.createObjectURL(blob);
+      this.blobUrlCache.set(address, blobUrl);
+      return blobUrl;
+    }
+
+    return null;
+  }
+
+  /**
+   * Delete a contact avatar from IndexedDB
+   * @param {string} address - The contact's address
+   * @returns {Promise<void>}
+   */
+  async delete(address) {
+    if (!this.db) {
+      await this.init();
+    }
+
+    if (this.blobUrlCache.has(address)) {
+      URL.revokeObjectURL(this.blobUrlCache.get(address));
+      this.blobUrlCache.delete(address);
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      const request = store.delete(address);
+
+      request.onsuccess = () => resolve();
+
+      request.onerror = () => {
+        console.warn('Failed to delete contact avatar:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+}
+
+/**
+ * ThumbnailCache - Handles IndexedDB storage for image thumbnails
+ */
+class ThumbnailCache {
+  constructor() {
+    this.dbName = 'liberdus_thumbnails';
+    this.storeName = 'thumbnails';
+    this.dbVersion = 1;
+    this.db = null;
+    this.maxCacheSize = 50 * 1024 * 1024; // 50MB in bytes
+  }
+
+  /**
+   * Load and initialize the thumbnail cache
+   * @returns {Promise<void>}
+   */
+  async load() {
+    try {
+      await this.init();
+      // Cleanup by size if cache is too large
+      const sizeDeletedCount = await this.cleanupBySize();
+      if (sizeDeletedCount > 0) {
+        console.log(`Cleaned up ${sizeDeletedCount} thumbnail(s) by size limit`);
+      }
+    } catch (err) {
+      console.warn('Failed to load thumbnail cache:', err);
+    }
+  }
+
+  /**
+   * Initialize IndexedDB database connection
+   * @returns {Promise<void>}
+   */
+  async init() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, this.dbVersion);
+
+      request.onerror = () => {
+        console.error('Failed to open thumbnail database:', request.error);
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        this.db = request.result;
+        console.log('Thumbnail cache initialized');
+        resolve();
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        // Create object store if it doesn't exist
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          const store = db.createObjectStore(this.storeName, { keyPath: 'url' });
+          store.createIndex('cachedAt', 'cachedAt', { unique: false });
+        }
+      };
+    });
+  }
+
+  /**
+   * Generate a thumbnail from an image blob
+   * @param {Blob} imageBlob - The image blob to create thumbnail from
+   * @param {number} maxSize - Maximum dimension in pixels (default: 500)
+   * @param {number} quality - JPEG quality 0-1 (default: 0.96)
+   * @returns {Promise<Blob>} The thumbnail blob
+   */
+  async generateThumbnail(imageBlob, maxSize = 500, quality = 0.96) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const blobUrl = URL.createObjectURL(imageBlob);
+
+      img.onload = () => {
+        URL.revokeObjectURL(blobUrl);
+
+        // Calculate dimensions maintaining aspect ratio
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const width = Math.floor(img.width * scale);
+        const height = Math.floor(img.height * scale);
+
+        // Create canvas and draw scaled image with high quality rendering
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        
+        // Enable high-quality image smoothing for better thumbnail quality
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Convert to blob (use JPEG for efficiency, PNG if transparency needed)
+        const outputType = imageBlob.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to create thumbnail blob'));
+            }
+          },
+          outputType,
+          outputType === 'image/jpeg' ? quality : undefined
+        );
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(blobUrl);
+        reject(new Error('Failed to load image for thumbnail generation'));
+      };
+
+      img.src = blobUrl;
+    });
+  }
+
+  /**
+   * Get the current total size of all cached thumbnails
+   * @returns {Promise<number>} Total size in bytes
+   */
+  async getCacheSize() {
+    if (!this.db) {
+      await this.init();
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const results = request.result;
+        const totalSize = results.reduce((sum, item) => {
+          return sum + (item.thumbnail ? item.thumbnail.size : 0);
+        }, 0);
+        resolve(totalSize);
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to get cache size:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Remove oldest thumbnails until cache size is under limit
+   * @returns {Promise<number>} Number of thumbnails removed
+   */
+  async cleanupBySize() {
+    if (!this.db) {
+      await this.init();
+    }
+
+    const currentSize = await this.getCacheSize();
+    // Target 90% of max to leave headroom and avoid frequent cleanups
+    const targetSize = this.maxCacheSize * 0.9;
+    
+    if (currentSize <= targetSize) {
+      return 0;
+    }
+
+    const sizeToRemove = currentSize - targetSize;
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      const index = store.index('cachedAt');
+      const request = index.openCursor(null, 'next'); // Oldest first
+
+      let deletedCount = 0;
+      let removedSize = 0;
+
+      request.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor && removedSize < sizeToRemove) {
+          const item = cursor.value;
+          const itemSize = item.thumbnail ? item.thumbnail.size : 0;
+          
+          cursor.delete();
+          deletedCount++;
+          removedSize += itemSize;
+          cursor.continue();
+        } else {
+          resolve(deletedCount);
+        }
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to cleanup thumbnails by size:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Save a thumbnail to IndexedDB
+   * @param {string} attachmentUrl - The attachment URL (used as key)
+   * @param {Blob} thumbnailBlob - The thumbnail blob to store
+   * @param {string} originalType - Original MIME type
+   * @returns {Promise<void>}
+   */
+  async save(attachmentUrl, thumbnailBlob, originalType) {
+    if (!this.db) {
+      await this.init();
+    }
+
+    // Check if adding this thumbnail would exceed size limit
+    const currentSize = await this.getCacheSize();
+    const newThumbnailSize = thumbnailBlob.size;
+    
+    // If adding this thumbnail would exceed limit, cleanup first
+    if (currentSize + newThumbnailSize > this.maxCacheSize) {
+      await this.cleanupBySize();
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readwrite');
+      const store = tx.objectStore(this.storeName);
+
+      const data = {
+        url: attachmentUrl,
+        thumbnail: thumbnailBlob,
+        originalType: originalType,
+        cachedAt: Date.now()
+      };
+
+      const request = store.put(data);
+
+      request.onsuccess = () => {
+        resolve();
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to save thumbnail:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Retrieve a cached thumbnail from IndexedDB
+   * @param {string} attachmentUrl - The attachment URL
+   * @returns {Promise<Blob|null>} The thumbnail blob or null if not found
+   */
+  async get(attachmentUrl) {
+    if (!this.db) {
+      await this.init();
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const request = store.get(attachmentUrl);
+
+      request.onsuccess = () => {
+        const result = request.result;
+        if (result && result.thumbnail) {
+          resolve(result.thumbnail);
+        } else {
+          resolve(null);
+        }
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to get thumbnail:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+}
+
+// Create caches instances
+const contactAvatarCache = new ContactAvatarCache();
+const thumbnailCache = new ThumbnailCache();
+
+/**
+ * Get HTML for a contact avatar (cached blob if available, otherwise identicon)
+ * @param {object|string} contactOrAddress - Contact object or address string
+ * @param {number} size - Desired avatar size
+ * @returns {Promise<string>} HTML string for avatar image/svg
+ */
+async function getContactAvatarHtml(contactOrAddress, size = 50) {
+  const address = typeof contactOrAddress === 'string'
+    ? normalizeAddress(contactOrAddress)
+    : normalizeAddress(contactOrAddress?.address);
+
+  const hasAvatar =
+    typeof contactOrAddress === 'object' && contactOrAddress !== null && 'hasAvatar' in contactOrAddress
+      ? contactOrAddress.hasAvatar
+      : myData?.contacts?.[address]?.hasAvatar;
+
+  if (address && hasAvatar) {
+    try {
+      const blobUrl = await contactAvatarCache.getBlobUrl(address);
+      if (blobUrl) {
+        return `<img src="${blobUrl}" class="contact-avatar-img" width="${size}" height="${size}" alt="">`;
+      }
+    } catch (err) {
+      console.warn('Failed to load contact avatar, falling back to identicon:', err);
+    }
+  }
+
+  if (address) {
+    return generateIdenticon(address, size);
+  }
+
+  return generateIdenticon('', size);
+}
 
 function getStabilityFactor() {
   return parseFloat(parameters.current.stabilityFactorStr);

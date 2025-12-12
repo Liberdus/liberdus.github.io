@@ -61,11 +61,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=2025.10.10.12.36" />
+    <link rel="stylesheet" href="./styles.css" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js?v=2025.10.10.12.36" type="module"></script>
+    <script src="./app.js" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -176,6 +176,19 @@
           <button class="wallet-action-button" id="openHistoryModal">
             <span class="action-icon"></span>
             <span class="action-label">History</span>
+          </button>
+          <div class="wallet-actions-break"></div>
+          <button class="wallet-action-button" id="openBuyButton">
+            <span class="action-icon"></span>
+            <span class="action-label">Buy</span>
+          </button>
+          <button class="wallet-action-button" id="openSellButton">
+            <span class="action-icon"></span>
+            <span class="action-label">Sell</span>
+          </button>
+          <button class="wallet-action-button" id="openFaucetBridgeButton">
+            <span class="action-icon"></span>
+            <span class="action-label">Faucet</span>
           </button>
         </div>
         <div class="wallet-assets">
@@ -425,8 +438,8 @@
                 <a class="about-link" href="styles.css" target="_blank">styles.css</a>
                 <a class="about-link" href="app.js" target="_blank">app.js</a>
                 <br>
-                <a class="about-link" href="crypto.js?v=2025.10.10.12.36" target="_blank">crypto.js</a>
-                <a class="about-link" href="lib.js?v=2025.10.10.12.36" target="_blank">lib.js</a>
+                <a class="about-link" href="crypto.js" target="_blank">crypto.js</a>
+                <a class="about-link" href="lib.js" target="_blank">lib.js</a>
                 <a class="about-link" href="network.js" target="_blank">network.js</a>
               </div>
 
@@ -595,9 +608,16 @@
               </div>
               
               <div id="moreOptionsSection" style="display: none;">
-                <div class="form-group">
+                <div class="form-group form-group--checkbox">
+                  <input type="checkbox" id="togglePrivateAccount" />
+                  <label for="togglePrivateAccount">
+                    Make this a private account
+                    <span class="toll-info-icon private-account-help" data-icon="info" id="privateAccountHelpButton"></span>
+                  </label>
+                </div>
+                <div class="form-group form-group--checkbox">
                   <input type="checkbox" id="togglePrivateKeyInput" />
-                  <label for="togglePrivateKeyInput" style="display: inline; margin-left: 5px">
+                  <label for="togglePrivateKeyInput">
                     Use my own private key (Advanced)
                   </label>
                 </div>
@@ -949,6 +969,13 @@
           <div class="attachment-preview" id="attachmentPreview" style="display: none;">
             <!-- Will be populated by JavaScript -->
           </div>
+          <div class="reply-preview" id="replyPreview" style="display: none;">
+            <div class="reply-preview-content">
+              <div class="reply-preview-label">Replying to:</div>
+              <div class="reply-preview-text"></div>
+            </div>
+            <button class="reply-preview-close" id="replyPreviewClose" aria-label="Cancel reply" type="button"></button>
+          </div>
           <div class="message-input-row">
             <button class="icon-button add-attachment-button" id="addAttachmentButton" aria-label="Add attachment"></button>
             <!-- Cancel Edit button (shown only when editing a message) -->
@@ -963,6 +990,9 @@
             </div>
             <input type="hidden" id="retryOfTxId" />
             <input type="hidden" id="editOfTxId" />
+            <input type="hidden" id="replyToTxId" />
+            <input type="hidden" id="replyToMessage" />
+            <input type="hidden" id="replyOwnerIsMine" />
             <!-- Add hidden file input for chat attachments -->
             <input type="file" id="chatFileInput" style="display:none;">
             <button class="icon-button voice-record-button" id="voiceRecordButton" aria-label="Record voice message"></button>
@@ -1087,6 +1117,10 @@
 
       <!-- Message Context Menu -->
       <div class="message-context-menu" id="messageContextMenu" style="display: none;">
+        <div class="context-menu-option" data-action="reply" data-icon="reply">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Reply</span>
+        </div>
         <div class="context-menu-option" data-action="copy" data-icon="copy">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Copy</span>
@@ -1180,6 +1214,23 @@
         </div>
       </template>
 
+      <!-- Template for private account help message -->
+      <template id="privateAccountHelpMessageTemplate">
+        <div class="toll-info-message">
+          <h4>What is a Private Account?</h4>
+          <p>A private account restricts communication and payments to only other private accounts.</p>
+          
+          <h5>Important:</h5>
+          <ul>
+            <li>Private account username should be obscure and not connected to you</li>
+            <li>Username of a private account should not be shared publicly and only shared through a direct message</li>
+            <li>Public accounts cannot interact with private accounts</li>
+            <li>This setting cannot be changed after account creation</li>
+            <li>Private accounts allow to communicate without exposing metadata</li>
+          </ul>
+        </div>
+      </template>
+
       <!-- Failed Message Context Menu -->
       <div class="failed-message-context-menu" id="failedMessageContextMenu" style="display: none;">
         <div class="context-menu-option" data-action="retry" data-icon="retry">
@@ -1262,6 +1313,35 @@
                   <a href="#" id="contactInfoX" class="contact-info-link" target="_blank" rel="noopener noreferrer"></a>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Avatar Edit Modal -->
+      <div class="modal fixed-header" id="avatarEditModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeAvatarEditModal"></button>
+          <div class="modal-title">Edit Photo</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <div class="avatar-edit-preview">
+              <div class="avatar-edit-square" id="avatarEditSquare">
+                <div class="avatar-edit-circle" id="avatarEditPreview"></div>
+              </div>
+            </div>
+            <div class="avatar-edit-controls">
+              <label for="avatarZoomRange">Zoom</label>
+              <input type="range" id="avatarZoomRange" min="1" max="3" step="0.01" value="1" />
+            </div>
+            <div class="avatar-edit-actions">
+              <input type="file" id="avatarEditFileInput" accept="image/*" style="display:none" />
+              <button class="primary-button" id="avatarEditUploadButton">Upload</button>
+              <button class="secondary-button danger-button" id="avatarEditDeleteButton">Delete</button>
+              <button class="btn btn--primary" id="avatarEditSaveButton" style="display: none;">Save</button>
+              <button class="btn btn--secondary btn--danger" id="avatarEditCancelButton" style="display: none;">Cancel</button>
             </div>
           </div>
         </div>
@@ -1622,10 +1702,10 @@
           <div class="form-container">
             <!-- have description of what this is -->
             <p>
-              This will download a file that contains your account data. You can use this file to restore your account on another device.
+              This will save a file that contains your account data. You can use this file to restore your account on another device.
             </p>
             <p>
-              If you are signed in you can choose to backup all accounts or just the signed in account.If you are not signed in, this will save all accounts.
+              If you are signed in you can choose to backup all accounts or just the signed in account. If you are not signed in, this will save all accounts.
             </p>
             <form id="backupForm" class="form--narrow">
               <div class="form-group" id="backupAllAccountsGroup" style="display: none;">
@@ -1636,9 +1716,17 @@
                 </label>
               </div>
               <div class="form-group">
+                <label for="backupStorageLocation">Storage Location</label>
+                <select id="backupStorageLocation" class="form-control">
+                  <option value="local" selected>Local</option>
+                  <option value="google-drive">Google Drive</option>
+                </select>
+              </div>
+              <div class="form-group">
                 <label for="backupPassword">
                   Password
                   <span id="backupPasswordWarning" style="color: #dc3545; display: none">too short</span>
+                  <span id="backupPasswordRequired" style="color: #dc3545; display: none">required</span>
                 </label>
                 <input
                   type="password"
@@ -1660,7 +1748,7 @@
                 />
               </div>
               <div class="form-actions">
-                <button type="submit" class="btn btn--primary btn--pill btn--full">Download Data</button>
+                <button type="submit" class="btn btn--primary btn--pill btn--full">Save Data</button>
               </div>
             </form>
           </div>
@@ -1971,7 +2059,7 @@
                     id="stakeNodeAddress"
                     class="form-control"
                     required
-                    placeholder="Enter long node address"
+                    placeholder="Enter node address"
                     style="flex: 1"
                   />
                   <button
