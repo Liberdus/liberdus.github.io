@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -907,9 +907,12 @@ class Footer {
       // Update header with username if signed in
       const appName = document.querySelector('.app-name');
       if (myAccount && myAccount.username) {
+        const isPrivateAccount = myAccount?.private === true || myData?.account?.private === true;
         appName.textContent = `${myAccount.username}`;
+        appName.classList.toggle('is-private', isPrivateAccount);
       } else {
         appName.textContent = '';
+        appName.classList.remove('is-private');
       }
   
       // Show/hide new chat button
@@ -2133,6 +2136,7 @@ class SignInModal {
     const signInData = signInModal.getSignInUsernames() || {};
     const usernames = Array.isArray(signInData.usernames) ? signInData.usernames : [];
     const netidAccounts = signInData.netidAccounts || { usernames: {} };
+    const { netid } = network;
 
     // Get the notified addresses and sort usernames to prioritize them
     const notifiedAddresses = reactNativeApp.isReactNativeWebView ? reactNativeApp.getNotificationAddresses() : [];
@@ -2157,13 +2161,25 @@ class SignInModal {
       sortedUsernames = [...notifiedUsernames, ...otherUsernames];
     }
 
-    // Populate select with sorted usernames and add an emoji to the username if it owns a notified address
+    // Populate select with sorted usernames
     this.usernameSelect.innerHTML = `
       <option value="" disabled selected hidden>Select an account</option>
       ${sortedUsernames.map((username) => {
         const isNotifiedAccount = notifiedUsernameSet.has(username);
         const dotIndicator = isNotifiedAccount ? ' 🔔' : '';
-        return `<option value="${username}">${username}${dotIndicator}</option>`;
+
+        // Private accounts are stored in per-account state (${username}_${netid}).
+        let isPrivateAccount = false;
+        try {
+          const localState = loadState(`${username}_${netid}`);
+          isPrivateAccount = localState?.account?.private === true;
+        } catch (e) {
+          isPrivateAccount = false;
+        }
+
+        // Explicitly style each <option> to avoid color inheritance quirks.
+        const optionColor = isPrivateAccount ? 'var(--danger-color)' : 'var(--text-color)';
+        return `<option value="${username}" style="color: ${optionColor};">${username}${dotIndicator}</option>`;
       }).join('')}
     `;
 
@@ -2172,7 +2188,27 @@ class SignInModal {
       this.usernameSelect.value = selectedUsername;
     }
 
+    // Update selected styling (so chosen private account shows red when the dropdown is closed)
+    this.updateSelectedAccountPrivateIndicator(netid);
+
     return { usernames, netidAccounts, sortedUsernames };
+  }
+
+  updateSelectedAccountPrivateIndicator(netid) {
+    const username = this.usernameSelect.value;
+    if (!username) {
+      this.usernameSelect.classList.remove('is-private');
+      return;
+    }
+
+    let isPrivateAccount = false;
+    try {
+      const localState = loadState(`${username}_${netid}`);
+      isPrivateAccount = localState?.account?.private === true;
+    } catch (e) {
+      isPrivateAccount = false;
+    }
+    this.usernameSelect.classList.toggle('is-private', isPrivateAccount);
   }
 
   async open(preselectedUsername_) {
@@ -2322,6 +2358,9 @@ class SignInModal {
       this.notFoundMessage.style.display = 'none';
       return;
     }
+
+    // Update selected styling
+    this.updateSelectedAccountPrivateIndicator(netid);
     //        const address = netidAccounts.usernames[username].keys.address;
     const address = netidAccounts.usernames[username].address;
     let availability = await checkUsernameAvailability(username, address);
@@ -5086,7 +5125,6 @@ class AvatarEditModal {
   constructor() {
     this.modal = null;
     this.backButton = null;
-    this.saveButton = null;
     this.uploadButton = null;
     this.deleteButton = null;
     this.fileInput = null;
@@ -5097,7 +5135,6 @@ class AvatarEditModal {
     this.currentAddress = null;
     this.previewUrl = null;
     this.pendingBlob = null;
-    this.pendingDelete = false;
     this.activeImageBlob = null;
     this.imageNaturalWidth = 0;
     this.imageNaturalHeight = 0;
@@ -5122,15 +5159,17 @@ class AvatarEditModal {
   load() {
     this.modal = document.getElementById('avatarEditModal');
     this.backButton = document.getElementById('closeAvatarEditModal');
-    this.saveButton = document.getElementById('saveAvatarEditButton');
     this.uploadButton = document.getElementById('avatarEditUploadButton');
     this.deleteButton = document.getElementById('avatarEditDeleteButton');
+    this.saveActionButton = document.getElementById('avatarEditSaveButton');
+    this.cancelButton = document.getElementById('avatarEditCancelButton');
     this.fileInput = document.getElementById('avatarEditFileInput');
     this.previewContainer = document.getElementById('avatarEditPreview');
     this.previewSquare = document.getElementById('avatarEditSquare');
     this.zoomRange = document.getElementById('avatarZoomRange');
+    this.zoomControls = document.querySelector('.avatar-edit-controls');
 
-    if (!this.modal || !this.backButton || !this.saveButton || !this.uploadButton || !this.deleteButton || !this.fileInput || !this.previewContainer || !this.previewSquare || !this.zoomRange) {
+    if (!this.modal || !this.backButton || !this.uploadButton || !this.deleteButton || !this.saveActionButton || !this.cancelButton || !this.fileInput || !this.previewContainer || !this.previewSquare || !this.zoomRange) {
       console.warn('AvatarEditModal elements not found');
       return;
     }
@@ -5151,9 +5190,10 @@ class AvatarEditModal {
     this.previewContainer.appendChild(this.foregroundImg);
 
     this.backButton.addEventListener('click', () => this.close());
-    this.saveButton.addEventListener('click', () => this.handleSave());
     this.uploadButton.addEventListener('click', () => this.fileInput.click());
     this.deleteButton.addEventListener('click', () => this.handleDelete());
+    this.saveActionButton.addEventListener('click', () => this.handleSave());
+    this.cancelButton.addEventListener('click', () => this.handleCancel());
     this.fileInput.addEventListener('change', (e) => this.handleFileSelected(e));
 
     this.zoomRange.addEventListener('input', (e) => {
@@ -5207,14 +5247,12 @@ class AvatarEditModal {
     window.addEventListener('touchend', endDrag);
   }
 
-  open(address) {
+  async open(address) {
     this.currentAddress = normalizeAddress(address);
     this.pendingBlob = null;
-    this.pendingDelete = false;
     this.activeImageBlob = null;
     this.enableTransform = false;
-    this.refreshPreview();
-    this.updateDeleteVisibility();
+    await this.refreshPreview();
     this.modal.classList.add('active');
     enterFullscreen();
   }
@@ -5223,7 +5261,6 @@ class AvatarEditModal {
     this.modal.classList.remove('active');
     this.clearPreviewUrl();
     this.pendingBlob = null;
-    this.pendingDelete = false;
     this.activeImageBlob = null;
     this.enableTransform = false;
     this.imageNaturalWidth = 0;
@@ -5271,15 +5308,6 @@ class AvatarEditModal {
     const contact = myData?.contacts?.[this.currentAddress];
     const displayInfo = contact ? createDisplayInfo(contact) : { address: this.currentAddress, hasAvatar: false };
 
-    if (this.pendingDelete) {
-      this.previewContainer.innerHTML = generateIdenticon(this.currentAddress, 218);
-      this.enableTransform = false;
-      this.updateZoomUI();
-      if (this.previewBg) this.previewBg.style.display = 'none';
-      if (this.foregroundImg) this.foregroundImg.style.display = 'none';
-      return;
-    }
-
     if (this.pendingBlob) {
       await this.setImageFromBlob(this.pendingBlob, true);
       return;
@@ -5305,16 +5333,31 @@ class AvatarEditModal {
     this.updateZoomUI();
     if (this.previewBg) this.previewBg.style.display = 'none';
     if (this.foregroundImg) this.foregroundImg.style.display = 'none';
+    this.updateButtonVisibility();
   }
 
   /**
-   * Toggle delete button based on existing avatar or staged upload/delete.
+   * Update button visibility based on whether a new image is uploaded.
+   * Only shows Save/Cancel when user uploads a new photo, not when viewing existing avatar.
    */
-  updateDeleteVisibility() {
-    const contact = myData?.contacts?.[this.currentAddress];
-    const hasAvatar = !!contact?.hasAvatar;
-    const hasLocalImage = !!(this.pendingBlob || this.activeImageBlob);
-    this.deleteButton.style.display = (hasAvatar || hasLocalImage) ? 'inline-flex' : 'none';
+  updateButtonVisibility() {
+    const hasNewUpload = !!this.pendingBlob; // Only true when user uploads a new photo
+    
+    if (hasNewUpload) {
+      // Show Save/Cancel buttons, hide Upload/Delete buttons
+      this.uploadButton.style.display = 'none';
+      this.deleteButton.style.display = 'none';
+      this.saveActionButton.style.display = 'inline-flex';
+      this.cancelButton.style.display = 'inline-flex';
+    } else {
+      // Show Upload/Delete buttons, hide Save/Cancel buttons
+      this.uploadButton.style.display = 'inline-flex';
+      const contact = myData?.contacts?.[this.currentAddress];
+      const hasAvatar = !!contact?.hasAvatar;
+      this.deleteButton.style.display = hasAvatar ? 'inline-flex' : 'none';
+      this.saveActionButton.style.display = 'none';
+      this.cancelButton.style.display = 'none';
+    }
   }
 
   /**
@@ -5329,45 +5372,61 @@ class AvatarEditModal {
       return;
     }
     this.pendingBlob = file;
-    this.pendingDelete = false;
     // Allow selecting the same file again after delete by clearing input value post-read
     if (this.fileInput) {
       this.fileInput.value = '';
     }
     this.setImageFromBlob(file, true);
+    this.updateButtonVisibility();
   }
 
   /**
-   * Stage deletion of the current avatar and reset preview/transform state.
+   * Handle cancel - discard uploaded image and revert to original state.
    */
-  handleDelete() {
-    // Clear any loaded blobs and revoke object URLs
+  async handleCancel() {
+    // Clear any pending uploads but keep existing avatar
     this.pendingBlob = null;
-    this.activeImageBlob = null;
-    this.pendingDelete = true;
     if (this.fileInput) {
       this.fileInput.value = '';
     }
-    this.clearPreviewUrl();
+    // Refresh to show original state
+    await this.refreshPreview();
+  }
 
-    // Clear image sources so the browser can release them
-    if (this.foregroundImg) {
-      this.foregroundImg.src = '';
+  /**
+   * Delete the current avatar immediately and save.
+   */
+  async handleDelete() {
+    if (!this.currentAddress) {
+      this.close();
+      return;
     }
-    if (this.previewBg) {
-      this.previewBg.src = '';
+
+    const contact = myData?.contacts?.[this.currentAddress];
+    if (!contact) {
+      this.close();
+      return;
     }
 
-    // Reset transforms
-    this.imageNaturalWidth = 0;
-    this.imageNaturalHeight = 0;
-    this.baseScale = 1;
-    this.zoom = 1;
-    this.offsetX = 0;
-    this.offsetY = 0;
-    this.updateZoomUI();
+    try {
+      // Delete avatar from cache
+      await contactAvatarCache.delete(this.currentAddress);
+      contact.hasAvatar = false;
+      saveState();
 
-    this.refreshPreview();
+      // Update UI
+      contactInfoModal.updateContactInfo(createDisplayInfo(contact));
+      contactInfoModal.needsContactListUpdate = true;
+      if (chatModal.isActive() && chatModal.address === this.currentAddress) {
+        chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+      }
+
+      // Update preview in the modal to show identicon
+      await this.refreshPreview();
+    } catch (err) {
+      console.warn('Failed to delete avatar:', err);
+      showToast('Failed to delete avatar', 2000, 'error');
+    }
   }
 
   /**
@@ -5394,13 +5453,13 @@ class AvatarEditModal {
       this.resetTransform();
       this.applyImageSources(blobUrl);
 
-      // If user uploaded, allow pan/zoom with background overlay
+      // If user uploaded, enable pan/zoom with background context image
       if (this.enableTransform) {
         if (this.previewBg) this.previewBg.style.display = 'block';
         if (this.foregroundImg) this.foregroundImg.style.display = 'block';
         this.applyTransform();
       } else {
-        // Existing avatar preview: fit image to circle, hide background overlay
+        // Existing avatar preview: fit image to circle, hide background
         if (this.previewBg) {
           this.previewBg.style.display = 'none';
         }
@@ -5413,7 +5472,7 @@ class AvatarEditModal {
           this.foregroundImg.style.transform = 'translate(-50%, -50%)';
         }
       }
-      this.updateDeleteVisibility();
+      this.updateButtonVisibility();
     } catch (e) {
       console.warn('Failed to load image for avatar editing:', e);
       showToast('Could not load image', 2000, 'error');
@@ -5435,15 +5494,14 @@ class AvatarEditModal {
   }
 
   resetTransform() {
-    // Fit to cover the square
+    // Calculate base scale to ensure circle is covered with overscan
     if (!this.imageNaturalWidth || !this.imageNaturalHeight) {
       this.baseScale = 1;
     } else {
-      // ensure at least covers the circle with overscan
       const minW = this.circleSize + this.coverOverscan * 2;
       const minH = this.circleSize + this.coverOverscan * 2;
       this.baseScale = Math.max(minW / this.imageNaturalWidth, minH / this.imageNaturalHeight);
-      // also cap to cover square if image is tiny
+      // Ensure tiny images at least cover the square
       const squareScale = Math.max(this.squareSize / this.imageNaturalWidth, this.squareSize / this.imageNaturalHeight);
       this.baseScale = Math.max(this.baseScale, squareScale);
     }
@@ -5464,6 +5522,10 @@ class AvatarEditModal {
       this.zoomRange.max = this.maxZoom.toFixed(2);
       this.zoomRange.value = this.zoom.toFixed(2);
       this.zoomRange.disabled = !this.enableTransform;
+    }
+    // Show/hide zoom controls based on whether transform is enabled
+    if (this.zoomControls) {
+      this.zoomControls.style.display = this.enableTransform ? 'flex' : 'none';
     }
   }
 
@@ -5490,13 +5552,12 @@ class AvatarEditModal {
   }
 
   /**
-   * Clamp offsets so the circle stays covered (with overscan).
+   * Clamp offsets to ensure circle stays covered when panning.
    * @param {number} displayWidth Rendered image width
    * @param {number} displayHeight Rendered image height
    */
   clampOffsets(displayWidth, displayHeight) {
-    const overscan = this.coverOverscan;
-    const circleRadius = this.circleSize / 2 + overscan;
+    const circleRadius = this.circleSize / 2 + this.coverOverscan;
     const halfW = displayWidth / 2;
     const halfH = displayHeight / 2;
 
@@ -5568,19 +5629,6 @@ class AvatarEditModal {
     }
 
     try {
-      if (this.pendingDelete) {
-        await contactAvatarCache.delete(this.currentAddress);
-        contact.hasAvatar = false;
-        saveState();
-        contactInfoModal.updateContactInfo(createDisplayInfo(contact));
-        contactInfoModal.needsContactListUpdate = true;
-        if (chatModal.isActive() && chatModal.address === this.currentAddress) {
-          chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
-        }
-        this.close();
-        return;
-      }
-
       // Need an image source to save
       if (this.pendingBlob || this.activeImageBlob) {
         const sourceBlob = this.pendingBlob || this.activeImageBlob;
@@ -14546,6 +14594,13 @@ class NewChatModal {
     this.usernameInputCheckTimeout = null;
   }
 
+  // Backend canonical shape: { account: { private: boolean } }
+  // If the field is missing entirely (older accounts), default to public (false).
+  getIsPrivateFromAccountResponse(accountRes) {
+    const isPrivate = accountRes?.account?.private;
+    return typeof isPrivate === 'boolean' ? isPrivate : false;
+  }
+
   /**
    * Loads the new chat modal event listeners
    * @returns {void}
@@ -14653,6 +14708,28 @@ class NewChatModal {
         this.showRecipientError('Error looking up username');
         return;
       }
+    }
+
+    // Prevent starting chats between private/public account types.
+    // Note: username lookup may succeed regardless of type; enforce on submit.
+    try {
+      const myIsPrivate = !!myData?.account?.private;
+      const recipientAccountRes = await queryNetwork(`/account/${longAddress(recipientAddress)}`);
+
+      if (!recipientAccountRes?.account) {
+        showToast('Account not found, try again.', 0, 'error');
+        return;
+      }
+      const recipientIsPrivate = recipientAccountRes?.account?.private === true;
+
+      if (recipientIsPrivate !== myIsPrivate) {
+        showToast(`${myIsPrivate ? 'Private' : 'Public'} accounts can only chat with other ${myIsPrivate ? 'private' : 'public'} accounts.`, 0, 'error');
+        return;
+      }
+    } catch (error) {
+      console.log('Error checking account type:', error);
+      showToast('Error checking account type', 0, 'error');
+      return;
     }
 
     // Get or create chat data
@@ -19166,7 +19243,14 @@ function isFaucetAddress(address) {
   if (!address || !network.faucetAddress) {
     return false;
   }
-  return normalizeAddress(address) === normalizeAddress(network.faucetAddress);
+  const normalizedAddress = normalizeAddress(address);
+  // Support both single string and array of addresses
+  const faucetAddresses = Array.isArray(network.faucetAddress) 
+    ? network.faucetAddress 
+    : [network.faucetAddress];
+  return faucetAddresses.some(faucetAddr => 
+    normalizeAddress(faucetAddr) === normalizedAddress
+  );
 }
 
 function isMobile() {
