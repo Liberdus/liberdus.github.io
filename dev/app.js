@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -7206,6 +7206,26 @@ class BackupAccountModal {
       backupObj.lock = lockVal;
     }
 
+    // Include contact avatars from IndexedDB
+    try {
+      const avatars = await contactAvatarCache.exportAll();
+      if (avatars && Object.keys(avatars).length > 0) {
+        backupObj._avatars = avatars;
+      }
+    } catch (e) {
+      console.warn('Failed to export avatars for backup:', e);
+    }
+
+    // Include message thumbnails from IndexedDB
+    try {
+      const thumbnails = await thumbnailCache.exportAll();
+      if (thumbnails && Object.keys(thumbnails).length > 0) {
+        backupObj._thumbnails = thumbnails;
+      }
+    } catch (e) {
+      console.warn('Failed to export thumbnails for backup:', e);
+    }
+
     const jsonData = stringify(backupObj, null, 2);
 
     try {
@@ -7265,7 +7285,27 @@ class BackupAccountModal {
 
     const password = this.passwordInput.value;
     const myLocalStore = this.copyLocalStorageToObject();
-//    console.log(myLocalStore);
+
+    // Include contact avatars from IndexedDB
+    try {
+      const avatars = await contactAvatarCache.exportAll();
+      if (avatars && Object.keys(avatars).length > 0) {
+        myLocalStore._avatars = avatars;
+      }
+    } catch (e) {
+      console.warn('Failed to export avatars for backup:', e);
+    }
+
+    // Include message thumbnails from IndexedDB
+    try {
+      const thumbnails = await thumbnailCache.exportAll();
+      if (thumbnails && Object.keys(thumbnails).length > 0) {
+        myLocalStore._thumbnails = thumbnails;
+      }
+    } catch (e) {
+      console.warn('Failed to export thumbnails for backup:', e);
+    }
+
     const jsonData = stringify(myLocalStore, null, 2);
 
     try {
@@ -7437,6 +7477,8 @@ class RestoreAccountModal {
   constructor() {
     this.developerOptionsEnabled = false;
     this.netids = []; // Will be populated from network.js
+    this.selectedGoogleDriveFile = null; // Store selected Google Drive file info
+    this.googleDriveFileContent = null; // Store downloaded file content
   }
 
   load() {
@@ -7451,10 +7493,27 @@ class RestoreAccountModal {
     this.importForm = document.getElementById('importForm');
     this.fileInput = document.getElementById('importFile');
     this.passwordInput = document.getElementById('importPassword');
+    this.passwordRequired = document.getElementById('importPasswordRequired');
     this.overwriteAccountsCheckbox = document.getElementById('overwriteAccountsCheckbox');
     this.backupAccountLockGroup = document.getElementById('backupAccountLockGroup');
     this.backupAccountLock = document.getElementById('backupAccountLock');
     this.developerOptionsSection = document.getElementById('developerOptionsSection');
+    this.submitButton = document.getElementById('restoreSubmitButton');
+
+    // Google Drive elements
+    this.sourceLocationSelect = document.getElementById('restoreSourceLocation');
+    this.localFileGroup = document.getElementById('localFileGroup');
+    this.googleDriveFileGroup = document.getElementById('googleDriveFileGroup');
+    this.pickGoogleDriveFileBtn = document.getElementById('pickGoogleDriveFile');
+    this.selectedGoogleDriveFileDisplay = document.getElementById('selectedGoogleDriveFile');
+    this.clearGoogleDriveFileBtn = document.getElementById('clearGoogleDriveFile');
+
+    // Google Drive picker modal elements
+    this.pickerModal = document.getElementById('googleDrivePickerModal');
+    this.closePickerBtn = document.getElementById('closeGoogleDrivePicker');
+    this.pickerLoading = document.getElementById('googleDrivePickerLoading');
+    this.pickerFileList = document.getElementById('googleDriveFileList');
+    this.pickerEmpty = document.getElementById('googleDrivePickerEmpty');
 
     this.closeImportForm.addEventListener('click', () => this.close());
     this.importForm.addEventListener('submit', (event) => this.handleSubmit(event));
@@ -7466,9 +7525,21 @@ class RestoreAccountModal {
     this.setupMutualExclusion(this.newStringSelect, this.newStringCustom);
     
     // Add listeners to extract netids from selected file
-    this.fileInput.addEventListener('change', () => this.extractNetidsFromFile());
-    this.debouncedExtractNetidsFromFile = debounce(() => this.extractNetidsFromFile(), 500);
-    this.passwordInput.addEventListener('input', this.debouncedExtractNetidsFromFile);
+    this.fileInput.addEventListener('change', () => {
+      this.extractNetids();
+      this.updateButtonState();
+    });
+    this.debouncedExtractNetids = debounce(() => this.extractNetids(), 500);
+    this.passwordInput.addEventListener('input', () => {
+      this.debouncedExtractNetids();
+      this.updateButtonState();
+    });
+
+    // Google Drive event listeners
+    this.sourceLocationSelect.addEventListener('change', () => this.handleSourceLocationChange());
+    this.pickGoogleDriveFileBtn.addEventListener('click', () => this.openGoogleDrivePicker());
+    this.clearGoogleDriveFileBtn.addEventListener('click', () => this.clearSelectedGoogleDriveFile());
+    this.closePickerBtn.addEventListener('click', () => this.closeGoogleDrivePicker());
 
     // Reset form state
     this.clearForm();
@@ -7512,6 +7583,306 @@ class RestoreAccountModal {
     this.developerOptionsSection.style.display = this.developerOptionsEnabled ? 'block' : 'none';
   }
 
+  // Handle source location change (Local vs Google Drive)
+  handleSourceLocationChange() {
+    const isGoogleDrive = this.sourceLocationSelect.value === 'google-drive';
+    
+    // Toggle visibility of file selection groups
+    this.localFileGroup.style.display = isGoogleDrive ? 'none' : 'block';
+    this.googleDriveFileGroup.style.display = isGoogleDrive ? 'block' : 'none';
+    
+    // Clear selections when switching
+    if (isGoogleDrive) {
+      this.fileInput.value = '';
+    } else {
+      this.clearSelectedGoogleDriveFile();
+    }
+    
+    // Update password required indicator
+    if (this.passwordRequired) {
+      this.passwordRequired.style.display = isGoogleDrive ? 'inline' : 'none';
+    }
+    
+    this.updateButtonState();
+  }
+
+  // Update the submit button state based on form validity
+  updateButtonState() {
+    const isGoogleDrive = this.sourceLocationSelect.value === 'google-drive';
+    let isValid = false;
+    
+    if (isGoogleDrive) {
+      // Google Drive: require file selection and password
+      const hasFile = this.selectedGoogleDriveFile !== null;
+      const hasPassword = this.passwordInput.value.trim().length > 0;
+      isValid = hasFile && hasPassword;
+    } else {
+      // Local: require file selection, password optional
+      isValid = this.fileInput.files && this.fileInput.files.length > 0;
+    }
+    
+    this.submitButton.disabled = !isValid;
+  }
+
+  // Open Google Drive file picker
+  async openGoogleDrivePicker() {
+    try {
+      // Start OAuth flow using the backup modal's auth method
+      showToast('Approve Drive access in the Google window.', 3000, 'info');
+      const tokenData = await backupAccountModal.startGoogleDriveAuth();
+      
+      // Show picker modal and load files
+      this.pickerModal.classList.add('active');
+      this.pickerLoading.style.display = 'block';
+      this.pickerFileList.style.display = 'none';
+      this.pickerEmpty.style.display = 'none';
+      
+      // List files from backup folder
+      await this.loadGoogleDriveFiles(tokenData);
+    } catch (error) {
+      console.error('Google Drive authentication failed:', error);
+      showToast(error.message || 'Authentication failed.', 0, 'error');
+    }
+  }
+
+  // Load files from Google Drive backup folder
+  async loadGoogleDriveFiles(tokenData) {
+    try {
+      const folderName = network.googleDrive.backupFolder;
+      
+      // First, find the backup folder
+      const folderQuery = new URLSearchParams({
+        q: `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'root' in parents`,
+        fields: 'files(id, name)'
+      });
+      
+      const folderRes = await fetch(
+        'https://www.googleapis.com/drive/v3/files?' + folderQuery.toString(),
+        {
+          headers: {
+            Authorization: `${tokenData.tokenType} ${tokenData.accessToken}`
+          }
+        }
+      );
+      
+      if (!folderRes.ok) {
+        throw new Error(`Failed to search for backup folder: ${folderRes.status}`);
+      }
+      
+      const folderData = await folderRes.json();
+      
+      if (!folderData.files || folderData.files.length === 0) {
+        // No backup folder found
+        this.pickerLoading.style.display = 'none';
+        this.pickerEmpty.style.display = 'block';
+        return;
+      }
+      
+      const folderId = folderData.files[0].id;
+      
+      // List JSON files in the backup folder
+      const filesQuery = new URLSearchParams({
+        q: `'${folderId}' in parents and trashed = false and (mimeType = 'application/json' or name contains '.json')`,
+        fields: 'files(id, name, modifiedTime, size)',
+        orderBy: 'modifiedTime desc'
+      });
+      
+      const filesRes = await fetch(
+        'https://www.googleapis.com/drive/v3/files?' + filesQuery.toString(),
+        {
+          headers: {
+            Authorization: `${tokenData.tokenType} ${tokenData.accessToken}`
+          }
+        }
+      );
+      
+      if (!filesRes.ok) {
+        throw new Error(`Failed to list files: ${filesRes.status}`);
+      }
+      
+      const filesData = await filesRes.json();
+      
+      this.pickerLoading.style.display = 'none';
+      
+      if (!filesData.files || filesData.files.length === 0) {
+        this.pickerEmpty.style.display = 'block';
+        return;
+      }
+      
+      // Render file list
+      this.renderGoogleDriveFileList(filesData.files, tokenData);
+      this.pickerFileList.style.display = 'block';
+      
+    } catch (error) {
+      console.error('Failed to load Google Drive files:', error);
+      showToast('Failed to load files from Google Drive.', 0, 'error');
+      this.closeGoogleDrivePicker();
+    }
+  }
+
+  // Render the list of files from Google Drive
+  renderGoogleDriveFileList(files, tokenData) {
+    this.pickerFileList.innerHTML = '';
+    
+    files.forEach(file => {
+      const li = document.createElement('li');
+      li.className = 'chat-item';
+      li.style.cursor = 'pointer';
+      
+      const modifiedDate = new Date(file.modifiedTime);
+      const dateStr = modifiedDate.toLocaleDateString() + ' ' + modifiedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      
+      li.innerHTML = `
+        <div class="chat-content" style="padding-left: 16px;">
+          <div class="chat-name" style="white-space: normal; word-break: break-word;">${file.name}</div>
+          <div class="chat-time" style="position: static; margin-top: 4px;">${dateStr}</div>
+        </div>
+      `;
+      
+      li.addEventListener('click', () => this.selectGoogleDriveFile(file, tokenData));
+      this.pickerFileList.appendChild(li);
+    });
+  }
+
+  // Select a file from Google Drive
+  async selectGoogleDriveFile(file, tokenData) {
+    try {
+      showToast('Downloading backup file...', 2000, 'info');
+      
+      // Download the file content
+      const downloadRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
+        {
+          headers: {
+            Authorization: `${tokenData.tokenType} ${tokenData.accessToken}`
+          }
+        }
+      );
+      
+      if (!downloadRes.ok) {
+        throw new Error(`Failed to download file: ${downloadRes.status}`);
+      }
+      
+      const fileContent = await downloadRes.text();
+      
+      // Store file info and content
+      this.selectedGoogleDriveFile = file;
+      this.googleDriveFileContent = fileContent;
+      
+      // Update UI
+      this.selectedGoogleDriveFileDisplay.style.display = 'flex';
+      this.selectedGoogleDriveFileDisplay.querySelector('.selected-file-name').textContent = file.name;
+      
+      // Close picker and update button state
+      this.closeGoogleDrivePicker();
+      this.updateButtonState();
+      
+      // Try to extract netids from the downloaded content
+      this.extractNetids();
+      
+      showToast('Backup file selected.', 2000, 'success');
+    } catch (error) {
+      console.error('Failed to download file:', error);
+      showToast('Failed to download file from Google Drive.', 0, 'error');
+    }
+  }
+
+  // Extract netids from file content and add to dropdowns
+  async extractNetids() {
+    // Get content from Google Drive or local file
+    let content;
+    if (this.googleDriveFileContent) {
+      content = this.googleDriveFileContent;
+    } else {
+      const file = this.fileInput.files[0];
+      if (!file) {
+        this.resetBackupLockPrompt();
+        this.removeFileInjectedNetids();
+        return;
+      }
+      content = await file.text();
+    }
+    
+    try {
+      // Try to decrypt if encrypted
+      // manual scan using regex: find first non-whitespace char
+      const m = /\S/.exec(content);
+      const firstNonWs = m ? m[0] : '';
+      if (firstNonWs !== '{') {
+        const password = this.passwordInput.value.trim();
+        if (!password) {
+          this.resetBackupLockPrompt();
+          return;
+        }
+        try {
+          content = decryptData(content, password);
+        } catch (error) {
+          this.resetBackupLockPrompt();
+          return;
+        }
+      }
+      
+      const data = parse(content);
+      
+      // Check if backup requires password
+      const requiresBackupPassword = data.lock && !(localStorage.lock && data.lock === localStorage.lock);
+      if (requiresBackupPassword) {
+        this.backupAccountLockGroup.style.display = 'block';
+      } else {
+        this.resetBackupLockPrompt();
+      }
+      
+      const netids = new Set();
+      
+      // Extract netids from localStorage keys (username_netid format)
+      Object.keys(data).forEach(key => {
+        if (key.includes('_') && key !== 'accounts' && key !== 'version') {
+          const parts = key.split('_');
+          if (parts.length >= 2) {
+            const possibleNetid = parts[parts.length - 1];
+            if (possibleNetid.length === 64 && /^[a-f0-9]+$/.test(possibleNetid)) {
+              netids.add(possibleNetid);
+            }
+          }
+        }
+      });
+      
+      // Add new netids to dropdowns
+      this.removeFileInjectedNetids();
+      const existing = Array.from(this.oldStringSelect.options).map(opt => opt.value);
+      [...netids].filter(netid => !existing.includes(netid)).forEach(netid => {
+        const label = `${netid} (from file)`;
+        const oldOption = new Option(label, netid);
+        oldOption.dataset.source = 'file';
+        this.oldStringSelect.add(oldOption);
+        const newOption = new Option(label, netid);
+        newOption.dataset.source = 'file';
+        this.newStringSelect.add(newOption);
+      });
+      
+      if (netids.size > 0) console.log(`Found ${netids.size} netids from file`);
+    } catch (error) {
+      this.resetBackupLockPrompt();
+    }
+  }
+
+  // Clear selected Google Drive file
+  clearSelectedGoogleDriveFile() {
+    this.selectedGoogleDriveFile = null;
+    this.googleDriveFileContent = null;
+    this.selectedGoogleDriveFileDisplay.style.display = 'none';
+    this.selectedGoogleDriveFileDisplay.querySelector('.selected-file-name').textContent = '';
+    this.removeFileInjectedNetids();
+    this.resetBackupLockPrompt();
+    this.updateButtonState();
+  }
+
+  // Close the Google Drive picker modal
+  closeGoogleDrivePicker() {
+    this.pickerModal.classList.remove('active');
+    this.pickerFileList.innerHTML = '';
+  }
+
   // populate the netid dropdowns
   populateNetidDropdowns() {
     // get all netids from network.js
@@ -7536,79 +7907,6 @@ class RestoreAccountModal {
     }
     
     return null;
-  }
-
-  // extract netids from selected file and add to dropdowns
-  async extractNetidsFromFile() {
-    const file = this.fileInput.files[0];
-    if (!file) {
-      this.resetBackupLockPrompt();
-      this.removeFileInjectedNetids();
-      return;
-    }
-
-    console.log('extractNetidsFromFile');
-
-    try {
-      let content = await file.text();
-      // Try to decrypt if encrypted
-      if (!content.match('{')) {
-        console.log('decrypting file');
-        const password = this.passwordInput.value.trim();
-        if (!password) {
-          this.resetBackupLockPrompt();
-          return;
-        }
-        try {
-          content = decryptData(content, password);
-        } catch (error) {
-          this.resetBackupLockPrompt();
-          return; // Invalid password, skip silently
-        }
-      }
-
-      const data = parse(content);
-      // If the backup file contains a top-level lock field (accounts were locked in backup)
-      const requiresBackupPassword = data.lock && !(localStorage.lock && data.lock === localStorage.lock);
-      if (requiresBackupPassword) {
-        // Show password input so user can provide password needed to unlock accounts
-        this.backupAccountLockGroup.style.display = 'block';
-      } else {
-        this.resetBackupLockPrompt();
-      }
-      const netids = new Set();
-
-      // Extract netids only from localStorage keys (username_netid format)
-      Object.keys(data).forEach(key => {
-        if (key.includes('_') && key !== 'accounts' && key !== 'version') {
-          const parts = key.split('_');
-          if (parts.length >= 2) {
-            const possibleNetid = parts[parts.length - 1]; // Get part after last underscore
-            if (possibleNetid.length === 64 && /^[a-f0-9]+$/.test(possibleNetid)) {
-              netids.add(possibleNetid);
-            }
-          }
-        }
-      });
-
-      // Add new netids to dropdowns
-      this.removeFileInjectedNetids();
-      const existing = Array.from(this.oldStringSelect.options).map(opt => opt.value);
-      [...netids].filter(netid => !existing.includes(netid)).forEach(netid => {
-        const label = `${netid} (from file)`;
-        const oldOption = new Option(label, netid);
-        oldOption.dataset.source = 'file';
-        this.oldStringSelect.add(oldOption);
-        const newOption = new Option(label, netid);
-        newOption.dataset.source = 'file';
-        this.newStringSelect.add(newOption);
-      });
-
-      if (netids.size > 0) console.log(`Found ${netids.size} netids from file`);
-    } catch (error) {
-      this.resetBackupLockPrompt();
-      // Ignore file/parse errors silently
-    }
   }
 
   /**
@@ -7740,17 +8038,56 @@ class RestoreAccountModal {
       }
     }
 
+    // Import contact avatars if present in backup
+    if (backupData._avatars && typeof backupData._avatars === 'object') {
+      try {
+        await contactAvatarCache.importAll(backupData._avatars, overwrite);
+      } catch (e) {
+        console.warn('Failed to import avatars from backup:', e);
+      }
+    }
+
+    // Import message thumbnails if present in backup
+    if (backupData._thumbnails && typeof backupData._thumbnails === 'object') {
+      try {
+        await thumbnailCache.importAll(backupData._thumbnails, overwrite);
+      } catch (e) {
+        console.warn('Failed to import thumbnails from backup:', e);
+      }
+    }
+
     return restoredCount;
   }
 
   async handleSubmit(event) {
     event.preventDefault();
 
+    const isGoogleDrive = this.sourceLocationSelect.value === 'google-drive';
+
     try {
-      // Read the file
-      const file = this.fileInput.files[0];
-      let fileContent = await file.text();
-      const isNotEncryptedData = fileContent.match('{');
+      let fileContent;
+      
+      if (isGoogleDrive) {
+        // Use downloaded Google Drive file content
+        if (!this.googleDriveFileContent) {
+          showToast('Please select a file from Google Drive', 0, 'error');
+          return;
+        }
+        fileContent = this.googleDriveFileContent;
+      } else {
+        // Read the local file
+        const file = this.fileInput.files[0];
+        if (!file) {
+          showToast('Please select a file', 0, 'error');
+          return;
+        }
+        fileContent = await file.text();
+      }
+      
+      // Manual scan using regex: find first non-whitespace char
+      const m = /\S/.exec(fileContent);
+      const firstNonWs = m ? m[0] : '';
+      const isNotEncryptedData = firstNonWs === '{';
 
       // Check if data is encrypted and decrypt if necessary
       if (!isNotEncryptedData) {
@@ -7827,6 +8164,11 @@ class RestoreAccountModal {
     this.newStringSelect.length = 1;
     this.populateNetidDropdowns();
     this.resetBackupLockPrompt();
+    
+    // Reset Google Drive state
+    this.sourceLocationSelect.value = 'local';
+    this.clearSelectedGoogleDriveFile();
+    this.handleSourceLocationChange();
   }
 
   resetBackupLockPrompt() {
@@ -9775,6 +10117,9 @@ class ChatModal {
 
     // Initialize context menu
     this.contextMenu = document.getElementById('messageContextMenu');
+    // Initialize image attachment context menu
+    this.imageAttachmentContextMenu = document.getElementById('imageAttachmentContextMenu');
+    this.currentImageAttachmentRow = null;
     
     // Add event delegation for message clicks (since messages are created dynamically)
     this.messagesList.addEventListener('click', this.handleMessageClick.bind(this));
@@ -9799,11 +10144,23 @@ class ChatModal {
         this.handleContextMenuAction(action);
       }
     });
+    // Add image attachment context menu option listeners
+    if (this.imageAttachmentContextMenu) {
+      this.imageAttachmentContextMenu.addEventListener('click', (e) => {
+        const option = e.target.closest('.context-menu-option');
+        if (!option) return;
+        const action = option.dataset.action;
+        this.handleImageAttachmentContextMenuAction(action);
+      });
+    }
     
     // Close context menu when clicking outside
     document.addEventListener('click', (e) => {
       if (this.contextMenu && !this.contextMenu.contains(e.target)) {
         this.closeContextMenu();
+      }
+      if (this.imageAttachmentContextMenu && !this.imageAttachmentContextMenu.contains(e.target)) {
+        this.closeImageAttachmentContextMenu();
       }
     });
     this.sendButton.addEventListener('click', this.handleSendMessage.bind(this));
@@ -9933,26 +10290,6 @@ class ChatModal {
         voiceRecordingModal.open();
       });
     }
-
-    this.messagesList.addEventListener('click', async (e) => {
-      const row = e.target.closest('.attachment-row');
-      if (!row) return;
-      e.preventDefault();
-
-      // Concurent download prevention
-      if (this.attachmentDownloadInProgress) return;
-
-      this.attachmentDownloadInProgress = true;
-
-      const idx  = Number(row.dataset.msgIdx);
-      const item = myData.contacts[this.address].messages[idx];
-
-      try {
-        await this.handleAttachmentDownload(item, row);
-      } finally {
-        this.attachmentDownloadInProgress = false;
-      }
-    });
 
     // Voice message play button event delegation
     this.messagesList.addEventListener('click', (e) => {
@@ -11054,8 +11391,9 @@ console.warn('in send message', txid)
                   data-msg-idx="${i}"
                   ${isImage ? 'data-image-attachment="true"' : ''}
                 >
-                  <div class="attachment-icon-container" style="${isImage ? 'margin-bottom: 10px;' : 'margin-right: 14px; flex-shrink: 0;'}">
+                  <div class="attachment-icon-container" style="${isImage ? 'margin-bottom: 10px; flex-direction: column;' : 'margin-right: 14px; flex-shrink: 0;'}">
                     <div class="attachment-icon" data-file-type="${fileTypeIcon}"></div>
+                    ${isImage ? '<div class="attachment-preview-hint">Click for options</div>' : ''}
                   </div>
                   <div style="min-width:0;">
                     <span class="attachment-label" style="font-weight:500;color:#222;font-size:0.7em;display:block;word-wrap:break-word;">
@@ -11790,46 +12128,58 @@ console.warn('in send message', txid)
     showToast(`${filename} downloaded`, 3000, 'success');
   }
 
+  /**
+   * Decrypts an attachment URL into a Blob using the message encryption metadata.
+   * Shared by download (Save) and Preview thumbnail generation.
+   * @param {Object} item - message object from myData.contacts[address].messages[idx]
+   * @param {HTMLElement} linkEl - attachment row element with data-* fields
+   * @returns {Promise<Blob>}
+   */
+  async decryptAttachmentToBlob(item, linkEl) {
+    if (!item || !linkEl) throw new Error('Missing item or attachment element');
+
+    // 1) Derive dhkey
+    let dhkey;
+    if (item.my) {
+      const selfKey = linkEl.dataset.selfkey;
+      const password = myAccount.keys.secret + myAccount.keys.pqSeed;
+      dhkey = hex2bin(decryptData(selfKey, password, true));
+    } else {
+      const ok = await ensureContactKeys(this.address);
+      const senderPublicKey = myData.contacts[this.address]?.public;
+      if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
+      const pqEncSharedKey = linkEl.dataset.pqencsharedkey;
+      dhkey = dhkeyCombined(
+        myAccount.keys.secret,
+        senderPublicKey,
+        myAccount.keys.pqSeed,
+        pqEncSharedKey
+      ).dhkey;
+    }
+
+    const url = linkEl.dataset.url;
+    if (!url || url === '#') throw new Error('Missing attachment url');
+
+    // 2) Download encrypted bytes
+    const res = await fetch(url, { signal: this.abortController.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const cipherBin = new Uint8Array(await res.arrayBuffer());
+
+    // 3) Decrypt
+    const cipherB64 = bin2base64(cipherBin);
+    const plainB64 = decryptChacha(dhkey, cipherB64);
+    if (!plainB64) throw new Error('decryptChacha returned null');
+    const clearBin = base642bin(plainB64);
+
+    // 4) Blob
+    return new Blob([clearBin], { type: linkEl.dataset.type || 'application/octet-stream' });
+  }
+
   async handleAttachmentDownload(item, linkEl) {
     let loadingToastId;
     try {
       loadingToastId = showToast(`Decrypting attachment...`, 0, 'loading');
-      // 1. Derive a fresh 32‑byte dhkey
-      let dhkey;
-      if (item.my) {
-        // you were the sender ⇒ run encapsulation side again
-        const selfKey = linkEl.dataset.selfkey;
-        const password = myAccount.keys.secret + myAccount.keys.pqSeed;
-        dhkey = hex2bin(decryptData(selfKey, password, true));
-      } else {
-        // you are the receiver ⇒ use fields stashed on the item
-        const ok = await ensureContactKeys(this.address);
-        const senderPublicKey = myData.contacts[this.address]?.public;
-        if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
-        const pqEncSharedKey = linkEl.dataset.pqencsharedkey;
-        dhkey = dhkeyCombined(
-          myAccount.keys.secret,
-          senderPublicKey,
-          myAccount.keys.pqSeed,
-          pqEncSharedKey
-        ).dhkey;
-      }
-
-      // 2. Download encrypted bytes
-      const res = await fetch(linkEl.dataset.url, {
-        signal: this.abortController.signal
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const cipherBin = new Uint8Array(await res.arrayBuffer());
-
-      // 3. bin → base64 → decrypt → clear Uint8Array
-      const cipherB64 = bin2base64(cipherBin);
-      const plainB64  = decryptChacha(dhkey, cipherB64);
-      if (!plainB64) throw new Error('decryptChacha returned null');
-      const clearBin  = base642bin(plainB64);
-
-      // 4. Blob + download
-      const blob    = new Blob([clearBin], { type: linkEl.dataset.type || 'application/octet-stream' });
+      const blob = await this.decryptAttachmentToBlob(item, linkEl);
       const blobUrl = URL.createObjectURL(blob);
       const filename = decodeURIComponent(linkEl.dataset.name || 'download');
 
@@ -11962,8 +12312,14 @@ console.warn('in send message', txid)
    * Handles message click events
    * @param {Event} e - Click event
    */
-  handleMessageClick(e) {
-    if (e.target.closest('.attachment-row')) return;
+  async handleMessageClick(e) {
+    const attachmentRow = e.target.closest('.attachment-row');
+    if (attachmentRow) {
+      e.preventDefault();
+      e.stopPropagation();
+      await this.showAttachmentContextMenu(e, attachmentRow);
+      return;
+    }
     if (e.target.closest('.voice-message-play-button')) return;
     if (e.target.closest('.voice-message-speed-button')) return;
     if (e.target.closest('.voice-message-seek')) return;
@@ -12006,14 +12362,16 @@ console.warn('in send message', txid)
 
     // Do not open context menu when clicking on reply quote
     if (e.target.closest('.reply-quote')) return;
+
+    // Ensure only one context menu is open at a time
+    this.closeAllContextMenus();
     
     this.currentContextMessage = messageEl;
     
     // Show/hide "Delete for all" option based on whether the message is from the current user
-    const isMine = messageEl.classList.contains('sent');
     const deleteForAllOption = this.contextMenu.querySelector('[data-action="delete-for-all"]');
     if (deleteForAllOption) {
-      const canDeleteForAll = isMine && myData.contacts[this.address]?.tollRequiredToSend == 0;
+      const canDeleteForAll = this.canDeleteMessageForAll(messageEl);
       deleteForAllOption.style.display = canDeleteForAll ? 'flex' : 'none';
     }
 
@@ -12060,6 +12418,7 @@ console.warn('in send message', txid)
       // Determine if edit should be shown
       if (editOption) {
         // Conditions: own plain message OR own payment with memo text, not deleted/failed/voice, within 15 minutes
+        const isMine = messageEl.classList.contains('sent');
         const createdTs = parseInt(messageEl.dataset.messageTimestamp || messageEl.dataset.timestamp || '0', 10);
         const ageOk = createdTs && (Date.now() - createdTs) < EDIT_WINDOW_MS;
         const isDeleted = messageEl.classList.contains('deleted-message');
@@ -12118,6 +12477,192 @@ console.warn('in send message', txid)
     if (!this.contextMenu) return;
     this.contextMenu.style.display = 'none';
     this.currentContextMessage = null;
+  }
+
+  closeAllContextMenus() {
+    this.closeContextMenu();
+    this.closeImageAttachmentContextMenu();
+  }
+
+  /**
+   * Returns whether "Delete for all" should be available for a given message element.
+   * Mirrors the gating used in the message context menu.
+   * @param {HTMLElement} messageEl
+   * @returns {boolean}
+   */
+  canDeleteMessageForAll(messageEl) {
+    const isMine = !!messageEl?.classList?.contains('sent');
+    return isMine && myData.contacts[this.address]?.tollRequiredToSend == 0;
+  }
+
+  /**
+   * Resolve common attachment context fields from an attachment row.
+   * @param {HTMLElement} attachmentRow
+   * @returns {{ attachmentRow: HTMLElement, messageEl: HTMLElement | null, idx: number, item: any, url: string }}
+   */
+  getAttachmentContextFromRow(attachmentRow) {
+    const idx = Number(attachmentRow?.dataset?.msgIdx);
+    const item = Number.isFinite(idx) ? myData.contacts[this.address]?.messages?.[idx] : null;
+    return {
+      attachmentRow,
+      messageEl: attachmentRow?.closest?.('.message') || null,
+      idx,
+      item,
+      url: attachmentRow?.dataset?.url || ''
+    };
+  }
+
+  closeImageAttachmentContextMenu() {
+    if (!this.imageAttachmentContextMenu) return;
+    this.imageAttachmentContextMenu.style.display = 'none';
+    this.currentImageAttachmentRow = null;
+    delete this.imageAttachmentContextMenu.dataset.previewMode;
+  }
+
+  /**
+   * Shows context menu for an attachment row.
+   * - Images: "Preview" when no thumbnail exists in IndexedDB; "Save" when it exists
+   * - Non-images: always "Save"
+   * @param {Event} e
+   * @param {HTMLElement} attachmentRow
+   */
+  async showAttachmentContextMenu(e, attachmentRow) {
+    if (!this.imageAttachmentContextMenu || !attachmentRow) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Close other menus
+    this.closeAllContextMenus();
+
+    this.currentImageAttachmentRow = attachmentRow;
+
+    // Toggle delete-for-all visibility similar to regular message context menu gating
+    const { messageEl, url } = this.getAttachmentContextFromRow(attachmentRow);
+
+    // Show copy only if parent message has actual message text
+    const copyOption = this.imageAttachmentContextMenu.querySelector('[data-action="copy"]');
+    if (copyOption) {
+      const text = messageEl?.querySelector?.('.message-content')?.textContent?.trim() || '';
+      copyOption.style.display = text ? 'flex' : 'none';
+    }
+
+    const deleteForAllOption = this.imageAttachmentContextMenu.querySelector('[data-action="delete-for-all"]');
+    if (deleteForAllOption) {
+      const canDeleteForAll = this.canDeleteMessageForAll(messageEl);
+      deleteForAllOption.style.display = canDeleteForAll ? 'flex' : 'none';
+    }
+
+    const isImageAttachment = attachmentRow.dataset.imageAttachment === 'true';
+
+    // Decide Preview vs Save:
+    // - Images: Preview when no thumbnail exists in IndexedDB; Save when it exists
+    // - Non-images: always Save (no thumbnail concept)
+    let hasThumb = true;
+    if (isImageAttachment) {
+      hasThumb = false;
+      if (url && url !== '#') {
+        try {
+          const thumb = await thumbnailCache.get(url);
+          hasThumb = !!thumb;
+        } catch (_) {
+          hasThumb = false;
+        }
+      }
+    }
+
+    const previewOptText = this.imageAttachmentContextMenu.querySelector(
+      '[data-action="preview-or-save"] .context-menu-text'
+    );
+    if (previewOptText) previewOptText.textContent = hasThumb ? 'Save' : 'Preview';
+    this.imageAttachmentContextMenu.dataset.previewMode = hasThumb ? 'save' : 'preview';
+
+    this.positionContextMenu(this.imageAttachmentContextMenu, attachmentRow);
+    this.imageAttachmentContextMenu.style.display = 'block';
+  }
+
+  handleImageAttachmentContextMenuAction(action) {
+    const row = this.currentImageAttachmentRow;
+    if (!row) return;
+
+    const { messageEl } = this.getAttachmentContextFromRow(row);
+    switch (action) {
+      case 'preview-or-save': {
+        const mode = this.imageAttachmentContextMenu?.dataset?.previewMode;
+        if (mode === 'save') {
+          void this.saveImageAttachment(row);
+        } else {
+          void this.previewImageAttachment(row);
+        }
+        break;
+      }
+      case 'reply':
+        if (messageEl) this.startReplyToMessage(messageEl);
+        break;
+      case 'copy':
+        if (messageEl) void this.copyMessageContent(messageEl);
+        break;
+      case 'delete':
+        if (messageEl) this.deleteMessage(messageEl);
+        break;
+      case 'delete-for-all':
+        if (messageEl) void this.deleteMessageForAll(messageEl);
+        break;
+    }
+
+    this.closeImageAttachmentContextMenu();
+  }
+
+  /**
+   * Preview an image attachment: decrypt + generate thumbnail + cache thumbnail in IndexedDB.
+   * Does NOT trigger download.
+   * @param {HTMLElement} attachmentRow
+   */
+  async previewImageAttachment(attachmentRow) {
+    let loadingToastId;
+    try {
+      const { item, url } = this.getAttachmentContextFromRow(attachmentRow);
+      if (!item) return;
+
+      if (!url || url === '#') return;
+
+      loadingToastId = showToast(`Decrypting attachment...`, 0, 'loading');
+
+      const blob = await this.decryptAttachmentToBlob(item, attachmentRow);
+      if (!blob.type.startsWith('image/')) {
+        hideToast(loadingToastId);
+        return showToast('Not an image attachment', 2000, 'info');
+      }
+
+      // 5. Generate + cache thumbnail
+      const thumbnail = await thumbnailCache.generateThumbnail(blob);
+      await thumbnailCache.save(url, thumbnail, blob.type);
+      this.updateThumbnailInPlace(attachmentRow, thumbnail);
+
+      hideToast(loadingToastId);
+    } catch (err) {
+      console.error('Preview decrypt/thumbnail failed:', err);
+      hideToast(loadingToastId);
+      if (err?.name !== 'AbortError') showToast('Preview failed.', 0, 'error');
+    }
+  }
+
+  /**
+   * Save an image attachment using the existing download/decrypt flow.
+   * @param {HTMLElement} attachmentRow
+   */
+  async saveImageAttachment(attachmentRow) {
+    // Reuse normal attachment download flow (decrypt + download)
+    const { item } = this.getAttachmentContextFromRow(attachmentRow);
+    if (!item) return;
+
+    // Concurent download prevention
+    if (this.attachmentDownloadInProgress) return;
+    this.attachmentDownloadInProgress = true;
+    try {
+      await this.handleAttachmentDownload(item, attachmentRow);
+    } finally {
+      this.attachmentDownloadInProgress = false;
+    }
   }
 
   /**
@@ -19692,6 +20237,122 @@ class ContactAvatarCache {
       };
     });
   }
+
+  /**
+   * Export all avatars as an object with base64-encoded data
+   * @returns {Promise<Object>} Object mapping address to { data: base64, type: mimeType }
+   */
+  async exportAll() {
+    if (!this.db) {
+      await this.init();
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const request = store.getAll();
+
+      request.onsuccess = async () => {
+        const results = request.result;
+        const avatars = {};
+
+        for (const item of results) {
+          if (item.address && item.avatar) {
+            try {
+              // Convert blob to base64
+              const base64 = await this.blobToBase64(item.avatar);
+              avatars[item.address] = {
+                data: base64,
+                type: item.avatar.type || 'image/jpeg'
+              };
+            } catch (e) {
+              console.warn(`Failed to export avatar for ${item.address}:`, e);
+            }
+          }
+        }
+
+        resolve(avatars);
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to export avatars:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Import avatars from exported data
+   * @param {Object} avatarsData - Object mapping address to { data: base64, type: mimeType }
+   * @param {boolean} overwrite - Whether to overwrite existing avatars
+   * @returns {Promise<number>} Number of avatars imported
+   */
+  async importAll(avatarsData, overwrite = false) {
+    if (!this.db) {
+      await this.init();
+    }
+
+    if (!avatarsData || typeof avatarsData !== 'object') {
+      return 0;
+    }
+
+    let importedCount = 0;
+
+    for (const [address, avatarInfo] of Object.entries(avatarsData)) {
+      if (!avatarInfo || !avatarInfo.data) continue;
+
+      try {
+        // Check if avatar already exists
+        if (!overwrite) {
+          const existing = await this.get(address);
+          if (existing) continue;
+        }
+
+        // Convert base64 back to blob
+        const blob = this.base64ToBlob(avatarInfo.data, avatarInfo.type || 'image/jpeg');
+        await this.save(address, blob);
+        importedCount++;
+      } catch (e) {
+        console.warn(`Failed to import avatar for ${address}:`, e);
+      }
+    }
+
+    return importedCount;
+  }
+
+  /**
+   * Convert a Blob to base64 string
+   * @param {Blob} blob - The blob to convert
+   * @returns {Promise<string>} Base64 encoded string
+   */
+  blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // Remove the data URL prefix (e.g., "data:image/jpeg;base64,")
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /**
+   * Convert a base64 string back to Blob
+   * @param {string} base64 - Base64 encoded string
+   * @param {string} mimeType - MIME type of the blob
+   * @returns {Blob} The resulting blob
+   */
+  base64ToBlob(base64, mimeType = 'image/jpeg') {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+  }
 }
 
 /**
@@ -19962,6 +20623,123 @@ class ThumbnailCache {
         reject(request.error);
       };
     });
+  }
+
+  /**
+   * Export all thumbnails as an object with base64-encoded data
+   * @returns {Promise<Object>} Object mapping url to { data: base64, type: mimeType, originalType: string }
+   */
+  async exportAll() {
+    if (!this.db) {
+      await this.init();
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const request = store.getAll();
+
+      request.onsuccess = async () => {
+        const results = request.result;
+        const thumbnails = {};
+
+        for (const item of results) {
+          if (item.url && item.thumbnail) {
+            try {
+              // Convert blob to base64
+              const base64 = await this.blobToBase64(item.thumbnail);
+              thumbnails[item.url] = {
+                data: base64,
+                type: item.thumbnail.type || 'image/jpeg',
+                originalType: item.originalType || 'image/jpeg'
+              };
+            } catch (e) {
+              console.warn(`Failed to export thumbnail for ${item.url}:`, e);
+            }
+          }
+        }
+
+        resolve(thumbnails);
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to export thumbnails:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Import thumbnails from exported data
+   * @param {Object} thumbnailsData - Object mapping url to { data: base64, type: mimeType, originalType: string }
+   * @param {boolean} overwrite - Whether to overwrite existing thumbnails
+   * @returns {Promise<number>} Number of thumbnails imported
+   */
+  async importAll(thumbnailsData, overwrite = false) {
+    if (!this.db) {
+      await this.init();
+    }
+
+    if (!thumbnailsData || typeof thumbnailsData !== 'object') {
+      return 0;
+    }
+
+    let importedCount = 0;
+
+    for (const [url, thumbInfo] of Object.entries(thumbnailsData)) {
+      if (!thumbInfo || !thumbInfo.data) continue;
+
+      try {
+        // Check if thumbnail already exists
+        if (!overwrite) {
+          const existing = await this.get(url);
+          if (existing) continue;
+        }
+
+        // Convert base64 back to blob
+        const blob = this.base64ToBlob(thumbInfo.data, thumbInfo.type || 'image/jpeg');
+        await this.save(url, blob, thumbInfo.originalType || thumbInfo.type || 'image/jpeg');
+        importedCount++;
+      } catch (e) {
+        console.warn(`Failed to import thumbnail for ${url}:`, e);
+      }
+    }
+
+    return importedCount;
+  }
+
+  /**
+   * Convert a Blob to base64 string
+   * @param {Blob} blob - The blob to convert
+   * @returns {Promise<string>} Base64 encoded string
+   */
+  blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // Remove the data URL prefix (e.g., "data:image/jpeg;base64,")
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /**
+   * Convert a base64 string back to Blob
+   * @param {string} base64 - Base64 encoded string
+   * @param {string} mimeType - MIME type of the blob
+   * @returns {Blob} The resulting blob
+   */
+  base64ToBlob(base64, mimeType = 'image/jpeg') {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
   }
 }
 
