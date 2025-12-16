@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -936,6 +936,11 @@ class Footer {
       } else if (view === 'wallet') {
         this.walletButton.classList.remove('has-notification');
         await walletScreen.updateWalletView();
+        
+        // Update last viewed timestamp so we know user has seen the wallet
+        if (myData?.wallet) {
+          myData.wallet.lastWalletViewTimestamp = getCorrectedTimestamp();
+        }
       }
     } catch (error) {
       console.error(`Error switching to ${view} view:`, error);
@@ -2140,17 +2145,17 @@ class SignInModal {
 
     // Get the notified addresses and sort usernames to prioritize them
     const notifiedAddresses = reactNativeApp.isReactNativeWebView ? reactNativeApp.getNotificationAddresses() : [];
-    const notifiedAddressSet = new Set(Array.isArray(notifiedAddresses) ? notifiedAddresses : []);
     let sortedUsernames = [...usernames];
     const notifiedUsernameSet = new Set();
     
     // if there are notified addresses, partition the usernames (stable) so notified come first
     if (notifiedAddresses.length > 0) {
+      const normalizedNotifiedSet = new Set(notifiedAddresses.map(addr => normalizeAddress(addr)));
       const notifiedUsernames = [];
       const otherUsernames = [];
       for (const username of sortedUsernames) {
         const address = netidAccounts?.usernames?.[username]?.address;
-        const isNotified = Boolean(address && notifiedAddressSet.has(address));
+        const isNotified = address && normalizedNotifiedSet.has(normalizeAddress(address));
         if (isNotified) {
           notifiedUsernames.push(username);
           notifiedUsernameSet.add(username);
@@ -2311,6 +2316,14 @@ class SignInModal {
     myAccount = myData.account;
     logsModal.log(`SignIn as ${username}_${netid}`)
 
+    // Clear notification address for this account when signing in
+    // Notification storage is only for accounts the user is NOT signed in to
+    if (reactNativeApp.isReactNativeWebView && myAccount?.keys?.address) {
+      const addressToClear = myAccount.keys.address;
+      reactNativeApp.clearNotificationAddress(addressToClear);
+      reactNativeApp.sendClearNotifications(addressToClear);
+    }
+
     /* requestNotificationPermission(); */
     if (useLongPolling) {
       setTimeout(longPoll, 10);
@@ -2342,6 +2355,11 @@ class SignInModal {
     }
     
     await footer.switchView('chats'); // Default view
+    
+    // Restore wallet/history notification dots if there are unread transfers
+    if (myData?.wallet?.history && Array.isArray(myData.wallet.history) && myData.wallet.history.length > 0) {
+      restoreWalletNotificationDots();
+    }
   }
 
   async handleUsernameChange() {
@@ -2566,6 +2584,12 @@ class ContactInfoModal {
     this.needsContactListUpdate = false; // track if we need to update the contact list
   }
 
+  // Helper method to open avatar edit modal
+  openAvatarEdit() {
+    if (!this.currentContactAddress) return;
+    avatarEditModal.open(this.currentContactAddress);
+  }
+
   // Initialize event listeners that only need to be set up once
   load() {
     this.modal = document.getElementById('contactInfoModal');
@@ -2611,9 +2635,15 @@ class ContactInfoModal {
     });
 
     // Avatar edit button
-    this.avatarEditButton.addEventListener('click', () => {
-      if (!this.currentContactAddress) return;
-      avatarEditModal.open(this.currentContactAddress);
+    this.avatarEditButton.addEventListener('click', (e) => {
+      e.stopPropagation(); // Prevent triggering avatar click
+      this.openAvatarEdit();
+    });
+
+    // Make the avatar itself clickable
+    this.avatarDiv.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.openAvatarEdit();
     });
 
     // Attach edit button to the avatar section (top-right)
@@ -2761,9 +2791,48 @@ class FriendModal {
   }
 
   // Open the friend modal
-  open() {
+  async open() {
     const contact = myData.contacts[this.currentContactAddress];
     if (!contact) return;
+
+    // Query network for current toll required status
+    try {
+      const myAddr = longAddress(myAccount.keys.address);
+      const contactAddr = longAddress(this.currentContactAddress);
+      const sortedAddresses = [myAddr, contactAddr].sort();
+      const chatId = hashBytes(sortedAddresses.join(''));
+      const myIndex = sortedAddresses.indexOf(myAddr);
+
+      const tollInfo = await queryNetwork(`/messages/${chatId}/toll`);
+      const networkRequired = tollInfo?.toll?.required?.[myIndex];
+
+      if (networkRequired !== undefined) {
+        // Map backend required value to frontend friend status
+        // Backend: 1 = toll required, 0 = toll not required, 2 = blocked
+        // Frontend: 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+        let networkFriendStatus;
+        if (networkRequired === 2) {
+          networkFriendStatus = 0; // blocked
+        } else if (networkRequired === 1) {
+          networkFriendStatus = 1; // Other (toll required)
+        } else if (networkRequired === 0) {
+          // toll not required - could be Acquaintance (2) or Friend (3)
+          // Use the local contact.friend if it's 2 or 3, otherwise default to 2
+          networkFriendStatus = (contact.friend === 2 || contact.friend === 3) ? contact.friend : 2;
+        }
+
+        // Update contact's friend status if it differs from network
+        if (networkFriendStatus !== undefined && networkFriendStatus !== contact.friend) {
+          contact.friend = networkFriendStatus;
+          contact.friendOld = networkFriendStatus;
+          // Update the friend button color
+          this.updateFriendButton(contact, 'addFriendButtonContactInfo');
+          this.updateFriendButton(contact, 'addFriendButtonChat');
+        }
+      }
+    } catch (error) {
+      console.error('Error querying toll required status:', error);
+    }
 
     // Set the current friend status
     const status = contact.friend.toString();
@@ -3141,12 +3210,17 @@ class HistoryModal {
     this.modal.classList.add('active');
     this.populateAssets();
     this.updateTransactionHistory();
+    
+    // Update last viewed timestamp when user opens history modal
+    // This clears the history button dot, but wallet dot remains if user hasn't viewed wallet screen
+    if (myData?.wallet) {
+      myData.wallet.lastHistoryViewTimestamp = getCorrectedTimestamp();
+      walletScreen.openHistoryModalButton.classList.remove('has-notification');
+    }
   }
 
   close() {
     this.modal.classList.remove('active');
-    walletScreen.openHistoryModalButton.classList.remove('has-notification');
-    footer.walletButton.classList.remove('has-notification');
   }
 
   populateAssets() {
@@ -3997,9 +4071,14 @@ async function processChats(chats, keys) {
                       // This is a message received from sender, who is now deleting it - valid
                       console.log(`Deleting message ${txidToDelete} as requested by sender`);
                       
+                      // Purge cached thumbnails for image attachments, if any
+                      chatModal.purgeThumbnail(messageToDelete.xattach);
+
                       // Mark the message as deleted
                       messageToDelete.deleted = 1;
                       messageToDelete.message = "Deleted by sender";
+                      // Remove attachments so we don't keep references around
+                      delete messageToDelete.xattach;
                       
                       // Remove payment-specific fields if present
                       if (messageToDelete.amount) {
@@ -4023,9 +4102,14 @@ async function processChats(chats, keys) {
                       // This is our own message, and we're deleting it - valid
                       console.log(`Deleting our message ${txidToDelete} as requested by us`);
                       
+                      // Purge cached thumbnails for image attachments, if any
+                      chatModal.purgeThumbnail(messageToDelete.xattach);
+
                       // Mark the message as deleted
                       messageToDelete.deleted = 1;
                       messageToDelete.message = "Deleted for all";
+                      // Remove attachments so we don't keep references around
+                      delete messageToDelete.xattach;
                       
                       // Remove payment-specific fields if present - same logic as above
                       if (messageToDelete.amount) {
@@ -4432,6 +4516,41 @@ async function processChats(chats, keys) {
     // Update the timestamp
     myAccount.chatTimestamp = newTimestamp;
     console.log('Updated global chat timestamp to', newTimestamp);
+  }
+}
+
+/**
+ * Restore wallet/history notification dots based on whether there are transfers
+ * newer than when the user last viewed those screens
+ */
+function restoreWalletNotificationDots() {
+  if (!myData?.wallet?.history || !Array.isArray(myData.wallet.history) || myData.wallet.history.length === 0) {
+    return;
+  }
+  
+  // Get the most recent transfer timestamp
+  const mostRecentTransfer = myData.wallet.history[0];
+  if (!mostRecentTransfer || !mostRecentTransfer.timestamp) {
+    return;
+  }
+  
+  const mostRecentTransferTimestamp = mostRecentTransfer.timestamp;
+  const lastWalletViewTimestamp = myData.wallet.lastWalletViewTimestamp || 0;
+  const lastHistoryViewTimestamp = myData.wallet.lastHistoryViewTimestamp || 0;
+  
+  // Only show dots for received transfers (sign === 1)
+  const isReceivedTransfer = mostRecentTransfer.sign === 1;
+  
+  // Show wallet tab dot if there's a newer received transfer and wallet screen is not active
+  // This dot is cleared when user switches to wallet screen
+  if (isReceivedTransfer && mostRecentTransferTimestamp > lastWalletViewTimestamp && !walletScreen.isActive()) {
+    footer.walletButton.classList.add('has-notification');
+  }
+  
+  // Show history button dot if there's a newer received transfer than when user last opened history modal
+  // This dot is cleared when user opens the history modal (not when they open wallet screen)
+  if (isReceivedTransfer && mostRecentTransferTimestamp > lastHistoryViewTimestamp) {
+    walletScreen.openHistoryModalButton.classList.add('has-notification');
   }
 }
 
@@ -10625,10 +10744,12 @@ class ChatModal {
     }
 
     const allRead = Object.values(myData.contacts).every((c) => c.unread === 0);
+    const currentAddress = myAccount?.keys?.address;
+    
     if (allRead) {
-      logsModal.log('Clearing notification address for', myAccount.keys.address);
-      reactNativeApp.clearNotificationAddress(myAccount.keys.address);
-      reactNativeApp.sendClearNotifications(myAccount.keys.address);
+      logsModal.log('Clearing notification address for account', currentAddress);
+      reactNativeApp.clearNotificationAddress(currentAddress);
+      reactNativeApp.sendClearNotifications(currentAddress);
     }
 
     const notificationAddresses = reactNativeApp.getNotificationAddresses();
@@ -12496,6 +12617,24 @@ console.warn('in send message', txid)
   }
 
   /**
+   * Removes cached thumbnails for any image attachments in an xattach array.
+   * Safe to call even if thumbnails don't exist.
+   * @param {any} xattach
+   */
+  purgeThumbnail(xattach) {
+    if (!Array.isArray(xattach) || !xattach.length) return;
+    for (const att of xattach) {
+      const url = att?.url;
+      const type = att?.type || '';
+      if (!url || url === '#') continue;
+      if (typeof type === 'string' && type.startsWith('image/')) {
+        // Fire-and-forget; deletion errors shouldn't block UI actions
+        void thumbnailCache.delete(url).catch((e) => console.warn('Failed to delete thumbnail:', e));
+      }
+    }
+  }
+
+  /**
    * Resolve common attachment context fields from an attachment row.
    * @param {HTMLElement} attachmentRow
    * @returns {{ attachmentRow: HTMLElement, messageEl: HTMLElement | null, idx: number, item: any, url: string }}
@@ -13039,7 +13178,8 @@ console.warn('in send message', txid)
           delete myData.wallet.history[txIndex].address;
         }
       }
-      // Remove attachments if any
+      // Remove cached thumbnails for image attachments, then remove attachments
+      this.purgeThumbnail(message.xattach);
       delete message.xattach;
       
       this.appendChatModal();
@@ -13384,17 +13524,16 @@ console.warn('in send message', txid)
       // Create the Meet URL
       const callUrl = `https://meet.liberdus.com/${randomHex}`;
       
-      // Open immediately only if call is now
-      if (chosenCallTime === 0) {
-        window.open(callUrl+`${callUrlParams}"${myAccount.username}"`, '_blank');
-      }
-      
       // Send a call message to the contact with callTime (0 or future timestamp)
-      await this.sendCallMessage(callUrl, chosenCallTime);
+      const success = await this.sendCallMessage(callUrl, chosenCallTime);
       
-      if (chosenCallTime && chosenCallTime > 0) {
-        const when = new Date(chosenCallTime - timeSkew); // convert back to local wall-clock for display
-        showToast(`Call scheduled for ${when.toLocaleString()}`, 3000, 'success');
+      if (success) {
+        if (chosenCallTime === 0) {
+          window.open(callUrl + `${callUrlParams}"${myAccount.username}"`, '_blank');
+        } else {
+          const when = new Date(chosenCallTime - timeSkew); // convert back to local wall-clock for display
+          showToast(`Call scheduled for ${when.toLocaleString()}`, 3000, 'success');
+        }
       }
       
     } catch (error) {
@@ -13412,25 +13551,25 @@ console.warn('in send message', txid)
     // if user is blocked, don't send message, show toast
     if (myData.contacts[this.address].tollRequiredToSend == 2) {
       showToast('You are blocked by this user', 0, 'error');
-      return;
+      return false;
     }
 
     try {
       // Get current chat data
       const chatsData = myData;
       const currentAddress = this.address;
-      if (!currentAddress) return;
+      if (!currentAddress) return false;
 
       // Check if trying to message self
       if (currentAddress === myAccount.address) {
-        return;
+        return false;
       }
 
       // Get sender's keys from wallet
       const keys = myAccount.keys;
       if (!keys) {
         showToast('Keys not found for sender address', 0, 'error');
-        return;
+        return false;
       }
 
       // Ensure recipient keys are available
@@ -13440,7 +13579,7 @@ console.warn('in send message', txid)
       if (!ok || !recipientPubKey || !pqRecPubKey) {
         console.log(`no public/PQ key found for recipient ${currentAddress}`);
         showToast('Failed to get recipient key', 0, 'error');
-        return;
+        return false;
       }
 
       const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey)
@@ -13533,11 +13672,15 @@ console.warn('in send message', txid)
         console.log('call message failed to send', response);
         updateTransactionStatus(txid, currentAddress, 'failed', 'message');
         this.appendChatModal();
+        return false;
       }
+
+      return true;
       
     } catch (error) {
       console.error('Call message error:', error);
       showToast('Failed to send call invitation. Please try again.', 0, 'error');
+      return false;
     }
   }
 
@@ -18625,30 +18768,39 @@ class ReactNativeApp {
           }
 
           if (data.type === 'ALL_NOTIFICATIONS_IN_PANEL') {
+            // Clear notifications for current user when app returns from background
+            const currentUserAddress = myAccount?.keys?.address;
+            if (currentUserAddress) {
+              this.clearNotificationAddress(currentUserAddress);
+              this.sendClearNotifications(currentUserAddress);
+            }
+            
             if (data.notifications && Array.isArray(data.notifications) && data.notifications.length > 0) {
               const { state } = this.getNotificationState();
               const currentTimestamp = state.timestamp || 0;
               let highestTimestamp = currentTimestamp;
+              const normalizedCurrentUser = currentUserAddress ? normalizeAddress(currentUserAddress) : null;
 
               data.notifications.forEach((notification, index) => {
                 try {
                   const rawTimestamp = notification?.data?.timestamp;
                   const parsedTimestamp = rawTimestamp ? Date.parse(rawTimestamp) : NaN;
                   const hasValidTimestamp = Number.isFinite(parsedTimestamp);
-                  const isNewerThanStored = !hasValidTimestamp || parsedTimestamp > currentTimestamp;
-
-                  if (!isNewerThanStored) {
-                    return;
+                  // Skip already-processed notifications if they are older than the current timestamp
+                  if (hasValidTimestamp && parsedTimestamp <= currentTimestamp) {
+                    return; // Skip already-processed notifications
                   }
 
-                  // Extract address from notification body text
+                  // Extract address from notification body (pattern: "to 0x...")
                   if (notification?.body && typeof notification.body === 'string') {
-                    // Look for pattern "to 0x..." in the body
-                    // expecting to just return one address
                     const addressMatch = notification.body.match(/to\s+(\S+)/);
                     if (addressMatch && addressMatch[1]) {
                       const normalizedToAddress = normalizeAddress(addressMatch[1]);
-                      this.saveNotificationAddress(normalizedToAddress);
+                      
+                      // Save notification for other accounts user owns (skip current user, already cleared above)
+                      if (normalizedToAddress !== normalizedCurrentUser) {
+                        this.saveNotificationAddress(normalizedToAddress);
+                      }
                     }
                   }
 
@@ -18854,6 +19006,15 @@ class ReactNativeApp {
   saveNotificationAddress(contactAddress) {
     if (!contactAddress || typeof contactAddress !== 'string') return;
     
+    // Don't save the current user's own address if they're already signed in
+    // Notification storage is only for prioritizing accounts in the sign-in modal when user is NOT signed in
+    // When user is signed in, they can see notifications in the wallet/chats UI, so no need to store it
+    if (this.isCurrentAccount(contactAddress)) {
+      // Also clear it if it already exists in storage (cleanup for cases where it was saved before this fix)
+      this.clearNotificationAddress(contactAddress);
+      return;
+    }
+    
     try {
       const { storage, netid, state } = this.getNotificationState();
       if (!netid) return;
@@ -18902,6 +19063,7 @@ class ReactNativeApp {
   }
 
   // Send clear notifications message
+  // NOTE: This only clears native app badge notifications, NOT UI notification dots
   sendClearNotifications(address=null) {
     this.postMessage({
       type: 'CLEAR_NOTI',
@@ -20620,6 +20782,31 @@ class ThumbnailCache {
 
       request.onerror = () => {
         console.warn('Failed to get thumbnail:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Delete a cached thumbnail from IndexedDB
+   * @param {string} attachmentUrl - The attachment URL (key)
+   * @returns {Promise<void>}
+   */
+  async delete(attachmentUrl) {
+    if (!attachmentUrl) return;
+    if (!this.db) {
+      await this.init();
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      const request = store.delete(attachmentUrl);
+
+      request.onsuccess = () => resolve();
+
+      request.onerror = () => {
+        console.warn('Failed to delete thumbnail:', request.error);
         reject(request.error);
       };
     });
