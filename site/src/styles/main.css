@@ -3515,6 +3515,166 @@ html[data-theme="light"] .page-header #funding-bg {
   mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24'%3E%3Cpath d='M22.539 8.242H1.46V5.406h21.08v2.836zM1.46 10.812V24L12 18.11 22.54 24V10.812H1.46zM22.54 0H1.46v2.836h21.08V0z'%3E%3C/path%3E%3C/svg%3E");
 }
 
+/* Buy/Sell Page Specific Styles */
+.buy-bg-gradient {
+  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+}
+
+.sell-bg-gradient {
+  background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+}
+
+.token-info-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-8);
+  backdrop-filter: blur(20px);
+  transition: all 0.3s ease;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.token-info-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-glow);
+  transform: translateY(-4px);
+}
+
+.token-info-card h3 {
+  margin-bottom: var(--space-4);
+  color: var(--text-primary);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.contract-address {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.95rem;
+  color: var(--primary);
+  background: var(--bg-glass);
+  padding: var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-light);
+  word-break: break-all;
+  margin-bottom: var(--space-6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  position: relative;
+}
+
+.token-links {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+}
+
+.token-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--text-secondary);
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.token-link:hover {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+  transform: translateY(-2px);
+}
+
+.trading-pair-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin-top: var(--space-8);
+  max-width: 1000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.trading-pair-row {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.trading-pair-row.top-row {
+  justify-content: space-evenly;
+}
+
+.trading-pair-row.bottom-row {
+  justify-content: center;
+  gap: calc(var(--space-6) + 60px);
+}
+
+.trading-pair-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  text-align: center;
+  backdrop-filter: blur(20px);
+  transition: all 0.3s ease;
+  flex: 0 0 280px;
+  max-width: 280px;
+}
+
+.trading-pair-card:hover {
+  border-color: var(--success);
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.2);
+  transform: translateY(-4px);
+}
+
+.trading-pair-icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto var(--space-4);
+  background: linear-gradient(135deg, var(--success), #059669);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: white;
+}
+
+.notice-section {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(220, 38, 38, 0.05));
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius-lg);
+  padding: var(--space-8);
+  margin: var(--space-12) 0;
+}
+
+[data-theme="light"] .notice-section {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.05), rgba(220, 38, 38, 0.02));
+}
+
+.external-link {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.external-link:hover {
+  color: var(--primary-dark);
+  text-decoration: underline;
+}
+
 /* Mobile responsiveness */
 @media (max-width: 768px) {
   .stats-grid {
@@ -3541,5 +3701,30 @@ html[data-theme="light"] .page-header #funding-bg {
   
   .comparison-cell {
     padding: 1rem;
+  }
+  
+  .trading-pair-row {
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .trading-pair-row.top-row,
+  .trading-pair-row.bottom-row {
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .token-info-card {
+    padding: var(--space-4);
+    max-width: 100%;
+  }
+  
+  .token-links {
+    grid-template-columns: 1fr;
+  }
+  
+  .contract-address {
+    font-size: 0.85rem;
+    padding: var(--space-3);
   }
 }
