@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="refresh" content="0; url=/site/buy.html">
+    <link rel="canonical" href="/site/buy.html" />
+    <title>Redirecting to Liberdus Download</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .redirect-message {
+            text-align: center;
+            padding: 3rem;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            margin: 0 0 1rem 0;
+            font-size: 2rem;
+            font-weight: 600;
+        }
+        p {
+            margin: 0;
+            font-size: 1.1rem;
+        }
+        a {
+            color: #fff;
+            text-decoration: underline;
+        }
+        a:hover {
+            color: #f0f0f0;
+        }
+        .spinner {
+            margin: 2rem auto 0;
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="redirect-message">
+        <h1>Redirecting to Liberdus...</h1>
+        <p>If you are not redirected automatically, <a href="/site/buy.html">click here</a>..</p>
+        <div class="spinner"></div>
+    </div>
+    <script>
+        // Immediate redirect
+        window.location.href = "/site/download/";
+    </script>
+</body>
+</html>
