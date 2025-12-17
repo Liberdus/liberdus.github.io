@@ -1,0 +1,1906 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Messaging App Comparison - Liberdus</title>
+    <meta
+      name="description"
+      content="Compare messaging applications across privacy, security, web3 features, governance, and user experience. See how Liberdus stacks up against the competition."
+    />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="src/styles/main.css" />
+    <link
+      rel="icon"
+      type="image/png"
+      href="src/assets/images/liberdus-favicon.png"
+    />
+
+    <!-- Required Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- Prevent theme flashing -->
+    <script>
+      (function () {
+        const savedTheme = localStorage.getItem("theme") || "dark";
+        document.documentElement.setAttribute("data-theme", savedTheme);
+        if (savedTheme === 'dark') {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
+
+    <style>
+      /* Comparison tool specific styles */
+      .comparison-tool {
+        font-family: 'Inter', sans-serif;
+      }
+      
+      /* Rating colors */
+      .rating-excellent { background-color: #22c55e; color: white; }
+      .rating-good { background-color: #84cc16; color: white; }
+      .rating-fair { background-color: #eab308; color: black; }
+      .rating-poor { background-color: #ef4444; color: white; }
+      
+      /* App logo styles */
+      .app-logo {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        padding: 4px;
+        transition: all 0.3s ease;
+        backdrop-filter: blur(10px);
+      }
+      
+      .app-logo img {
+        border-radius: 6px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+      
+      /* Dark mode adjustments */
+      [data-theme="dark"] .app-logo {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      
+      [data-theme="dark"] .app-logo img {
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      }
+      
+      /* Light mode adjustments */
+      [data-theme="light"] .app-logo {
+        background: rgba(0, 0, 0, 0.02);
+        border: 1px solid rgba(0, 0, 0, 0.05);
+      }
+      
+      [data-theme="light"] .app-logo img {
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+      }
+
+      /* View toggle button styles */
+      .view-toggle-btn {
+        background: var(--bg-glass);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+        padding: 8px 16px;
+        border-radius: var(--radius-sm);
+        transition: all 0.3s ease;
+        font-weight: 500;
+      }
+      
+      .view-toggle-btn:hover {
+        background: var(--bg-card);
+        border-color: var(--primary);
+        color: var(--text-primary);
+        transform: translateY(-1px);
+      }
+      
+      .view-toggle-btn.active {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: white;
+        box-shadow: var(--shadow-glow);
+      }
+      
+      .view-toggle-btn.active:hover {
+        background: var(--primary-dark);
+        transform: translateY(-1px);
+      }
+
+      /* Category filter button styles */
+      .category-filter {
+        background: var(--bg-glass);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+        padding: 8px 12px;
+        border-radius: var(--radius-sm);
+        transition: all 0.3s ease;
+        font-size: 0.875rem;
+        font-weight: 500;
+      }
+      
+      .category-filter:hover {
+        background: var(--bg-card);
+        border-color: var(--primary);
+        color: var(--text-primary);
+      }
+      
+      .category-filter.selected {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: white;
+      }
+
+      /* Table styles */
+      .table-container {
+        overflow-x: auto;
+        border-radius: 12px;
+        background: var(--bg-glass);
+        border: 1px solid var(--border);
+        backdrop-filter: blur(20px);
+      }
+      
+      .comparison-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+      }
+      
+      .comparison-table th,
+      .comparison-table td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        color: var(--text-primary);
+      }
+      
+      .comparison-table th {
+        background: var(--bg-glass);
+        font-weight: 600;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      
+      .app-selector {
+        background: var(--bg-glass);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px;
+        text-align: center;
+        transition: all 0.3s ease;
+        color: var(--text-primary);
+      }
+      
+      .app-selector:hover {
+        border-color: var(--primary);
+        transform: translateY(-2px);
+      }
+      
+      .app-selector.selected {
+        background: var(--primary);
+        color: white;
+      }
+      
+      .category-filter {
+        background: var(--bg-glass);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 8px 16px;
+        transition: all 0.3s ease;
+        color: var(--text-primary);
+      }
+      
+      .category-filter:hover {
+        border-color: var(--primary);
+      }
+      
+      .category-filter.selected {
+        background: var(--primary);
+        color: white;
+      }
+      
+      .tooltip {
+        background: var(--bg-main);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 8px 12px;
+        font-size: 14px;
+        color: var(--text-primary);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(20px);
+      }
+      
+      .export-btn {
+        background: var(--bg-glass);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 8px 16px;
+        color: var(--text-primary);
+        transition: all 0.3s ease;
+      }
+      
+      .export-btn:hover {
+        background: var(--primary);
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Navigation -->
+    <nav class="nav" id="header"></nav>
+
+    <!-- Page Header -->
+    <section class="page-header" id="top">
+      <!-- Animated Background -->
+      <div style="position: absolute; inset: 0; pointer-events: none;" id="comparison-bg">
+        <svg style="position: absolute; width: 100vw; height: 100%; left: 50%; top: 60px; transform: translateX(-50%); overflow: visible;" viewBox="0 0 1200 400">
+          <defs>
+            <linearGradient id="comparisonBgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:#5D5CDE;stop-opacity:1"></stop>
+              <stop offset="100%" style="stop-color:#8B5CF6;stop-opacity:1"></stop>
+            </linearGradient>
+          </defs>
+          <circle cx="100" cy="80" r="40" style="fill: url(#comparisonBgGradient) !important; opacity: 0.3;">
+            <animateTransform attributeName="transform" type="translate" values="0,0; 20,-30; 0,0" dur="6s" repeatCount="indefinite"></animateTransform>
+            <animate attributeName="opacity" values="0.3;0.5;0.3" dur="6s" repeatCount="indefinite"></animate>
+          </circle>
+          <circle cx="300" cy="250" r="25" style="fill: url(#comparisonBgGradient) !important; opacity: 0.4;">
+            <animateTransform attributeName="transform" type="translate" values="0,0; -15,25; 0,0" dur="8s" repeatCount="indefinite"></animateTransform>
+            <animate attributeName="opacity" values="0.4;0.6;0.4" dur="8s" repeatCount="indefinite"></animate>
+          </circle>
+          <circle cx="900" cy="100" r="35" style="fill: url(#comparisonBgGradient) !important; opacity: 0.3;">
+            <animateTransform attributeName="transform" type="translate" values="0,0; 15,-20; 0,0" dur="7s" repeatCount="indefinite"></animateTransform>
+            <animate attributeName="opacity" values="0.3;0.5;0.3" dur="7s" repeatCount="indefinite"></animate>
+          </circle>
+          <circle cx="1100" cy="280" r="30" style="fill: url(#comparisonBgGradient) !important; opacity: 0.35;">
+            <animateTransform attributeName="transform" type="translate" values="0,0; -20,15; 0,0" dur="9s" repeatCount="indefinite"></animateTransform>
+            <animate attributeName="opacity" values="0.35;0.55;0.35" dur="9s" repeatCount="indefinite"></animate>
+          </circle>
+          <line x1="100" y1="80" x2="300" y2="250" style="stroke: url(#comparisonBgGradient) !important; stroke-width: 2; opacity: 0.1;">
+            <animate attributeName="opacity" values="0.05;0.15;0.05" dur="4s" repeatCount="indefinite"></animate>
+          </line>
+          <line x1="300" y1="250" x2="900" y2="100" style="stroke: url(#comparisonBgGradient) !important; stroke-width: 2; opacity: 0.1;">
+            <animate attributeName="opacity" values="0.05;0.15;0.05" dur="5s" repeatCount="indefinite"></animate>
+          </line>
+          <line x1="900" y1="100" x2="1100" y2="280" style="stroke: url(#comparisonBgGradient) !important; stroke-width: 2; opacity: 0.1;">
+            <animate attributeName="opacity" values="0.05;0.15;0.05" dur="6s" repeatCount="indefinite"></animate>
+          </line>
+        </svg>
+        <div style="position: absolute; top: 10%; right: 15%; width: 300px; height: 300px; background: radial-gradient(circle, rgba(93,92,222,0.2) 0%, transparent 70%); filter: blur(60px);"></div>
+        <div style="position: absolute; bottom: 10%; left: 10%; width: 250px; height: 250px; background: radial-gradient(circle, rgba(139,92,246,0.15) 0%, transparent 70%); filter: blur(60px);"></div>
+      </div>
+
+      <div class="container page-container">
+        <h1 class="page-title">Messaging App Comparison</h1>
+        <p class="page-subtitle">
+          Compare messaging applications across privacy, security, web3 features, governance, and user experience. See how Liberdus stacks up against the competition.
+        </p>
+      </div>
+    </section>
+
+    <!-- Comparison Tool Section -->
+    <section class="section comparison-tool" id="comparison-tool">
+      <div class="container">
+        
+        <!-- Controls -->
+        <div class="mb-8">
+          <div class="flex flex-col lg:flex-row gap-4 items-center justify-between mb-6">
+            <div class="flex items-center gap-4">
+              <input type="text" id="search-input" placeholder="Search apps or features..." 
+                     class="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary">
+              <button id="select-all" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors">
+                Select All
+              </button>
+            </div>
+            <div class="flex gap-2">
+              <button class="export-btn" onclick="exportAsCSV()">📊 CSV</button>
+              <button class="export-btn" onclick="exportAsImage('png')">🖼️ PNG</button>
+              <button class="export-btn" onclick="shareComparison()">🔗 Share</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- App Selection -->
+        <div class="mb-8">
+          <h3 class="text-xl font-bold mb-4">Select Apps to Compare</h3>
+          <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4" id="app-selector-grid">
+            <!-- Apps will be populated here -->
+          </div>
+          <div class="mt-4 text-sm" style="color: var(--text-secondary);">
+            <span id="selected-count">0</span> apps selected
+          </div>
+        </div>
+
+        <!-- Category Filters -->
+        <div class="mb-8">
+          <h3 class="text-xl font-bold mb-4">Categories</h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3" id="category-filters">
+            <!-- Categories will be populated here -->
+          </div>
+        </div>
+
+        <!-- View Toggle -->
+        <div class="mb-6">
+          <div class="flex gap-2">
+            <button id="table-view" class="view-toggle-btn active">Table View</button>
+            <button id="dashboard-view" class="view-toggle-btn">Dashboard</button>
+          </div>
+        </div>
+
+        <!-- Comparison Content -->
+        <div id="comparison-content">
+          <div id="no-selection" class="text-center py-12">
+            <div class="text-6xl mb-4">📱</div>
+            <h3 class="text-2xl font-bold mb-2">Select Apps to Compare</h3>
+            <p style="color: var(--text-secondary);">Choose messaging apps from the grid above to see a detailed comparison</p>
+          </div>
+          
+          <div id="comparison-table" style="display: none;">
+            <!-- Table content will be generated here -->
+          </div>
+          
+          <div id="comparison-dashboard" style="display: none;">
+            <!-- Dashboard content will be generated here -->
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer" id="footer"></footer>
+
+    <script src="src/scripts/main.js"></script>
+    <script>
+      // Complete app data with all messaging applications
+      const appData = {
+        liberdus: {
+          name: "Liberdus",
+          type: "Web3",
+          region: "Global",
+          company: "Liberdus DAO",
+          logo: "https://pfst.cf2.poecdn.net/base/image/95cc6462eed94f00ee4aec700e67f5e7be891e5efd362fbe7a78484e190d37f9?w=512&h=512",
+          tags: ["web3", "decentralized", "privacy", "open-source", "e2e-encryption", "dao", "self-custodial"],
+          privacy: {
+            "Audit Status": { value: "✅ Regular independent security audits", rating: "excellent" },
+            "Backup Encryption": { value: "✅ User controls all keys", rating: "excellent" },
+            "E2E Encryption": { value: "✅ Military-grade end-to-end by default", rating: "excellent" },
+            "Metadata Protection": { value: "✅ Minimal metadata collection", rating: "excellent" },
+            "Open Source": { value: "✅ Fully open-source", rating: "excellent" },
+            "Self destructing messages?": { value: "✅ Configurable timers", rating: "excellent" }
+          },
+          architecture: {
+            "Company Location": { value: "🌐 Globally distributed DAO", rating: "excellent" },
+            "Custody Model": { value: "✅ Non-custodial - user controls keys", rating: "excellent" },
+            "Data Location": { value: "✅ Decentralized storage network", rating: "excellent" },
+            "Infrastructure Ownership": { value: "✅ Community-owned network", rating: "excellent" },
+            "Interoperability": { value: "✅ Cross-chain compatible", rating: "excellent" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "✅ Integrated Web3 wallet", rating: "excellent" },
+            "Own Their Data / Assets?": { value: "✅ Users own all data and assets", rating: "excellent" },
+            "Money‑making Model": { value: "✅ Community-driven, no ads", rating: "excellent" },
+            "Multi‑token Support": { value: "✅ Multi-chain token support", rating: "excellent" },
+            "Native Token?": { value: "✅ LIB token", rating: "excellent" },
+            "Primary Income Source": { value: "Network fees, community governance", rating: "excellent" },
+            "QR Code Friend‑Add": { value: "✅ Yes", rating: "excellent" },
+            "QR Code Payments": { value: "✅ Built-in crypto payments", rating: "excellent" },
+            "Token Swaps": { value: "✅ Built-in DEX", rating: "excellent" }
+          },
+          governance: {
+            "Governance Type": { value: "✅ DAO governance", rating: "excellent" },
+            "Transparency": { value: "✅ Fully transparent operations", rating: "excellent" },
+            "Upgradeability": { value: "✅ Community-controlled upgrades", rating: "excellent" },
+            "Who Owns It?": { value: "✅ Community/DAO", rating: "excellent" }
+          },
+          ux: {
+            "Account Creation": { value: "⚠️ Web3 wallet required", rating: "fair" },
+            "Browser Access": { value: "✅ Full browser support", rating: "excellent" },
+            "Desktop Support": { value: "✅ Cross-platform desktop", rating: "excellent" },
+            "KYC Required": { value: "❌ No KYC required", rating: "excellent" },
+            "Localization": { value: "✅ Multi-language support", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "✅ Seamless sync across devices", rating: "excellent" },
+            "Multi‑Device Use": { value: "✅ Unlimited devices", rating: "excellent" },
+            "Offline Messaging": { value: "✅ Offline message queuing", rating: "excellent" },
+            "Scalable": { value: "✅ Horizontally scalable network", rating: "excellent" },
+            "User Onboarding": { value: "⚠️ Requires Web3 wallet setup", rating: "fair" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "✅ Decentralized backup system", rating: "excellent" },
+            "Backup & Restore Options": { value: "✅ Cryptographic recovery", rating: "excellent" },
+            "Emojis Supported": { value: "✅ Full emoji and reactions", rating: "excellent" },
+            "File Sharing (with security note)": { value: "✅ E2E encrypted file sharing", rating: "excellent" },
+            "File Size Limit": { value: "✅ Large file support", rating: "excellent" },
+            "Group Chat Limit": { value: "✅ Unlimited group size", rating: "excellent" },
+            "Group Chats Available": { value: "✅ Advanced group features", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ Full communication suite", rating: "excellent" },
+            "Self‑Destructing Messages": { value: "✅ Configurable message timers", rating: "excellent" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "✅ Web3 native", rating: "excellent" },
+            "Blockchain‑based?": { value: "✅ Built on Shardus protocol", rating: "excellent" },
+            "Bridging / Cross‑Chain?": { value: "✅ Multi-chain bridging", rating: "excellent" },
+            "Chain Dependency": { value: "✅ Shardus ecosystem", rating: "excellent" },
+            "Network Used": { value: "✅ Shardus decentralized network", rating: "excellent" },
+            "Smart Contract Use": { value: "✅ Smart contract integration", rating: "excellent" },
+            "Token / Governance Mechanism": { value: "✅ LIB token governance", rating: "excellent" },
+            "Wallet Compatibility": { value: "✅ Multi-wallet support", rating: "excellent" }
+          }
+        },
+
+        whatsapp: {
+          name: "WhatsApp",
+          type: "Web2",
+          region: "USA", 
+          company: "Meta",
+          logo: "https://pfst.cf2.poecdn.net/base/image/09b28261ab14d00494ce1f3de4083d7fe691a53499164b415f64e899b8da386f?w=3500&h=3516",
+          tags: ["web2", "centralized", "meta", "popular", "mobile", "e2e encryption", "phone required", "audited", "usa"],
+          privacy: {
+            "Audit Status": { value: "⚠️ Limited - Meta internal audits only", rating: "fair" },
+            "Backup Encryption": { value: "⚠️ Optional - Encrypted backups need user activation", rating: "fair" },
+            "E2E Encryption": { value: "✅ Default for 1:1 & group chats", rating: "excellent" },
+            "Metadata Protection": { value: "❌ Meta collects extensive metadata", rating: "poor" },
+            "Open Source": { value: "❌ Closed source", rating: "poor" },
+            "Self destructing messages?": { value: "✅ With view-once & disappearing timers", rating: "excellent" }
+          },
+          architecture: {
+            "Company Location": { value: "🇺🇸 U.S. (Meta)", rating: "fair" },
+            "Custody Model": { value: "❌ Custodial - Meta controls keys and data", rating: "poor" },
+            "Data Location": { value: "❌ Centralized - Meta servers, global data storage", rating: "poor" },
+            "Infrastructure Ownership": { value: "❌ Owned by Meta Platforms", rating: "poor" },
+            "Interoperability": { value: "⚠️ Limited - only basic third-party integration", rating: "fair" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "❌ No", rating: "poor" },
+            "Own Their Data / Assets?": { value: "❌ No - Meta stores data", rating: "poor" },
+            "Money‑making Model": { value: "⚠️ Ad-free, payment fees in select markets", rating: "fair" },
+            "Multi‑token Support": { value: "❌ No", rating: "poor" },
+            "Native Token?": { value: "❌ None", rating: "poor" },
+            "Primary Income Source": { value: "Payment commission & merchant fees", rating: "fair" },
+            "QR Code Friend‑Add": { value: "✅ Yes (business)", rating: "excellent" },
+            "QR Code Payments": { value: "✅ Yes (India, others)", rating: "excellent" },
+            "Token Swaps": { value: "❌ No", rating: "poor" }
+          },
+          governance: {
+            "Governance Type": { value: "❌ Meta-run closed corp", rating: "poor" },
+            "Transparency": { value: "⚠️ Limited transparency; reports bi-annual", rating: "fair" },
+            "Upgradeability": { value: "⚠️ Controlled by Meta; forced updates", rating: "fair" },
+            "Who Owns It?": { value: "❌ Owned by Meta", rating: "poor" }
+          },
+          ux: {
+            "Account Creation": { value: "✅ Phone number required", rating: "good" },
+            "Browser Access": { value: "❌ (mobile QR needed)", rating: "poor" },
+            "Desktop Support": { value: "✅ Native app (Win/Mac)", rating: "excellent" },
+            "KYC Required": { value: "⚠️ No manual KYC; payment features may require ID", rating: "fair" },
+            "Localization": { value: "✅ Multi-language support", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "✅ Up to 4 linked devices", rating: "good" },
+            "Multi‑Device Use": { value: "✅ Yes via linked devices", rating: "excellent" },
+            "Offline Messaging": { value: "⚠️ Phone must be online within 14 days", rating: "fair" },
+            "Scalable": { value: "✅ Highly scalable for billions", rating: "excellent" },
+            "User Onboarding": { value: "✅ Simple phone + contact import", rating: "excellent" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "✅ Google Drive / iCloud backup", rating: "excellent" },
+            "Backup & Restore Options": { value: "✅ Full restore from cloud backups", rating: "excellent" },
+            "Emojis Supported": { value: "✅ Full emoji support + stickers & reactions", rating: "excellent" },
+            "File Sharing (with security note)": { value: "✅ Encrypted if E2E enabled", rating: "good" },
+            "File Size Limit": { value: "✅ Documents/images up to 2 GB", rating: "excellent" },
+            "Group Chat Limit": { value: "✅ Up to 512 members", rating: "excellent" },
+            "Group Chats Available": { value: "✅ Yes", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ Full support for chat, voice, video calls", rating: "excellent" },
+            "Self‑Destructing Messages": { value: "✅ Optional timers: 24h, 7d, 90d", rating: "excellent" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "❌ Web2", rating: "poor" },
+            "Blockchain‑based?": { value: "❌ No", rating: "poor" },
+            "Bridging / Cross‑Chain?": { value: "❌ None", rating: "poor" },
+            "Chain Dependency": { value: "❌ None", rating: "poor" },
+            "Network Used": { value: "❌ None", rating: "poor" },
+            "Smart Contract Use": { value: "❌ None", rating: "poor" },
+            "Token / Governance Mechanism": { value: "❌ None", rating: "poor" },
+            "Wallet Compatibility": { value: "❌ None", rating: "poor" }
+          }
+        },
+
+        signal: {
+          name: "Signal",
+          type: "Web2+",
+          region: "USA",
+          company: "Signal Foundation",
+          logo: "https://pfst.cf2.poecdn.net/base/image/6c0acdad432ecc0d2ad0815f10daf069f45085e9dac09eaabe47681564210ac4?w=4096&h=4096",
+          tags: ["web2+", "privacy-focused", "open source", "e2e encryption", "audited", "foundation", "phone required", "usa"],
+          privacy: {
+            "Audit Status": { value: "✅ Independent audits (e.g. Cure53)", rating: "excellent" },
+            "Backup Encryption": { value: "✅ Local backups only, no cloud", rating: "excellent" },
+            "E2E Encryption": { value: "✅ Default for all messages", rating: "excellent" },
+            "Metadata Protection": { value: "✅ Minimal metadata with Sealed Sender", rating: "excellent" },
+            "Open Source": { value: "✅ Fully open-source", rating: "excellent" },
+            "Self destructing messages?": { value: "✅ With customizable timers", rating: "excellent" }
+          },
+          architecture: {
+            "Company Location": { value: "🇺🇸 U.S. (Non-profit)", rating: "good" },
+            "Custody Model": { value: "✅ Non-custodial - user holds keys, no cloud backup", rating: "excellent" },
+            "Data Location": { value: "✅ Decentralized relay - no message storage", rating: "excellent" },
+            "Infrastructure Ownership": { value: "❌ Web2+ (privacy-focused, not decentralized)", rating: "poor" },
+            "Interoperability": { value: "⚠️ Minimal - bridges to SMS only", rating: "fair" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "❌ No", rating: "poor" },
+            "Own Their Data / Assets?": { value: "✅ Yes - user keys, no backups", rating: "excellent" },
+            "Money‑making Model": { value: "✅ Voluntary grants/donations", rating: "excellent" },
+            "Multi‑token Support": { value: "❌ No token support", rating: "poor" },
+            "Native Token?": { value: "❌ None", rating: "poor" },
+            "Primary Income Source": { value: "Donations (Signal Foundation)", rating: "excellent" },
+            "QR Code Friend‑Add": { value: "⚠️ Occasionally via QR", rating: "fair" },
+            "QR Code Payments": { value: "❌ No", rating: "poor" },
+            "Token Swaps": { value: "❌ No", rating: "poor" }
+          },
+          governance: {
+            "Governance Type": { value: "✅ Nonprofit foundation", rating: "excellent" },
+            "Transparency": { value: "✅ Very high: public financial data, public board", rating: "excellent" },
+            "Upgradeability": { value: "✅ Controlled by foundation; public releases", rating: "excellent" },
+            "Who Owns It?": { value: "✅ Signal Foundation nonprofit", rating: "excellent" }
+          },
+          ux: {
+            "Account Creation": { value: "✅ Phone number or VoIP; username optional", rating: "good" },
+            "Browser Access": { value: "❌ Only via linked app, not browser", rating: "poor" },
+            "Desktop Support": { value: "✅ Windows/macOS/Linux", rating: "excellent" },
+            "KYC Required": { value: "❌ None", rating: "excellent" },
+            "Localization": { value: "✅ Translated widely", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "✅ Up to 5 linked devices", rating: "excellent" },
+            "Multi‑Device Use": { value: "✅ Yes with desktop + mobile", rating: "excellent" },
+            "Offline Messaging": { value: "✅ Desktop can work offline after sync", rating: "excellent" },
+            "Scalable": { value: "✅ Scalable but centralized relays", rating: "good" },
+            "User Onboarding": { value: "⚠️ Requires phone setup and linked device steps", rating: "fair" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "❌ No cloud backups; local transfer on Android only", rating: "fair" },
+            "Backup & Restore Options": { value: "⚠️ Android transfer works; no cross-platform restore", rating: "fair" },
+            "Emojis Supported": { value: "✅ Full emoji + custom reactions", rating: "excellent" },
+            "File Sharing (with security note)": { value: "✅ E2E encrypted file sharing; max 100 MB", rating: "excellent" },
+            "File Size Limit": { value: "⚠️ Max file size ~100 MB", rating: "fair" },
+            "Group Chat Limit": { value: "⚠️ Max ~1,000 users per group", rating: "good" },
+            "Group Chats Available": { value: "✅ Yes", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ Text, voice, video calls (up to 5 participants)", rating: "excellent" },
+            "Self‑Destructing Messages": { value: "✅ Configurable disappearing messages up to 4 weeks", rating: "excellent" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "❌ Web2+", rating: "poor" },
+            "Blockchain‑based?": { value: "❌ No", rating: "poor" },
+            "Bridging / Cross‑Chain?": { value: "❌ None", rating: "poor" },
+            "Chain Dependency": { value: "❌ None", rating: "poor" },
+            "Network Used": { value: "❌ None", rating: "poor" },
+            "Smart Contract Use": { value: "❌ None", rating: "poor" },
+            "Token / Governance Mechanism": { value: "❌ None", rating: "poor" },
+            "Wallet Compatibility": { value: "❌ None", rating: "poor" }
+          }
+        },
+
+        telegram: {
+          name: "Telegram",
+          type: "Web2",
+          region: "UAE/BVI",
+          company: "Telegram FZ-LLC",
+          logo: "https://pfst.cf2.poecdn.net/base/image/241b38ef76aab398bf1ed4fca1aabd193e0bea0caf0999dde819a48b7c7cd195?w=4096&h=4096",
+          tags: ["web2", "freemium", "cloud sync", "bots", "channels", "ton", "uae"],
+          privacy: {
+            "Audit Status": { value: "⚠️ Some external audits of MTProto", rating: "fair" },
+            "Backup Encryption": { value: "❌ Cloud backups unencrypted", rating: "poor" },
+            "E2E Encryption": { value: "❌ Only 'Secret Chats' are E2E", rating: "poor" },
+            "Metadata Protection": { value: "❌ IPs and metadata stored", rating: "poor" },
+            "Open Source": { value: "⚠️ Partial - Clients open source, server closed", rating: "fair" },
+            "Self destructing messages?": { value: "⚠️ Only in Secret Chats", rating: "fair" }
+          },
+          architecture: {
+            "Company Location": { value: "🇧🇻 BVI legal / 🇦🇪 UAE ops", rating: "fair" },
+            "Custody Model": { value: "⚠️ Custodial - Cloud chats stored by Telegram", rating: "poor" },
+            "Data Location": { value: "⚠️ Global proprietary infrastructure", rating: "fair" },
+            "Infrastructure Ownership": { value: "❌ Owned by Telegram FZ-LLC (UAE-based)", rating: "poor" },
+            "Interoperability": { value: "⚠️ Limited - some TON integration plans", rating: "fair" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "⚠️ X Wallet (TON)", rating: "fair" },
+            "Own Their Data / Assets?": { value: "⚠️ Partial - TON account only", rating: "fair" },
+            "Money‑making Model": { value: "⚠️ Transaction fees on TON, ads, subscriptions", rating: "fair" },
+            "Multi‑token Support": { value: "✅ Yes (TON token services)", rating: "excellent" },
+            "Native Token?": { value: "✅ TON", rating: "excellent" },
+            "Primary Income Source": { value: "TON-based fees, premium subscriptions", rating: "good" },
+            "QR Code Friend‑Add": { value: "✅ Yes via TON wallets", rating: "excellent" },
+            "QR Code Payments": { value: "✅ Yes (TON)", rating: "excellent" },
+            "Token Swaps": { value: "⚠️ Token-level", rating: "fair" }
+          },
+          governance: {
+            "Governance Type": { value: "⚠️ Private company", rating: "fair" },
+            "Transparency": { value: "⚠️ Closed corporate governance", rating: "poor" },
+            "Upgradeability": { value: "⚠️ Proprietary controlled", rating: "fair" },
+            "Who Owns It?": { value: "❌ Telegram Inc.", rating: "poor" }
+          },
+          ux: {
+            "Account Creation": { value: "✅ Phone number required", rating: "good" },
+            "Browser Access": { value: "✅ Full browser web.telegram.org login", rating: "excellent" },
+            "Desktop Support": { value: "✅ Native desktop app", rating: "excellent" },
+            "KYC Required": { value: "❌ None", rating: "excellent" },
+            "Localization": { value: "✅ 20+ languages supported", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "✅ All devices sync instantly via cloud", rating: "excellent" },
+            "Multi‑Device Use": { value: "✅ Unlimited concurrent sessions", rating: "excellent" },
+            "Offline Messaging": { value: "✅ Cloud sync supports offline reading", rating: "excellent" },
+            "Scalable": { value: "✅ Extremely scalable via cloud", rating: "excellent" },
+            "User Onboarding": { value: "✅ Easy phone + SMS; username optional", rating: "excellent" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "✅ Cloud chat sync across devices", rating: "excellent" },
+            "Backup & Restore Options": { value: "✅ Restore anytime via cloud on new device", rating: "excellent" },
+            "Emojis Supported": { value: "✅ Full emoji, stickers, animated GIFs", rating: "excellent" },
+            "File Sharing (with security note)": { value: "✅ Up to 2 GB files stored in cloud servers", rating: "good" },
+            "File Size Limit": { value: "✅ Up to 2 GB per file", rating: "excellent" },
+            "Group Chat Limit": { value: "✅ Up to 200,000 users per group", rating: "excellent" },
+            "Group Chats Available": { value: "✅ Yes", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ Text, voice, video (groups too)", rating: "excellent" },
+            "Self‑Destructing Messages": { value: "✅ Secret Chats support timer deletes", rating: "good" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "❌ Web2", rating: "poor" },
+            "Blockchain‑based?": { value: "❌ No, but associated with TON", rating: "poor" },
+            "Bridging / Cross‑Chain?": { value: "⚠️ TON integrates with Ethereum bridge", rating: "fair" },
+            "Chain Dependency": { value: "❌ None but associated with TON", rating: "poor" },
+            "Network Used": { value: "❌ None but associated with TON", rating: "poor" },
+            "Smart Contract Use": { value: "⚠️ TON uses smart contracts", rating: "fair" },
+            "Token / Governance Mechanism": { value: "✅ TON token for governance & fees", rating: "excellent" },
+            "Wallet Compatibility": { value: "✅ Some wallet support for TON", rating: "good" }
+          }
+        },
+
+        discord: {
+          name: "Discord",
+          type: "Web2",
+          region: "USA",
+          company: "Discord Inc.",
+          logo: "https://pfst.cf2.poecdn.net/base/image/a4ee58d9ec70066fb05446f4a552743754feb8c8421efc672277ca04a46623e9?w=1080&h=1080",
+          tags: ["web2", "gaming", "communities", "voice chat", "servers", "no encryption", "usa"],
+          privacy: {
+            "Audit Status": { value: "❌ No independent audit available", rating: "poor" },
+            "Backup Encryption": { value: "❌ Messages stored unencrypted on servers", rating: "poor" },
+            "E2E Encryption": { value: "❌ Server-side encryption only", rating: "poor" },
+            "Metadata Protection": { value: "❌ Collects IP, usage, and metadata", rating: "poor" },
+            "Open Source": { value: "❌ Proprietary platform", rating: "poor" },
+            "Self destructing messages?": { value: "❌ No message expiration", rating: "poor" }
+          },
+          architecture: {
+            "Company Location": { value: "🇺🇸 U.S. (San Francisco)", rating: "fair" },
+            "Custody Model": { value: "❌ Custodial - Discord controls all data", rating: "poor" },
+            "Data Location": { value: "❌ Centralized cloud infrastructure", rating: "poor" },
+            "Infrastructure Ownership": { value: "❌ Discord Inc. owned", rating: "poor" },
+            "Interoperability": { value: "❌ None - proprietary, closed platform", rating: "poor" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "❌ No", rating: "poor" },
+            "Own Their Data / Assets?": { value: "❌ No", rating: "poor" },
+            "Money‑making Model": { value: "⚠️ Nitro subscriptions, marketplace", rating: "fair" },
+            "Multi‑token Support": { value: "⚠️ Limited (NFT roles via bots)", rating: "fair" },
+            "Native Token?": { value: "❌ None", rating: "poor" },
+            "Primary Income Source": { value: "Subscriptions, transaction cut", rating: "good" },
+            "QR Code Friend‑Add": { value: "✅ Yes (bots)", rating: "good" },
+            "QR Code Payments": { value: "❌ No", rating: "poor" },
+            "Token Swaps": { value: "❌ No", rating: "poor" }
+          },
+          governance: {
+            "Governance Type": { value: "❌ Corporate control", rating: "poor" },
+            "Transparency": { value: "❌ Limited corporate transparency", rating: "poor" },
+            "Upgradeability": { value: "❌ Company-controlled updates", rating: "poor" },
+            "Who Owns It?": { value: "❌ Discord Inc.", rating: "poor" }
+          },
+          ux: {
+            "Account Creation": { value: "✅ Email + username", rating: "excellent" },
+            "Browser Access": { value: "✅ Full web client", rating: "excellent" },
+            "Desktop Support": { value: "✅ Native desktop app", rating: "excellent" },
+            "KYC Required": { value: "❌ No", rating: "excellent" },
+            "Localization": { value: "✅ Multi-language", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "✅ Real-time sync", rating: "excellent" },
+            "Multi‑Device Use": { value: "✅ Unlimited devices", rating: "excellent" },
+            "Offline Messaging": { value: "⚠️ Limited offline functionality", rating: "fair" },
+            "Scalable": { value: "✅ Highly scalable", rating: "excellent" },
+            "User Onboarding": { value: "✅ Simple registration", rating: "excellent" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "❌ No user backups", rating: "poor" },
+            "Backup & Restore Options": { value: "❌ No restore options", rating: "poor" },
+            "Emojis Supported": { value: "✅ Extensive emoji and custom emotes", rating: "excellent" },
+            "File Sharing (with security note)": { value: "⚠️ File sharing up to 25MB, not encrypted", rating: "fair" },
+            "File Size Limit": { value: "⚠️ 25MB (100MB with Nitro)", rating: "fair" },
+            "Group Chat Limit": { value: "✅ No practical limit in servers", rating: "excellent" },
+            "Group Chats Available": { value: "✅ Advanced server system", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ Full communication suite", rating: "excellent" },
+            "Self‑Destructing Messages": { value: "❌ No self-destructing messages", rating: "poor" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "❌ Web2", rating: "poor" },
+            "Blockchain‑based?": { value: "❌ No", rating: "poor" },
+            "Bridging / Cross‑Chain?": { value: "❌ None", rating: "poor" },
+            "Chain Dependency": { value: "❌ None", rating: "poor" },
+            "Network Used": { value: "❌ None", rating: "poor" },
+            "Smart Contract Use": { value: "❌ None", rating: "poor" },
+            "Token / Governance Mechanism": { value: "❌ None", rating: "poor" },
+            "Wallet Compatibility": { value: "❌ None", rating: "poor" }
+          }
+        }
+
+        ,
+
+        wechat: {
+          name: "WeChat",
+          type: "Web2",
+          region: "China",
+          company: "Tencent",
+          logo: "https://pfst.cf2.poecdn.net/base/image/37d9dcc55ce8de042c8af965730ef860f3e325ea959e6363bed81986fe505357?w=4096&h=4096",
+          tags: ["web2", "tencent", "china", "kyc required", "payments", "surveillance", "no encryption"],
+          privacy: {
+            "Audit Status": { value: "❌ No transparency", rating: "poor" },
+            "Backup Encryption": { value: "❌ Stored unencrypted on Tencent servers", rating: "poor" },
+            "E2E Encryption": { value: "❌ Not E2E encrypted", rating: "poor" },
+            "Metadata Protection": { value: "❌ High surveillance and metadata logging", rating: "poor" },
+            "Open Source": { value: "❌ Proprietary", rating: "poor" },
+            "Self destructing messages?": { value: "❌ No timed messages", rating: "poor" }
+          },
+          architecture: {
+            "Company Location": { value: "🇨🇳 China (Tencent)", rating: "poor" },
+            "Custody Model": { value: "❌ Custodial - full control by Tencent", rating: "poor" },
+            "Data Location": { value: "❌ Data stored in China, government accessible", rating: "poor" },
+            "Infrastructure Ownership": { value: "❌ Tencent owned", rating: "poor" },
+            "Interoperability": { value: "❌ No interoperability", rating: "poor" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "✅ WeChat Pay", rating: "excellent" },
+            "Own Their Data / Assets?": { value: "❌ No - Tencent controls data", rating: "poor" },
+            "Money‑making Model": { value: "✅ Merchant fees, advertising", rating: "good" },
+            "Multi‑token Support": { value: "❌ No", rating: "poor" },
+            "Native Token?": { value: "❌ None", rating: "poor" },
+            "Primary Income Source": { value: "Payments & ads", rating: "good" },
+            "QR Code Friend‑Add": { value: "✅ Yes (QR add friend)", rating: "excellent" },
+            "QR Code Payments": { value: "✅ Yes (WeChat Pay)", rating: "excellent" },
+            "Token Swaps": { value: "❌ No", rating: "poor" }
+          },
+          governance: {
+            "Governance Type": { value: "❌ Tencent-run", rating: "poor" },
+            "Transparency": { value: "❌ No public transparency", rating: "poor" },
+            "Upgradeability": { value: "⚠️ Tencent deployment", rating: "fair" },
+            "Who Owns It?": { value: "❌ Tencent Holdings", rating: "poor" }
+          },
+          ux: {
+            "Account Creation": { value: "⚠️ Phone & ID via Tencent", rating: "poor" },
+            "Browser Access": { value: "⚠️ Web lite via region", rating: "fair" },
+            "Desktop Support": { value: "✅ Windows/mac", rating: "good" },
+            "KYC Required": { value: "✅ Identity verification needed", rating: "poor" },
+            "Localization": { value: "✅ Multiple major languages", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "⚠️ Limited to region/China", rating: "fair" },
+            "Multi‑Device Use": { value: "⚠️ Some multi-login regions", rating: "fair" },
+            "Offline Messaging": { value: "⚠️ May not function offline", rating: "fair" },
+            "Scalable": { value: "✅ Scalable Tencent infrastructure", rating: "excellent" },
+            "User Onboarding": { value: "⚠️ May require ID in some regions", rating: "fair" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "⚠️ Local backup only", rating: "fair" },
+            "Backup & Restore Options": { value: "⚠️ Chat export manually only", rating: "fair" },
+            "Emojis Supported": { value: "✅ Emoji, stickers, mini-apps", rating: "excellent" },
+            "File Sharing (with security note)": { value: "✅ Shared via TLS, no E2E", rating: "fair" },
+            "File Size Limit": { value: "⚠️ Depends on Tencent config", rating: "fair" },
+            "Group Chat Limit": { value: "✅ Large groups supported", rating: "excellent" },
+            "Group Chats Available": { value: "✅ Yes", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ All supported", rating: "excellent" },
+            "Self‑Destructing Messages": { value: "✅ Individual deletion timers", rating: "good" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "❌ Web2", rating: "poor" },
+            "Blockchain‑based?": { value: "❌ No", rating: "poor" },
+            "Bridging / Cross‑Chain?": { value: "❌ None", rating: "poor" },
+            "Chain Dependency": { value: "❌ None", rating: "poor" },
+            "Network Used": { value: "❌ None", rating: "poor" },
+            "Smart Contract Use": { value: "❌ None", rating: "poor" },
+            "Token / Governance Mechanism": { value: "❌ None", rating: "poor" },
+            "Wallet Compatibility": { value: "❌ None", rating: "poor" }
+          }
+        },
+
+        messenger: {
+          name: "Messenger",
+          type: "Web2",
+          region: "USA",
+          company: "Meta",
+          logo: "https://pfst.cf2.poecdn.net/base/image/bcc25b5e48c921cdf9cc1d830e82b9398c90668696cceb36209e7a6cd12f681b?w=880&h=880",
+          tags: ["web2", "meta", "facebook", "advertising", "data collection", "usa"],
+          privacy: {
+            "Audit Status": { value: "⚠️ Some Meta assessments", rating: "fair" },
+            "Backup Encryption": { value: "⚠️ Optional - not user-keyed", rating: "fair" },
+            "E2E Encryption": { value: "❌ Only 'Secret Conversations' are E2E", rating: "poor" },
+            "Metadata Protection": { value: "❌ Meta collects extensive metadata", rating: "poor" },
+            "Open Source": { value: "❌ Closed source", rating: "poor" },
+            "Self destructing messages?": { value: "⚠️ Only in Secret Conversations", rating: "fair" }
+          },
+          architecture: {
+            "Company Location": { value: "🇺🇸 U.S. (Meta)", rating: "fair" },
+            "Custody Model": { value: "❌ Custodial - Meta holds message data", rating: "poor" },
+            "Data Location": { value: "❌ Centralized - Meta-controlled", rating: "poor" },
+            "Infrastructure Ownership": { value: "❌ Meta owned", rating: "poor" },
+            "Interoperability": { value: "⚠️ Limited - within Meta apps only", rating: "fair" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "⚠️ Facebook Pay", rating: "fair" },
+            "Own Their Data / Assets?": { value: "❌ No", rating: "poor" },
+            "Money‑making Model": { value: "⚠️ Transaction fees, shops", rating: "fair" },
+            "Multi‑token Support": { value: "❌ No", rating: "poor" },
+            "Native Token?": { value: "❌ None", rating: "poor" },
+            "Primary Income Source": { value: "Meta commerce & ads", rating: "poor" },
+            "QR Code Friend‑Add": { value: "✅ Yes", rating: "excellent" },
+            "QR Code Payments": { value: "✅ Yes (via FB Pay)", rating: "excellent" },
+            "Token Swaps": { value: "❌ No", rating: "poor" }
+          },
+          governance: {
+            "Governance Type": { value: "❌ Meta-run", rating: "poor" },
+            "Transparency": { value: "❌ Closed corp", rating: "poor" },
+            "Upgradeability": { value: "⚠️ Meta-controlled updates", rating: "fair" },
+            "Who Owns It?": { value: "❌ Meta Platforms", rating: "poor" }
+          },
+          ux: {
+            "Account Creation": { value: "⚠️ Facebook/phone login", rating: "fair" },
+            "Browser Access": { value: "✅ Browser via Facebook", rating: "excellent" },
+            "Desktop Support": { value: "✅ Apps + web", rating: "excellent" },
+            "KYC Required": { value: "⚠️ Payments may require real ID", rating: "fair" },
+            "Localization": { value: "✅ Major global languages", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "✅ Within Meta ecosystem", rating: "excellent" },
+            "Multi‑Device Use": { value: "✅ Yes across Meta apps", rating: "excellent" },
+            "Offline Messaging": { value: "⚠️ Limited offline fallback", rating: "fair" },
+            "Scalable": { value: "✅ Massive scale in Meta", rating: "excellent" },
+            "User Onboarding": { value: "⚠️ Meta account required", rating: "fair" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "⚠️ Chats tied to Facebook profile", rating: "fair" },
+            "Backup & Restore Options": { value: "❌ None", rating: "poor" },
+            "Emojis Supported": { value: "✅ Emoji, reactions on Facebook", rating: "excellent" },
+            "File Sharing (with security note)": { value: "✅ TLS-encrypted, no E2E for standard chats", rating: "fair" },
+            "File Size Limit": { value: "⚠️ ~25 MB attachments", rating: "fair" },
+            "Group Chat Limit": { value: "✅ Up to ~250 members", rating: "good" },
+            "Group Chats Available": { value: "✅ Yes", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ Text, voice, video", rating: "excellent" },
+            "Self‑Destructing Messages": { value: "⚠️ Only in Secret Conversations", rating: "fair" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "❌ Web2", rating: "poor" },
+            "Blockchain‑based?": { value: "❌ No", rating: "poor" },
+            "Bridging / Cross‑Chain?": { value: "❌ None", rating: "poor" },
+            "Chain Dependency": { value: "❌ None", rating: "poor" },
+            "Network Used": { value: "❌ None", rating: "poor" },
+            "Smart Contract Use": { value: "❌ None", rating: "poor" },
+            "Token / Governance Mechanism": { value: "❌ None", rating: "poor" },
+            "Wallet Compatibility": { value: "❌ None", rating: "poor" }
+          }
+        },
+
+        qq: {
+          name: "QQ",
+          type: "Web2",
+          region: "China",
+          company: "Tencent",
+          logo: "https://pfst.cf2.poecdn.net/base/image/eec4d25c39797d6d9e27e5a9cb89a6a4a4ec2ab493d87a129f773f3e8f62dccd?w=512&h=512",
+          tags: ["web2", "tencent", "china", "kyc required", "gaming", "virtual goods", "no encryption"],
+          privacy: {
+            "Audit Status": { value: "❌ No known audits", rating: "poor" },
+            "Backup Encryption": { value: "❌ Data stored on Tencent servers", rating: "poor" },
+            "E2E Encryption": { value: "❌ No E2E encryption", rating: "poor" },
+            "Metadata Protection": { value: "❌ Highly surveilled", rating: "poor" },
+            "Open Source": { value: "❌ Closed source", rating: "poor" },
+            "Self destructing messages?": { value: "❌ No expiry by default", rating: "poor" }
+          },
+          architecture: {
+            "Company Location": { value: "🇨🇳 China (Tencent)", rating: "poor" },
+            "Custody Model": { value: "❌ Custodial - Tencent owns all data", rating: "poor" },
+            "Data Location": { value: "❌ Stored in China - highly surveilled", rating: "poor" },
+            "Infrastructure Ownership": { value: "❌ Tencent owned", rating: "poor" },
+            "Interoperability": { value: "❌ None", rating: "poor" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "❌ No", rating: "poor" },
+            "Own Their Data / Assets?": { value: "❌ No", rating: "poor" },
+            "Money‑making Model": { value: "⚠️ Virtual goods, gaming, ads", rating: "fair" },
+            "Multi‑token Support": { value: "⚠️ Limited (Tencent dApps)", rating: "fair" },
+            "Native Token?": { value: "❌ None", rating: "poor" },
+            "Primary Income Source": { value: "Tencent ecosystem commerce", rating: "fair" },
+            "QR Code Friend‑Add": { value: "✅ Yes (friend code)", rating: "excellent" },
+            "QR Code Payments": { value: "⚠️ Limited", rating: "fair" },
+            "Token Swaps": { value: "⚠️ via Tencent", rating: "fair" }
+          },
+          governance: {
+            "Governance Type": { value: "❌ Tencent-run", rating: "poor" },
+            "Transparency": { value: "❌ No public reporting", rating: "poor" },
+            "Upgradeability": { value: "⚠️ Tencent-controlled", rating: "fair" },
+            "Who Owns It?": { value: "❌ Tencent Holdings", rating: "poor" }
+          },
+          ux: {
+            "Account Creation": { value: "⚠️ Phone/email", rating: "good" },
+            "Browser Access": { value: "⚠️ Limited", rating: "fair" },
+            "Desktop Support": { value: "✅ Desktop app", rating: "excellent" },
+            "KYC Required": { value: "⚠️ Security checks in China", rating: "poor" },
+            "Localization": { value: "✅ Chinese/English", rating: "fair" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "❌ Mostly mobile only", rating: "poor" },
+            "Multi‑Device Use": { value: "⚠️ Multi-session limited", rating: "fair" },
+            "Offline Messaging": { value: "⚠️ Limited offline features", rating: "fair" },
+            "Scalable": { value: "✅ Tencent infrastructure", rating: "excellent" },
+            "User Onboarding": { value: "⚠️ QQ ID required", rating: "fair" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "⚠️ Export via Tencent service", rating: "fair" },
+            "Backup & Restore Options": { value: "⚠️ Export limited", rating: "fair" },
+            "Emojis Supported": { value: "✅ Limited set + stickers", rating: "good" },
+            "File Sharing (with security note)": { value: "✅ File sharing via Tencent", rating: "fair" },
+            "File Size Limit": { value: "⚠️ Unspecified", rating: "fair" },
+            "Group Chat Limit": { value: "⚠️ ~200 members", rating: "good" },
+            "Group Chats Available": { value: "✅ Yes", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ Text, voice, video", rating: "excellent" },
+            "Self‑Destructing Messages": { value: "❌ No auto-destruct", rating: "poor" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "❌ Web2", rating: "poor" },
+            "Blockchain‑based?": { value: "❌ No", rating: "poor" },
+            "Bridging / Cross‑Chain?": { value: "❌ None", rating: "poor" },
+            "Chain Dependency": { value: "❌ None", rating: "poor" },
+            "Network Used": { value: "❌ None", rating: "poor" },
+            "Smart Contract Use": { value: "❌ None", rating: "poor" },
+            "Token / Governance Mechanism": { value: "❌ None", rating: "poor" },
+            "Wallet Compatibility": { value: "❌ None", rating: "poor" }
+          }
+        },
+
+        imessage: {
+          name: "iMessage",
+          type: "Web2",
+          region: "USA",
+          company: "Apple",
+          logo: "https://pfst.cf2.poecdn.net/base/image/1b1ec55abadcf93281cf599d6d751b6c2517c80db4cf3901ce81c104e98cf81a?w=1024&h=1024",
+          tags: ["web2", "apple", "ios", "e2e encryption", "apple id required", "ecosystem lock-in", "usa"],
+          privacy: {
+            "Audit Status": { value: "✅ Apple security whitepapers", rating: "excellent" },
+            "Backup Encryption": { value: "⚠️ Optional - iCloud (Apple holds keys)", rating: "fair" },
+            "E2E Encryption": { value: "✅ Default for Apple devices", rating: "excellent" },
+            "Metadata Protection": { value: "⚠️ Metadata stored with iCloud", rating: "fair" },
+            "Open Source": { value: "❌ Closed source", rating: "poor" },
+            "Self destructing messages?": { value: "✅ Expiry and view-once options", rating: "excellent" }
+          },
+          architecture: {
+            "Company Location": { value: "🇺🇸 U.S. (Apple)", rating: "fair" },
+            "Custody Model": { value: "⚠️ Custodial unless iCloud Advanced enabled", rating: "fair" },
+            "Data Location": { value: "⚠️ Apple servers unless E2E iCloud", rating: "fair" },
+            "Infrastructure Ownership": { value: "❌ Apple owned", rating: "poor" },
+            "Interoperability": { value: "❌ Apple-only ecosystem", rating: "poor" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "⚠️ Apple Pay Cash", rating: "good" },
+            "Own Their Data / Assets?": { value: "❌ No (unless secure backups)", rating: "poor" },
+            "Money‑making Model": { value: "⚠️ Apple Pay fees and ecosystem cuts", rating: "fair" },
+            "Multi‑token Support": { value: "❌ No support", rating: "poor" },
+            "Native Token?": { value: "❌ None", rating: "poor" },
+            "Primary Income Source": { value: "Transaction fees via Apple ecosystem", rating: "fair" },
+            "QR Code Friend‑Add": { value: "✅ Yes", rating: "good" },
+            "QR Code Payments": { value: "✅ Yes (Apple Pay)", rating: "excellent" },
+            "Token Swaps": { value: "❌ No", rating: "poor" }
+          },
+          governance: {
+            "Governance Type": { value: "❌ Apple corp", rating: "poor" },
+            "Transparency": { value: "⚠️ Apple internal only", rating: "fair" },
+            "Upgradeability": { value: "⚠️ Apple control via iOS", rating: "fair" },
+            "Who Owns It?": { value: "❌ Apple Inc.", rating: "poor" }
+          },
+          ux: {
+            "Account Creation": { value: "⚠️ Apple ID/phone", rating: "fair" },
+            "Browser Access": { value: "❌ No", rating: "poor" },
+            "Desktop Support": { value: "✅ macOS/Windows via Messages", rating: "good" },
+            "KYC Required": { value: "⚠️ Apple ID optional ID link", rating: "fair" },
+            "Localization": { value: "✅ Global via Apple translations", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/macOS only", rating: "fair" },
+            "Multi‑Device Sync": { value: "✅ Sync across Apple devices", rating: "excellent" },
+            "Multi‑Device Use": { value: "✅ Apple devices only", rating: "good" },
+            "Offline Messaging": { value: "⚠️ Limited offline", rating: "fair" },
+            "Scalable": { value: "✅ Apple scale fits iOS users", rating: "excellent" },
+            "User Onboarding": { value: "⚠️ Apple ID required", rating: "fair" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "⚠️ iCloud sync", rating: "fair" },
+            "Backup & Restore Options": { value: "⚠️ Requires device backups", rating: "fair" },
+            "Emojis Supported": { value: "✅ Apple emojis + reactions", rating: "excellent" },
+            "File Sharing (with security note)": { value: "✅ E2E on Apple devices", rating: "excellent" },
+            "File Size Limit": { value: "⚠️ Default Messages limits", rating: "fair" },
+            "Group Chat Limit": { value: "⚠️ Apple group limit ~32", rating: "fair" },
+            "Group Chats Available": { value: "✅ Yes", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ Text + FaceTime for video", rating: "excellent" },
+            "Self‑Destructing Messages": { value: "⚠️ Manual delete only", rating: "fair" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "❌ Web2", rating: "poor" },
+            "Blockchain‑based?": { value: "❌ No", rating: "poor" },
+            "Bridging / Cross‑Chain?": { value: "❌ None", rating: "poor" },
+            "Chain Dependency": { value: "❌ None", rating: "poor" },
+            "Network Used": { value: "❌ None", rating: "poor" },
+            "Smart Contract Use": { value: "❌ None", rating: "poor" },
+            "Token / Governance Mechanism": { value: "❌ None", rating: "poor" },
+            "Wallet Compatibility": { value: "❌ None", rating: "poor" }
+          }
+        },
+
+        snapchat: {
+          name: "Snapchat",
+          type: "Web2",
+          region: "USA",
+          company: "Snap Inc.",
+          logo: "https://pfst.cf2.poecdn.net/base/image/8fccd4fd3405ad249316b986cb406b30ba11830f20f96dc41b831da107e3651f?w=1920&h=1920",
+          tags: ["web2", "disappearing messages", "snap inc", "mobile-first", "ar filters", "advertising", "usa"],
+          privacy: {
+            "Audit Status": { value: "⚠️ Some internal security practices", rating: "fair" },
+            "Backup Encryption": { value: "❌ Media temporarily stored, not encrypted", rating: "poor" },
+            "E2E Encryption": { value: "❌ Not end-to-end by default", rating: "poor" },
+            "Metadata Protection": { value: "❌ Extensive data collection", rating: "poor" },
+            "Open Source": { value: "❌ Closed source", rating: "poor" },
+            "Self destructing messages?": { value: "✅ Disappearing messages & snaps", rating: "excellent" }
+          },
+          architecture: {
+            "Company Location": { value: "🇺🇸 U.S. (Snap Inc.)", rating: "fair" },
+            "Custody Model": { value: "❌ Custodial - Snap stores data", rating: "poor" },
+            "Data Location": { value: "❌ Centralized - Snap infrastructure", rating: "poor" },
+            "Infrastructure Ownership": { value: "❌ Snap Inc. owned", rating: "poor" },
+            "Interoperability": { value: "❌ No interoperability", rating: "poor" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "⚠️ Snap Token (in test)", rating: "fair" },
+            "Own Their Data / Assets?": { value: "❌ No", rating: "poor" },
+            "Money‑making Model": { value: "⚠️ Premium features, ads", rating: "fair" },
+            "Multi‑token Support": { value: "⚠️ Partial (Spotlight rewards)", rating: "fair" },
+            "Native Token?": { value: "⚠️ In test", rating: "fair" },
+            "Primary Income Source": { value: "Ad platform & premium services", rating: "fair" },
+            "QR Code Friend‑Add": { value: "✅ Yes", rating: "excellent" },
+            "QR Code Payments": { value: "⚠️ Experimental", rating: "fair" },
+            "Token Swaps": { value: "⚠️ In beta", rating: "fair" }
+          },
+          governance: {
+            "Governance Type": { value: "❌ Private corp", rating: "poor" },
+            "Transparency": { value: "❌ Limited public detail", rating: "poor" },
+            "Upgradeability": { value: "⚠️ Snap-controlled updates", rating: "fair" },
+            "Who Owns It?": { value: "❌ Snap Inc.", rating: "poor" }
+          },
+          ux: {
+            "Account Creation": { value: "⚠️ Phone/email", rating: "good" },
+            "Browser Access": { value: "✅ Web login available", rating: "good" },
+            "Desktop Support": { value: "⚠️ Limited via Snap web", rating: "fair" },
+            "KYC Required": { value: "⚠️ Age verification only", rating: "good" },
+            "Localization": { value: "✅ Multiple languages", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "⚠️ Ephemeral chat support only", rating: "fair" },
+            "Multi‑Device Use": { value: "⚠️ App only", rating: "fair" },
+            "Offline Messaging": { value: "❌ Limited offline cache", rating: "fair" },
+            "Scalable": { value: "✅ Mass consumer scale", rating: "excellent" },
+            "User Onboarding": { value: "✅ Quick with phone/email", rating: "excellent" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "⚠️ Memory export as zip", rating: "fair" },
+            "Backup & Restore Options": { value: "⚠️ Memory archive export only", rating: "fair" },
+            "Emojis Supported": { value: "✅ Snapchat emojis, Bitmoji", rating: "excellent" },
+            "File Sharing (with security note)": { value: "✅ Temporary encrypted media", rating: "good" },
+            "File Size Limit": { value: "⚠️ Short video max ~10s", rating: "fair" },
+            "Group Chat Limit": { value: "⚠️ ~200 users per group", rating: "good" },
+            "Group Chats Available": { value: "✅ Yes", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ Text & snaps; limited video calls", rating: "good" },
+            "Self‑Destructing Messages": { value: "✅ Snaps expire by default", rating: "excellent" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "❌ Web2", rating: "poor" },
+            "Blockchain‑based?": { value: "❌ No", rating: "poor" },
+            "Bridging / Cross‑Chain?": { value: "❌ None", rating: "poor" },
+            "Chain Dependency": { value: "❌ None", rating: "poor" },
+            "Network Used": { value: "❌ None", rating: "poor" },
+            "Smart Contract Use": { value: "❌ None", rating: "poor" },
+            "Token / Governance Mechanism": { value: "❌ None", rating: "poor" },
+            "Wallet Compatibility": { value: "❌ None", rating: "poor" }
+          }
+        },
+
+        line: {
+          name: "LINE",
+          type: "Web2",
+          region: "Japan/Korea",
+          company: "LINE Corporation",
+          logo: "https://pfst.cf2.poecdn.net/base/image/c6d5d0dbd6887c74ee9fc0730300836b654ae53e70dd9d294872f62400f68176?w=1280&h=1280",
+          tags: ["web2", "asia", "stickers", "payments", "super app", "korea", "japan"],
+          privacy: {
+            "Audit Status": { value: "⚠️ Limited security assessments", rating: "fair" },
+            "Backup Encryption": { value: "❌ Cloud backups not user-encrypted", rating: "poor" },
+            "E2E Encryption": { value: "⚠️ Letter Sealing for some messages", rating: "fair" },
+            "Metadata Protection": { value: "❌ Metadata collected", rating: "poor" },
+            "Open Source": { value: "❌ Closed source", rating: "poor" },
+            "Self destructing messages?": { value: "⚠️ Optional timer messages", rating: "fair" }
+          },
+          architecture: {
+            "Company Location": { value: "🇯🇵🇰🇷 Japan/Korea", rating: "fair" },
+            "Custody Model": { value: "❌ Custodial - LINE controls data", rating: "poor" },
+            "Data Location": { value: "❌ Centralized LINE servers", rating: "poor" },
+            "Infrastructure Ownership": { value: "❌ LINE Corporation owned", rating: "poor" },
+            "Interoperability": { value: "⚠️ Limited - some third-party integrations", rating: "fair" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "✅ LINE Pay", rating: "excellent" },
+            "Own Their Data / Assets?": { value: "❌ No", rating: "poor" },
+            "Money‑making Model": { value: "⚠️ Stickers, games, payments", rating: "fair" },
+            "Multi‑token Support": { value: "⚠️ Limited (LINK token)", rating: "fair" },
+            "Native Token?": { value: "✅ LINK token", rating: "excellent" },
+            "Primary Income Source": { value: "Digital goods & payment fees", rating: "good" },
+            "QR Code Friend‑Add": { value: "✅ Yes", rating: "excellent" },
+            "QR Code Payments": { value: "✅ Yes (LINE Pay)", rating: "excellent" },
+            "Token Swaps": { value: "❌ No", rating: "poor" }
+          },
+          governance: {
+            "Governance Type": { value: "❌ Corporate control", rating: "poor" },
+            "Transparency": { value: "⚠️ Limited transparency", rating: "fair" },
+            "Upgradeability": { value: "⚠️ LINE-controlled updates", rating: "fair" },
+            "Who Owns It?": { value: "❌ LINE Corporation (Naver)", rating: "poor" }
+          },
+          ux: {
+            "Account Creation": { value: "✅ Phone number required", rating: "good" },
+            "Browser Access": { value: "⚠️ Limited web version", rating: "fair" },
+            "Desktop Support": { value: "✅ Desktop apps available", rating: "excellent" },
+            "KYC Required": { value: "⚠️ For payments only", rating: "fair" },
+            "Localization": { value: "✅ Multiple Asian languages", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "✅ Sync across devices", rating: "excellent" },
+            "Multi‑Device Use": { value: "✅ Multiple device login", rating: "excellent" },
+            "Offline Messaging": { value: "⚠️ Limited offline functionality", rating: "fair" },
+            "Scalable": { value: "✅ Highly scalable infrastructure", rating: "excellent" },
+            "User Onboarding": { value: "✅ Simple phone registration", rating: "excellent" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "⚠️ Cloud backup via LINE", rating: "fair" },
+            "Backup & Restore Options": { value: "⚠️ Limited backup options", rating: "fair" },
+            "Emojis Supported": { value: "✅ Extensive sticker ecosystem", rating: "excellent" },
+            "File Sharing (with security note)": { value: "⚠️ File sharing via LINE servers", rating: "fair" },
+            "File Size Limit": { value: "⚠️ Up to 20MB", rating: "fair" },
+            "Group Chat Limit": { value: "✅ Up to 500 members", rating: "excellent" },
+            "Group Chats Available": { value: "✅ Yes", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ Full communication suite", rating: "excellent" },
+            "Self‑Destructing Messages": { value: "⚠️ Optional timer for some messages", rating: "fair" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "❌ Web2", rating: "poor" },
+            "Blockchain‑based?": { value: "❌ No", rating: "poor" },
+            "Bridging / Cross‑Chain?": { value: "❌ None", rating: "poor" },
+            "Chain Dependency": { value: "❌ None", rating: "poor" },
+            "Network Used": { value: "❌ None", rating: "poor" },
+            "Smart Contract Use": { value: "❌ None", rating: "poor" },
+            "Token / Governance Mechanism": { value: "⚠️ LINK token (limited use)", rating: "fair" },
+            "Wallet Compatibility": { value: "❌ None", rating: "poor" }
+          }
+        },
+
+        session: {
+          name: "Session",
+          type: "Web3",
+          region: "Decentralized",
+          company: "Session Technology Foundation",
+          logo: "https://pfst.cf2.poecdn.net/base/image/efb446c4aae1d45f95c3b463eb42e62c171583058d0cd1692eea2ec55285e8b1?w=512&h=512",
+          tags: ["web3", "decentralized", "privacy", "anonymous", "onion routing", "oxen"],
+          privacy: {
+            "Audit Status": { value: "✅ Independent security audits", rating: "excellent" },
+            "Backup Encryption": { value: "✅ User-controlled seed phrase", rating: "excellent" },
+            "E2E Encryption": { value: "✅ Default end-to-end encryption", rating: "excellent" },
+            "Metadata Protection": { value: "✅ Onion routing, no metadata collection", rating: "excellent" },
+            "Open Source": { value: "✅ Fully open source", rating: "excellent" },
+            "Self destructing messages?": { value: "✅ Disappearing messages", rating: "excellent" }
+          },
+          architecture: {
+            "Company Location": { value: "🌐 Decentralized network", rating: "excellent" },
+            "Custody Model": { value: "✅ Non-custodial - user controls keys", rating: "excellent" },
+            "Data Location": { value: "✅ Decentralized Oxen network", rating: "excellent" },
+            "Infrastructure Ownership": { value: "✅ Community-owned network", rating: "excellent" },
+            "Interoperability": { value: "⚠️ Limited cross-platform integration", rating: "fair" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "❌ No built-in wallet", rating: "poor" },
+            "Own Their Data / Assets?": { value: "✅ Users own all data", rating: "excellent" },
+            "Money‑making Model": { value: "✅ Open source, no monetization", rating: "excellent" },
+            "Multi‑token Support": { value: "❌ No token support", rating: "poor" },
+            "Native Token?": { value: "⚠️ Uses Oxen network", rating: "fair" },
+            "Primary Income Source": { value: "Foundation funding", rating: "excellent" },
+            "QR Code Friend‑Add": { value: "✅ Yes via Session ID", rating: "excellent" },
+            "QR Code Payments": { value: "❌ No payment features", rating: "poor" },
+            "Token Swaps": { value: "❌ No", rating: "poor" }
+          },
+          governance: {
+            "Governance Type": { value: "✅ Foundation governance", rating: "excellent" },
+            "Transparency": { value: "✅ Fully transparent operations", rating: "excellent" },
+            "Upgradeability": { value: "✅ Community-driven development", rating: "excellent" },
+            "Who Owns It?": { value: "✅ Session Technology Foundation", rating: "excellent" }
+          },
+          ux: {
+            "Account Creation": { value: "✅ Anonymous - no phone/email", rating: "excellent" },
+            "Browser Access": { value: "❌ No browser version", rating: "poor" },
+            "Desktop Support": { value: "✅ Desktop apps available", rating: "excellent" },
+            "KYC Required": { value: "❌ No KYC required", rating: "excellent" },
+            "Localization": { value: "✅ Multiple languages", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "⚠️ Manual device linking", rating: "fair" },
+            "Multi‑Device Use": { value: "⚠️ Limited multi-device", rating: "fair" },
+            "Offline Messaging": { value: "✅ Onion routing works offline", rating: "excellent" },
+            "Scalable": { value: "✅ Decentralized scaling", rating: "excellent" },
+            "User Onboarding": { value: "⚠️ Technical setup required", rating: "fair" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "✅ Seed phrase backup", rating: "excellent" },
+            "Backup & Restore Options": { value: "✅ Restore with seed phrase", rating: "excellent" },
+            "Emojis Supported": { value: "✅ Basic emoji support", rating: "good" },
+            "File Sharing (with security note)": { value: "✅ E2E encrypted file sharing", rating: "excellent" },
+            "File Size Limit": { value: "⚠️ Limited file sizes", rating: "fair" },
+            "Group Chat Limit": { value: "⚠️ Up to 100 members", rating: "good" },
+            "Group Chats Available": { value: "✅ Yes", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "⚠️ Text only (voice planned)", rating: "fair" },
+            "Self‑Destructing Messages": { value: "✅ Disappearing message timers", rating: "excellent" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "✅ Web3 native", rating: "excellent" },
+            "Blockchain‑based?": { value: "✅ Built on Oxen network", rating: "excellent" },
+            "Bridging / Cross‑Chain?": { value: "❌ Oxen network only", rating: "poor" },
+            "Chain Dependency": { value: "✅ Oxen blockchain", rating: "excellent" },
+            "Network Used": { value: "✅ Oxen decentralized network", rating: "excellent" },
+            "Smart Contract Use": { value: "❌ Not applicable", rating: "poor" },
+            "Token / Governance Mechanism": { value: "⚠️ Oxen token economics", rating: "fair" },
+            "Wallet Compatibility": { value: "❌ No wallet integration", rating: "poor" }
+          }
+        },
+
+        status: {
+          name: "Status",
+          type: "Web3",
+          region: "Ethereum",
+          company: "Status Network",
+          logo: "https://pfst.cf2.poecdn.net/base/image/f58da8d8f2f14af8164a4a3a46c2b5fc43c8804cc4784ebc9ad378832951ee44?w=1280&h=1280",
+          tags: ["web3", "ethereum", "dapp browser", "snt token", "decentralized", "crypto wallet"],
+          privacy: {
+            "Audit Status": { value: "✅ Security audits completed", rating: "excellent" },
+            "Backup Encryption": { value: "✅ User-controlled seed phrase", rating: "excellent" },
+            "E2E Encryption": { value: "✅ Default end-to-end encryption", rating: "excellent" },
+            "Metadata Protection": { value: "✅ Waku protocol for metadata privacy", rating: "excellent" },
+            "Open Source": { value: "✅ Fully open source", rating: "excellent" },
+            "Self destructing messages?": { value: "⚠️ Limited disappearing messages", rating: "fair" }
+          },
+          architecture: {
+            "Company Location": { value: "🌐 Decentralized/Global", rating: "excellent" },
+            "Custody Model": { value: "✅ Non-custodial - users control keys", rating: "excellent" },
+            "Data Location": { value: "✅ Decentralized Waku network", rating: "excellent" },
+            "Infrastructure Ownership": { value: "✅ Community-owned protocol", rating: "excellent" },
+            "Interoperability": { value: "✅ Full Ethereum ecosystem", rating: "excellent" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "✅ Integrated Ethereum wallet", rating: "excellent" },
+            "Own Their Data / Assets?": { value: "✅ Users own all data and assets", rating: "excellent" },
+            "Money‑making Model": { value: "✅ Community-driven, no ads", rating: "excellent" },
+            "Multi‑token Support": { value: "✅ All Ethereum tokens", rating: "excellent" },
+            "Native Token?": { value: "✅ SNT token", rating: "excellent" },
+            "Primary Income Source": { value: "SNT token economics", rating: "excellent" },
+            "QR Code Friend‑Add": { value: "✅ Yes via chat key", rating: "excellent" },
+            "QR Code Payments": { value: "✅ Crypto payments via wallet", rating: "excellent" },
+            "Token Swaps": { value: "✅ Built-in DEX integration", rating: "excellent" }
+          },
+          governance: {
+            "Governance Type": { value: "✅ DAO governance via SNT", rating: "excellent" },
+            "Transparency": { value: "✅ Fully transparent operations", rating: "excellent" },
+            "Upgradeability": { value: "✅ Community-controlled upgrades", rating: "excellent" },
+            "Who Owns It?": { value: "✅ Status Network DAO", rating: "excellent" }
+          },
+          ux: {
+            "Account Creation": { value: "⚠️ Ethereum wallet required", rating: "fair" },
+            "Browser Access": { value: "❌ No browser version", rating: "poor" },
+            "Desktop Support": { value: "✅ Desktop app available", rating: "excellent" },
+            "KYC Required": { value: "❌ No KYC required", rating: "excellent" },
+            "Localization": { value: "✅ Multiple languages", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "⚠️ Wallet-based sync", rating: "fair" },
+            "Multi‑Device Use": { value: "⚠️ Limited multi-device", rating: "fair" },
+            "Offline Messaging": { value: "⚠️ Limited offline capability", rating: "fair" },
+            "Scalable": { value: "✅ Ethereum-based scaling", rating: "excellent" },
+            "User Onboarding": { value: "⚠️ Web3 knowledge required", rating: "fair" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "✅ Seed phrase backup", rating: "excellent" },
+            "Backup & Restore Options": { value: "✅ Wallet restoration", rating: "excellent" },
+            "Emojis Supported": { value: "✅ Emoji and reactions", rating: "excellent" },
+            "File Sharing (with security note)": { value: "✅ E2E encrypted file sharing", rating: "excellent" },
+            "File Size Limit": { value: "⚠️ IPFS-based file sharing", rating: "fair" },
+            "Group Chat Limit": { value: "⚠️ Limited group size", rating: "fair" },
+            "Group Chats Available": { value: "✅ Yes", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "⚠️ Primarily text messaging", rating: "fair" },
+            "Self‑Destructing Messages": { value: "⚠️ Limited disappearing messages", rating: "fair" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "✅ Web3 native", rating: "excellent" },
+            "Blockchain‑based?": { value: "✅ Built on Ethereum", rating: "excellent" },
+            "Bridging / Cross‑Chain?": { value: "⚠️ Ethereum ecosystem focus", rating: "fair" },
+            "Chain Dependency": { value: "✅ Ethereum ecosystem", rating: "excellent" },
+            "Network Used": { value: "✅ Ethereum + Waku protocol", rating: "excellent" },
+            "Smart Contract Use": { value: "✅ Full smart contract integration", rating: "excellent" },
+            "Token / Governance Mechanism": { value: "✅ SNT token governance", rating: "excellent" },
+            "Wallet Compatibility": { value: "✅ Built-in Ethereum wallet", rating: "excellent" }
+          }
+        },
+
+        viber: {
+          name: "Viber",
+          type: "Web2",
+          region: "Cyprus/Japan",
+          company: "Rakuten",
+          logo: "https://pfst.cf2.poecdn.net/base/image/6090beebbd7327e12554185bf9bc9483379567b79ab82864adcc254e410d2cdd?w=860&h=781",
+          tags: ["web2", "rakuten", "cyprus", "japan", "voice calls", "stickers"],
+          privacy: {
+            "Audit Status": { value: "⚠️ Limited security assessments", rating: "fair" },
+            "Backup Encryption": { value: "❌ Cloud backups not encrypted", rating: "poor" },
+            "E2E Encryption": { value: "⚠️ Only for secret chats", rating: "fair" },
+            "Metadata Protection": { value: "❌ Metadata collected", rating: "poor" },
+            "Open Source": { value: "❌ Closed source", rating: "poor" },
+            "Self destructing messages?": { value: "⚠️ Only in secret chats", rating: "fair" }
+          },
+          architecture: {
+            "Company Location": { value: "🇨🇾🇯🇵 Cyprus/Japan (Rakuten)", rating: "fair" },
+            "Custody Model": { value: "❌ Custodial - Rakuten controls data", rating: "poor" },
+            "Data Location": { value: "❌ Centralized Rakuten servers", rating: "poor" },
+            "Infrastructure Ownership": { value: "❌ Rakuten owned", rating: "poor" },
+            "Interoperability": { value: "❌ No interoperability", rating: "poor" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "❌ No built-in wallet", rating: "poor" },
+            "Own Their Data / Assets?": { value: "❌ No", rating: "poor" },
+            "Money‑making Model": { value: "⚠️ Stickers, games, ads", rating: "fair" },
+            "Multi‑token Support": { value: "❌ No token support", rating: "poor" },
+            "Native Token?": { value: "❌ None", rating: "poor" },
+            "Primary Income Source": { value: "Digital goods & advertising", rating: "fair" },
+            "QR Code Friend‑Add": { value: "✅ Yes", rating: "excellent" },
+            "QR Code Payments": { value: "❌ No payment features", rating: "poor" },
+            "Token Swaps": { value: "❌ No", rating: "poor" }
+          },
+          governance: {
+            "Governance Type": { value: "❌ Corporate control", rating: "poor" },
+            "Transparency": { value: "⚠️ Limited transparency", rating: "fair" },
+            "Upgradeability": { value: "⚠️ Rakuten-controlled updates", rating: "fair" },
+            "Who Owns It?": { value: "❌ Rakuten Inc.", rating: "poor" }
+          },
+          ux: {
+            "Account Creation": { value: "✅ Phone number required", rating: "good" },
+            "Browser Access": { value: "⚠️ Limited web version", rating: "fair" },
+            "Desktop Support": { value: "✅ Desktop apps available", rating: "excellent" },
+            "KYC Required": { value: "❌ No KYC required", rating: "excellent" },
+            "Localization": { value: "✅ Multiple languages", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "✅ Sync across devices", rating: "excellent" },
+            "Multi‑Device Use": { value: "✅ Multiple device support", rating: "excellent" },
+            "Offline Messaging": { value: "⚠️ Limited offline functionality", rating: "fair" },
+            "Scalable": { value: "✅ Scalable infrastructure", rating: "excellent" },
+            "User Onboarding": { value: "✅ Simple phone registration", rating: "excellent" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "⚠️ Cloud backup via Rakuten", rating: "fair" },
+            "Backup & Restore Options": { value: "⚠️ Limited backup options", rating: "fair" },
+            "Emojis Supported": { value: "✅ Extensive sticker collection", rating: "excellent" },
+            "File Sharing (with security note)": { value: "⚠️ File sharing via servers", rating: "fair" },
+            "File Size Limit": { value: "⚠️ Up to 200MB", rating: "good" },
+            "Group Chat Limit": { value: "✅ Up to 250 members", rating: "excellent" },
+            "Group Chats Available": { value: "✅ Yes", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ Full communication suite", rating: "excellent" },
+            "Self‑Destructing Messages": { value: "⚠️ Only in secret chats", rating: "fair" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "❌ Web2", rating: "poor" },
+            "Blockchain‑based?": { value: "❌ No", rating: "poor" },
+            "Bridging / Cross‑Chain?": { value: "❌ None", rating: "poor" },
+            "Chain Dependency": { value: "❌ None", rating: "poor" },
+            "Network Used": { value: "❌ None", rating: "poor" },
+            "Smart Contract Use": { value: "❌ None", rating: "poor" },
+            "Token / Governance Mechanism": { value: "❌ None", rating: "poor" },
+            "Wallet Compatibility": { value: "❌ None", rating: "poor" }
+          }
+        },
+
+        threema: {
+          name: "Threema",
+          type: "Web2+",
+          region: "Switzerland",
+          company: "Threema GmbH",
+          logo: "https://pfst.cf2.poecdn.net/base/image/241aa9538f64b6902e2980dbaeed94a61283a79548c8ebf9e81d77fbfbd448ff?w=512&h=512",
+          tags: ["web2+", "privacy-focused", "swiss", "no phone required", "e2e encryption", "audited"],
+          privacy: {
+            "Audit Status": { value: "✅ Regular independent audits", rating: "excellent" },
+            "Backup Encryption": { value: "✅ Local encrypted backups", rating: "excellent" },
+            "E2E Encryption": { value: "✅ Default end-to-end encryption", rating: "excellent" },
+            "Metadata Protection": { value: "✅ Minimal metadata collection", rating: "excellent" },
+            "Open Source": { value: "✅ Client code open source", rating: "excellent" },
+            "Self destructing messages?": { value: "⚠️ Manual deletion only", rating: "fair" }
+          },
+          architecture: {
+            "Company Location": { value: "🇨🇭 Switzerland", rating: "excellent" },
+            "Custody Model": { value: "✅ Non-custodial - user controls keys", rating: "excellent" },
+            "Data Location": { value: "✅ Swiss servers, minimal data", rating: "excellent" },
+            "Infrastructure Ownership": { value: "❌ Threema GmbH owned", rating: "poor" },
+            "Interoperability": { value: "❌ Proprietary protocol", rating: "poor" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "❌ No built-in wallet", rating: "poor" },
+            "Own Their Data / Assets?": { value: "✅ Users control all data", rating: "excellent" },
+            "Money‑making Model": { value: "✅ One-time purchase, no ads", rating: "excellent" },
+            "Multi‑token Support": { value: "❌ No token support", rating: "poor" },
+            "Native Token?": { value: "❌ None", rating: "poor" },
+            "Primary Income Source": { value: "App sales & enterprise licenses", rating: "excellent" },
+            "QR Code Friend‑Add": { value: "✅ Yes via Threema ID", rating: "excellent" },
+            "QR Code Payments": { value: "❌ No payment features", rating: "poor" },
+            "Token Swaps": { value: "❌ No", rating: "poor" }
+          },
+          governance: {
+            "Governance Type": { value: "⚠️ Private company (Swiss)", rating: "fair" },
+            "Transparency": { value: "✅ Swiss transparency standards", rating: "excellent" },
+            "Upgradeability": { value: "⚠️ Company-controlled updates", rating: "fair" },
+            "Who Owns It?": { value: "⚠️ Threema GmbH (Swiss company)", rating: "fair" }
+          },
+          ux: {
+            "Account Creation": { value: "✅ Anonymous - no phone/email required", rating: "excellent" },
+            "Browser Access": { value: "✅ Web version available", rating: "excellent" },
+            "Desktop Support": { value: "✅ Desktop apps available", rating: "excellent" },
+            "KYC Required": { value: "❌ No KYC required", rating: "excellent" },
+            "Localization": { value: "✅ Multiple languages", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "✅ Multi-device support", rating: "excellent" },
+            "Multi‑Device Use": { value: "✅ Unlimited devices", rating: "excellent" },
+            "Offline Messaging": { value: "✅ Messages queued when offline", rating: "excellent" },
+            "Scalable": { value: "✅ Efficient architecture", rating: "excellent" },
+            "User Onboarding": { value: "✅ Simple anonymous setup", rating: "excellent" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "✅ Encrypted local backups", rating: "excellent" },
+            "Backup & Restore Options": { value: "✅ ID export/import", rating: "excellent" },
+            "Emojis Supported": { value: "✅ Standard emoji support", rating: "excellent" },
+            "File Sharing (with security note)": { value: "✅ E2E encrypted file sharing", rating: "excellent" },
+            "File Size Limit": { value: "⚠️ Up to 20MB", rating: "fair" },
+            "Group Chat Limit": { value: "⚠️ Up to 256 members", rating: "good" },
+            "Group Chats Available": { value: "✅ Yes", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ Full communication suite", rating: "excellent" },
+            "Self‑Destructing Messages": { value: "⚠️ Manual deletion only", rating: "fair" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "❌ Web2+", rating: "poor" },
+            "Blockchain‑based?": { value: "❌ No", rating: "poor" },
+            "Bridging / Cross‑Chain?": { value: "❌ None", rating: "poor" },
+            "Chain Dependency": { value: "❌ None", rating: "poor" },
+            "Network Used": { value: "❌ None", rating: "poor" },
+            "Smart Contract Use": { value: "❌ None", rating: "poor" },
+            "Token / Governance Mechanism": { value: "❌ None", rating: "poor" },
+            "Wallet Compatibility": { value: "❌ None", rating: "poor" }
+          }
+        },
+
+        element: {
+          name: "Element",
+          type: "Web2+",
+          region: "UK/EU",
+          company: "New Vector Ltd",
+          logo: "https://pfst.cf2.poecdn.net/base/image/e34f73959fea8134c0a752435b6da5cd9996684427542d5cd8d60c15cd98c730?w=32&h=32",
+          tags: ["web2+", "matrix protocol", "decentralized", "federation", "open source", "self-hosted"],
+          privacy: {
+            "Audit Status": { value: "✅ Regular security audits", rating: "excellent" },
+            "Backup Encryption": { value: "✅ E2E encrypted backups", rating: "excellent" },
+            "E2E Encryption": { value: "✅ Default end-to-end encryption", rating: "excellent" },
+            "Metadata Protection": { value: "✅ Federated servers reduce metadata", rating: "excellent" },
+            "Open Source": { value: "✅ Fully open source", rating: "excellent" },
+            "Self destructing messages?": { value: "⚠️ Limited disappearing messages", rating: "fair" }
+          },
+          architecture: {
+            "Company Location": { value: "🇬🇧🇪🇺 UK/EU", rating: "good" },
+            "Custody Model": { value: "✅ Non-custodial - user/server admin controls", rating: "excellent" },
+            "Data Location": { value: "✅ Federated servers or self-hosted", rating: "excellent" },
+            "Infrastructure Ownership": { value: "✅ Open protocol, multiple providers", rating: "excellent" },
+            "Interoperability": { value: "✅ Matrix protocol federation", rating: "excellent" }
+          },
+          monetization: {
+            "Built‑in Wallet": { value: "❌ No built-in wallet", rating: "poor" },
+            "Own Their Data / Assets?": { value: "✅ Users control data via federation", rating: "excellent" },
+            "Money‑making Model": { value: "✅ Hosting services, no ads", rating: "excellent" },
+            "Multi‑token Support": { value: "❌ No token support", rating: "poor" },
+            "Native Token?": { value: "❌ None", rating: "poor" },
+            "Primary Income Source": { value: "Matrix hosting & enterprise", rating: "excellent" },
+            "QR Code Friend‑Add": { value: "✅ Yes via Matrix ID", rating: "excellent" },
+            "QR Code Payments": { value: "❌ No payment features", rating: "poor" },
+            "Token Swaps": { value: "❌ No", rating: "poor" }
+          },
+          governance: {
+            "Governance Type": { value: "✅ Matrix Foundation governance", rating: "excellent" },
+            "Transparency": { value: "✅ Fully transparent operations", rating: "excellent" },
+            "Upgradeability": { value: "✅ Open protocol upgrades", rating: "excellent" },
+            "Who Owns It?": { value: "✅ Matrix.org Foundation", rating: "excellent" }
+          },
+          ux: {
+            "Account Creation": { value: "✅ Choose server or self-host", rating: "excellent" },
+            "Browser Access": { value: "✅ Full web client", rating: "excellent" },
+            "Desktop Support": { value: "✅ Desktop apps available", rating: "excellent" },
+            "KYC Required": { value: "❌ Depends on server (usually no)", rating: "excellent" },
+            "Localization": { value: "✅ Multiple languages", rating: "excellent" },
+            "Mobile Support": { value: "✅ iOS/Android", rating: "excellent" },
+            "Multi‑Device Sync": { value: "✅ Cross-device sync", rating: "excellent" },
+            "Multi‑Device Use": { value: "✅ Unlimited devices", rating: "excellent" },
+            "Offline Messaging": { value: "✅ Offline message sync", rating: "excellent" },
+            "Scalable": { value: "✅ Federated scaling", rating: "excellent" },
+            "User Onboarding": { value: "⚠️ Server selection can be confusing", rating: "fair" }
+          },
+          messaging: {
+            "Backup & Data Transfer": { value: "✅ E2E encrypted key backup", rating: "excellent" },
+            "Backup & Restore Options": { value: "✅ Cross-signing for recovery", rating: "excellent" },
+            "Emojis Supported": { value: "✅ Full emoji and custom reactions", rating: "excellent" },
+            "File Sharing (with security note)": { value: "✅ E2E encrypted file sharing", rating: "excellent" },
+            "File Size Limit": { value: "⚠️ Depends on server config", rating: "fair" },
+            "Group Chat Limit": { value: "✅ Large rooms supported", rating: "excellent" },
+            "Group Chats Available": { value: "✅ Advanced room system", rating: "excellent" },
+            "Messaging (Text, Voice, Video)": { value: "✅ Full communication suite", rating: "excellent" },
+            "Self‑Destructing Messages": { value: "⚠️ Limited disappearing messages", rating: "fair" }
+          },
+          web3: {
+            "Web2 / Web3": { value: "❌ Web2+", rating: "poor" },
+            "Blockchain‑based?": { value: "❌ No", rating: "poor" },
+            "Bridging / Cross‑Chain?": { value: "❌ None", rating: "poor" },
+            "Chain Dependency": { value: "❌ None", rating: "poor" },
+            "Network Used": { value: "❌ Matrix protocol (not blockchain)", rating: "poor" },
+            "Smart Contract Use": { value: "❌ None", rating: "poor" },
+            "Token / Governance Mechanism": { value: "❌ None", rating: "poor" },
+            "Wallet Compatibility": { value: "❌ None", rating: "poor" }
+          }
+        }
+      };
+
+      const categories = {
+        privacy: "🔐 Privacy & Security",
+        architecture: "⚙️ Architecture & Control",
+        monetization: "💸 Monetization & Web3",
+        governance: "🏛️ Governance & Trust",
+        ux: "👤 User Experience",
+        messaging: "💬 Messaging Features",
+        web3: "🌐 Web3 Integration"
+      };
+
+      let selectedApps = new Set();
+      let selectedCategories = new Set(Object.keys(categories));
+      let currentView = 'table';
+
+      // Initialize the app
+      document.addEventListener('DOMContentLoaded', function() {
+        initializeApp();
+      });
+
+      function initializeApp() {
+        renderAppSelector();
+        renderCategoryFilters();
+        setupEventListeners();
+        updateDisplay();
+      }
+
+      function renderAppSelector() {
+        const grid = document.getElementById('app-selector-grid');
+        grid.innerHTML = '';
+        
+        Object.entries(appData).forEach(([key, app]) => {
+          const button = document.createElement('button');
+          button.className = 'app-selector';
+          button.dataset.app = key;
+          button.innerHTML = `
+            <div class="w-12 h-12 mb-2 mx-auto flex items-center justify-center app-logo">
+              <img src="${app.logo}" alt="${app.name}" class="w-10 h-10 object-contain" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
+              <div class="text-2xl hidden">📱</div>
+            </div>
+            <div class="font-medium">${app.name}</div>
+            <div class="text-xs mt-1" style="color: var(--text-tertiary);">${app.type}</div>
+          `;
+          button.onclick = () => toggleAppSelection(key);
+          grid.appendChild(button);
+        });
+      }
+
+      function renderCategoryFilters() {
+        const container = document.getElementById('category-filters');
+        container.innerHTML = '';
+        
+        Object.entries(categories).forEach(([key, name]) => {
+          const button = document.createElement('button');
+          button.className = 'category-filter selected';
+          button.dataset.category = key;
+          button.textContent = name;
+          button.onclick = () => toggleCategorySelection(key);
+          container.appendChild(button);
+        });
+      }
+
+      function toggleAppSelection(appKey) {
+        const button = document.querySelector(`[data-app="${appKey}"]`);
+        
+        if (selectedApps.has(appKey)) {
+          selectedApps.delete(appKey);
+          button.classList.remove('selected');
+        } else {
+          selectedApps.add(appKey);
+          button.classList.add('selected');
+        }
+        
+        updateSelectedCount();
+        updateDisplay();
+      }
+
+      function toggleCategorySelection(categoryKey) {
+        const button = document.querySelector(`[data-category="${categoryKey}"]`);
+        
+        if (selectedCategories.has(categoryKey)) {
+          selectedCategories.delete(categoryKey);
+          button.classList.remove('selected');
+        } else {
+          selectedCategories.add(categoryKey);
+          button.classList.add('selected');
+        }
+        
+        updateDisplay();
+      }
+
+      function updateSelectedCount() {
+        document.getElementById('selected-count').textContent = selectedApps.size;
+      }
+
+      function updateDisplay() {
+        const noSelection = document.getElementById('no-selection');
+        const comparisonTable = document.getElementById('comparison-table');
+        const comparisonDashboard = document.getElementById('comparison-dashboard');
+        
+        if (selectedApps.size === 0) {
+          noSelection.style.display = 'block';
+          comparisonTable.style.display = 'none';
+          comparisonDashboard.style.display = 'none';
+        } else {
+          noSelection.style.display = 'none';
+          if (currentView === 'table') {
+            comparisonTable.style.display = 'block';
+            comparisonDashboard.style.display = 'none';
+            generateComparisonTable();
+          } else {
+            comparisonTable.style.display = 'none';
+            comparisonDashboard.style.display = 'block';
+            generateDashboard();
+          }
+        }
+      }
+
+      function generateComparisonTable() {
+        const container = document.getElementById('comparison-table');
+        const apps = Array.from(selectedApps);
+        const cats = Array.from(selectedCategories);
+        
+        let html = '';
+        
+        cats.forEach(categoryKey => {
+          const categoryName = categories[categoryKey];
+          const properties = Object.keys(appData[apps[0]][categoryKey] || {});
+          
+          if (properties.length === 0) return;
+          
+          html += `
+            <div class="table-container mb-6">
+              <h3 class="text-lg font-bold p-4 bg-gray-50" style="background: var(--bg-glass);">${categoryName}</h3>
+              <table class="comparison-table">
+                <thead>
+                  <tr>
+                    <th class="w-1/4">Feature</th>
+                    ${apps.map(app => `<th class="text-center">${appData[app].name}</th>`).join('')}
+                  </tr>
+                </thead>
+                <tbody>
+                  ${properties.map(property => `
+                    <tr>
+                      <td class="font-medium">${property}</td>
+                      ${apps.map(app => {
+                        const data = appData[app][categoryKey]?.[property] || { value: "❌ Not available", rating: "poor" };
+                        return `<td class="text-center">
+                          <span class="inline-block px-2 py-1 rounded text-xs rating-${data.rating}">
+                            ${data.value}
+                          </span>
+                        </td>`;
+                      }).join('')}
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `;
+        });
+        
+        container.innerHTML = html;
+      }
+
+      function generateDashboard() {
+        const container = document.getElementById('comparison-dashboard');
+        const apps = Array.from(selectedApps);
+        
+        let html = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">';
+        
+        apps.forEach(appKey => {
+          const app = appData[appKey];
+          const score = calculateAppScore(app);
+          
+          html += `
+            <div class="bg-white rounded-lg p-6 shadow-lg" style="background: var(--bg-glass); border: 1px solid var(--border);">
+              <h3 class="text-xl font-bold mb-4">${app.name}</h3>
+              <div class="text-3xl font-bold text-center mb-4 ${score >= 80 ? 'text-green-600' : score >= 60 ? 'text-yellow-600' : 'text-red-600'}">
+                ${score}%
+              </div>
+              <div class="space-y-2">
+                ${Array.from(selectedCategories).map(cat => {
+                  const catScore = calculateCategoryScore(app, cat);
+                  return `
+                    <div class="flex justify-between">
+                      <span class="text-sm">${categories[cat]}</span>
+                      <span class="text-sm font-medium">${catScore}%</span>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        });
+        
+        html += '</div>';
+        container.innerHTML = html;
+      }
+
+      function calculateAppScore(app) {
+        let totalScore = 0;
+        let totalFeatures = 0;
+        
+        Array.from(selectedCategories).forEach(categoryKey => {
+          const category = app[categoryKey];
+          if (!category) return;
+          
+          Object.values(category).forEach(feature => {
+            totalFeatures++;
+            switch(feature.rating) {
+              case 'excellent': totalScore += 100; break;
+              case 'good': totalScore += 75; break;
+              case 'fair': totalScore += 50; break;
+              case 'poor': totalScore += 25; break;
+            }
+          });
+        });
+        
+        return totalFeatures > 0 ? Math.round(totalScore / totalFeatures) : 0;
+      }
+
+      function calculateCategoryScore(app, categoryKey) {
+        const category = app[categoryKey];
+        if (!category) return 0;
+        
+        let totalScore = 0;
+        let totalFeatures = 0;
+        
+        Object.values(category).forEach(feature => {
+          totalFeatures++;
+          switch(feature.rating) {
+            case 'excellent': totalScore += 100; break;
+            case 'good': totalScore += 75; break;
+            case 'fair': totalScore += 50; break;
+            case 'poor': totalScore += 25; break;
+          }
+        });
+        
+        return totalFeatures > 0 ? Math.round(totalScore / totalFeatures) : 0;
+      }
+
+      function setupEventListeners() {
+        // View toggle
+        document.getElementById('table-view').onclick = () => {
+          currentView = 'table';
+          document.getElementById('table-view').className = 'view-toggle-btn active';
+          document.getElementById('dashboard-view').className = 'view-toggle-btn';
+          updateDisplay();
+        };
+        
+        document.getElementById('dashboard-view').onclick = () => {
+          currentView = 'dashboard';
+          document.getElementById('dashboard-view').className = 'view-toggle-btn active';
+          document.getElementById('table-view').className = 'view-toggle-btn';
+          updateDisplay();
+        };
+        
+        // Select all
+        document.getElementById('select-all').onclick = () => {
+          const allApps = Object.keys(appData);
+          const allSelected = allApps.every(app => selectedApps.has(app));
+          
+          if (allSelected) {
+            selectedApps.clear();
+            document.querySelectorAll('.app-selector').forEach(btn => btn.classList.remove('selected'));
+          } else {
+            allApps.forEach(app => selectedApps.add(app));
+            document.querySelectorAll('.app-selector').forEach(btn => btn.classList.add('selected'));
+          }
+          
+          updateSelectedCount();
+          updateDisplay();
+        };
+      }
+
+      // Export functions
+      function exportAsCSV() {
+        if (selectedApps.size === 0) {
+          alert('Please select at least one app to export');
+          return;
+        }
+        
+        let csv = 'Feature,' + Array.from(selectedApps).map(app => appData[app].name).join(',') + '\n';
+        
+        Array.from(selectedCategories).forEach(categoryKey => {
+          const properties = Object.keys(appData[Array.from(selectedApps)[0]][categoryKey] || {});
+          
+          properties.forEach(property => {
+            csv += `"${property}",`;
+            csv += Array.from(selectedApps).map(app => {
+              const data = appData[app][categoryKey]?.[property];
+              return `"${data ? data.value : 'Not available'}"`;
+            }).join(',');
+            csv += '\n';
+          });
+        });
+        
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'messaging-app-comparison.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      function exportAsImage(format) {
+        if (selectedApps.size === 0) {
+          alert('Please select at least one app to export');
+          return;
+        }
+        
+        const element = document.getElementById('comparison-content');
+        html2canvas(element).then(canvas => {
+          const url = canvas.toDataURL(`image/${format}`);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `messaging-app-comparison.${format}`;
+          a.click();
+        });
+      }
+
+      function shareComparison() {
+        const url = window.location.href;
+        if (navigator.share) {
+          navigator.share({
+            title: 'Messaging App Comparison - Liberdus',
+            text: 'Check out this comparison of messaging applications',
+            url: url
+          });
+        } else {
+          navigator.clipboard.writeText(url).then(() => {
+            alert('URL copied to clipboard!');
+          });
+        }
+      }
+    </script>
+  </body>
+</html>
