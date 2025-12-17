@@ -1971,20 +1971,28 @@ body {
 }
 
 /* Increase visibility of background bubbles on dark theme */
-html[data-theme="dark"] .page-header #funding-bg {
+html[data-theme="dark"] .page-header #funding-bg,
+html[data-theme="dark"] .page-header #buy-bg,
+html[data-theme="dark"] .page-header #sell-bg {
   opacity: 0.6 !important;
 }
 
-html[data-theme="dark"] .page-header #funding-bg svg {
+html[data-theme="dark"] .page-header #funding-bg svg,
+html[data-theme="dark"] .page-header #buy-bg svg,
+html[data-theme="dark"] .page-header #sell-bg svg {
   mix-blend-mode: screen;
 }
 
-html[data-theme="light"] .page-header #funding-bg {
+html[data-theme="light"] .page-header #funding-bg,
+html[data-theme="light"] .page-header #buy-bg,
+html[data-theme="light"] .page-header #sell-bg {
   opacity: 0.15 !important;
 }
 
 /* Ensure proper stacking */
-.page-header #funding-bg {
+.page-header #funding-bg,
+.page-header #buy-bg,
+.page-header #sell-bg {
   position: absolute;
   inset: 0;
   z-index: 0;
@@ -2538,30 +2546,40 @@ html[data-theme="light"] .page-header #funding-bg {
   }
 
   /* Mobile bubble animation adjustments */
-  .page-header #funding-bg svg {
+  .page-header #funding-bg svg,
+  .page-header #buy-bg svg,
+  .page-header #sell-bg svg {
     viewBox: "0 0 400 300";
     height: 300px !important;
   }
   
-  .page-header #funding-bg svg circle:nth-child(1) {
+  .page-header #funding-bg svg circle:nth-child(1),
+  .page-header #buy-bg svg circle:nth-child(1),
+  .page-header #sell-bg svg circle:nth-child(1) {
     cx: "80" !important;
     cy: "60" !important;
     r: "25" !important;
   }
   
-  .page-header #funding-bg svg circle:nth-child(2) {
+  .page-header #funding-bg svg circle:nth-child(2),
+  .page-header #buy-bg svg circle:nth-child(2),
+  .page-header #sell-bg svg circle:nth-child(2) {
     cx: "250" !important;
     cy: "180" !important;
     r: "20" !important;
   }
   
-  .page-header #funding-bg svg circle:nth-child(3) {
+  .page-header #funding-bg svg circle:nth-child(3),
+  .page-header #buy-bg svg circle:nth-child(3),
+  .page-header #sell-bg svg circle:nth-child(3) {
     cx: "320" !important;
     cy: "80" !important;
     r: "25" !important;
   }
   
-  .page-header #funding-bg svg circle:nth-child(4) {
+  .page-header #funding-bg svg circle:nth-child(4),
+  .page-header #buy-bg svg circle:nth-child(4),
+  .page-header #sell-bg svg circle:nth-child(4) {
     cx: "350" !important;
     cy: "220" !important;
     r: "20" !important;
