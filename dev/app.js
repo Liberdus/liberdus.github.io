@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'a'
+const version = 'b'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -4252,7 +4252,9 @@ async function processChats(chats, keys) {
                   if (payload.callTime && reactNativeApp.isReactNativeWebView) {
                     // Send it to the native app to display the scheduled call notification
                     if (!chatModal.isCallExpired(payload.callTime) || chatModal.isFutureCall(payload.callTime)) {
-                      reactNativeApp.sendScheduledCall(contact.username, payload.callTime);
+                      // Pass the current account address so we can show bell in sign-in modal
+                      const accountAddress = myAccount?.keys?.address;
+                      reactNativeApp.sendScheduledCall(contact.username, payload.callTime, accountAddress);
                     }
                   }
                 } else if (parsedMessage.type === 'vm') {
@@ -12748,7 +12750,6 @@ console.warn('in send message', txid)
     if (!this.imageAttachmentContextMenu) return;
     this.imageAttachmentContextMenu.style.display = 'none';
     this.currentImageAttachmentRow = null;
-    delete this.imageAttachmentContextMenu.dataset.previewMode;
   }
 
   /**
@@ -12786,8 +12787,8 @@ console.warn('in send message', txid)
 
     const isImageAttachment = attachmentRow.dataset.imageAttachment === 'true';
 
-    // Decide Preview vs Save:
-    // - Images: Preview when no thumbnail exists in IndexedDB; Save when it exists
+    // Decide Preview/Save vs Save:
+    // - Images: Show both Preview and Save when no thumbnail exists; Show only Save when it exists
     // - Non-images: always Save (no thumbnail concept)
     let hasThumb = true;
     if (isImageAttachment) {
@@ -12802,11 +12803,9 @@ console.warn('in send message', txid)
       }
     }
 
-    const previewOptText = this.imageAttachmentContextMenu.querySelector(
-      '[data-action="preview-or-save"] .context-menu-text'
-    );
-    if (previewOptText) previewOptText.textContent = hasThumb ? 'Save' : 'Preview';
-    this.imageAttachmentContextMenu.dataset.previewMode = hasThumb ? 'save' : 'preview';
+    // Show Preview only for images without a thumbnail; Save is always visible
+    const previewOpt = this.imageAttachmentContextMenu.querySelector('[data-action="preview"]');
+    if (previewOpt) previewOpt.style.display = (isImageAttachment && !hasThumb) ? '' : 'none';
 
     this.positionContextMenu(this.imageAttachmentContextMenu, attachmentRow);
     this.imageAttachmentContextMenu.style.display = 'block';
@@ -12818,15 +12817,12 @@ console.warn('in send message', txid)
 
     const { messageEl } = this.getAttachmentContextFromRow(row);
     switch (action) {
-      case 'preview-or-save': {
-        const mode = this.imageAttachmentContextMenu?.dataset?.previewMode;
-        if (mode === 'save') {
-          void this.saveImageAttachment(row);
-        } else {
-          void this.previewImageAttachment(row);
-        }
+      case 'preview':
+        void this.previewImageAttachment(row);
         break;
-      }
+      case 'save':
+        void this.saveImageAttachment(row);
+        break;
       case 'reply':
         if (messageEl) this.startReplyToMessage(messageEl);
         break;
@@ -18884,17 +18880,26 @@ class ReactNativeApp {
                     return; // Skip already-processed notifications
                   }
 
+                  // Handle scheduled call notifications - extract address from data.to
+                  if (notification?.data?.type === 'SCHEDULE_CALL' && notification?.data?.to) {
+                    const normalizedToAddress = normalizeAddress(notification.data.to);
+                    // Save notification address to show bell in sign-in modal for accounts with notifications
+                    if (normalizedToAddress !== normalizedCurrentUser) {
+                      this.saveNotificationAddress(normalizedToAddress);
+                    }
+                  } else {
                   // Extract address from notification body (pattern: "to 0x...")
                   if (notification?.body && typeof notification.body === 'string') {
                     const addressMatch = notification.body.match(/to\s+(\S+)/);
                     if (addressMatch && addressMatch[1]) {
                       const normalizedToAddress = normalizeAddress(addressMatch[1]);
                       
-                      // Save notification for other accounts user owns (skip current user, already cleared above)
+                      // Save notification address to show bell in sign-in modal for accounts with notifications
                       if (normalizedToAddress !== normalizedCurrentUser) {
                         this.saveNotificationAddress(normalizedToAddress);
                       }
                     }
+                  }
                   }
 
                   if (hasValidTimestamp) {
@@ -19375,11 +19380,12 @@ class ReactNativeApp {
     });
   }
 
-  sendScheduledCall(username, timestamp){
+  sendScheduledCall(username, timestamp, address){
     this.postMessage({
       type: 'SCHEDULE_CALL',
       username,
-      timestamp
+      timestamp,
+      address
     });
   }
   
