@@ -2257,7 +2257,7 @@ input[type='file'].form-control {
 
 #displayAddress {
   background-color: var(--light-color) !important;
-  font-family: var(--font-primary);
+  font-family: monospace;
   font-size: 0.8rem !important;
   line-height: 1.3 !important;
   padding: 6px 10px !important;
@@ -2271,12 +2271,23 @@ input[type='file'].form-control {
   border-radius: 12px;
 }
 
+#secretHexDisplay {
+  flex: 1;
+  font-size: 0.875rem;
+  padding: 8px 12px;
+  word-break: break-all;
+  line-height: 1.4;
+  background-color: #f8f9fa;
+  cursor: default;
+}
+
 /* Reduce bottom margin for the form-group containing the address */
 #receiveModal .form-group:has(#displayAddress) {
   margin-bottom: 0.5rem;
 }
 
-#copyAddress {
+#copyAddress,
+#copySecretButton {
   background: none;
   border: none;
   cursor: pointer;
@@ -2288,12 +2299,22 @@ input[type='file'].form-control {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Adjust vertical position for better centering */
+}
+
+/* Adjust vertical position for better centering */
+#copyAddress {
   position: relative;
   top: -5px;
 }
 
-#copyAddress::before {
+#copySecretButton {
+  color: #007bff;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+#copyAddress::before,
+#copySecretButton::before {
   content: '';
   width: 20px;
   height: 20px;
@@ -2305,7 +2326,8 @@ input[type='file'].form-control {
 
 /* Shared copy icon styling - used by both context menu copy icon and copy address button */
 .context-menu-option[data-icon="copy"] .context-menu-icon,
-#copyAddress::before {
+#copyAddress::before,
+#copySecretButton::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2'%3E%3C/rect%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'%3E%3C/path%3E%3C/svg%3E");
 }
 
@@ -2327,12 +2349,32 @@ input[type='file'].form-control {
 }
 
 /* Success checkmark icon */
-#copyAddress.success::before {
+#copyAddress.success::before,
+#copySecretButton.success::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
 }
 
+/* Secret Modal Styles */
+#secretModal .form-group p {
+  color: #dc3545;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+#secretContent {
+  display: none;
+}
+
+#secretContent .form-group > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
 /* QR code container */
-#qrcode {
+#qrcode,
+#secretQRCode {
   margin: 0.75rem auto !important;
   padding: 0.75rem;
   background-color: var(--light-color);
@@ -2344,7 +2386,9 @@ input[type='file'].form-control {
 }
 
 #qrcode img,
-#qrcode canvas {
+#qrcode canvas,
+#secretQRCode img,
+#secretQRCode canvas {
   display: block;
   width: 200px;
   height: 200px;
@@ -5068,6 +5112,10 @@ small {
 
 .menu-item[data-icon="log-out"]::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'%3E%3C/path%3E%3Cpolyline points='16,17 21,12 16,7'%3E%3C/polyline%3E%3Cline x1='21' y1='12' x2='9' y2='12'%3E%3C/line%3E%3C/svg%3E");
+}
+
+.menu-item[data-icon="key"]::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4'%3E%3C/path%3E%3C/svg%3E");
 }
 
 .menu-item[data-icon="lock"]::before {

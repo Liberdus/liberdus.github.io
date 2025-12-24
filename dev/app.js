@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'c'
+const version = 'd'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -413,6 +413,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Settings Modal
   settingsModal.load();
+
+  // Secret Modal
+  secretModal.load();
 
   // Failed Transaction Modal
   failedTransactionModal.load();
@@ -1792,6 +1795,9 @@ class SettingsModal {
     this.removeButton = document.getElementById('openRemoveAccount');
     this.removeButton.addEventListener('click', () => removeAccountModal.open());
     
+    this.secretButton = document.getElementById('openSecretModal');
+    this.secretButton.addEventListener('click', () => secretModal.open());
+    
     this.signOutButton = document.getElementById('handleSignOutSettings');
     this.signOutButton.addEventListener('click', async () => await menuModal.handleSignOut());
   }
@@ -1812,6 +1818,117 @@ class SettingsModal {
 }
 
 const settingsModal = new SettingsModal();
+
+class SecretModal {
+  constructor() { }
+
+  load() {
+    this.modal = document.getElementById('secretModal');
+    this.closeButton = document.getElementById('closeSecretModal');
+    this.closeButton.addEventListener('click', () => this.close());
+    
+    this.showButton = document.getElementById('showSecretButton');
+    this.showButton.addEventListener('click', () => this.showSecret());
+    
+    this.secretContent = document.getElementById('secretContent');
+    this.secretHexDisplay = document.getElementById('secretHexDisplay');
+    this.copyButton = document.getElementById('copySecretButton');
+    this.copyButton.addEventListener('click', () => this.copyToClipboard());
+    
+    this.qrContainer = document.getElementById('secretQRCode');
+  }
+
+  resetSecretState() {
+    // Reset the secret content state
+    this.secretContent.style.display = 'none';
+    this.showButton.textContent = 'Show';
+    this.showButton.style.display = 'block';
+    this.secretHexDisplay.textContent = '';
+    if (this.qrContainer) {
+      this.qrContainer.innerHTML = '';
+    }
+  }
+
+  open() {
+    this.modal.classList.add('active');
+    enterFullscreen();
+    this.resetSecretState();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    enterFullscreen();
+    this.resetSecretState();
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  showSecret() {
+    if (!myAccount || !myAccount.keys || !myAccount.keys.secret) {
+      console.error('Secret key not available');
+      showToast('Secret key not available', 0, 'error');
+      return;
+    }
+
+    const secretKey = myAccount.keys.secret;
+    
+    // Display the secret as hex string with 0x prefix
+    const secretKeyWithPrefix = '0x' + secretKey;
+    this.secretHexDisplay.textContent = secretKeyWithPrefix;
+    
+    // Generate and display QR code with 0x prefix
+    this.renderSecretQR(secretKeyWithPrefix);
+    
+    // Show the content and hide the button
+    this.secretContent.style.display = 'block';
+    this.showButton.style.display = 'none';
+  }
+
+  renderSecretQR(secretKey) {
+    try {
+      if (!this.qrContainer) return;
+      this.qrContainer.innerHTML = '';
+      
+      // Generate QR using the global qr library as GIF
+      const gifBytes = qr.encodeQR(secretKey, 'gif', { scale: 4 });
+      const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
+      const dataUrl = 'data:image/gif;base64,' + base64;
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.width = 200;
+      img.height = 200;
+      img.alt = 'Secret key QR code';
+      this.qrContainer.appendChild(img);
+    } catch (e) {
+      console.error('Failed to render secret QR:', e);
+      showToast('Failed to generate QR code', 0, 'error');
+    }
+  }
+
+  async copyToClipboard() {
+    const secretKey = this.secretHexDisplay.textContent;
+    if (!secretKey) {
+      showToast('No secret key to copy', 0, 'error');
+      return;
+    }
+    
+    try {
+      await navigator.clipboard.writeText(secretKey);
+      this.copyButton.classList.add('success');
+      setTimeout(() => {
+        this.copyButton.classList.remove('success');
+      }, 2000);
+      showToast('Secret key copied to clipboard', 2000, 'success');
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      showToast('Failed to copy to clipboard', 0, 'error');
+    }
+  }
+}
+
+const secretModal = new SecretModal();
 
 /**
  * createNewContact

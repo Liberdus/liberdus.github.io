@@ -290,6 +290,7 @@
             <li class="menu-item" id="openAccountForm" data-icon="user">Profile</li>
             <li class="menu-item" id="openToll" data-icon="dollar-sign">Toll</li>
             <li class="menu-item" id="openLockModal" data-icon="lock">Lock</li>
+            <li class="menu-item" id="openSecretModal" data-icon="key">Secret</li>
             <li class="menu-item" id="openBackupForm" data-icon="download">Backup</li>
             <li class="menu-item" id="openRemoveAccount" data-icon="trash-2">Remove</li>
             <li class="menu-item" id="openLaunchUrl" data-icon="launch" style="display: none;">Launch</li>
@@ -1794,6 +1795,46 @@
             <div id="removeAccountsList" class="account-list"></div>
             <button type="button" id="submitRemoveAccounts" class="btn btn--primary btn--pill btn--full" disabled>Remove Selected</button>
             <button type="button" id="removeAllAccountsButton" class="btn btn--danger btn--pill btn--full">Remove All Accounts</button>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Secret Modal -->
+      <div class="modal fixed-header" id="secretModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeSecretModal"></button>
+          <div class="modal-title">Secret Key</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <div class="form-group">
+              <p>
+                <strong>Warning:</strong> Keep your secret key private. Anyone with access to it can control your account.
+              </p>
+              <button id="showSecretButton" class="btn btn--primary btn--pill btn--full">Show</button>
+            </div>
+            <div id="secretContent">
+              <div class="form-group">
+                <label for="secretHexDisplay">Secret Key (Hex)</label>
+                <div>
+                  <div
+                    id="secretHexDisplay"
+                    class="form-control"
+                  ></div>
+                  <button
+                    type="button"
+                    id="copySecretButton"
+                    class="icon-button"
+                    title="Copy to Clipboard"
+                  ></button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>QR Code</label>
+                <div id="secretQRCode"></div>
+              </div>
+            </div>
           </div>
         </div>
         <a class="last-item" href="#"> </a>
