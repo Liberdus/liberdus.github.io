@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -1415,6 +1415,14 @@ class WalletScreen {
 
   open() {
     this.screen.classList.add('active');
+    // Show testnet warning toast if on testnet and not shown this session
+    if (!this.isMainnet()) {
+      const hasBeenShown = sessionStorage.getItem('testnetWarningShown');
+      if (hasBeenShown !== 'true') {
+        showToast('The LIB in this Testnet is not of any value and will not be transferred to the Mainnet.', 0, 'info');
+        sessionStorage.setItem('testnetWarningShown', 'true');
+      }
+    }
   }
 
   close() {
@@ -1894,7 +1902,7 @@ class ScanQRModal {
           case 'NotAllowedError':
             this.close();
             throw new Error(
-              'Camera access was denied. Please check your browser settings and grant permission to use the camera.'
+              'Camera access was denied. Please check your device settings and grant permission to use the camera.'
             );
           case 'NotFoundError':
             throw new Error('No camera device was found on your system.');
@@ -4293,6 +4301,28 @@ async function processChats(chats, keys) {
           if (payload.senderInfo && !mine){
             contact.senderInfo = cleanSenderInfo(payload.senderInfo)
             delete payload.senderInfo;
+            if (contact.senderInfo.avatarId && contact.senderInfo.avatarKey && contact.avatarId !== contact.senderInfo.avatarId) {
+              downloadAndDecryptAvatar(`https://inv.liberdus.com:2083/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
+                .then(async (blob) => {
+                  try {
+                    await contactAvatarCache.save(contact.address, blob);
+                    contact.avatarId = contact.senderInfo.avatarId;
+                    contact.hasAvatar = true;
+                    saveState();
+                    // Refresh UI immediately: chat modal avatar + messages + chat list
+                    if (chatModal.isActive() && chatModal.address === contact.address) {
+                      chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+                      chatModal.appendChatModal(true);
+                    }
+                    if (typeof chatsScreen !== 'undefined') {
+                      chatsScreen.updateChatList();
+                    }
+                  } catch (e) {
+                    console.warn('Failed to save avatar after download:', e);
+                  }
+                })
+                .catch(err => console.warn('Failed to download avatar:', err));
+            }
             if (contact.username) {
               // if we already have the username, we can use it
               contact.senderInfo.username = contact.username;
@@ -4414,6 +4444,28 @@ async function processChats(chats, keys) {
           if (payload.senderInfo && !mine) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
+            if (contact.senderInfo.avatarId && contact.senderInfo.avatarKey && contact.avatarId !== contact.senderInfo.avatarId) {
+              downloadAndDecryptAvatar(`https://inv.liberdus.com:2083/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
+                .then(async (blob) => {
+                  try {
+                    await contactAvatarCache.save(contact.address, blob);
+                    contact.avatarId = contact.senderInfo.avatarId;
+                    contact.hasAvatar = true;
+                    saveState();
+                    // Refresh UI immediately: chat modal avatar + messages + chat list
+                    if (chatModal.isActive() && chatModal.address === contact.address) {
+                      chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+                      chatModal.appendChatModal(true);
+                    }
+                    if (typeof chatsScreen !== 'undefined') {
+                      chatsScreen.updateChatList();
+                    }
+                  } catch (e) {
+                    console.warn('Failed to save avatar after download:', e);
+                  }
+                })
+                .catch(err => console.warn('Failed to download avatar:', err));
+            }
             if (contact.username) {
               // if we already have the username, we can use it
               contact.senderInfo.username = contact.username;
@@ -5588,6 +5640,38 @@ class AvatarEditModal {
   }
 
   /**
+   * Attempt to delete an avatar from the attachment server.
+   * Accepts an avatarId and optional secret; for backwards compatibility
+   * the secret may be omitted.
+   * @param {string} id Avatar id
+   * @param {string?} secret Avatar secret
+   */
+  async deleteAvatarFromServer(id, secret) {
+    if (!id) return false;
+    try {
+      const idParam = encodeURIComponent(secret ? `${id}-${secret}` : id);
+      try {
+        const delRes = await fetch(`https://inv.liberdus.com:2083/delete/${idParam}`, { method: 'DELETE' });
+        if (!delRes.ok) {
+          if (delRes.status === 404) {
+            // Missing resource on server -> treat as already-deleted (success)
+            return true;
+          }
+          console.warn('Avatar delete request failed on server:', delRes.status, await delRes.text().catch(() => ''));
+          return false;
+        }
+        return true;
+      } catch (e) {
+        console.warn('Failed to call avatar delete endpoint:', e);
+        return false;
+      }
+    } catch (e) {
+      console.warn('Error while attempting avatar server delete:', e);
+      return false;
+    }
+  }
+
+  /**
    * Delete the current avatar immediately and save.
    */
   async handleDelete() {
@@ -5597,14 +5681,30 @@ class AvatarEditModal {
     }
 
     try {
-      // Delete avatar from cache
-      await contactAvatarCache.delete(this.currentAddress);
-
       if (this.isOwnAvatar) {
         // Update own avatar state
         if (myData?.account) {
-          myData.account.hasAvatar = false;
-          saveState();
+          // Attempt to delete avatar on attachment server if we have id (secret optional)
+          let deletedOnServer = true;
+          try {
+            const aid = myData.account.avatarId;
+            const secret = myData.account.avatarSecret;
+            if (aid) deletedOnServer = await this.deleteAvatarFromServer(aid, secret);
+          } catch (e) {
+            console.warn('Error while attempting avatar server delete:', e);
+            deletedOnServer = false;
+          }
+
+          if (deletedOnServer) {
+            await contactAvatarCache.delete(this.currentAddress);
+            myData.account.hasAvatar = false;
+            delete myData.account.avatarId;
+            delete myData.account.avatarKey;
+            delete myData.account.avatarSecret;
+            saveState();
+          } else {
+            showToast('Failed to delete avatar', 3000, 'error');
+          }
         }
         // Update My Info modal UI
         myInfoModal.updateMyInfo();
@@ -5615,6 +5715,8 @@ class AvatarEditModal {
           return;
         }
         contact.hasAvatar = false;
+        delete contact.avatarId;
+        await contactAvatarCache.delete(this.currentAddress);
         saveState();
 
         // Update UI
@@ -5831,14 +5933,54 @@ class AvatarEditModal {
       if (this.pendingBlob || this.activeImageBlob) {
         const sourceBlob = this.pendingBlob || this.activeImageBlob;
         const thumbnail = await this.exportCroppedThumbnail(sourceBlob);
-        await contactAvatarCache.save(this.currentAddress, thumbnail);
 
         if (this.isOwnAvatar) {
-          // Update own avatar state
-          if (myData?.account) {
-            myData.account.hasAvatar = true;
-            saveState();
+          // If we already have an avatar on the server, try to delete it first
+          let deletedOld = true;
+          try {
+            const oldId = myData?.account?.avatarId;
+            const oldSecret = myData?.account?.avatarSecret;
+            if (oldId) deletedOld = await this.deleteAvatarFromServer(oldId, oldSecret);
+          } catch (e) {
+            console.warn('Failed to delete existing avatar before upload:', e);
+            deletedOld = false;
           }
+
+          if (!deletedOld) {
+            showToast('Upload failed: could not delete existing avatar from server', 3000, 'error');
+            return;
+          }
+
+          // Generate random key and secret, encrypt thumbnail
+          const avatarKey = generateRandomBytes(32);
+          const secret = bin2hex(generateRandomBytes(16));
+          const encryptedBlob = await encryptBlob(thumbnail, avatarKey);
+
+          // Upload encrypted blob to attachment server
+          const formData = new FormData();
+          formData.append('file', encryptedBlob);
+          formData.append('secret', secret);
+          const response = await fetch('https://inv.liberdus.com:2083/post', {
+            method: 'POST',
+            body: formData
+          });
+          if (!response.ok) {
+            showToast('Failed to upload avatar', 3000, 'error');
+            return;
+          }
+          const result = await response.json();
+          const avatarId = result.id;
+
+          // Save thumbnail to cache now that server operations succeeded
+          await contactAvatarCache.save(this.currentAddress, thumbnail);
+
+          // Save id, key and secret in account
+          myData.account.avatarId = avatarId;
+          myData.account.avatarKey = bin2base64(avatarKey);
+          myData.account.avatarSecret = secret;
+          myData.account.hasAvatar = true;
+          saveState();
+
           // Update My Info modal UI
           myInfoModal.updateMyInfo();
         } else {
@@ -5848,6 +5990,8 @@ class AvatarEditModal {
             return;
           }
           contact.hasAvatar = true;
+          delete contact.avatarId;
+          await contactAvatarCache.save(this.currentAddress, thumbnail);
           saveState();
           contactInfoModal.updateContactInfo(createDisplayInfo(contact));
           contactInfoModal.needsContactListUpdate = true;
@@ -10320,6 +10464,15 @@ class ChatModal {
     this.addFriendButtonChat = document.getElementById('addFriendButtonChat');
     this.addAttachmentButton = document.getElementById('addAttachmentButton');
     this.chatFileInput = document.getElementById('chatFileInput');
+    this.chatPhotoLibraryInput = document.getElementById('chatPhotoLibraryInput');
+    this.chatFilesInput = document.getElementById('chatFilesInput');
+    
+    // Camera capture modal elements
+    this.cameraCaptureOverlay = document.getElementById('cameraCaptureOverlay');
+    this.cameraCaptureDialog = document.getElementById('cameraCaptureDialog');
+    this.cameraCaptureVideo = document.getElementById('cameraCaptureVideo');
+    this.cameraCancelButton = document.getElementById('cameraCancelButton');
+    this.cameraCaptureButton = document.getElementById('cameraCaptureButton');
 
     // Voice recording elements
     this.voiceRecordButton = document.getElementById('voiceRecordButton');
@@ -10333,6 +10486,8 @@ class ChatModal {
     this.contextMenu = document.getElementById('messageContextMenu');
     // Initialize image attachment context menu
     this.imageAttachmentContextMenu = document.getElementById('imageAttachmentContextMenu');
+    // Initialize attachment options context menu
+    this.attachmentOptionsContextMenu = document.getElementById('attachmentOptionsContextMenu');
     this.currentImageAttachmentRow = null;
     
     // Add event delegation for message clicks (since messages are created dynamically)
@@ -10367,6 +10522,15 @@ class ChatModal {
         this.handleImageAttachmentContextMenuAction(action);
       });
     }
+    // Add attachment options context menu option listeners
+    if (this.attachmentOptionsContextMenu) {
+      this.attachmentOptionsContextMenu.addEventListener('click', (e) => {
+        const option = e.target.closest('.context-menu-option');
+        if (!option) return;
+        const action = option.dataset.action;
+        this.handleAttachmentOptionsContextMenuAction(action);
+      });
+    }
     
     // Close context menu when clicking outside
     document.addEventListener('click', (e) => {
@@ -10375,6 +10539,9 @@ class ChatModal {
       }
       if (this.imageAttachmentContextMenu && !this.imageAttachmentContextMenu.contains(e.target)) {
         this.closeImageAttachmentContextMenu();
+      }
+      if (this.attachmentOptionsContextMenu && !this.attachmentOptionsContextMenu.contains(e.target) && !this.addAttachmentButton.contains(e.target)) {
+        this.closeAttachmentOptionsContextMenu();
       }
     });
     this.sendButton.addEventListener('click', this.handleSendMessage.bind(this));
@@ -10398,6 +10565,7 @@ class ChatModal {
 
       // Save draft (text is already limited to 2000 chars by maxlength attribute)
       this.debouncedSaveDraft(e.target.value);
+      this.toggleSendButtonVisibility();
     });
 
     // allow ctlr+enter or cmd+enter to send message
@@ -10480,13 +10648,34 @@ class ChatModal {
     }
 
     if (this.addAttachmentButton) {
-      this.addAttachmentButton.addEventListener('click', () => {
-        this.triggerFileSelection();
+      this.addAttachmentButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // On iOS, directly trigger file input to use native iOS picker
+        // On Android, show our custom context menu
+        if (isIOS()) {
+          // iOS will show its native picker with Camera, Photo Library, and Files options
+          if (this.chatFileInput) {
+            this.chatFileInput.click();
+          }
+        } else {
+          // Android: show our custom context menu
+          this.showAttachmentOptionsContextMenu(e);
+        }
       });
     }
 
     if (this.chatFileInput) {
       this.chatFileInput.addEventListener('change', (e) => {
+        this.handleFileAttachment(e);
+      });
+    }
+    if (this.chatPhotoLibraryInput) {
+      this.chatPhotoLibraryInput.addEventListener('change', (e) => {
+        this.handleFileAttachment(e);
+      });
+    }
+    if (this.chatFilesInput) {
+      this.chatFilesInput.addEventListener('change', (e) => {
         this.handleFileAttachment(e);
       });
     }
@@ -10559,6 +10748,7 @@ class ChatModal {
       });
     }
 
+    this.toggleSendButtonVisibility();
   }
 
     // Voice message seek slider live time display (works even before playback)
@@ -10670,6 +10860,17 @@ class ChatModal {
   }
 
   /**
+   * Toggles visibility of send button and microphone button based on input content
+   */
+  toggleSendButtonVisibility() {
+    const hasText = this.messageInput.value.trim().length > 0 || (this.fileAttachments && this.fileAttachments.length > 0);
+    this.sendButton.style.display = hasText ? 'flex' : 'none';
+    if (this.voiceRecordButton) {
+      this.voiceRecordButton.style.display = hasText ? 'none' : 'flex';
+    }
+  }
+
+  /**
    * Opens the chat modal for the given address.
    * @param {string} address - The address of the contact to open the chat modal for.
    * @returns {Promise<void>}
@@ -10679,6 +10880,7 @@ class ChatModal {
     this.messageInput.value = '';
     this.messageInput.style.height = '48px';
     this.messageByteCounter.style.display = 'none';
+    this.toggleSendButtonVisibility();
     // clear any edit state and hide cancel button
     const editInputInit = document.getElementById('editOfTxId');
     editInputInit.value = '';
@@ -11172,6 +11374,11 @@ class ChatModal {
         senderInfo.phone = myData.account.phone;
         senderInfo.linkedin = myData.account.linkedin;
         senderInfo.x = myData.account.x;
+        // Add avatar info if available
+        if (myData.account.avatarId && myData.account.avatarKey) {
+          senderInfo.avatarId = myData.account.avatarId;
+          senderInfo.avatarKey = myData.account.avatarKey;
+        }
       }
 
       // Always encrypt and send senderInfo (which will contain at least the username)
@@ -11279,7 +11486,9 @@ console.warn('in send message', txid)
       this.messageInput.style.height = '48px'; // original height
 
       // Hide byte counter
-      this.messageByteCounter.style.display = 'none'; 
+      this.messageByteCounter.style.display = 'none';
+      // Toggle button visibility (should show microphone when empty)
+      this.toggleSendButtonVisibility(); 
 
       // Call debounced save directly with empty string
       this.debouncedSaveDraft('');
@@ -11397,6 +11606,8 @@ console.warn('in send message', txid)
       }
       // Hide cancel button
       this.cancelEditButton.style.display = 'none';
+      // Toggle button visibility (should show microphone when empty)
+      this.toggleSendButtonVisibility();
       // Re-enable attachments on cancel
       this.addAttachmentButton.disabled = false;
       // Give feedback
@@ -11602,8 +11813,6 @@ console.warn('in send message', txid)
                   data-url="${fileUrl}"
                   data-name="${encodeURIComponent(fileName)}"
                   data-type="${att.type || ''}"
-                  data-pqEncSharedKey="${att.pqEncSharedKey || ''}"
-                  data-selfKey="${att.selfKey || ''}"
                   data-msg-idx="${i}"
                   ${isImage ? 'data-image-attachment="true"' : ''}
                 >
@@ -11666,10 +11875,8 @@ console.warn('in send message', txid)
           if (item.type === 'vm') {
             const duration = this.formatDuration(item.duration);
             // Use audio encryption keys for playback, fall back to message encryption keys if not available
-            const audioEncKey = item.audioPqEncSharedKey || item.pqEncSharedKey || '';
-            const audioSelfKey = item.audioSelfKey || item.selfKey || '';
             messageTextHTML = `
-              <div class="voice-message" data-voice-url="${item.url || ''}" data-pqEncSharedKey="${audioEncKey}" data-selfKey="${audioSelfKey}" data-msg-idx="${i}" data-duration="${item.duration || 0}">
+              <div class="voice-message" data-url="${item.url || ''}" data-name="voice-message" data-type="audio/webm" data-msg-idx="${i}" data-duration="${item.duration || 0}">
                 <div class="voice-message-controls">
                   <div class="voice-message-top-row">
                     <button class="voice-message-play-button" aria-label="Play voice message">
@@ -11896,6 +12103,7 @@ console.warn('in send message', txid)
       // trigger input event to update the byte counter
       this.messageInput.dispatchEvent(new Event('input'));
     }
+    this.toggleSendButtonVisibility();
     
     // Restore reply state if it exists
     if (contact?.draftReplyTxid) {
@@ -12139,6 +12347,7 @@ console.warn('in send message', txid)
     if (!this.fileAttachments || this.fileAttachments.length === 0) {
       preview.innerHTML = '';
       preview.style.display = 'none';
+      this.toggleSendButtonVisibility();
       return;
     }
   
@@ -12165,7 +12374,8 @@ console.warn('in send message', txid)
     });
 
     preview.style.display = 'block';
-    
+    // Toggle button visibility when attachments are added
+    this.toggleSendButtonVisibility();
     // Check if user was at the bottom before showing preview
     const messageContainer = this.messagesContainer;
     const wasAtBottom = messageContainer ? 
@@ -12182,6 +12392,36 @@ console.warn('in send message', txid)
   }
 
   /**
+   * Best effort delete of files from attachment server
+   * @param {string|Array<{url: string}>} urlsOrAttachments - Single URL string or array of attachment objects with url property
+   * @returns {void}
+   */
+  deleteAttachmentsFromServer(urlsOrAttachments) {
+    if (!urlsOrAttachments) return;
+    
+    const uploadUrl = 'https://inv.liberdus.com:2083';
+    const urls = Array.isArray(urlsOrAttachments) 
+      ? urlsOrAttachments.map(att => att?.url).filter(Boolean)
+      : [urlsOrAttachments];
+    
+    urls.forEach(url => {
+      if (typeof url !== 'string') return;
+      
+      // Extract ID from URL format: https://inv.liberdus.com:2083/get/{id}
+      const urlMatch = url.match(/\/get\/([^\/]+)$/);
+      if (urlMatch && urlMatch[1]) {
+        const fileId = urlMatch[1];
+        fetch(`${uploadUrl}/delete/${fileId}`, {
+          method: 'DELETE'
+        }).catch(err => {
+          // Silently ignore errors - best effort delete
+          console.warn('Failed to delete attachment from server:', err);
+        });
+      }
+    });
+  }
+
+  /**
    * Removes a specific attached file
    * @param {number} index - Index of file to remove
    * @returns {void}
@@ -12195,6 +12435,9 @@ console.warn('in send message', txid)
       if (this.address && myData.contacts[this.address]) {
         this.saveAttachmentState(myData.contacts[this.address]);
       }
+
+      // Best effort delete from server
+      this.deleteAttachmentsFromServer(removedFile.url);
     }
   }
 
@@ -12348,33 +12591,52 @@ console.warn('in send message', txid)
    * Decrypts an attachment URL into a Blob using the message encryption metadata.
    * Shared by download (Save) and Preview thumbnail generation.
    * @param {Object} item - message object from myData.contacts[address].messages[idx]
-   * @param {HTMLElement} linkEl - attachment row element with data-* fields
+   * @param {HTMLElement} linkEl - element with data-* fields (attachment row or voice message element)
    * @returns {Promise<Blob>}
    */
   async decryptAttachmentToBlob(item, linkEl) {
     if (!item || !linkEl) throw new Error('Missing item or attachment element');
 
     // 1) Derive dhkey
+    // - Attachments: use per-attachment keys from item.xattach (not stored in DOM)
+    // - Voice messages: use audio keys from the message item
+    let selfKey;
+    let pqEncSharedKey;
+
+    const url = linkEl.dataset.url;
+    if (!url || url === '#') throw new Error('Missing attachment url');
+
+    const isVoice = item.type === 'vm';
+    if (isVoice) {
+      // Voice message: audio keys (fallback to message keys)
+      selfKey = item.audioSelfKey || item.selfKey;
+      pqEncSharedKey = item.audioPqEncSharedKey || item.pqEncSharedKey;
+    } else {
+      // Attachment: look up attachment entry by url
+      const att = Array.isArray(item.xattach) ? item.xattach.find((a) => a?.url === url) : null;
+      selfKey = att?.selfKey;
+      pqEncSharedKey = att?.pqEncSharedKey;
+    }
+
     let dhkey;
     if (item.my) {
-      const selfKey = linkEl.dataset.selfkey;
+      if (!selfKey) throw new Error('Missing selfKey for decrypt');
       const password = myAccount.keys.secret + myAccount.keys.pqSeed;
       dhkey = hex2bin(decryptData(selfKey, password, true));
     } else {
+      if (!pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
       const ok = await ensureContactKeys(this.address);
       const senderPublicKey = myData.contacts[this.address]?.public;
       if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
-      const pqEncSharedKey = linkEl.dataset.pqencsharedkey;
+      // dhkeyCombined/pqSharedKey expect ciphertext bytes; accept base64 strings too by converting here.
+      const pqCipher = (typeof pqEncSharedKey === 'string') ? base642bin(pqEncSharedKey) : pqEncSharedKey;
       dhkey = dhkeyCombined(
         myAccount.keys.secret,
         senderPublicKey,
         myAccount.keys.pqSeed,
-        pqEncSharedKey
+        pqCipher
       ).dhkey;
     }
-
-    const url = linkEl.dataset.url;
-    if (!url || url === '#') throw new Error('Missing attachment url');
 
     // 2) Download encrypted bytes
     const res = await fetch(url, { signal: this.abortController.signal });
@@ -12600,7 +12862,10 @@ console.warn('in send message', txid)
     const replyOption = this.contextMenu.querySelector('[data-action="reply"]');
     const editResendOption = this.contextMenu.querySelector('[data-action="edit-resend"]');
     const editOption = this.contextMenu.querySelector('[data-action="edit"]');
+    const saveOption = this.contextMenu.querySelector('[data-action="save"]');
     const isFailedPayment = messageEl.dataset.status === 'failed' && messageEl.classList.contains('payment-info');
+    // Show save option only for voice messages
+    if (saveOption) saveOption.style.display = isVoice ? 'flex' : 'none';
     // For failed payment messages, hide copy and delete-for-all regardless of sender
     if (isFailedPayment) {
       if (copyOption) copyOption.style.display = 'none';
@@ -12698,6 +12963,7 @@ console.warn('in send message', txid)
   closeAllContextMenus() {
     this.closeContextMenu();
     this.closeImageAttachmentContextMenu();
+    this.closeAttachmentOptionsContextMenu();
   }
 
   /**
@@ -12750,6 +13016,416 @@ console.warn('in send message', txid)
     if (!this.imageAttachmentContextMenu) return;
     this.imageAttachmentContextMenu.style.display = 'none';
     this.currentImageAttachmentRow = null;
+  }
+
+  /**
+   * Shows the attachment options context menu
+   * @param {Event} e - The click event
+   */
+  showAttachmentOptionsContextMenu(e) {
+    if (!this.attachmentOptionsContextMenu) return;
+    
+    this.closeAllContextMenus();
+    
+    const menu = this.attachmentOptionsContextMenu;
+    const buttonRect = this.addAttachmentButton.getBoundingClientRect();
+
+    // Desktop: only show "Camera" + "Files" (hide "Photo Library")
+    // Heuristic: devices with a fine pointer + hover are typically desktop/laptop.
+    try {
+      const isDesktopLike = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+      const photoLibraryOpt = menu.querySelector('.context-menu-option[data-action="photo-library"]');
+      if (photoLibraryOpt) photoLibraryOpt.style.display = isDesktopLike ? 'none' : '';
+    } catch (_) {
+      // ignore
+    }
+    
+    // Show menu first to get its dimensions
+    menu.style.display = 'block';
+    const menuRect = menu.getBoundingClientRect();
+    
+    // Position menu above the button by default (since button is at bottom)
+    let top = buttonRect.top - menuRect.height - 8;
+    
+    // If menu would go off top of screen, position it below instead
+    if (top < 10) {
+      top = buttonRect.bottom + 8;
+    }
+    
+    // Ensure menu doesn't go off left or right of screen
+    let left = buttonRect.left;
+    if (left + menuRect.width > window.innerWidth - 10) {
+      left = window.innerWidth - menuRect.width - 10;
+    }
+    if (left < 10) {
+      left = 10;
+    }
+    
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
+  /**
+   * Closes the attachment options context menu
+   */
+  closeAttachmentOptionsContextMenu() {
+    if (!this.attachmentOptionsContextMenu) return;
+    this.attachmentOptionsContextMenu.style.display = 'none';
+  }
+
+  /**
+   * Handles attachment options context menu actions
+   * @param {string} action - The action to perform
+   */
+  handleAttachmentOptionsContextMenuAction(action) {
+    this.closeAttachmentOptionsContextMenu();
+
+    // Important: keep this synchronous to preserve the user gesture required by some browsers
+    // (notably Android Chrome) to open native file pickers via input.click().
+    switch (action) {
+      case 'camera':
+        if (isAndroidLikeMobileUA()) {
+          // Android: check/request permission, then open file picker or toast
+          void this.handleAndroidCameraAction();
+        } else {
+          // Desktop: use full camera overlay
+          void this.capturePhotoFromCamera();
+        }
+        break;
+      case 'photo-library':
+        if (this.chatPhotoLibraryInput) {
+          this.chatPhotoLibraryInput.value = '';
+          this.chatPhotoLibraryInput.click();
+        }
+        break;
+      case 'files':
+        if (this.chatFilesInput) {
+          this.chatFilesInput.value = '';
+          this.chatFilesInput.click();
+        }
+        break;
+    }
+  }
+
+  /**
+   * Handles Android camera action: checks/requests permission, then opens file picker or shows toast
+   * @returns {Promise<void>}
+   */
+  async handleAndroidCameraAction() {
+    try {
+      let permissionStatus = 'unknown';
+      if (navigator.permissions?.query) {
+        const result = await navigator.permissions.query({ name: 'camera' });
+        permissionStatus = result.state;
+      }
+      
+      if (permissionStatus === 'granted') {
+        // Already granted - open file picker
+        if (this.chatFilesInput) {
+          this.chatFilesInput.value = '';
+          this.chatFilesInput.click();
+        }
+        return;
+      }
+      
+      if (permissionStatus === 'denied') {
+        // Permission already denied - show toast
+        showToast('Camera permission required. Please enable it in your device settings.', 0, 'error');
+        return;
+      }
+      
+      // Permission is 'prompt' or 'unknown' - request permission via getUserMedia
+      // This will trigger the permission prompt
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        // Immediately stop the stream (don't show camera)
+        stream.getTracks().forEach(track => track.stop());
+        // Permission granted - open file picker
+        if (this.chatFilesInput) {
+          this.chatFilesInput.value = '';
+          this.chatFilesInput.click();
+        }
+      } catch (err) {
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          // User denied permission - show toast
+          showToast('Camera permission required. Please enable it in your device settings.', 0, 'error');
+        } else {
+          showToast('Unable to access camera', 0, 'error');
+        }
+      }
+    } catch (err) {
+      console.warn('Camera permission check failed:', err);
+    }
+  }
+
+  /**
+   * Opens a camera overlay, lets the user capture a photo, and attaches it.
+   * Cleanup is guaranteed via try/finally so media tracks never leak.
+   * @returns {Promise<void>}
+   */
+  async capturePhotoFromCamera() {
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      showToast('Camera is not supported on this device.', 0, 'error');
+      return;
+    }
+
+    if (!this.cameraCaptureOverlay || !this.cameraCaptureDialog || !this.cameraCaptureVideo) {
+      showToast('Camera modal elements not found.', 0, 'error');
+      return;
+    }
+
+    // Prevent opening multiple overlays.
+    if (this.cameraCaptureOverlay.style.display !== 'none') return;
+
+    const prevFocusedEl = document.activeElement;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    const prevBodyOverflow = document.body.style.overflow;
+
+    /** @type {MediaStream|null} */
+    let stream = null;
+    let done = false;
+
+    const lockPageScroll = () => {
+      try {
+        document.documentElement.style.overflow = 'hidden';
+        document.body.style.overflow = 'hidden';
+      } catch (_) {
+        // ignore
+      }
+    };
+
+    const unlockPageScroll = () => {
+      try {
+        document.documentElement.style.overflow = prevHtmlOverflow;
+        document.body.style.overflow = prevBodyOverflow;
+      } catch (_) {
+        // ignore
+      }
+    };
+
+    const stopStream = () => {
+      try {
+        if (stream) stream.getTracks().forEach((t) => t.stop());
+      } catch (_) {
+        // ignore
+      } finally {
+        stream = null;
+      }
+    };
+
+    /** @type {(e: KeyboardEvent) => void} */
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (!done) this.cameraCancelButton?.click();
+        return;
+      }
+
+      // Minimal focus trap: keep Tab within our two buttons.
+      if (e.key === 'Tab' && this.cameraCaptureOverlay) {
+        const focusables = [this.cameraCancelButton, this.cameraCaptureButton].filter(Boolean);
+        if (focusables.length === 0) return;
+        const currentIdx = focusables.indexOf(document.activeElement);
+        const nextIdx = e.shiftKey
+          ? (currentIdx <= 0 ? focusables.length - 1 : currentIdx - 1)
+          : (currentIdx >= focusables.length - 1 ? 0 : currentIdx + 1);
+        e.preventDefault();
+        focusables[nextIdx]?.focus?.();
+      }
+    };
+
+    /** @type {() => void} */
+    const onOverlayClick = () => {
+      this.cameraCancelButton?.click();
+    };
+
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+
+      document.removeEventListener('keydown', onKeyDown, true);
+      this.cameraCaptureOverlay.removeEventListener('click', onOverlayClick);
+
+      try {
+        this.cameraCaptureOverlay.style.display = 'none';
+        // Reset dialog styles
+        this.cameraCaptureDialog.style.width = '';
+        this.cameraCaptureDialog.style.height = '';
+        this.cameraCaptureDialog.style.position = '';
+        this.cameraCaptureDialog.style.top = '';
+        this.cameraCaptureDialog.style.left = '';
+        this.cameraCaptureDialog.style.borderRadius = '';
+        this.cameraCaptureDialog.style.margin = '';
+        this.cameraCaptureOverlay.style.alignItems = '';
+        this.cameraCaptureOverlay.style.justifyContent = '';
+      } catch (_) {
+        // ignore
+      }
+
+      stopStream();
+      unlockPageScroll();
+
+      try {
+        if (prevFocusedEl && typeof prevFocusedEl.focus === 'function') prevFocusedEl.focus();
+      } catch (_) {
+        // ignore
+      }
+    };
+
+    // Get container dimensions to match dialog size
+    const containerEl = document.querySelector('.container');
+    let containerRect = null;
+    if (containerEl) {
+      containerRect = containerEl.getBoundingClientRect();
+    }
+
+    // Size and position dialog to match container if it exists
+    if (containerRect) {
+      this.cameraCaptureDialog.style.width = `${containerRect.width}px`;
+      this.cameraCaptureDialog.style.height = `${containerRect.height}px`;
+      this.cameraCaptureDialog.style.maxWidth = 'none';
+      this.cameraCaptureDialog.style.maxHeight = 'none';
+      this.cameraCaptureDialog.style.position = 'fixed';
+      this.cameraCaptureDialog.style.top = `${containerRect.top}px`;
+      this.cameraCaptureDialog.style.left = `${containerRect.left}px`;
+      this.cameraCaptureDialog.style.borderRadius = '8px';
+      this.cameraCaptureDialog.style.margin = '0';
+      // Remove flexbox centering from overlay when dialog is positioned
+      this.cameraCaptureOverlay.style.alignItems = 'flex-start';
+      this.cameraCaptureOverlay.style.justifyContent = 'flex-start';
+    }
+
+    // Click outside the dialog cancels.
+    this.cameraCaptureOverlay.addEventListener('click', onOverlayClick);
+    this.cameraCaptureDialog.addEventListener('click', (e) => e.stopPropagation());
+
+    // Show overlay
+    this.cameraCaptureOverlay.style.display = 'flex';
+    document.addEventListener('keydown', onKeyDown, true);
+    lockPageScroll();
+    this.cameraCaptureOverlay.focus();
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false
+      });
+
+      this.cameraCaptureVideo.srcObject = stream;
+      
+      // Ensure video is properly constrained to dialog size
+      // Wait for metadata to ensure video dimensions are available
+      await new Promise((resolve) => {
+        if (this.cameraCaptureVideo.readyState >= 1) {
+          resolve();
+        } else {
+          this.cameraCaptureVideo.addEventListener('loadedmetadata', resolve, { once: true });
+        }
+      });
+      
+      // Explicitly constrain video to dialog bounds
+      this.cameraCaptureVideo.style.width = '100%';
+      this.cameraCaptureVideo.style.height = '100%';
+      this.cameraCaptureVideo.style.maxWidth = '100%';
+      this.cameraCaptureVideo.style.maxHeight = '100%';
+      
+      try {
+        await this.cameraCaptureVideo.play();
+      } catch (err) {
+        // Autoplay restrictions / transient failures: user can still press Capture.
+        console.warn('Camera video.play() failed:', err);
+      }
+
+      this.cameraCaptureButton.focus();
+
+      const waitForAction = () =>
+        new Promise((resolve) => {
+          this.cameraCancelButton.addEventListener(
+            'click',
+            () => resolve({ type: 'cancel' }),
+            { once: true }
+          );
+          this.cameraCaptureButton.addEventListener(
+            'click',
+            () => resolve({ type: 'capture' }),
+            { once: true }
+          );
+        });
+
+      const action = await waitForAction();
+      if (action.type !== 'capture') return;
+
+      // Get the actual displayed size of the video element (what user sees)
+      const videoRect = this.cameraCaptureVideo.getBoundingClientRect();
+      const displayedWidth = Math.round(videoRect.width);
+      const displayedHeight = Math.round(videoRect.height);
+      
+      // Get the camera's native resolution for aspect ratio calculation
+      const nativeWidth = this.cameraCaptureVideo.videoWidth || stream.getVideoTracks?.()?.[0]?.getSettings?.()?.width || 0;
+      const nativeHeight = this.cameraCaptureVideo.videoHeight || stream.getVideoTracks?.()?.[0]?.getSettings?.()?.height || 0;
+      
+      if (!nativeWidth || !nativeHeight || !displayedWidth || !displayedHeight) {
+        showToast('Camera not ready yet. Please try again.', 0, 'error');
+        return;
+      }
+
+      // Calculate the source crop to match what's visible in the preview
+      // The video uses object-fit: cover, so we need to calculate the visible portion
+      const videoAspect = nativeWidth / nativeHeight;
+      const displayAspect = displayedWidth / displayedHeight;
+      
+      let sourceWidth, sourceHeight, sourceX = 0, sourceY = 0;
+      
+      if (videoAspect > displayAspect) {
+        // Video is wider - crop left/right
+        sourceHeight = nativeHeight;
+        sourceWidth = nativeHeight * displayAspect;
+        sourceX = (nativeWidth - sourceWidth) / 2;
+      } else {
+        // Video is taller - crop top/bottom
+        sourceWidth = nativeWidth;
+        sourceHeight = nativeWidth / displayAspect;
+        sourceY = (nativeHeight - sourceHeight) / 2;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = displayedWidth;
+      canvas.height = displayedHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        showToast('Unable to capture photo.', 0, 'error');
+        return;
+      }
+
+      // Draw the visible portion of the video at the displayed size
+      ctx.drawImage(
+        this.cameraCaptureVideo,
+        sourceX, sourceY, sourceWidth, sourceHeight,  // Source crop
+        0, 0, displayedWidth, displayedHeight          // Destination size
+      );
+
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+      if (!blob) {
+        showToast('Unable to capture photo.', 0, 'error');
+        return;
+      }
+
+      const fileName = `camera_${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`;
+      const file = new File([blob], fileName, { type: 'image/jpeg' });
+
+      // Feed into the existing attachment pipeline. (handleFileAttachment only reads files[0])
+      cleanup(); // hide overlay + stop camera before heavy work starts
+      await this.handleFileAttachment({ target: { files: [file], value: '' } });
+    } catch (err) {
+      console.error('Camera capture failed:', err);
+      if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
+        showToast('Camera permission required. Please enable it in your device settings.', 0, 'error');
+      } else {
+        showToast('Unable to access camera.', 0, 'error');
+      }
+    } finally {
+      cleanup();
+    }
   }
 
   /**
@@ -12902,6 +13578,9 @@ console.warn('in send message', txid)
     if (!messageEl) return;
     
     switch (action) {
+      case 'save':
+        void this.saveVoiceMessage(messageEl);
+        break;
       case 'copy':
         this.copyMessageContent(messageEl);
         break;
@@ -13378,6 +14057,15 @@ console.warn('in send message', txid)
 
       showToast('Delete request sent', 3000, 'success');
       
+      // Best effort delete attachments from server
+      if (message.xattach && Array.isArray(message.xattach)) {
+        this.deleteAttachmentsFromServer(message.xattach);
+      }
+      // Also handle voice messages which have url directly
+      if (message.url && message.type === 'vm') {
+        this.deleteAttachmentsFromServer(message.url);
+      }
+      
       // Note: We don't do optimistic UI updates for delete-for-all
       // The message will be deleted when we process the delete tx from the network
       
@@ -13709,6 +14397,11 @@ console.warn('in send message', txid)
         senderInfo.phone = myData.account.phone;
         senderInfo.linkedin = myData.account.linkedin;
         senderInfo.x = myData.account.x;
+        // Add avatar info if available
+        if (myData.account.avatarId && myData.account.avatarKey) {
+          senderInfo.avatarId = myData.account.avatarId;
+          senderInfo.avatarKey = myData.account.avatarKey;
+        }
       }
 
       // Always encrypt and send senderInfo
@@ -13839,6 +14532,11 @@ console.warn('in send message', txid)
       senderInfo.phone = myData.account.phone;
       senderInfo.linkedin = myData.account.linkedin;
       senderInfo.x = myData.account.x;
+      // Add avatar info if available
+        if (myData.account.avatarId && myData.account.avatarKey) {
+          senderInfo.avatarId = myData.account.avatarId;
+          senderInfo.avatarKey = myData.account.avatarKey;
+        }
     }
 
     payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
@@ -13964,9 +14662,7 @@ console.warn('in send message', txid)
       return;
     }
 
-    const voiceUrl = voiceMessageElement.dataset.voiceUrl;
-    const pqEncSharedKey = voiceMessageElement.dataset.pqencsharedkey;
-    const selfKey = voiceMessageElement.dataset.selfkey;
+    const voiceUrl = voiceMessageElement.dataset.url;
     const msgIdx = voiceMessageElement.dataset.msgIdx;
 
     if (!voiceUrl) {
@@ -13977,7 +14673,14 @@ console.warn('in send message', txid)
     try {
       // Check if it's our own message or received message
       const message = myData.contacts[this.address].messages[msgIdx];
+      if (!message) {
+        throw new Error('Message not found');
+      }
       const isMyMessage = message.my;
+      
+      // Get keys from message item (voice messages use audio-specific keys with fallback)
+      const pqEncSharedKey = message.audioPqEncSharedKey || message.pqEncSharedKey;
+      const selfKey = message.audioSelfKey || message.selfKey;
 
       buttonElement.disabled = true;
       
@@ -14126,6 +14829,37 @@ console.warn('in send message', txid)
       console.error('Error playing voice message:', error);
       showToast(`Error playing voice message: ${error.message}`, 0, 'error');
       buttonElement.disabled = false;
+    }
+  }
+
+  /**
+   * Save a voice message by downloading, decrypting, and saving it as a file
+   * Reuses the existing attachment download flow
+   * @param {HTMLElement} messageEl - The message element containing the voice message
+   */
+  async saveVoiceMessage(messageEl) {
+    const voiceEl = messageEl.querySelector('.voice-message');
+    const msgIdx = voiceEl?.dataset?.msgIdx;
+    const item = msgIdx !== undefined ? myData.contacts[this.address]?.messages?.[msgIdx] : null;
+    
+    if (!voiceEl || !item || item.type !== 'vm') {
+      showToast('Voice message not found', 2000, 'error');
+      return;
+    }
+
+    if (this.attachmentDownloadInProgress) return;
+    this.attachmentDownloadInProgress = true;
+
+    try {
+      // Generate filename with timestamp if not already set
+      if (!voiceEl.dataset.name || voiceEl.dataset.name === 'voice-message') {
+        const ts = parseInt(messageEl.dataset.messageTimestamp || Date.now(), 10);
+        voiceEl.dataset.name = `voice-message-${new Date(ts).toISOString().replace(/[:.]/g, '-').slice(0, -5)}.webm`;
+      }
+      
+      await this.handleAttachmentDownload(item, voiceEl);
+    } finally {
+      this.attachmentDownloadInProgress = false;
     }
   }
 
@@ -14804,21 +15538,41 @@ class FailedMessageMenu {
 
     // Voice message retry: resend the same voice message (no re-upload)
     if (voiceEl) {
-      const voiceUrl = voiceEl.dataset.voiceUrl || '';
+      const voiceUrl = voiceEl.dataset.url || '';
       const duration = Number(voiceEl.dataset.duration || 0);
-      const pqEncSharedKeyB64 = voiceEl.dataset.pqencsharedkey || '';
-      const selfKey = voiceEl.dataset.selfkey || '';
 
-      if (!txid || !voiceUrl || !duration || !pqEncSharedKeyB64 || !selfKey) {
+      if (!txid || !voiceUrl || !duration) {
         console.error('Error preparing voice message retry: Necessary elements or data missing.');
+        return;
+      }
+
+      // Get message item to retrieve encryption keys
+      const contact = myData.contacts[chatModal.address];
+      if (!contact || !Array.isArray(contact.messages)) {
+        console.error('Error preparing voice message retry: Contact/messages not found.');
+        return;
+      }
+      const messageIndex = contact.messages.findIndex(msg => msg.txid === txid);
+      
+      if (messageIndex < 0) {
+        console.error('Error preparing voice message retry: Message not found.');
+        return;
+      }
+
+      const message = contact.messages[messageIndex];
+      const pqEncSharedKey = message.audioPqEncSharedKey || message.pqEncSharedKey;
+      const selfKey = message.audioSelfKey || message.selfKey;
+
+      if (!pqEncSharedKey || !selfKey) {
+        console.error('Error preparing voice message retry: Encryption keys not found.');
         return;
       }
 
       try {
         chatModal.retryOfTxId.value = txid;
-        const pqEncSharedKey = base642bin(pqEncSharedKeyB64);
+        const pqEncSharedKeyBin = base642bin(pqEncSharedKey);
         void chatModal
-          .sendVoiceMessageTx(voiceUrl, duration, pqEncSharedKey, selfKey)
+          .sendVoiceMessageTx(voiceUrl, duration, pqEncSharedKeyBin, selfKey)
           .catch((err) => {
             console.error('Voice message retry failed:', err);
             showToast('Failed to retry voice message', 0, 'error');
@@ -19938,6 +20692,12 @@ function cleanSenderInfo(si) {
   if (si.x) {
     csi.x = normalizeXTwitterUsername(si.x)
   }
+  if (si.avatarId) {
+    csi.avatarId = si.avatarId
+  }
+  if (si.avatarKey) {
+    csi.avatarKey = si.avatarKey
+  }
   return csi;
 }
 
@@ -20067,6 +20827,26 @@ function isFaucetAddress(address) {
 
 function isMobile() {
   return /Android|webOS|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+/**
+ * Detect if the user is on an Android-like mobile device (excludes iOS)
+ * @returns {boolean}
+ */
+function isAndroidLikeMobileUA() {
+  return /Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+/**
+ * Detect if the user is on an iOS device (iPhone or iPad)
+ * @returns {boolean}
+ */
+function isIOS() {
+  const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+  // Check for iOS devices in user agent, or iPadOS 13+ (reports as Mac with touch)
+  const isIOSDevice = /iPad|iPhone|iPod/.test(userAgent);
+  const isIPadOS = /Macintosh/.test(userAgent) && navigator.maxTouchPoints > 1;
+  return isIOSDevice || isIPadOS;
 }
 
 function enterFullscreen() {
@@ -21071,6 +21851,62 @@ async function getContactAvatarHtml(contactOrAddress, size = 50) {
   }
 
   return generateIdenticon('', size);
+}
+
+/**
+ * Encrypt a blob using ChaCha20-Poly1305 via Web Worker
+ * @param {Blob} blob - The blob to encrypt
+ * @param {Uint8Array} key - The encryption key
+ * @returns {Promise<Blob>} The encrypted blob
+ */
+async function encryptBlob(blob, key) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker('encryption.worker.js', { type: 'module' });
+    worker.postMessage({ action: 'encryptBlob', blob, key });
+    worker.onmessage = (e) => {
+      if (e.data.error) {
+        reject(new Error(e.data.error));
+      } else {
+        resolve(e.data.blob);
+      }
+      worker.terminate();
+    };
+    worker.onerror = (error) => {
+      reject(error);
+      worker.terminate();
+    };
+  });
+}
+
+/**
+ * Download and decrypt an avatar from the attachment server
+ * @param {string} url - The download URL
+ * @param {string} key - The decryption key (base64)
+ * @returns {Promise<Blob>} The decrypted avatar blob
+ */
+async function downloadAndDecryptAvatar(url, key) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to download avatar: ${response.status}`);
+    }
+    // Download bytes, convert to base64 (encryptChacha/ decryptChacha use base64 strings)
+    const cipherBin = new Uint8Array(await response.arrayBuffer());
+    const cipherB64 = bin2base64(cipherBin);
+
+    // key is stored as base64 in account; convert to binary key for decryptChacha
+    const keyBin = base642bin(key);
+
+    // decryptChacha expects (keyUint8Array, cipherBase64) and returns plaintext base64
+    const plainB64 = decryptChacha(keyBin, cipherB64);
+    if (!plainB64) throw new Error('decryptChacha returned null');
+
+    const clearBin = base642bin(plainB64);
+    return new Blob([clearBin], { type: 'image/jpeg' });
+  } catch (error) {
+    console.warn('Error downloading/decrypting avatar:', error);
+    throw error;
+  }
 }
 
 function getStabilityFactor() {
