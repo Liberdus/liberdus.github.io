@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'w'
+const version = 'x'
 let myVersion = '0';
 async function checkVersion() {
   myVersion = localStorage.getItem('version') || '0';
@@ -413,6 +413,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Settings Modal
   settingsModal.load();
+
+  // Secret Modal
+  secretModal.load();
 
   // Failed Transaction Modal
   failedTransactionModal.load();
@@ -936,6 +939,11 @@ class Footer {
       } else if (view === 'wallet') {
         this.walletButton.classList.remove('has-notification');
         await walletScreen.updateWalletView();
+        
+        // Update last viewed timestamp so we know user has seen the wallet
+        if (myData?.wallet) {
+          myData.wallet.lastWalletViewTimestamp = getCorrectedTimestamp();
+        }
       }
     } catch (error) {
       console.error(`Error switching to ${view} view:`, error);
@@ -1049,15 +1057,18 @@ class ChatsScreen {
     const chatList = this.chatList;
     const contacts = myData.contacts;
     const chats = myData.chats;
-    if (chats.length === 0) {
-      chatList.querySelector('.empty-state').style.display = 'block';
+    const emptyStateEl = chatList.querySelector('.empty-state');
+    // Remove existing rendered chat items without destroying the built-in empty state node
+    chatList.querySelectorAll('li.chat-item').forEach((el) => el.remove());
+
+    if (!Array.isArray(chats) || chats.length === 0) {
+      if (emptyStateEl) emptyStateEl.style.display = 'block';
       return;
     }
 
-    console.log('chats.length', JSON.stringify(chats.length));
+    if (emptyStateEl) emptyStateEl.style.display = 'none';
 
-    // Clear existing chat items before adding new ones
-    chatList.innerHTML = '';
+    console.log('chats.length', JSON.stringify(chats.length));
 
     const chatItems = [];
     for (const chat of chats) {
@@ -1067,12 +1078,20 @@ class ChatsScreen {
       
       const contact = contacts[chat.address];
       if (!contact) continue;
+      // In chat list don't show people that are blocked
+      if (Number(contact?.friend) === 0) continue;
 
       const latestActivity = contact.messages && contact.messages.length > 0 ? contact.messages[0] : null;
       // If there's no latest activity (no messages), skip this chat item
       if (!latestActivity) continue;
 
       chatItems.push({ chat, contact, latestActivity });
+    }
+
+    // If everything was filtered out (e.g. all chats are blocked), show empty state
+    if (chatItems.length === 0) {
+      if (emptyStateEl) emptyStateEl.style.display = 'block';
+      return;
     }
 
     const avatarHtmlList = await Promise.all(
@@ -1399,6 +1418,14 @@ class WalletScreen {
 
   open() {
     this.screen.classList.add('active');
+    // Show testnet warning toast if on testnet and not shown this session
+    if (!this.isMainnet()) {
+      const hasBeenShown = sessionStorage.getItem('testnetWarningShown');
+      if (hasBeenShown !== 'true') {
+        showToast('The LIB in this Testnet is not of any value and will not be transferred to the Mainnet.', 0, 'info');
+        sessionStorage.setItem('testnetWarningShown', 'true');
+      }
+    }
   }
 
   close() {
@@ -1768,6 +1795,9 @@ class SettingsModal {
     this.removeButton = document.getElementById('openRemoveAccount');
     this.removeButton.addEventListener('click', () => removeAccountModal.open());
     
+    this.secretButton = document.getElementById('openSecretModal');
+    this.secretButton.addEventListener('click', () => secretModal.open());
+    
     this.signOutButton = document.getElementById('handleSignOutSettings');
     this.signOutButton.addEventListener('click', async () => await menuModal.handleSignOut());
   }
@@ -1788,6 +1818,117 @@ class SettingsModal {
 }
 
 const settingsModal = new SettingsModal();
+
+class SecretModal {
+  constructor() { }
+
+  load() {
+    this.modal = document.getElementById('secretModal');
+    this.closeButton = document.getElementById('closeSecretModal');
+    this.closeButton.addEventListener('click', () => this.close());
+    
+    this.showButton = document.getElementById('showSecretButton');
+    this.showButton.addEventListener('click', () => this.showSecret());
+    
+    this.secretContent = document.getElementById('secretContent');
+    this.secretHexDisplay = document.getElementById('secretHexDisplay');
+    this.copyButton = document.getElementById('copySecretButton');
+    this.copyButton.addEventListener('click', () => this.copyToClipboard());
+    
+    this.qrContainer = document.getElementById('secretQRCode');
+  }
+
+  resetSecretState() {
+    // Reset the secret content state
+    this.secretContent.style.display = 'none';
+    this.showButton.textContent = 'Show';
+    this.showButton.style.display = 'block';
+    this.secretHexDisplay.textContent = '';
+    if (this.qrContainer) {
+      this.qrContainer.innerHTML = '';
+    }
+  }
+
+  open() {
+    this.modal.classList.add('active');
+    enterFullscreen();
+    this.resetSecretState();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    enterFullscreen();
+    this.resetSecretState();
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  showSecret() {
+    if (!myAccount || !myAccount.keys || !myAccount.keys.secret) {
+      console.error('Secret key not available');
+      showToast('Secret key not available', 0, 'error');
+      return;
+    }
+
+    const secretKey = myAccount.keys.secret;
+    
+    // Display the secret as hex string with 0x prefix
+    const secretKeyWithPrefix = '0x' + secretKey;
+    this.secretHexDisplay.textContent = secretKeyWithPrefix;
+    
+    // Generate and display QR code with 0x prefix
+    this.renderSecretQR(secretKeyWithPrefix);
+    
+    // Show the content and hide the button
+    this.secretContent.style.display = 'block';
+    this.showButton.style.display = 'none';
+  }
+
+  renderSecretQR(secretKey) {
+    try {
+      if (!this.qrContainer) return;
+      this.qrContainer.innerHTML = '';
+      
+      // Generate QR using the global qr library as GIF
+      const gifBytes = qr.encodeQR(secretKey, 'gif', { scale: 4 });
+      const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
+      const dataUrl = 'data:image/gif;base64,' + base64;
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.width = 200;
+      img.height = 200;
+      img.alt = 'Secret key QR code';
+      this.qrContainer.appendChild(img);
+    } catch (e) {
+      console.error('Failed to render secret QR:', e);
+      showToast('Failed to generate QR code', 0, 'error');
+    }
+  }
+
+  async copyToClipboard() {
+    const secretKey = this.secretHexDisplay.textContent;
+    if (!secretKey) {
+      showToast('No secret key to copy', 0, 'error');
+      return;
+    }
+    
+    try {
+      await navigator.clipboard.writeText(secretKey);
+      this.copyButton.classList.add('success');
+      setTimeout(() => {
+        this.copyButton.classList.remove('success');
+      }, 2000);
+      showToast('Secret key copied to clipboard', 2000, 'success');
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      showToast('Failed to copy to clipboard', 0, 'error');
+    }
+  }
+}
+
+const secretModal = new SecretModal();
 
 /**
  * createNewContact
@@ -1878,7 +2019,7 @@ class ScanQRModal {
           case 'NotAllowedError':
             this.close();
             throw new Error(
-              'Camera access was denied. Please check your browser settings and grant permission to use the camera.'
+              'Camera access was denied. Please check your device settings and grant permission to use the camera.'
             );
           case 'NotFoundError':
             throw new Error('No camera device was found on your system.');
@@ -2140,17 +2281,17 @@ class SignInModal {
 
     // Get the notified addresses and sort usernames to prioritize them
     const notifiedAddresses = reactNativeApp.isReactNativeWebView ? reactNativeApp.getNotificationAddresses() : [];
-    const notifiedAddressSet = new Set(Array.isArray(notifiedAddresses) ? notifiedAddresses : []);
     let sortedUsernames = [...usernames];
     const notifiedUsernameSet = new Set();
     
     // if there are notified addresses, partition the usernames (stable) so notified come first
     if (notifiedAddresses.length > 0) {
+      const normalizedNotifiedSet = new Set(notifiedAddresses.map(addr => normalizeAddress(addr)));
       const notifiedUsernames = [];
       const otherUsernames = [];
       for (const username of sortedUsernames) {
         const address = netidAccounts?.usernames?.[username]?.address;
-        const isNotified = Boolean(address && notifiedAddressSet.has(address));
+        const isNotified = address && normalizedNotifiedSet.has(normalizeAddress(address));
         if (isNotified) {
           notifiedUsernames.push(username);
           notifiedUsernameSet.add(username);
@@ -2311,6 +2452,14 @@ class SignInModal {
     myAccount = myData.account;
     logsModal.log(`SignIn as ${username}_${netid}`)
 
+    // Clear notification address for this account when signing in
+    // Notification storage is only for accounts the user is NOT signed in to
+    if (reactNativeApp.isReactNativeWebView && myAccount?.keys?.address) {
+      const addressToClear = myAccount.keys.address;
+      reactNativeApp.clearNotificationAddress(addressToClear);
+      reactNativeApp.sendClearNotifications(addressToClear);
+    }
+
     /* requestNotificationPermission(); */
     if (useLongPolling) {
       setTimeout(longPoll, 10);
@@ -2342,6 +2491,11 @@ class SignInModal {
     }
     
     await footer.switchView('chats'); // Default view
+    
+    // Restore wallet/history notification dots if there are unread transfers
+    if (myData?.wallet?.history && Array.isArray(myData.wallet.history) && myData.wallet.history.length > 0) {
+      restoreWalletNotificationDots();
+    }
   }
 
   async handleUsernameChange() {
@@ -2460,16 +2614,53 @@ class MyInfoModal {
     this.subtitleDiv = this.avatarSection.querySelector('.subtitle');
     this.qrContainer = this.modal.querySelector('#myInfoQR');
 
+    // Create avatar edit button
+    this.avatarEditButton = document.createElement('button');
+    this.avatarEditButton.className = 'icon-button edit-icon avatar-edit-button avatar-edit-button-outside';
+    this.avatarEditButton.setAttribute('aria-label', 'Edit photo');
+
     this.backButton.addEventListener('click', () => this.close());
     this.editButton.addEventListener('click', () => myProfileModal.open());
+
+    // Avatar edit button click
+    this.avatarEditButton.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.openAvatarEdit();
+    });
+
+    // Make the avatar itself clickable
+    this.avatarDiv.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.openAvatarEdit();
+    });
+
+    // Attach edit button to the avatar div
+    if (!this.avatarDiv.contains(this.avatarEditButton)) {
+      this.avatarDiv.appendChild(this.avatarEditButton);
+    }
+  }
+
+  // Helper method to open avatar edit modal for own avatar
+  openAvatarEdit() {
+    if (!myAccount?.keys?.address) return;
+    avatarEditModal.open(myAccount.keys.address, true); // true = isOwnAvatar
   }
 
   async updateMyInfo() {
     if (!myAccount) return;
 
-    const identicon = generateIdenticon(myAccount.keys.address, 96);
+    // Use getContactAvatarHtml for consistent avatar rendering
+    const avatarHtml = await getContactAvatarHtml(
+      { address: myAccount.keys.address, hasAvatar: myData?.account?.hasAvatar },
+      96
+    );
+    this.avatarDiv.innerHTML = avatarHtml;
 
-    this.avatarDiv.innerHTML = identicon;
+    // Re-append the avatar edit button after setting the avatar content
+    if (!this.avatarDiv.contains(this.avatarEditButton)) {
+      this.avatarDiv.appendChild(this.avatarEditButton);
+    }
+
     this.nameDiv.textContent = myAccount.username;
     this.subtitleDiv.textContent = myAccount.keys.address;
 
@@ -2566,6 +2757,12 @@ class ContactInfoModal {
     this.needsContactListUpdate = false; // track if we need to update the contact list
   }
 
+  // Helper method to open avatar edit modal
+  openAvatarEdit() {
+    if (!this.currentContactAddress) return;
+    avatarEditModal.open(this.currentContactAddress);
+  }
+
   // Initialize event listeners that only need to be set up once
   load() {
     this.modal = document.getElementById('contactInfoModal');
@@ -2580,7 +2777,7 @@ class ContactInfoModal {
     this.subtitleDiv = this.avatarSection.querySelector('.subtitle');
     this.usernameDiv = document.getElementById('contactInfoUsername');
     this.avatarEditButton = document.createElement('button');
-    this.avatarEditButton.className = 'icon-button edit-icon avatar-edit-button';
+    this.avatarEditButton.className = 'icon-button edit-icon avatar-edit-button avatar-edit-button-outside';
     this.avatarEditButton.setAttribute('aria-label', 'Edit photo');
 
     // Back button
@@ -2611,14 +2808,20 @@ class ContactInfoModal {
     });
 
     // Avatar edit button
-    this.avatarEditButton.addEventListener('click', () => {
-      if (!this.currentContactAddress) return;
-      avatarEditModal.open(this.currentContactAddress);
+    this.avatarEditButton.addEventListener('click', (e) => {
+      e.stopPropagation(); // Prevent triggering avatar click
+      this.openAvatarEdit();
     });
 
-    // Attach edit button to the avatar section (top-right)
-    if (!this.avatarSection.contains(this.avatarEditButton)) {
-      this.avatarSection.appendChild(this.avatarEditButton);
+    // Make the avatar itself clickable
+    this.avatarDiv.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.openAvatarEdit();
+    });
+
+    // Attach edit button to the avatar div
+    if (!this.avatarDiv.contains(this.avatarEditButton)) {
+      this.avatarDiv.appendChild(this.avatarEditButton);
     }
   }
 
@@ -2628,6 +2831,11 @@ class ContactInfoModal {
 
     // Update the avatar section
     this.avatarDiv.innerHTML = avatarHtml;
+
+    // Re-append the avatar edit button after setting the avatar content
+    if (!this.avatarDiv.contains(this.avatarEditButton)) {
+      this.avatarDiv.appendChild(this.avatarEditButton);
+    }
     this.nameDiv.textContent = displayInfo.name !== 'Not Entered' ? displayInfo.name : displayInfo.username;
     this.subtitleDiv.textContent = displayInfo.address;
 
@@ -2761,9 +2969,48 @@ class FriendModal {
   }
 
   // Open the friend modal
-  open() {
+  async open() {
     const contact = myData.contacts[this.currentContactAddress];
     if (!contact) return;
+
+    // Query network for current toll required status
+    try {
+      const myAddr = longAddress(myAccount.keys.address);
+      const contactAddr = longAddress(this.currentContactAddress);
+      const sortedAddresses = [myAddr, contactAddr].sort();
+      const chatId = hashBytes(sortedAddresses.join(''));
+      const myIndex = sortedAddresses.indexOf(myAddr);
+
+      const tollInfo = await queryNetwork(`/messages/${chatId}/toll`);
+      const networkRequired = tollInfo?.toll?.required?.[myIndex];
+
+      if (networkRequired !== undefined) {
+        // Map backend required value to frontend friend status
+        // Backend: 1 = toll required, 0 = toll not required, 2 = blocked
+        // Frontend: 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+        let networkFriendStatus;
+        if (networkRequired === 2) {
+          networkFriendStatus = 0; // blocked
+        } else if (networkRequired === 1) {
+          networkFriendStatus = 1; // Other (toll required)
+        } else if (networkRequired === 0) {
+          // toll not required - could be Acquaintance (2) or Friend (3)
+          // Use the local contact.friend if it's 2 or 3, otherwise default to 2
+          networkFriendStatus = (contact.friend === 2 || contact.friend === 3) ? contact.friend : 2;
+        }
+
+        // Update contact's friend status if it differs from network
+        if (networkFriendStatus !== undefined && networkFriendStatus !== contact.friend) {
+          contact.friend = networkFriendStatus;
+          contact.friendOld = networkFriendStatus;
+          // Update the friend button color
+          this.updateFriendButton(contact, 'addFriendButtonContactInfo');
+          this.updateFriendButton(contact, 'addFriendButtonChat');
+        }
+      }
+    } catch (error) {
+      console.error('Error querying toll required status:', error);
+    }
 
     // Set the current friend status
     const status = contact.friend.toString();
@@ -2815,6 +3062,7 @@ class FriendModal {
     this.submitButton.disabled = true;
     const contact = myData.contacts[this.currentContactAddress];
     const selectedStatus = this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value;
+    const prevFriendStatus = Number(contact?.friend);
 
     if (selectedStatus == null || Number(selectedStatus) === contact.friend) {
       this.submitButton.disabled = true;
@@ -2875,6 +3123,11 @@ class FriendModal {
 
     // Update the contact list
     await contactsScreen.updateContactsList();
+    // Only refresh chats list if the change enters or exits "blocked"
+    const nextFriendStatus = Number(selectedStatus);
+    if (prevFriendStatus === 0 || nextFriendStatus === 0) {
+      await chatsScreen.updateChatList();
+    }
 
     // Close the friend modal
     this.closeFriendModal();
@@ -3141,12 +3394,17 @@ class HistoryModal {
     this.modal.classList.add('active');
     this.populateAssets();
     this.updateTransactionHistory();
+    
+    // Update last viewed timestamp when user opens history modal
+    // This clears the history button dot, but wallet dot remains if user hasn't viewed wallet screen
+    if (myData?.wallet) {
+      myData.wallet.lastHistoryViewTimestamp = getCorrectedTimestamp();
+      walletScreen.openHistoryModalButton.classList.remove('has-notification');
+    }
   }
 
   close() {
     this.modal.classList.remove('active');
-    walletScreen.openHistoryModalButton.classList.remove('has-notification');
-    footer.walletButton.classList.remove('has-notification');
   }
 
   populateAssets() {
@@ -3997,9 +4255,14 @@ async function processChats(chats, keys) {
                       // This is a message received from sender, who is now deleting it - valid
                       console.log(`Deleting message ${txidToDelete} as requested by sender`);
                       
+                      // Purge cached thumbnails for image attachments, if any
+                      chatModal.purgeThumbnail(messageToDelete.xattach);
+
                       // Mark the message as deleted
                       messageToDelete.deleted = 1;
                       messageToDelete.message = "Deleted by sender";
+                      // Remove attachments so we don't keep references around
+                      delete messageToDelete.xattach;
                       
                       // Remove payment-specific fields if present
                       if (messageToDelete.amount) {
@@ -4023,9 +4286,14 @@ async function processChats(chats, keys) {
                       // This is our own message, and we're deleting it - valid
                       console.log(`Deleting our message ${txidToDelete} as requested by us`);
                       
+                      // Purge cached thumbnails for image attachments, if any
+                      chatModal.purgeThumbnail(messageToDelete.xattach);
+
                       // Mark the message as deleted
                       messageToDelete.deleted = 1;
                       messageToDelete.message = "Deleted for all";
+                      // Remove attachments so we don't keep references around
+                      delete messageToDelete.xattach;
                       
                       // Remove payment-specific fields if present - same logic as above
                       if (messageToDelete.amount) {
@@ -4109,7 +4377,9 @@ async function processChats(chats, keys) {
                   if (payload.callTime && reactNativeApp.isReactNativeWebView) {
                     // Send it to the native app to display the scheduled call notification
                     if (!chatModal.isCallExpired(payload.callTime) || chatModal.isFutureCall(payload.callTime)) {
-                      reactNativeApp.sendScheduledCall(contact.username, payload.callTime);
+                      // Pass the current account address so we can show bell in sign-in modal
+                      const accountAddress = myAccount?.keys?.address;
+                      reactNativeApp.sendScheduledCall(contact.username, payload.callTime, accountAddress);
                     }
                   }
                 } else if (parsedMessage.type === 'vm') {
@@ -4148,6 +4418,28 @@ async function processChats(chats, keys) {
           if (payload.senderInfo && !mine){
             contact.senderInfo = cleanSenderInfo(payload.senderInfo)
             delete payload.senderInfo;
+            if (contact.senderInfo.avatarId && contact.senderInfo.avatarKey && contact.avatarId !== contact.senderInfo.avatarId) {
+              downloadAndDecryptAvatar(`https://inv.liberdus.com:2083/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
+                .then(async (blob) => {
+                  try {
+                    await contactAvatarCache.save(contact.address, blob);
+                    contact.avatarId = contact.senderInfo.avatarId;
+                    contact.hasAvatar = true;
+                    saveState();
+                    // Refresh UI immediately: chat modal avatar + messages + chat list
+                    if (chatModal.isActive() && chatModal.address === contact.address) {
+                      chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+                      chatModal.appendChatModal(true);
+                    }
+                    if (typeof chatsScreen !== 'undefined') {
+                      chatsScreen.updateChatList();
+                    }
+                  } catch (e) {
+                    console.warn('Failed to save avatar after download:', e);
+                  }
+                })
+                .catch(err => console.warn('Failed to download avatar:', err));
+            }
             if (contact.username) {
               // if we already have the username, we can use it
               contact.senderInfo.username = contact.username;
@@ -4269,6 +4561,28 @@ async function processChats(chats, keys) {
           if (payload.senderInfo && !mine) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
+            if (contact.senderInfo.avatarId && contact.senderInfo.avatarKey && contact.avatarId !== contact.senderInfo.avatarId) {
+              downloadAndDecryptAvatar(`https://inv.liberdus.com:2083/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
+                .then(async (blob) => {
+                  try {
+                    await contactAvatarCache.save(contact.address, blob);
+                    contact.avatarId = contact.senderInfo.avatarId;
+                    contact.hasAvatar = true;
+                    saveState();
+                    // Refresh UI immediately: chat modal avatar + messages + chat list
+                    if (chatModal.isActive() && chatModal.address === contact.address) {
+                      chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+                      chatModal.appendChatModal(true);
+                    }
+                    if (typeof chatsScreen !== 'undefined') {
+                      chatsScreen.updateChatList();
+                    }
+                  } catch (e) {
+                    console.warn('Failed to save avatar after download:', e);
+                  }
+                })
+                .catch(err => console.warn('Failed to download avatar:', err));
+            }
             if (contact.username) {
               // if we already have the username, we can use it
               contact.senderInfo.username = contact.username;
@@ -4432,6 +4746,41 @@ async function processChats(chats, keys) {
     // Update the timestamp
     myAccount.chatTimestamp = newTimestamp;
     console.log('Updated global chat timestamp to', newTimestamp);
+  }
+}
+
+/**
+ * Restore wallet/history notification dots based on whether there are transfers
+ * newer than when the user last viewed those screens
+ */
+function restoreWalletNotificationDots() {
+  if (!myData?.wallet?.history || !Array.isArray(myData.wallet.history) || myData.wallet.history.length === 0) {
+    return;
+  }
+  
+  // Get the most recent transfer timestamp
+  const mostRecentTransfer = myData.wallet.history[0];
+  if (!mostRecentTransfer || !mostRecentTransfer.timestamp) {
+    return;
+  }
+  
+  const mostRecentTransferTimestamp = mostRecentTransfer.timestamp;
+  const lastWalletViewTimestamp = myData.wallet.lastWalletViewTimestamp || 0;
+  const lastHistoryViewTimestamp = myData.wallet.lastHistoryViewTimestamp || 0;
+  
+  // Only show dots for received transfers (sign === 1)
+  const isReceivedTransfer = mostRecentTransfer.sign === 1;
+  
+  // Show wallet tab dot if there's a newer received transfer and wallet screen is not active
+  // This dot is cleared when user switches to wallet screen
+  if (isReceivedTransfer && mostRecentTransferTimestamp > lastWalletViewTimestamp && !walletScreen.isActive()) {
+    footer.walletButton.classList.add('has-notification');
+  }
+  
+  // Show history button dot if there's a newer received transfer than when user last opened history modal
+  // This dot is cleared when user opens the history modal (not when they open wallet screen)
+  if (isReceivedTransfer && mostRecentTransferTimestamp > lastHistoryViewTimestamp) {
+    walletScreen.openHistoryModalButton.classList.add('has-notification');
   }
 }
 
@@ -5154,6 +5503,7 @@ class AvatarEditModal {
     this.squareSize = 220;
     this.enableTransform = false;
     this.coverOverscan = 16; // extra pixels to ensure circle is always fully covered
+    this.isOwnAvatar = false; // Track if editing own avatar vs contact avatar
   }
 
   load() {
@@ -5247,8 +5597,9 @@ class AvatarEditModal {
     window.addEventListener('touchend', endDrag);
   }
 
-  async open(address) {
+  async open(address, isOwnAvatar = false) {
     this.currentAddress = normalizeAddress(address);
+    this.isOwnAvatar = isOwnAvatar; // Track if editing own avatar vs contact avatar
     this.pendingBlob = null;
     this.activeImageBlob = null;
     this.enableTransform = false;
@@ -5263,6 +5614,7 @@ class AvatarEditModal {
     this.pendingBlob = null;
     this.activeImageBlob = null;
     this.enableTransform = false;
+    this.isOwnAvatar = false;
     this.imageNaturalWidth = 0;
     this.imageNaturalHeight = 0;
     this.offsetX = 0;
@@ -5305,8 +5657,14 @@ class AvatarEditModal {
    */
   async refreshPreview() {
     this.clearPreviewUrl();
-    const contact = myData?.contacts?.[this.currentAddress];
-    const displayInfo = contact ? createDisplayInfo(contact) : { address: this.currentAddress, hasAvatar: false };
+    let displayInfo;
+    if (this.isOwnAvatar) {
+      // For own avatar, use account data
+      displayInfo = { address: this.currentAddress, hasAvatar: myData?.account?.hasAvatar || false };
+    } else {
+      const contact = myData?.contacts?.[this.currentAddress];
+      displayInfo = contact ? createDisplayInfo(contact) : { address: this.currentAddress, hasAvatar: false };
+    }
 
     if (this.pendingBlob) {
       await this.setImageFromBlob(this.pendingBlob, true);
@@ -5352,8 +5710,13 @@ class AvatarEditModal {
     } else {
       // Show Upload/Delete buttons, hide Save/Cancel buttons
       this.uploadButton.style.display = 'inline-flex';
-      const contact = myData?.contacts?.[this.currentAddress];
-      const hasAvatar = !!contact?.hasAvatar;
+      let hasAvatar;
+      if (this.isOwnAvatar) {
+        hasAvatar = !!myData?.account?.hasAvatar;
+      } else {
+        const contact = myData?.contacts?.[this.currentAddress];
+        hasAvatar = !!contact?.hasAvatar;
+      }
       this.deleteButton.style.display = hasAvatar ? 'inline-flex' : 'none';
       this.saveActionButton.style.display = 'none';
       this.cancelButton.style.display = 'none';
@@ -5394,6 +5757,38 @@ class AvatarEditModal {
   }
 
   /**
+   * Attempt to delete an avatar from the attachment server.
+   * Accepts an avatarId and optional secret; for backwards compatibility
+   * the secret may be omitted.
+   * @param {string} id Avatar id
+   * @param {string?} secret Avatar secret
+   */
+  async deleteAvatarFromServer(id, secret) {
+    if (!id) return false;
+    try {
+      const idParam = encodeURIComponent(secret ? `${id}-${secret}` : id);
+      try {
+        const delRes = await fetch(`https://inv.liberdus.com:2083/delete/${idParam}`, { method: 'DELETE' });
+        if (!delRes.ok) {
+          if (delRes.status === 404) {
+            // Missing resource on server -> treat as already-deleted (success)
+            return true;
+          }
+          console.warn('Avatar delete request failed on server:', delRes.status, await delRes.text().catch(() => ''));
+          return false;
+        }
+        return true;
+      } catch (e) {
+        console.warn('Failed to call avatar delete endpoint:', e);
+        return false;
+      }
+    } catch (e) {
+      console.warn('Error while attempting avatar server delete:', e);
+      return false;
+    }
+  }
+
+  /**
    * Delete the current avatar immediately and save.
    */
   async handleDelete() {
@@ -5402,23 +5797,51 @@ class AvatarEditModal {
       return;
     }
 
-    const contact = myData?.contacts?.[this.currentAddress];
-    if (!contact) {
-      this.close();
-      return;
-    }
-
     try {
-      // Delete avatar from cache
-      await contactAvatarCache.delete(this.currentAddress);
-      contact.hasAvatar = false;
-      saveState();
+      if (this.isOwnAvatar) {
+        // Update own avatar state
+        if (myData?.account) {
+          // Attempt to delete avatar on attachment server if we have id (secret optional)
+          let deletedOnServer = true;
+          try {
+            const aid = myData.account.avatarId;
+            const secret = myData.account.avatarSecret;
+            if (aid) deletedOnServer = await this.deleteAvatarFromServer(aid, secret);
+          } catch (e) {
+            console.warn('Error while attempting avatar server delete:', e);
+            deletedOnServer = false;
+          }
 
-      // Update UI
-      contactInfoModal.updateContactInfo(createDisplayInfo(contact));
-      contactInfoModal.needsContactListUpdate = true;
-      if (chatModal.isActive() && chatModal.address === this.currentAddress) {
-        chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+          if (deletedOnServer) {
+            await contactAvatarCache.delete(this.currentAddress);
+            myData.account.hasAvatar = false;
+            delete myData.account.avatarId;
+            delete myData.account.avatarKey;
+            delete myData.account.avatarSecret;
+            saveState();
+          } else {
+            showToast('Failed to delete avatar', 3000, 'error');
+          }
+        }
+        // Update My Info modal UI
+        myInfoModal.updateMyInfo();
+      } else {
+        const contact = myData?.contacts?.[this.currentAddress];
+        if (!contact) {
+          this.close();
+          return;
+        }
+        contact.hasAvatar = false;
+        delete contact.avatarId;
+        await contactAvatarCache.delete(this.currentAddress);
+        saveState();
+
+        // Update UI
+        contactInfoModal.updateContactInfo(createDisplayInfo(contact));
+        contactInfoModal.needsContactListUpdate = true;
+        if (chatModal.isActive() && chatModal.address === this.currentAddress) {
+          chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+        }
       }
 
       // Update preview in the modal to show identicon
@@ -5622,24 +6045,76 @@ class AvatarEditModal {
       return;
     }
 
-    const contact = myData?.contacts?.[this.currentAddress];
-    if (!contact) {
-      this.close();
-      return;
-    }
-
     try {
       // Need an image source to save
       if (this.pendingBlob || this.activeImageBlob) {
         const sourceBlob = this.pendingBlob || this.activeImageBlob;
         const thumbnail = await this.exportCroppedThumbnail(sourceBlob);
-        await contactAvatarCache.save(this.currentAddress, thumbnail);
-        contact.hasAvatar = true;
-        saveState();
-        contactInfoModal.updateContactInfo(createDisplayInfo(contact));
-        contactInfoModal.needsContactListUpdate = true;
-        if (chatModal.isActive() && chatModal.address === this.currentAddress) {
-          chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+
+        if (this.isOwnAvatar) {
+          // If we already have an avatar on the server, try to delete it first
+          let deletedOld = true;
+          try {
+            const oldId = myData?.account?.avatarId;
+            const oldSecret = myData?.account?.avatarSecret;
+            if (oldId) deletedOld = await this.deleteAvatarFromServer(oldId, oldSecret);
+          } catch (e) {
+            console.warn('Failed to delete existing avatar before upload:', e);
+            deletedOld = false;
+          }
+
+          if (!deletedOld) {
+            showToast('Upload failed: could not delete existing avatar from server', 3000, 'error');
+            return;
+          }
+
+          // Generate random key and secret, encrypt thumbnail
+          const avatarKey = generateRandomBytes(32);
+          const secret = bin2hex(generateRandomBytes(16));
+          const encryptedBlob = await encryptBlob(thumbnail, avatarKey);
+
+          // Upload encrypted blob to attachment server
+          const formData = new FormData();
+          formData.append('file', encryptedBlob);
+          formData.append('secret', secret);
+          const response = await fetch('https://inv.liberdus.com:2083/post', {
+            method: 'POST',
+            body: formData
+          });
+          if (!response.ok) {
+            showToast('Failed to upload avatar', 3000, 'error');
+            return;
+          }
+          const result = await response.json();
+          const avatarId = result.id;
+
+          // Save thumbnail to cache now that server operations succeeded
+          await contactAvatarCache.save(this.currentAddress, thumbnail);
+
+          // Save id, key and secret in account
+          myData.account.avatarId = avatarId;
+          myData.account.avatarKey = bin2base64(avatarKey);
+          myData.account.avatarSecret = secret;
+          myData.account.hasAvatar = true;
+          saveState();
+
+          // Update My Info modal UI
+          myInfoModal.updateMyInfo();
+        } else {
+          const contact = myData?.contacts?.[this.currentAddress];
+          if (!contact) {
+            this.close();
+            return;
+          }
+          contact.hasAvatar = true;
+          delete contact.avatarId;
+          await contactAvatarCache.save(this.currentAddress, thumbnail);
+          saveState();
+          contactInfoModal.updateContactInfo(createDisplayInfo(contact));
+          contactInfoModal.needsContactListUpdate = true;
+          if (chatModal.isActive() && chatModal.address === this.currentAddress) {
+            chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+          }
         }
       }
     } catch (err) {
@@ -7206,6 +7681,26 @@ class BackupAccountModal {
       backupObj.lock = lockVal;
     }
 
+    // Include contact avatars from IndexedDB
+    try {
+      const avatars = await contactAvatarCache.exportAll();
+      if (avatars && Object.keys(avatars).length > 0) {
+        backupObj._avatars = avatars;
+      }
+    } catch (e) {
+      console.warn('Failed to export avatars for backup:', e);
+    }
+
+    // Include message thumbnails from IndexedDB
+    try {
+      const thumbnails = await thumbnailCache.exportAll();
+      if (thumbnails && Object.keys(thumbnails).length > 0) {
+        backupObj._thumbnails = thumbnails;
+      }
+    } catch (e) {
+      console.warn('Failed to export thumbnails for backup:', e);
+    }
+
     const jsonData = stringify(backupObj, null, 2);
 
     try {
@@ -7265,7 +7760,27 @@ class BackupAccountModal {
 
     const password = this.passwordInput.value;
     const myLocalStore = this.copyLocalStorageToObject();
-//    console.log(myLocalStore);
+
+    // Include contact avatars from IndexedDB
+    try {
+      const avatars = await contactAvatarCache.exportAll();
+      if (avatars && Object.keys(avatars).length > 0) {
+        myLocalStore._avatars = avatars;
+      }
+    } catch (e) {
+      console.warn('Failed to export avatars for backup:', e);
+    }
+
+    // Include message thumbnails from IndexedDB
+    try {
+      const thumbnails = await thumbnailCache.exportAll();
+      if (thumbnails && Object.keys(thumbnails).length > 0) {
+        myLocalStore._thumbnails = thumbnails;
+      }
+    } catch (e) {
+      console.warn('Failed to export thumbnails for backup:', e);
+    }
+
     const jsonData = stringify(myLocalStore, null, 2);
 
     try {
@@ -7437,6 +7952,8 @@ class RestoreAccountModal {
   constructor() {
     this.developerOptionsEnabled = false;
     this.netids = []; // Will be populated from network.js
+    this.selectedGoogleDriveFile = null; // Store selected Google Drive file info
+    this.googleDriveFileContent = null; // Store downloaded file content
   }
 
   load() {
@@ -7451,10 +7968,27 @@ class RestoreAccountModal {
     this.importForm = document.getElementById('importForm');
     this.fileInput = document.getElementById('importFile');
     this.passwordInput = document.getElementById('importPassword');
+    this.passwordRequired = document.getElementById('importPasswordRequired');
     this.overwriteAccountsCheckbox = document.getElementById('overwriteAccountsCheckbox');
     this.backupAccountLockGroup = document.getElementById('backupAccountLockGroup');
     this.backupAccountLock = document.getElementById('backupAccountLock');
     this.developerOptionsSection = document.getElementById('developerOptionsSection');
+    this.submitButton = document.getElementById('restoreSubmitButton');
+
+    // Google Drive elements
+    this.sourceLocationSelect = document.getElementById('restoreSourceLocation');
+    this.localFileGroup = document.getElementById('localFileGroup');
+    this.googleDriveFileGroup = document.getElementById('googleDriveFileGroup');
+    this.pickGoogleDriveFileBtn = document.getElementById('pickGoogleDriveFile');
+    this.selectedGoogleDriveFileDisplay = document.getElementById('selectedGoogleDriveFile');
+    this.clearGoogleDriveFileBtn = document.getElementById('clearGoogleDriveFile');
+
+    // Google Drive picker modal elements
+    this.pickerModal = document.getElementById('googleDrivePickerModal');
+    this.closePickerBtn = document.getElementById('closeGoogleDrivePicker');
+    this.pickerLoading = document.getElementById('googleDrivePickerLoading');
+    this.pickerFileList = document.getElementById('googleDriveFileList');
+    this.pickerEmpty = document.getElementById('googleDrivePickerEmpty');
 
     this.closeImportForm.addEventListener('click', () => this.close());
     this.importForm.addEventListener('submit', (event) => this.handleSubmit(event));
@@ -7466,9 +8000,21 @@ class RestoreAccountModal {
     this.setupMutualExclusion(this.newStringSelect, this.newStringCustom);
     
     // Add listeners to extract netids from selected file
-    this.fileInput.addEventListener('change', () => this.extractNetidsFromFile());
-    this.debouncedExtractNetidsFromFile = debounce(() => this.extractNetidsFromFile(), 500);
-    this.passwordInput.addEventListener('input', this.debouncedExtractNetidsFromFile);
+    this.fileInput.addEventListener('change', () => {
+      this.extractNetids();
+      this.updateButtonState();
+    });
+    this.debouncedExtractNetids = debounce(() => this.extractNetids(), 500);
+    this.passwordInput.addEventListener('input', () => {
+      this.debouncedExtractNetids();
+      this.updateButtonState();
+    });
+
+    // Google Drive event listeners
+    this.sourceLocationSelect.addEventListener('change', () => this.handleSourceLocationChange());
+    this.pickGoogleDriveFileBtn.addEventListener('click', () => this.openGoogleDrivePicker());
+    this.clearGoogleDriveFileBtn.addEventListener('click', () => this.clearSelectedGoogleDriveFile());
+    this.closePickerBtn.addEventListener('click', () => this.closeGoogleDrivePicker());
 
     // Reset form state
     this.clearForm();
@@ -7512,6 +8058,306 @@ class RestoreAccountModal {
     this.developerOptionsSection.style.display = this.developerOptionsEnabled ? 'block' : 'none';
   }
 
+  // Handle source location change (Local vs Google Drive)
+  handleSourceLocationChange() {
+    const isGoogleDrive = this.sourceLocationSelect.value === 'google-drive';
+    
+    // Toggle visibility of file selection groups
+    this.localFileGroup.style.display = isGoogleDrive ? 'none' : 'block';
+    this.googleDriveFileGroup.style.display = isGoogleDrive ? 'block' : 'none';
+    
+    // Clear selections when switching
+    if (isGoogleDrive) {
+      this.fileInput.value = '';
+    } else {
+      this.clearSelectedGoogleDriveFile();
+    }
+    
+    // Update password required indicator
+    if (this.passwordRequired) {
+      this.passwordRequired.style.display = isGoogleDrive ? 'inline' : 'none';
+    }
+    
+    this.updateButtonState();
+  }
+
+  // Update the submit button state based on form validity
+  updateButtonState() {
+    const isGoogleDrive = this.sourceLocationSelect.value === 'google-drive';
+    let isValid = false;
+    
+    if (isGoogleDrive) {
+      // Google Drive: require file selection and password
+      const hasFile = this.selectedGoogleDriveFile !== null;
+      const hasPassword = this.passwordInput.value.trim().length > 0;
+      isValid = hasFile && hasPassword;
+    } else {
+      // Local: require file selection, password optional
+      isValid = this.fileInput.files && this.fileInput.files.length > 0;
+    }
+    
+    this.submitButton.disabled = !isValid;
+  }
+
+  // Open Google Drive file picker
+  async openGoogleDrivePicker() {
+    try {
+      // Start OAuth flow using the backup modal's auth method
+      showToast('Approve Drive access in the Google window.', 3000, 'info');
+      const tokenData = await backupAccountModal.startGoogleDriveAuth();
+      
+      // Show picker modal and load files
+      this.pickerModal.classList.add('active');
+      this.pickerLoading.style.display = 'block';
+      this.pickerFileList.style.display = 'none';
+      this.pickerEmpty.style.display = 'none';
+      
+      // List files from backup folder
+      await this.loadGoogleDriveFiles(tokenData);
+    } catch (error) {
+      console.error('Google Drive authentication failed:', error);
+      showToast(error.message || 'Authentication failed.', 0, 'error');
+    }
+  }
+
+  // Load files from Google Drive backup folder
+  async loadGoogleDriveFiles(tokenData) {
+    try {
+      const folderName = network.googleDrive.backupFolder;
+      
+      // First, find the backup folder
+      const folderQuery = new URLSearchParams({
+        q: `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'root' in parents`,
+        fields: 'files(id, name)'
+      });
+      
+      const folderRes = await fetch(
+        'https://www.googleapis.com/drive/v3/files?' + folderQuery.toString(),
+        {
+          headers: {
+            Authorization: `${tokenData.tokenType} ${tokenData.accessToken}`
+          }
+        }
+      );
+      
+      if (!folderRes.ok) {
+        throw new Error(`Failed to search for backup folder: ${folderRes.status}`);
+      }
+      
+      const folderData = await folderRes.json();
+      
+      if (!folderData.files || folderData.files.length === 0) {
+        // No backup folder found
+        this.pickerLoading.style.display = 'none';
+        this.pickerEmpty.style.display = 'block';
+        return;
+      }
+      
+      const folderId = folderData.files[0].id;
+      
+      // List JSON files in the backup folder
+      const filesQuery = new URLSearchParams({
+        q: `'${folderId}' in parents and trashed = false and (mimeType = 'application/json' or name contains '.json')`,
+        fields: 'files(id, name, modifiedTime, size)',
+        orderBy: 'modifiedTime desc'
+      });
+      
+      const filesRes = await fetch(
+        'https://www.googleapis.com/drive/v3/files?' + filesQuery.toString(),
+        {
+          headers: {
+            Authorization: `${tokenData.tokenType} ${tokenData.accessToken}`
+          }
+        }
+      );
+      
+      if (!filesRes.ok) {
+        throw new Error(`Failed to list files: ${filesRes.status}`);
+      }
+      
+      const filesData = await filesRes.json();
+      
+      this.pickerLoading.style.display = 'none';
+      
+      if (!filesData.files || filesData.files.length === 0) {
+        this.pickerEmpty.style.display = 'block';
+        return;
+      }
+      
+      // Render file list
+      this.renderGoogleDriveFileList(filesData.files, tokenData);
+      this.pickerFileList.style.display = 'block';
+      
+    } catch (error) {
+      console.error('Failed to load Google Drive files:', error);
+      showToast('Failed to load files from Google Drive.', 0, 'error');
+      this.closeGoogleDrivePicker();
+    }
+  }
+
+  // Render the list of files from Google Drive
+  renderGoogleDriveFileList(files, tokenData) {
+    this.pickerFileList.innerHTML = '';
+    
+    files.forEach(file => {
+      const li = document.createElement('li');
+      li.className = 'chat-item';
+      li.style.cursor = 'pointer';
+      
+      const modifiedDate = new Date(file.modifiedTime);
+      const dateStr = modifiedDate.toLocaleDateString() + ' ' + modifiedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      
+      li.innerHTML = `
+        <div class="chat-content" style="padding-left: 16px;">
+          <div class="chat-name" style="white-space: normal; word-break: break-word;">${file.name}</div>
+          <div class="chat-time" style="position: static; margin-top: 4px;">${dateStr}</div>
+        </div>
+      `;
+      
+      li.addEventListener('click', () => this.selectGoogleDriveFile(file, tokenData));
+      this.pickerFileList.appendChild(li);
+    });
+  }
+
+  // Select a file from Google Drive
+  async selectGoogleDriveFile(file, tokenData) {
+    try {
+      showToast('Downloading backup file...', 2000, 'info');
+      
+      // Download the file content
+      const downloadRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
+        {
+          headers: {
+            Authorization: `${tokenData.tokenType} ${tokenData.accessToken}`
+          }
+        }
+      );
+      
+      if (!downloadRes.ok) {
+        throw new Error(`Failed to download file: ${downloadRes.status}`);
+      }
+      
+      const fileContent = await downloadRes.text();
+      
+      // Store file info and content
+      this.selectedGoogleDriveFile = file;
+      this.googleDriveFileContent = fileContent;
+      
+      // Update UI
+      this.selectedGoogleDriveFileDisplay.style.display = 'flex';
+      this.selectedGoogleDriveFileDisplay.querySelector('.selected-file-name').textContent = file.name;
+      
+      // Close picker and update button state
+      this.closeGoogleDrivePicker();
+      this.updateButtonState();
+      
+      // Try to extract netids from the downloaded content
+      this.extractNetids();
+      
+      showToast('Backup file selected.', 2000, 'success');
+    } catch (error) {
+      console.error('Failed to download file:', error);
+      showToast('Failed to download file from Google Drive.', 0, 'error');
+    }
+  }
+
+  // Extract netids from file content and add to dropdowns
+  async extractNetids() {
+    // Get content from Google Drive or local file
+    let content;
+    if (this.googleDriveFileContent) {
+      content = this.googleDriveFileContent;
+    } else {
+      const file = this.fileInput.files[0];
+      if (!file) {
+        this.resetBackupLockPrompt();
+        this.removeFileInjectedNetids();
+        return;
+      }
+      content = await file.text();
+    }
+    
+    try {
+      // Try to decrypt if encrypted
+      // manual scan using regex: find first non-whitespace char
+      const m = /\S/.exec(content);
+      const firstNonWs = m ? m[0] : '';
+      if (firstNonWs !== '{') {
+        const password = this.passwordInput.value.trim();
+        if (!password) {
+          this.resetBackupLockPrompt();
+          return;
+        }
+        try {
+          content = decryptData(content, password);
+        } catch (error) {
+          this.resetBackupLockPrompt();
+          return;
+        }
+      }
+      
+      const data = parse(content);
+      
+      // Check if backup requires password
+      const requiresBackupPassword = data.lock && !(localStorage.lock && data.lock === localStorage.lock);
+      if (requiresBackupPassword) {
+        this.backupAccountLockGroup.style.display = 'block';
+      } else {
+        this.resetBackupLockPrompt();
+      }
+      
+      const netids = new Set();
+      
+      // Extract netids from localStorage keys (username_netid format)
+      Object.keys(data).forEach(key => {
+        if (key.includes('_') && key !== 'accounts' && key !== 'version') {
+          const parts = key.split('_');
+          if (parts.length >= 2) {
+            const possibleNetid = parts[parts.length - 1];
+            if (possibleNetid.length === 64 && /^[a-f0-9]+$/.test(possibleNetid)) {
+              netids.add(possibleNetid);
+            }
+          }
+        }
+      });
+      
+      // Add new netids to dropdowns
+      this.removeFileInjectedNetids();
+      const existing = Array.from(this.oldStringSelect.options).map(opt => opt.value);
+      [...netids].filter(netid => !existing.includes(netid)).forEach(netid => {
+        const label = `${netid} (from file)`;
+        const oldOption = new Option(label, netid);
+        oldOption.dataset.source = 'file';
+        this.oldStringSelect.add(oldOption);
+        const newOption = new Option(label, netid);
+        newOption.dataset.source = 'file';
+        this.newStringSelect.add(newOption);
+      });
+      
+      if (netids.size > 0) console.log(`Found ${netids.size} netids from file`);
+    } catch (error) {
+      this.resetBackupLockPrompt();
+    }
+  }
+
+  // Clear selected Google Drive file
+  clearSelectedGoogleDriveFile() {
+    this.selectedGoogleDriveFile = null;
+    this.googleDriveFileContent = null;
+    this.selectedGoogleDriveFileDisplay.style.display = 'none';
+    this.selectedGoogleDriveFileDisplay.querySelector('.selected-file-name').textContent = '';
+    this.removeFileInjectedNetids();
+    this.resetBackupLockPrompt();
+    this.updateButtonState();
+  }
+
+  // Close the Google Drive picker modal
+  closeGoogleDrivePicker() {
+    this.pickerModal.classList.remove('active');
+    this.pickerFileList.innerHTML = '';
+  }
+
   // populate the netid dropdowns
   populateNetidDropdowns() {
     // get all netids from network.js
@@ -7536,79 +8382,6 @@ class RestoreAccountModal {
     }
     
     return null;
-  }
-
-  // extract netids from selected file and add to dropdowns
-  async extractNetidsFromFile() {
-    const file = this.fileInput.files[0];
-    if (!file) {
-      this.resetBackupLockPrompt();
-      this.removeFileInjectedNetids();
-      return;
-    }
-
-    console.log('extractNetidsFromFile');
-
-    try {
-      let content = await file.text();
-      // Try to decrypt if encrypted
-      if (!content.match('{')) {
-        console.log('decrypting file');
-        const password = this.passwordInput.value.trim();
-        if (!password) {
-          this.resetBackupLockPrompt();
-          return;
-        }
-        try {
-          content = decryptData(content, password);
-        } catch (error) {
-          this.resetBackupLockPrompt();
-          return; // Invalid password, skip silently
-        }
-      }
-
-      const data = parse(content);
-      // If the backup file contains a top-level lock field (accounts were locked in backup)
-      const requiresBackupPassword = data.lock && !(localStorage.lock && data.lock === localStorage.lock);
-      if (requiresBackupPassword) {
-        // Show password input so user can provide password needed to unlock accounts
-        this.backupAccountLockGroup.style.display = 'block';
-      } else {
-        this.resetBackupLockPrompt();
-      }
-      const netids = new Set();
-
-      // Extract netids only from localStorage keys (username_netid format)
-      Object.keys(data).forEach(key => {
-        if (key.includes('_') && key !== 'accounts' && key !== 'version') {
-          const parts = key.split('_');
-          if (parts.length >= 2) {
-            const possibleNetid = parts[parts.length - 1]; // Get part after last underscore
-            if (possibleNetid.length === 64 && /^[a-f0-9]+$/.test(possibleNetid)) {
-              netids.add(possibleNetid);
-            }
-          }
-        }
-      });
-
-      // Add new netids to dropdowns
-      this.removeFileInjectedNetids();
-      const existing = Array.from(this.oldStringSelect.options).map(opt => opt.value);
-      [...netids].filter(netid => !existing.includes(netid)).forEach(netid => {
-        const label = `${netid} (from file)`;
-        const oldOption = new Option(label, netid);
-        oldOption.dataset.source = 'file';
-        this.oldStringSelect.add(oldOption);
-        const newOption = new Option(label, netid);
-        newOption.dataset.source = 'file';
-        this.newStringSelect.add(newOption);
-      });
-
-      if (netids.size > 0) console.log(`Found ${netids.size} netids from file`);
-    } catch (error) {
-      this.resetBackupLockPrompt();
-      // Ignore file/parse errors silently
-    }
   }
 
   /**
@@ -7740,17 +8513,56 @@ class RestoreAccountModal {
       }
     }
 
+    // Import contact avatars if present in backup
+    if (backupData._avatars && typeof backupData._avatars === 'object') {
+      try {
+        await contactAvatarCache.importAll(backupData._avatars, overwrite);
+      } catch (e) {
+        console.warn('Failed to import avatars from backup:', e);
+      }
+    }
+
+    // Import message thumbnails if present in backup
+    if (backupData._thumbnails && typeof backupData._thumbnails === 'object') {
+      try {
+        await thumbnailCache.importAll(backupData._thumbnails, overwrite);
+      } catch (e) {
+        console.warn('Failed to import thumbnails from backup:', e);
+      }
+    }
+
     return restoredCount;
   }
 
   async handleSubmit(event) {
     event.preventDefault();
 
+    const isGoogleDrive = this.sourceLocationSelect.value === 'google-drive';
+
     try {
-      // Read the file
-      const file = this.fileInput.files[0];
-      let fileContent = await file.text();
-      const isNotEncryptedData = fileContent.match('{');
+      let fileContent;
+      
+      if (isGoogleDrive) {
+        // Use downloaded Google Drive file content
+        if (!this.googleDriveFileContent) {
+          showToast('Please select a file from Google Drive', 0, 'error');
+          return;
+        }
+        fileContent = this.googleDriveFileContent;
+      } else {
+        // Read the local file
+        const file = this.fileInput.files[0];
+        if (!file) {
+          showToast('Please select a file', 0, 'error');
+          return;
+        }
+        fileContent = await file.text();
+      }
+      
+      // Manual scan using regex: find first non-whitespace char
+      const m = /\S/.exec(fileContent);
+      const firstNonWs = m ? m[0] : '';
+      const isNotEncryptedData = firstNonWs === '{';
 
       // Check if data is encrypted and decrypt if necessary
       if (!isNotEncryptedData) {
@@ -7827,6 +8639,11 @@ class RestoreAccountModal {
     this.newStringSelect.length = 1;
     this.populateNetidDropdowns();
     this.resetBackupLockPrompt();
+    
+    // Reset Google Drive state
+    this.sourceLocationSelect.value = 'local';
+    this.clearSelectedGoogleDriveFile();
+    this.handleSourceLocationChange();
   }
 
   resetBackupLockPrompt() {
@@ -9764,6 +10581,15 @@ class ChatModal {
     this.addFriendButtonChat = document.getElementById('addFriendButtonChat');
     this.addAttachmentButton = document.getElementById('addAttachmentButton');
     this.chatFileInput = document.getElementById('chatFileInput');
+    this.chatPhotoLibraryInput = document.getElementById('chatPhotoLibraryInput');
+    this.chatFilesInput = document.getElementById('chatFilesInput');
+    
+    // Camera capture modal elements
+    this.cameraCaptureOverlay = document.getElementById('cameraCaptureOverlay');
+    this.cameraCaptureDialog = document.getElementById('cameraCaptureDialog');
+    this.cameraCaptureVideo = document.getElementById('cameraCaptureVideo');
+    this.cameraCancelButton = document.getElementById('cameraCancelButton');
+    this.cameraCaptureButton = document.getElementById('cameraCaptureButton');
 
     // Voice recording elements
     this.voiceRecordButton = document.getElementById('voiceRecordButton');
@@ -9775,6 +10601,11 @@ class ChatModal {
 
     // Initialize context menu
     this.contextMenu = document.getElementById('messageContextMenu');
+    // Initialize image attachment context menu
+    this.imageAttachmentContextMenu = document.getElementById('imageAttachmentContextMenu');
+    // Initialize attachment options context menu
+    this.attachmentOptionsContextMenu = document.getElementById('attachmentOptionsContextMenu');
+    this.currentImageAttachmentRow = null;
     
     // Add event delegation for message clicks (since messages are created dynamically)
     this.messagesList.addEventListener('click', this.handleMessageClick.bind(this));
@@ -9799,11 +10630,35 @@ class ChatModal {
         this.handleContextMenuAction(action);
       }
     });
+    // Add image attachment context menu option listeners
+    if (this.imageAttachmentContextMenu) {
+      this.imageAttachmentContextMenu.addEventListener('click', (e) => {
+        const option = e.target.closest('.context-menu-option');
+        if (!option) return;
+        const action = option.dataset.action;
+        this.handleImageAttachmentContextMenuAction(action);
+      });
+    }
+    // Add attachment options context menu option listeners
+    if (this.attachmentOptionsContextMenu) {
+      this.attachmentOptionsContextMenu.addEventListener('click', (e) => {
+        const option = e.target.closest('.context-menu-option');
+        if (!option) return;
+        const action = option.dataset.action;
+        this.handleAttachmentOptionsContextMenuAction(action);
+      });
+    }
     
     // Close context menu when clicking outside
     document.addEventListener('click', (e) => {
       if (this.contextMenu && !this.contextMenu.contains(e.target)) {
         this.closeContextMenu();
+      }
+      if (this.imageAttachmentContextMenu && !this.imageAttachmentContextMenu.contains(e.target)) {
+        this.closeImageAttachmentContextMenu();
+      }
+      if (this.attachmentOptionsContextMenu && !this.attachmentOptionsContextMenu.contains(e.target) && !this.addAttachmentButton.contains(e.target)) {
+        this.closeAttachmentOptionsContextMenu();
       }
     });
     this.sendButton.addEventListener('click', this.handleSendMessage.bind(this));
@@ -9827,6 +10682,7 @@ class ChatModal {
 
       // Save draft (text is already limited to 2000 chars by maxlength attribute)
       this.debouncedSaveDraft(e.target.value);
+      this.toggleSendButtonVisibility();
     });
 
     // allow ctlr+enter or cmd+enter to send message
@@ -9909,13 +10765,34 @@ class ChatModal {
     }
 
     if (this.addAttachmentButton) {
-      this.addAttachmentButton.addEventListener('click', () => {
-        this.triggerFileSelection();
+      this.addAttachmentButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // On iOS, directly trigger file input to use native iOS picker
+        // On Android, show our custom context menu
+        if (isIOS()) {
+          // iOS will show its native picker with Camera, Photo Library, and Files options
+          if (this.chatFileInput) {
+            this.chatFileInput.click();
+          }
+        } else {
+          // Android: show our custom context menu
+          this.showAttachmentOptionsContextMenu(e);
+        }
       });
     }
 
     if (this.chatFileInput) {
       this.chatFileInput.addEventListener('change', (e) => {
+        this.handleFileAttachment(e);
+      });
+    }
+    if (this.chatPhotoLibraryInput) {
+      this.chatPhotoLibraryInput.addEventListener('change', (e) => {
+        this.handleFileAttachment(e);
+      });
+    }
+    if (this.chatFilesInput) {
+      this.chatFilesInput.addEventListener('change', (e) => {
         this.handleFileAttachment(e);
       });
     }
@@ -9933,26 +10810,6 @@ class ChatModal {
         voiceRecordingModal.open();
       });
     }
-
-    this.messagesList.addEventListener('click', async (e) => {
-      const row = e.target.closest('.attachment-row');
-      if (!row) return;
-      e.preventDefault();
-
-      // Concurent download prevention
-      if (this.attachmentDownloadInProgress) return;
-
-      this.attachmentDownloadInProgress = true;
-
-      const idx  = Number(row.dataset.msgIdx);
-      const item = myData.contacts[this.address].messages[idx];
-
-      try {
-        await this.handleAttachmentDownload(item, row);
-      } finally {
-        this.attachmentDownloadInProgress = false;
-      }
-    });
 
     // Voice message play button event delegation
     this.messagesList.addEventListener('click', (e) => {
@@ -10008,6 +10865,7 @@ class ChatModal {
       });
     }
 
+    this.toggleSendButtonVisibility();
   }
 
     // Voice message seek slider live time display (works even before playback)
@@ -10119,6 +10977,17 @@ class ChatModal {
   }
 
   /**
+   * Toggles visibility of send button and microphone button based on input content
+   */
+  toggleSendButtonVisibility() {
+    const hasText = this.messageInput.value.trim().length > 0 || (this.fileAttachments && this.fileAttachments.length > 0);
+    this.sendButton.style.display = hasText ? 'flex' : 'none';
+    if (this.voiceRecordButton) {
+      this.voiceRecordButton.style.display = hasText ? 'none' : 'flex';
+    }
+  }
+
+  /**
    * Opens the chat modal for the given address.
    * @param {string} address - The address of the contact to open the chat modal for.
    * @returns {Promise<void>}
@@ -10128,6 +10997,7 @@ class ChatModal {
     this.messageInput.value = '';
     this.messageInput.style.height = '48px';
     this.messageByteCounter.style.display = 'none';
+    this.toggleSendButtonVisibility();
     // clear any edit state and hide cancel button
     const editInputInit = document.getElementById('editOfTxId');
     editInputInit.value = '';
@@ -10288,10 +11158,12 @@ class ChatModal {
     }
 
     const allRead = Object.values(myData.contacts).every((c) => c.unread === 0);
+    const currentAddress = myAccount?.keys?.address;
+    
     if (allRead) {
-      logsModal.log('Clearing notification address for', myAccount.keys.address);
-      reactNativeApp.clearNotificationAddress(myAccount.keys.address);
-      reactNativeApp.sendClearNotifications(myAccount.keys.address);
+      logsModal.log('Clearing notification address for account', currentAddress);
+      reactNativeApp.clearNotificationAddress(currentAddress);
+      reactNativeApp.sendClearNotifications(currentAddress);
     }
 
     const notificationAddresses = reactNativeApp.getNotificationAddresses();
@@ -10619,6 +11491,11 @@ class ChatModal {
         senderInfo.phone = myData.account.phone;
         senderInfo.linkedin = myData.account.linkedin;
         senderInfo.x = myData.account.x;
+        // Add avatar info if available
+        if (myData.account.avatarId && myData.account.avatarKey) {
+          senderInfo.avatarId = myData.account.avatarId;
+          senderInfo.avatarKey = myData.account.avatarKey;
+        }
       }
 
       // Always encrypt and send senderInfo (which will contain at least the username)
@@ -10726,7 +11603,9 @@ console.warn('in send message', txid)
       this.messageInput.style.height = '48px'; // original height
 
       // Hide byte counter
-      this.messageByteCounter.style.display = 'none'; 
+      this.messageByteCounter.style.display = 'none';
+      // Toggle button visibility (should show microphone when empty)
+      this.toggleSendButtonVisibility(); 
 
       // Call debounced save directly with empty string
       this.debouncedSaveDraft('');
@@ -10844,6 +11723,8 @@ console.warn('in send message', txid)
       }
       // Hide cancel button
       this.cancelEditButton.style.display = 'none';
+      // Toggle button visibility (should show microphone when empty)
+      this.toggleSendButtonVisibility();
       // Re-enable attachments on cancel
       this.addAttachmentButton.disabled = false;
       // Give feedback
@@ -11049,13 +11930,12 @@ console.warn('in send message', txid)
                   data-url="${fileUrl}"
                   data-name="${encodeURIComponent(fileName)}"
                   data-type="${att.type || ''}"
-                  data-pqEncSharedKey="${att.pqEncSharedKey || ''}"
-                  data-selfKey="${att.selfKey || ''}"
                   data-msg-idx="${i}"
                   ${isImage ? 'data-image-attachment="true"' : ''}
                 >
-                  <div class="attachment-icon-container" style="${isImage ? 'margin-bottom: 10px;' : 'margin-right: 14px; flex-shrink: 0;'}">
+                  <div class="attachment-icon-container" style="${isImage ? 'margin-bottom: 10px; flex-direction: column;' : 'margin-right: 14px; flex-shrink: 0;'}">
                     <div class="attachment-icon" data-file-type="${fileTypeIcon}"></div>
+                    ${isImage ? '<div class="attachment-preview-hint">Click for options</div>' : ''}
                   </div>
                   <div style="min-width:0;">
                     <span class="attachment-label" style="font-weight:500;color:#222;font-size:0.7em;display:block;word-wrap:break-word;">
@@ -11112,10 +11992,8 @@ console.warn('in send message', txid)
           if (item.type === 'vm') {
             const duration = this.formatDuration(item.duration);
             // Use audio encryption keys for playback, fall back to message encryption keys if not available
-            const audioEncKey = item.audioPqEncSharedKey || item.pqEncSharedKey || '';
-            const audioSelfKey = item.audioSelfKey || item.selfKey || '';
             messageTextHTML = `
-              <div class="voice-message" data-voice-url="${item.url || ''}" data-pqEncSharedKey="${audioEncKey}" data-selfKey="${audioSelfKey}" data-msg-idx="${i}" data-duration="${item.duration || 0}">
+              <div class="voice-message" data-url="${item.url || ''}" data-name="voice-message" data-type="audio/webm" data-msg-idx="${i}" data-duration="${item.duration || 0}">
                 <div class="voice-message-controls">
                   <div class="voice-message-top-row">
                     <button class="voice-message-play-button" aria-label="Play voice message">
@@ -11342,6 +12220,7 @@ console.warn('in send message', txid)
       // trigger input event to update the byte counter
       this.messageInput.dispatchEvent(new Event('input'));
     }
+    this.toggleSendButtonVisibility();
     
     // Restore reply state if it exists
     if (contact?.draftReplyTxid) {
@@ -11585,6 +12464,7 @@ console.warn('in send message', txid)
     if (!this.fileAttachments || this.fileAttachments.length === 0) {
       preview.innerHTML = '';
       preview.style.display = 'none';
+      this.toggleSendButtonVisibility();
       return;
     }
   
@@ -11611,7 +12491,8 @@ console.warn('in send message', txid)
     });
 
     preview.style.display = 'block';
-    
+    // Toggle button visibility when attachments are added
+    this.toggleSendButtonVisibility();
     // Check if user was at the bottom before showing preview
     const messageContainer = this.messagesContainer;
     const wasAtBottom = messageContainer ? 
@@ -11628,6 +12509,36 @@ console.warn('in send message', txid)
   }
 
   /**
+   * Best effort delete of files from attachment server
+   * @param {string|Array<{url: string}>} urlsOrAttachments - Single URL string or array of attachment objects with url property
+   * @returns {void}
+   */
+  deleteAttachmentsFromServer(urlsOrAttachments) {
+    if (!urlsOrAttachments) return;
+    
+    const uploadUrl = 'https://inv.liberdus.com:2083';
+    const urls = Array.isArray(urlsOrAttachments) 
+      ? urlsOrAttachments.map(att => att?.url).filter(Boolean)
+      : [urlsOrAttachments];
+    
+    urls.forEach(url => {
+      if (typeof url !== 'string') return;
+      
+      // Extract ID from URL format: https://inv.liberdus.com:2083/get/{id}
+      const urlMatch = url.match(/\/get\/([^\/]+)$/);
+      if (urlMatch && urlMatch[1]) {
+        const fileId = urlMatch[1];
+        fetch(`${uploadUrl}/delete/${fileId}`, {
+          method: 'DELETE'
+        }).catch(err => {
+          // Silently ignore errors - best effort delete
+          console.warn('Failed to delete attachment from server:', err);
+        });
+      }
+    });
+  }
+
+  /**
    * Removes a specific attached file
    * @param {number} index - Index of file to remove
    * @returns {void}
@@ -11641,6 +12552,9 @@ console.warn('in send message', txid)
       if (this.address && myData.contacts[this.address]) {
         this.saveAttachmentState(myData.contacts[this.address]);
       }
+
+      // Best effort delete from server
+      this.deleteAttachmentsFromServer(removedFile.url);
     }
   }
 
@@ -11790,46 +12704,77 @@ console.warn('in send message', txid)
     showToast(`${filename} downloaded`, 3000, 'success');
   }
 
+  /**
+   * Decrypts an attachment URL into a Blob using the message encryption metadata.
+   * Shared by download (Save) and Preview thumbnail generation.
+   * @param {Object} item - message object from myData.contacts[address].messages[idx]
+   * @param {HTMLElement} linkEl - element with data-* fields (attachment row or voice message element)
+   * @returns {Promise<Blob>}
+   */
+  async decryptAttachmentToBlob(item, linkEl) {
+    if (!item || !linkEl) throw new Error('Missing item or attachment element');
+
+    // 1) Derive dhkey
+    // - Attachments: use per-attachment keys from item.xattach (not stored in DOM)
+    // - Voice messages: use audio keys from the message item
+    let selfKey;
+    let pqEncSharedKey;
+
+    const url = linkEl.dataset.url;
+    if (!url || url === '#') throw new Error('Missing attachment url');
+
+    const isVoice = item.type === 'vm';
+    if (isVoice) {
+      // Voice message: audio keys (fallback to message keys)
+      selfKey = item.audioSelfKey || item.selfKey;
+      pqEncSharedKey = item.audioPqEncSharedKey || item.pqEncSharedKey;
+    } else {
+      // Attachment: look up attachment entry by url
+      const att = Array.isArray(item.xattach) ? item.xattach.find((a) => a?.url === url) : null;
+      selfKey = att?.selfKey;
+      pqEncSharedKey = att?.pqEncSharedKey;
+    }
+
+    let dhkey;
+    if (item.my) {
+      if (!selfKey) throw new Error('Missing selfKey for decrypt');
+      const password = myAccount.keys.secret + myAccount.keys.pqSeed;
+      dhkey = hex2bin(decryptData(selfKey, password, true));
+    } else {
+      if (!pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
+      const ok = await ensureContactKeys(this.address);
+      const senderPublicKey = myData.contacts[this.address]?.public;
+      if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
+      // dhkeyCombined/pqSharedKey expect ciphertext bytes; accept base64 strings too by converting here.
+      const pqCipher = (typeof pqEncSharedKey === 'string') ? base642bin(pqEncSharedKey) : pqEncSharedKey;
+      dhkey = dhkeyCombined(
+        myAccount.keys.secret,
+        senderPublicKey,
+        myAccount.keys.pqSeed,
+        pqCipher
+      ).dhkey;
+    }
+
+    // 2) Download encrypted bytes
+    const res = await fetch(url, { signal: this.abortController.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const cipherBin = new Uint8Array(await res.arrayBuffer());
+
+    // 3) Decrypt
+    const cipherB64 = bin2base64(cipherBin);
+    const plainB64 = decryptChacha(dhkey, cipherB64);
+    if (!plainB64) throw new Error('decryptChacha returned null');
+    const clearBin = base642bin(plainB64);
+
+    // 4) Blob
+    return new Blob([clearBin], { type: linkEl.dataset.type || 'application/octet-stream' });
+  }
+
   async handleAttachmentDownload(item, linkEl) {
     let loadingToastId;
     try {
       loadingToastId = showToast(`Decrypting attachment...`, 0, 'loading');
-      // 1. Derive a fresh 32‑byte dhkey
-      let dhkey;
-      if (item.my) {
-        // you were the sender ⇒ run encapsulation side again
-        const selfKey = linkEl.dataset.selfkey;
-        const password = myAccount.keys.secret + myAccount.keys.pqSeed;
-        dhkey = hex2bin(decryptData(selfKey, password, true));
-      } else {
-        // you are the receiver ⇒ use fields stashed on the item
-        const ok = await ensureContactKeys(this.address);
-        const senderPublicKey = myData.contacts[this.address]?.public;
-        if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
-        const pqEncSharedKey = linkEl.dataset.pqencsharedkey;
-        dhkey = dhkeyCombined(
-          myAccount.keys.secret,
-          senderPublicKey,
-          myAccount.keys.pqSeed,
-          pqEncSharedKey
-        ).dhkey;
-      }
-
-      // 2. Download encrypted bytes
-      const res = await fetch(linkEl.dataset.url, {
-        signal: this.abortController.signal
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const cipherBin = new Uint8Array(await res.arrayBuffer());
-
-      // 3. bin → base64 → decrypt → clear Uint8Array
-      const cipherB64 = bin2base64(cipherBin);
-      const plainB64  = decryptChacha(dhkey, cipherB64);
-      if (!plainB64) throw new Error('decryptChacha returned null');
-      const clearBin  = base642bin(plainB64);
-
-      // 4. Blob + download
-      const blob    = new Blob([clearBin], { type: linkEl.dataset.type || 'application/octet-stream' });
+      const blob = await this.decryptAttachmentToBlob(item, linkEl);
       const blobUrl = URL.createObjectURL(blob);
       const filename = decodeURIComponent(linkEl.dataset.name || 'download');
 
@@ -11962,8 +12907,14 @@ console.warn('in send message', txid)
    * Handles message click events
    * @param {Event} e - Click event
    */
-  handleMessageClick(e) {
-    if (e.target.closest('.attachment-row')) return;
+  async handleMessageClick(e) {
+    const attachmentRow = e.target.closest('.attachment-row');
+    if (attachmentRow) {
+      e.preventDefault();
+      e.stopPropagation();
+      await this.showAttachmentContextMenu(e, attachmentRow);
+      return;
+    }
     if (e.target.closest('.voice-message-play-button')) return;
     if (e.target.closest('.voice-message-speed-button')) return;
     if (e.target.closest('.voice-message-seek')) return;
@@ -12006,14 +12957,16 @@ console.warn('in send message', txid)
 
     // Do not open context menu when clicking on reply quote
     if (e.target.closest('.reply-quote')) return;
+
+    // Ensure only one context menu is open at a time
+    this.closeAllContextMenus();
     
     this.currentContextMessage = messageEl;
     
     // Show/hide "Delete for all" option based on whether the message is from the current user
-    const isMine = messageEl.classList.contains('sent');
     const deleteForAllOption = this.contextMenu.querySelector('[data-action="delete-for-all"]');
     if (deleteForAllOption) {
-      const canDeleteForAll = isMine && myData.contacts[this.address]?.tollRequiredToSend == 0;
+      const canDeleteForAll = this.canDeleteMessageForAll(messageEl);
       deleteForAllOption.style.display = canDeleteForAll ? 'flex' : 'none';
     }
 
@@ -12026,7 +12979,10 @@ console.warn('in send message', txid)
     const replyOption = this.contextMenu.querySelector('[data-action="reply"]');
     const editResendOption = this.contextMenu.querySelector('[data-action="edit-resend"]');
     const editOption = this.contextMenu.querySelector('[data-action="edit"]');
+    const saveOption = this.contextMenu.querySelector('[data-action="save"]');
     const isFailedPayment = messageEl.dataset.status === 'failed' && messageEl.classList.contains('payment-info');
+    // Show save option only for voice messages
+    if (saveOption) saveOption.style.display = isVoice ? 'flex' : 'none';
     // For failed payment messages, hide copy and delete-for-all regardless of sender
     if (isFailedPayment) {
       if (copyOption) copyOption.style.display = 'none';
@@ -12060,6 +13016,7 @@ console.warn('in send message', txid)
       // Determine if edit should be shown
       if (editOption) {
         // Conditions: own plain message OR own payment with memo text, not deleted/failed/voice, within 15 minutes
+        const isMine = messageEl.classList.contains('sent');
         const createdTs = parseInt(messageEl.dataset.messageTimestamp || messageEl.dataset.timestamp || '0', 10);
         const ageOk = createdTs && (Date.now() - createdTs) < EDIT_WINDOW_MS;
         const isDeleted = messageEl.classList.contains('deleted-message');
@@ -12120,6 +13077,615 @@ console.warn('in send message', txid)
     this.currentContextMessage = null;
   }
 
+  closeAllContextMenus() {
+    this.closeContextMenu();
+    this.closeImageAttachmentContextMenu();
+    this.closeAttachmentOptionsContextMenu();
+  }
+
+  /**
+   * Returns whether "Delete for all" should be available for a given message element.
+   * Mirrors the gating used in the message context menu.
+   * @param {HTMLElement} messageEl
+   * @returns {boolean}
+   */
+  canDeleteMessageForAll(messageEl) {
+    const isMine = !!messageEl?.classList?.contains('sent');
+    return isMine && myData.contacts[this.address]?.tollRequiredToSend == 0;
+  }
+
+  /**
+   * Removes cached thumbnails for any image attachments in an xattach array.
+   * Safe to call even if thumbnails don't exist.
+   * @param {any} xattach
+   */
+  purgeThumbnail(xattach) {
+    if (!Array.isArray(xattach) || !xattach.length) return;
+    for (const att of xattach) {
+      const url = att?.url;
+      const type = att?.type || '';
+      if (!url || url === '#') continue;
+      if (typeof type === 'string' && type.startsWith('image/')) {
+        // Fire-and-forget; deletion errors shouldn't block UI actions
+        void thumbnailCache.delete(url).catch((e) => console.warn('Failed to delete thumbnail:', e));
+      }
+    }
+  }
+
+  /**
+   * Resolve common attachment context fields from an attachment row.
+   * @param {HTMLElement} attachmentRow
+   * @returns {{ attachmentRow: HTMLElement, messageEl: HTMLElement | null, idx: number, item: any, url: string }}
+   */
+  getAttachmentContextFromRow(attachmentRow) {
+    const idx = Number(attachmentRow?.dataset?.msgIdx);
+    const item = Number.isFinite(idx) ? myData.contacts[this.address]?.messages?.[idx] : null;
+    return {
+      attachmentRow,
+      messageEl: attachmentRow?.closest?.('.message') || null,
+      idx,
+      item,
+      url: attachmentRow?.dataset?.url || ''
+    };
+  }
+
+  closeImageAttachmentContextMenu() {
+    if (!this.imageAttachmentContextMenu) return;
+    this.imageAttachmentContextMenu.style.display = 'none';
+    this.currentImageAttachmentRow = null;
+  }
+
+  /**
+   * Shows the attachment options context menu
+   * @param {Event} e - The click event
+   */
+  showAttachmentOptionsContextMenu(e) {
+    if (!this.attachmentOptionsContextMenu) return;
+    
+    this.closeAllContextMenus();
+    
+    const menu = this.attachmentOptionsContextMenu;
+    const buttonRect = this.addAttachmentButton.getBoundingClientRect();
+
+    // Desktop: only show "Camera" + "Files" (hide "Photo Library")
+    // Heuristic: devices with a fine pointer + hover are typically desktop/laptop.
+    try {
+      const isDesktopLike = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+      const photoLibraryOpt = menu.querySelector('.context-menu-option[data-action="photo-library"]');
+      if (photoLibraryOpt) photoLibraryOpt.style.display = isDesktopLike ? 'none' : '';
+    } catch (_) {
+      // ignore
+    }
+    
+    // Show menu first to get its dimensions
+    menu.style.display = 'block';
+    const menuRect = menu.getBoundingClientRect();
+    
+    // Position menu above the button by default (since button is at bottom)
+    let top = buttonRect.top - menuRect.height - 8;
+    
+    // If menu would go off top of screen, position it below instead
+    if (top < 10) {
+      top = buttonRect.bottom + 8;
+    }
+    
+    // Ensure menu doesn't go off left or right of screen
+    let left = buttonRect.left;
+    if (left + menuRect.width > window.innerWidth - 10) {
+      left = window.innerWidth - menuRect.width - 10;
+    }
+    if (left < 10) {
+      left = 10;
+    }
+    
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
+  /**
+   * Closes the attachment options context menu
+   */
+  closeAttachmentOptionsContextMenu() {
+    if (!this.attachmentOptionsContextMenu) return;
+    this.attachmentOptionsContextMenu.style.display = 'none';
+  }
+
+  /**
+   * Handles attachment options context menu actions
+   * @param {string} action - The action to perform
+   */
+  handleAttachmentOptionsContextMenuAction(action) {
+    this.closeAttachmentOptionsContextMenu();
+
+    // Important: keep this synchronous to preserve the user gesture required by some browsers
+    // (notably Android Chrome) to open native file pickers via input.click().
+    switch (action) {
+      case 'camera':
+        if (isAndroidLikeMobileUA()) {
+          // Android: check/request permission, then open file picker or toast
+          void this.handleAndroidCameraAction();
+        } else {
+          // Desktop: use full camera overlay
+          void this.capturePhotoFromCamera();
+        }
+        break;
+      case 'photo-library':
+        if (this.chatPhotoLibraryInput) {
+          this.chatPhotoLibraryInput.value = '';
+          this.chatPhotoLibraryInput.click();
+        }
+        break;
+      case 'files':
+        if (this.chatFilesInput) {
+          this.chatFilesInput.value = '';
+          this.chatFilesInput.click();
+        }
+        break;
+    }
+  }
+
+  /**
+   * Handles Android camera action: checks/requests permission, then opens file picker or shows toast
+   * @returns {Promise<void>}
+   */
+  async handleAndroidCameraAction() {
+    try {
+      let permissionStatus = 'unknown';
+      if (navigator.permissions?.query) {
+        const result = await navigator.permissions.query({ name: 'camera' });
+        permissionStatus = result.state;
+      }
+      
+      if (permissionStatus === 'granted') {
+        // Already granted - open file picker
+        if (this.chatFilesInput) {
+          this.chatFilesInput.value = '';
+          this.chatFilesInput.click();
+        }
+        return;
+      }
+      
+      if (permissionStatus === 'denied') {
+        // Permission already denied - show toast
+        showToast('Camera permission required. Please enable it in your device settings.', 0, 'error');
+        return;
+      }
+      
+      // Permission is 'prompt' or 'unknown' - request permission via getUserMedia
+      // This will trigger the permission prompt
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        // Immediately stop the stream (don't show camera)
+        stream.getTracks().forEach(track => track.stop());
+        // Permission granted - open file picker
+        if (this.chatFilesInput) {
+          this.chatFilesInput.value = '';
+          this.chatFilesInput.click();
+        }
+      } catch (err) {
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          // User denied permission - show toast
+          showToast('Camera permission required. Please enable it in your device settings.', 0, 'error');
+        } else {
+          showToast('Unable to access camera', 0, 'error');
+        }
+      }
+    } catch (err) {
+      console.warn('Camera permission check failed:', err);
+    }
+  }
+
+  /**
+   * Opens a camera overlay, lets the user capture a photo, and attaches it.
+   * Cleanup is guaranteed via try/finally so media tracks never leak.
+   * @returns {Promise<void>}
+   */
+  async capturePhotoFromCamera() {
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      showToast('Camera is not supported on this device.', 0, 'error');
+      return;
+    }
+
+    if (!this.cameraCaptureOverlay || !this.cameraCaptureDialog || !this.cameraCaptureVideo) {
+      showToast('Camera modal elements not found.', 0, 'error');
+      return;
+    }
+
+    // Prevent opening multiple overlays.
+    if (this.cameraCaptureOverlay.style.display !== 'none') return;
+
+    const prevFocusedEl = document.activeElement;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    const prevBodyOverflow = document.body.style.overflow;
+
+    /** @type {MediaStream|null} */
+    let stream = null;
+    let done = false;
+
+    const lockPageScroll = () => {
+      try {
+        document.documentElement.style.overflow = 'hidden';
+        document.body.style.overflow = 'hidden';
+      } catch (_) {
+        // ignore
+      }
+    };
+
+    const unlockPageScroll = () => {
+      try {
+        document.documentElement.style.overflow = prevHtmlOverflow;
+        document.body.style.overflow = prevBodyOverflow;
+      } catch (_) {
+        // ignore
+      }
+    };
+
+    const stopStream = () => {
+      try {
+        if (stream) stream.getTracks().forEach((t) => t.stop());
+      } catch (_) {
+        // ignore
+      } finally {
+        stream = null;
+      }
+    };
+
+    /** @type {(e: KeyboardEvent) => void} */
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (!done) this.cameraCancelButton?.click();
+        return;
+      }
+
+      // Minimal focus trap: keep Tab within our two buttons.
+      if (e.key === 'Tab' && this.cameraCaptureOverlay) {
+        const focusables = [this.cameraCancelButton, this.cameraCaptureButton].filter(Boolean);
+        if (focusables.length === 0) return;
+        const currentIdx = focusables.indexOf(document.activeElement);
+        const nextIdx = e.shiftKey
+          ? (currentIdx <= 0 ? focusables.length - 1 : currentIdx - 1)
+          : (currentIdx >= focusables.length - 1 ? 0 : currentIdx + 1);
+        e.preventDefault();
+        focusables[nextIdx]?.focus?.();
+      }
+    };
+
+    /** @type {() => void} */
+    const onOverlayClick = () => {
+      this.cameraCancelButton?.click();
+    };
+
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+
+      document.removeEventListener('keydown', onKeyDown, true);
+      this.cameraCaptureOverlay.removeEventListener('click', onOverlayClick);
+
+      try {
+        this.cameraCaptureOverlay.style.display = 'none';
+        // Reset dialog styles
+        this.cameraCaptureDialog.style.width = '';
+        this.cameraCaptureDialog.style.height = '';
+        this.cameraCaptureDialog.style.position = '';
+        this.cameraCaptureDialog.style.top = '';
+        this.cameraCaptureDialog.style.left = '';
+        this.cameraCaptureDialog.style.borderRadius = '';
+        this.cameraCaptureDialog.style.margin = '';
+        this.cameraCaptureOverlay.style.alignItems = '';
+        this.cameraCaptureOverlay.style.justifyContent = '';
+      } catch (_) {
+        // ignore
+      }
+
+      stopStream();
+      unlockPageScroll();
+
+      try {
+        if (prevFocusedEl && typeof prevFocusedEl.focus === 'function') prevFocusedEl.focus();
+      } catch (_) {
+        // ignore
+      }
+    };
+
+    // Get container dimensions to match dialog size
+    const containerEl = document.querySelector('.container');
+    let containerRect = null;
+    if (containerEl) {
+      containerRect = containerEl.getBoundingClientRect();
+    }
+
+    // Size and position dialog to match container if it exists
+    if (containerRect) {
+      this.cameraCaptureDialog.style.width = `${containerRect.width}px`;
+      this.cameraCaptureDialog.style.height = `${containerRect.height}px`;
+      this.cameraCaptureDialog.style.maxWidth = 'none';
+      this.cameraCaptureDialog.style.maxHeight = 'none';
+      this.cameraCaptureDialog.style.position = 'fixed';
+      this.cameraCaptureDialog.style.top = `${containerRect.top}px`;
+      this.cameraCaptureDialog.style.left = `${containerRect.left}px`;
+      this.cameraCaptureDialog.style.borderRadius = '8px';
+      this.cameraCaptureDialog.style.margin = '0';
+      // Remove flexbox centering from overlay when dialog is positioned
+      this.cameraCaptureOverlay.style.alignItems = 'flex-start';
+      this.cameraCaptureOverlay.style.justifyContent = 'flex-start';
+    }
+
+    // Click outside the dialog cancels.
+    this.cameraCaptureOverlay.addEventListener('click', onOverlayClick);
+    this.cameraCaptureDialog.addEventListener('click', (e) => e.stopPropagation());
+
+    // Show overlay
+    this.cameraCaptureOverlay.style.display = 'flex';
+    document.addEventListener('keydown', onKeyDown, true);
+    lockPageScroll();
+    this.cameraCaptureOverlay.focus();
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false
+      });
+
+      this.cameraCaptureVideo.srcObject = stream;
+      
+      // Ensure video is properly constrained to dialog size
+      // Wait for metadata to ensure video dimensions are available
+      await new Promise((resolve) => {
+        if (this.cameraCaptureVideo.readyState >= 1) {
+          resolve();
+        } else {
+          this.cameraCaptureVideo.addEventListener('loadedmetadata', resolve, { once: true });
+        }
+      });
+      
+      // Explicitly constrain video to dialog bounds
+      this.cameraCaptureVideo.style.width = '100%';
+      this.cameraCaptureVideo.style.height = '100%';
+      this.cameraCaptureVideo.style.maxWidth = '100%';
+      this.cameraCaptureVideo.style.maxHeight = '100%';
+      
+      try {
+        await this.cameraCaptureVideo.play();
+      } catch (err) {
+        // Autoplay restrictions / transient failures: user can still press Capture.
+        console.warn('Camera video.play() failed:', err);
+      }
+
+      this.cameraCaptureButton.focus();
+
+      const waitForAction = () =>
+        new Promise((resolve) => {
+          this.cameraCancelButton.addEventListener(
+            'click',
+            () => resolve({ type: 'cancel' }),
+            { once: true }
+          );
+          this.cameraCaptureButton.addEventListener(
+            'click',
+            () => resolve({ type: 'capture' }),
+            { once: true }
+          );
+        });
+
+      const action = await waitForAction();
+      if (action.type !== 'capture') return;
+
+      // Get the actual displayed size of the video element (what user sees)
+      const videoRect = this.cameraCaptureVideo.getBoundingClientRect();
+      const displayedWidth = Math.round(videoRect.width);
+      const displayedHeight = Math.round(videoRect.height);
+      
+      // Get the camera's native resolution for aspect ratio calculation
+      const nativeWidth = this.cameraCaptureVideo.videoWidth || stream.getVideoTracks?.()?.[0]?.getSettings?.()?.width || 0;
+      const nativeHeight = this.cameraCaptureVideo.videoHeight || stream.getVideoTracks?.()?.[0]?.getSettings?.()?.height || 0;
+      
+      if (!nativeWidth || !nativeHeight || !displayedWidth || !displayedHeight) {
+        showToast('Camera not ready yet. Please try again.', 0, 'error');
+        return;
+      }
+
+      // Calculate the source crop to match what's visible in the preview
+      // The video uses object-fit: cover, so we need to calculate the visible portion
+      const videoAspect = nativeWidth / nativeHeight;
+      const displayAspect = displayedWidth / displayedHeight;
+      
+      let sourceWidth, sourceHeight, sourceX = 0, sourceY = 0;
+      
+      if (videoAspect > displayAspect) {
+        // Video is wider - crop left/right
+        sourceHeight = nativeHeight;
+        sourceWidth = nativeHeight * displayAspect;
+        sourceX = (nativeWidth - sourceWidth) / 2;
+      } else {
+        // Video is taller - crop top/bottom
+        sourceWidth = nativeWidth;
+        sourceHeight = nativeWidth / displayAspect;
+        sourceY = (nativeHeight - sourceHeight) / 2;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = displayedWidth;
+      canvas.height = displayedHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        showToast('Unable to capture photo.', 0, 'error');
+        return;
+      }
+
+      // Draw the visible portion of the video at the displayed size
+      ctx.drawImage(
+        this.cameraCaptureVideo,
+        sourceX, sourceY, sourceWidth, sourceHeight,  // Source crop
+        0, 0, displayedWidth, displayedHeight          // Destination size
+      );
+
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+      if (!blob) {
+        showToast('Unable to capture photo.', 0, 'error');
+        return;
+      }
+
+      const fileName = `camera_${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`;
+      const file = new File([blob], fileName, { type: 'image/jpeg' });
+
+      // Feed into the existing attachment pipeline. (handleFileAttachment only reads files[0])
+      cleanup(); // hide overlay + stop camera before heavy work starts
+      await this.handleFileAttachment({ target: { files: [file], value: '' } });
+    } catch (err) {
+      console.error('Camera capture failed:', err);
+      if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
+        showToast('Camera permission required. Please enable it in your device settings.', 0, 'error');
+      } else {
+        showToast('Unable to access camera.', 0, 'error');
+      }
+    } finally {
+      cleanup();
+    }
+  }
+
+  /**
+   * Shows context menu for an attachment row.
+   * - Images: "Preview" when no thumbnail exists in IndexedDB; "Save" when it exists
+   * - Non-images: always "Save"
+   * @param {Event} e
+   * @param {HTMLElement} attachmentRow
+   */
+  async showAttachmentContextMenu(e, attachmentRow) {
+    if (!this.imageAttachmentContextMenu || !attachmentRow) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Close other menus
+    this.closeAllContextMenus();
+
+    this.currentImageAttachmentRow = attachmentRow;
+
+    // Toggle delete-for-all visibility similar to regular message context menu gating
+    const { messageEl, url } = this.getAttachmentContextFromRow(attachmentRow);
+
+    // Show copy only if parent message has actual message text
+    const copyOption = this.imageAttachmentContextMenu.querySelector('[data-action="copy"]');
+    if (copyOption) {
+      const text = messageEl?.querySelector?.('.message-content')?.textContent?.trim() || '';
+      copyOption.style.display = text ? 'flex' : 'none';
+    }
+
+    const deleteForAllOption = this.imageAttachmentContextMenu.querySelector('[data-action="delete-for-all"]');
+    if (deleteForAllOption) {
+      const canDeleteForAll = this.canDeleteMessageForAll(messageEl);
+      deleteForAllOption.style.display = canDeleteForAll ? 'flex' : 'none';
+    }
+
+    const isImageAttachment = attachmentRow.dataset.imageAttachment === 'true';
+
+    // Decide Preview/Save vs Save:
+    // - Images: Show both Preview and Save when no thumbnail exists; Show only Save when it exists
+    // - Non-images: always Save (no thumbnail concept)
+    let hasThumb = true;
+    if (isImageAttachment) {
+      hasThumb = false;
+      if (url && url !== '#') {
+        try {
+          const thumb = await thumbnailCache.get(url);
+          hasThumb = !!thumb;
+        } catch (_) {
+          hasThumb = false;
+        }
+      }
+    }
+
+    // Show Preview only for images without a thumbnail; Save is always visible
+    const previewOpt = this.imageAttachmentContextMenu.querySelector('[data-action="preview"]');
+    if (previewOpt) previewOpt.style.display = (isImageAttachment && !hasThumb) ? '' : 'none';
+
+    this.positionContextMenu(this.imageAttachmentContextMenu, attachmentRow);
+    this.imageAttachmentContextMenu.style.display = 'block';
+  }
+
+  handleImageAttachmentContextMenuAction(action) {
+    const row = this.currentImageAttachmentRow;
+    if (!row) return;
+
+    const { messageEl } = this.getAttachmentContextFromRow(row);
+    switch (action) {
+      case 'preview':
+        void this.previewImageAttachment(row);
+        break;
+      case 'save':
+        void this.saveImageAttachment(row);
+        break;
+      case 'reply':
+        if (messageEl) this.startReplyToMessage(messageEl);
+        break;
+      case 'copy':
+        if (messageEl) void this.copyMessageContent(messageEl);
+        break;
+      case 'delete':
+        if (messageEl) this.deleteMessage(messageEl);
+        break;
+      case 'delete-for-all':
+        if (messageEl) void this.deleteMessageForAll(messageEl);
+        break;
+    }
+
+    this.closeImageAttachmentContextMenu();
+  }
+
+  /**
+   * Preview an image attachment: decrypt + generate thumbnail + cache thumbnail in IndexedDB.
+   * Does NOT trigger download.
+   * @param {HTMLElement} attachmentRow
+   */
+  async previewImageAttachment(attachmentRow) {
+    let loadingToastId;
+    try {
+      const { item, url } = this.getAttachmentContextFromRow(attachmentRow);
+      if (!item) return;
+
+      if (!url || url === '#') return;
+
+      loadingToastId = showToast(`Decrypting attachment...`, 0, 'loading');
+
+      const blob = await this.decryptAttachmentToBlob(item, attachmentRow);
+      if (!blob.type.startsWith('image/')) {
+        hideToast(loadingToastId);
+        return showToast('Not an image attachment', 2000, 'info');
+      }
+
+      // 5. Generate + cache thumbnail
+      const thumbnail = await thumbnailCache.generateThumbnail(blob);
+      await thumbnailCache.save(url, thumbnail, blob.type);
+      this.updateThumbnailInPlace(attachmentRow, thumbnail);
+
+      hideToast(loadingToastId);
+    } catch (err) {
+      console.error('Preview decrypt/thumbnail failed:', err);
+      hideToast(loadingToastId);
+      if (err?.name !== 'AbortError') showToast('Preview failed.', 0, 'error');
+    }
+  }
+
+  /**
+   * Save an image attachment using the existing download/decrypt flow.
+   * @param {HTMLElement} attachmentRow
+   */
+  async saveImageAttachment(attachmentRow) {
+    // Reuse normal attachment download flow (decrypt + download)
+    const { item } = this.getAttachmentContextFromRow(attachmentRow);
+    if (!item) return;
+
+    // Concurent download prevention
+    if (this.attachmentDownloadInProgress) return;
+    this.attachmentDownloadInProgress = true;
+    try {
+      await this.handleAttachmentDownload(item, attachmentRow);
+    } finally {
+      this.attachmentDownloadInProgress = false;
+    }
+  }
+
   /**
    * Handles context menu option selection
    * @param {string} action - The action to perform
@@ -12129,6 +13695,9 @@ console.warn('in send message', txid)
     if (!messageEl) return;
     
     switch (action) {
+      case 'save':
+        void this.saveVoiceMessage(messageEl);
+        break;
       case 'copy':
         this.copyMessageContent(messageEl);
         break;
@@ -12494,7 +14063,8 @@ console.warn('in send message', txid)
           delete myData.wallet.history[txIndex].address;
         }
       }
-      // Remove attachments if any
+      // Remove cached thumbnails for image attachments, then remove attachments
+      this.purgeThumbnail(message.xattach);
       delete message.xattach;
       
       this.appendChatModal();
@@ -12603,6 +14173,15 @@ console.warn('in send message', txid)
       }
 
       showToast('Delete request sent', 3000, 'success');
+      
+      // Best effort delete attachments from server
+      if (message.xattach && Array.isArray(message.xattach)) {
+        this.deleteAttachmentsFromServer(message.xattach);
+      }
+      // Also handle voice messages which have url directly
+      if (message.url && message.type === 'vm') {
+        this.deleteAttachmentsFromServer(message.url);
+      }
       
       // Note: We don't do optimistic UI updates for delete-for-all
       // The message will be deleted when we process the delete tx from the network
@@ -12839,17 +14418,16 @@ console.warn('in send message', txid)
       // Create the Meet URL
       const callUrl = `https://meet.liberdus.com/${randomHex}`;
       
-      // Open immediately only if call is now
-      if (chosenCallTime === 0) {
-        window.open(callUrl+`${callUrlParams}"${myAccount.username}"`, '_blank');
-      }
-      
       // Send a call message to the contact with callTime (0 or future timestamp)
-      await this.sendCallMessage(callUrl, chosenCallTime);
+      const success = await this.sendCallMessage(callUrl, chosenCallTime);
       
-      if (chosenCallTime && chosenCallTime > 0) {
-        const when = new Date(chosenCallTime - timeSkew); // convert back to local wall-clock for display
-        showToast(`Call scheduled for ${when.toLocaleString()}`, 3000, 'success');
+      if (success) {
+        if (chosenCallTime === 0) {
+          window.open(callUrl + `${callUrlParams}"${myAccount.username}"`, '_blank');
+        } else {
+          const when = new Date(chosenCallTime - timeSkew); // convert back to local wall-clock for display
+          showToast(`Call scheduled for ${when.toLocaleString()}`, 3000, 'success');
+        }
       }
       
     } catch (error) {
@@ -12867,25 +14445,25 @@ console.warn('in send message', txid)
     // if user is blocked, don't send message, show toast
     if (myData.contacts[this.address].tollRequiredToSend == 2) {
       showToast('You are blocked by this user', 0, 'error');
-      return;
+      return false;
     }
 
     try {
       // Get current chat data
       const chatsData = myData;
       const currentAddress = this.address;
-      if (!currentAddress) return;
+      if (!currentAddress) return false;
 
       // Check if trying to message self
       if (currentAddress === myAccount.address) {
-        return;
+        return false;
       }
 
       // Get sender's keys from wallet
       const keys = myAccount.keys;
       if (!keys) {
         showToast('Keys not found for sender address', 0, 'error');
-        return;
+        return false;
       }
 
       // Ensure recipient keys are available
@@ -12895,7 +14473,7 @@ console.warn('in send message', txid)
       if (!ok || !recipientPubKey || !pqRecPubKey) {
         console.log(`no public/PQ key found for recipient ${currentAddress}`);
         showToast('Failed to get recipient key', 0, 'error');
-        return;
+        return false;
       }
 
       const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey)
@@ -12936,6 +14514,11 @@ console.warn('in send message', txid)
         senderInfo.phone = myData.account.phone;
         senderInfo.linkedin = myData.account.linkedin;
         senderInfo.x = myData.account.x;
+        // Add avatar info if available
+        if (myData.account.avatarId && myData.account.avatarKey) {
+          senderInfo.avatarId = myData.account.avatarId;
+          senderInfo.avatarKey = myData.account.avatarKey;
+        }
       }
 
       // Always encrypt and send senderInfo
@@ -12988,11 +14571,15 @@ console.warn('in send message', txid)
         console.log('call message failed to send', response);
         updateTransactionStatus(txid, currentAddress, 'failed', 'message');
         this.appendChatModal();
+        return false;
       }
+
+      return true;
       
     } catch (error) {
       console.error('Call message error:', error);
       showToast('Failed to send call invitation. Please try again.', 0, 'error');
+      return false;
     }
   }
 
@@ -13062,6 +14649,11 @@ console.warn('in send message', txid)
       senderInfo.phone = myData.account.phone;
       senderInfo.linkedin = myData.account.linkedin;
       senderInfo.x = myData.account.x;
+      // Add avatar info if available
+        if (myData.account.avatarId && myData.account.avatarKey) {
+          senderInfo.avatarId = myData.account.avatarId;
+          senderInfo.avatarKey = myData.account.avatarKey;
+        }
     }
 
     payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
@@ -13187,9 +14779,7 @@ console.warn('in send message', txid)
       return;
     }
 
-    const voiceUrl = voiceMessageElement.dataset.voiceUrl;
-    const pqEncSharedKey = voiceMessageElement.dataset.pqencsharedkey;
-    const selfKey = voiceMessageElement.dataset.selfkey;
+    const voiceUrl = voiceMessageElement.dataset.url;
     const msgIdx = voiceMessageElement.dataset.msgIdx;
 
     if (!voiceUrl) {
@@ -13200,7 +14790,14 @@ console.warn('in send message', txid)
     try {
       // Check if it's our own message or received message
       const message = myData.contacts[this.address].messages[msgIdx];
+      if (!message) {
+        throw new Error('Message not found');
+      }
       const isMyMessage = message.my;
+      
+      // Get keys from message item (voice messages use audio-specific keys with fallback)
+      const pqEncSharedKey = message.audioPqEncSharedKey || message.pqEncSharedKey;
+      const selfKey = message.audioSelfKey || message.selfKey;
 
       buttonElement.disabled = true;
       
@@ -13349,6 +14946,37 @@ console.warn('in send message', txid)
       console.error('Error playing voice message:', error);
       showToast(`Error playing voice message: ${error.message}`, 0, 'error');
       buttonElement.disabled = false;
+    }
+  }
+
+  /**
+   * Save a voice message by downloading, decrypting, and saving it as a file
+   * Reuses the existing attachment download flow
+   * @param {HTMLElement} messageEl - The message element containing the voice message
+   */
+  async saveVoiceMessage(messageEl) {
+    const voiceEl = messageEl.querySelector('.voice-message');
+    const msgIdx = voiceEl?.dataset?.msgIdx;
+    const item = msgIdx !== undefined ? myData.contacts[this.address]?.messages?.[msgIdx] : null;
+    
+    if (!voiceEl || !item || item.type !== 'vm') {
+      showToast('Voice message not found', 2000, 'error');
+      return;
+    }
+
+    if (this.attachmentDownloadInProgress) return;
+    this.attachmentDownloadInProgress = true;
+
+    try {
+      // Generate filename with timestamp if not already set
+      if (!voiceEl.dataset.name || voiceEl.dataset.name === 'voice-message') {
+        const ts = parseInt(messageEl.dataset.messageTimestamp || Date.now(), 10);
+        voiceEl.dataset.name = `voice-message-${new Date(ts).toISOString().replace(/[:.]/g, '-').slice(0, -5)}.webm`;
+      }
+      
+      await this.handleAttachmentDownload(item, voiceEl);
+    } finally {
+      this.attachmentDownloadInProgress = false;
     }
   }
 
@@ -14027,21 +15655,41 @@ class FailedMessageMenu {
 
     // Voice message retry: resend the same voice message (no re-upload)
     if (voiceEl) {
-      const voiceUrl = voiceEl.dataset.voiceUrl || '';
+      const voiceUrl = voiceEl.dataset.url || '';
       const duration = Number(voiceEl.dataset.duration || 0);
-      const pqEncSharedKeyB64 = voiceEl.dataset.pqencsharedkey || '';
-      const selfKey = voiceEl.dataset.selfkey || '';
 
-      if (!txid || !voiceUrl || !duration || !pqEncSharedKeyB64 || !selfKey) {
+      if (!txid || !voiceUrl || !duration) {
         console.error('Error preparing voice message retry: Necessary elements or data missing.');
+        return;
+      }
+
+      // Get message item to retrieve encryption keys
+      const contact = myData.contacts[chatModal.address];
+      if (!contact || !Array.isArray(contact.messages)) {
+        console.error('Error preparing voice message retry: Contact/messages not found.');
+        return;
+      }
+      const messageIndex = contact.messages.findIndex(msg => msg.txid === txid);
+      
+      if (messageIndex < 0) {
+        console.error('Error preparing voice message retry: Message not found.');
+        return;
+      }
+
+      const message = contact.messages[messageIndex];
+      const pqEncSharedKey = message.audioPqEncSharedKey || message.pqEncSharedKey;
+      const selfKey = message.audioSelfKey || message.selfKey;
+
+      if (!pqEncSharedKey || !selfKey) {
+        console.error('Error preparing voice message retry: Encryption keys not found.');
         return;
       }
 
       try {
         chatModal.retryOfTxId.value = txid;
-        const pqEncSharedKey = base642bin(pqEncSharedKeyB64);
+        const pqEncSharedKeyBin = base642bin(pqEncSharedKey);
         void chatModal
-          .sendVoiceMessageTx(voiceUrl, duration, pqEncSharedKey, selfKey)
+          .sendVoiceMessageTx(voiceUrl, duration, pqEncSharedKeyBin, selfKey)
           .catch((err) => {
             console.error('Voice message retry failed:', err);
             showToast('Failed to retry voice message', 0, 'error');
@@ -18080,31 +19728,49 @@ class ReactNativeApp {
           }
 
           if (data.type === 'ALL_NOTIFICATIONS_IN_PANEL') {
+            // Clear notifications for current user when app returns from background
+            const currentUserAddress = myAccount?.keys?.address;
+            if (currentUserAddress) {
+              this.clearNotificationAddress(currentUserAddress);
+              this.sendClearNotifications(currentUserAddress);
+            }
+            
             if (data.notifications && Array.isArray(data.notifications) && data.notifications.length > 0) {
               const { state } = this.getNotificationState();
               const currentTimestamp = state.timestamp || 0;
               let highestTimestamp = currentTimestamp;
+              const normalizedCurrentUser = currentUserAddress ? normalizeAddress(currentUserAddress) : null;
 
               data.notifications.forEach((notification, index) => {
                 try {
                   const rawTimestamp = notification?.data?.timestamp;
                   const parsedTimestamp = rawTimestamp ? Date.parse(rawTimestamp) : NaN;
                   const hasValidTimestamp = Number.isFinite(parsedTimestamp);
-                  const isNewerThanStored = !hasValidTimestamp || parsedTimestamp > currentTimestamp;
-
-                  if (!isNewerThanStored) {
-                    return;
+                  // Skip already-processed notifications if they are older than the current timestamp
+                  if (hasValidTimestamp && parsedTimestamp <= currentTimestamp) {
+                    return; // Skip already-processed notifications
                   }
 
-                  // Extract address from notification body text
+                  // Handle scheduled call notifications - extract address from data.to
+                  if (notification?.data?.type === 'SCHEDULE_CALL' && notification?.data?.to) {
+                    const normalizedToAddress = normalizeAddress(notification.data.to);
+                    // Save notification address to show bell in sign-in modal for accounts with notifications
+                    if (normalizedToAddress !== normalizedCurrentUser) {
+                      this.saveNotificationAddress(normalizedToAddress);
+                    }
+                  } else {
+                  // Extract address from notification body (pattern: "to 0x...")
                   if (notification?.body && typeof notification.body === 'string') {
-                    // Look for pattern "to 0x..." in the body
-                    // expecting to just return one address
                     const addressMatch = notification.body.match(/to\s+(\S+)/);
                     if (addressMatch && addressMatch[1]) {
                       const normalizedToAddress = normalizeAddress(addressMatch[1]);
-                      this.saveNotificationAddress(normalizedToAddress);
+                      
+                      // Save notification address to show bell in sign-in modal for accounts with notifications
+                      if (normalizedToAddress !== normalizedCurrentUser) {
+                        this.saveNotificationAddress(normalizedToAddress);
+                      }
                     }
+                  }
                   }
 
                   if (hasValidTimestamp) {
@@ -18309,6 +19975,15 @@ class ReactNativeApp {
   saveNotificationAddress(contactAddress) {
     if (!contactAddress || typeof contactAddress !== 'string') return;
     
+    // Don't save the current user's own address if they're already signed in
+    // Notification storage is only for prioritizing accounts in the sign-in modal when user is NOT signed in
+    // When user is signed in, they can see notifications in the wallet/chats UI, so no need to store it
+    if (this.isCurrentAccount(contactAddress)) {
+      // Also clear it if it already exists in storage (cleanup for cases where it was saved before this fix)
+      this.clearNotificationAddress(contactAddress);
+      return;
+    }
+    
     try {
       const { storage, netid, state } = this.getNotificationState();
       if (!netid) return;
@@ -18357,6 +20032,7 @@ class ReactNativeApp {
   }
 
   // Send clear notifications message
+  // NOTE: This only clears native app badge notifications, NOT UI notification dots
   sendClearNotifications(address=null) {
     this.postMessage({
       type: 'CLEAR_NOTI',
@@ -18575,11 +20251,12 @@ class ReactNativeApp {
     });
   }
 
-  sendScheduledCall(username, timestamp){
+  sendScheduledCall(username, timestamp, address){
     this.postMessage({
       type: 'SCHEDULE_CALL',
       username,
-      timestamp
+      timestamp,
+      address
     });
   }
   
@@ -18833,10 +20510,16 @@ async function checkPendingTransactions() {
             }
           } else if (type === 'update_toll_required') {
             showToast(`Update contact status failed: ${failureReason}. Reverting contact to old status.`, 0, 'error');
+            const currentFriendStatus = Number(myData.contacts?.[pendingTxInfo.to]?.friend);
+            const previousFriendStatus = Number(myData.contacts?.[pendingTxInfo.to]?.friendOld);
             // revert the local myData.contacts[toAddress].friend to the old value
             myData.contacts[pendingTxInfo.to].friend = myData.contacts[pendingTxInfo.to].friendOld;
             // update contact list since friend status was reverted
-            contactsScreen.updateContactsList();
+            await contactsScreen.updateContactsList();
+            // Only refresh chats list if the revert enters or exits "blocked"
+            if (currentFriendStatus === 0 || previousFriendStatus === 0) {
+              await chatsScreen.updateChatList();
+            }
           } else if (type === 'read') {
             showToast(`Read transaction failed: ${failureReason}`, 0, 'error');
             // revert the local myData.contacts[toAddress].timestamp to the old value
@@ -19126,6 +20809,12 @@ function cleanSenderInfo(si) {
   if (si.x) {
     csi.x = normalizeXTwitterUsername(si.x)
   }
+  if (si.avatarId) {
+    csi.avatarId = si.avatarId
+  }
+  if (si.avatarKey) {
+    csi.avatarKey = si.avatarKey
+  }
   return csi;
 }
 
@@ -19255,6 +20944,26 @@ function isFaucetAddress(address) {
 
 function isMobile() {
   return /Android|webOS|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+/**
+ * Detect if the user is on an Android-like mobile device (excludes iOS)
+ * @returns {boolean}
+ */
+function isAndroidLikeMobileUA() {
+  return /Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+/**
+ * Detect if the user is on an iOS device (iPhone or iPad)
+ * @returns {boolean}
+ */
+function isIOS() {
+  const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+  // Check for iOS devices in user agent, or iPadOS 13+ (reports as Mac with touch)
+  const isIOSDevice = /iPad|iPhone|iPod/.test(userAgent);
+  const isIPadOS = /Macintosh/.test(userAgent) && navigator.maxTouchPoints > 1;
+  return isIOSDevice || isIPadOS;
 }
 
 function enterFullscreen() {
@@ -19692,6 +21401,122 @@ class ContactAvatarCache {
       };
     });
   }
+
+  /**
+   * Export all avatars as an object with base64-encoded data
+   * @returns {Promise<Object>} Object mapping address to { data: base64, type: mimeType }
+   */
+  async exportAll() {
+    if (!this.db) {
+      await this.init();
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const request = store.getAll();
+
+      request.onsuccess = async () => {
+        const results = request.result;
+        const avatars = {};
+
+        for (const item of results) {
+          if (item.address && item.avatar) {
+            try {
+              // Convert blob to base64
+              const base64 = await this.blobToBase64(item.avatar);
+              avatars[item.address] = {
+                data: base64,
+                type: item.avatar.type || 'image/jpeg'
+              };
+            } catch (e) {
+              console.warn(`Failed to export avatar for ${item.address}:`, e);
+            }
+          }
+        }
+
+        resolve(avatars);
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to export avatars:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Import avatars from exported data
+   * @param {Object} avatarsData - Object mapping address to { data: base64, type: mimeType }
+   * @param {boolean} overwrite - Whether to overwrite existing avatars
+   * @returns {Promise<number>} Number of avatars imported
+   */
+  async importAll(avatarsData, overwrite = false) {
+    if (!this.db) {
+      await this.init();
+    }
+
+    if (!avatarsData || typeof avatarsData !== 'object') {
+      return 0;
+    }
+
+    let importedCount = 0;
+
+    for (const [address, avatarInfo] of Object.entries(avatarsData)) {
+      if (!avatarInfo || !avatarInfo.data) continue;
+
+      try {
+        // Check if avatar already exists
+        if (!overwrite) {
+          const existing = await this.get(address);
+          if (existing) continue;
+        }
+
+        // Convert base64 back to blob
+        const blob = this.base64ToBlob(avatarInfo.data, avatarInfo.type || 'image/jpeg');
+        await this.save(address, blob);
+        importedCount++;
+      } catch (e) {
+        console.warn(`Failed to import avatar for ${address}:`, e);
+      }
+    }
+
+    return importedCount;
+  }
+
+  /**
+   * Convert a Blob to base64 string
+   * @param {Blob} blob - The blob to convert
+   * @returns {Promise<string>} Base64 encoded string
+   */
+  blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // Remove the data URL prefix (e.g., "data:image/jpeg;base64,")
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /**
+   * Convert a base64 string back to Blob
+   * @param {string} base64 - Base64 encoded string
+   * @param {string} mimeType - MIME type of the blob
+   * @returns {Blob} The resulting blob
+   */
+  base64ToBlob(base64, mimeType = 'image/jpeg') {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+  }
 }
 
 /**
@@ -19963,6 +21788,148 @@ class ThumbnailCache {
       };
     });
   }
+
+  /**
+   * Delete a cached thumbnail from IndexedDB
+   * @param {string} attachmentUrl - The attachment URL (key)
+   * @returns {Promise<void>}
+   */
+  async delete(attachmentUrl) {
+    if (!attachmentUrl) return;
+    if (!this.db) {
+      await this.init();
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      const request = store.delete(attachmentUrl);
+
+      request.onsuccess = () => resolve();
+
+      request.onerror = () => {
+        console.warn('Failed to delete thumbnail:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Export all thumbnails as an object with base64-encoded data
+   * @returns {Promise<Object>} Object mapping url to { data: base64, type: mimeType, originalType: string }
+   */
+  async exportAll() {
+    if (!this.db) {
+      await this.init();
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction([this.storeName], 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const request = store.getAll();
+
+      request.onsuccess = async () => {
+        const results = request.result;
+        const thumbnails = {};
+
+        for (const item of results) {
+          if (item.url && item.thumbnail) {
+            try {
+              // Convert blob to base64
+              const base64 = await this.blobToBase64(item.thumbnail);
+              thumbnails[item.url] = {
+                data: base64,
+                type: item.thumbnail.type || 'image/jpeg',
+                originalType: item.originalType || 'image/jpeg'
+              };
+            } catch (e) {
+              console.warn(`Failed to export thumbnail for ${item.url}:`, e);
+            }
+          }
+        }
+
+        resolve(thumbnails);
+      };
+
+      request.onerror = () => {
+        console.warn('Failed to export thumbnails:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Import thumbnails from exported data
+   * @param {Object} thumbnailsData - Object mapping url to { data: base64, type: mimeType, originalType: string }
+   * @param {boolean} overwrite - Whether to overwrite existing thumbnails
+   * @returns {Promise<number>} Number of thumbnails imported
+   */
+  async importAll(thumbnailsData, overwrite = false) {
+    if (!this.db) {
+      await this.init();
+    }
+
+    if (!thumbnailsData || typeof thumbnailsData !== 'object') {
+      return 0;
+    }
+
+    let importedCount = 0;
+
+    for (const [url, thumbInfo] of Object.entries(thumbnailsData)) {
+      if (!thumbInfo || !thumbInfo.data) continue;
+
+      try {
+        // Check if thumbnail already exists
+        if (!overwrite) {
+          const existing = await this.get(url);
+          if (existing) continue;
+        }
+
+        // Convert base64 back to blob
+        const blob = this.base64ToBlob(thumbInfo.data, thumbInfo.type || 'image/jpeg');
+        await this.save(url, blob, thumbInfo.originalType || thumbInfo.type || 'image/jpeg');
+        importedCount++;
+      } catch (e) {
+        console.warn(`Failed to import thumbnail for ${url}:`, e);
+      }
+    }
+
+    return importedCount;
+  }
+
+  /**
+   * Convert a Blob to base64 string
+   * @param {Blob} blob - The blob to convert
+   * @returns {Promise<string>} Base64 encoded string
+   */
+  blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // Remove the data URL prefix (e.g., "data:image/jpeg;base64,")
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /**
+   * Convert a base64 string back to Blob
+   * @param {string} base64 - Base64 encoded string
+   * @param {string} mimeType - MIME type of the blob
+   * @returns {Blob} The resulting blob
+   */
+  base64ToBlob(base64, mimeType = 'image/jpeg') {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+  }
 }
 
 // Create caches instances
@@ -19989,10 +21956,10 @@ async function getContactAvatarHtml(contactOrAddress, size = 50) {
     try {
       const blobUrl = await contactAvatarCache.getBlobUrl(address);
       if (blobUrl) {
-        return `<img src="${blobUrl}" class="contact-avatar-img" width="${size}" height="${size}" alt="">`;
+        return `<img src="${blobUrl}" class="contact-avatar-img" width="${size}" height="${size}" alt="avatar">`;
       }
     } catch (err) {
-      console.warn('Failed to load contact avatar, falling back to identicon:', err);
+      console.warn('Failed to load avatar, falling back to identicon:', err);
     }
   }
 
@@ -20001,6 +21968,62 @@ async function getContactAvatarHtml(contactOrAddress, size = 50) {
   }
 
   return generateIdenticon('', size);
+}
+
+/**
+ * Encrypt a blob using ChaCha20-Poly1305 via Web Worker
+ * @param {Blob} blob - The blob to encrypt
+ * @param {Uint8Array} key - The encryption key
+ * @returns {Promise<Blob>} The encrypted blob
+ */
+async function encryptBlob(blob, key) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker('encryption.worker.js', { type: 'module' });
+    worker.postMessage({ action: 'encryptBlob', blob, key });
+    worker.onmessage = (e) => {
+      if (e.data.error) {
+        reject(new Error(e.data.error));
+      } else {
+        resolve(e.data.blob);
+      }
+      worker.terminate();
+    };
+    worker.onerror = (error) => {
+      reject(error);
+      worker.terminate();
+    };
+  });
+}
+
+/**
+ * Download and decrypt an avatar from the attachment server
+ * @param {string} url - The download URL
+ * @param {string} key - The decryption key (base64)
+ * @returns {Promise<Blob>} The decrypted avatar blob
+ */
+async function downloadAndDecryptAvatar(url, key) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to download avatar: ${response.status}`);
+    }
+    // Download bytes, convert to base64 (encryptChacha/ decryptChacha use base64 strings)
+    const cipherBin = new Uint8Array(await response.arrayBuffer());
+    const cipherB64 = bin2base64(cipherBin);
+
+    // key is stored as base64 in account; convert to binary key for decryptChacha
+    const keyBin = base642bin(key);
+
+    // decryptChacha expects (keyUint8Array, cipherBase64) and returns plaintext base64
+    const plainB64 = decryptChacha(keyBin, cipherB64);
+    if (!plainB64) throw new Error('decryptChacha returned null');
+
+    const clearBin = base642bin(plainB64);
+    return new Blob([clearBin], { type: 'image/jpeg' });
+  } catch (error) {
+    console.warn('Error downloading/decrypting avatar:', error);
+    throw error;
+  }
 }
 
 function getStabilityFactor() {

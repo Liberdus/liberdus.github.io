@@ -290,6 +290,7 @@
             <li class="menu-item" id="openAccountForm" data-icon="user">Profile</li>
             <li class="menu-item" id="openToll" data-icon="dollar-sign">Toll</li>
             <li class="menu-item" id="openLockModal" data-icon="lock">Lock</li>
+            <li class="menu-item" id="openSecretModal" data-icon="key">Secret</li>
             <li class="menu-item" id="openBackupForm" data-icon="download">Backup</li>
             <li class="menu-item" id="openRemoveAccount" data-icon="trash-2">Remove</li>
             <li class="menu-item" id="openLaunchUrl" data-icon="launch" style="display: none;">Launch</li>
@@ -798,11 +799,29 @@
           <div class="form-container">
             <form id="importForm" class="form--narrow">
               <div class="form-group">
+                <label for="restoreSourceLocation">Source Location</label>
+                <select id="restoreSourceLocation" class="form-control">
+                  <option value="local" selected>Local</option>
+                  <option value="google-drive">Google Drive</option>
+                </select>
+              </div>
+              <div class="form-group" id="localFileGroup">
                 <label for="importFile">Select File</label>
-                <input type="file" id="importFile" class="form-control" required accept=".json,application/json" />
+                <input type="file" id="importFile" class="form-control" accept=".json,application/json" />
+              </div>
+              <div class="form-group" id="googleDriveFileGroup" style="display: none;">
+                <label>Google Drive File</label>
+                <button type="button" id="pickGoogleDriveFile" class="btn btn--secondary btn--pill btn--full">Pick File from Google Drive</button>
+                <div id="selectedGoogleDriveFile" class="u-mt-5" style="display: none;">
+                  <span class="selected-file-name"></span>
+                  <button type="button" id="clearGoogleDriveFile" class="btn btn--text">Clear</button>
+                </div>
               </div>
               <div class="form-group">
-                <label for="importPassword">Password (if encrypted)</label>
+                <label for="importPassword">
+                  Password
+                  <span id="importPasswordRequired" style="color: var(--danger-color); display: none;">required</span>
+                </label>
                 <input
                   type="password"
                   id="importPassword"
@@ -827,7 +846,7 @@
                 />
               </div>
               <div class="form-actions">
-                <button type="submit" class="btn btn--primary btn--pill btn--full">Load Account</button>
+                <button type="submit" id="restoreSubmitButton" class="btn btn--primary btn--pill btn--full" disabled>Load Account</button>
               </div>
               <div class="form-group">
                 <label>
@@ -856,6 +875,31 @@
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Google Drive File Picker Modal -->
+      <div class="modal fixed-header" id="googleDrivePickerModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeGoogleDrivePicker"></button>
+          <div class="modal-title">Select Backup File</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <div id="googleDrivePickerLoading" class="empty-state">
+              <div></div>
+              <div>Loading files...</div>
+            </div>
+            <ul class="chat-list" id="googleDriveFileList" style="display: none;">
+              <!-- Files will be populated here -->
+            </ul>
+            <div id="googleDrivePickerEmpty" class="empty-state" style="display: none;">
+              <div></div>
+              <div>No Backup Files Found</div>
+              <div>No backup files were found in your Liberdus Backups folder</div>
+            </div>
           </div>
         </div>
         <a class="last-item" href="#"> </a>
@@ -987,20 +1031,22 @@
                 <span class="toll-value" id="tollValue"></span>
                 <span class="toll-info-icon" data-icon="info"></span>
               </div>
+              <button class="icon-button voice-record-button" id="voiceRecordButton" aria-label="Record voice message"></button>
+              <button class="send-button" id="handleSendMessage">
+                <svg viewBox="0 0 24 24">
+                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                </svg>
+              </button>
             </div>
             <input type="hidden" id="retryOfTxId" />
             <input type="hidden" id="editOfTxId" />
             <input type="hidden" id="replyToTxId" />
             <input type="hidden" id="replyToMessage" />
             <input type="hidden" id="replyOwnerIsMine" />
-            <!-- Add hidden file input for chat attachments -->
+            <!-- Add hidden file inputs for chat attachments -->
             <input type="file" id="chatFileInput" style="display:none;">
-            <button class="icon-button voice-record-button" id="voiceRecordButton" aria-label="Record voice message"></button>
-            <button class="send-button" id="handleSendMessage">
-              <svg viewBox="0 0 24 24">
-                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-              </svg>
-            </button>
+            <input type="file" id="chatPhotoLibraryInput" accept="image/*" style="display:none;">
+            <input type="file" id="chatFilesInput" style="display:none;">
           </div>
         </div>
         <a class="last-item" href="#"> </a>
@@ -1117,6 +1163,11 @@
 
       <!-- Message Context Menu -->
       <div class="message-context-menu" id="messageContextMenu" style="display: none;">
+        <!-- Voice message specific action: Save -->
+        <div class="context-menu-option" data-action="save" data-icon="download" style="display: none;">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Save</span>
+        </div>
         <div class="context-menu-option" data-action="reply" data-icon="reply">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Reply</span>
@@ -1154,6 +1205,63 @@
           <span class="context-menu-text">Delete for all</span>
         </div>
         <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Image Attachment Context Menu -->
+      <div class="message-context-menu" id="imageAttachmentContextMenu" style="display: none;">
+        <div class="context-menu-option" data-action="preview" data-icon="download" style="display: none;">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Preview</span>
+        </div>
+        <div class="context-menu-option" data-action="save" data-icon="download">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Save</span>
+        </div>
+        <div class="context-menu-option" data-action="reply" data-icon="reply">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Reply</span>
+        </div>
+        <div class="context-menu-option" data-action="copy" data-icon="copy" style="display: none;">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Copy</span>
+        </div>
+        <div class="context-menu-option" data-action="delete" data-icon="delete">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Delete for me</span>
+        </div>
+        <div class="context-menu-option" data-action="delete-for-all" data-icon="delete" style="display: none;">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Delete for all</span>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Attachment Options Context Menu -->
+      <div class="message-context-menu" id="attachmentOptionsContextMenu" style="display: none;">
+        <div class="context-menu-option" data-action="camera" data-icon="camera">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Camera</span>
+        </div>
+        <div class="context-menu-option" data-action="photo-library" data-icon="image">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Photo Library</span>
+        </div>
+        <div class="context-menu-option" data-action="files" data-icon="file">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Files</span>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Camera Capture Modal -->
+      <div class="camera-capture-overlay" id="cameraCaptureOverlay" style="display: none;" role="dialog" aria-modal="true" aria-label="Camera" tabindex="-1">
+        <div class="camera-capture-dialog" id="cameraCaptureDialog">
+          <video class="camera-capture-video" id="cameraCaptureVideo" playsinline muted autoplay></video>
+          <div class="camera-capture-controls">
+            <button type="button" class="btn btn--secondary btn--pill" id="cameraCancelButton" aria-label="Cancel camera">Cancel</button>
+            <button type="button" class="btn btn--primary btn--pill" id="cameraCaptureButton" aria-label="Capture photo">Capture</button>
+          </div>
+        </div>
       </div>
 
       <!-- Call Invite Modal -->
@@ -1687,6 +1795,46 @@
             <div id="removeAccountsList" class="account-list"></div>
             <button type="button" id="submitRemoveAccounts" class="btn btn--primary btn--pill btn--full" disabled>Remove Selected</button>
             <button type="button" id="removeAllAccountsButton" class="btn btn--danger btn--pill btn--full">Remove All Accounts</button>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Secret Modal -->
+      <div class="modal fixed-header" id="secretModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeSecretModal"></button>
+          <div class="modal-title">Secret Key</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <div class="form-group">
+              <p>
+                <strong>Warning:</strong> Keep your secret key private. Anyone with access to it can control your account.
+              </p>
+              <button id="showSecretButton" class="btn btn--primary btn--pill btn--full">Show</button>
+            </div>
+            <div id="secretContent">
+              <div class="form-group">
+                <label for="secretHexDisplay">Secret Key (Hex)</label>
+                <div>
+                  <div
+                    id="secretHexDisplay"
+                    class="form-control"
+                  ></div>
+                  <button
+                    type="button"
+                    id="copySecretButton"
+                    class="icon-button"
+                    title="Copy to Clipboard"
+                  ></button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>QR Code</label>
+                <div id="secretQRCode"></div>
+              </div>
+            </div>
           </div>
         </div>
         <a class="last-item" href="#"> </a>
