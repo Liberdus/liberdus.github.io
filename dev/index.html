@@ -714,10 +714,25 @@
               <div class="contact-avatar-section">
                 <div class="avatar" id="myInfoAvatar"></div>
                 <div class="name" id="myInfoDisplayName"></div>
-                <div class="subtitle" id="myInfoDisplayUsername"></div>
                 <div id="myInfoQR" class="myinfo-qr"></div>
               </div>
               <!-- My info fields -->
+              <div class="contact-info-item" style="display: block;">
+                <div class="contact-info-label">Address</div>
+                <div class="contact-info-value">
+                  <div class="address-container">
+                    <div
+                      id="myInfoDisplayUsername"
+                      class="form-control address-display"
+                    ></div>
+                    <button
+                      id="myInfoCopyAddress"
+                      class="icon-button address-copy-button"
+                      aria-label="Copy address"
+                    ></button>
+                  </div>
+                </div>
+              </div>
               <div class="contact-info-item" style="display: none">
                 <div class="contact-info-label">Name</div>
                   <div class="contact-info-value" id="myInfoName"></div>
@@ -1209,7 +1224,7 @@
 
       <!-- Image Attachment Context Menu -->
       <div class="message-context-menu" id="imageAttachmentContextMenu" style="display: none;">
-        <div class="context-menu-option" data-action="preview" data-icon="download" style="display: none;">
+        <div class="context-menu-option" data-action="preview" data-icon="eye" style="display: none;">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Preview</span>
         </div>
@@ -1451,6 +1466,27 @@
               <button class="btn btn--primary" id="avatarEditSaveButton" style="display: none;">Save</button>
               <button class="btn btn--secondary btn--danger" id="avatarEditCancelButton" style="display: none;">Cancel</button>
             </div>
+            <!-- Avatar selection options: contact-sent, mine (local), identicon -->
+            <div class="avatar-options" id="avatarOptionsContainer">
+              <div class="avatar-options-label">Choose avatar to use:</div>
+              <div class="avatar-options-list">
+                <div class="avatar-option" data-value="mine" id="avatarOptionUploaded">
+                  <div class="avatar-thumb" id="avatarThumbUploaded"></div>
+                  <div class="avatar-option-label">Mine</div>
+                </div>
+                <div class="avatar-option" data-value="contact" id="avatarOptionContact">
+                  <div class="avatar-thumb" id="avatarThumbContact"></div>
+                  <div class="avatar-option-label">Contact</div>
+                </div>
+                <div class="avatar-option" data-value="identicon" id="avatarOptionIdenticon">
+                  <div class="avatar-thumb" id="avatarThumbIdenticon"></div>
+                  <div class="avatar-option-label">Identicon</div>
+                </div>
+              </div>
+            </div>
+            <div class="avatar-options-actions" id="avatarOptionsActions">
+              <button class="btn btn--primary" id="avatarUseButton" disabled>Use</button>
+            </div>
           </div>
         </div>
         <a class="last-item" href="#"> </a>
@@ -1512,24 +1548,14 @@
           <div class="form-container">
             <div class="form-group">
               <label>Your Address</label>
-              <div style="display: flex; align-items: flex-start; gap: 0.5rem">
+              <div class="address-container">
                 <div
                   id="displayAddress"
-                  class="form-control"
-                  style="
-                    flex: 1;
-                    font-size: 0.875rem;
-                    padding: 8px 12px;
-                    word-break: break-all;
-                    line-height: 1.4;
-                    background-color: #f8f9fa;
-                    cursor: default;
-                  "
+                  class="form-control address-display"
                 ></div>
                 <button
                   id="copyAddress"
-                  class="icon-button"
-                  style="color: #007bff; margin-top: 4px; flex-shrink: 0"
+                  class="icon-button address-copy-button"
                 ></button>
               </div>
               <div id="qrcode"></div>
