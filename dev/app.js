@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'e'
+const version = 'f'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -91,6 +91,7 @@ import {
   passwordToKey,
   dhkeyCombined,
   decryptChacha,
+  generateUUIDv4,
 } from './crypto.js';
 
 // Put standalone conversion function in lib.js
@@ -2817,6 +2818,8 @@ class ContactInfoModal {
     this.avatarEditButton = document.createElement('button');
     this.avatarEditButton.className = 'icon-button edit-icon avatar-edit-button avatar-edit-button-outside';
     this.avatarEditButton.setAttribute('aria-label', 'Edit photo');
+    this.notesElement = document.getElementById('contactInfoNotes');
+    this.notesEditButton = document.getElementById('notesEditButton');
 
     // Back button
     this.backButton.addEventListener('click', () => this.close());
@@ -2849,6 +2852,12 @@ class ContactInfoModal {
     this.avatarEditButton.addEventListener('click', (e) => {
       e.stopPropagation(); // Prevent triggering avatar click
       this.openAvatarEdit();
+    });
+
+    // Notes edit button
+    this.notesEditButton.addEventListener('click', (e) => {
+      e.stopPropagation();
+      editContactModal.open();
     });
 
     // Make the avatar itself clickable
@@ -2922,6 +2931,10 @@ class ContactInfoModal {
         element.textContent = value;
       }
     });
+
+    // Notes
+    const notesRaw = displayInfo.notes ?? (displayInfo.address && myData.contacts?.[displayInfo.address]?.notes);
+    this.notesElement.textContent = notesRaw || 'Not Entered';
   }
 
   // Set up chat button functionality
@@ -3243,15 +3256,20 @@ class EditContactModal {
   load() {
     this.modal = document.getElementById('editContactModal');
     this.nameInput = document.getElementById('editContactNameInput');
-    this.nameActionButton = this.nameInput.parentElement.querySelector('.field-action-button');
+    this.nameClearButton = document.getElementById('nameClearButton');
     this.providedNameContainer = document.getElementById('editContactProvidedNameContainer');
+    this.notesInput = document.getElementById('editContactNotesInput');
+    this.notesClearButton = document.getElementById('notesClearButton');
+    this.saveButton = document.getElementById('saveEditContactButton');
     this.backButton = document.getElementById('closeEditContactModal');
 
     // Setup event listeners
     this.nameInput.addEventListener('input', (e) => this.handleNameInput(e));
     this.nameInput.addEventListener('blur', () => this.handleNameBlur());
     this.nameInput.addEventListener('keydown', (e) => this.handleNameKeydown(e));
-    this.nameActionButton.addEventListener('click', () => this.handleNameButton());
+    this.nameClearButton.addEventListener('click', () => this.handleNameClear());
+    this.notesClearButton.addEventListener('click', () => this.handleNotesClear());
+    this.saveButton.addEventListener('click', () => this.handleSave());
     this.providedNameContainer.addEventListener('click', () => this.handleProvidedNameClick());
     this.backButton.addEventListener('click', () => this.close());
   }
@@ -3292,8 +3310,6 @@ class EditContactModal {
     // Set up the input field with the original name
     this.nameInput.value = originalName;
 
-    // field-action-button should be clear
-    this.nameActionButton.className = 'field-action-button clear';
 
     // Get the current contact info from the contact info modal
     this.currentContactAddress = contactInfoModal.currentContactAddress;
@@ -3301,6 +3317,10 @@ class EditContactModal {
       console.error('No current contact found');
       return;
     }
+
+    // Populate notes field
+    const contactNotes = myData.contacts[this.currentContactAddress]?.notes || '';
+    this.notesInput.value = contactNotes;
 
     // Show the edit contact modal
     this.modal.classList.add('active');
@@ -3343,14 +3363,6 @@ class EditContactModal {
     // normalize the input using normalizeName
     const normalizedName = normalizeName(this.nameInput.value);
     this.nameInput.value = normalizedName;
-
-    // if already 'add' class, return early
-    if (this.nameActionButton.classList.contains('add')) {
-      return;
-    }
-
-    this.nameActionButton.className = 'field-action-button add';
-    this.nameActionButton.setAttribute('aria-label', 'Save');
   }
 
   handleNameBlur() {
@@ -3359,16 +3371,16 @@ class EditContactModal {
     this.nameInput.value = normalizedName;
   }
 
-  handleNameButton() {
-    if (this.nameActionButton.classList.contains('clear')) {
-      this.nameInput.value = '';
-      // Always show save button after clearing
-      this.nameActionButton.className = 'field-action-button add';
-      this.nameActionButton.setAttribute('aria-label', 'Save');
-      this.nameInput.focus();
-    } else {
-      this.handleSave();
-    }
+  handleNameClear() {
+    // Clear the name field
+    this.nameInput.value = '';
+    this.nameInput.focus();
+  }
+
+  handleNotesClear() {
+    // Clear the notes field
+    this.notesInput.value = '';
+    this.notesInput.focus();
   }
 
   handleNameKeydown(e) {
@@ -3381,15 +3393,17 @@ class EditContactModal {
   handleSave() {
     // Save changes - if input is empty/spaces, it will become undefined
     const newName = this.nameInput.value.trim() || null;
+    const newNotes = this.notesInput.value.trim() || null;
     const contact = myData.contacts[this.currentContactAddress];
     if (contact) {
       contact.name = newName;
+      contact.notes = newNotes;
       contactInfoModal.needsContactListUpdate = true;
     }
 
     // update title if chatModal is open and if contact.name is '' fallback to contact.username
     if (chatModal.isActive() && chatModal.address === this.currentContactAddress) {
-      chatModal.modalTitle.textContent = getContactDisplayName(contact);
+      chatModal.setTitleWithChevron(getContactDisplayName(contact));
     }
 
     // Safely update the contact info modal if it exists and is open
@@ -7591,7 +7605,7 @@ class BackupAccountModal {
    *          Resolves with token data on success; rejects with Error on cancel/deny/timeout/error.
    */
   async startGoogleDriveAuth() {
-    const sessionId = crypto.randomUUID();
+    const sessionId = generateUUIDv4();
     const url = this.buildOAuthServerUrl(sessionId);
     const isReactNative = reactNativeApp.isReactNativeWebView;
     
@@ -10930,9 +10944,8 @@ class ChatModal {
     this.cancelEditButton = document.getElementById('cancelEditButton');
     this.modalAvatar = this.modal.querySelector('.modal-avatar');
     this.modalTitle = this.modal.querySelector('.modal-title');
-    this.editButton = document.getElementById('chatEditButton');
-    this.callButton = document.getElementById('chatCallButton');
-    this.sendMoneyButton = document.getElementById('chatSendMoneyButton');
+    this.headerMenuButton = document.getElementById('chatHeaderMenuButton');
+    this.headerContextMenu = document.getElementById('chatHeaderContextMenu');
     this.retryOfTxId = document.getElementById('retryOfTxId');
     this.messageInput = document.querySelector('.message-input');
     this.replyPreview = document.getElementById('replyPreview');
@@ -10942,7 +10955,6 @@ class ChatModal {
     this.replyToTxId = document.getElementById('replyToTxId');
     this.replyToMessage = document.getElementById('replyToMessage');
     this.replyOwnerIsMine = document.getElementById('replyOwnerIsMine');
-    this.chatSendMoneyButton = document.getElementById('chatSendMoneyButton');
     this.messageByteCounter = document.querySelector('.message-byte-counter');
     this.tollTemplate = document.getElementById('tollInfoMessageTemplate');
     this.messagesContainer = document.querySelector('.messages-container');
@@ -11028,6 +11040,9 @@ class ChatModal {
       if (this.attachmentOptionsContextMenu && !this.attachmentOptionsContextMenu.contains(e.target) && !this.addAttachmentButton.contains(e.target)) {
         this.closeAttachmentOptionsContextMenu();
       }
+      if (this.headerContextMenu && !this.headerContextMenu.contains(e.target) && this.headerMenuButton && !this.headerMenuButton.contains(e.target)) {
+        this.closeHeaderContextMenu();
+      }
     });
     this.sendButton.addEventListener('click', this.handleSendMessage.bind(this));
     this.cancelEditButton.addEventListener('click', () => this.cancelEdit());
@@ -11104,16 +11119,22 @@ class ChatModal {
       this.unlockBackgroundScroll();
     });
 
-    this.chatSendMoneyButton.addEventListener('click', () => {
-      this.pauseVoiceMessages();
-      sendAssetFormModal.username = this.chatSendMoneyButton.dataset.username;
-      sendAssetFormModal.open();
-    });
+    // Header context menu handlers
+    if (this.headerMenuButton) {
+      this.headerMenuButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.showHeaderContextMenu(e);
+      });
+    }
 
-    this.callButton.addEventListener('click', () => {
-      this.pauseVoiceMessages();
-      this.handleCallUser();
-    });
+    if (this.headerContextMenu) {
+      this.headerContextMenu.addEventListener('click', (e) => {
+        const option = e.target.closest('.context-menu-option');
+        if (!option) return;
+        const action = option.dataset.action;
+        this.handleHeaderContextMenuAction(action);
+      });
+    }
 
     this.addFriendButtonChat.addEventListener('click', () => {
       this.pauseVoiceMessages();
@@ -11356,6 +11377,29 @@ class ChatModal {
   }
 
   /**
+   * Sets the modal title with a chevron indicator
+   * @param {string} displayName - The name to display
+   */
+  setTitleWithChevron(displayName) {
+    // Clear existing content
+    this.modalTitle.innerHTML = '';
+    
+    // Create text wrapper span that will ellipsis
+    const textSpan = document.createElement('span');
+    textSpan.className = 'modal-title-text';
+    textSpan.textContent = displayName;
+    
+    // Create chevron that will always be visible
+    const chevron = document.createElement('span');
+    chevron.className = 'modal-title-chevron';
+    chevron.textContent = '>';
+    
+    // Append both
+    this.modalTitle.appendChild(textSpan);
+    this.modalTitle.appendChild(chevron);
+  }
+
+  /**
    * Opens the chat modal for the given address.
    * @param {string} address - The address of the contact to open the chat modal for.
    * @returns {Promise<void>}
@@ -11377,7 +11421,7 @@ class ChatModal {
     const contact = myData.contacts[address];
     friendModal.updateFriendButton(contact, 'addFriendButtonChat');
     // Set user info
-    this.modalTitle.textContent = getContactDisplayName(contact);
+    this.setTitleWithChevron(getContactDisplayName(contact));
 
     walletScreen.updateWalletBalances();
 
@@ -11392,8 +11436,13 @@ class ChatModal {
 
     this.updateTollAmountUI(address);
 
-    // Add data attributes to store the username and address
-    this.sendMoneyButton.dataset.username = contact.username || address;
+    // Store username for context menu pay action
+    if (this.headerContextMenu) {
+      const payOption = this.headerContextMenu.querySelector('[data-action="pay"]');
+      if (payOption) {
+        payOption.dataset.username = contact.username || address;
+      }
+    }
 
     this.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
 
@@ -11419,15 +11468,6 @@ class ChatModal {
       }
     };
 
-    // Add click handler for edit button
-    // TODO: create event listener instead of onclick here
-    this.editButton.onclick = () => {
-      this.pauseVoiceMessages();
-      const contact = myData.contacts[address];
-      if (contact) {
-        contactInfoModal.open(createDisplayInfo(contact));
-      }
-    };
 
     // Load any draft message
     this.loadDraft(address);
@@ -11481,9 +11521,9 @@ class ChatModal {
       if (!this.isActive() || this.address !== address) return;
 
       showToast(
-        '<strong>This user has deposited a toll to message you.</strong><ul style="margin: 8px 0 0 0; padding-left: 20px; text-align: center;"><li style="text-align: center;">Change their status to a connection or friend to refund the toll</li><li style="text-align: center;">Reply to collect the full toll</li><li style="text-align: center;">Ignore to collect half the toll</li></ul>',
+        '<strong>This user has deposited a toll to message you.</strong><ul style="margin: 8px 0 0 0; padding-left: 20px;"><li>Change their status to a connection or friend to refund the toll</li><li>Reply to collect the full toll</li><li>Ignore to collect half the toll</li></ul>',
         0,
-        'info',
+        'toll',
         true
       );
 
@@ -13547,6 +13587,78 @@ console.warn('in send message', txid)
     this.closeContextMenu();
     this.closeImageAttachmentContextMenu();
     this.closeAttachmentOptionsContextMenu();
+    this.closeHeaderContextMenu();
+  }
+
+  /**
+   * Shows the header context menu
+   * @param {Event} e - Click event
+   */
+  showHeaderContextMenu(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Ensure only one context menu is open at a time
+    this.closeAllContextMenus();
+
+    if (!this.headerContextMenu || !this.headerMenuButton) return;
+
+    const buttonRect = this.headerMenuButton.getBoundingClientRect();
+    const menuWidth = 200;
+    const menuHeight = 150; // Approximate height for 3 options
+
+    // Position menu below and aligned to the right of the button
+    let left = buttonRect.right - menuWidth;
+    let top = buttonRect.bottom + 8;
+
+    // Adjust if menu would go off screen
+    if (left < 10) {
+      left = 10;
+    }
+    if (top + menuHeight > window.innerHeight - 10) {
+      top = buttonRect.top - menuHeight - 8;
+    }
+
+    Object.assign(this.headerContextMenu.style, {
+      left: `${left}px`,
+      top: `${top}px`,
+      display: 'block'
+    });
+  }
+
+  /**
+   * Closes the header context menu
+   */
+  closeHeaderContextMenu() {
+    if (!this.headerContextMenu) return;
+    this.headerContextMenu.style.display = 'none';
+  }
+
+  /**
+   * Handles header context menu actions
+   * @param {string} action - The action to perform
+   */
+  handleHeaderContextMenuAction(action) {
+    this.closeHeaderContextMenu();
+    this.pauseVoiceMessages();
+
+    const contact = myData.contacts[this.address];
+    if (!contact) return;
+
+    switch (action) {
+      case 'call':
+        this.handleCallUser();
+        break;
+      case 'info':
+        contactInfoModal.open(createDisplayInfo(contact));
+        break;
+      case 'pay':
+        const payOption = this.headerContextMenu.querySelector('[data-action="pay"]');
+        const username = payOption?.dataset.username || contact.username || this.address;
+        sendAssetFormModal.username = username;
+        sendAssetFormModal.open();
+        break;
+    }
   }
 
   /**

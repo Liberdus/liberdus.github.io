@@ -1011,12 +1011,10 @@
             <div class="modal-avatar"></div>
             <div class="modal-title"></div>
           </div>
-          <!-- Add header actions container for the edit button and send money button -->
+          <!-- Add header actions container -->
           <div class="header-actions">
-            <button class="icon-button phone-icon" id="chatCallButton" aria-label="Start call"></button>
-            <button class="icon-button edit-icon" id="chatEditButton" aria-label="Edit contact"></button>
-            <button class="icon-button send-money-icon" id="chatSendMoneyButton" aria-label="Send money"></button>
             <button class="icon-button add-friend-icon" id="addFriendButtonChat" aria-label="Add friend"></button>
+            <button class="icon-button menu-icon" id="chatHeaderMenuButton" aria-label="More options"></button>
           </div>
         </div>
         <div class="messages-container">
@@ -1174,6 +1172,23 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- Chat Header Context Menu -->
+      <div class="message-context-menu" id="chatHeaderContextMenu" style="display: none;">
+        <div class="context-menu-option" data-action="call" data-icon="call">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Call</span>
+        </div>
+        <div class="context-menu-option" data-action="pay" data-icon="send-money">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Pay</span>
+        </div>
+        <div class="context-menu-option" data-action="info" data-icon="info">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Info</span>
+        </div>
+        <a class="last-item" href="#"></a>
       </div>
 
       <!-- Message Context Menu -->
@@ -1434,6 +1449,13 @@
                 <div class="contact-info-label">X-Twitter</div>
                 <div class="contact-info-value">
                   <a href="#" id="contactInfoX" class="contact-info-link" target="_blank" rel="noopener noreferrer"></a>
+                </div>
+              </div>
+              <div class="contact-info-item">
+                <div class="contact-info-label">Notes</div>
+                <div class="contact-info-value-container">
+                  <div class="contact-info-value" id="contactInfoNotes"></div>
+                  <button class="icon-button edit-icon" id="notesEditButton" aria-label="Edit notes"></button>
                 </div>
               </div>
             </div>
@@ -2014,7 +2036,7 @@
                       id="editContactNameInput"
                       placeholder="Enter contact name"
                     />
-                    <button class="field-action-button clear" aria-label="Add"></button>
+                    <button class="field-action-button clear" id="nameClearButton" aria-label="Clear"></button>
                   </div>
                 </div>
               </div>
@@ -2037,6 +2059,18 @@
               <div class="contact-info-item" style="display: none">
                 <div class="contact-info-label">X-Twitter</div>
                 <div class="contact-info-value" id="editContactX"></div>
+              </div>
+              <div class="contact-info-item">
+                <div class="contact-info-label">Notes</div>
+                <div class="contact-info-value-container">
+                  <div class="contact-info-value editing">
+                    <textarea id="editContactNotesInput" class="form-control" rows="4" placeholder="Enter notes about this contact"></textarea>
+                    <button class="field-action-button clear" id="notesClearButton" aria-label="Clear"></button>
+                  </div>
+                </div>
+              </div>
+              <div class="form-actions" style="padding: 1rem;">
+                <button id="saveEditContactButton" class="btn btn--primary btn--pill btn--full">Save</button>
               </div>
             </div>
           </div>
