@@ -598,9 +598,6 @@ body {
 /* Search Results List */
 #searchResults .chat-list {
   padding: 0;
-  overscroll-behavior: contain;
-  -webkit-overscroll-behavior: contain;
-  touch-action: pan-y;
   margin: 0;
 }
 
@@ -1254,9 +1251,6 @@ button:disabled {
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-  -webkit-overscroll-behavior: contain;
-  touch-action: pan-y;
 }
 
 .modal.active {
@@ -4794,9 +4788,6 @@ small {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  overscroll-behavior: contain;
-  -webkit-overscroll-behavior: contain;
-  touch-action: pan-y;
 }
 
 .modal-dialog .modal-actions {
