@@ -599,6 +599,7 @@ body {
   padding: 0;
   overscroll-behavior: contain;
   -webkit-overscroll-behavior: contain;
+  touch-action: pan-y;
   margin: 0;
 }
 
@@ -1254,6 +1255,7 @@ button:disabled {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   -webkit-overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .modal.active {
@@ -1428,6 +1430,7 @@ button:disabled {
   box-sizing: border-box;
   overscroll-behavior: contain;
   -webkit-overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .modal-content {
@@ -4792,6 +4795,7 @@ small {
   gap: 16px;
   overscroll-behavior: contain;
   -webkit-overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .modal-dialog .modal-actions {
