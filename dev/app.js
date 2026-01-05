@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -3403,7 +3403,7 @@ class EditContactModal {
 
     // update title if chatModal is open and if contact.name is '' fallback to contact.username
     if (chatModal.isActive() && chatModal.address === this.currentContactAddress) {
-      chatModal.setTitleWithChevron(getContactDisplayName(contact));
+      chatModal.modalTitle.textContent = getContactDisplayName(contact);
     }
 
     // Safely update the contact info modal if it exists and is open
@@ -4441,6 +4441,16 @@ async function processChats(chats, keys) {
                   payload.url = parsedMessage.url;
                   payload.duration = parsedMessage.duration;
                   payload.type = 'vm';
+                  // Extract reply info for voice messages
+                  if (parsedMessage.replyId) {
+                    payload.replyId = parsedMessage.replyId;
+                  }
+                  if (parsedMessage.replyMessage) {
+                    payload.replyMessage = parsedMessage.replyMessage;
+                  }
+                  if (typeof parsedMessage.replyOwnerIsMine !== 'undefined') {
+                    payload.replyOwnerIsMine = parsedMessage.replyOwnerIsMine;
+                  }
                 } else if (parsedMessage.type === 'message') {
                   // Regular message format processing
                   payload.message = parsedMessage.message;
@@ -5627,7 +5637,7 @@ class AvatarEditModal {
     this.previewContainer.appendChild(this.foregroundImg);
 
     this.backButton.addEventListener('click', () => this.close());
-    this.uploadButton.addEventListener('click', () => this.fileInput.click());
+    this.uploadButton.addEventListener('click', () => this.handleUploadButton());
     this.deleteButton.addEventListener('click', () => this.handleDelete());
     this.saveActionButton.addEventListener('click', () => this.handleSave());
     this.cancelButton.addEventListener('click', () => this.handleCancel());
@@ -6116,10 +6126,23 @@ class AvatarEditModal {
     }
   }
 
+  handleUploadButton(){
+    if (!isOnline && this.isOwnAvatar) {
+      showToast('You are offline. Please try again when connected.', 3000, 'error');
+      return;
+    }
+    this.fileInput.click(); 
+  }
+
   /**
    * Delete the current avatar immediately and save.
    */
   async handleDelete() {
+    if (!isOnline && this.isOwnAvatar) {
+      showToast('You are offline. Please try again when connected.', 3000, 'error');
+      return;
+    }
+
     if (!this.currentAddress) {
       this.close();
       return;
@@ -11377,29 +11400,6 @@ class ChatModal {
   }
 
   /**
-   * Sets the modal title with a chevron indicator
-   * @param {string} displayName - The name to display
-   */
-  setTitleWithChevron(displayName) {
-    // Clear existing content
-    this.modalTitle.innerHTML = '';
-    
-    // Create text wrapper span that will ellipsis
-    const textSpan = document.createElement('span');
-    textSpan.className = 'modal-title-text';
-    textSpan.textContent = displayName;
-    
-    // Create chevron that will always be visible
-    const chevron = document.createElement('span');
-    chevron.className = 'modal-title-chevron';
-    chevron.textContent = '>';
-    
-    // Append both
-    this.modalTitle.appendChild(textSpan);
-    this.modalTitle.appendChild(chevron);
-  }
-
-  /**
    * Opens the chat modal for the given address.
    * @param {string} address - The address of the contact to open the chat modal for.
    * @returns {Promise<void>}
@@ -11421,7 +11421,7 @@ class ChatModal {
     const contact = myData.contacts[address];
     friendModal.updateFriendButton(contact, 'addFriendButtonChat');
     // Set user info
-    this.setTitleWithChevron(getContactDisplayName(contact));
+    this.modalTitle.textContent = getContactDisplayName(contact);
 
     walletScreen.updateWalletBalances();
 
@@ -12933,7 +12933,6 @@ console.warn('in send message', txid)
       this.addAttachmentButton.disabled = false;
       this.isEncrypting = false;
     } finally {
-      hideToast(loadingToastId);
       event.target.value = ''; // Reset the file input value
     }
   }
@@ -13513,6 +13512,7 @@ console.warn('in send message', txid)
       if (inviteOption) inviteOption.style.display = 'none';
       if (joinOption) joinOption.style.display = 'none';
       if (replyOption) replyOption.style.display = 'flex';
+      if (editOption) editOption.style.display = 'none';
     } else {
       if (copyOption) copyOption.style.display = 'flex';
       if (joinOption) joinOption.style.display = 'none';
@@ -15184,13 +15184,20 @@ console.warn('in send message', txid)
    * @param {string} audioSelfKey - Self key for audio file decryption
    * @returns {Promise<void>}
    */
-  async sendVoiceMessageTx(voiceMessageUrl, duration, audioPqEncSharedKey, audioSelfKey) {
+  async sendVoiceMessageTx(voiceMessageUrl, duration, audioPqEncSharedKey, audioSelfKey, replyInfo = null) {
     // Create voice message object
     const messageObj = {
       type: 'vm',
       url: voiceMessageUrl,
       duration: duration
     };
+
+    // Add reply info if provided
+    if (replyInfo && replyInfo.replyId) {
+      messageObj.replyId = replyInfo.replyId;
+      messageObj.replyMessage = replyInfo.replyMessage || '';
+      messageObj.replyOwnerIsMine = replyInfo.replyOwnerIsMine;
+    }
 
     // Ensure recipient keys are available
     const ok = await ensureContactKeys(this.address);
@@ -15267,6 +15274,13 @@ console.warn('in send message', txid)
       selfKey: audioSelfKey, // Add audio file selfKey for our own message decryption
       pqEncSharedKey: bin2base64(audioPqEncSharedKey) // Add audio file pqEncSharedKey
     };
+
+    // Add reply info to the optimistic message if present
+    if (replyInfo && replyInfo.replyId) {
+      newMessage.replyId = replyInfo.replyId;
+      newMessage.replyMessage = replyInfo.replyMessage || '';
+      newMessage.replyOwnerIsMine = replyInfo.replyOwnerIsMine;
+    }
 
     const contact2 = myData.contacts[this.address];
     if (contact2) {
@@ -16744,8 +16758,22 @@ class VoiceRecordingModal {
 
       const voiceMessageUrl = `${uploadUrl}/get/${id}`;
       
+      // Capture reply state before sending (if user is replying to a message)
+      const replyIdVal = chatModal.replyToTxId?.value?.trim?.() || '';
+      const replyMsgVal = chatModal.replyToMessage?.value?.trim?.() || '';
+      const replyOwnerIsMineVal = chatModal.replyOwnerIsMine?.value === '1';
+      
+      const replyInfo = replyIdVal ? {
+        replyId: replyIdVal,
+        replyMessage: replyMsgVal,
+        replyOwnerIsMine: replyOwnerIsMineVal
+      } : null;
+      
       // Send the voice message through chat modal
-      await chatModal.sendVoiceMessageTx(voiceMessageUrl, duration, pqEncSharedKey, selfKey);
+      await chatModal.sendVoiceMessageTx(voiceMessageUrl, duration, pqEncSharedKey, selfKey, replyInfo);
+      
+      // Clear reply state after sending
+      chatModal.cancelReply();
 
       this.close();
       
