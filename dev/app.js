@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'
+const version = 'u'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -482,14 +482,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Add global keyboard listener for fullscreen toggling
   window.addEventListener('resize', () => setTimeout(handleKeyboardFullscreenToggle(), 300));
-
-  // Prevent touch/pan gestures from bubbling to React Native when any modal is active
-  document.body.addEventListener('touchmove', (e) => {
-    const activeModal = document.querySelector('.modal.active');
-    if (activeModal) {
-      e.stopPropagation();
-    }
-  }, { passive: false });
 
   getNetworkParams();
 
@@ -14509,8 +14501,11 @@ console.warn('in send message', txid)
     requestAnimationFrame(() => {
       const elementTop = target.offsetTop;
       const containerHeight = container.clientHeight;
-      const elementHeight = target.offsetHeight;
-      const scrollTarget = Math.max(0, elementTop - (containerHeight / 2) + (elementHeight / 2));
+      const inputContainerHeight = this.modal?.querySelector('.message-input-container')?.offsetHeight || 80;
+      const topPadding = 10; // Space to keep message below header
+      const bottomPadding = 20; // Space above input
+      const availableHeight = containerHeight - inputContainerHeight - topPadding - bottomPadding;
+      const scrollTarget = Math.max(0, elementTop - (availableHeight / 3) - topPadding);
       
       container.scrollTo?.({ top: scrollTarget, behavior: 'smooth' }) || (container.scrollTop = scrollTarget);
       target.classList.add('highlighted');
