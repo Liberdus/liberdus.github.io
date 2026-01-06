@@ -3316,6 +3316,10 @@ html[data-theme="light"] .page-header #sell-bg {
   background-image: url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2' stroke='%236366F1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='9' cy='7' r='4' stroke='%236366F1' stroke-width='2'/%3E%3Cpath d='M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75' stroke='%236366F1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M12 14l3-3 3 3' stroke='%236366F1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
+.icon-otc-trading {
+  background-image: url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2' stroke='%236366F1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='9' cy='7' r='4' stroke='%236366F1' stroke-width='2'/%3E%3Cpath d='M23 21v-2a4 4 0 0 0-3-3.87' stroke='%236366F1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75' stroke='%236366F1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
 .icon-server {
   background-image: url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='2' y='2' width='20' height='8' rx='2' ry='2' stroke='%236366F1' stroke-width='2'/%3E%3Crect x='2' y='14' width='20' height='8' rx='2' ry='2' stroke='%236366F1' stroke-width='2'/%3E%3Cline x1='6' y1='6' x2='6.01' y2='6' stroke='%236366F1' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='6' y1='18' x2='6.01' y2='18' stroke='%236366F1' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
 }
@@ -3330,6 +3334,40 @@ html[data-theme="light"] .page-header #sell-bg {
 
 .icon-cloud {
   background-image: url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z' stroke='%236366F1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.icon-dex-aggregator {
+  background-image: url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='12' r='3' stroke='%236366F1' stroke-width='2'/%3E%3Ccircle cx='6' cy='6' r='2' stroke='%236366F1' stroke-width='2'/%3E%3Ccircle cx='18' cy='6' r='2' stroke='%236366F1' stroke-width='2'/%3E%3Ccircle cx='6' cy='18' r='2' stroke='%236366F1' stroke-width='2'/%3E%3Ccircle cx='18' cy='18' r='2' stroke='%236366F1' stroke-width='2'/%3E%3Cpath d='M8 8l8 8M16 8l-8 8' stroke='%236366F1' stroke-width='1.5' stroke-linecap='round'/%3E%3Cpath d='M12 9l0 6M9 12l6 0' stroke='%236366F1' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+.icon-usdc {
+  width: 40px;
+  height: 40px;
+  background-image: url("https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  border-radius: 50%;
+}
+
+.icon-dai {
+  width: 40px;
+  height: 40px;
+  background-image: url("https://assets.coingecko.com/coins/images/9956/large/4943.png");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  border-radius: 50%;
+}
+
+.icon-weth {
+  width: 40px;
+  height: 40px;
+  background-image: url("https://assets.coingecko.com/coins/images/2518/large/weth.png");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  border-radius: 50%;
 }
 
 /* Light theme versions with different color */
@@ -3389,6 +3427,10 @@ html[data-theme="light"] .page-header #sell-bg {
   background-image: url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2' stroke='%234F46E5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='9' cy='7' r='4' stroke='%234F46E5' stroke-width='2'/%3E%3Cpath d='M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75' stroke='%234F46E5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M12 14l3-3 3 3' stroke='%234F46E5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
+[data-theme="light"] .icon-otc-trading {
+  background-image: url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2' stroke='%234F46E5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='9' cy='7' r='4' stroke='%234F46E5' stroke-width='2'/%3E%3Cpath d='M23 21v-2a4 4 0 0 0-3-3.87' stroke='%234F46E5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75' stroke='%234F46E5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
 [data-theme="light"] .icon-server {
   background-image: url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='2' y='2' width='20' height='8' rx='2' ry='2' stroke='%234F46E5' stroke-width='2'/%3E%3Crect x='2' y='14' width='20' height='8' rx='2' ry='2' stroke='%234F46E5' stroke-width='2'/%3E%3Cline x1='6' y1='6' x2='6.01' y2='6' stroke='%234F46E5' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='6' y1='18' x2='6.01' y2='18' stroke='%234F46E5' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
 }
@@ -3403,6 +3445,10 @@ html[data-theme="light"] .page-header #sell-bg {
 
 [data-theme="light"] .icon-cloud {
   background-image: url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z' stroke='%234F46E5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+[data-theme="light"] .icon-dex-aggregator {
+  background-image: url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='12' r='3' stroke='%234F46E5' stroke-width='2'/%3E%3Ccircle cx='6' cy='6' r='2' stroke='%234F46E5' stroke-width='2'/%3E%3Ccircle cx='18' cy='6' r='2' stroke='%234F46E5' stroke-width='2'/%3E%3Ccircle cx='6' cy='18' r='2' stroke='%234F46E5' stroke-width='2'/%3E%3Ccircle cx='18' cy='18' r='2' stroke='%234F46E5' stroke-width='2'/%3E%3Cpath d='M8 8l8 8M16 8l-8 8' stroke='%234F46E5' stroke-width='1.5' stroke-linecap='round'/%3E%3Cpath d='M12 9l0 6M9 12l6 0' stroke='%234F46E5' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
 }
 
 /* Common styling for all icon backgrounds */
@@ -3420,10 +3466,12 @@ html[data-theme="light"] .page-header #sell-bg {
 .icon-resources,
 .icon-code,
 .icon-community,
+.icon-otc-trading,
 .icon-server,
 .icon-exchange,
 .icon-network,
-.icon-cloud {
+.icon-cloud,
+.icon-dex-aggregator {
   width: 32px;
   height: 32px;
   background-repeat: no-repeat;
@@ -3645,8 +3693,11 @@ html[data-theme="light"] .page-header #sell-bg {
   text-align: center;
   backdrop-filter: blur(20px);
   transition: all 0.3s ease;
-  flex: 0 0 280px;
+  width: 280px;
+  min-width: 280px;
   max-width: 280px;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .trading-pair-card:hover {
@@ -3667,6 +3718,24 @@ html[data-theme="light"] .page-header #sell-bg {
   font-size: 1.5rem;
   font-weight: bold;
   color: white;
+}
+
+.trading-pair-icon.icon-usdc,
+.trading-pair-icon.icon-dai,
+.trading-pair-icon.icon-weth {
+  background: transparent;
+  border-radius: 50%;
+  padding: 0;
+}
+
+.trading-pair-icon.icon-usdc .icon-usdc,
+.trading-pair-icon.icon-dai .icon-dai,
+.trading-pair-icon.icon-weth .icon-weth {
+  width: 48px;
+  height: 48px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
 }
 
 .notice-section {
@@ -3732,6 +3801,13 @@ html[data-theme="light"] .page-header #sell-bg {
     align-items: center;
   }
   
+  .trading-pair-card {
+    width: 280px;
+    min-width: 280px;
+    max-width: 280px;
+    flex-shrink: 0;
+  }
+  
   .token-info-card {
     padding: var(--space-4);
     max-width: 100%;
@@ -3744,5 +3820,39 @@ html[data-theme="light"] .page-header #sell-bg {
   .contract-address {
     font-size: 0.85rem;
     padding: var(--space-3);
+  }
+}
+
+/* Samsung Foldable Device Fixes */
+@media (min-width: 280px) and (max-width: 540px) and (min-height: 600px) {
+  .trading-pair-card {
+    width: 100%;
+    max-width: 320px;
+    min-width: unset;
+    margin: 0 auto;
+  }
+  
+  .trading-pair-row {
+    width: 100%;
+  }
+}
+
+/* Samsung Fold Unfolded Mode */
+@media (min-width: 700px) and (max-width: 900px) {
+  .trading-pair-card {
+    width: 280px;
+    min-width: 280px;
+    max-width: 280px;
+    flex-shrink: 0;
+  }
+  
+  .trading-pair-row.top-row {
+    justify-content: center;
+    gap: var(--space-4);
+  }
+  
+  .trading-pair-row.bottom-row {
+    justify-content: center;
+    gap: var(--space-4);
   }
 }
