@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 's'
+const version = 't'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -482,6 +482,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Add global keyboard listener for fullscreen toggling
   window.addEventListener('resize', () => setTimeout(handleKeyboardFullscreenToggle(), 300));
+
+  // Prevent touch/pan gestures from bubbling to React Native when any modal is active
+  document.body.addEventListener('touchmove', (e) => {
+    const activeModal = document.querySelector('.modal.active');
+    if (activeModal) {
+      e.stopPropagation();
+    }
+  }, { passive: false });
 
   getNetworkParams();
 
