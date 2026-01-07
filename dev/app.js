@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'v'
+const version = 'w'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -809,10 +809,12 @@ class Header {
     this.logoLink = this.header.querySelector('.logo-link');
     this.menuButton = document.getElementById('toggleMenu');
     this.settingsButton = document.getElementById('toggleSettings');
+    this.upcomingCallsBtn = document.getElementById('upcomingCallsBtn');
 
     this.logoLink.addEventListener('keydown', ignoreShiftTabKey); // add event listener for first-item to prevent shift+tab
     this.menuButton.addEventListener('click', () => menuModal.open());
     this.settingsButton.addEventListener('click', () => settingsModal.open());
+    this.upcomingCallsBtn.addEventListener('click', () => callsModal.open());
     
     // Add click event for username display to open myInfoModal
     this.text.addEventListener('click', () => {
@@ -836,6 +838,26 @@ class Header {
 
   setText(newText) {
     this.text.textContent = newText;
+  }
+
+  /**
+   * Updates the upcoming calls icon visibility and glow state
+   */
+  updateCallsIcon() {
+    if (!this.upcomingCallsBtn) return;
+    
+    const hasUpcoming = callsModal.hasUpcomingCalls();
+    const hasImminent = callsModal.hasImminentCalls();
+    
+    // Show/hide icon based on upcoming calls
+    this.upcomingCallsBtn.style.display = hasUpcoming ? '' : 'none';
+    
+    // Add/remove glow class based on imminent calls
+    if (hasImminent) {
+      this.upcomingCallsBtn.classList.add('upcoming-calls-glow');
+    } else {
+      this.upcomingCallsBtn.classList.remove('upcoming-calls-glow');
+    }
   }
 
 }
@@ -1715,6 +1737,7 @@ class MenuModal {
       clearInterval(getSystemNoticeIntervalId);
       getSystemNoticeIntervalId = null;
     }
+    callsModal.stopPeriodicCallsRefresh();
     // Stop camera if it's running
     if (typeof scanQRModal !== 'undefined' && scanQRModal.camera.scanInterval) {
       scanQRModal.stopCamera();
@@ -2501,6 +2524,11 @@ class SignInModal {
     if (myData?.wallet?.history && Array.isArray(myData.wallet.history) && myData.wallet.history.length > 0) {
       restoreWalletNotificationDots();
     }
+    
+    // Initialize upcoming calls icon and start periodic refresh
+    callsModal.refreshCalls();
+    header.updateCallsIcon();
+    callsModal.startPeriodicCallsRefresh();
   }
 
   async handleUsernameChange() {
@@ -3955,6 +3983,57 @@ class CallsModal {
           joinBtn.classList.add('call-join--active');
         }
     });
+  }
+
+  /**
+   * Returns true if there are any calls within the last 1 hour or next hour
+   * @returns {boolean}
+   */
+  hasUpcomingCalls() {
+    const now = getCorrectedTimestamp();
+    const oneHourMs = 60 * 60 * 1000;
+    const oneHourAgo = now - oneHourMs;
+    const oneHourFromNow = now + oneHourMs;
+    return this.calls.some(callGroup => {
+      const callTime = Number(callGroup.callTime);
+      return Number.isFinite(callTime) && callTime >= oneHourAgo && callTime <= oneHourFromNow;
+    });
+  }
+
+  /**
+   * Returns true if there are any calls within 15 minutes before or after now
+   * @returns {boolean}
+   */
+  hasImminentCalls() {
+    const now = getCorrectedTimestamp();
+    const fifteenMinMs = 15 * 60 * 1000;
+    const windowStart = now - fifteenMinMs;
+    const windowEnd = now + fifteenMinMs;
+    return this.calls.some(callGroup => {
+      const callTime = Number(callGroup.callTime);
+      return Number.isFinite(callTime) && callTime >= windowStart && callTime <= windowEnd;
+    });
+  }
+
+  /**
+   * Starts the periodic refresh interval (every minute)
+   */
+  startPeriodicCallsRefresh() {
+    if (this._periodicRefreshInterval) return;
+    this._periodicRefreshInterval = setInterval(() => {
+      this.refreshCalls();
+      header.updateCallsIcon();
+    }, 60000);
+  }
+
+  /**
+   * Stops the periodic refresh interval
+   */
+  stopPeriodicCallsRefresh() {
+    if (this._periodicRefreshInterval) {
+      clearInterval(this._periodicRefreshInterval);
+      this._periodicRefreshInterval = null;
+    }
   }
 }
 
@@ -12214,6 +12293,7 @@ console.warn('in send message', txid)
       if (editInput) editInput.value = '';
       // Clear input text and reset height
       this.messageInput.value = '';
+      this.messageInput.style.height = '48px';
       this.messageByteCounter.style.display = 'none';
       // Clear any saved draft
       if (typeof this.debouncedSaveDraft === 'function') {
@@ -14355,6 +14435,17 @@ console.warn('in send message', txid)
       this.cancelEditButton.style.display = '';
       // Disable attachments while editing
       this.addAttachmentButton.disabled = true;
+      
+      // Trigger input event for other listeners (byte counter, etc.)
+      this.messageInput.dispatchEvent(new Event('input'));
+      
+      // Manually resize textarea after browser has updated layout
+      // requestAnimationFrame ensures scrollHeight is accurate
+      requestAnimationFrame(() => {
+        this.messageInput.style.height = '48px';
+        this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
+      });
+      
       // Toggle button visibility to show send button since input has content
       this.toggleSendButtonVisibility();
       // Focus input and move caret to end
@@ -16314,6 +16405,17 @@ class FailedMessageMenu {
     if (chatModal.messageInput && chatModal.retryOfTxId && messageContent && txid) {
       chatModal.messageInput.value = messageContent;
       chatModal.retryOfTxId.value = txid;
+      
+      // Trigger input event to ensure all listeners fire (byte counter, draft save, etc.)
+      chatModal.messageInput.dispatchEvent(new Event('input'));
+      
+      // Manually resize textarea after browser has updated layout
+      // requestAnimationFrame ensures scrollHeight is accurate
+      requestAnimationFrame(() => {
+        chatModal.messageInput.style.height = '48px';
+        chatModal.messageInput.style.height = Math.min(chatModal.messageInput.scrollHeight, 120) + 'px';
+      });
+      
       chatModal.toggleSendButtonVisibility();
       chatModal.messageInput.focus();
       return;
