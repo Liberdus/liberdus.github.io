@@ -1901,7 +1901,11 @@ input[type='file'].form-control::file-selector-button {
 .message-content {
   overflow-wrap: break-word;
   word-wrap: break-word;
-  word-break: break-word;
+  word-break: normal; /* Use normal word breaking to allow hyphens to work */
+  white-space: normal; /* Ensure text can wrap */
+  -webkit-hyphens: auto; /* Add hyphens at line breaks (Chrome/Safari) */
+  -moz-hyphens: auto; /* Add hyphens at line breaks (Firefox) */
+  hyphens: auto; /* Add hyphens at line breaks */
 }
 
 /* Wrapper for the send button and the toll information */
@@ -2324,6 +2328,11 @@ input[type='file'].form-control {
   font-size: 0.875rem;
   padding: 8px 12px;
   word-break: break-all;
+  overflow-wrap: break-word;
+  white-space: normal; 
+  min-width: 0; /* Allow flex item to shrink below content size */
+  height: auto; /* Override fixed height from .form-control to allow multi-line wrapping */
+  min-height: 56px; /* Maintain minimum height */
   line-height: 1.4;
   background-color: #f8f9fa;
   cursor: default;
@@ -2438,6 +2447,7 @@ input[type='file'].form-control {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
+  min-width: 0; /* Allow flex container to shrink */
 }
 
 /* QR code container */
@@ -5355,8 +5365,9 @@ small {
   background-image: var(--icon-file-image);
 }
 
-/* Image icons in message display (not preview) */
-.attachment-row .attachment-icon[data-file-type="image"] {
+/* Image and video icons in message display (not preview) */
+.attachment-row .attachment-icon[data-file-type="image"],
+.attachment-row .attachment-icon[data-file-type="video"] {
   width: 144px;
   height: 144px;
   background-size: 144px;
@@ -6165,6 +6176,7 @@ small {
   border-radius: 12px;
   background: var(--bg-secondary);
   margin: 4px 0;
+  min-width: 0; /* Allow flex item to shrink below content size */
 }
 
 .call-message-phone-button {
@@ -6192,6 +6204,17 @@ small {
 
 .call-message-text {
   color: var(--text-color);
+  overflow-wrap: break-word;
+  white-space: normal; /* Allow text to wrap */
+  -webkit-hyphens: auto; /* Add hyphens at line breaks (Chrome/Safari) */
+  -moz-hyphens: auto; /* Add hyphens at line breaks (Firefox) */
+  hyphens: auto; /* Add hyphens at line breaks */
+}
+
+/* Allow call-message div children (wrapper divs and direct call-message-text) to shrink */
+.call-message > div:not(.call-message-phone-button) {
+  flex: 1;
+  min-width: 0; /* Allow flex item to shrink below content size */
 }
 
 .call-message-schedule {
