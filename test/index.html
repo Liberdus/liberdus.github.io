@@ -61,11 +61,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=2026.01.08.19.12" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js" type="module"></script>
+    <script src="./app.js?v=2026.01.08.19.12" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -78,6 +78,7 @@
         <div class="app-name">Liberdus</div>
         <div class="header-icons">
           <div class="offline-indicator" id="offlineIndicator">Offline</div>
+          <button class="icon-button" id="upcomingCallsBtn" style="display: none;"></button>
           <button class="icon-button" id="toggleSettings"></button>
           <button class="icon-button" id="toggleMenu"></button>
         </div>
@@ -439,8 +440,8 @@
                 <a class="about-link" href="styles.css" target="_blank">styles.css</a>
                 <a class="about-link" href="app.js" target="_blank">app.js</a>
                 <br>
-                <a class="about-link" href="crypto.js" target="_blank">crypto.js</a>
-                <a class="about-link" href="lib.js" target="_blank">lib.js</a>
+                <a class="about-link" href="crypto.js?v=2026.01.08.19.12" target="_blank">crypto.js</a>
+                <a class="about-link" href="lib.js?v=2026.01.08.19.12" target="_blank">lib.js</a>
                 <a class="about-link" href="network.js" target="_blank">network.js</a>
               </div>
 
@@ -714,10 +715,25 @@
               <div class="contact-avatar-section">
                 <div class="avatar" id="myInfoAvatar"></div>
                 <div class="name" id="myInfoDisplayName"></div>
-                <div class="subtitle" id="myInfoDisplayUsername"></div>
                 <div id="myInfoQR" class="myinfo-qr"></div>
               </div>
               <!-- My info fields -->
+              <div class="contact-info-item" style="display: block;">
+                <div class="contact-info-label">Address</div>
+                <div class="contact-info-value">
+                  <div class="address-container">
+                    <div
+                      id="myInfoDisplayUsername"
+                      class="form-control address-display"
+                    ></div>
+                    <button
+                      id="myInfoCopyAddress"
+                      class="icon-button address-copy-button"
+                      aria-label="Copy address"
+                    ></button>
+                  </div>
+                </div>
+              </div>
               <div class="contact-info-item" style="display: none">
                 <div class="contact-info-label">Name</div>
                   <div class="contact-info-value" id="myInfoName"></div>
@@ -996,12 +1012,10 @@
             <div class="modal-avatar"></div>
             <div class="modal-title"></div>
           </div>
-          <!-- Add header actions container for the edit button and send money button -->
+          <!-- Add header actions container -->
           <div class="header-actions">
-            <button class="icon-button phone-icon" id="chatCallButton" aria-label="Start call"></button>
-            <button class="icon-button edit-icon" id="chatEditButton" aria-label="Edit contact"></button>
-            <button class="icon-button send-money-icon" id="chatSendMoneyButton" aria-label="Send money"></button>
             <button class="icon-button add-friend-icon" id="addFriendButtonChat" aria-label="Add friend"></button>
+            <button class="icon-button menu-icon" id="chatHeaderMenuButton" aria-label="More options"></button>
           </div>
         </div>
         <div class="messages-container">
@@ -1161,6 +1175,23 @@
         </div>
       </div>
 
+      <!-- Chat Header Context Menu -->
+      <div class="message-context-menu" id="chatHeaderContextMenu" style="display: none;">
+        <div class="context-menu-option" data-action="call" data-icon="call">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Call</span>
+        </div>
+        <div class="context-menu-option" data-action="pay" data-icon="send-money">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Pay</span>
+        </div>
+        <div class="context-menu-option" data-action="info" data-icon="info">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Info</span>
+        </div>
+        <a class="last-item" href="#"></a>
+      </div>
+
       <!-- Message Context Menu -->
       <div class="message-context-menu" id="messageContextMenu" style="display: none;">
         <!-- Voice message specific action: Save -->
@@ -1209,7 +1240,7 @@
 
       <!-- Image Attachment Context Menu -->
       <div class="message-context-menu" id="imageAttachmentContextMenu" style="display: none;">
-        <div class="context-menu-option" data-action="preview" data-icon="download" style="display: none;">
+        <div class="context-menu-option" data-action="preview" data-icon="eye" style="display: none;">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Preview</span>
         </div>
@@ -1421,6 +1452,13 @@
                   <a href="#" id="contactInfoX" class="contact-info-link" target="_blank" rel="noopener noreferrer"></a>
                 </div>
               </div>
+              <div class="contact-info-item">
+                <div class="contact-info-label">Notes</div>
+                <div class="contact-info-value-container">
+                  <div class="contact-info-value" id="contactInfoNotes"></div>
+                  <button class="icon-button edit-icon" id="notesEditButton" aria-label="Edit notes"></button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1450,6 +1488,27 @@
               <button class="secondary-button danger-button" id="avatarEditDeleteButton">Delete</button>
               <button class="btn btn--primary" id="avatarEditSaveButton" style="display: none;">Save</button>
               <button class="btn btn--secondary btn--danger" id="avatarEditCancelButton" style="display: none;">Cancel</button>
+            </div>
+            <!-- Avatar selection options: contact-sent, mine (local), identicon -->
+            <div class="avatar-options" id="avatarOptionsContainer">
+              <div class="avatar-options-label">Choose avatar to use:</div>
+              <div class="avatar-options-list">
+                <div class="avatar-option" data-value="mine" id="avatarOptionUploaded">
+                  <div class="avatar-thumb" id="avatarThumbUploaded"></div>
+                  <div class="avatar-option-label">Mine</div>
+                </div>
+                <div class="avatar-option" data-value="contact" id="avatarOptionContact">
+                  <div class="avatar-thumb" id="avatarThumbContact"></div>
+                  <div class="avatar-option-label">Contact</div>
+                </div>
+                <div class="avatar-option" data-value="identicon" id="avatarOptionIdenticon">
+                  <div class="avatar-thumb" id="avatarThumbIdenticon"></div>
+                  <div class="avatar-option-label">Identicon</div>
+                </div>
+              </div>
+            </div>
+            <div class="avatar-options-actions" id="avatarOptionsActions">
+              <button class="btn btn--primary" id="avatarUseButton" disabled>Use</button>
             </div>
           </div>
         </div>
@@ -1512,24 +1571,14 @@
           <div class="form-container">
             <div class="form-group">
               <label>Your Address</label>
-              <div style="display: flex; align-items: flex-start; gap: 0.5rem">
+              <div class="address-container">
                 <div
                   id="displayAddress"
-                  class="form-control"
-                  style="
-                    flex: 1;
-                    font-size: 0.875rem;
-                    padding: 8px 12px;
-                    word-break: break-all;
-                    line-height: 1.4;
-                    background-color: #f8f9fa;
-                    cursor: default;
-                  "
+                  class="form-control address-display"
                 ></div>
                 <button
                   id="copyAddress"
-                  class="icon-button"
-                  style="color: #007bff; margin-top: 4px; flex-shrink: 0"
+                  class="icon-button address-copy-button"
                 ></button>
               </div>
               <div id="qrcode"></div>
@@ -1911,7 +1960,7 @@
           <div class="modal-title">Search Messages</div>
         </div>
         <div class="modal-content">
-          <div class="form-container">
+          <div class="search-bar-container">
             <div class="search-bar">
               <span class="search-icon"></span>
               <input
@@ -1924,6 +1973,8 @@
                 maxlength="30"
               />
             </div>
+          </div>
+          <div class="form-container">
             <div id="searchResults" class="chat-list">
               <!-- Results will be populated here -->
             </div>
@@ -1939,7 +1990,7 @@
           <div class="modal-title">Search Contacts</div>
         </div>
         <div class="modal-content">
-          <div class="form-container">
+          <div class="search-bar-container">
             <div class="search-bar">
               <span class="search-icon"></span>
               <input
@@ -1952,6 +2003,9 @@
                 maxlength="30"
               />
             </div>
+          </div>
+          <div class="form-container">
+            
             <div id="contactSearchResults" class="chat-list">
               <!-- Contact search results will be populated here -->
             </div>
@@ -1988,7 +2042,7 @@
                       id="editContactNameInput"
                       placeholder="Enter contact name"
                     />
-                    <button class="field-action-button clear" aria-label="Add"></button>
+                    <button class="field-action-button clear" id="nameClearButton" aria-label="Clear"></button>
                   </div>
                 </div>
               </div>
@@ -2011,6 +2065,18 @@
               <div class="contact-info-item" style="display: none">
                 <div class="contact-info-label">X-Twitter</div>
                 <div class="contact-info-value" id="editContactX"></div>
+              </div>
+              <div class="contact-info-item">
+                <div class="contact-info-label">Notes</div>
+                <div class="contact-info-value-container">
+                  <div class="contact-info-value editing">
+                    <textarea id="editContactNotesInput" class="form-control" rows="4" placeholder="Enter notes about this contact" maxlength="1000"></textarea>
+                    <button class="field-action-button clear" id="notesClearButton" aria-label="Clear"></button>
+                  </div>
+                </div>
+              </div>
+              <div class="form-actions" style="padding: 1rem;">
+                <button id="saveEditContactButton" class="btn btn--primary btn--pill btn--full">Save</button>
               </div>
             </div>
           </div>

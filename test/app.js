@@ -1,9 +1,11 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 let myVersion = '0';
 async function checkVersion() {
-  myVersion = localStorage.getItem('version') || '0';
+  // Use network-specific version key to avoid false update alerts when switching networks
+  const versionKey = network?.netid ? `version_${network.netid}` : 'version';
+  myVersion = localStorage.getItem(versionKey) || '0';
   let newVersion;
   try {
     const response = await fetch(`version.html`, {cache: 'reload', headers: {
@@ -19,7 +21,6 @@ async function checkVersion() {
     if (!navigator.onLine || error instanceof TypeError) {
       isOnline = false;
       updateUIForConnectivity();
-      console.log(`DEBUG: about to invoke showToast in checkVersion`);
     }
     newVersion = myVersion; // Allow continuing with the old version
   }
@@ -27,7 +28,7 @@ async function checkVersion() {
   console.log(parseInt(myVersion.replace(/\D/g, '')), parseInt(newVersion.replace(/\D/g, '')));
   if (parseInt(myVersion.replace(/\D/g, '')) != parseInt(newVersion.replace(/\D/g, ''))) {
     alert('Updating to new version: ' + newVersion + ' ' + version);
-    localStorage.setItem('version', newVersion); // Save new version
+    localStorage.setItem(versionKey, newVersion); // Save new version with network-specific key
     const newUrl = window.location.href.split('?')[0];
 
     logsModal.log(`Updated to version: ${newVersion}`)
@@ -89,6 +90,7 @@ import {
   passwordToKey,
   dhkeyCombined,
   decryptChacha,
+  generateUUIDv4,
 } from './crypto.js';
 
 // Put standalone conversion function in lib.js
@@ -174,7 +176,6 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
   }
   // First check if we're offline
   if (!isOnline) {
-    console.log('Checking username availability offline');
     // When offline, check local storage only
     const { netid } = network;
     const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
@@ -186,13 +187,11 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
       netidAccounts.usernames[username] &&
       normalizeAddress(netidAccounts.usernames[username].address) === normalizeAddress(address)
     ) {
-      console.log('Username found locally and matches address');
       return 'mine';
     }
 
     // If we have the username but address doesn't match
     if (netidAccounts?.usernames && netidAccounts.usernames[username]) {
-      console.log('Username found locally but address does not match');
       if (foundAddressObject) {
         foundAddressObject.address = netidAccounts.usernames[username].address;
       }
@@ -200,7 +199,6 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
     }
 
     // Username not found locally
-    console.log('Username not found locally');
     return 'available';
   }
 
@@ -232,7 +230,7 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
     logsModal.log(`Checked username returned available: ${username}, response: ${JSON.stringify(data)}`);
     return 'available';
   } catch (error) {
-    console.log('Error checking username:', error);
+    console.error('Error checking username:', error);
     return 'error2';
   }
 }
@@ -499,8 +497,6 @@ function handleBeforeUnload(e) {
 
 // This is for installed apps where we can't stop the back button; just save the state
 function handleVisibilityChange() {
-  console.log('in handleVisibilityChange', document.visibilityState);
-
   if (document.visibilityState === 'hidden') {
     reactNativeApp.handleNativeAppSubscribe();
     if (reactNativeApp.isReactNativeWebView) {
@@ -548,16 +544,13 @@ async function encryptAllAccounts(oldPassword, newPassword) {
   const accountsObj = parse(localStorage.getItem('accounts') || 'null');
   if (!accountsObj?.netids) return;
 
-  console.log('looping through all netids')
   for (const netid in accountsObj.netids) {
     const usernamesObj = accountsObj.netids[netid]?.usernames;
     if (!usernamesObj) continue;
-    console.log('looping through all accounts for '+netid)
     for (const username in usernamesObj) {
       const key = `${username}_${netid}`;
       let data = localStorage.getItem(key);
       if (!data) continue;
-      console.log('about to reencrypt '+key)
 
       // If oldEncKey is set, decrypt; otherwise, treat as plaintext
       if (oldEncKey) {
@@ -588,9 +581,7 @@ async function encryptAllAccounts(oldPassword, newPassword) {
 }
 
 function saveState() {
-  console.log('in saveState');
   if (myData && myAccount && myAccount.username && myAccount.netid) {
-    console.log('saving state');
     let data = stringify(myData)
     if (localStorage.lock && lockModal.encKey){  // Consider what happens if localStorage.lock was manually deleted
       data = encryptData(data, lockModal.encKey, true)
@@ -607,6 +598,23 @@ function loadState(account, noparse=false){
   }
   if (noparse) return data;
   return parse(data);
+}
+
+function checkFirstTimeTip(tipName) {
+  if (!myData?.account) return false;
+  if (typeof tipName !== 'string' || !tipName) return false;
+  const existing = myData.account.firstTimeTips;
+  if (!existing || typeof existing !== 'object') return false;
+  return existing[tipName] === true;
+}
+
+function setFirstTimeTipShown(tipName) {
+  if (!myData?.account) return;
+  if (typeof tipName !== 'string' || !tipName) return;
+  const existing = myData.account.firstTimeTips;
+  myData.account.firstTimeTips = existing && typeof existing === 'object' ? existing : {};
+  myData.account.firstTimeTips[tipName] = true;
+  saveState();
 }
 
 class WelcomeScreen {
@@ -806,10 +814,12 @@ class Header {
     this.logoLink = this.header.querySelector('.logo-link');
     this.menuButton = document.getElementById('toggleMenu');
     this.settingsButton = document.getElementById('toggleSettings');
+    this.upcomingCallsBtn = document.getElementById('upcomingCallsBtn');
 
     this.logoLink.addEventListener('keydown', ignoreShiftTabKey); // add event listener for first-item to prevent shift+tab
     this.menuButton.addEventListener('click', () => menuModal.open());
     this.settingsButton.addEventListener('click', () => settingsModal.open());
+    this.upcomingCallsBtn.addEventListener('click', () => callsModal.open());
     
     // Add click event for username display to open myInfoModal
     this.text.addEventListener('click', () => {
@@ -833,6 +843,26 @@ class Header {
 
   setText(newText) {
     this.text.textContent = newText;
+  }
+
+  /**
+   * Updates the upcoming calls icon visibility and glow state
+   */
+  updateCallsIcon() {
+    if (!this.upcomingCallsBtn) return;
+    
+    const hasUpcoming = callsModal.hasUpcomingCalls();
+    const hasImminent = callsModal.hasImminentCalls();
+    
+    // Show/hide icon based on upcoming calls
+    this.upcomingCallsBtn.style.display = hasUpcoming ? '' : 'none';
+    
+    // Add/remove glow class based on imminent calls
+    if (hasImminent) {
+      this.upcomingCallsBtn.classList.add('upcoming-calls-glow');
+    } else {
+      this.upcomingCallsBtn.classList.remove('upcoming-calls-glow');
+    }
   }
 
 }
@@ -950,8 +980,7 @@ class Footer {
   
       // Restore previous view if there was an error
       if (previousView && previousButton) {
-        console.log(`Restoring previous view: ${previousView}`);
-  
+
         // Hide all screens with direct references
         chatsScreen.close();
         contactsScreen.close();
@@ -1067,8 +1096,6 @@ class ChatsScreen {
     }
 
     if (emptyStateEl) emptyStateEl.style.display = 'none';
-
-    console.log('chats.length', JSON.stringify(chats.length));
 
     const chatItems = [];
     for (const chat of chats) {
@@ -1474,7 +1501,6 @@ class WalletScreen {
 
     this.assetsList.innerHTML = walletData.assets
       .map((asset) => {
-        console.log('asset balance', asset, asset.balance);
         return `
               <div class="asset-item">
                   <div class="asset-logo"><img src="./media/liberdus_logo_50.png" class="asset-logo"></div>
@@ -1523,7 +1549,6 @@ class WalletScreen {
             console.error(`Error fetching balance for address ${addr.address}:`, data);
             continue;
           }
-          console.log('balance', data);
           if (data?.balance !== undefined) {
             // Update address balance
             addr.balance = data.balance;
@@ -1712,6 +1737,7 @@ class MenuModal {
       clearInterval(getSystemNoticeIntervalId);
       getSystemNoticeIntervalId = null;
     }
+    callsModal.stopPeriodicCallsRefresh();
     // Stop camera if it's running
     if (typeof scanQRModal !== 'undefined' && scanQRModal.camera.scanInterval) {
       scanQRModal.stopCamera();
@@ -1935,9 +1961,10 @@ const secretModal = new SecretModal();
  * @param {string} addr - the address of the contact
  * @param {string} username - the username of the contact
  * @param {number = 1} friendStatus - the friend status of the contact, default is 1
+ * @param {boolean = true} tolledDepositToastShown - if false, ChatModal may show a one-time toast about the sender's toll deposit
  * @returns {void}
  */
-function createNewContact(addr, username, friendStatus = 1) {
+function createNewContact(addr, username, friendStatus = 1, tolledDepositToastShown = true) {
   const address = normalizeAddress(addr);
   if (myData.contacts[address]) {
     return;
@@ -1959,6 +1986,7 @@ function createNewContact(addr, username, friendStatus = 1) {
   c.tollRequiredToSend = 1;
   c.friend = friendStatus;
   c.friendOld = friendStatus;
+  c.tolledDepositToastShown = tolledDepositToastShown;
 }
 
 class ScanQRModal {
@@ -2102,7 +2130,6 @@ class ScanQRModal {
 
         // If QR code found and decoded
         if (decodedText) {
-          console.log('QR Code detected:', decodedText);
           this.handleSuccessfulScan(decodedText);
         }
       } catch (error) {
@@ -2114,7 +2141,6 @@ class ScanQRModal {
 
   handleSuccessfulScan(data) {
     this.close();
-    console.log('Raw QR Data Scanned');
     if (this.fillFunction) this.fillFunction(data); // Call the assigned fill function (e.g., fillPaymentFromQR or fillStakeAddressFromQR)
   }
 }
@@ -2242,6 +2268,7 @@ class SignInModal {
     this.removeButton.style.display = 'none';
     this.notFoundMessage.textContent = 'network error';
     this.notFoundMessage.style.display = 'inline';
+    showToast('The gateway server is down, please try again later.', 5000, 'warning');
   }
 
   // When auto-selecting after account creation, the network may not have propagated
@@ -2302,27 +2329,54 @@ class SignInModal {
       sortedUsernames = [...notifiedUsernames, ...otherUsernames];
     }
 
-    // Populate select with sorted usernames
-    this.usernameSelect.innerHTML = `
-      <option value="" disabled selected hidden>Select an account</option>
-      ${sortedUsernames.map((username) => {
-        const isNotifiedAccount = notifiedUsernameSet.has(username);
-        const dotIndicator = isNotifiedAccount ? ' 🔔' : '';
+    // Populate select with sorted usernames.
+    // Build a map of privacy flags to avoid multiple loadState calls and
+    // render options via a small helper to reduce duplication.
+    const isPrivateMap = Object.create(null);
+    for (const username of sortedUsernames) {
+      let isPrivateAccount = false;
+      try {
+        const localState = loadState(`${username}_${netid}`);
+        isPrivateAccount = localState?.account?.private === true;
+      } catch (e) {
+        isPrivateAccount = false;
+      }
+      isPrivateMap[username] = isPrivateAccount;
+    }
 
-        // Private accounts are stored in per-account state (${username}_${netid}).
-        let isPrivateAccount = false;
-        try {
-          const localState = loadState(`${username}_${netid}`);
-          isPrivateAccount = localState?.account?.private === true;
-        } catch (e) {
-          isPrivateAccount = false;
-        }
+    // Keep notified accounts (any privacy) at the very top, in the order
+    // they appear in sortedUsernames. Then render remaining public accounts,
+    // and finally remaining private accounts grouped under a disabled label.
+    const notifiedTop = sortedUsernames.filter(u => notifiedUsernameSet.has(u));
+    const remaining = sortedUsernames.filter(u => !notifiedUsernameSet.has(u));
+    const publicRemaining = remaining.filter(u => !isPrivateMap[u]);
+    const privateRemaining = remaining.filter(u => isPrivateMap[u]);
 
-        // Explicitly style each <option> to avoid color inheritance quirks.
-        const optionColor = isPrivateAccount ? 'var(--danger-color)' : 'var(--text-color)';
-        return `<option value="${username}" style="color: ${optionColor};">${username}${dotIndicator}</option>`;
-      }).join('')}
-    `;
+    const renderOption = (username) => {
+      const isNotifiedAccount = notifiedUsernameSet.has(username);
+      const dotIndicator = isNotifiedAccount ? ' 🔔' : '';
+      const optionColor = isPrivateMap[username] ? 'var(--danger-color)' : 'var(--text-color)';
+      const displayName = isPrivateMap[username] ? `- ${username}` : username;
+      return `<option value="${username}" style="color: ${optionColor};">${displayName}${dotIndicator}</option>`;
+    };
+
+    let html = `<option value="" disabled selected hidden>Select an account</option>`;
+
+    if (notifiedTop.length > 0) {
+      html += notifiedTop.map(renderOption).join('');
+    }
+
+    if (publicRemaining.length > 0) {
+      html += publicRemaining.map(renderOption).join('');
+    }
+
+    // Private accounts grouped with a disabled label (avoids optgroup indentation)
+    if (privateRemaining.length > 0) {
+      html += `<option value="" disabled style="font-weight:600; color:var(--danger-color);">Private accounts</option>`;
+      html += privateRemaining.map(renderOption).join('');
+    }
+
+    this.usernameSelect.innerHTML = html;
 
     // Restore the previously selected username if it exists
     if (selectedUsername && usernames.includes(selectedUsername)) {
@@ -2355,45 +2409,47 @@ class SignInModal {
   async open(preselectedUsername_) {
     this.preselectedUsername = preselectedUsername_;
 
-    // First show the modal so we can properly close it if needed
-    this.modal.classList.add('active');
-
-    // Update username select and get usernames
+    // Update username select and get usernames BEFORE opening modal
     const { usernames } = this.updateUsernameSelect();
 
-    // If no accounts exist, close modal and open Create Account modal
-    if (usernames.length === 0) {
-      this.close();
-      createAccountModal.open();
-      return;
-    }
+    // Wait for browser to process DOM changes before starting modal transition
+    requestAnimationFrame(async () => {
+      this.modal.classList.add('active');
 
-    // If a username should be auto-selected (either preselect or only one account), do it
-    if ((preselectedUsername_ && usernames.includes(preselectedUsername_))) {
-      this.usernameSelect.value = this.preselectedUsername;
-      await this.handleUsernameChange();
-      // happens when autoselect parameter is given since new account was just created and network may not have propagated account
-      if (this.notFoundMessage.textContent === 'not found') {
-        this.applyAutoSelectNotFoundOverride();
-        this.handleSignIn();
+      // If no accounts exist, close modal and open Create Account modal
+      if (usernames.length === 0) {
+        this.close();
+        createAccountModal.open();
+        return;
       }
-      return;
-    }
 
-    // If only one account exists, select it and trigger change event
-    if (usernames.length === 1) {
-      this.usernameSelect.value = usernames[0];
-      this.usernameSelect.dispatchEvent(new Event('change'));
-      return;
-    }
+      // If a username should be auto-selected (either preselect or only one account), do it
+      if ((preselectedUsername_ && usernames.includes(preselectedUsername_))) {
+        this.usernameSelect.value = this.preselectedUsername;
+        await this.handleUsernameChange();
+        // happens when autoselect parameter is given since new account was just created and network may not have propagated account
+        if (this.notFoundMessage.textContent === 'not found') {
+          this.applyAutoSelectNotFoundOverride();
+          this.handleSignIn();
+        }
+        return;
+      }
 
-    // Multiple accounts exist, show modal with select dropdown
-    this.setUiDisabledSignIn();
+      // If only one account exists, select it and trigger change event
+      if (usernames.length === 1) {
+        this.usernameSelect.value = usernames[0];
+        this.usernameSelect.dispatchEvent(new Event('change'));
+        return;
+      }
 
-    // set timeout to focus on the last item so shift+tab and tab prevention works
-    setTimeout(() => {
-      this.signInModalLastItem.focus();
-    }, 100);
+      // Multiple accounts exist, show modal with select dropdown
+      this.setUiDisabledSignIn();
+
+      // set timeout to focus on the last item so shift+tab and tab prevention works
+      setTimeout(() => {
+        this.signInModalLastItem.focus();
+      }, 100);
+    });
   }
 
   close() {
@@ -2446,7 +2502,7 @@ class SignInModal {
 
     myData = loadState(`${username}_${netid}`)
     if (!myData) {
-      console.log('Account data not found');
+      console.warn('Account data not found');
       return;
     }
     myAccount = myData.account;
@@ -2496,10 +2552,14 @@ class SignInModal {
     if (myData?.wallet?.history && Array.isArray(myData.wallet.history) && myData.wallet.history.length > 0) {
       restoreWalletNotificationDots();
     }
+    
+    // Initialize upcoming calls icon and start periodic refresh
+    callsModal.refreshCalls();
+    header.updateCallsIcon();
+    callsModal.startPeriodicCallsRefresh();
   }
 
   async handleUsernameChange() {
-    console.log('in handleUsernameChange');
     // Get existing accounts
     const { netid } = network;
     const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
@@ -2611,8 +2671,10 @@ class MyInfoModal {
     this.avatarSection = this.modal.querySelector('.contact-avatar-section');
     this.avatarDiv = this.avatarSection.querySelector('.avatar');
     this.nameDiv = this.avatarSection.querySelector('.name');
-    this.subtitleDiv = this.avatarSection.querySelector('.subtitle');
+    this.addressDiv = document.getElementById('myInfoDisplayUsername');
+    this.copyButton = document.getElementById('myInfoCopyAddress');
     this.qrContainer = this.modal.querySelector('#myInfoQR');
+    this.fullAddress = null; // Store full address for copying
 
     // Create avatar edit button
     this.avatarEditButton = document.createElement('button');
@@ -2621,6 +2683,10 @@ class MyInfoModal {
 
     this.backButton.addEventListener('click', () => this.close());
     this.editButton.addEventListener('click', () => myProfileModal.open());
+
+    // Copy address functionality
+    this.copyButton.addEventListener('click', () => this.copyAddress());
+    this.addressDiv.addEventListener('click', () => this.copyAddress());
 
     // Avatar edit button click
     this.avatarEditButton.addEventListener('click', (e) => {
@@ -2650,8 +2716,13 @@ class MyInfoModal {
     if (!myAccount) return;
 
     // Use getContactAvatarHtml for consistent avatar rendering
+    // Include account avatar fields so user preference (`useAvatar`) is respected
     const avatarHtml = await getContactAvatarHtml(
-      { address: myAccount.keys.address, hasAvatar: myData?.account?.hasAvatar },
+      {
+        address: myAccount.keys.address,
+        hasAvatar: myData?.account?.hasAvatar,
+        avatarId: myData?.account?.avatarId,
+      },
       96
     );
     this.avatarDiv.innerHTML = avatarHtml;
@@ -2662,7 +2733,14 @@ class MyInfoModal {
     }
 
     this.nameDiv.textContent = myAccount.username;
-    this.subtitleDiv.textContent = myAccount.keys.address;
+    const address = myAccount.keys.address;
+    const addressWithPrefix = address.startsWith('0x') ? address : `0x${address}`;
+    
+    // Store full address for copying
+    this.fullAddress = addressWithPrefix;
+    
+    // Display full address (address is always shown, so no need to check display)
+    this.addressDiv.textContent = addressWithPrefix;
 
     const { account = {} } = myData ?? {};
     const fields = {
@@ -2746,6 +2824,22 @@ class MyInfoModal {
       console.error('Failed to render username QR:', e);
     }
   }
+
+  async copyAddress() {
+    // Copy the full address, not the displayed truncated version and toast 
+    const address = this.fullAddress || this.addressDiv.textContent;
+    try {
+      await navigator.clipboard.writeText(address);
+      showToast('Address copied to clipboard', 2000, 'success');
+      this.copyButton.classList.add('success');
+      setTimeout(() => {
+        this.copyButton.classList.remove('success');
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      showToast('Failed to copy address', 0, 'error');
+    }
+  }
 }
 
 // Create a singleton instance
@@ -2779,6 +2873,8 @@ class ContactInfoModal {
     this.avatarEditButton = document.createElement('button');
     this.avatarEditButton.className = 'icon-button edit-icon avatar-edit-button avatar-edit-button-outside';
     this.avatarEditButton.setAttribute('aria-label', 'Edit photo');
+    this.notesElement = document.getElementById('contactInfoNotes');
+    this.notesEditButton = document.getElementById('notesEditButton');
 
     // Back button
     this.backButton.addEventListener('click', () => this.close());
@@ -2811,6 +2907,12 @@ class ContactInfoModal {
     this.avatarEditButton.addEventListener('click', (e) => {
       e.stopPropagation(); // Prevent triggering avatar click
       this.openAvatarEdit();
+    });
+
+    // Notes edit button
+    this.notesEditButton.addEventListener('click', (e) => {
+      e.stopPropagation();
+      editContactModal.open();
     });
 
     // Make the avatar itself clickable
@@ -2884,6 +2986,10 @@ class ContactInfoModal {
         element.textContent = value;
       }
     });
+
+    // Notes
+    const notesRaw = displayInfo.notes ?? (displayInfo.address && myData.contacts?.[displayInfo.address]?.notes);
+    this.notesElement.textContent = notesRaw || 'Not Entered';
   }
 
   // Set up chat button functionality
@@ -3035,7 +3141,6 @@ class FriendModal {
     const fromAddr = longAddress(myAccount.keys.address);
     const toAddr = longAddress(address);
     const chatId_ = hashBytes([fromAddr, toAddr].sort().join(''));
-    console.log('DEBUG 1:chatId_', chatId_);
 
     const tx = {
       from: fromAddr,
@@ -3205,15 +3310,20 @@ class EditContactModal {
   load() {
     this.modal = document.getElementById('editContactModal');
     this.nameInput = document.getElementById('editContactNameInput');
-    this.nameActionButton = this.nameInput.parentElement.querySelector('.field-action-button');
+    this.nameClearButton = document.getElementById('nameClearButton');
     this.providedNameContainer = document.getElementById('editContactProvidedNameContainer');
+    this.notesInput = document.getElementById('editContactNotesInput');
+    this.notesClearButton = document.getElementById('notesClearButton');
+    this.saveButton = document.getElementById('saveEditContactButton');
     this.backButton = document.getElementById('closeEditContactModal');
 
     // Setup event listeners
     this.nameInput.addEventListener('input', (e) => this.handleNameInput(e));
     this.nameInput.addEventListener('blur', () => this.handleNameBlur());
     this.nameInput.addEventListener('keydown', (e) => this.handleNameKeydown(e));
-    this.nameActionButton.addEventListener('click', () => this.handleNameButton());
+    this.nameClearButton.addEventListener('click', () => this.handleNameClear());
+    this.notesClearButton.addEventListener('click', () => this.handleNotesClear());
+    this.saveButton.addEventListener('click', () => this.handleSave());
     this.providedNameContainer.addEventListener('click', () => this.handleProvidedNameClick());
     this.backButton.addEventListener('click', () => this.close());
   }
@@ -3254,8 +3364,6 @@ class EditContactModal {
     // Set up the input field with the original name
     this.nameInput.value = originalName;
 
-    // field-action-button should be clear
-    this.nameActionButton.className = 'field-action-button clear';
 
     // Get the current contact info from the contact info modal
     this.currentContactAddress = contactInfoModal.currentContactAddress;
@@ -3263,6 +3371,10 @@ class EditContactModal {
       console.error('No current contact found');
       return;
     }
+
+    // Populate notes field
+    const contactNotes = myData.contacts[this.currentContactAddress]?.notes || '';
+    this.notesInput.value = contactNotes;
 
     // Show the edit contact modal
     this.modal.classList.add('active');
@@ -3305,14 +3417,6 @@ class EditContactModal {
     // normalize the input using normalizeName
     const normalizedName = normalizeName(this.nameInput.value);
     this.nameInput.value = normalizedName;
-
-    // if already 'add' class, return early
-    if (this.nameActionButton.classList.contains('add')) {
-      return;
-    }
-
-    this.nameActionButton.className = 'field-action-button add';
-    this.nameActionButton.setAttribute('aria-label', 'Save');
   }
 
   handleNameBlur() {
@@ -3321,16 +3425,16 @@ class EditContactModal {
     this.nameInput.value = normalizedName;
   }
 
-  handleNameButton() {
-    if (this.nameActionButton.classList.contains('clear')) {
-      this.nameInput.value = '';
-      // Always show save button after clearing
-      this.nameActionButton.className = 'field-action-button add';
-      this.nameActionButton.setAttribute('aria-label', 'Save');
-      this.nameInput.focus();
-    } else {
-      this.handleSave();
-    }
+  handleNameClear() {
+    // Clear the name field
+    this.nameInput.value = '';
+    this.nameInput.focus();
+  }
+
+  handleNotesClear() {
+    // Clear the notes field
+    this.notesInput.value = '';
+    this.notesInput.focus();
   }
 
   handleNameKeydown(e) {
@@ -3343,9 +3447,17 @@ class EditContactModal {
   handleSave() {
     // Save changes - if input is empty/spaces, it will become undefined
     const newName = this.nameInput.value.trim() || null;
+    // Enforce 1000 character limit on notes (safety check)
+    const maxNotesLength = 1000;
+    let notesValue = this.notesInput.value;
+    if (notesValue.length > maxNotesLength) {
+      notesValue = notesValue.substring(0, maxNotesLength);
+    }
+    const newNotes = notesValue.trim() || null;
     const contact = myData.contacts[this.currentContactAddress];
     if (contact) {
       contact.name = newName;
+      contact.notes = newNotes;
       contactInfoModal.needsContactListUpdate = true;
     }
 
@@ -3538,8 +3650,7 @@ class HistoryModal {
     }
     
     if (item.dataset.status === 'failed') {
-      console.log(`Not opening chatModal for failed transaction`);
-      
+
       if (event.target.closest('.transaction-item')) {
         failedTransactionModal.open(item.dataset.txid, item);
       }
@@ -3904,6 +4015,57 @@ class CallsModal {
         }
     });
   }
+
+  /**
+   * Returns true if there are any calls within the last 1 hour or next hour
+   * @returns {boolean}
+   */
+  hasUpcomingCalls() {
+    const now = getCorrectedTimestamp();
+    const oneHourMs = 60 * 60 * 1000;
+    const oneHourAgo = now - oneHourMs;
+    const oneHourFromNow = now + oneHourMs;
+    return this.calls.some(callGroup => {
+      const callTime = Number(callGroup.callTime);
+      return Number.isFinite(callTime) && callTime >= oneHourAgo && callTime <= oneHourFromNow;
+    });
+  }
+
+  /**
+   * Returns true if there are any calls within 15 minutes before or after now
+   * @returns {boolean}
+   */
+  hasImminentCalls() {
+    const now = getCorrectedTimestamp();
+    const fifteenMinMs = 15 * 60 * 1000;
+    const windowStart = now - fifteenMinMs;
+    const windowEnd = now + fifteenMinMs;
+    return this.calls.some(callGroup => {
+      const callTime = Number(callGroup.callTime);
+      return Number.isFinite(callTime) && callTime >= windowStart && callTime <= windowEnd;
+    });
+  }
+
+  /**
+   * Starts the periodic refresh interval (every minute)
+   */
+  startPeriodicCallsRefresh() {
+    if (this._periodicRefreshInterval) return;
+    this._periodicRefreshInterval = setInterval(() => {
+      this.refreshCalls();
+      header.updateCallsIcon();
+    }, 60000);
+  }
+
+  /**
+   * Stops the periodic refresh interval
+   */
+  stopPeriodicCallsRefresh() {
+    if (this._periodicRefreshInterval) {
+      clearInterval(this._periodicRefreshInterval);
+      this._periodicRefreshInterval = null;
+    }
+  }
 }
 
 const callsModal = new CallsModal();
@@ -3993,8 +4155,6 @@ async function updateAssetPricesIfNeeded() {
       if (data.pairs && data.pairs.length > 0 && data.pairs[0].priceUsd) {
         asset.price = parseFloat(data.pairs[0].priceUsd);
         myData.wallet.priceTimestamp = now;
-        console.log(`Updated price of ${asset.symbol} to ${asset.price}`);
-        console.log(JSON.stringify(data, null, 4));
       } else {
         console.warn(`No price data found for ${asset.symbol} from API`);
       }
@@ -4018,19 +4178,16 @@ async function queryNetwork(url, abortSignal = null) {
   }
 
   try {
-    const now = new Date().toLocaleTimeString();
-    console.log(`${now} query`, `${selectedGateway.web}${url}`);
     if (network.name != 'Testnet'){
 //      showToast(`${now} query ${selectedGateway.web}${url}`, 0, 'info')
     }
     const response = await fetch(`${selectedGateway.web}${url}`, { signal: abortSignal });
     const data = parse(await response.text());
-    console.log('response', data);
     return data;
   } catch (error) {
     // Check if error is due to abort
     if (error.name === 'AbortError') {
-      console.log('queryNetwork aborted:', url);
+      console.error('queryNetwork aborted:', url);
       return null;
     }
     // log local hh:mm:ss
@@ -4045,10 +4202,9 @@ async function queryNetwork(url, abortSignal = null) {
 
 async function getChats(keys, retry = 1) {
   // needs to return the number of chats that need to be processed
-  console.log(`getChats retry ${retry}`);
   //console.log('keys', keys)
   if (!keys) {
-    console.log('no keys in getChats');
+    console.warn('no keys in getChats');
     return 0;
   } // TODO don't require passing in keys
   const now = getCorrectedTimestamp();
@@ -4070,12 +4226,6 @@ async function getChats(keys, retry = 1) {
   const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/${timestamp}`); // TODO get this working
   //    const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/0`) // TODO stop using this
   let chatCount = senders?.chats ? Object.keys(senders.chats).length : 0; // Handle null/undefined senders.chats
-  console.log(
-    'getChats senders',
-    timestamp === undefined ? 'undefined' : JSON.stringify(timestamp),
-    chatCount === undefined ? 'undefined' : JSON.stringify(chatCount),
-    senders === undefined ? 'undefined' : JSON.stringify(senders)
-  );
   if (senders && senders.chats && chatCount) {
     await processChats(senders.chats, keys);
   } else {
@@ -4158,11 +4308,11 @@ async function processChats(chats, keys) {
   for (let sender in chats) {
     // Fetch messages using the adjusted timestamp
     const res = await queryNetwork(`/messages/${chats[sender]}/${messageQueryTimestamp}`);
-    console.log('processChats sender', sender, 'fetching since', messageQueryTimestamp);
     if (res && res.messages) {
       const from = normalizeAddress(sender);
       if (!myData.contacts[from]) {
-        createNewContact(from);
+        // New inbound chat (not previously in contacts): create as tolled + allow one-time tolled deposit toast
+        createNewContact(from, undefined, 1, false);
       }
       const contact = myData.contacts[from];
       // Set username to "Liberdus Faucet" if there is no username for the faucet address contact
@@ -4189,7 +4339,6 @@ async function processChats(chats, keys) {
 
         newTimestamp = tx.timestamp > newTimestamp ? tx.timestamp : newTimestamp;
         mine = tx.from == longAddress(keys.address) ? true : false;
-        if (mine) console.warn('txid in processChats is', txidHex)
         // timestamp-skew check for incoming messages/transfers (ensures we don't use out of range sent_timestamp)
         if (!mine && (tx.type === 'message' || tx.type === 'transfer')) {
           const sentTs = Number(((tx.type === 'message' ? tx.xmessage : tx.xmemo) || {}).sent_timestamp || 0);
@@ -4206,12 +4355,12 @@ async function processChats(chats, keys) {
             payload.sent_timestamp = tx.timestamp;
           }
           if (mine){
-            console.warn('my message tx', tx)
+            // console.warn('my message tx', tx)
           }
           else if (payload.encrypted) {
             await ensureContactKeys(from);
             if (!myData.contacts[from]?.public) {
-              console.log(`no public key found for sender ${sender}`);
+              console.warn(`no public key found for sender ${sender}`);
               continue;
             }
             payload.public = myData.contacts[from].public;
@@ -4253,8 +4402,6 @@ async function processChats(chats, keys) {
                     
                     if (!messageToDelete.my && originalSender === from) {
                       // This is a message received from sender, who is now deleting it - valid
-                      console.log(`Deleting message ${txidToDelete} as requested by sender`);
-                      
                       // Purge cached thumbnails for image attachments, if any
                       chatModal.purgeThumbnail(messageToDelete.xattach);
 
@@ -4284,8 +4431,6 @@ async function processChats(chats, keys) {
                       }
                     } else if (messageToDelete.my && normalizeAddress(keys.address) === normalizeAddress(tx.from)) {
                       // This is our own message, and we're deleting it - valid
-                      console.log(`Deleting our message ${txidToDelete} as requested by us`);
-                      
                       // Purge cached thumbnails for image attachments, if any
                       chatModal.purgeThumbnail(messageToDelete.xattach);
 
@@ -4388,6 +4533,16 @@ async function processChats(chats, keys) {
                   payload.url = parsedMessage.url;
                   payload.duration = parsedMessage.duration;
                   payload.type = 'vm';
+                  // Extract reply info for voice messages
+                  if (parsedMessage.replyId) {
+                    payload.replyId = parsedMessage.replyId;
+                  }
+                  if (parsedMessage.replyMessage) {
+                    payload.replyMessage = parsedMessage.replyMessage;
+                  }
+                  if (typeof parsedMessage.replyOwnerIsMine !== 'undefined') {
+                    payload.replyOwnerIsMine = parsedMessage.replyOwnerIsMine;
+                  }
                 } else if (parsedMessage.type === 'message') {
                   // Regular message format processing
                   payload.message = parsedMessage.message;
@@ -4419,12 +4574,17 @@ async function processChats(chats, keys) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo)
             delete payload.senderInfo;
             if (contact.senderInfo.avatarId && contact.senderInfo.avatarKey && contact.avatarId !== contact.senderInfo.avatarId) {
-              downloadAndDecryptAvatar(`https://inv.liberdus.com:2083/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
+              downloadAndDecryptAvatar(`${network.attachmentServerUrl}/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
                 .then(async (blob) => {
                   try {
-                    await contactAvatarCache.save(contact.address, blob);
+                    // Save blob under the server-provided avatar id
+                    await contactAvatarCache.save(contact.senderInfo.avatarId, blob);
                     contact.avatarId = contact.senderInfo.avatarId;
                     contact.hasAvatar = true;
+                    // If contact provided a new avatar, prefer their sent avatar
+                    myData.contacts ??= {};
+                    myData.contacts[contact.address] ??= { address: contact.address };
+                    myData.contacts[contact.address].useAvatar = 'contact';
                     saveState();
                     // Refresh UI immediately: chat modal avatar + messages + chat list
                     if (chatModal.isActive() && chatModal.address === contact.address) {
@@ -4531,12 +4691,12 @@ async function processChats(chats, keys) {
           }
           if (mine) {
             const txx = parse(stringify(tx))
-            console.warn('my transfer tx', txx)
+            // console.warn('my transfer tx', txx)
           }
           else if (payload.encrypted) {
             await ensureContactKeys(from);
             if (!myData.contacts[from]?.public) {
-              console.log(`no public key found for sender ${sender}`);
+              console.warn(`no public key found for sender ${sender}`);
               continue;
             }
             payload.public = myData.contacts[from].public;
@@ -4562,12 +4722,16 @@ async function processChats(chats, keys) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
             if (contact.senderInfo.avatarId && contact.senderInfo.avatarKey && contact.avatarId !== contact.senderInfo.avatarId) {
-              downloadAndDecryptAvatar(`https://inv.liberdus.com:2083/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
+              downloadAndDecryptAvatar(`${network.attachmentServerUrl}/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
                 .then(async (blob) => {
                   try {
-                    await contactAvatarCache.save(contact.address, blob);
+                    await contactAvatarCache.save(contact.senderInfo.avatarId, blob);
                     contact.avatarId = contact.senderInfo.avatarId;
                     contact.hasAvatar = true;
+                    // If contact provided a new avatar, prefer their sent avatar
+                    myData.contacts ??= {};
+                    myData.contacts[contact.address] ??= { address: contact.address };
+                    myData.contacts[contact.address].useAvatar = 'contact';
                     saveState();
                     // Refresh UI immediately: chat modal avatar + messages + chat list
                     if (chatModal.isActive() && chatModal.address === contact.address) {
@@ -4745,7 +4909,6 @@ async function processChats(chats, keys) {
   if (newTimestamp > 0) {
     // Update the timestamp
     myAccount.chatTimestamp = newTimestamp;
-    console.log('Updated global chat timestamp to', newTimestamp);
   }
 }
 
@@ -4808,7 +4971,7 @@ async function getUsernameAddress(username) {
     }
     return data.address;
   } catch (error) {
-    console.log('Error checking username:', error);
+    console.error('Error checking username:', error);
     return null;
   }
 }
@@ -4932,7 +5095,6 @@ async function injectTx(tx, txid) {
       `${selectedGateway.web}/inject`,
       options
     );
-    console.log('DEBUG: injectTx response', response);
     const data = await response.json();
     data.txid = txid;
 
@@ -5018,7 +5180,6 @@ function getTxid(tx){
   if (typeof(tx) !== "string"){
     txo = stringify(tx)
   }
-console.warn('tx is', txo)
   txo = parse(txo)
   delete txo.sign;
   const jstr = stringify(txo);
@@ -5070,6 +5231,9 @@ class SearchMessagesModal {
 
       contact.messages.forEach((message) => {
         if (!message.message) return; // some messages like calls have no message field
+        // Skip deleted messages and call messages
+        if (message.deleted > 0) return;
+        if (message.type === 'call') return;
         if (message.message.toLowerCase().includes(searchLower)) {
           // Highlight matching text
           const messageText = escapeHtml(message.message);
@@ -5104,6 +5268,8 @@ class SearchMessagesModal {
   // this is also used by contact search 
   displayEmptyState(containerId, message = 'No results found') {
     const resultsContainer = document.getElementById(containerId);
+    // Scroll to top before rendering
+    resultsContainer.closest('.modal-content')?.scrollTo(0, 0);
     resultsContainer.innerHTML = `
           <div class="empty-state" style="display: block">
               <div class="empty-state-message">${message}</div>
@@ -5111,7 +5277,7 @@ class SearchMessagesModal {
       `;
   }
 
-  handleSearchResultClick(result) {
+  async handleSearchResultClick(result) {
     try {
       // Close search modal
       this.close();
@@ -5119,13 +5285,13 @@ class SearchMessagesModal {
       // Switch to chats view if not already there
       footer.switchView('chats');
 
-      // Open the chat with this contact
-      chatModal.open(result.contactAddress);
+      // Open the chat with this contact, skip auto-scroll since we'll scroll to specific message
+      await chatModal.open(result.contactAddress, true);
 
-      // Scroll to and highlight the message
-      setTimeout(() => {
+      // Messages are already in DOM after await, use requestAnimationFrame for layout
+      requestAnimationFrame(() => {
         chatModal.scrollToMessage(result.messageId);
-      }, 300);
+      });
     } catch (error) {
       console.error('Error handling search result:', error);
       // Could add error notification here
@@ -5133,6 +5299,9 @@ class SearchMessagesModal {
   }
 
   displaySearchResults(results) {
+    // Scroll to top before rendering new results
+    this.searchResults.closest('.modal-content')?.scrollTo(0, 0);
+
     // Create a ul element to properly contain the list items
     const resultsList = document.createElement('ul');
     resultsList.className = 'chat-list';
@@ -5162,12 +5331,12 @@ class SearchMessagesModal {
               </div>
           `;
 
-      resultElement.addEventListener('click', (event) => {
+      resultElement.addEventListener('click', async (event) => {
         event.stopImmediatePropagation(); // Stop all other listeners and bubbling immediately
         // clear search input and clear results
         document.getElementById('messageSearch').value = '';
         document.getElementById('searchResults').innerHTML = '';
-        this.handleSearchResultClick(result);
+        await this.handleSearchResultClick(result);
       });
 
       resultsList.appendChild(resultElement);
@@ -5407,6 +5576,8 @@ class SearchContactsModal {
   }
 
   displayContactResults(results, searchText) {
+    // Scroll to top before rendering new results
+    this.resultsContainer.closest('.modal-content')?.scrollTo(0, 0);
     this.resultsContainer.innerHTML = '';
 
     results.forEach(async (contact) => {
@@ -5463,6 +5634,9 @@ function createDisplayInfo(contact) {
     x: contact.senderInfo?.x || 'Not provided',
     address: contact.address,
     hasAvatar: !!contact.hasAvatar,
+    avatarId: contact.avatarId,
+    mineAvatarId: contact.mineAvatarId,
+    useAvatar: contact.useAvatar,
   };
 }
 
@@ -5504,6 +5678,19 @@ class AvatarEditModal {
     this.enableTransform = false;
     this.coverOverscan = 16; // extra pixels to ensure circle is always fully covered
     this.isOwnAvatar = false; // Track if editing own avatar vs contact avatar
+    this._avatarEditSelected = null; // 'contact' | 'mine' | 'identicon'
+    // Cached DOM refs for avatar options
+    this.avatarOptionsContainer = null;
+    this.avatarOptionsActions = null;
+    this.avatarThumbContact = null;
+    this.avatarThumbUploaded = null;
+    this.avatarThumbIdenticon = null;
+    this.avatarOptionContact = null;
+    this.avatarOptionUploaded = null;
+    this.avatarOptionIdenticon = null;
+    this.avatarUseButton = null;
+    // Track object URLs created for option thumbnails so we can revoke them
+    this._optionBlobUrls = [];
   }
 
   load() {
@@ -5518,6 +5705,15 @@ class AvatarEditModal {
     this.previewSquare = document.getElementById('avatarEditSquare');
     this.zoomRange = document.getElementById('avatarZoomRange');
     this.zoomControls = document.querySelector('.avatar-edit-controls');
+    this.avatarOptionsContainer = document.getElementById('avatarOptionsContainer');
+    this.avatarOptionsActions = document.getElementById('avatarOptionsActions');
+    this.avatarThumbContact = document.getElementById('avatarThumbContact');
+    this.avatarThumbUploaded = document.getElementById('avatarThumbUploaded');
+    this.avatarThumbIdenticon = document.getElementById('avatarThumbIdenticon');
+    this.avatarOptionContact = document.getElementById('avatarOptionContact');
+    this.avatarOptionUploaded = document.getElementById('avatarOptionUploaded');
+    this.avatarOptionIdenticon = document.getElementById('avatarOptionIdenticon');
+    this.avatarUseButton = document.getElementById('avatarUseButton');
 
     if (!this.modal || !this.backButton || !this.uploadButton || !this.deleteButton || !this.saveActionButton || !this.cancelButton || !this.fileInput || !this.previewContainer || !this.previewSquare || !this.zoomRange) {
       console.warn('AvatarEditModal elements not found');
@@ -5540,7 +5736,7 @@ class AvatarEditModal {
     this.previewContainer.appendChild(this.foregroundImg);
 
     this.backButton.addEventListener('click', () => this.close());
-    this.uploadButton.addEventListener('click', () => this.fileInput.click());
+    this.uploadButton.addEventListener('click', () => this.handleUploadButton());
     this.deleteButton.addEventListener('click', () => this.handleDelete());
     this.saveActionButton.addEventListener('click', () => this.handleSave());
     this.cancelButton.addEventListener('click', () => this.handleCancel());
@@ -5604,6 +5800,8 @@ class AvatarEditModal {
     this.activeImageBlob = null;
     this.enableTransform = false;
     await this.refreshPreview();
+    // populate three-option avatar selector (contact, mine, identicon)
+    try { await this.populateOptions(); } catch (e) { console.warn('populateOptions failed', e); }
     this.modal.classList.add('active');
     enterFullscreen();
   }
@@ -5621,7 +5819,223 @@ class AvatarEditModal {
     this.offsetY = 0;
     this.dragging = false;
     this.fileInput.value = '';
+    // hide avatar options UI if present
+    try {
+      const container = document.getElementById('avatarOptionsContainer');
+      const actions = document.getElementById('avatarOptionsActions');
+      if (container) container.style.display = 'none';
+      if (actions) actions.style.display = 'none';
+      this._avatarEditSelected = null;
+      const [o1,o2,o3] = [
+        document.getElementById('avatarOptionContact'),
+        document.getElementById('avatarOptionUploaded'),
+        document.getElementById('avatarOptionIdenticon')
+      ];
+      [o1,o2,o3].forEach(o => { if (o) o.style.outline = 'none'; });
+      const useBtn = document.getElementById('avatarUseButton');
+      if (useBtn) useBtn.disabled = true;
+      // Revoke any object URLs created for option thumbnails
+      if (this._optionBlobUrls && this._optionBlobUrls.length) {
+        for (const u of this._optionBlobUrls) {
+          try { URL.revokeObjectURL(u); } catch (e) {}
+        }
+        this._optionBlobUrls = [];
+      }
+    } catch (e) {}
     enterFullscreen();
+  }
+
+  /**
+   * Populate the avatar selection options (contact, mine, identicon)
+   * and wire handlers to persist `useAvatar` for the contact.
+   */
+  async populateOptions() {
+    const address = this.currentAddress;
+    const contactThumb = this.avatarThumbContact;
+    const uploadedThumb = this.avatarThumbUploaded;
+    const identiconThumb = this.avatarThumbIdenticon;
+    const container = this.avatarOptionsContainer;
+    const actions = this.avatarOptionsActions;
+    const useBtn = this.avatarUseButton;
+
+    if (!contactThumb || !uploadedThumb || !identiconThumb || !container || !actions || !useBtn) return;
+
+    // clear previous
+    contactThumb.innerHTML = '';
+    uploadedThumb.innerHTML = '';
+    identiconThumb.innerHTML = '';
+    this._avatarEditSelected = null;
+    useBtn.disabled = true;
+
+    // Revoke any previously-created option object URLs to avoid showing stale
+    // thumbnails after deletes and to avoid leaking object URLs.
+    if (this._optionBlobUrls && this._optionBlobUrls.length) {
+      for (const u of this._optionBlobUrls) {
+        try { URL.revokeObjectURL(u); } catch (e) {}
+      }
+      this._optionBlobUrls = [];
+    }
+
+    // fetch blobs (may be null). Use `get()` (blob) rather than cached blob URLs
+    // so we can detect actual existence after deletes.
+    let contactBlob = null;
+    let userBlob = null;
+    if (this.isOwnAvatar) {
+      // When editing own avatar we do not show preference options —
+      // only allow upload/delete. Hide options UI and show delete/upload as appropriate.
+      container.style.display = 'none';
+      actions.style.display = 'none';
+      // Clear any stale option handlers and disable use button since options are hidden.
+      try { useBtn.onclick = null; } catch (e) {}
+      useBtn.disabled = true;
+      this.deleteButton.style.display = myData?.account?.hasAvatar ? 'inline-flex' : 'none';
+      // Early return: remaining option population is contact-specific and not needed for own avatar.
+      return;
+    } else {
+      const contactObj = myData?.contacts?.[address] || null;
+      try { contactBlob = contactObj?.avatarId ? await contactAvatarCache.get(contactObj.avatarId) : null; } catch (e) { contactBlob = null; }
+      try { userBlob = contactObj?.mineAvatarId ? await contactAvatarCache.get(contactObj.mineAvatarId) : null; } catch (e) { userBlob = null; }
+    }
+
+    const contactUrl = contactBlob ? URL.createObjectURL(contactBlob) : null;
+    const userUrl = userBlob ? URL.createObjectURL(userBlob) : null;
+    if (contactUrl) this._optionBlobUrls.push(contactUrl);
+    if (userUrl) this._optionBlobUrls.push(userUrl);
+
+    // If there are no uploaded avatars for this contact (neither contact-sent nor user's uploaded),
+    // do not show the avatar options UI at all. For own-avatar editing we hide the options when
+    // there is no account avatar available.
+    if (!contactUrl && !userUrl) {
+      if (container) container.style.display = 'none';
+      if (actions) actions.style.display = 'none';
+      // ensure use button disabled
+      if (useBtn) useBtn.disabled = true;
+      // hide delete button as there's nothing for the user to delete
+      if (this.deleteButton) this.deleteButton.style.display = 'none';
+      return;
+    }
+
+    if (contactUrl) {
+      contactThumb.innerHTML = `<img src="${contactUrl}" width="64" height="64" style="border-radius:50%">`;
+    } else {
+      contactThumb.innerHTML = '';
+    }
+
+    if (userUrl) {
+      uploadedThumb.innerHTML = `<img src="${userUrl}" width="64" height="64" style="border-radius:50%">`;
+    } else {
+      uploadedThumb.innerHTML = '';
+    }
+
+    identiconThumb.innerHTML = generateIdenticon(address, 64);
+
+    // hide option entries that don't have an image (don't show empty options)
+    if (this.avatarOptionContact) this.avatarOptionContact.style.display = contactUrl ? '' : 'none';
+    if (this.avatarOptionUploaded) this.avatarOptionUploaded.style.display = userUrl ? '' : 'none';
+    if (this.avatarOptionIdenticon) this.avatarOptionIdenticon.style.display = identiconThumb ? '' : 'none';
+
+    // show container and actions
+    container.style.display = 'block';
+    actions.style.display = 'block';
+
+    // Show Delete button only when appropriate:
+    // - If editing own avatar: show when account hasAvatar
+    // - If editing a contact: show when the user's uploaded ('mine') avatar exists
+    try {
+      if (this.deleteButton) {
+        this.deleteButton.style.display = userUrl ? 'inline-flex' : 'none';
+      }
+    } catch (e) {}
+
+    // Ensure any avatar images inside this modal's header/controls show the user's uploaded
+    // avatar (`mine`) or the identicon — never the contact-sent avatar. This prevents the
+    // edit-icon area from displaying the contact avatar when editing.
+    try {
+      const headerImgs = this.modal.querySelectorAll('.contact-avatar-img');
+      if (headerImgs && headerImgs.length) {
+        for (const imgEl of headerImgs) {
+          if (userUrl) {
+            imgEl.src = userUrl;
+          } else {
+            // Replace the <img> with the identicon SVG
+            const sizeAttr = parseInt(imgEl.getAttribute('width')) || 40;
+            const wrapper = document.createElement('span');
+            wrapper.innerHTML = generateIdenticon(address, sizeAttr);
+            imgEl.replaceWith(wrapper.firstChild);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to update modal header avatar images:', e);
+    }
+
+    // attach click handlers (re-attach to ensure latest)
+
+    const selectOption = (type, el) => {
+      this._avatarEditSelected = type;
+      useBtn.disabled = false;
+      [this.avatarOptionContact, this.avatarOptionUploaded, this.avatarOptionIdenticon].forEach(o => { if (o) o.style.outline = 'none'; });
+      if (el) el.style.outline = '3px solid #007acc';
+    };
+
+    // Pre-select the current useAvatar preference if set (only if that option is visible).
+    // For contacts, prefer stored per-contact preference; default to identicon.
+    const currentPref = myData?.contacts?.[address]?.useAvatar ?? null;
+    const effectivePref = currentPref ?? 'identicon';
+
+    if (effectivePref) {
+      if (effectivePref === 'contact' && this.avatarOptionContact && this.avatarOptionContact.style.display !== 'none') selectOption('contact', this.avatarOptionContact);
+      else if (effectivePref === 'mine' && this.avatarOptionUploaded && this.avatarOptionUploaded.style.display !== 'none') selectOption('mine', this.avatarOptionUploaded);
+      else if (effectivePref === 'identicon' && this.avatarOptionIdenticon && this.avatarOptionIdenticon.style.display !== 'none') selectOption('identicon', this.avatarOptionIdenticon);
+    }
+    if (this.avatarOptionContact) this.avatarOptionContact.onclick = () => selectOption('contact', this.avatarOptionContact);
+    if (this.avatarOptionUploaded) this.avatarOptionUploaded.onclick = () => selectOption('mine', this.avatarOptionUploaded);
+    if (this.avatarOptionIdenticon) this.avatarOptionIdenticon.onclick = () => selectOption('identicon', this.avatarOptionIdenticon);
+
+    useBtn.onclick = async () => {
+      if (!this._avatarEditSelected || !address) return;
+      if (this.isOwnAvatar) {
+        // Own-avatar options are not shown; do not persist an account-level preference.
+        // Just refresh the My Info UI in case nothing changed.
+        try {
+          if (myInfoModal && typeof myInfoModal.updateMyInfo === 'function') {
+            myInfoModal.updateMyInfo();
+          }
+        } catch (e) {
+          console.warn('Failed to refresh My Info UI after avatar option selection (own avatar):', e);
+        }
+      } else {
+        // persist preference on contact
+        myData.contacts ??= {};
+        myData.contacts[address] ??= { address };
+        myData.contacts[address].useAvatar = this._avatarEditSelected;
+        saveState();
+        // Update UI where appropriate so the change is visible immediately
+        try {
+          const contact = myData.contacts[address];
+          if (contactInfoModal && typeof contactInfoModal.updateContactInfo === 'function') {
+            contactInfoModal.updateContactInfo(createDisplayInfo(contact));
+            contactInfoModal.needsContactListUpdate = true;
+          }
+          if (chatModal && chatModal.isActive && chatModal.isActive() && chatModal.address === address) {
+            chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+          }
+        } catch (e) {
+          console.warn('Failed to refresh avatar UI after selecting useAvatar:', e);
+        }
+      }
+      // Close modal
+      this.close();
+    };
+
+    // wire close button to hide our controls when closed
+    const closeBtn = document.getElementById('closeAvatarEditModal');
+    if (closeBtn) {
+      closeBtn.onclick = () => {
+        if (container) container.style.display = 'none';
+        if (actions) actions.style.display = 'none';
+      };
+    }
   }
 
   /**
@@ -5671,10 +6085,35 @@ class AvatarEditModal {
       return;
     }
 
-    // Try to get avatar blob from cache
+    // For contact avatar editing: show only the user's uploaded avatar ('mine') if present,
+    // otherwise fall back to identicon. We intentionally ignore the contact-sent avatar here.
+    if (!this.isOwnAvatar) {
+      try {
+        const contactObj = myData?.contacts?.[this.currentAddress] || null;
+        const mineBlob = contactObj?.mineAvatarId ? await contactAvatarCache.get(contactObj.mineAvatarId) : null;
+        if (mineBlob) {
+          await this.setImageFromBlob(mineBlob, false);
+          return;
+        }
+      } catch (e) {
+        // ignore and fall through to identicon
+      }
+
+      // No user-uploaded avatar -> show identicon (never show contact avatar here)
+      const avatarHtml = generateIdenticon(this.currentAddress, 218);
+      this.previewContainer.innerHTML = avatarHtml;
+      this.enableTransform = false;
+      this.updateZoomUI();
+      if (this.previewBg) this.previewBg.style.display = 'none';
+      if (this.foregroundImg) this.foregroundImg.style.display = 'none';
+      this.updateButtonVisibility();
+      return;
+    }
+
+    // For own avatar, keep existing behavior (account-based)
     let avatarBlob = null;
     try {
-      avatarBlob = await contactAvatarCache.get(this.currentAddress);
+      avatarBlob = await contactAvatarCache.get(myData?.account?.avatarId);
     } catch (e) {
       avatarBlob = null;
     }
@@ -5684,7 +6123,7 @@ class AvatarEditModal {
       return;
     }
 
-    // Fallback to identicon if no avatar blob
+    // Fallback to identicon if no avatar blob for own avatar
     const avatarHtml = await getContactAvatarHtml(displayInfo, 218);
     this.previewContainer.innerHTML = avatarHtml;
     this.enableTransform = false;
@@ -5708,16 +6147,14 @@ class AvatarEditModal {
       this.saveActionButton.style.display = 'inline-flex';
       this.cancelButton.style.display = 'inline-flex';
     } else {
-      // Show Upload/Delete buttons, hide Save/Cancel buttons
+      // Show Upload button and Save/Cancel hidden. Delete visibility for contacts is
+      // controlled by `populateOptions()` (which has async knowledge of cache). Only
+      // set Delete visibility here for own-avatar context.
       this.uploadButton.style.display = 'inline-flex';
-      let hasAvatar;
       if (this.isOwnAvatar) {
-        hasAvatar = !!myData?.account?.hasAvatar;
-      } else {
-        const contact = myData?.contacts?.[this.currentAddress];
-        hasAvatar = !!contact?.hasAvatar;
+        const hasAvatar = !!myData?.account?.hasAvatar;
+        this.deleteButton.style.display = hasAvatar ? 'inline-flex' : 'none';
       }
-      this.deleteButton.style.display = hasAvatar ? 'inline-flex' : 'none';
       this.saveActionButton.style.display = 'none';
       this.cancelButton.style.display = 'none';
     }
@@ -5768,7 +6205,7 @@ class AvatarEditModal {
     try {
       const idParam = encodeURIComponent(secret ? `${id}-${secret}` : id);
       try {
-        const delRes = await fetch(`https://inv.liberdus.com:2083/delete/${idParam}`, { method: 'DELETE' });
+        const delRes = await fetch(`${network.attachmentServerUrl}/delete/${idParam}`, { method: 'DELETE' });
         if (!delRes.ok) {
           if (delRes.status === 404) {
             // Missing resource on server -> treat as already-deleted (success)
@@ -5788,10 +6225,23 @@ class AvatarEditModal {
     }
   }
 
+  handleUploadButton(){
+    if (!isOnline && this.isOwnAvatar) {
+      showToast('You are offline. Please try again when connected.', 3000, 'error');
+      return;
+    }
+    this.fileInput.click(); 
+  }
+
   /**
    * Delete the current avatar immediately and save.
    */
   async handleDelete() {
+    if (!isOnline && this.isOwnAvatar) {
+      showToast('You are offline. Please try again when connected.', 3000, 'error');
+      return;
+    }
+
     if (!this.currentAddress) {
       this.close();
       return;
@@ -5813,7 +6263,8 @@ class AvatarEditModal {
           }
 
           if (deletedOnServer) {
-            await contactAvatarCache.delete(this.currentAddress);
+            // delete account avatar by id
+            await contactAvatarCache.delete(myData?.account?.avatarId);
             myData.account.hasAvatar = false;
             delete myData.account.avatarId;
             delete myData.account.avatarKey;
@@ -5831,17 +6282,56 @@ class AvatarEditModal {
           this.close();
           return;
         }
-        contact.hasAvatar = false;
-        delete contact.avatarId;
-        await contactAvatarCache.delete(this.currentAddress);
-        saveState();
 
-        // Update UI
+        // Delete only the user's uploaded avatar slot ('mine'). Do not remove contact-sent avatar.
+        if (contact.mineAvatarId) {
+          await contactAvatarCache.delete(contact.mineAvatarId);
+          delete contact.mineAvatarId;
+        }
+
+        // Check whether a contact-sent avatar still exists
+        let contactExists = false;
+        try {
+          const contactBlob = contact.avatarId ? await contactAvatarCache.get(contact.avatarId) : null;
+          contactExists = !!contactBlob;
+        } catch (e) {
+          contactExists = false;
+        }
+
+        // Update contact.hasAvatar to reflect any remaining avatar
+        contact.hasAvatar = contactExists;
+
+        // Set per-contact preference only if the user previously preferred their uploaded avatar.
+        // If the current preference is not 'mine', leave it unchanged.
+        myData.contacts ??= {};
+        myData.contacts[this.currentAddress] ??= { address: this.currentAddress };
+        const currentPref = myData.contacts[this.currentAddress].useAvatar ?? null;
+        if (currentPref === 'mine') {
+          myData.contacts[this.currentAddress].useAvatar = contactExists ? 'contact' : 'identicon';
+          saveState();
+        }
+
+        // Update UI so contact info reflects deletion
         contactInfoModal.updateContactInfo(createDisplayInfo(contact));
         contactInfoModal.needsContactListUpdate = true;
         if (chatModal.isActive() && chatModal.address === this.currentAddress) {
           chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
         }
+      }
+
+      // Revoke any option thumbnails in this modal to avoid showing stale URLs
+      if (this._optionBlobUrls && this._optionBlobUrls.length) {
+        for (const u of this._optionBlobUrls) {
+          try { URL.revokeObjectURL(u); } catch (e) {}
+        }
+        this._optionBlobUrls = [];
+      }
+
+      // Refresh the option list once so the modal immediately reflects the deletion
+      try {
+        await this.populateOptions();
+      } catch (e) {
+        console.warn('Failed to repopulate avatar options after delete:', e);
       }
 
       // Update preview in the modal to show identicon
@@ -6077,7 +6567,7 @@ class AvatarEditModal {
           const formData = new FormData();
           formData.append('file', encryptedBlob);
           formData.append('secret', secret);
-          const response = await fetch('https://inv.liberdus.com:2083/post', {
+          const response = await fetch(`${network.attachmentServerUrl}/post`, {
             method: 'POST',
             body: formData
           });
@@ -6088,8 +6578,8 @@ class AvatarEditModal {
           const result = await response.json();
           const avatarId = result.id;
 
-          // Save thumbnail to cache now that server operations succeeded
-          await contactAvatarCache.save(this.currentAddress, thumbnail);
+          // Save thumbnail to cache now that server operations succeeded (keyed by avatarId)
+          await contactAvatarCache.save(avatarId, thumbnail);
 
           // Save id, key and secret in account
           myData.account.avatarId = avatarId;
@@ -6107,8 +6597,14 @@ class AvatarEditModal {
             return;
           }
           contact.hasAvatar = true;
-          delete contact.avatarId;
-          await contactAvatarCache.save(this.currentAddress, thumbnail);
+          // Save user's uploaded avatar under a generated id and reference it on the contact
+          const mineId = bin2hex(generateRandomBytes(16));
+          await contactAvatarCache.save(mineId, thumbnail);
+          contact.mineAvatarId = mineId;
+          // Prefer the user's uploaded avatar for this contact
+          myData.contacts ??= {};
+          myData.contacts[this.currentAddress] ??= { address: this.currentAddress };
+          myData.contacts[this.currentAddress].useAvatar = 'mine';
           saveState();
           contactInfoModal.updateContactInfo(createDisplayInfo(contact));
           contactInfoModal.needsContactListUpdate = true;
@@ -6284,7 +6780,6 @@ async function handleConnectivityChange() {
   if (isOnline) {
     await getNetworkParams();
     if (!isOnline) return;
-    console.log('Just came back online.');
     // We just came back online
     updateUIForConnectivity();
     showToast("You're back online!", 3000, 'online');
@@ -6343,13 +6838,17 @@ function markConnectivityDependentElements() {
   const networkDependentElements = [
     // Chat related
     '#handleSendMessage',
+    '#voiceRecordButton',
+    '#newChatForm button[type="submit"]',
 
     // Wallet related
     '#refreshBalance',
+    '#openFaucetBridgeButton',
     '#sendForm button[type="submit"]',
 
     // Send asset related
     '#sendAssetForm button[type="submit"]',
+    '#sendToAddress',
     '#toggleBalance',
 
     // Add friend related
@@ -6364,10 +6863,14 @@ function markConnectivityDependentElements() {
     // Profile related
     '#createAccountForm button[type="submit"]',
     '#importForm button[type="submit"]',
+    '#newUsername',
+    '#newPrivateKey',
+    '#migrateAccountsButton',
 
     // stakeModal
     '#submitStake',
     '#faucetButton',
+    '#stakeNodeAddress',
 
     // tollModal
     '#saveNewTollButton',
@@ -7185,7 +7688,6 @@ class BackupAccountModal {
       const tokenData = JSON.parse(raw);
       if (!tokenData.accessToken || !tokenData.expiresAt) return null;
       if (Date.now() >= tokenData.expiresAt) {
-        console.log('Google Drive token expired, clearing.');
         localStorage.removeItem(this.GOOGLE_TOKEN_STORAGE_KEY);
         return null;
       }
@@ -7223,12 +7725,10 @@ class BackupAccountModal {
    *          Resolves with token data on success; rejects with Error on cancel/deny/timeout/error.
    */
   async startGoogleDriveAuth() {
-    const sessionId = crypto.randomUUID();
+    const sessionId = generateUUIDv4();
     const url = this.buildOAuthServerUrl(sessionId);
     const isReactNative = reactNativeApp.isReactNativeWebView;
-    
-    console.log('Opening Google OAuth via OAuth server...', { sessionId, isReactNative });
-    
+
     let popup = null;
     let waitingToastId = null;
     let currentAbortController = null;
@@ -7236,7 +7736,6 @@ class BackupAccountModal {
     // In React Native, send message to native app to open in-app browser
     if (isReactNative) {
       if (window.ReactNativeWebView?.postMessage) {
-        console.log('Sending GOOGLE_OAUTH_REQUEST to native app');
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'GOOGLE_OAUTH_REQUEST',
           url: url,
@@ -7315,7 +7814,6 @@ class BackupAccountModal {
     // Single poll request with AbortController and attempt logging.
     const fetchPollResponse = async (attempt) => {
       currentAbortController = new AbortController();
-      console.log('Polling OAuth server for token...', { attempt, sessionId });
       const response = await fetch(
         `${config.oauthServerUrl}/auth/poll?sessionId=${sessionId}`,
         { signal: currentAbortController.signal }
@@ -7399,7 +7897,7 @@ class BackupAccountModal {
                   ? 'Authentication was cancelled or denied. Please try again if you want to connect Google Drive.'
                   : `Authentication failed: ${errorMessage}`;
                 
-                console.log('OAuth error received from server:', errorMessage);
+                console.error('OAuth error received from server:', errorMessage);
                 cleanup();
                 throw new Error(userFriendlyMessage);
               }
@@ -7413,17 +7911,16 @@ class BackupAccountModal {
               };
               
               //this.storeGoogleToken(tokenData);
-              console.log('Received access token from OAuth server.');
               cleanup();
               return tokenData;
             }
           } else if (response.status === 408) {
             // Timeout from server, retry
-            console.log('Poll timeout, retrying...', { attempt });
+            console.warn('Poll timeout, retrying...', { attempt });
             continue;
           } else if (response.status === 404) {
             // Session not found, retry
-            console.log('Session not found, retrying...', { attempt });
+            console.warn('Session not found, retrying...', { attempt });
             continue;
           } else {
             const errorData = await response.json().catch(() => ({}));
@@ -7446,7 +7943,7 @@ class BackupAccountModal {
           if (fetchError?.name === 'AbortError') {
             continue;
           }
-          console.log('Poll fetch error, retrying...', fetchError.message);
+          console.error('Poll fetch error, retrying...', fetchError.message);
         }
       }
 
@@ -7491,7 +7988,6 @@ class BackupAccountModal {
       expiresAt
     };
     //this.storeGoogleToken(tokenData);
-    console.log('Received access token from Google (legacy redirect).');
 
     // Clean the URL
     window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
@@ -7502,7 +7998,6 @@ class BackupAccountModal {
   // ======================================
   async ensureBackupFolder(tokenData) {
     const folderName = network.googleDrive.backupFolder;
-    console.log(`Checking for existing '${folderName}' folder...`);
 
     const queryParams = new URLSearchParams({
       q: `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'root' in parents`,
@@ -7525,11 +8020,8 @@ class BackupAccountModal {
 
     const listData = await listRes.json();
     if (listData.files && listData.files.length > 0) {
-      console.log(`Found existing ${folderName} folder.`, listData.files[0]);
       return listData.files[0].id;
     }
-
-    console.log(`No existing ${folderName} folder, creating one...`);
 
     const folderMetadata = {
       name: folderName,
@@ -7555,7 +8047,6 @@ class BackupAccountModal {
     }
 
     const folderData = await createRes.json();
-    console.log(`Created ${folderName} folder.`, folderData);
     return folderData.id;
   }
 
@@ -7563,11 +8054,8 @@ class BackupAccountModal {
   // GOOGLE DRIVE UPLOAD
   // ======================================
   async uploadToGoogleDrive(data, filename, tokenData) {
-    console.log('Preparing upload to Google Drive...', { filename, sizeBytes: data.length });
-
     // Ensure backup folder exists and get its ID
     const folderId = await this.ensureBackupFolder(tokenData);
-    console.log('Using backup folder', { folderId });
 
     // Set metadata to put file in that folder
     const metadata = {
@@ -7600,7 +8088,6 @@ class BackupAccountModal {
     }
 
     const result = await res.json();
-    console.log('Upload success.', result);
     return result;
   }
 
@@ -8335,7 +8822,6 @@ class RestoreAccountModal {
         this.newStringSelect.add(newOption);
       });
       
-      if (netids.size > 0) console.log(`Found ${netids.size} netids from file`);
     } catch (error) {
       this.resetBackupLockPrompt();
     }
@@ -8580,7 +9066,6 @@ class RestoreAccountModal {
       const substitution = this.getStringSubstitution();
       if (substitution) {
         fileContent = this.performStringSubstitution(fileContent, substitution);
-        console.log(`Applied substitution: ${substitution.oldString} → ${substitution.newString}`);
       }
 
       // We first parse to jsonData so that if the parse does not work we don't destroy myData
@@ -10243,7 +10728,6 @@ class StakeValidatorModal {
       this.backButton.disabled = true;
 
       const response = await this.postStake(nodeAddress, amount_in_wei, myAccount.keys);
-      console.log('Stake Response:', response);
 
       if (response && response.result && response.result.success) {
         myData.wallet.history.unshift({
@@ -10415,8 +10899,6 @@ class StakeValidatorModal {
    * @returns {void}
    * */
   async fillFromQR(data) {
-    console.log('Filling stake address from QR data:', data);
-
     // Directly set the value of the stakeNodeAddress input field
     if (this.nodeAddressInput) {
       this.nodeAddressInput.value = data;
@@ -10562,9 +11044,8 @@ class ChatModal {
     this.cancelEditButton = document.getElementById('cancelEditButton');
     this.modalAvatar = this.modal.querySelector('.modal-avatar');
     this.modalTitle = this.modal.querySelector('.modal-title');
-    this.editButton = document.getElementById('chatEditButton');
-    this.callButton = document.getElementById('chatCallButton');
-    this.sendMoneyButton = document.getElementById('chatSendMoneyButton');
+    this.headerMenuButton = document.getElementById('chatHeaderMenuButton');
+    this.headerContextMenu = document.getElementById('chatHeaderContextMenu');
     this.retryOfTxId = document.getElementById('retryOfTxId');
     this.messageInput = document.querySelector('.message-input');
     this.replyPreview = document.getElementById('replyPreview');
@@ -10574,7 +11055,6 @@ class ChatModal {
     this.replyToTxId = document.getElementById('replyToTxId');
     this.replyToMessage = document.getElementById('replyToMessage');
     this.replyOwnerIsMine = document.getElementById('replyOwnerIsMine');
-    this.chatSendMoneyButton = document.getElementById('chatSendMoneyButton');
     this.messageByteCounter = document.querySelector('.message-byte-counter');
     this.tollTemplate = document.getElementById('tollInfoMessageTemplate');
     this.messagesContainer = document.querySelector('.messages-container');
@@ -10660,6 +11140,9 @@ class ChatModal {
       if (this.attachmentOptionsContextMenu && !this.attachmentOptionsContextMenu.contains(e.target) && !this.addAttachmentButton.contains(e.target)) {
         this.closeAttachmentOptionsContextMenu();
       }
+      if (this.headerContextMenu && !this.headerContextMenu.contains(e.target) && this.headerMenuButton && !this.headerMenuButton.contains(e.target)) {
+        this.closeHeaderContextMenu();
+      }
     });
     this.sendButton.addEventListener('click', this.handleSendMessage.bind(this));
     this.cancelEditButton.addEventListener('click', () => this.cancelEdit());
@@ -10703,7 +11186,6 @@ class ChatModal {
       // If viewport height decreased significantly, keyboard is likely open
       if (heightDifference > 150) { // 150px threshold for keyboard detection
         this.isKeyboardVisible = true;
-        console.log('⌨️ Keyboard detected as open (viewport height decreased by', heightDifference, 'px)');
         this.lockBackgroundScroll();
       } else if (heightDifference < 50) { // If height increased or stayed similar, keyboard is likely closed
         this.isKeyboardVisible = false;
@@ -10736,16 +11218,22 @@ class ChatModal {
       this.unlockBackgroundScroll();
     });
 
-    this.chatSendMoneyButton.addEventListener('click', () => {
-      this.pauseVoiceMessages();
-      sendAssetFormModal.username = this.chatSendMoneyButton.dataset.username;
-      sendAssetFormModal.open();
-    });
+    // Header context menu handlers
+    if (this.headerMenuButton) {
+      this.headerMenuButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.showHeaderContextMenu(e);
+      });
+    }
 
-    this.callButton.addEventListener('click', () => {
-      this.pauseVoiceMessages();
-      this.handleCallUser();
-    });
+    if (this.headerContextMenu) {
+      this.headerContextMenu.addEventListener('click', (e) => {
+        const option = e.target.closest('.context-menu-option');
+        if (!option) return;
+        const action = option.dataset.action;
+        this.handleHeaderContextMenuAction(action);
+      });
+    }
 
     this.addFriendButtonChat.addEventListener('click', () => {
       this.pauseVoiceMessages();
@@ -10990,9 +11478,10 @@ class ChatModal {
   /**
    * Opens the chat modal for the given address.
    * @param {string} address - The address of the contact to open the chat modal for.
+   * @param {boolean} skipAutoScroll - Whether to skip auto-scrolling to bottom (used when scrolling to a specific message)
    * @returns {Promise<void>}
    */
-  async open(address) {
+  async open(address, skipAutoScroll = false) {
     // clear message input
     this.messageInput.value = '';
     this.messageInput.style.height = '48px';
@@ -11024,8 +11513,13 @@ class ChatModal {
 
     this.updateTollAmountUI(address);
 
-    // Add data attributes to store the username and address
-    this.sendMoneyButton.dataset.username = contact.username || address;
+    // Store username for context menu pay action
+    if (this.headerContextMenu) {
+      const payOption = this.headerContextMenu.querySelector('[data-action="pay"]');
+      if (payOption) {
+        payOption.dataset.username = contact.username || address;
+      }
+    }
 
     this.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
 
@@ -11036,9 +11530,12 @@ class ChatModal {
     this.messagesList.innerHTML = '';
 
     // Scroll to bottom (initial scroll for empty list, appendChatModal will scroll later)
-    setTimeout(() => {
-      this.messagesList.parentElement.scrollTop = this.messagesList.parentElement.scrollHeight;
-    }, 100);
+    // Skip if we're going to scroll to a specific message
+    if (!skipAutoScroll) {
+      setTimeout(() => {
+        this.messagesList.parentElement.scrollTop = this.messagesList.parentElement.scrollHeight;
+      }, 100);
+    }
 
     // Add click handler for username to show contact info
     // TODO: create event listener instead of onclick here
@@ -11051,15 +11548,6 @@ class ChatModal {
       }
     };
 
-    // Add click handler for edit button
-    // TODO: create event listener instead of onclick here
-    this.editButton.onclick = () => {
-      this.pauseVoiceMessages();
-      const contact = myData.contacts[address];
-      if (contact) {
-        contactInfoModal.open(createDisplayInfo(contact));
-      }
-    };
 
     // Load any draft message
     this.loadDraft(address);
@@ -11079,7 +11567,83 @@ class ChatModal {
     // Setup state for appendChatModal and perform initial render
     this.address = address;
 
-    this.appendChatModal(false); // Call appendChatModal to render messages, ensure highlight=false
+    // One-time tolled deposit toast (only if explicitly enabled on the contact)
+    this.maybeShowTolledDepositToast(address);
+
+    this.appendChatModal(false, skipAutoScroll); // Call appendChatModal to render messages, ensure highlight=false
+  }
+
+  /**
+   * Show a one-time toast when opening a chat where the other party is tolled and has deposited a toll.
+   * This is opt-in via contact.tolledDepositToastShown === false (older accounts may not have this field).
+   * @param {string} address
+   * @returns {Promise<void>}
+   */
+  async maybeShowTolledDepositToast(address) {
+    try {
+      const contact = myData?.contacts?.[address];
+      if (!contact) return;
+
+      // Only show if explicitly marked as not-yet-shown.
+      if (contact.tolledDepositToastShown !== false) return;
+
+      // Only for tolled contacts
+      if (Number(contact.friend) !== 1) return;
+
+      // Need network to confirm there is an actual deposited toll on this chat
+      if (!isOnline) return;
+
+      const depositInfo = await this.hasIncomingTolledDeposit(address);
+      const hasDeposit = !!depositInfo?.hasDeposit;
+      if (!hasDeposit) return;
+
+      // User may have navigated away while we were awaiting network
+      if (!this.isActive() || this.address !== address) return;
+
+      showToast(
+        '<strong>This user has deposited a toll to message you.</strong><ul style="margin: 8px 0 0 0; padding-left: 20px;"><li>Change their status to a connection or friend to refund the toll</li><li>Reply to collect the full toll</li><li>Ignore to collect half the toll</li></ul>',
+        0,
+        'toll',
+        true
+      );
+
+      contact.tolledDepositToastShown = true;
+      saveState();
+    } catch (e) {
+      console.warn('maybeShowTolledDepositToast failed', e);
+    }
+  }
+
+  /**
+   * Returns true if the other party has an outstanding toll deposit for us on this chat (payOnRead only).
+   * @param {string} address
+   * @returns {Promise<{hasDeposit: boolean, payOnRead: bigint}>}
+   */
+  async hasIncomingTolledDeposit(address) {
+    try {
+      if (!myAccount?.keys?.address) return { hasDeposit: false, payOnRead: 0n };
+      const myAddr = longAddress(myAccount.keys.address);
+      const contactAddr = longAddress(address);
+      const sortedAddresses = [myAddr, contactAddr].sort();
+      const chatId = hashBytes(sortedAddresses.join(''));
+      const myIndex = sortedAddresses.indexOf(myAddr);
+
+      const chatIdAccount = await queryNetwork(`/messages/${chatId}/toll`);
+      if (!chatIdAccount || chatIdAccount?.error || !chatIdAccount?.toll) {
+        return { hasDeposit: false, payOnRead: 0n };
+      }
+
+      const payOnReadRaw = chatIdAccount.toll?.payOnRead?.[myIndex];
+
+      const payOnRead =
+        typeof payOnReadRaw === 'bigint' ? payOnReadRaw : BigInt(payOnReadRaw || 0);
+
+      // Only consider payOnRead for triggering the toast (per product decision).
+      return { hasDeposit: payOnRead !== 0n, payOnRead };
+    } catch (e) {
+      console.warn('hasIncomingTolledDeposit failed', e);
+      return { hasDeposit: false, payOnRead: 0n };
+    }
   }
 
   /**
@@ -11099,7 +11663,6 @@ class ChatModal {
     this.unlockBackgroundScroll();
     if (isOnline) {
       const needsToSendReadTx = this.needsToSend();
-      console.log(`[close] needsToSendReadTx: ${needsToSendReadTx}`);
       // if newestRecevied message does not have an amount property and user has not responded, then send a read transaction
       if (needsToSendReadTx) {
         this.sendReadTransaction(this.address);
@@ -11218,22 +11781,21 @@ class ChatModal {
    * @returns {Promise<void>}
    */
   async sendReclaimTollTransaction(contactAddress) {
-    console.log(`[sendReclaimTollTransaction] entering function`);
     await getNetworkParams();
     const currentTime = getCorrectedTimestamp();
     const networkTollTimeoutInMs = parameters.current.tollTimeout; 
     const timeSinceNewestSentMessage = currentTime - this.newestSentMessage?.timestamp;
     if (!this.newestSentMessage || timeSinceNewestSentMessage < networkTollTimeoutInMs) {
-      console.log(
-        `[sendReclaimTollTransaction] timeSinceNewestSentMessage ${timeSinceNewestSentMessage}ms is less than networkTollTimeoutInMs ${networkTollTimeoutInMs}ms, skipping reclaim toll transaction`
-      );
+      // console.log(
+      //   `[sendReclaimTollTransaction] timeSinceNewestSentMessage ${timeSinceNewestSentMessage}ms is less than networkTollTimeoutInMs ${networkTollTimeoutInMs}ms, skipping reclaim toll transaction`
+      // );
       return;
     }
     const canReclaimToll = await this.canSenderReclaimToll(contactAddress);
     if (!canReclaimToll) {
-      console.log(
-        `[sendReclaimTollTransaction] does not have a value not 0 in payOnReplay or payOnRead, skipping reclaim toll transaction`
-      );
+      // console.log(
+      //   `[sendReclaimTollTransaction] does not have a value not 0 in payOnReplay or payOnRead, skipping reclaim toll transaction`
+      // );
       return;
     }
 
@@ -11249,8 +11811,6 @@ class ChatModal {
     const response = await injectTx(tx, txid);
     if (!response || !response.result || !response.result.success) {
       console.warn('reclaim toll transaction failed to send', response);
-    } else {
-      console.log('reclaim toll transaction sent successfully');
     }
   }
 
@@ -11286,10 +11846,8 @@ class ChatModal {
    * @returns {void}
    */
   async sendReadTransaction(contactAddress) {
-    console.log(`[sendReadTransaction] entering function`);
     const contact = myData.contacts[contactAddress];
 
-    console.log(`[sendReadTransaction] injecting read transaction`);
     const readTransaction = await this.createReadTransaction(contactAddress);
     const txid = await signObj(readTransaction, myAccount.keys);
     showToast(`Sending read transaction`, 3000, 'info');
@@ -11395,7 +11953,7 @@ class ChatModal {
       let recipientPubKey = myData.contacts[currentAddress]?.public;
       let pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
       if (!keysOk || !recipientPubKey || !pqRecPubKey) {
-        console.log(`no public/PQ key found for recipient ${currentAddress}`);
+        console.warn(`no public/PQ key found for recipient ${currentAddress}`);
         return;
       }
 
@@ -11510,7 +12068,6 @@ class ChatModal {
       const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
       await signObj(chatMessageObj, keys);
       const txid = getTxid(chatMessageObj)
-console.warn('in send message', txid)
 
       // if there a hidden txid input, get the value to be used to delete that txid from relevant data stores
       const retryTxId = this.retryOfTxId.value;
@@ -11627,7 +12184,7 @@ console.warn('in send message', txid)
       const response = await injectTx(chatMessageObj, txid);
 
       if (!response || !response.result || !response.result.success) {
-        console.log('message failed to send', response);
+        console.error('message failed to send', response);
         const str = response.result.reason;
         const regex = /toll/i;
   
@@ -11716,6 +12273,7 @@ console.warn('in send message', txid)
       if (editInput) editInput.value = '';
       // Clear input text and reset height
       this.messageInput.value = '';
+      this.messageInput.style.height = '48px';
       this.messageByteCounter.style.display = 'none';
       // Clear any saved draft
       if (typeof this.debouncedSaveDraft === 'function') {
@@ -11796,18 +12354,18 @@ console.warn('in send message', txid)
   /**
    * Appends the chat modal to the DOM
    * @param {boolean} highlightNewMessage - Whether to highlight the newest message
+   * @param {boolean} skipAutoScroll - Whether to skip auto-scrolling to bottom (used when scrolling to a specific message)
    * @returns {void}
    */
-  appendChatModal(highlightNewMessage = false) {
+  appendChatModal(highlightNewMessage = false, skipAutoScroll = false) {
     const currentAddress = this.address; // Use a local constant
-    console.log('appendChatModal running for address:', currentAddress, 'Highlight:', highlightNewMessage);
     if (!currentAddress) {
       return;
     }
 
     const contact = myData.contacts[currentAddress];
     if (!contact || !contact.messages) {
-      console.log('No contact or messages found for address:', this.address);
+      console.warn('No contact or messages found for address:', this.address);
       return;
     }
     const messages = contact.messages; // Already sorted descending
@@ -11820,7 +12378,6 @@ console.warn('in send message', txid)
     // --- 1. Identify the actual newest received message data item ---
     // Since messages are sorted descending (newest first), the first item with my: false is the newest received.
     const newestReceivedItem = messages.find((item) => !item.my);
-    console.log('appendChatModal: Identified newestReceivedItem data:', newestReceivedItem);
     this.newestReceivedMessage = newestReceivedItem;
     this.newestSentMessage = messages.find((item) => item.my);
 
@@ -11923,19 +12480,23 @@ console.warn('in send message', txid)
               const fileSize = att.size ? this.formatFileSize(att.size) : '';
               const fileType = att.type ? att.type.split('/').pop().toUpperCase() : '';
               const isImage = att.type && att.type.startsWith('image/');
+              const isVideo = att.type && att.type.startsWith('video/');
+              const hasThumbnail = isImage || isVideo;
               const fileTypeIcon = this.getFileTypeForIcon(att.type || '', fileName);
-              const paddingStyle = isImage ? 'padding: 5px 5px;' : 'padding: 10px 12px;';
+              const paddingStyle = hasThumbnail ? 'padding: 5px 5px;' : 'padding: 10px 12px;';
               return `
-                <div class="attachment-row" style="display: flex; ${isImage ? 'flex-direction: column;' : 'align-items: center;'} background: #f5f5f7; border-radius: 12px; ${paddingStyle} margin-bottom: 6px;"
+                <div class="attachment-row" style="display: flex; ${hasThumbnail ? 'flex-direction: column;' : 'align-items: center;'} background: #f5f5f7; border-radius: 12px; ${paddingStyle} margin-bottom: 6px;"
                   data-url="${fileUrl}"
+                  data-p-url="${att.pUrl || ''}"
                   data-name="${encodeURIComponent(fileName)}"
                   data-type="${att.type || ''}"
                   data-msg-idx="${i}"
                   ${isImage ? 'data-image-attachment="true"' : ''}
+                  ${isVideo ? 'data-video-attachment="true"' : ''}
                 >
-                  <div class="attachment-icon-container" style="${isImage ? 'margin-bottom: 10px; flex-direction: column;' : 'margin-right: 14px; flex-shrink: 0;'}">
+                  <div class="attachment-icon-container" style="${hasThumbnail ? 'margin-bottom: 10px; flex-direction: column;' : 'margin-right: 14px; flex-shrink: 0;'}">
                     <div class="attachment-icon" data-file-type="${fileTypeIcon}"></div>
-                    ${isImage ? '<div class="attachment-preview-hint">Click for options</div>' : ''}
+                    ${hasThumbnail ? '<div class="attachment-preview-hint">Click for options</div>' : ''}
                   </div>
                   <div style="min-width:0;">
                     <span class="attachment-label" style="font-weight:500;color:#222;font-size:0.7em;display:block;word-wrap:break-word;">
@@ -12039,6 +12600,9 @@ console.warn('in send message', txid)
 
     // 6. Delayed Scrolling & Highlighting Logic (after loop)
     setTimeout(() => {
+      // Skip auto-scrolling if we're going to scroll to a specific message
+      if (skipAutoScroll) return;
+
       const messageContainer = this.messagesList.parentElement;
 
       // Find the DOM element for the actual newest received item using its timestamp
@@ -12106,7 +12670,6 @@ console.warn('in send message', txid)
 
     // 1. Refresh History Modal if active
     if (historyModal.isActive()) {
-      console.log('DEBUG: Refreshing transaction history modal due to transaction failure.');
       historyModal.refresh();
     }
     // 2. Refresh Chat Modal if active AND the failed txid's message is currently rendered
@@ -12116,18 +12679,11 @@ console.warn('in send message', txid)
 
       if (messageElement) {
         // If the element exists, the failed message is visible in the open chat. Refresh the modal.
-        console.log(`DEBUG: Refreshing active chat modal because failed txid ${txid} was found in the view.`);
         this.appendChatModal(); // This will redraw the messages based on the updated data (where the failed tx is removed)
-      } else {
-        // The failed txid doesn't correspond to a visible message in the *currently open* chat modal. No UI refresh needed for the modal itself.
-        console.log(
-          `DEBUG: Skipping chat modal refresh. Failed txid ${txid} not found in the active modal's message list.`
-        );
       }
     }
     // 3. Refresh Chat List if active
     if (chatsScreen.isActive()) {
-      console.log('DEBUG: Refreshing chat list view due to transaction failure.');
       chatsScreen.updateChatList();
     }
     // No other active view to refresh in this context
@@ -12322,13 +12878,26 @@ console.warn('in send message', txid)
     let loadingToastId;
     let thumbnailBlob = null;
     
+    // Normalize file type (fallback to extension detection for missing MIME types)
+    const normalizedType = this.getMimeTypeFromFilename(file.name, file.type);
+    
     // Generate thumbnail for images before encryption
-    const isImage = file.type && file.type.startsWith('image/');
+    const isImage = normalizedType.startsWith('image/');
     if (isImage) {
       try {
         thumbnailBlob = await thumbnailCache.generateThumbnail(file);
       } catch (error) {
         console.warn('Failed to generate thumbnail for attached image:', error);
+      }
+    }
+
+    // Generate thumbnail for videos before encryption
+    const isVideo = normalizedType.startsWith('video/');
+    if (isVideo && !thumbnailBlob) {
+      try {
+        thumbnailBlob = await thumbnailCache.extractVideoThumbnail(file);
+      } catch (error) {
+        console.warn('Failed to extract thumbnail for attached video:', error);
       }
     }
 
@@ -12349,7 +12918,10 @@ console.warn('in send message', txid)
         if (e.data.error) {
           hideToast(loadingToastId);
           showToast(e.data.error, 0, 'error');
-          this.sendButton.disabled = false; // Re-enable send button
+          
+          const messageValidation = this.validateMessageSize(this.messageInput.value);
+          this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
+          
           this.addAttachmentButton.disabled = false;
         } else {
           // Encryption successful
@@ -12358,38 +12930,40 @@ console.warn('in send message', txid)
           const bytes = new Uint8Array(e.data.cipherBin);
           const blob = new Blob([bytes], { type: 'application/octet-stream' });
 
-          const form = new FormData();
-          form.append('file', blob, file.name);
-
-          // TODO: move to network.js
-          const uploadUrl = 'https://inv.liberdus.com:2083';
-
           try {
-            const response = await fetch(`${uploadUrl}/post`, {
-              method: 'POST',
-              body: form,
-              signal: this.abortController.signal
-            });
-            if (!response.ok) throw new Error(`upload failed ${response.status}`);
-
-            const { id } = await response.json();
-            if (!id) throw new Error('No file ID returned from upload');
-
-            const attachmentUrl = `${uploadUrl}/get/${id}`;
+            // Upload main file
+            const attachmentUrl = await this.uploadEncryptedFile(blob, file.name);
+            
+            // NEW: Encrypt and upload thumbnail ONLY if main file upload succeeded
+            let previewUrl = null;
+            if (capturedThumbnailBlob) {
+              try {
+                // Encrypt thumbnail using same dhkey as main file
+                const encryptedThumbnailBlob = await encryptBlob(capturedThumbnailBlob, dhkey);
+                // Upload encrypted thumbnail
+                previewUrl = await this.uploadEncryptedFile(encryptedThumbnailBlob, file.name);
+              } catch (error) {
+                console.warn('Failed to upload thumbnail:', error);
+                // If thumbnail upload fails, delete the successfully uploaded main file
+                this.deleteAttachmentsFromServer(attachmentUrl);
+                throw error;  // Re-throw to trigger cleanup
+              }
+            }
             
             this.fileAttachments.push({
               url: attachmentUrl,
+              pUrl: previewUrl,  // NEW FIELD (undefined if upload failed)
               name: file.name,
               size: file.size,
-              type: file.type,
-              pqEncSharedKey: bin2base64(pqEncSharedKey),
-              selfKey
+              type: normalizedType,
+              pqEncSharedKey: bin2base64(pqEncSharedKey),  // Same key for main file AND thumbnail
+              selfKey  // Same key for main file AND thumbnail
             });
             
             // Cache thumbnail if we generated one - use captured variable
-            if (capturedThumbnailBlob && isImage) {
+            if (capturedThumbnailBlob && (isImage || isVideo)) {
               thumbnailCache.save(attachmentUrl, capturedThumbnailBlob, file.type).catch(err => {
-                console.warn('Failed to cache thumbnail for attached image:', err);
+                console.warn('Failed to cache thumbnail for attached file:', err);
               });
             }
             
@@ -12400,7 +12974,10 @@ console.warn('in send message', txid)
               this.saveAttachmentState(myData.contacts[this.address]);
             }
             
-            this.sendButton.disabled = false; // Re-enable send button
+            const messageValidation = this.validateMessageSize(this.messageInput.value);
+            this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
+            this.toggleSendButtonVisibility();
+            
             this.addAttachmentButton.disabled = false;
             showToast(`File "${file.name}" attached successfully`, 2000, 'success');
           } catch (fetchError) {
@@ -12411,7 +12988,10 @@ console.warn('in send message', txid)
               hideToast(loadingToastId);
               showToast(`Upload failed: ${fetchError.message}`, 0, 'error');
             }
-            this.sendButton.disabled = false;
+            
+            const messageValidation = this.validateMessageSize(this.messageInput.value);
+            this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
+            
             this.addAttachmentButton.disabled = false;
             this.isEncrypting = false;
           }
@@ -12423,7 +13003,10 @@ console.warn('in send message', txid)
         hideToast(loadingToastId);
         showToast(`File encryption failed: ${err.message}`, 0, 'error');
         this.isEncrypting = false;
-        this.sendButton.disabled = false; // Re-enable send button
+        
+        const messageValidation = this.validateMessageSize(this.messageInput.value);
+        this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
+        
         this.addAttachmentButton.disabled = false;
         worker.terminate();
       };
@@ -12445,13 +13028,45 @@ console.warn('in send message', txid)
       }
       
       // Re-enable buttons
-      this.sendButton.disabled = false;
+      const messageValidation = this.validateMessageSize(this.messageInput.value);
+      this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
+      
       this.addAttachmentButton.disabled = false;
       this.isEncrypting = false;
     } finally {
-      hideToast(loadingToastId);
       event.target.value = ''; // Reset the file input value
     }
+  }
+
+  /**
+   * Upload encrypted file to attachment server
+   * @param {Blob} encryptedBlob - The encrypted blob to upload
+   * @param {string} fileName - File name for the upload
+   * @returns {Promise<string>} File URL
+   */
+  async uploadEncryptedFile(encryptedBlob, fileName) {
+    const form = new FormData();
+    form.append('file', encryptedBlob, fileName);
+
+    const uploadUrl = network.attachmentServerUrl;
+    const response = await fetch(`${uploadUrl}/post`, {
+      method: 'POST',
+      body: form,
+      signal: this.abortController.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`upload failed ${response.status}`);
+    }
+
+    const { id } = await response.json();
+    if (!id) {
+      throw new Error('No file ID returned from upload');
+    }
+
+    // Construct and return file URL
+    const fileUrl = `${uploadUrl}/get/${id}`;
+    return fileUrl;
   }
 
   /**
@@ -12516,7 +13131,7 @@ console.warn('in send message', txid)
   deleteAttachmentsFromServer(urlsOrAttachments) {
     if (!urlsOrAttachments) return;
     
-    const uploadUrl = 'https://inv.liberdus.com:2083';
+    const uploadUrl = network.attachmentServerUrl;
     const urls = Array.isArray(urlsOrAttachments) 
       ? urlsOrAttachments.map(att => att?.url).filter(Boolean)
       : [urlsOrAttachments];
@@ -12524,7 +13139,7 @@ console.warn('in send message', txid)
     urls.forEach(url => {
       if (typeof url !== 'string') return;
       
-      // Extract ID from URL format: https://inv.liberdus.com:2083/get/{id}
+      // Extract ID from URL format: {attachmentServerUrl}/get/{id}
       const urlMatch = url.match(/\/get\/([^\/]+)$/);
       if (urlMatch && urlMatch[1]) {
         const fileId = urlMatch[1];
@@ -12584,6 +13199,51 @@ console.warn('in send message', txid)
   }
 
   /**
+   * Get MIME type from filename extension with fallback
+   * @param {string} filename - The filename
+   * @param {string} existingType - Existing MIME type from file.type
+   * @returns {string} Normalized MIME type
+   */
+  getMimeTypeFromFilename(filename, existingType) {
+    // If we already have a valid MIME type, use it
+    if (existingType && existingType !== '' && existingType !== 'application/octet-stream') {
+      return existingType;
+    }
+    
+    // Fallback: detect from file extension
+    const ext = filename.toLowerCase().split('.').pop();
+    const mimeTypes = {
+      // Video formats
+      'mov': 'video/quicktime',
+      'mp4': 'video/mp4',
+      'avi': 'video/x-msvideo',
+      'webm': 'video/webm',
+      'mkv': 'video/x-matroska',
+      'm4v': 'video/x-m4v',
+      '3gp': 'video/3gpp',
+      'flv': 'video/x-flv',
+      'ogv': 'video/ogg',
+      // Image formats
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'png': 'image/png',
+      'gif': 'image/gif',
+      'webp': 'image/webp',
+      'bmp': 'image/bmp',
+      'svg': 'image/svg+xml',
+      // Audio formats
+      'mp3': 'audio/mpeg',
+      'wav': 'audio/wav',
+      'ogg': 'audio/ogg',
+      'm4a': 'audio/mp4',
+      'aac': 'audio/aac',
+      'flac': 'audio/flac',
+    };
+    
+    return mimeTypes[ext] || existingType || 'application/octet-stream';
+  }
+
+  /**
    * Get the file type for icon display
    * @param {string} type - MIME type of the file
    * @param {string} name - Name of the file
@@ -12633,13 +13293,16 @@ console.warn('in send message', txid)
   }
 
   /**
-   * Load thumbnails for image attachments asynchronously
+   * Load thumbnails for image and video attachments asynchronously
+   * Only loads from local IndexedDB cache - pUrl downloads happen on user action (Preview)
    * @returns {void}
    */
   async loadThumbnailsForAttachments() {
-    const imageAttachments = this.messagesList.querySelectorAll('[data-image-attachment="true"]');
+    const thumbnailAttachments = this.messagesList.querySelectorAll(
+      '[data-image-attachment="true"], [data-video-attachment="true"]'
+    );
     
-    for (const attachmentRow of imageAttachments) {
+    for (const attachmentRow of thumbnailAttachments) {
       const url = attachmentRow.dataset.url;
       if (!url || url === '#') continue;
 
@@ -12709,9 +13372,10 @@ console.warn('in send message', txid)
    * Shared by download (Save) and Preview thumbnail generation.
    * @param {Object} item - message object from myData.contacts[address].messages[idx]
    * @param {HTMLElement} linkEl - element with data-* fields (attachment row or voice message element)
+   * @param {string} [urlOverride] - optional URL to fetch instead of linkEl.dataset.url (used for pUrl thumbnails)
    * @returns {Promise<Blob>}
    */
-  async decryptAttachmentToBlob(item, linkEl) {
+  async decryptAttachmentToBlob(item, linkEl, urlOverride = null) {
     if (!item || !linkEl) throw new Error('Missing item or attachment element');
 
     // 1) Derive dhkey
@@ -12720,8 +13384,10 @@ console.warn('in send message', txid)
     let selfKey;
     let pqEncSharedKey;
 
-    const url = linkEl.dataset.url;
-    if (!url || url === '#') throw new Error('Missing attachment url');
+    // Use urlOverride if provided, otherwise use the main attachment URL
+    const mainUrl = linkEl.dataset.url;
+    const fetchUrl = urlOverride || mainUrl;
+    if (!mainUrl || mainUrl === '#') throw new Error('Missing attachment url');
 
     const isVoice = item.type === 'vm';
     if (isVoice) {
@@ -12729,8 +13395,8 @@ console.warn('in send message', txid)
       selfKey = item.audioSelfKey || item.selfKey;
       pqEncSharedKey = item.audioPqEncSharedKey || item.pqEncSharedKey;
     } else {
-      // Attachment: look up attachment entry by url
-      const att = Array.isArray(item.xattach) ? item.xattach.find((a) => a?.url === url) : null;
+      // Attachment: look up attachment entry by main url (keys are stored there)
+      const att = Array.isArray(item.xattach) ? item.xattach.find((a) => a?.url === mainUrl) : null;
       selfKey = att?.selfKey;
       pqEncSharedKey = att?.pqEncSharedKey;
     }
@@ -12755,8 +13421,8 @@ console.warn('in send message', txid)
       ).dhkey;
     }
 
-    // 2) Download encrypted bytes
-    const res = await fetch(url, { signal: this.abortController.signal });
+    // 2) Download encrypted bytes (use fetchUrl which may be pUrl or main url)
+    const res = await fetch(fetchUrl, { signal: this.abortController.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const cipherBin = new Uint8Array(await res.arrayBuffer());
 
@@ -12766,8 +13432,34 @@ console.warn('in send message', txid)
     if (!plainB64) throw new Error('decryptChacha returned null');
     const clearBin = base642bin(plainB64);
 
-    // 4) Blob
-    return new Blob([clearBin], { type: linkEl.dataset.type || 'application/octet-stream' });
+    // 4) Blob - use image/jpeg for thumbnails (urlOverride), otherwise use original type
+    const blobType = urlOverride ? 'image/jpeg' : (linkEl.dataset.type || 'application/octet-stream');
+    return new Blob([clearBin], { type: blobType });
+  }
+
+  /**
+   * Handles attachment errors, showing appropriate toast messages.
+   * Shows warning for expired files (404/410/403), error for other failures.
+   * @param {Error} err - The error that occurred
+   * @param {string} defaultErrorMessage - Default error message to show for non-expired errors
+   */
+  handleAttachmentError(err, defaultErrorMessage = 'Decryption failed.') {
+    if (err?.name === 'AbortError') {
+      return; // Don't show error for user-initiated cancellations
+    }
+
+    // Check if the error is due to file not being available (expired)
+    const isFileExpired = err.message && (
+      err.message.includes('HTTP 404') ||
+      err.message.includes('HTTP 410') ||
+      err.message.includes('HTTP 403')
+    );
+
+    if (isFileExpired) {
+      showToast('File has expired. Please ask that it be resent to you.', 0, 'warning');
+    } else {
+      showToast(defaultErrorMessage, 0, 'error');
+    }
   }
 
   async handleAttachmentDownload(item, linkEl) {
@@ -12778,24 +13470,31 @@ console.warn('in send message', txid)
       const blobUrl = URL.createObjectURL(blob);
       const filename = decodeURIComponent(linkEl.dataset.name || 'download');
 
-      // Generate and cache thumbnail for images, then update in place
-      if (blob.type.startsWith('image/')) {
+      // Generate and cache thumbnail for images and videos, then update in place
+      if (blob.type.startsWith('image/') || blob.type.startsWith('video/')) {
         const attachmentUrl = linkEl.dataset.url;
-        const attachmentRow = linkEl.closest('.attachment-row') || linkEl.closest('[data-image-attachment="true"]');
+        const attachmentRow = linkEl.closest('.attachment-row') || 
+          linkEl.closest('[data-image-attachment="true"]') ||
+          linkEl.closest('[data-video-attachment="true"]');
         
-        thumbnailCache.generateThumbnail(blob).then(thumbnail => {
-          return thumbnailCache.save(attachmentUrl, thumbnail, blob.type);
-        }).then(async () => {
-          // Update thumbnail in place
-          if (attachmentRow) {
-            const thumbnailBlob = await thumbnailCache.get(attachmentUrl);
-            if (thumbnailBlob) {
-              this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
+        const thumbnailPromise = blob.type.startsWith('image/')
+          ? thumbnailCache.generateThumbnail(blob)
+          : thumbnailCache.extractVideoThumbnail(blob);
+        
+        thumbnailPromise
+          .then(thumbnail => thumbnailCache.save(attachmentUrl, thumbnail, blob.type))
+          .then(async () => {
+            // Update thumbnail in place
+            if (attachmentRow) {
+              const thumbnailBlob = await thumbnailCache.get(attachmentUrl);
+              if (thumbnailBlob) {
+                this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
+              }
             }
-          }
-        }).catch(err => {
-          console.warn('Failed to generate or cache thumbnail:', err);
-        });
+          })
+          .catch(err => {
+            console.warn('Failed to generate or cache thumbnail:', err);
+          });
       }
 
       hideToast(loadingToastId);
@@ -12821,12 +13520,6 @@ console.warn('in send message', txid)
             // Open in new tab and download
             const newTab = window.open(blobUrl, '_blank');
             this.triggerFileDownload(blobUrl, filename);
-            
-            if (newTab) {
-              console.log('opened in new tab');
-            } else {
-              console.log('failed to open in new tab');
-            }
           } else {
             // Non-viewable files: download only
             this.triggerFileDownload(blobUrl, filename);
@@ -12841,10 +13534,7 @@ console.warn('in send message', txid)
       console.error('Attachment decrypt failed:', err);
       
       hideToast(loadingToastId);
-
-      if (err.name !== 'AbortError') {
-        showToast(`Decryption failed.`, 0, 'error');
-      }
+      this.handleAttachmentError(err, 'Decryption failed.');
     }
   }
 
@@ -12922,7 +13612,7 @@ console.warn('in send message', txid)
 
     // Check if keyboard is open - if so, don't show context menu
     if (this.isKeyboardOpen()) {
-      console.log('⌨️ Keyboard is open, preventing context menu');
+      console.warn('⌨️ Keyboard is open, preventing context menu');
       return;
     }
 
@@ -13007,6 +13697,7 @@ console.warn('in send message', txid)
       if (inviteOption) inviteOption.style.display = 'none';
       if (joinOption) joinOption.style.display = 'none';
       if (replyOption) replyOption.style.display = 'flex';
+      if (editOption) editOption.style.display = 'none';
     } else {
       if (copyOption) copyOption.style.display = 'flex';
       if (joinOption) joinOption.style.display = 'none';
@@ -13081,6 +13772,78 @@ console.warn('in send message', txid)
     this.closeContextMenu();
     this.closeImageAttachmentContextMenu();
     this.closeAttachmentOptionsContextMenu();
+    this.closeHeaderContextMenu();
+  }
+
+  /**
+   * Shows the header context menu
+   * @param {Event} e - Click event
+   */
+  showHeaderContextMenu(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Ensure only one context menu is open at a time
+    this.closeAllContextMenus();
+
+    if (!this.headerContextMenu || !this.headerMenuButton) return;
+
+    const buttonRect = this.headerMenuButton.getBoundingClientRect();
+    const menuWidth = 200;
+    const menuHeight = 150; // Approximate height for 3 options
+
+    // Position menu below and aligned to the right of the button
+    let left = buttonRect.right - menuWidth;
+    let top = buttonRect.bottom + 8;
+
+    // Adjust if menu would go off screen
+    if (left < 10) {
+      left = 10;
+    }
+    if (top + menuHeight > window.innerHeight - 10) {
+      top = buttonRect.top - menuHeight - 8;
+    }
+
+    Object.assign(this.headerContextMenu.style, {
+      left: `${left}px`,
+      top: `${top}px`,
+      display: 'block'
+    });
+  }
+
+  /**
+   * Closes the header context menu
+   */
+  closeHeaderContextMenu() {
+    if (!this.headerContextMenu) return;
+    this.headerContextMenu.style.display = 'none';
+  }
+
+  /**
+   * Handles header context menu actions
+   * @param {string} action - The action to perform
+   */
+  handleHeaderContextMenuAction(action) {
+    this.closeHeaderContextMenu();
+    this.pauseVoiceMessages();
+
+    const contact = myData.contacts[this.address];
+    if (!contact) return;
+
+    switch (action) {
+      case 'call':
+        this.handleCallUser();
+        break;
+      case 'info':
+        contactInfoModal.open(createDisplayInfo(contact));
+        break;
+      case 'pay':
+        const payOption = this.headerContextMenu.querySelector('[data-action="pay"]');
+        const username = payOption?.dataset.username || contact.username || this.address;
+        sendAssetFormModal.username = username;
+        sendAssetFormModal.open();
+        break;
+    }
   }
 
   /**
@@ -13547,8 +14310,8 @@ console.warn('in send message', txid)
 
   /**
    * Shows context menu for an attachment row.
-   * - Images: "Preview" when no thumbnail exists in IndexedDB; "Save" when it exists
-   * - Non-images: always "Save"
+   * - Images/Videos: "Preview" when no thumbnail exists in IndexedDB; "Save" when it exists
+   * - Non-images/videos: always "Save"
    * @param {Event} e
    * @param {HTMLElement} attachmentRow
    */
@@ -13579,12 +14342,14 @@ console.warn('in send message', txid)
     }
 
     const isImageAttachment = attachmentRow.dataset.imageAttachment === 'true';
+    const isVideoAttachment = attachmentRow.dataset.videoAttachment === 'true';
+    const hasThumbnailSupport = isImageAttachment || isVideoAttachment;
 
     // Decide Preview/Save vs Save:
-    // - Images: Show both Preview and Save when no thumbnail exists; Show only Save when it exists
-    // - Non-images: always Save (no thumbnail concept)
+    // - Images/Videos: Show both Preview and Save when no thumbnail exists; Show only Save when it exists
+    // - Non-images/videos: always Save (no thumbnail concept)
     let hasThumb = true;
-    if (isImageAttachment) {
+    if (hasThumbnailSupport) {
       hasThumb = false;
       if (url && url !== '#') {
         try {
@@ -13596,9 +14361,9 @@ console.warn('in send message', txid)
       }
     }
 
-    // Show Preview only for images without a thumbnail; Save is always visible
+    // Show Preview only for images/videos without a thumbnail; Save is always visible
     const previewOpt = this.imageAttachmentContextMenu.querySelector('[data-action="preview"]');
-    if (previewOpt) previewOpt.style.display = (isImageAttachment && !hasThumb) ? '' : 'none';
+    if (previewOpt) previewOpt.style.display = (hasThumbnailSupport && !hasThumb) ? '' : 'none';
 
     this.positionContextMenu(this.imageAttachmentContextMenu, attachmentRow);
     this.imageAttachmentContextMenu.style.display = 'block';
@@ -13611,7 +14376,7 @@ console.warn('in send message', txid)
     const { messageEl } = this.getAttachmentContextFromRow(row);
     switch (action) {
       case 'preview':
-        void this.previewImageAttachment(row);
+        void this.previewMediaAttachment(row);
         break;
       case 'save':
         void this.saveImageAttachment(row);
@@ -13634,36 +14399,37 @@ console.warn('in send message', txid)
   }
 
   /**
-   * Preview an image attachment: decrypt + generate thumbnail + cache thumbnail in IndexedDB.
-   * Does NOT trigger download.
+   * Preview a media attachment (image or video): download + decrypt thumbnail from pUrl + cache in IndexedDB.
+   * Does NOT trigger full file download - uses the pre-generated thumbnail from server.
    * @param {HTMLElement} attachmentRow
    */
-  async previewImageAttachment(attachmentRow) {
+  async previewMediaAttachment(attachmentRow) {
     let loadingToastId;
     try {
       const { item, url } = this.getAttachmentContextFromRow(attachmentRow);
-      if (!item) return;
-
-      if (!url || url === '#') return;
-
-      loadingToastId = showToast(`Decrypting attachment...`, 0, 'loading');
-
-      const blob = await this.decryptAttachmentToBlob(item, attachmentRow);
-      if (!blob.type.startsWith('image/')) {
-        hideToast(loadingToastId);
-        return showToast('Not an image attachment', 2000, 'info');
+      if (!item || !url || url === '#') return;
+      
+      // Get pUrl from data attributes
+      const pUrl = attachmentRow.dataset.pUrl;
+      if (!pUrl) {
+        showToast('Preview not available for this attachment', 2000, 'info');
+        return;
       }
-
-      // 5. Generate + cache thumbnail
-      const thumbnail = await thumbnailCache.generateThumbnail(blob);
-      await thumbnailCache.save(url, thumbnail, blob.type);
-      this.updateThumbnailInPlace(attachmentRow, thumbnail);
-
+      
+      loadingToastId = showToast(`Loading preview...`, 0, 'loading');
+      
+      // Decrypt thumbnail using pUrl (reuses same key derivation as main file)
+      const thumbnailBlob = await this.decryptAttachmentToBlob(item, attachmentRow, pUrl);
+      
+      // Cache and display thumbnail
+      await thumbnailCache.save(url, thumbnailBlob, 'image/jpeg');
+      this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
+      
       hideToast(loadingToastId);
     } catch (err) {
-      console.error('Preview decrypt/thumbnail failed:', err);
+      console.error('Preview failed:', err);
       hideToast(loadingToastId);
-      if (err?.name !== 'AbortError') showToast('Preview failed.', 0, 'error');
+      this.handleAttachmentError(err, 'Preview failed.');
     }
   }
 
@@ -13746,6 +14512,13 @@ console.warn('in send message', txid)
       if (timestamp && (Date.now() - timestamp) > EDIT_WINDOW_MS) {
         return showToast('Edit window expired', 3000, 'info');
       }
+
+      // One-time toast
+      if (!checkFirstTimeTip('editMessageFee')) {
+        showToast('Editing a message costs the same transaction fee as sending a new message.', 0, 'info');
+        setFirstTimeTipShown('editMessageFee');
+      }
+
       // If this is a payment, edit the memo; else edit plain message content
       const contentEl = messageEl.classList.contains('payment-info')
         ? messageEl.querySelector('.payment-memo')
@@ -13759,6 +14532,19 @@ console.warn('in send message', txid)
       this.cancelEditButton.style.display = '';
       // Disable attachments while editing
       this.addAttachmentButton.disabled = true;
+      
+      // Trigger input event for other listeners (byte counter, etc.)
+      this.messageInput.dispatchEvent(new Event('input'));
+      
+      // Manually resize textarea after browser has updated layout
+      // requestAnimationFrame ensures scrollHeight is accurate
+      requestAnimationFrame(() => {
+        this.messageInput.style.height = '48px';
+        this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
+      });
+      
+      // Toggle button visibility to show send button since input has content
+      this.toggleSendButtonVisibility();
       // Focus input and move caret to end
       this.messageInput.focus();
       this.messageInput.selectionStart = this.messageInput.selectionEnd = this.messageInput.value.length;
@@ -13898,22 +14684,18 @@ console.warn('in send message', txid)
     }
 
     const container = this.messagesContainer;
-    if (container) {
-      const rect = target.getBoundingClientRect();
-      const containerRect = container.getBoundingClientRect();
-      const fullyVisible = rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
-      if (!fullyVisible) {
-        const scrollTarget = Math.max(0, target.offsetTop - container.clientHeight / 3);
-        if (typeof container.scrollTo === 'function') {
-          container.scrollTo({ top: scrollTarget, behavior: 'smooth' });
-        } else {
-          container.scrollTop = scrollTarget;
-        }
-      }
-    }
+    if (!container) return;
 
-    target.classList.add('highlighted');
-    setTimeout(() => target.classList.remove('highlighted'), 2000);
+    requestAnimationFrame(() => {
+      const elementTop = target.offsetTop;
+      const containerHeight = container.clientHeight;
+      const elementHeight = target.offsetHeight;
+      const scrollTarget = Math.max(0, elementTop - (containerHeight / 2) + (elementHeight / 2));
+      
+      container.scrollTo?.({ top: scrollTarget, behavior: 'smooth' }) || (container.scrollTop = scrollTarget);
+      target.classList.add('highlighted');
+      setTimeout(() => target.classList.remove('highlighted'), 2000);
+    });
   }
 
   /**
@@ -14132,7 +14914,7 @@ console.warn('in send message', txid)
       const recipientPubKey = myData.contacts[this.address]?.public;
       const pqRecPubKey = myData.contacts[this.address]?.pqPublic;
       if (!ok || !recipientPubKey || !pqRecPubKey) {
-        console.log(`No public/PQ key found for recipient ${this.address}`);
+        console.warn(`No public/PQ key found for recipient ${this.address}`);
         showToast('Failed to get recipient key', 0, 'error');
         return;
       }
@@ -14168,11 +14950,11 @@ console.warn('in send message', txid)
       const response = await injectTx(deleteMessageObj, deleteTxid);
 
       if (!response || !response.result || !response.result.success) {
-        console.log('Delete message failed to send', response);
+        console.error('Delete message failed to send', response);
         return showToast('Failed to delete message: ' + (response?.result?.reason || 'Unknown error'), 0, 'error');
       }
 
-      showToast('Delete request sent', 3000, 'success');
+      showToast('Delete request sent', 5000, 'loading');
       
       // Best effort delete attachments from server
       if (message.xattach && Array.isArray(message.xattach)) {
@@ -14343,8 +15125,6 @@ console.warn('in send message', txid)
         this.updateTollAmountUI(address);
       }
     } else {
-      console.log(`Returning early since queried toll value is the same as the toll field in localStorage`);
-      // return early
       return;
     }
   }
@@ -14471,7 +15251,7 @@ console.warn('in send message', txid)
       const recipientPubKey = myData.contacts[currentAddress]?.public;
       const pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
       if (!ok || !recipientPubKey || !pqRecPubKey) {
-        console.log(`no public/PQ key found for recipient ${currentAddress}`);
+        console.warn(`no public/PQ key found for recipient ${currentAddress}`);
         showToast('Failed to get recipient key', 0, 'error');
         return false;
       }
@@ -14568,7 +15348,7 @@ console.warn('in send message', txid)
       const response = await injectTx(chatMessageObj, txid);
 
       if (!response || !response.result || !response.result.success) {
-        console.log('call message failed to send', response);
+        console.error('call message failed to send', response);
         updateTransactionStatus(txid, currentAddress, 'failed', 'message');
         this.appendChatModal();
         return false;
@@ -14604,13 +15384,20 @@ console.warn('in send message', txid)
    * @param {string} audioSelfKey - Self key for audio file decryption
    * @returns {Promise<void>}
    */
-  async sendVoiceMessageTx(voiceMessageUrl, duration, audioPqEncSharedKey, audioSelfKey) {
+  async sendVoiceMessageTx(voiceMessageUrl, duration, audioPqEncSharedKey, audioSelfKey, replyInfo = null) {
     // Create voice message object
     const messageObj = {
       type: 'vm',
       url: voiceMessageUrl,
       duration: duration
     };
+
+    // Add reply info if provided
+    if (replyInfo && replyInfo.replyId) {
+      messageObj.replyId = replyInfo.replyId;
+      messageObj.replyMessage = replyInfo.replyMessage || '';
+      messageObj.replyOwnerIsMine = replyInfo.replyOwnerIsMine;
+    }
 
     // Ensure recipient keys are available
     const ok = await ensureContactKeys(this.address);
@@ -14688,6 +15475,13 @@ console.warn('in send message', txid)
       pqEncSharedKey: bin2base64(audioPqEncSharedKey) // Add audio file pqEncSharedKey
     };
 
+    // Add reply info to the optimistic message if present
+    if (replyInfo && replyInfo.replyId) {
+      newMessage.replyId = replyInfo.replyId;
+      newMessage.replyMessage = replyInfo.replyMessage || '';
+      newMessage.replyOwnerIsMine = replyInfo.replyOwnerIsMine;
+    }
+
     const contact2 = myData.contacts[this.address];
     if (contact2) {
       insertSorted(contact2.messages, newMessage, 'timestamp');
@@ -14717,7 +15511,7 @@ console.warn('in send message', txid)
       const response = await injectTx(chatMessageObj, txid);
 
       if (!response || !response.result || !response.result.success) {
-        console.log('voice message failed to send', response);
+        console.error('voice message failed to send', response);
 
         const reason = response?.result?.reason || '';
         if (/toll/i.test(reason)) {
@@ -15077,7 +15871,6 @@ class CallInviteModal {
     this.contactsList.addEventListener('change', this.updateCounter.bind(this));
     this.inviteSendButton.addEventListener('click', this.sendInvites.bind(this));
     this.cancelButton.addEventListener('click', () => {
-      console.log('Invite modal cancelled');
       this.close();
     });
     this.closeButton.addEventListener('click', this.close.bind(this));
@@ -15202,7 +15995,6 @@ class CallInviteModal {
         }
 
         const payload = { type: 'call', url: msgCallLink, callTime: msgCallTime };
-        console.log('payload', payload);
 
         let messagePayload = {}
         const contact = myData.contacts[addr];
@@ -15291,7 +16083,7 @@ class CallInviteModal {
         const response = await injectTx(messageObj, txid);
 
         if (!response || !response.result || !response.result.success) {
-          console.log('call message failed to send', response);
+          console.error('call message failed to send', response);
           updateTransactionStatus(txid, addr, 'failed', 'message');
           if (chatModal.isActive() && chatModal.address === addr) {
             chatModal.appendChatModal();
@@ -15375,6 +16167,7 @@ class CallScheduleDateModal {
     this.closeBtn = null;
     this.onDone = null; // function(timestamp|null)
     this.DEFAULT_OFFSET_MINUTES = 0;
+    this.maxDaysOut = 400;
     this.clockTimer = new ClockTimer('callScheduleCurrentTime');
     this._onSubmit = this._onSubmit.bind(this);
     this._onSubmitBtn = this._onSubmitBtn.bind(this);
@@ -15453,6 +16246,10 @@ class CallScheduleDateModal {
     }
     // Set local date input
     if (this.dateInput) {
+      const max = new Date();
+      max.setDate(max.getDate() + this.maxDaysOut);
+      this.dateInput.max = this._formatDateInput(max);
+
       this.dateInput.value = this._formatDateInput(defaultDate);
     }
     this.modal?.classList.add('active');
@@ -15494,8 +16291,18 @@ class CallScheduleDateModal {
     const corrected = localMs + timeSkew;
     const nowCorrected = getCorrectedTimestamp();
     const minAllowed = nowCorrected - 5 * 60 * 1000;
+
+    // Max 400 days out
+    const d = new Date(nowCorrected);
+    d.setDate(d.getDate() + this.maxDaysOut);
+    const maxAllowed = d.getTime();
+
     if (corrected < minAllowed) {
       showToast('Please choose a date or time in the future', 0, 'error');
+      return;
+    }
+    if (corrected > maxAllowed) {
+      showToast(`Please choose a date within the next ${this.maxDaysOut} days`, 0, 'error');
       return;
     }
     this._closeWith(corrected);
@@ -15706,6 +16513,18 @@ class FailedMessageMenu {
     if (chatModal.messageInput && chatModal.retryOfTxId && messageContent && txid) {
       chatModal.messageInput.value = messageContent;
       chatModal.retryOfTxId.value = txid;
+      
+      // Trigger input event to ensure all listeners fire (byte counter, draft save, etc.)
+      chatModal.messageInput.dispatchEvent(new Event('input'));
+      
+      // Manually resize textarea after browser has updated layout
+      // requestAnimationFrame ensures scrollHeight is accurate
+      requestAnimationFrame(() => {
+        chatModal.messageInput.style.height = '48px';
+        chatModal.messageInput.style.height = Math.min(chatModal.messageInput.scrollHeight, 120) + 'px';
+      });
+      
+      chatModal.toggleSendButtonVisibility();
       chatModal.messageInput.focus();
       return;
     }
@@ -15816,7 +16635,6 @@ class VoiceRecordingModal {
    * @returns {void}
    */
   open() {
-    console.log('Opening voice recording modal');
     this.modal.style.display = 'flex';
     this.resetUI();
   }
@@ -16150,7 +16968,7 @@ class VoiceRecordingModal {
       const form = new FormData();
       form.append('file', blob, `voice_message_${Date.now()}.webm`);
 
-      const uploadUrl = 'https://inv.liberdus.com:2083';
+      const uploadUrl = network.attachmentServerUrl;
       const response = await fetch(`${uploadUrl}/post`, {
         method: 'POST',
         body: form
@@ -16163,8 +16981,22 @@ class VoiceRecordingModal {
 
       const voiceMessageUrl = `${uploadUrl}/get/${id}`;
       
+      // Capture reply state before sending (if user is replying to a message)
+      const replyIdVal = chatModal.replyToTxId?.value?.trim?.() || '';
+      const replyMsgVal = chatModal.replyToMessage?.value?.trim?.() || '';
+      const replyOwnerIsMineVal = chatModal.replyOwnerIsMine?.value === '1';
+      
+      const replyInfo = replyIdVal ? {
+        replyId: replyIdVal,
+        replyMessage: replyMsgVal,
+        replyOwnerIsMine: replyOwnerIsMineVal
+      } : null;
+      
       // Send the voice message through chat modal
-      await chatModal.sendVoiceMessageTx(voiceMessageUrl, duration, pqEncSharedKey, selfKey);
+      await chatModal.sendVoiceMessageTx(voiceMessageUrl, duration, pqEncSharedKey, selfKey, replyInfo);
+      
+      // Clear reply state after sending
+      chatModal.cancelReply();
 
       this.close();
       
@@ -16352,7 +17184,7 @@ class NewChatModal {
         // Normalize address from API if it has 0x prefix or trailing zeros
         recipientAddress = normalizeAddress(data.address);
       } catch (error) {
-        console.log('Error looking up username:', error);
+        console.error('Error looking up username:', error);
         this.showRecipientError('Error looking up username');
         return;
       }
@@ -16375,7 +17207,7 @@ class NewChatModal {
         return;
       }
     } catch (error) {
-      console.log('Error checking account type:', error);
+      console.error('Error checking account type:', error);
       showToast('Error checking account type', 0, 'error');
       return;
     }
@@ -16840,13 +17672,12 @@ class CreateAccountModal {
     if (providedPrivateKey) {
       try {
         const accountCheckAddress = longAddress(addressHex);
-        console.log(`Checking network for existing account at address: ${accountCheckAddress}`);
         const accountInfo = await queryNetwork(`/account/${accountCheckAddress}`);
 
         // Check if the query returned data indicating an account exists.
         // This assumes a non-null `accountInfo` with an `account` property means it exists.
         if (accountInfo && accountInfo.account) {
-          console.log('Account already exists for this private key:', accountInfo);
+          console.warn('Account already exists for this private key:', accountInfo);
           this.privateKeyError.textContent = 'An account already exists for this private key.';
           this.privateKeyError.style.color = '#dc3545';
           this.privateKeyError.style.display = 'inline';
@@ -16854,7 +17685,6 @@ class CreateAccountModal {
           this.reEnableControls();
           return; // Stop the account creation process
         } else {
-          console.log('No existing account found for this private key.');
           this.privateKeyError.style.display = 'none';
         }
       } catch (error) {
@@ -16940,7 +17770,7 @@ class CreateAccountModal {
         signInModal.open(username);
       } catch (error) {
         if (waitingToastId) hideToast(waitingToastId);
-        console.log(`DEBUG: handleCreateAccount error`, JSON.stringify(error, null, 2));
+        console.error(`DEBUG: handleCreateAccount error`, JSON.stringify(error, null, 2));
         showToast(`account creation failed: ${error}`, 0, 'error');
         this.reEnableControls();
 
@@ -17317,7 +18147,33 @@ class SendAssetFormModal {
     const confirmButton = sendAssetConfirmModal.confirmSendButton;
     const cancelButton = sendAssetConfirmModal.cancelButton;
 
-    await getNetworkParams();
+    // Ensure recipient account type matches sender (public/private).
+    try {
+      const recipientRaw = this.foundAddressObject?.address;
+      if (!recipientRaw) {
+        showToast('Recipient address not resolved; enter a valid username', 0, 'error');
+        return;
+      }
+      const recipientAddress = normalizeAddress(recipientRaw);
+
+      await getNetworkParams();
+      const myIsPrivate = !!myData?.account?.private;
+      const recipientAccountRes = await queryNetwork(`/account/${longAddress(recipientAddress)}`);
+      if (!recipientAccountRes?.account) {
+        showToast('Account not found, try again.', 0, 'error');
+        return;
+      }
+      const recipientIsPrivate = recipientAccountRes?.account?.private === true;
+      if (recipientIsPrivate !== myIsPrivate) {
+        showToast(`${myIsPrivate ? 'Private' : 'Public'} accounts can only send to other ${myIsPrivate ? 'private' : 'public'} accounts.`, 0, 'error');
+        return;
+      }
+    } catch (error) {
+      console.error('Error checking account type:', error);
+      showToast('Error checking account type', 0, 'error');
+      return;
+    }
+
     const stabilityFactor = getStabilityFactor();
 
     // get `usdAmount` and `libAmount`
@@ -17492,7 +18348,6 @@ class SendAssetFormModal {
     if (this.foundAddressObject.address) {
       if (this.amountInput.value.trim() != '') {
         isAmountAndTollValid = this.validateToll(amountBigInt);
-        console.log('ismountAndTollValid ' + isAmountAndTollValid);
       }
     }
     // Enable button only if both conditions are met.
@@ -17507,16 +18362,12 @@ class SendAssetFormModal {
     // check if user is required to pay a toll
     if (this.tollInfo.required == 1) {
       if (this.memoInput.value.trim() != '') {
-        console.log('checking if toll > amount');
         const factor = getStabilityFactor();
         let amountInLIB = amount;
         let tollInLIB = this.tollInfo.toll;
         if (this.tollInfo.tollUnit !== 'LIB') {
           tollInLIB = bigxnum2big(this.tollInfo.toll, (1.0 / factor).toString());
         }
-        console.log(
-          `toll > amount  ${big2str(tollInLIB, 8)} > ${big2str(amountInLIB, 8)} : ${tollInLIB > amountInLIB}`
-        );
         if (tollInLIB > amountInLIB) {
           this.balanceWarning.textContent = 'less than toll for memo';
           this.balanceWarning.style.display = 'inline';
@@ -17720,8 +18571,6 @@ class SendAssetFormModal {
    * @returns {void}
    * */
   async fillFromQR(data) {
-    console.log('Attempting to fill payment form from QR:', data);
-
     // Explicitly check for the required prefix
     if (!data || !data.startsWith('liberdus://')) {
       console.error("Invalid payment QR code format. Missing 'liberdus://' prefix.", data);
@@ -17743,8 +18592,6 @@ class SendAssetFormModal {
       const base64Data = data.substring('liberdus://'.length);
       const jsonData = bin2utf8(base642bin(base64Data));
       const paymentData = JSON.parse(jsonData);
-
-      console.log('Read payment data:', JSON.stringify(paymentData, null, 2));
 
       if (paymentData.u) {
         this.usernameInput.value = paymentData.u;
@@ -17987,7 +18834,6 @@ class SendAssetConfirmModal {
     };
 
     try {
-      console.log('payload is', payload);
       // Send the transaction using postAssetTransfer
       const response = await postAssetTransfer(toAddress, amount, payload, keys);
 
@@ -18129,6 +18975,7 @@ class ReceiveModal {
     this.copyButton = document.getElementById('copyAddress');
     this.toggleReceiveBalanceButton = document.getElementById('toggleReceiveBalance');
     this.receiveBalanceSymbol = document.getElementById('receiveBalanceSymbol');
+    this.fullAddress = null; // Store full address for copying
 
     // Create debounced function
     this.debouncedUpdateQRCode = debounce(() => this.updateQRCode(), 300);
@@ -18136,8 +18983,9 @@ class ReceiveModal {
     // Modal close
     document.getElementById('closeReceiveModal').addEventListener('click', () => this.close());
     
-    // Copy address
+    // Copy address functionality
     this.copyButton.addEventListener('click', () => this.copyAddress());
+    this.displayAddress.addEventListener('click', () => this.copyAddress());
     
     // QR code updates
     this.assetSelect.addEventListener('change', () => this.updateQRCode());
@@ -18166,14 +19014,12 @@ class ReceiveModal {
         option.textContent = `${asset.name} (${asset.symbol})`;
         this.assetSelect.appendChild(option);
       });
-      console.log(`Populated ${walletData.assets.length} assets in dropdown`);
     } else {
       // Add a default option if no assets
       const option = document.createElement('option');
       option.value = 0;
       option.textContent = 'Liberdus (LIB)';
       this.assetSelect.appendChild(option);
-      console.log('No wallet assets found, using default');
     }
 
     // Clear input fields
@@ -18201,12 +19047,17 @@ class ReceiveModal {
     this.qrcodeContainer.innerHTML = '';
 
     const address = myAccount.keys.address;
-    this.displayAddress.textContent = '0x' + address;
+    const addressWithPrefix = address.startsWith('0x') ? address : `0x${address}`;
+    
+    // Store full address for copying
+    this.fullAddress = addressWithPrefix;
+    
+    // Display full address
+    this.displayAddress.textContent = addressWithPrefix;
 
     // Generate QR code with payment data
     try {
       this.updateQRCode();
-      console.log('QR code updated with payment data');
     } catch (error) {
       console.error('Error updating QR code:', error);
 
@@ -18216,7 +19067,7 @@ class ReceiveModal {
         width: 200,
         height: 200,
       });
-      console.log('Fallback to basic address QR code');
+      console.warn('Fallback to basic address QR code');
     }
   }
 
@@ -18236,9 +19087,8 @@ class ReceiveModal {
         if (asset) {
           assetId = asset.id || 'liberdus';
           symbol = asset.symbol || 'LIB';
-          console.log(`Selected asset: ${asset.name} (${symbol})`);
         } else {
-          console.log(`Asset not found at index ${assetIndex}, using defaults`);
+          console.warn(`Asset not found at index ${assetIndex}, using defaults`);
         }
       } else {
         console.warn('Wallet assets not available, using default asset');
@@ -18278,7 +19128,6 @@ class ReceiveModal {
     try {
       // Get payment data
       const paymentData = this.createQRPaymentData();
-      console.log('Created payment data:', JSON.stringify(paymentData, null, 2));
 
       // Convert to JSON and encode as base64
       const jsonData = JSON.stringify(paymentData);
@@ -18286,8 +19135,6 @@ class ReceiveModal {
 
       // Create URI with liberdus:// prefix
       const qrText = `liberdus://${base64Data}`;
-      console.log('QR code text length:', qrText.length);
-      console.log('QR code text (first 100 chars):', qrText.substring(0, 100) + (qrText.length > 100 ? '...' : ''));
 
       const gifBytes = qr.encodeQR(qrText, 'gif', { scale: 4 });
       // Convert the raw bytes to a base64 data URL
@@ -18327,7 +19174,6 @@ class ReceiveModal {
         // Add the image to the container
         this.qrcodeContainer.appendChild(img);
 
-        console.log('Fallback QR code generated with username URI');
         console.error('Error generating full QR', error);
 
         // Show error directly in the preview element
@@ -18374,15 +19220,18 @@ class ReceiveModal {
   }
 
   async copyAddress() {
-    const address = this.displayAddress.textContent;
+    // Copy the full address, not the displayed truncated version and toast
+    const address = this.fullAddress || this.displayAddress.textContent;
     try {
       await navigator.clipboard.writeText(address);
+      showToast('Address copied to clipboard', 2000, 'success');
       this.copyButton.classList.add('success');
       setTimeout(() => {
         this.copyButton.classList.remove('success');
       }, 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
+      showToast('Failed to copy address', 0, 'error');
     }
   }
 }
@@ -18429,9 +19278,7 @@ class FailedTransactionModal {
    * @param {Element} element - The element that triggered the failed transaction
    * @returns {void}
    */
-  open(txid, element) {
-    console.log('open', txid);
-  
+  open(txid, element) {  
     // Get the address and memo from the original failed transfer element
     const address = element?.dataset?.address || chatModal.address;
     const memo =
@@ -18443,11 +19290,7 @@ class FailedTransactionModal {
     this.memo = memo;
     this.txid = txid;
     //open.assetID = assetID;
-  
-    console.log(`this.address: ${this.address}`);
-    console.log(`this.memo: ${this.memo}`);
-    console.log(`this.txid: ${this.txid}`);
-    //console.log(`open.assetID: ${open.assetID}`)
+
     this.modal.classList.add('active');
   }
 
@@ -18691,7 +19534,6 @@ class MigrateAccountsModal {
   }
 
   async open() {
-    console.log('open migrate accounts modal');
     await this.populateAccounts();
     this.modal.classList.add('active');
   }
@@ -18867,7 +19709,6 @@ class MigrateAccountsModal {
 
   async handleSubmit(event) {
     event.preventDefault();
-    console.log('handleSubmit');
 
     this.submitButton.disabled = true;
     this.closeButton.disabled = true;
@@ -18883,7 +19724,6 @@ class MigrateAccountsModal {
       const netid = checkbox.dataset.netid;
   
       const loadingToastId = showToast('Migrating '+username, 0, 'loading');
-      console.log('processing account: ', username, netid, section);  
       // Start processing this account
       if (section === 'mine') {
         this.migrateAccountData(username, netid, parameters.networkId)
@@ -18921,9 +19761,7 @@ class MigrateAccountsModal {
         const loadingToastId = showToast('Migrating '+username, 0, 'loading');
         const txid = results[username].txid;
         const submittedts = results[username].submittedts
-console.log('migrating ',username,'checking txid', txid)
         const result = await checkPendingTransaction(txid, submittedts); // return true, false or null
-console.log('    result is',result)
         if (result !== null){
           if (result == true){
             this.migrateAccountData(username, results[username].netid, parameters.networkId)
@@ -19000,7 +19838,6 @@ console.log('    result is',result)
 
     // Save updated accounts registry
     localStorage.setItem('accounts', stringify(accountsObj));
-    console.log(`Updated accounts registry for ${username}: removed from ${oldNetid}, added to ${newNetid}`);
   }
 
   clearForm() {
@@ -19629,7 +20466,6 @@ class ReactNativeApp {
 
   load() {
     if (this.isReactNativeWebView) {
-      console.log('🌐 Initializing React Native WebView Communication');
       this.captureInitialViewportHeight();
 
       window.addEventListener('message', (event) => {
@@ -19713,7 +20549,7 @@ class ReactNativeApp {
             // User is signed in - check if it's the right account
             const isCurrentAccount = this.isCurrentAccount(normalizedToAddress);
             if (isCurrentAccount) {
-              console.log('🔔 You are signed in to the account that received the message');
+              // console.log('🔔 You are signed in to the account that received the message');
             } else {
               // We're signed in to a different account, ask user what to do
               const shouldSignOut = confirm('You received a message for a different account. Would you like to sign out to switch to that account?');
@@ -19722,7 +20558,7 @@ class ReactNativeApp {
                 // Sign out and save the notification address for priority
                 menuModal.handleSignOut();
               } else {
-                console.log('User chose to stay signed in - notified account will appear first next time');
+                // console.log('User chose to stay signed in - notified account will appear first next time');
               }
             }
           }
@@ -19836,7 +20672,6 @@ class ReactNativeApp {
 
   captureInitialViewportHeight() {
     const currentHeight = window.innerHeight;
-    console.log('📏 Capturing initial viewport height:', currentHeight);
     this.postMessage({
         type: 'VIEWPORT_HEIGHT',
         height: currentHeight
@@ -19869,13 +20704,6 @@ class ReactNativeApp {
       const inputBottom = rect.bottom;
       const inputIsAboveKeyboard = inputBottom < keyboardTop;
       const needsManualHandling = !inputIsAboveKeyboard;
-
-      console.log('⌨️ Native keyboard detection:', {
-        keyboardHeight,
-        inputBottom,
-        keyboardTop,
-        needsManualHandling
-      });
 
       this.postMessage({
         type: 'KEYBOARD_DETECTION',
@@ -20082,7 +20910,6 @@ class ReactNativeApp {
   async handleNativeAppSubscribe() {
     // Check if we're online before proceeding
     if (!isOnline) {
-      console.log('handleNativeAppSubscribe: Device is offline, skipping subscription');
       return;
     }
 
@@ -20091,9 +20918,7 @@ class ReactNativeApp {
     const fcmToken = this.fcmToken || null;
     const voipToken = this.voipToken || null;
     
-    if (deviceToken && expoPushToken) {
-      console.log('Native app subscription tokens detected:', { deviceToken, expoPushToken, fcmToken, voipToken });
-      
+    if (deviceToken && expoPushToken) {      
       try {
         // Get the user's address from localStorage if available
         const { netid } = network;
@@ -20125,9 +20950,6 @@ class ReactNativeApp {
         }
 
         const SUBSCRIPTION_API = `${selectedGateway.web}/notifier/subscribe`;
-
-        console.log('payload', payload);
-        console.log('SUBSCRIPTION_API', SUBSCRIPTION_API);
         
         const response = await fetch(SUBSCRIPTION_API, {
           method: 'POST',
@@ -20138,8 +20960,6 @@ class ReactNativeApp {
         });
         
         if (response.ok) {
-          const result = await response.json();
-          console.log('Subscription successful:', result);
           /* showToast('Push notifications enabled', 3000, 'success'); */
         } else {
           console.error('Subscription failed:', response.status, response.statusText);
@@ -20160,13 +20980,11 @@ class ReactNativeApp {
   async handleNativeAppUnsubscribe() {
     // Early return if running on Android device in React Native WebView
     if (window.ReactNativeWebView && navigator.userAgent.toLowerCase().includes('android')) {
-      console.log('handleNativeAppUnsubscribe: Skipping unsubscribe on Android device');
       return;
     }
 
     // Check if we're online before proceeding
     if (!isOnline) {
-      console.log('handleNativeAppUnsubscribe: Device is offline, skipping unsubscribe');
       return;
     }
 
@@ -20341,8 +21159,6 @@ const reactNativeApp = new ReactNativeApp();
  * @param {string} currentAddress - The address of the current contact
  */
 function removeFailedTx(txid, currentAddress) {
-  console.log(`DEBUG: Removing failed/timed-out txid ${txid} from all stores`);
-
   // remove pending tx if exists
   const index = myData.pending.findIndex((tx) => tx.txid === txid);
   if (index > -1) {
@@ -20359,7 +21175,6 @@ function removeFailedTx(txid, currentAddress) {
 async function checkPendingTransaction(txid, submittedts){
   const now = getCorrectedTimestamp();
   const duration = (now - submittedts) / 1000   // to make it in seconds
-console.log('timestamp is', submittedts, 'duration is', duration)
   let endpointPath = `/transaction/${txid}`;
   if (duration > 20){
     endpointPath = `/collector/api/transaction?appReceiptId=${txid}`;
@@ -20381,7 +21196,6 @@ console.log('timestamp is', submittedts, 'duration is', duration)
  */
 async function checkPendingTransactions() {
   if (!myData || !myAccount) {
-    console.log('DEBUG: user is not logged in');
     return;
   }
 
@@ -20394,7 +21208,6 @@ async function checkPendingTransactions() {
 
   const startingPendingCount = myData.pending.length;
 
-  console.log(`checking pending transactions (${myData.pending.length})`);
   const now = getCorrectedTimestamp();
   const eightSecondsAgo = now - 8000;
   const twentySecondsAgo = now - 20000;
@@ -20405,7 +21218,6 @@ async function checkPendingTransactions() {
     const { txid, type, submittedts } = pendingTxInfo;
 
     if (submittedts < eightSecondsAgo) {
-      console.log(`DEBUG: txid ${txid} is older than 8 seconds, checking receipt`);
 
       let endpointPath = `/transaction/${txid}`;
       if (submittedts < twentySecondsAgo || submittedts < thirtySecondsAgo) {
@@ -20437,8 +21249,6 @@ async function checkPendingTransactions() {
           if (index !== -1) {
             // covert amount to wei
             myData.wallet.history[index].amount = parse(stringify(res.transaction.additionalInfo.totalUnstakeAmount));
-          } else {
-            console.log(`DEBUG: txid ${txid} not found in wallet history`);
           }
         }
 
@@ -20453,6 +21263,7 @@ async function checkPendingTransactions() {
         }
 
         if (type === 'toll') {
+          // log used by e2e tests do not delete
           console.log(`Toll transaction successfully processed!`);
           if (tollModal.isActive()) {
             showToast(`Toll change successful!`, 3000, 'success');
@@ -20460,6 +21271,7 @@ async function checkPendingTransactions() {
         }
 
         if (type === 'update_toll_required') {
+          // log used by e2e tests do not delete
           console.log(`DEBUG: update_toll_required transaction successfully processed!`);
           myData.contacts[pendingTxInfo.to].friendOld = myData.contacts[pendingTxInfo.to].friend;
         }
@@ -20605,7 +21417,6 @@ const pendingPromiseService = (() => {
 
   function resolve(txid, data) {
     if (pendingPromises.has(txid)) {
-      console.log(`DEBUG: resolving txid ${txid} with data ${data}`);
       const promiseControls = pendingPromises.get(txid);
       promiseControls.resolve(data);
       pendingPromises.delete(txid);
@@ -20614,7 +21425,6 @@ const pendingPromiseService = (() => {
 
   function reject(txid, error) {
     if (pendingPromises.has(txid)) {
-      console.log(`DEBUG: rejecting txid ${txid} with error ${error}`);
       const promiseControls = pendingPromises.get(txid);
       promiseControls.reject(error);
       pendingPromises.delete(txid);
@@ -20641,7 +21451,6 @@ function ignoreTabKey(e) {
  * @param {Event} e - The event object.
  */
 function ignoreShiftTabKey(e) {
-  console.log('DEBUG: ignoring shift+tab key');
   // if key is tab and key.shiftKey is true, prevent default
   if (e.key === 'Tab' && e.shiftKey) {
     e.preventDefault();
@@ -20666,13 +21475,12 @@ async function getNetworkParams() {
     if (cachedParams) {
       try {
         parameters = parse(cachedParams);
-        console.log('Using cached network parameters (offline)');
         return;
       } catch (e) {
         console.warn('Failed to parse cached network parameters:', e);
       }
     }
-    console.log('No cached network parameters available (offline)');
+    console.warn('No cached network parameters available (offline)');
     return;
   }
 
@@ -20720,7 +21528,6 @@ getNetworkParams.timestamp = 0;
 
 async function getSystemNotice() {
   if (!isOnline) {
-    console.log('getSystemNotice skipped: Not online');
     return;
   }
 
@@ -20828,7 +21635,6 @@ function stopLongPoll() {
     longPollAbortController = null;
   }
   isLongPolling = false;
-  console.log('LongPoll stopped');
 }
 
 function longPoll() {
@@ -20840,14 +21646,13 @@ function longPoll() {
     return;
   }
   if (isLongPolling) {
-    console.log('LongPoll already running, skipping');
     return;
   }
 
   const myAccount = myData?.account;
   // Skip if no valid account
   if (!myAccount?.keys?.address) {
-    console.log('Poll skipped: No valid account');
+    console.warn('Poll skipped: No valid account');
     return;
   }
 
@@ -20862,7 +21667,6 @@ function longPoll() {
 
     // call this with a promise that'll resolve with callback longPollResult function with the data
     const longPollPromise = queryNetwork(`/collector/api/poll?account=${longAddress(myAccount.keys.address)}&chatTimestamp=${timestamp}`, longPollAbortController.signal);
-    console.log(`longPoll started with account=${longAddress(myAccount.keys.address)} chatTimestamp=${timestamp}`);
     
     // Handle both success and error cases properly
     longPollPromise
@@ -20888,9 +21692,7 @@ function longPoll() {
 }
 longPoll.start = 0;
 
-async function longPollResult(data) {
-  console.log('longpoll data', data)
-  
+async function longPollResult(data) {  
   // Reset polling state and clean up abort controller
   isLongPolling = false;
   longPollAbortController = null;
@@ -20968,7 +21770,6 @@ function isIOS() {
 
 function enterFullscreen() {
   if (isMobile()) {
-  console.log('in enterFullscreen');
     if (document.documentElement.requestFullscreen) {
       // on android 15 using chrome without delay caused issues with input field on ChatModal to be positioned below visual viewport
       setTimeout(() => {
@@ -21028,7 +21829,6 @@ class LocalStorageMonitor {
    * Initialize the localStorage monitor
    */
   load() {
-    console.log('🔧 Loading localStorage monitor...');
     this.checkStorageOnStartup();
   }
 
@@ -21056,8 +21856,6 @@ class LocalStorageMonitor {
         const warningMessage = `⚠️ Storage Warning: Only ${(info.availableBytes / 1024).toFixed(1)}KB remaining! Consider clearing old data.`;
         console.warn(warningMessage);
         showToast(warningMessage, 8000, 'warning');
-      } else {
-        console.log(`✅ Storage OK: ${(info.availableBytes / 1024).toFixed(1)}KB available`);
       }
     } catch (error) {
       console.error('Error checking localStorage on startup:', error);
@@ -21091,17 +21889,14 @@ class LocalStorageMonitor {
   getCachedOrCalculateCapacity() {
     const storedCapacity = localStorage.getItem(this.CAPACITY_KEY);
     if (storedCapacity) {
-      console.log('✅ Using stored localStorage capacity:', storedCapacity);
       return parseInt(storedCapacity);
     }
     
-    console.log('🔄 Calculating localStorage capacity for first time...');
     const usage = this.getLocalStorageUsage();
     const available = this.findLocalStorageAvailable(); // Only runs once!
     const totalCapacity = usage + available;
     
     localStorage.setItem(this.CAPACITY_KEY, totalCapacity.toString());
-    console.log('💾 Stored localStorage capacity for future use:', totalCapacity);
     
     return totalCapacity;
   }
@@ -21187,7 +21982,8 @@ class ContactAvatarCache {
   constructor() {
     this.dbName = 'liberdus_contact_avatars';
     this.storeName = 'avatars';
-    this.dbVersion = 1;
+    // Bump version to force onupgradeneeded for existing installations
+    this.dbVersion = 2;
     this.db = null;
     this.blobUrlCache = new Map();
   }
@@ -21219,16 +22015,22 @@ class ContactAvatarCache {
 
       request.onsuccess = () => {
         this.db = request.result;
-        console.log('Contact avatar cache initialized');
         resolve();
       };
 
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
-        if (!db.objectStoreNames.contains(this.storeName)) {
-          const store = db.createObjectStore(this.storeName, { keyPath: 'address' });
-          store.createIndex('savedAt', 'savedAt', { unique: false });
+        // If an old store exists (keyPath=address) remove it and recreate under 'id'.
+        if (db.objectStoreNames.contains(this.storeName)) {
+          try {
+            db.deleteObjectStore(this.storeName);
+          } catch (e) {
+            console.warn('Failed to delete existing avatars object store during upgrade:', e);
+          }
         }
+        // Use avatar id as the primary key for one-image-per-id storage
+        const store = db.createObjectStore(this.storeName, { keyPath: 'id' });
+        store.createIndex('savedAt', 'savedAt', { unique: false });
       };
     });
   }
@@ -21285,131 +22087,116 @@ class ContactAvatarCache {
   }
 
   /**
-   * Save a contact avatar to IndexedDB
-   * @param {string} address - The contact's address (used as key)
-   * @param {Blob} avatarBlob - The avatar blob to store
+   * Save an avatar blob to the avatars store keyed by avatar id.
+   * @param {string} id - Avatar id (server-provided or locally-generated)
+   * @param {Blob} avatarBlob - The avatar image blob to store
    * @returns {Promise<void>}
    */
-  async save(address, avatarBlob) {
-    if (!this.db) {
-      await this.init();
-    }
+  async save(id, avatarBlob) {
+    if (!id) throw new Error('avatar id required');
+    if (!this.db) await this.init();
 
-    if (this.blobUrlCache.has(address)) {
-      URL.revokeObjectURL(this.blobUrlCache.get(address));
-      this.blobUrlCache.delete(address);
+    // Revoke any cached object URL for this id
+    if (this.blobUrlCache.has(id)) {
+      try { URL.revokeObjectURL(this.blobUrlCache.get(id)); } catch (e) {}
+      this.blobUrlCache.delete(id);
     }
 
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction([this.storeName], 'readwrite');
       const store = tx.objectStore(this.storeName);
 
-      const data = {
-        address,
-        avatar: avatarBlob,
+      const record = {
+        id,
+        blob: avatarBlob,
+        type: avatarBlob?.type || 'image/jpeg',
+        size: avatarBlob?.size || 0,
+        savedAt: Date.now(),
       };
 
-      const request = store.put(data);
-
-      request.onsuccess = () => {
-        resolve();
-      };
-
-      request.onerror = () => {
-        console.warn('Failed to save contact avatar:', request.error);
-        reject(request.error);
+      const putReq = store.put(record);
+      putReq.onsuccess = () => resolve();
+      putReq.onerror = () => {
+        console.warn('Failed to save avatar blob:', putReq.error);
+        reject(putReq.error);
       };
     });
   }
 
   /**
-   * Retrieve a contact avatar blob from IndexedDB
-   * @param {string} address - The contact's address
+   * Get avatar blob by avatar id.
+   * @param {string} id - Avatar id (server-provided or locally-generated)
    * @returns {Promise<Blob|null>} The avatar blob or null if not found
    */
-  async get(address) {
-    if (!this.db) {
-      await this.init();
-    }
+  async get(id) {
+    if (!id) return null;
+    if (!this.db) await this.init();
 
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction([this.storeName], 'readonly');
       const store = tx.objectStore(this.storeName);
-      const request = store.get(address);
+      const request = store.get(id);
 
       request.onsuccess = () => {
         const result = request.result;
-        if (result && result.avatar) {
-          resolve(result.avatar);
-        } else {
-          resolve(null);
-        }
+        if (!result) return resolve(null);
+        return resolve(result.blob || null);
       };
 
       request.onerror = () => {
-        console.warn('Failed to get contact avatar:', request.error);
+        console.warn('Failed to get avatar blob:', request.error);
         reject(request.error);
       };
     });
   }
 
   /**
-   * Get a blob URL for a contact avatar
-   * @param {string} address - The contact's address
+   * Get a blob URL for an avatar id (cached).
+   * @param {string} id - Avatar id (server-provided or locally-generated)
    * @returns {Promise<string|null>} Blob URL or null if not found
    */
-  async getBlobUrl(address) {
-    if (this.blobUrlCache.has(address)) {
-      return this.blobUrlCache.get(address);
-    }
-
-    const blob = await this.get(address);
+  async getBlobUrl(id) {
+    if (!id) return null;
+    if (this.blobUrlCache.has(id)) return this.blobUrlCache.get(id);
+    const blob = await this.get(id);
     if (blob) {
       const blobUrl = URL.createObjectURL(blob);
-      this.blobUrlCache.set(address, blobUrl);
+      this.blobUrlCache.set(id, blobUrl);
       return blobUrl;
     }
-
     return null;
   }
 
   /**
-   * Delete a contact avatar from IndexedDB
-   * @param {string} address - The contact's address
+   * Delete an avatar record by id.
+   * @param {string} id - Avatar id to delete
    * @returns {Promise<void>}
    */
-  async delete(address) {
-    if (!this.db) {
-      await this.init();
-    }
+  async delete(id) {
+    if (!id) return;
+    if (!this.db) await this.init();
 
-    if (this.blobUrlCache.has(address)) {
-      URL.revokeObjectURL(this.blobUrlCache.get(address));
-      this.blobUrlCache.delete(address);
+    // Revoke cached URL for this id
+    if (this.blobUrlCache.has(id)) {
+      try { URL.revokeObjectURL(this.blobUrlCache.get(id)); } catch (e) {}
+      this.blobUrlCache.delete(id);
     }
 
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction([this.storeName], 'readwrite');
       const store = tx.objectStore(this.storeName);
-      const request = store.delete(address);
-
+      const request = store.delete(id);
       request.onsuccess = () => resolve();
-
-      request.onerror = () => {
-        console.warn('Failed to delete contact avatar:', request.error);
-        reject(request.error);
-      };
+      request.onerror = () => reject(request.error);
     });
   }
 
   /**
    * Export all avatars as an object with base64-encoded data
-   * @returns {Promise<Object>} Object mapping address to { data: base64, type: mimeType }
+   * @returns {Promise<Object>} Object mapping id to { data: base64, type: mimeType, size }
    */
   async exportAll() {
-    if (!this.db) {
-      await this.init();
-    }
+    if (!this.db) await this.init();
 
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction([this.storeName], 'readonly');
@@ -21417,24 +22204,21 @@ class ContactAvatarCache {
       const request = store.getAll();
 
       request.onsuccess = async () => {
-        const results = request.result;
+        const results = request.result || [];
         const avatars = {};
-
         for (const item of results) {
-          if (item.address && item.avatar) {
+          if (item && item.id && item.blob) {
             try {
-              // Convert blob to base64
-              const base64 = await this.blobToBase64(item.avatar);
-              avatars[item.address] = {
-                data: base64,
-                type: item.avatar.type || 'image/jpeg'
+              avatars[item.id] = {
+                data: await this.blobToBase64(item.blob),
+                type: item.type || 'image/jpeg',
+                size: item.size || 0,
               };
             } catch (e) {
-              console.warn(`Failed to export avatar for ${item.address}:`, e);
+              console.warn(`Failed to export avatar id ${item.id}:`, e);
             }
           }
         }
-
         resolve(avatars);
       };
 
@@ -21447,37 +22231,29 @@ class ContactAvatarCache {
 
   /**
    * Import avatars from exported data
-   * @param {Object} avatarsData - Object mapping address to { data: base64, type: mimeType }
+   * @param {Object} avatarsData - Object mapping avatar id to { data: base64, type: mimeType }
    * @param {boolean} overwrite - Whether to overwrite existing avatars
    * @returns {Promise<number>} Number of avatars imported
    */
   async importAll(avatarsData, overwrite = false) {
-    if (!this.db) {
-      await this.init();
-    }
-
-    if (!avatarsData || typeof avatarsData !== 'object') {
-      return 0;
-    }
+    if (!this.db) await this.init();
+    if (!avatarsData || typeof avatarsData !== 'object') return 0;
 
     let importedCount = 0;
-
-    for (const [address, avatarInfo] of Object.entries(avatarsData)) {
-      if (!avatarInfo || !avatarInfo.data) continue;
-
+    for (const [id, avatarInfo] of Object.entries(avatarsData)) {
+      if (!avatarInfo) continue;
       try {
-        // Check if avatar already exists
         if (!overwrite) {
-          const existing = await this.get(address);
+          const existing = await this.get(id);
           if (existing) continue;
         }
-
-        // Convert base64 back to blob
-        const blob = this.base64ToBlob(avatarInfo.data, avatarInfo.type || 'image/jpeg');
-        await this.save(address, blob);
-        importedCount++;
+        if (avatarInfo.data) {
+          const blob = this.base64ToBlob(avatarInfo.data, avatarInfo.type || 'image/jpeg');
+          await this.save(id, blob);
+          importedCount++;
+        }
       } catch (e) {
-        console.warn(`Failed to import avatar for ${address}:`, e);
+        console.warn(`Failed to import avatar id ${id}:`, e);
       }
     }
 
@@ -21519,6 +22295,8 @@ class ContactAvatarCache {
   }
 }
 
+const contactAvatarCache = new ContactAvatarCache();
+
 /**
  * ThumbnailCache - Handles IndexedDB storage for image thumbnails
  */
@@ -21540,9 +22318,6 @@ class ThumbnailCache {
       await this.init();
       // Cleanup by size if cache is too large
       const sizeDeletedCount = await this.cleanupBySize();
-      if (sizeDeletedCount > 0) {
-        console.log(`Cleaned up ${sizeDeletedCount} thumbnail(s) by size limit`);
-      }
     } catch (err) {
       console.warn('Failed to load thumbnail cache:', err);
     }
@@ -21563,7 +22338,6 @@ class ThumbnailCache {
 
       request.onsuccess = () => {
         this.db = request.result;
-        console.log('Thumbnail cache initialized');
         resolve();
       };
 
@@ -21631,6 +22405,69 @@ class ThumbnailCache {
       };
 
       img.src = blobUrl;
+    });
+  }
+
+  /**
+   * Extract a thumbnail frame from a video file
+   * @param {Blob|File} videoFile - The video file to extract thumbnail from
+   * @param {number} timeInSeconds - Time in seconds to extract frame from (default: 0.5)
+   * @param {number} maxSize - Maximum dimension in pixels (default: 500)
+   * @param {number} quality - JPEG quality 0-1 (default: 0.9)
+   * @returns {Promise<Blob>} The thumbnail blob as JPEG
+   */
+  async extractVideoThumbnail(videoFile, timeInSeconds = 0.5, maxSize = 500, quality = 0.9) {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+
+      const objectURL = URL.createObjectURL(videoFile);
+      video.src = objectURL;
+
+      video.onloadedmetadata = () => {
+        // Seek to specified time (default 0.5s) but don't go past end
+        const seekTime = Math.min(timeInSeconds, Math.max(0, video.duration - 0.1));
+        video.currentTime = seekTime;
+      };
+
+      video.onseeked = () => {
+        // Calculate thumbnail dimensions maintaining aspect ratio
+        const scale = Math.min(1, maxSize / Math.max(video.videoWidth, video.videoHeight));
+        const thumbWidth = Math.floor(video.videoWidth * scale);
+        const thumbHeight = Math.floor(video.videoHeight * scale);
+
+        // Create canvas for thumbnail
+        const canvas = document.createElement('canvas');
+        canvas.width = thumbWidth;
+        canvas.height = thumbHeight;
+        const ctx = canvas.getContext('2d');
+        
+        // Enable high-quality rendering
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
+        // Draw video frame onto canvas (scaled)
+        ctx.drawImage(video, 0, 0, thumbWidth, thumbHeight);
+
+        // Convert to JPEG blob
+        canvas.toBlob((blob) => {
+          URL.revokeObjectURL(objectURL);
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Failed to create video thumbnail blob'));
+          }
+        }, 'image/jpeg', quality);
+      };
+
+      video.onerror = (error) => {
+        URL.revokeObjectURL(objectURL);
+        reject(new Error('Failed to load video for thumbnail extraction: ' + (error.message || 'Unknown error')));
+      };
+
+      video.load();
     });
   }
 
@@ -21932,8 +22769,6 @@ class ThumbnailCache {
   }
 }
 
-// Create caches instances
-const contactAvatarCache = new ContactAvatarCache();
 const thumbnailCache = new ThumbnailCache();
 
 /**
@@ -21947,23 +22782,77 @@ async function getContactAvatarHtml(contactOrAddress, size = 50) {
     ? normalizeAddress(contactOrAddress)
     : normalizeAddress(contactOrAddress?.address);
 
-  const hasAvatar =
-    typeof contactOrAddress === 'object' && contactOrAddress !== null && 'hasAvatar' in contactOrAddress
-      ? contactOrAddress.hasAvatar
-      : myData?.contacts?.[address]?.hasAvatar;
+  // Helper to return img HTML when blobUrl available
+  const makeImg = (url) => `<img src="${url}" class="contact-avatar-img" width="${size}" height="${size}" alt="avatar">`;
+  
+  const contactObj = typeof contactOrAddress === 'object' && contactOrAddress !== null
+    ? contactOrAddress
+    : myData?.contacts?.[address] || {};
 
-  if (address && hasAvatar) {
+  // If the requested avatar is for the current user, always return the
+  // account avatar if present, otherwise identicon. We do not consult or
+  // persist a `useAvatar` preference for the account anymore.
+  if (address && myAccount?.keys?.address && normalizeAddress(myAccount.keys.address) === address) {
     try {
-      const blobUrl = await contactAvatarCache.getBlobUrl(address);
-      if (blobUrl) {
-        return `<img src="${blobUrl}" class="contact-avatar-img" width="${size}" height="${size}" alt="avatar">`;
+      const aid = myData?.account?.avatarId;
+      if (aid) {
+        const url = await contactAvatarCache.getBlobUrl(aid);
+        if (url) return makeImg(url);
+      }
+    } catch (e) {
+      console.warn('Failed to load account avatar, falling back to identicon:', e);
+    }
+    return generateIdenticon(address, size);
+  }
+
+  // useAvatar preference: 'contact' | 'mine' | 'identicon'
+  const usePref = contactObj.useAvatar || myData?.contacts?.[address]?.useAvatar || null;
+
+  if (address) {
+    try {
+      if (usePref === 'identicon') return generateIdenticon(address, size);
+
+      // Determine available avatar ids from contact or account
+      const contact = typeof contactOrAddress === 'object' && contactOrAddress !== null
+        ? contactOrAddress
+        : myData?.contacts?.[address] || null;
+
+      if (usePref === 'mine') {
+        // Prefer the user's uploaded avatar for this contact; fall back to contact avatar.
+        // Only use the account avatar when the contact is the current user.
+        let id = contact?.mineAvatarId || contact?.avatarId;
+        if (!id && address && myData?.account?.address && normalizeAddress(myData.account.address) === address) {
+          id = myData?.account?.avatarId;
+        }
+        if (id) {
+          const url = await contactAvatarCache.getBlobUrl(id);
+          if (url) return makeImg(url);
+        }
+      } else if (usePref === 'contact') {
+        const id = contact?.avatarId || null;
+        if (id) {
+          const url = await contactAvatarCache.getBlobUrl(id);
+          if (url) return makeImg(url);
+        }
+      } else {
+        // No explicit preference: prefer contact avatar, then user-uploaded avatar.
+        // Do NOT fall back to the account's avatar here — that previously caused
+        // unrelated contacts with no images to show the user's own avatar.
+        let id = contact?.avatarId;
+        if (id) {
+          let url = await contactAvatarCache.getBlobUrl(id);
+          if (url) return makeImg(url);
+        }
+        id = contact?.mineAvatarId;
+        if (id) {
+          let url = await contactAvatarCache.getBlobUrl(id);
+          if (url) return makeImg(url);
+        }
       }
     } catch (err) {
       console.warn('Failed to load avatar, falling back to identicon:', err);
     }
-  }
 
-  if (address) {
     return generateIdenticon(address, size);
   }
 
@@ -22037,7 +22926,6 @@ function getTransactionFeeWei() {
 
 
 function handleBrowserBackButton(event) {
-  console.log('in popstate')
   history.pushState({state:1}, '', '.');
 
   const topModal = findTopModal();
@@ -22063,7 +22951,6 @@ function findTopModal() {
 
 function closeTopModal(topModal){
   const modalId = topModal.id;
-  console.log('trying to close', modalId)
   switch (modalId) {
     case 'chatModal':
       chatModal.close();
@@ -22168,7 +23055,7 @@ function closeTopModal(topModal){
       removeAccountModal.close();
       break;
     default:
-      console.log('Unknown modal:', modalId);
+      console.warn('Unknown modal:', modalId);
       return false;
   }
   return true; // means we closed a modal
