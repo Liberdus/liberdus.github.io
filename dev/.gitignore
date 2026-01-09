@@ -4,3 +4,9 @@ node_modules
 .DS_Store
 out
 
+# Browser automation (Cursor MCP)
+.playwright-mcp/
+playwright-browser-data/
+open-browser.js
+dev-metamask.sh
+
