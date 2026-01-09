@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -21,7 +21,6 @@ async function checkVersion() {
     if (!navigator.onLine || error instanceof TypeError) {
       isOnline = false;
       updateUIForConnectivity();
-      console.log(`DEBUG: about to invoke showToast in checkVersion`);
     }
     newVersion = myVersion; // Allow continuing with the old version
   }
@@ -177,7 +176,6 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
   }
   // First check if we're offline
   if (!isOnline) {
-    console.log('Checking username availability offline');
     // When offline, check local storage only
     const { netid } = network;
     const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
@@ -189,13 +187,11 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
       netidAccounts.usernames[username] &&
       normalizeAddress(netidAccounts.usernames[username].address) === normalizeAddress(address)
     ) {
-      console.log('Username found locally and matches address');
       return 'mine';
     }
 
     // If we have the username but address doesn't match
     if (netidAccounts?.usernames && netidAccounts.usernames[username]) {
-      console.log('Username found locally but address does not match');
       if (foundAddressObject) {
         foundAddressObject.address = netidAccounts.usernames[username].address;
       }
@@ -203,7 +199,6 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
     }
 
     // Username not found locally
-    console.log('Username not found locally');
     return 'available';
   }
 
@@ -235,7 +230,7 @@ async function checkUsernameAvailability(username, address, foundAddressObject) 
     logsModal.log(`Checked username returned available: ${username}, response: ${JSON.stringify(data)}`);
     return 'available';
   } catch (error) {
-    console.log('Error checking username:', error);
+    console.error('Error checking username:', error);
     return 'error2';
   }
 }
@@ -502,8 +497,6 @@ function handleBeforeUnload(e) {
 
 // This is for installed apps where we can't stop the back button; just save the state
 function handleVisibilityChange() {
-  console.log('in handleVisibilityChange', document.visibilityState);
-
   if (document.visibilityState === 'hidden') {
     reactNativeApp.handleNativeAppSubscribe();
     if (reactNativeApp.isReactNativeWebView) {
@@ -551,16 +544,13 @@ async function encryptAllAccounts(oldPassword, newPassword) {
   const accountsObj = parse(localStorage.getItem('accounts') || 'null');
   if (!accountsObj?.netids) return;
 
-  console.log('looping through all netids')
   for (const netid in accountsObj.netids) {
     const usernamesObj = accountsObj.netids[netid]?.usernames;
     if (!usernamesObj) continue;
-    console.log('looping through all accounts for '+netid)
     for (const username in usernamesObj) {
       const key = `${username}_${netid}`;
       let data = localStorage.getItem(key);
       if (!data) continue;
-      console.log('about to reencrypt '+key)
 
       // If oldEncKey is set, decrypt; otherwise, treat as plaintext
       if (oldEncKey) {
@@ -591,9 +581,7 @@ async function encryptAllAccounts(oldPassword, newPassword) {
 }
 
 function saveState() {
-  console.log('in saveState');
   if (myData && myAccount && myAccount.username && myAccount.netid) {
-    console.log('saving state');
     let data = stringify(myData)
     if (localStorage.lock && lockModal.encKey){  // Consider what happens if localStorage.lock was manually deleted
       data = encryptData(data, lockModal.encKey, true)
@@ -610,6 +598,23 @@ function loadState(account, noparse=false){
   }
   if (noparse) return data;
   return parse(data);
+}
+
+function checkFirstTimeTip(tipName) {
+  if (!myData?.account) return false;
+  if (typeof tipName !== 'string' || !tipName) return false;
+  const existing = myData.account.firstTimeTips;
+  if (!existing || typeof existing !== 'object') return false;
+  return existing[tipName] === true;
+}
+
+function setFirstTimeTipShown(tipName) {
+  if (!myData?.account) return;
+  if (typeof tipName !== 'string' || !tipName) return;
+  const existing = myData.account.firstTimeTips;
+  myData.account.firstTimeTips = existing && typeof existing === 'object' ? existing : {};
+  myData.account.firstTimeTips[tipName] = true;
+  saveState();
 }
 
 class WelcomeScreen {
@@ -975,8 +980,7 @@ class Footer {
   
       // Restore previous view if there was an error
       if (previousView && previousButton) {
-        console.log(`Restoring previous view: ${previousView}`);
-  
+
         // Hide all screens with direct references
         chatsScreen.close();
         contactsScreen.close();
@@ -1092,8 +1096,6 @@ class ChatsScreen {
     }
 
     if (emptyStateEl) emptyStateEl.style.display = 'none';
-
-    console.log('chats.length', JSON.stringify(chats.length));
 
     const chatItems = [];
     for (const chat of chats) {
@@ -1499,7 +1501,6 @@ class WalletScreen {
 
     this.assetsList.innerHTML = walletData.assets
       .map((asset) => {
-        console.log('asset balance', asset, asset.balance);
         return `
               <div class="asset-item">
                   <div class="asset-logo"><img src="./media/liberdus_logo_50.png" class="asset-logo"></div>
@@ -1548,7 +1549,6 @@ class WalletScreen {
             console.error(`Error fetching balance for address ${addr.address}:`, data);
             continue;
           }
-          console.log('balance', data);
           if (data?.balance !== undefined) {
             // Update address balance
             addr.balance = data.balance;
@@ -2130,7 +2130,6 @@ class ScanQRModal {
 
         // If QR code found and decoded
         if (decodedText) {
-          console.log('QR Code detected:', decodedText);
           this.handleSuccessfulScan(decodedText);
         }
       } catch (error) {
@@ -2142,7 +2141,6 @@ class ScanQRModal {
 
   handleSuccessfulScan(data) {
     this.close();
-    console.log('Raw QR Data Scanned');
     if (this.fillFunction) this.fillFunction(data); // Call the assigned fill function (e.g., fillPaymentFromQR or fillStakeAddressFromQR)
   }
 }
@@ -2270,6 +2268,7 @@ class SignInModal {
     this.removeButton.style.display = 'none';
     this.notFoundMessage.textContent = 'network error';
     this.notFoundMessage.style.display = 'inline';
+    showToast('The gateway server is down, please try again later.', 5000, 'warning');
   }
 
   // When auto-selecting after account creation, the network may not have propagated
@@ -2503,7 +2502,7 @@ class SignInModal {
 
     myData = loadState(`${username}_${netid}`)
     if (!myData) {
-      console.log('Account data not found');
+      console.warn('Account data not found');
       return;
     }
     myAccount = myData.account;
@@ -2561,7 +2560,6 @@ class SignInModal {
   }
 
   async handleUsernameChange() {
-    console.log('in handleUsernameChange');
     // Get existing accounts
     const { netid } = network;
     const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
@@ -3143,7 +3141,6 @@ class FriendModal {
     const fromAddr = longAddress(myAccount.keys.address);
     const toAddr = longAddress(address);
     const chatId_ = hashBytes([fromAddr, toAddr].sort().join(''));
-    console.log('DEBUG 1:chatId_', chatId_);
 
     const tx = {
       from: fromAddr,
@@ -3653,8 +3650,7 @@ class HistoryModal {
     }
     
     if (item.dataset.status === 'failed') {
-      console.log(`Not opening chatModal for failed transaction`);
-      
+
       if (event.target.closest('.transaction-item')) {
         failedTransactionModal.open(item.dataset.txid, item);
       }
@@ -4159,8 +4155,6 @@ async function updateAssetPricesIfNeeded() {
       if (data.pairs && data.pairs.length > 0 && data.pairs[0].priceUsd) {
         asset.price = parseFloat(data.pairs[0].priceUsd);
         myData.wallet.priceTimestamp = now;
-        console.log(`Updated price of ${asset.symbol} to ${asset.price}`);
-        console.log(JSON.stringify(data, null, 4));
       } else {
         console.warn(`No price data found for ${asset.symbol} from API`);
       }
@@ -4184,19 +4178,16 @@ async function queryNetwork(url, abortSignal = null) {
   }
 
   try {
-    const now = new Date().toLocaleTimeString();
-    console.log(`${now} query`, `${selectedGateway.web}${url}`);
     if (network.name != 'Testnet'){
 //      showToast(`${now} query ${selectedGateway.web}${url}`, 0, 'info')
     }
     const response = await fetch(`${selectedGateway.web}${url}`, { signal: abortSignal });
     const data = parse(await response.text());
-    console.log('response', data);
     return data;
   } catch (error) {
     // Check if error is due to abort
     if (error.name === 'AbortError') {
-      console.log('queryNetwork aborted:', url);
+      console.error('queryNetwork aborted:', url);
       return null;
     }
     // log local hh:mm:ss
@@ -4211,10 +4202,9 @@ async function queryNetwork(url, abortSignal = null) {
 
 async function getChats(keys, retry = 1) {
   // needs to return the number of chats that need to be processed
-  console.log(`getChats retry ${retry}`);
   //console.log('keys', keys)
   if (!keys) {
-    console.log('no keys in getChats');
+    console.warn('no keys in getChats');
     return 0;
   } // TODO don't require passing in keys
   const now = getCorrectedTimestamp();
@@ -4236,12 +4226,6 @@ async function getChats(keys, retry = 1) {
   const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/${timestamp}`); // TODO get this working
   //    const senders = await queryNetwork(`/account/${longAddress(keys.address)}/chats/0`) // TODO stop using this
   let chatCount = senders?.chats ? Object.keys(senders.chats).length : 0; // Handle null/undefined senders.chats
-  console.log(
-    'getChats senders',
-    timestamp === undefined ? 'undefined' : JSON.stringify(timestamp),
-    chatCount === undefined ? 'undefined' : JSON.stringify(chatCount),
-    senders === undefined ? 'undefined' : JSON.stringify(senders)
-  );
   if (senders && senders.chats && chatCount) {
     await processChats(senders.chats, keys);
   } else {
@@ -4324,7 +4308,6 @@ async function processChats(chats, keys) {
   for (let sender in chats) {
     // Fetch messages using the adjusted timestamp
     const res = await queryNetwork(`/messages/${chats[sender]}/${messageQueryTimestamp}`);
-    console.log('processChats sender', sender, 'fetching since', messageQueryTimestamp);
     if (res && res.messages) {
       const from = normalizeAddress(sender);
       if (!myData.contacts[from]) {
@@ -4356,7 +4339,6 @@ async function processChats(chats, keys) {
 
         newTimestamp = tx.timestamp > newTimestamp ? tx.timestamp : newTimestamp;
         mine = tx.from == longAddress(keys.address) ? true : false;
-        if (mine) console.warn('txid in processChats is', txidHex)
         // timestamp-skew check for incoming messages/transfers (ensures we don't use out of range sent_timestamp)
         if (!mine && (tx.type === 'message' || tx.type === 'transfer')) {
           const sentTs = Number(((tx.type === 'message' ? tx.xmessage : tx.xmemo) || {}).sent_timestamp || 0);
@@ -4373,12 +4355,12 @@ async function processChats(chats, keys) {
             payload.sent_timestamp = tx.timestamp;
           }
           if (mine){
-            console.warn('my message tx', tx)
+            // console.warn('my message tx', tx)
           }
           else if (payload.encrypted) {
             await ensureContactKeys(from);
             if (!myData.contacts[from]?.public) {
-              console.log(`no public key found for sender ${sender}`);
+              console.warn(`no public key found for sender ${sender}`);
               continue;
             }
             payload.public = myData.contacts[from].public;
@@ -4420,8 +4402,6 @@ async function processChats(chats, keys) {
                     
                     if (!messageToDelete.my && originalSender === from) {
                       // This is a message received from sender, who is now deleting it - valid
-                      console.log(`Deleting message ${txidToDelete} as requested by sender`);
-                      
                       // Purge cached thumbnails for image attachments, if any
                       chatModal.purgeThumbnail(messageToDelete.xattach);
 
@@ -4451,8 +4431,6 @@ async function processChats(chats, keys) {
                       }
                     } else if (messageToDelete.my && normalizeAddress(keys.address) === normalizeAddress(tx.from)) {
                       // This is our own message, and we're deleting it - valid
-                      console.log(`Deleting our message ${txidToDelete} as requested by us`);
-                      
                       // Purge cached thumbnails for image attachments, if any
                       chatModal.purgeThumbnail(messageToDelete.xattach);
 
@@ -4596,7 +4574,7 @@ async function processChats(chats, keys) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo)
             delete payload.senderInfo;
             if (contact.senderInfo.avatarId && contact.senderInfo.avatarKey && contact.avatarId !== contact.senderInfo.avatarId) {
-              downloadAndDecryptAvatar(`https://inv.liberdus.com:2083/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
+              downloadAndDecryptAvatar(`${network.attachmentServerUrl}/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
                 .then(async (blob) => {
                   try {
                     // Save blob under the server-provided avatar id
@@ -4713,12 +4691,12 @@ async function processChats(chats, keys) {
           }
           if (mine) {
             const txx = parse(stringify(tx))
-            console.warn('my transfer tx', txx)
+            // console.warn('my transfer tx', txx)
           }
           else if (payload.encrypted) {
             await ensureContactKeys(from);
             if (!myData.contacts[from]?.public) {
-              console.log(`no public key found for sender ${sender}`);
+              console.warn(`no public key found for sender ${sender}`);
               continue;
             }
             payload.public = myData.contacts[from].public;
@@ -4744,7 +4722,7 @@ async function processChats(chats, keys) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
             if (contact.senderInfo.avatarId && contact.senderInfo.avatarKey && contact.avatarId !== contact.senderInfo.avatarId) {
-              downloadAndDecryptAvatar(`https://inv.liberdus.com:2083/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
+              downloadAndDecryptAvatar(`${network.attachmentServerUrl}/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
                 .then(async (blob) => {
                   try {
                     await contactAvatarCache.save(contact.senderInfo.avatarId, blob);
@@ -4931,7 +4909,6 @@ async function processChats(chats, keys) {
   if (newTimestamp > 0) {
     // Update the timestamp
     myAccount.chatTimestamp = newTimestamp;
-    console.log('Updated global chat timestamp to', newTimestamp);
   }
 }
 
@@ -4994,7 +4971,7 @@ async function getUsernameAddress(username) {
     }
     return data.address;
   } catch (error) {
-    console.log('Error checking username:', error);
+    console.error('Error checking username:', error);
     return null;
   }
 }
@@ -5118,7 +5095,6 @@ async function injectTx(tx, txid) {
       `${selectedGateway.web}/inject`,
       options
     );
-    console.log('DEBUG: injectTx response', response);
     const data = await response.json();
     data.txid = txid;
 
@@ -5204,7 +5180,6 @@ function getTxid(tx){
   if (typeof(tx) !== "string"){
     txo = stringify(tx)
   }
-console.warn('tx is', txo)
   txo = parse(txo)
   delete txo.sign;
   const jstr = stringify(txo);
@@ -6230,7 +6205,7 @@ class AvatarEditModal {
     try {
       const idParam = encodeURIComponent(secret ? `${id}-${secret}` : id);
       try {
-        const delRes = await fetch(`https://inv.liberdus.com:2083/delete/${idParam}`, { method: 'DELETE' });
+        const delRes = await fetch(`${network.attachmentServerUrl}/delete/${idParam}`, { method: 'DELETE' });
         if (!delRes.ok) {
           if (delRes.status === 404) {
             // Missing resource on server -> treat as already-deleted (success)
@@ -6592,7 +6567,7 @@ class AvatarEditModal {
           const formData = new FormData();
           formData.append('file', encryptedBlob);
           formData.append('secret', secret);
-          const response = await fetch('https://inv.liberdus.com:2083/post', {
+          const response = await fetch(`${network.attachmentServerUrl}/post`, {
             method: 'POST',
             body: formData
           });
@@ -6805,7 +6780,6 @@ async function handleConnectivityChange() {
   if (isOnline) {
     await getNetworkParams();
     if (!isOnline) return;
-    console.log('Just came back online.');
     // We just came back online
     updateUIForConnectivity();
     showToast("You're back online!", 3000, 'online');
@@ -7714,7 +7688,6 @@ class BackupAccountModal {
       const tokenData = JSON.parse(raw);
       if (!tokenData.accessToken || !tokenData.expiresAt) return null;
       if (Date.now() >= tokenData.expiresAt) {
-        console.log('Google Drive token expired, clearing.');
         localStorage.removeItem(this.GOOGLE_TOKEN_STORAGE_KEY);
         return null;
       }
@@ -7755,9 +7728,7 @@ class BackupAccountModal {
     const sessionId = generateUUIDv4();
     const url = this.buildOAuthServerUrl(sessionId);
     const isReactNative = reactNativeApp.isReactNativeWebView;
-    
-    console.log('Opening Google OAuth via OAuth server...', { sessionId, isReactNative });
-    
+
     let popup = null;
     let waitingToastId = null;
     let currentAbortController = null;
@@ -7765,7 +7736,6 @@ class BackupAccountModal {
     // In React Native, send message to native app to open in-app browser
     if (isReactNative) {
       if (window.ReactNativeWebView?.postMessage) {
-        console.log('Sending GOOGLE_OAUTH_REQUEST to native app');
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'GOOGLE_OAUTH_REQUEST',
           url: url,
@@ -7844,7 +7814,6 @@ class BackupAccountModal {
     // Single poll request with AbortController and attempt logging.
     const fetchPollResponse = async (attempt) => {
       currentAbortController = new AbortController();
-      console.log('Polling OAuth server for token...', { attempt, sessionId });
       const response = await fetch(
         `${config.oauthServerUrl}/auth/poll?sessionId=${sessionId}`,
         { signal: currentAbortController.signal }
@@ -7928,7 +7897,7 @@ class BackupAccountModal {
                   ? 'Authentication was cancelled or denied. Please try again if you want to connect Google Drive.'
                   : `Authentication failed: ${errorMessage}`;
                 
-                console.log('OAuth error received from server:', errorMessage);
+                console.error('OAuth error received from server:', errorMessage);
                 cleanup();
                 throw new Error(userFriendlyMessage);
               }
@@ -7942,17 +7911,16 @@ class BackupAccountModal {
               };
               
               //this.storeGoogleToken(tokenData);
-              console.log('Received access token from OAuth server.');
               cleanup();
               return tokenData;
             }
           } else if (response.status === 408) {
             // Timeout from server, retry
-            console.log('Poll timeout, retrying...', { attempt });
+            console.warn('Poll timeout, retrying...', { attempt });
             continue;
           } else if (response.status === 404) {
             // Session not found, retry
-            console.log('Session not found, retrying...', { attempt });
+            console.warn('Session not found, retrying...', { attempt });
             continue;
           } else {
             const errorData = await response.json().catch(() => ({}));
@@ -7975,7 +7943,7 @@ class BackupAccountModal {
           if (fetchError?.name === 'AbortError') {
             continue;
           }
-          console.log('Poll fetch error, retrying...', fetchError.message);
+          console.error('Poll fetch error, retrying...', fetchError.message);
         }
       }
 
@@ -8020,7 +7988,6 @@ class BackupAccountModal {
       expiresAt
     };
     //this.storeGoogleToken(tokenData);
-    console.log('Received access token from Google (legacy redirect).');
 
     // Clean the URL
     window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
@@ -8031,7 +7998,6 @@ class BackupAccountModal {
   // ======================================
   async ensureBackupFolder(tokenData) {
     const folderName = network.googleDrive.backupFolder;
-    console.log(`Checking for existing '${folderName}' folder...`);
 
     const queryParams = new URLSearchParams({
       q: `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'root' in parents`,
@@ -8054,11 +8020,8 @@ class BackupAccountModal {
 
     const listData = await listRes.json();
     if (listData.files && listData.files.length > 0) {
-      console.log(`Found existing ${folderName} folder.`, listData.files[0]);
       return listData.files[0].id;
     }
-
-    console.log(`No existing ${folderName} folder, creating one...`);
 
     const folderMetadata = {
       name: folderName,
@@ -8084,7 +8047,6 @@ class BackupAccountModal {
     }
 
     const folderData = await createRes.json();
-    console.log(`Created ${folderName} folder.`, folderData);
     return folderData.id;
   }
 
@@ -8092,11 +8054,8 @@ class BackupAccountModal {
   // GOOGLE DRIVE UPLOAD
   // ======================================
   async uploadToGoogleDrive(data, filename, tokenData) {
-    console.log('Preparing upload to Google Drive...', { filename, sizeBytes: data.length });
-
     // Ensure backup folder exists and get its ID
     const folderId = await this.ensureBackupFolder(tokenData);
-    console.log('Using backup folder', { folderId });
 
     // Set metadata to put file in that folder
     const metadata = {
@@ -8129,7 +8088,6 @@ class BackupAccountModal {
     }
 
     const result = await res.json();
-    console.log('Upload success.', result);
     return result;
   }
 
@@ -8864,7 +8822,6 @@ class RestoreAccountModal {
         this.newStringSelect.add(newOption);
       });
       
-      if (netids.size > 0) console.log(`Found ${netids.size} netids from file`);
     } catch (error) {
       this.resetBackupLockPrompt();
     }
@@ -9109,7 +9066,6 @@ class RestoreAccountModal {
       const substitution = this.getStringSubstitution();
       if (substitution) {
         fileContent = this.performStringSubstitution(fileContent, substitution);
-        console.log(`Applied substitution: ${substitution.oldString} → ${substitution.newString}`);
       }
 
       // We first parse to jsonData so that if the parse does not work we don't destroy myData
@@ -10772,7 +10728,6 @@ class StakeValidatorModal {
       this.backButton.disabled = true;
 
       const response = await this.postStake(nodeAddress, amount_in_wei, myAccount.keys);
-      console.log('Stake Response:', response);
 
       if (response && response.result && response.result.success) {
         myData.wallet.history.unshift({
@@ -10944,8 +10899,6 @@ class StakeValidatorModal {
    * @returns {void}
    * */
   async fillFromQR(data) {
-    console.log('Filling stake address from QR data:', data);
-
     // Directly set the value of the stakeNodeAddress input field
     if (this.nodeAddressInput) {
       this.nodeAddressInput.value = data;
@@ -11233,7 +11186,6 @@ class ChatModal {
       // If viewport height decreased significantly, keyboard is likely open
       if (heightDifference > 150) { // 150px threshold for keyboard detection
         this.isKeyboardVisible = true;
-        console.log('⌨️ Keyboard detected as open (viewport height decreased by', heightDifference, 'px)');
         this.lockBackgroundScroll();
       } else if (heightDifference < 50) { // If height increased or stayed similar, keyboard is likely closed
         this.isKeyboardVisible = false;
@@ -11711,7 +11663,6 @@ class ChatModal {
     this.unlockBackgroundScroll();
     if (isOnline) {
       const needsToSendReadTx = this.needsToSend();
-      console.log(`[close] needsToSendReadTx: ${needsToSendReadTx}`);
       // if newestRecevied message does not have an amount property and user has not responded, then send a read transaction
       if (needsToSendReadTx) {
         this.sendReadTransaction(this.address);
@@ -11830,22 +11781,21 @@ class ChatModal {
    * @returns {Promise<void>}
    */
   async sendReclaimTollTransaction(contactAddress) {
-    console.log(`[sendReclaimTollTransaction] entering function`);
     await getNetworkParams();
     const currentTime = getCorrectedTimestamp();
     const networkTollTimeoutInMs = parameters.current.tollTimeout; 
     const timeSinceNewestSentMessage = currentTime - this.newestSentMessage?.timestamp;
     if (!this.newestSentMessage || timeSinceNewestSentMessage < networkTollTimeoutInMs) {
-      console.log(
-        `[sendReclaimTollTransaction] timeSinceNewestSentMessage ${timeSinceNewestSentMessage}ms is less than networkTollTimeoutInMs ${networkTollTimeoutInMs}ms, skipping reclaim toll transaction`
-      );
+      // console.log(
+      //   `[sendReclaimTollTransaction] timeSinceNewestSentMessage ${timeSinceNewestSentMessage}ms is less than networkTollTimeoutInMs ${networkTollTimeoutInMs}ms, skipping reclaim toll transaction`
+      // );
       return;
     }
     const canReclaimToll = await this.canSenderReclaimToll(contactAddress);
     if (!canReclaimToll) {
-      console.log(
-        `[sendReclaimTollTransaction] does not have a value not 0 in payOnReplay or payOnRead, skipping reclaim toll transaction`
-      );
+      // console.log(
+      //   `[sendReclaimTollTransaction] does not have a value not 0 in payOnReplay or payOnRead, skipping reclaim toll transaction`
+      // );
       return;
     }
 
@@ -11861,8 +11811,6 @@ class ChatModal {
     const response = await injectTx(tx, txid);
     if (!response || !response.result || !response.result.success) {
       console.warn('reclaim toll transaction failed to send', response);
-    } else {
-      console.log('reclaim toll transaction sent successfully');
     }
   }
 
@@ -11898,10 +11846,8 @@ class ChatModal {
    * @returns {void}
    */
   async sendReadTransaction(contactAddress) {
-    console.log(`[sendReadTransaction] entering function`);
     const contact = myData.contacts[contactAddress];
 
-    console.log(`[sendReadTransaction] injecting read transaction`);
     const readTransaction = await this.createReadTransaction(contactAddress);
     const txid = await signObj(readTransaction, myAccount.keys);
     showToast(`Sending read transaction`, 3000, 'info');
@@ -12007,7 +11953,7 @@ class ChatModal {
       let recipientPubKey = myData.contacts[currentAddress]?.public;
       let pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
       if (!keysOk || !recipientPubKey || !pqRecPubKey) {
-        console.log(`no public/PQ key found for recipient ${currentAddress}`);
+        console.warn(`no public/PQ key found for recipient ${currentAddress}`);
         return;
       }
 
@@ -12122,7 +12068,6 @@ class ChatModal {
       const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
       await signObj(chatMessageObj, keys);
       const txid = getTxid(chatMessageObj)
-console.warn('in send message', txid)
 
       // if there a hidden txid input, get the value to be used to delete that txid from relevant data stores
       const retryTxId = this.retryOfTxId.value;
@@ -12239,7 +12184,7 @@ console.warn('in send message', txid)
       const response = await injectTx(chatMessageObj, txid);
 
       if (!response || !response.result || !response.result.success) {
-        console.log('message failed to send', response);
+        console.error('message failed to send', response);
         const str = response.result.reason;
         const regex = /toll/i;
   
@@ -12414,14 +12359,13 @@ console.warn('in send message', txid)
    */
   appendChatModal(highlightNewMessage = false, skipAutoScroll = false) {
     const currentAddress = this.address; // Use a local constant
-    console.log('appendChatModal running for address:', currentAddress, 'Highlight:', highlightNewMessage);
     if (!currentAddress) {
       return;
     }
 
     const contact = myData.contacts[currentAddress];
     if (!contact || !contact.messages) {
-      console.log('No contact or messages found for address:', this.address);
+      console.warn('No contact or messages found for address:', this.address);
       return;
     }
     const messages = contact.messages; // Already sorted descending
@@ -12434,7 +12378,6 @@ console.warn('in send message', txid)
     // --- 1. Identify the actual newest received message data item ---
     // Since messages are sorted descending (newest first), the first item with my: false is the newest received.
     const newestReceivedItem = messages.find((item) => !item.my);
-    console.log('appendChatModal: Identified newestReceivedItem data:', newestReceivedItem);
     this.newestReceivedMessage = newestReceivedItem;
     this.newestSentMessage = messages.find((item) => item.my);
 
@@ -12544,6 +12487,7 @@ console.warn('in send message', txid)
               return `
                 <div class="attachment-row" style="display: flex; ${hasThumbnail ? 'flex-direction: column;' : 'align-items: center;'} background: #f5f5f7; border-radius: 12px; ${paddingStyle} margin-bottom: 6px;"
                   data-url="${fileUrl}"
+                  data-p-url="${att.pUrl || ''}"
                   data-name="${encodeURIComponent(fileName)}"
                   data-type="${att.type || ''}"
                   data-msg-idx="${i}"
@@ -12726,7 +12670,6 @@ console.warn('in send message', txid)
 
     // 1. Refresh History Modal if active
     if (historyModal.isActive()) {
-      console.log('DEBUG: Refreshing transaction history modal due to transaction failure.');
       historyModal.refresh();
     }
     // 2. Refresh Chat Modal if active AND the failed txid's message is currently rendered
@@ -12736,18 +12679,11 @@ console.warn('in send message', txid)
 
       if (messageElement) {
         // If the element exists, the failed message is visible in the open chat. Refresh the modal.
-        console.log(`DEBUG: Refreshing active chat modal because failed txid ${txid} was found in the view.`);
         this.appendChatModal(); // This will redraw the messages based on the updated data (where the failed tx is removed)
-      } else {
-        // The failed txid doesn't correspond to a visible message in the *currently open* chat modal. No UI refresh needed for the modal itself.
-        console.log(
-          `DEBUG: Skipping chat modal refresh. Failed txid ${txid} not found in the active modal's message list.`
-        );
       }
     }
     // 3. Refresh Chat List if active
     if (chatsScreen.isActive()) {
-      console.log('DEBUG: Refreshing chat list view due to transaction failure.');
       chatsScreen.updateChatList();
     }
     // No other active view to refresh in this context
@@ -12994,32 +12930,34 @@ console.warn('in send message', txid)
           const bytes = new Uint8Array(e.data.cipherBin);
           const blob = new Blob([bytes], { type: 'application/octet-stream' });
 
-          const form = new FormData();
-          form.append('file', blob, file.name);
-
-          // TODO: move to network.js
-          const uploadUrl = 'https://inv.liberdus.com:2083';
-
           try {
-            const response = await fetch(`${uploadUrl}/post`, {
-              method: 'POST',
-              body: form,
-              signal: this.abortController.signal
-            });
-            if (!response.ok) throw new Error(`upload failed ${response.status}`);
-
-            const { id } = await response.json();
-            if (!id) throw new Error('No file ID returned from upload');
-
-            const attachmentUrl = `${uploadUrl}/get/${id}`;
+            // Upload main file
+            const attachmentUrl = await this.uploadEncryptedFile(blob, file.name);
+            
+            // NEW: Encrypt and upload thumbnail ONLY if main file upload succeeded
+            let previewUrl = null;
+            if (capturedThumbnailBlob) {
+              try {
+                // Encrypt thumbnail using same dhkey as main file
+                const encryptedThumbnailBlob = await encryptBlob(capturedThumbnailBlob, dhkey);
+                // Upload encrypted thumbnail
+                previewUrl = await this.uploadEncryptedFile(encryptedThumbnailBlob, file.name);
+              } catch (error) {
+                console.warn('Failed to upload thumbnail:', error);
+                // If thumbnail upload fails, delete the successfully uploaded main file
+                this.deleteAttachmentsFromServer(attachmentUrl);
+                throw error;  // Re-throw to trigger cleanup
+              }
+            }
             
             this.fileAttachments.push({
               url: attachmentUrl,
+              pUrl: previewUrl,  // NEW FIELD (undefined if upload failed)
               name: file.name,
               size: file.size,
               type: normalizedType,
-              pqEncSharedKey: bin2base64(pqEncSharedKey),
-              selfKey
+              pqEncSharedKey: bin2base64(pqEncSharedKey),  // Same key for main file AND thumbnail
+              selfKey  // Same key for main file AND thumbnail
             });
             
             // Cache thumbnail if we generated one - use captured variable
@@ -13101,6 +13039,37 @@ console.warn('in send message', txid)
   }
 
   /**
+   * Upload encrypted file to attachment server
+   * @param {Blob} encryptedBlob - The encrypted blob to upload
+   * @param {string} fileName - File name for the upload
+   * @returns {Promise<string>} File URL
+   */
+  async uploadEncryptedFile(encryptedBlob, fileName) {
+    const form = new FormData();
+    form.append('file', encryptedBlob, fileName);
+
+    const uploadUrl = network.attachmentServerUrl;
+    const response = await fetch(`${uploadUrl}/post`, {
+      method: 'POST',
+      body: form,
+      signal: this.abortController.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`upload failed ${response.status}`);
+    }
+
+    const { id } = await response.json();
+    if (!id) {
+      throw new Error('No file ID returned from upload');
+    }
+
+    // Construct and return file URL
+    const fileUrl = `${uploadUrl}/get/${id}`;
+    return fileUrl;
+  }
+
+  /**
    * Shows a preview of the attached file just above the textarea
    * @returns {void}
    */
@@ -13162,7 +13131,7 @@ console.warn('in send message', txid)
   deleteAttachmentsFromServer(urlsOrAttachments) {
     if (!urlsOrAttachments) return;
     
-    const uploadUrl = 'https://inv.liberdus.com:2083';
+    const uploadUrl = network.attachmentServerUrl;
     const urls = Array.isArray(urlsOrAttachments) 
       ? urlsOrAttachments.map(att => att?.url).filter(Boolean)
       : [urlsOrAttachments];
@@ -13170,7 +13139,7 @@ console.warn('in send message', txid)
     urls.forEach(url => {
       if (typeof url !== 'string') return;
       
-      // Extract ID from URL format: https://inv.liberdus.com:2083/get/{id}
+      // Extract ID from URL format: {attachmentServerUrl}/get/{id}
       const urlMatch = url.match(/\/get\/([^\/]+)$/);
       if (urlMatch && urlMatch[1]) {
         const fileId = urlMatch[1];
@@ -13325,6 +13294,7 @@ console.warn('in send message', txid)
 
   /**
    * Load thumbnails for image and video attachments asynchronously
+   * Only loads from local IndexedDB cache - pUrl downloads happen on user action (Preview)
    * @returns {void}
    */
   async loadThumbnailsForAttachments() {
@@ -13402,9 +13372,10 @@ console.warn('in send message', txid)
    * Shared by download (Save) and Preview thumbnail generation.
    * @param {Object} item - message object from myData.contacts[address].messages[idx]
    * @param {HTMLElement} linkEl - element with data-* fields (attachment row or voice message element)
+   * @param {string} [urlOverride] - optional URL to fetch instead of linkEl.dataset.url (used for pUrl thumbnails)
    * @returns {Promise<Blob>}
    */
-  async decryptAttachmentToBlob(item, linkEl) {
+  async decryptAttachmentToBlob(item, linkEl, urlOverride = null) {
     if (!item || !linkEl) throw new Error('Missing item or attachment element');
 
     // 1) Derive dhkey
@@ -13413,8 +13384,10 @@ console.warn('in send message', txid)
     let selfKey;
     let pqEncSharedKey;
 
-    const url = linkEl.dataset.url;
-    if (!url || url === '#') throw new Error('Missing attachment url');
+    // Use urlOverride if provided, otherwise use the main attachment URL
+    const mainUrl = linkEl.dataset.url;
+    const fetchUrl = urlOverride || mainUrl;
+    if (!mainUrl || mainUrl === '#') throw new Error('Missing attachment url');
 
     const isVoice = item.type === 'vm';
     if (isVoice) {
@@ -13422,8 +13395,8 @@ console.warn('in send message', txid)
       selfKey = item.audioSelfKey || item.selfKey;
       pqEncSharedKey = item.audioPqEncSharedKey || item.pqEncSharedKey;
     } else {
-      // Attachment: look up attachment entry by url
-      const att = Array.isArray(item.xattach) ? item.xattach.find((a) => a?.url === url) : null;
+      // Attachment: look up attachment entry by main url (keys are stored there)
+      const att = Array.isArray(item.xattach) ? item.xattach.find((a) => a?.url === mainUrl) : null;
       selfKey = att?.selfKey;
       pqEncSharedKey = att?.pqEncSharedKey;
     }
@@ -13448,8 +13421,8 @@ console.warn('in send message', txid)
       ).dhkey;
     }
 
-    // 2) Download encrypted bytes
-    const res = await fetch(url, { signal: this.abortController.signal });
+    // 2) Download encrypted bytes (use fetchUrl which may be pUrl or main url)
+    const res = await fetch(fetchUrl, { signal: this.abortController.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const cipherBin = new Uint8Array(await res.arrayBuffer());
 
@@ -13459,8 +13432,9 @@ console.warn('in send message', txid)
     if (!plainB64) throw new Error('decryptChacha returned null');
     const clearBin = base642bin(plainB64);
 
-    // 4) Blob
-    return new Blob([clearBin], { type: linkEl.dataset.type || 'application/octet-stream' });
+    // 4) Blob - use image/jpeg for thumbnails (urlOverride), otherwise use original type
+    const blobType = urlOverride ? 'image/jpeg' : (linkEl.dataset.type || 'application/octet-stream');
+    return new Blob([clearBin], { type: blobType });
   }
 
   /**
@@ -13546,12 +13520,6 @@ console.warn('in send message', txid)
             // Open in new tab and download
             const newTab = window.open(blobUrl, '_blank');
             this.triggerFileDownload(blobUrl, filename);
-            
-            if (newTab) {
-              console.log('opened in new tab');
-            } else {
-              console.log('failed to open in new tab');
-            }
           } else {
             // Non-viewable files: download only
             this.triggerFileDownload(blobUrl, filename);
@@ -13644,7 +13612,7 @@ console.warn('in send message', txid)
 
     // Check if keyboard is open - if so, don't show context menu
     if (this.isKeyboardOpen()) {
-      console.log('⌨️ Keyboard is open, preventing context menu');
+      console.warn('⌨️ Keyboard is open, preventing context menu');
       return;
     }
 
@@ -14431,8 +14399,8 @@ console.warn('in send message', txid)
   }
 
   /**
-   * Preview a media attachment (image or video): decrypt + generate/extract thumbnail + cache thumbnail in IndexedDB.
-   * Does NOT trigger download.
+   * Preview a media attachment (image or video): download + decrypt thumbnail from pUrl + cache in IndexedDB.
+   * Does NOT trigger full file download - uses the pre-generated thumbnail from server.
    * @param {HTMLElement} attachmentRow
    */
   async previewMediaAttachment(attachmentRow) {
@@ -14440,29 +14408,26 @@ console.warn('in send message', txid)
     try {
       const { item, url } = this.getAttachmentContextFromRow(attachmentRow);
       if (!item || !url || url === '#') return;
-
-      loadingToastId = showToast(`Decrypting attachment...`, 0, 'loading');
-
-      const blob = await this.decryptAttachmentToBlob(item, attachmentRow);
-      const isImage = blob.type.startsWith('image/');
-      const isVideo = blob.type.startsWith('video/');
-
-      if (!isImage && !isVideo) {
-        hideToast(loadingToastId);
-        return showToast('Not a supported media attachment', 2000, 'info');
-      }
-
-      // Generate thumbnail based on media type
-      const thumbnail = isImage
-        ? await thumbnailCache.generateThumbnail(blob)
-        : await thumbnailCache.extractVideoThumbnail(blob);
       
-      await thumbnailCache.save(url, thumbnail, blob.type);
-      this.updateThumbnailInPlace(attachmentRow, thumbnail);
-
+      // Get pUrl from data attributes
+      const pUrl = attachmentRow.dataset.pUrl;
+      if (!pUrl) {
+        showToast('Preview not available for this attachment', 2000, 'info');
+        return;
+      }
+      
+      loadingToastId = showToast(`Loading preview...`, 0, 'loading');
+      
+      // Decrypt thumbnail using pUrl (reuses same key derivation as main file)
+      const thumbnailBlob = await this.decryptAttachmentToBlob(item, attachmentRow, pUrl);
+      
+      // Cache and display thumbnail
+      await thumbnailCache.save(url, thumbnailBlob, 'image/jpeg');
+      this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
+      
       hideToast(loadingToastId);
     } catch (err) {
-      console.error('Preview decrypt/thumbnail failed:', err);
+      console.error('Preview failed:', err);
       hideToast(loadingToastId);
       this.handleAttachmentError(err, 'Preview failed.');
     }
@@ -14547,6 +14512,13 @@ console.warn('in send message', txid)
       if (timestamp && (Date.now() - timestamp) > EDIT_WINDOW_MS) {
         return showToast('Edit window expired', 3000, 'info');
       }
+
+      // One-time toast
+      if (!checkFirstTimeTip('editMessageFee')) {
+        showToast('Editing a message costs the same transaction fee as sending a new message.', 0, 'info');
+        setFirstTimeTipShown('editMessageFee');
+      }
+
       // If this is a payment, edit the memo; else edit plain message content
       const contentEl = messageEl.classList.contains('payment-info')
         ? messageEl.querySelector('.payment-memo')
@@ -14942,7 +14914,7 @@ console.warn('in send message', txid)
       const recipientPubKey = myData.contacts[this.address]?.public;
       const pqRecPubKey = myData.contacts[this.address]?.pqPublic;
       if (!ok || !recipientPubKey || !pqRecPubKey) {
-        console.log(`No public/PQ key found for recipient ${this.address}`);
+        console.warn(`No public/PQ key found for recipient ${this.address}`);
         showToast('Failed to get recipient key', 0, 'error');
         return;
       }
@@ -14978,11 +14950,11 @@ console.warn('in send message', txid)
       const response = await injectTx(deleteMessageObj, deleteTxid);
 
       if (!response || !response.result || !response.result.success) {
-        console.log('Delete message failed to send', response);
+        console.error('Delete message failed to send', response);
         return showToast('Failed to delete message: ' + (response?.result?.reason || 'Unknown error'), 0, 'error');
       }
 
-      showToast('Delete request sent', 3000, 'success');
+      showToast('Delete request sent', 5000, 'loading');
       
       // Best effort delete attachments from server
       if (message.xattach && Array.isArray(message.xattach)) {
@@ -15153,8 +15125,6 @@ console.warn('in send message', txid)
         this.updateTollAmountUI(address);
       }
     } else {
-      console.log(`Returning early since queried toll value is the same as the toll field in localStorage`);
-      // return early
       return;
     }
   }
@@ -15281,7 +15251,7 @@ console.warn('in send message', txid)
       const recipientPubKey = myData.contacts[currentAddress]?.public;
       const pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
       if (!ok || !recipientPubKey || !pqRecPubKey) {
-        console.log(`no public/PQ key found for recipient ${currentAddress}`);
+        console.warn(`no public/PQ key found for recipient ${currentAddress}`);
         showToast('Failed to get recipient key', 0, 'error');
         return false;
       }
@@ -15378,7 +15348,7 @@ console.warn('in send message', txid)
       const response = await injectTx(chatMessageObj, txid);
 
       if (!response || !response.result || !response.result.success) {
-        console.log('call message failed to send', response);
+        console.error('call message failed to send', response);
         updateTransactionStatus(txid, currentAddress, 'failed', 'message');
         this.appendChatModal();
         return false;
@@ -15541,7 +15511,7 @@ console.warn('in send message', txid)
       const response = await injectTx(chatMessageObj, txid);
 
       if (!response || !response.result || !response.result.success) {
-        console.log('voice message failed to send', response);
+        console.error('voice message failed to send', response);
 
         const reason = response?.result?.reason || '';
         if (/toll/i.test(reason)) {
@@ -15901,7 +15871,6 @@ class CallInviteModal {
     this.contactsList.addEventListener('change', this.updateCounter.bind(this));
     this.inviteSendButton.addEventListener('click', this.sendInvites.bind(this));
     this.cancelButton.addEventListener('click', () => {
-      console.log('Invite modal cancelled');
       this.close();
     });
     this.closeButton.addEventListener('click', this.close.bind(this));
@@ -16026,7 +15995,6 @@ class CallInviteModal {
         }
 
         const payload = { type: 'call', url: msgCallLink, callTime: msgCallTime };
-        console.log('payload', payload);
 
         let messagePayload = {}
         const contact = myData.contacts[addr];
@@ -16115,7 +16083,7 @@ class CallInviteModal {
         const response = await injectTx(messageObj, txid);
 
         if (!response || !response.result || !response.result.success) {
-          console.log('call message failed to send', response);
+          console.error('call message failed to send', response);
           updateTransactionStatus(txid, addr, 'failed', 'message');
           if (chatModal.isActive() && chatModal.address === addr) {
             chatModal.appendChatModal();
@@ -16667,7 +16635,6 @@ class VoiceRecordingModal {
    * @returns {void}
    */
   open() {
-    console.log('Opening voice recording modal');
     this.modal.style.display = 'flex';
     this.resetUI();
   }
@@ -17001,7 +16968,7 @@ class VoiceRecordingModal {
       const form = new FormData();
       form.append('file', blob, `voice_message_${Date.now()}.webm`);
 
-      const uploadUrl = 'https://inv.liberdus.com:2083';
+      const uploadUrl = network.attachmentServerUrl;
       const response = await fetch(`${uploadUrl}/post`, {
         method: 'POST',
         body: form
@@ -17217,7 +17184,7 @@ class NewChatModal {
         // Normalize address from API if it has 0x prefix or trailing zeros
         recipientAddress = normalizeAddress(data.address);
       } catch (error) {
-        console.log('Error looking up username:', error);
+        console.error('Error looking up username:', error);
         this.showRecipientError('Error looking up username');
         return;
       }
@@ -17240,7 +17207,7 @@ class NewChatModal {
         return;
       }
     } catch (error) {
-      console.log('Error checking account type:', error);
+      console.error('Error checking account type:', error);
       showToast('Error checking account type', 0, 'error');
       return;
     }
@@ -17705,13 +17672,12 @@ class CreateAccountModal {
     if (providedPrivateKey) {
       try {
         const accountCheckAddress = longAddress(addressHex);
-        console.log(`Checking network for existing account at address: ${accountCheckAddress}`);
         const accountInfo = await queryNetwork(`/account/${accountCheckAddress}`);
 
         // Check if the query returned data indicating an account exists.
         // This assumes a non-null `accountInfo` with an `account` property means it exists.
         if (accountInfo && accountInfo.account) {
-          console.log('Account already exists for this private key:', accountInfo);
+          console.warn('Account already exists for this private key:', accountInfo);
           this.privateKeyError.textContent = 'An account already exists for this private key.';
           this.privateKeyError.style.color = '#dc3545';
           this.privateKeyError.style.display = 'inline';
@@ -17719,7 +17685,6 @@ class CreateAccountModal {
           this.reEnableControls();
           return; // Stop the account creation process
         } else {
-          console.log('No existing account found for this private key.');
           this.privateKeyError.style.display = 'none';
         }
       } catch (error) {
@@ -17805,7 +17770,7 @@ class CreateAccountModal {
         signInModal.open(username);
       } catch (error) {
         if (waitingToastId) hideToast(waitingToastId);
-        console.log(`DEBUG: handleCreateAccount error`, JSON.stringify(error, null, 2));
+        console.error(`DEBUG: handleCreateAccount error`, JSON.stringify(error, null, 2));
         showToast(`account creation failed: ${error}`, 0, 'error');
         this.reEnableControls();
 
@@ -18204,7 +18169,7 @@ class SendAssetFormModal {
         return;
       }
     } catch (error) {
-      console.log('Error checking account type:', error);
+      console.error('Error checking account type:', error);
       showToast('Error checking account type', 0, 'error');
       return;
     }
@@ -18383,7 +18348,6 @@ class SendAssetFormModal {
     if (this.foundAddressObject.address) {
       if (this.amountInput.value.trim() != '') {
         isAmountAndTollValid = this.validateToll(amountBigInt);
-        console.log('ismountAndTollValid ' + isAmountAndTollValid);
       }
     }
     // Enable button only if both conditions are met.
@@ -18398,16 +18362,12 @@ class SendAssetFormModal {
     // check if user is required to pay a toll
     if (this.tollInfo.required == 1) {
       if (this.memoInput.value.trim() != '') {
-        console.log('checking if toll > amount');
         const factor = getStabilityFactor();
         let amountInLIB = amount;
         let tollInLIB = this.tollInfo.toll;
         if (this.tollInfo.tollUnit !== 'LIB') {
           tollInLIB = bigxnum2big(this.tollInfo.toll, (1.0 / factor).toString());
         }
-        console.log(
-          `toll > amount  ${big2str(tollInLIB, 8)} > ${big2str(amountInLIB, 8)} : ${tollInLIB > amountInLIB}`
-        );
         if (tollInLIB > amountInLIB) {
           this.balanceWarning.textContent = 'less than toll for memo';
           this.balanceWarning.style.display = 'inline';
@@ -18611,8 +18571,6 @@ class SendAssetFormModal {
    * @returns {void}
    * */
   async fillFromQR(data) {
-    console.log('Attempting to fill payment form from QR:', data);
-
     // Explicitly check for the required prefix
     if (!data || !data.startsWith('liberdus://')) {
       console.error("Invalid payment QR code format. Missing 'liberdus://' prefix.", data);
@@ -18634,8 +18592,6 @@ class SendAssetFormModal {
       const base64Data = data.substring('liberdus://'.length);
       const jsonData = bin2utf8(base642bin(base64Data));
       const paymentData = JSON.parse(jsonData);
-
-      console.log('Read payment data:', JSON.stringify(paymentData, null, 2));
 
       if (paymentData.u) {
         this.usernameInput.value = paymentData.u;
@@ -18878,7 +18834,6 @@ class SendAssetConfirmModal {
     };
 
     try {
-      console.log('payload is', payload);
       // Send the transaction using postAssetTransfer
       const response = await postAssetTransfer(toAddress, amount, payload, keys);
 
@@ -19059,14 +19014,12 @@ class ReceiveModal {
         option.textContent = `${asset.name} (${asset.symbol})`;
         this.assetSelect.appendChild(option);
       });
-      console.log(`Populated ${walletData.assets.length} assets in dropdown`);
     } else {
       // Add a default option if no assets
       const option = document.createElement('option');
       option.value = 0;
       option.textContent = 'Liberdus (LIB)';
       this.assetSelect.appendChild(option);
-      console.log('No wallet assets found, using default');
     }
 
     // Clear input fields
@@ -19105,7 +19058,6 @@ class ReceiveModal {
     // Generate QR code with payment data
     try {
       this.updateQRCode();
-      console.log('QR code updated with payment data');
     } catch (error) {
       console.error('Error updating QR code:', error);
 
@@ -19115,7 +19067,7 @@ class ReceiveModal {
         width: 200,
         height: 200,
       });
-      console.log('Fallback to basic address QR code');
+      console.warn('Fallback to basic address QR code');
     }
   }
 
@@ -19135,9 +19087,8 @@ class ReceiveModal {
         if (asset) {
           assetId = asset.id || 'liberdus';
           symbol = asset.symbol || 'LIB';
-          console.log(`Selected asset: ${asset.name} (${symbol})`);
         } else {
-          console.log(`Asset not found at index ${assetIndex}, using defaults`);
+          console.warn(`Asset not found at index ${assetIndex}, using defaults`);
         }
       } else {
         console.warn('Wallet assets not available, using default asset');
@@ -19177,7 +19128,6 @@ class ReceiveModal {
     try {
       // Get payment data
       const paymentData = this.createQRPaymentData();
-      console.log('Created payment data:', JSON.stringify(paymentData, null, 2));
 
       // Convert to JSON and encode as base64
       const jsonData = JSON.stringify(paymentData);
@@ -19185,8 +19135,6 @@ class ReceiveModal {
 
       // Create URI with liberdus:// prefix
       const qrText = `liberdus://${base64Data}`;
-      console.log('QR code text length:', qrText.length);
-      console.log('QR code text (first 100 chars):', qrText.substring(0, 100) + (qrText.length > 100 ? '...' : ''));
 
       const gifBytes = qr.encodeQR(qrText, 'gif', { scale: 4 });
       // Convert the raw bytes to a base64 data URL
@@ -19226,7 +19174,6 @@ class ReceiveModal {
         // Add the image to the container
         this.qrcodeContainer.appendChild(img);
 
-        console.log('Fallback QR code generated with username URI');
         console.error('Error generating full QR', error);
 
         // Show error directly in the preview element
@@ -19331,9 +19278,7 @@ class FailedTransactionModal {
    * @param {Element} element - The element that triggered the failed transaction
    * @returns {void}
    */
-  open(txid, element) {
-    console.log('open', txid);
-  
+  open(txid, element) {  
     // Get the address and memo from the original failed transfer element
     const address = element?.dataset?.address || chatModal.address;
     const memo =
@@ -19345,11 +19290,7 @@ class FailedTransactionModal {
     this.memo = memo;
     this.txid = txid;
     //open.assetID = assetID;
-  
-    console.log(`this.address: ${this.address}`);
-    console.log(`this.memo: ${this.memo}`);
-    console.log(`this.txid: ${this.txid}`);
-    //console.log(`open.assetID: ${open.assetID}`)
+
     this.modal.classList.add('active');
   }
 
@@ -19593,7 +19534,6 @@ class MigrateAccountsModal {
   }
 
   async open() {
-    console.log('open migrate accounts modal');
     await this.populateAccounts();
     this.modal.classList.add('active');
   }
@@ -19769,7 +19709,6 @@ class MigrateAccountsModal {
 
   async handleSubmit(event) {
     event.preventDefault();
-    console.log('handleSubmit');
 
     this.submitButton.disabled = true;
     this.closeButton.disabled = true;
@@ -19785,7 +19724,6 @@ class MigrateAccountsModal {
       const netid = checkbox.dataset.netid;
   
       const loadingToastId = showToast('Migrating '+username, 0, 'loading');
-      console.log('processing account: ', username, netid, section);  
       // Start processing this account
       if (section === 'mine') {
         this.migrateAccountData(username, netid, parameters.networkId)
@@ -19823,9 +19761,7 @@ class MigrateAccountsModal {
         const loadingToastId = showToast('Migrating '+username, 0, 'loading');
         const txid = results[username].txid;
         const submittedts = results[username].submittedts
-console.log('migrating ',username,'checking txid', txid)
         const result = await checkPendingTransaction(txid, submittedts); // return true, false or null
-console.log('    result is',result)
         if (result !== null){
           if (result == true){
             this.migrateAccountData(username, results[username].netid, parameters.networkId)
@@ -19902,7 +19838,6 @@ console.log('    result is',result)
 
     // Save updated accounts registry
     localStorage.setItem('accounts', stringify(accountsObj));
-    console.log(`Updated accounts registry for ${username}: removed from ${oldNetid}, added to ${newNetid}`);
   }
 
   clearForm() {
@@ -20531,7 +20466,6 @@ class ReactNativeApp {
 
   load() {
     if (this.isReactNativeWebView) {
-      console.log('🌐 Initializing React Native WebView Communication');
       this.captureInitialViewportHeight();
 
       window.addEventListener('message', (event) => {
@@ -20615,7 +20549,7 @@ class ReactNativeApp {
             // User is signed in - check if it's the right account
             const isCurrentAccount = this.isCurrentAccount(normalizedToAddress);
             if (isCurrentAccount) {
-              console.log('🔔 You are signed in to the account that received the message');
+              // console.log('🔔 You are signed in to the account that received the message');
             } else {
               // We're signed in to a different account, ask user what to do
               const shouldSignOut = confirm('You received a message for a different account. Would you like to sign out to switch to that account?');
@@ -20624,7 +20558,7 @@ class ReactNativeApp {
                 // Sign out and save the notification address for priority
                 menuModal.handleSignOut();
               } else {
-                console.log('User chose to stay signed in - notified account will appear first next time');
+                // console.log('User chose to stay signed in - notified account will appear first next time');
               }
             }
           }
@@ -20738,7 +20672,6 @@ class ReactNativeApp {
 
   captureInitialViewportHeight() {
     const currentHeight = window.innerHeight;
-    console.log('📏 Capturing initial viewport height:', currentHeight);
     this.postMessage({
         type: 'VIEWPORT_HEIGHT',
         height: currentHeight
@@ -20771,13 +20704,6 @@ class ReactNativeApp {
       const inputBottom = rect.bottom;
       const inputIsAboveKeyboard = inputBottom < keyboardTop;
       const needsManualHandling = !inputIsAboveKeyboard;
-
-      console.log('⌨️ Native keyboard detection:', {
-        keyboardHeight,
-        inputBottom,
-        keyboardTop,
-        needsManualHandling
-      });
 
       this.postMessage({
         type: 'KEYBOARD_DETECTION',
@@ -20984,7 +20910,6 @@ class ReactNativeApp {
   async handleNativeAppSubscribe() {
     // Check if we're online before proceeding
     if (!isOnline) {
-      console.log('handleNativeAppSubscribe: Device is offline, skipping subscription');
       return;
     }
 
@@ -20993,9 +20918,7 @@ class ReactNativeApp {
     const fcmToken = this.fcmToken || null;
     const voipToken = this.voipToken || null;
     
-    if (deviceToken && expoPushToken) {
-      console.log('Native app subscription tokens detected:', { deviceToken, expoPushToken, fcmToken, voipToken });
-      
+    if (deviceToken && expoPushToken) {      
       try {
         // Get the user's address from localStorage if available
         const { netid } = network;
@@ -21027,9 +20950,6 @@ class ReactNativeApp {
         }
 
         const SUBSCRIPTION_API = `${selectedGateway.web}/notifier/subscribe`;
-
-        console.log('payload', payload);
-        console.log('SUBSCRIPTION_API', SUBSCRIPTION_API);
         
         const response = await fetch(SUBSCRIPTION_API, {
           method: 'POST',
@@ -21040,8 +20960,6 @@ class ReactNativeApp {
         });
         
         if (response.ok) {
-          const result = await response.json();
-          console.log('Subscription successful:', result);
           /* showToast('Push notifications enabled', 3000, 'success'); */
         } else {
           console.error('Subscription failed:', response.status, response.statusText);
@@ -21062,13 +20980,11 @@ class ReactNativeApp {
   async handleNativeAppUnsubscribe() {
     // Early return if running on Android device in React Native WebView
     if (window.ReactNativeWebView && navigator.userAgent.toLowerCase().includes('android')) {
-      console.log('handleNativeAppUnsubscribe: Skipping unsubscribe on Android device');
       return;
     }
 
     // Check if we're online before proceeding
     if (!isOnline) {
-      console.log('handleNativeAppUnsubscribe: Device is offline, skipping unsubscribe');
       return;
     }
 
@@ -21243,8 +21159,6 @@ const reactNativeApp = new ReactNativeApp();
  * @param {string} currentAddress - The address of the current contact
  */
 function removeFailedTx(txid, currentAddress) {
-  console.log(`DEBUG: Removing failed/timed-out txid ${txid} from all stores`);
-
   // remove pending tx if exists
   const index = myData.pending.findIndex((tx) => tx.txid === txid);
   if (index > -1) {
@@ -21261,7 +21175,6 @@ function removeFailedTx(txid, currentAddress) {
 async function checkPendingTransaction(txid, submittedts){
   const now = getCorrectedTimestamp();
   const duration = (now - submittedts) / 1000   // to make it in seconds
-console.log('timestamp is', submittedts, 'duration is', duration)
   let endpointPath = `/transaction/${txid}`;
   if (duration > 20){
     endpointPath = `/collector/api/transaction?appReceiptId=${txid}`;
@@ -21283,7 +21196,6 @@ console.log('timestamp is', submittedts, 'duration is', duration)
  */
 async function checkPendingTransactions() {
   if (!myData || !myAccount) {
-    console.log('DEBUG: user is not logged in');
     return;
   }
 
@@ -21296,7 +21208,6 @@ async function checkPendingTransactions() {
 
   const startingPendingCount = myData.pending.length;
 
-  console.log(`checking pending transactions (${myData.pending.length})`);
   const now = getCorrectedTimestamp();
   const eightSecondsAgo = now - 8000;
   const twentySecondsAgo = now - 20000;
@@ -21307,7 +21218,6 @@ async function checkPendingTransactions() {
     const { txid, type, submittedts } = pendingTxInfo;
 
     if (submittedts < eightSecondsAgo) {
-      console.log(`DEBUG: txid ${txid} is older than 8 seconds, checking receipt`);
 
       let endpointPath = `/transaction/${txid}`;
       if (submittedts < twentySecondsAgo || submittedts < thirtySecondsAgo) {
@@ -21339,8 +21249,6 @@ async function checkPendingTransactions() {
           if (index !== -1) {
             // covert amount to wei
             myData.wallet.history[index].amount = parse(stringify(res.transaction.additionalInfo.totalUnstakeAmount));
-          } else {
-            console.log(`DEBUG: txid ${txid} not found in wallet history`);
           }
         }
 
@@ -21355,6 +21263,7 @@ async function checkPendingTransactions() {
         }
 
         if (type === 'toll') {
+          // log used by e2e tests do not delete
           console.log(`Toll transaction successfully processed!`);
           if (tollModal.isActive()) {
             showToast(`Toll change successful!`, 3000, 'success');
@@ -21362,6 +21271,7 @@ async function checkPendingTransactions() {
         }
 
         if (type === 'update_toll_required') {
+          // log used by e2e tests do not delete
           console.log(`DEBUG: update_toll_required transaction successfully processed!`);
           myData.contacts[pendingTxInfo.to].friendOld = myData.contacts[pendingTxInfo.to].friend;
         }
@@ -21507,7 +21417,6 @@ const pendingPromiseService = (() => {
 
   function resolve(txid, data) {
     if (pendingPromises.has(txid)) {
-      console.log(`DEBUG: resolving txid ${txid} with data ${data}`);
       const promiseControls = pendingPromises.get(txid);
       promiseControls.resolve(data);
       pendingPromises.delete(txid);
@@ -21516,7 +21425,6 @@ const pendingPromiseService = (() => {
 
   function reject(txid, error) {
     if (pendingPromises.has(txid)) {
-      console.log(`DEBUG: rejecting txid ${txid} with error ${error}`);
       const promiseControls = pendingPromises.get(txid);
       promiseControls.reject(error);
       pendingPromises.delete(txid);
@@ -21543,7 +21451,6 @@ function ignoreTabKey(e) {
  * @param {Event} e - The event object.
  */
 function ignoreShiftTabKey(e) {
-  console.log('DEBUG: ignoring shift+tab key');
   // if key is tab and key.shiftKey is true, prevent default
   if (e.key === 'Tab' && e.shiftKey) {
     e.preventDefault();
@@ -21568,13 +21475,12 @@ async function getNetworkParams() {
     if (cachedParams) {
       try {
         parameters = parse(cachedParams);
-        console.log('Using cached network parameters (offline)');
         return;
       } catch (e) {
         console.warn('Failed to parse cached network parameters:', e);
       }
     }
-    console.log('No cached network parameters available (offline)');
+    console.warn('No cached network parameters available (offline)');
     return;
   }
 
@@ -21622,7 +21528,6 @@ getNetworkParams.timestamp = 0;
 
 async function getSystemNotice() {
   if (!isOnline) {
-    console.log('getSystemNotice skipped: Not online');
     return;
   }
 
@@ -21730,7 +21635,6 @@ function stopLongPoll() {
     longPollAbortController = null;
   }
   isLongPolling = false;
-  console.log('LongPoll stopped');
 }
 
 function longPoll() {
@@ -21742,14 +21646,13 @@ function longPoll() {
     return;
   }
   if (isLongPolling) {
-    console.log('LongPoll already running, skipping');
     return;
   }
 
   const myAccount = myData?.account;
   // Skip if no valid account
   if (!myAccount?.keys?.address) {
-    console.log('Poll skipped: No valid account');
+    console.warn('Poll skipped: No valid account');
     return;
   }
 
@@ -21764,7 +21667,6 @@ function longPoll() {
 
     // call this with a promise that'll resolve with callback longPollResult function with the data
     const longPollPromise = queryNetwork(`/collector/api/poll?account=${longAddress(myAccount.keys.address)}&chatTimestamp=${timestamp}`, longPollAbortController.signal);
-    console.log(`longPoll started with account=${longAddress(myAccount.keys.address)} chatTimestamp=${timestamp}`);
     
     // Handle both success and error cases properly
     longPollPromise
@@ -21790,9 +21692,7 @@ function longPoll() {
 }
 longPoll.start = 0;
 
-async function longPollResult(data) {
-  console.log('longpoll data', data)
-  
+async function longPollResult(data) {  
   // Reset polling state and clean up abort controller
   isLongPolling = false;
   longPollAbortController = null;
@@ -21870,7 +21770,6 @@ function isIOS() {
 
 function enterFullscreen() {
   if (isMobile()) {
-  console.log('in enterFullscreen');
     if (document.documentElement.requestFullscreen) {
       // on android 15 using chrome without delay caused issues with input field on ChatModal to be positioned below visual viewport
       setTimeout(() => {
@@ -21930,7 +21829,6 @@ class LocalStorageMonitor {
    * Initialize the localStorage monitor
    */
   load() {
-    console.log('🔧 Loading localStorage monitor...');
     this.checkStorageOnStartup();
   }
 
@@ -21958,8 +21856,6 @@ class LocalStorageMonitor {
         const warningMessage = `⚠️ Storage Warning: Only ${(info.availableBytes / 1024).toFixed(1)}KB remaining! Consider clearing old data.`;
         console.warn(warningMessage);
         showToast(warningMessage, 8000, 'warning');
-      } else {
-        console.log(`✅ Storage OK: ${(info.availableBytes / 1024).toFixed(1)}KB available`);
       }
     } catch (error) {
       console.error('Error checking localStorage on startup:', error);
@@ -21993,17 +21889,14 @@ class LocalStorageMonitor {
   getCachedOrCalculateCapacity() {
     const storedCapacity = localStorage.getItem(this.CAPACITY_KEY);
     if (storedCapacity) {
-      console.log('✅ Using stored localStorage capacity:', storedCapacity);
       return parseInt(storedCapacity);
     }
     
-    console.log('🔄 Calculating localStorage capacity for first time...');
     const usage = this.getLocalStorageUsage();
     const available = this.findLocalStorageAvailable(); // Only runs once!
     const totalCapacity = usage + available;
     
     localStorage.setItem(this.CAPACITY_KEY, totalCapacity.toString());
-    console.log('💾 Stored localStorage capacity for future use:', totalCapacity);
     
     return totalCapacity;
   }
@@ -22122,7 +22015,6 @@ class ContactAvatarCache {
 
       request.onsuccess = () => {
         this.db = request.result;
-        console.log('Contact avatar cache initialized');
         resolve();
       };
 
@@ -22132,7 +22024,6 @@ class ContactAvatarCache {
         if (db.objectStoreNames.contains(this.storeName)) {
           try {
             db.deleteObjectStore(this.storeName);
-            console.log('Deleted old avatars object store to recreate with id keyPath');
           } catch (e) {
             console.warn('Failed to delete existing avatars object store during upgrade:', e);
           }
@@ -22427,9 +22318,6 @@ class ThumbnailCache {
       await this.init();
       // Cleanup by size if cache is too large
       const sizeDeletedCount = await this.cleanupBySize();
-      if (sizeDeletedCount > 0) {
-        console.log(`Cleaned up ${sizeDeletedCount} thumbnail(s) by size limit`);
-      }
     } catch (err) {
       console.warn('Failed to load thumbnail cache:', err);
     }
@@ -22450,7 +22338,6 @@ class ThumbnailCache {
 
       request.onsuccess = () => {
         this.db = request.result;
-        console.log('Thumbnail cache initialized');
         resolve();
       };
 
@@ -23039,7 +22926,6 @@ function getTransactionFeeWei() {
 
 
 function handleBrowserBackButton(event) {
-  console.log('in popstate')
   history.pushState({state:1}, '', '.');
 
   const topModal = findTopModal();
@@ -23065,7 +22951,6 @@ function findTopModal() {
 
 function closeTopModal(topModal){
   const modalId = topModal.id;
-  console.log('trying to close', modalId)
   switch (modalId) {
     case 'chatModal':
       chatModal.close();
@@ -23170,7 +23055,7 @@ function closeTopModal(topModal){
       removeAccountModal.close();
       break;
     default:
-      console.log('Unknown modal:', modalId);
+      console.warn('Unknown modal:', modalId);
       return false;
   }
   return true; // means we closed a modal
