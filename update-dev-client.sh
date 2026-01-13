@@ -98,6 +98,8 @@ rsync -av \
   --exclude='.vscode' \
   --exclude='.cursorrles' \
   --exclude='data_structures_flow' \
+  --exclude='explorer/index.html' \
+  --exclude='network/index.html' \
   "$SOURCE_DIR/" "$TARGET_DIR/"
 
 echo "Removing unwanted folders..."
