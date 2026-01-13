@@ -42,7 +42,7 @@ REPO_DIR="$SCRIPT_DIR"
 SOURCE_DIR="$(dirname "$REPO_DIR")/liberdus-docs/build"
 
 # Target directory is the docs folder in this repo
-TARGET_DIR="$REPO_DIR/docs-test"
+TARGET_DIR="$REPO_DIR/docs"
 
 # Change to the repo directory
 cd "$REPO_DIR" || exit 1
