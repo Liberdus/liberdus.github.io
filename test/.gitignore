@@ -4,3 +4,16 @@ node_modules
 .DS_Store
 out
 
+# Browser automation (Cursor MCP)
+.playwright-mcp/
+playwright-browser-data/
+open-browser.js
+dev-metamask.sh
+chat-modal-performance-phases.md
+OPTIMIZATION_SUMMARY.md
+data_structures_flow/OPTIMIZATION_QUICK_REF.md
+data_structures_flow/thumbnail-prefetch-optimization.md
+chat-modal-open-render-flow.md
+file-attachment-flow.md
+thumbnail-upload-plan.md
+

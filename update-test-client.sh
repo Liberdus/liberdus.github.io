@@ -22,11 +22,12 @@
 #
 # WHAT IT DOES:
 # - Copies all files from web-client-v2/* to liberdus.github.io/test/
+# - Excludes files listed in .gitignore
 # - Removes unwanted folders (.vscode, .cursorrles, data_structures_flow)
-# - Updates network configuration (copies network.js_web to network.js)
+# - Updates network configuration (copies network.js_test from source repo to network.js)
+# - Does NOT copy network.js_test file itself as a separate file
 # - Increments version in test/app.js (last character: a->b, z->a, etc.)
 # - Updates version.html with current timestamp
-# - Adds cache-busting parameters (?v=timestamp) to CSS, JS, lib.js, and crypto.js references
 #
 # =============================================================================
 
@@ -81,7 +82,20 @@ new_version_char_increment="${current_version:0:-1}$next_char"
 echo "Copying web-client-v2 contents to test..."
 echo "Source: $SOURCE_DIR"
 echo "Target: $TARGET_DIR"
-cp -a "$SOURCE_DIR"/* "$TARGET_DIR"/
+
+# Use rsync to copy files while excluding gitignore patterns and network.js_test
+rsync -av \
+  --exclude='node_modules' \
+  --exclude='.idea' \
+  --exclude='.next' \
+  --exclude='.DS_Store' \
+  --exclude='out' \
+  --exclude='network.js_test' \
+  --exclude='network.js_dev' \
+  --exclude='.vscode' \
+  --exclude='.cursorrles' \
+  --exclude='data_structures_flow' \
+  "$SOURCE_DIR/" "$TARGET_DIR/"
 
 echo "Removing unwanted folders and files..."
 rm -rf "$TARGET_DIR/data_structures_flow"
@@ -91,7 +105,13 @@ rm -f "$TARGET_DIR/package.json"
 rm -f "$TARGET_DIR/package-lock.json"
 
 echo "Updating network configuration..."
-cp "$TARGET_DIR/network.js_web" "$TARGET_DIR/network.js"
+# Copy network.js_test from source repo to network.js in target
+if [ ! -f "$SOURCE_DIR/network.js_test" ]; then
+    echo "Warning: network.js_test not found in source directory"
+else
+    cp "$SOURCE_DIR/network.js_test" "$TARGET_DIR/network.js"
+    echo "Copied network.js_test from source to network.js"
+fi
 
 # Update the version in the newly copied test/app.js with the incremented version
 sed -i "s/^const version = .*/const version = '$new_version_char_increment'/" "$TARGET_DIR/app.js"
@@ -101,35 +121,6 @@ current_date=$(date +"%Y.%m.%d.%H.%M")
 
 # Update the version in test/version.html
 echo "$current_date" > "$TARGET_DIR/version.html"
-
-# Use current_date as the ?v= value for cache busting
-# Update or add ?v=... in styles.css reference in test/index.html
-if grep -q 'href="\./styles\.css\?v=' "$TARGET_DIR/index.html"; then
-  sed -i -E "s|(href=\"\./styles\.css\?v=)[^\"]*(\")|\1$current_date\2|" "$TARGET_DIR/index.html"
-else
-  sed -i -E "s|(href=\"\./styles\.css)(\")|\1?v=$current_date\2|" "$TARGET_DIR/index.html"
-fi
-
-# Update or add ?v=... in app.js reference in test/index.html
-if grep -q 'src="\./app\.js\?v=' "$TARGET_DIR/index.html"; then
-  sed -i -E "s|(src=\"\./app\.js\?v=)[^\"]*(\")|\1$current_date\2|" "$TARGET_DIR/index.html"
-else
-  sed -i -E "s|(src=\"\./app\.js)(\")|\1?v=$current_date\2|" "$TARGET_DIR/index.html"
-fi
-
-# Update or add ?v=... in lib.js reference in test/index.html
-if grep -q 'href="lib\.js\?v=' "$TARGET_DIR/index.html"; then
-  sed -i -E "s|(href=\"lib\.js\?v=)[^\"]*(\")|\1$current_date\2|" "$TARGET_DIR/index.html"
-else
-  sed -i -E "s|(href=\"lib\.js)(\")|\1?v=$current_date\2|" "$TARGET_DIR/index.html"
-fi
-
-# Update or add ?v=... in crypto.js reference in test/index.html
-if grep -q 'href="crypto\.js\?v=' "$TARGET_DIR/index.html"; then
-  sed -i -E "s|(href=\"crypto\.js\?v=)[^\"]*(\")|\1$current_date\2|" "$TARGET_DIR/index.html"
-else
-  sed -i -E "s|(href=\"crypto\.js)(\")|\1?v=$current_date\2|" "$TARGET_DIR/index.html"
-fi
 
 # Debugging output
 echo "Current directory: $(pwd)"
