@@ -1,0 +1,7 @@
+# Ignore linting/formatting setup commits from git blame
+# Usage: git blame --ignore-revs-file .git-blame-ignore-revs <file>
+# Or configure globally: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# ESLint and Prettier setup commit - contains only configuration changes
+3f0a3a2900c5b6e0783795e4b572825de0f18080
+86dcf5da01a4e8f8bb3a004a01f86c15028751f7

@@ -22,8 +22,9 @@
 #
 # WHAT IT DOES:
 # - Copies all files from web-client-v2/* to liberdus.github.io/dev/
+# - Excludes files listed in .gitignore
 # - Removes unwanted folders (.vscode, .cursorrles, data_structures_flow)
-# - Updates network configuration (copies network.js_web to network.js)
+# - Updates network configuration (copies local dev/network.js_dev to network.js)
 # - Increments version in dev/app.js (last character: a->b, z->a, etc.)
 # - Updates version.html with current timestamp
 #
@@ -63,6 +64,10 @@ if [ ! -d "$TARGET_DIR" ]; then
     exit 1
 fi
 
+# Save the local network.js_dev before copying (in case it gets overwritten)
+# We'll use this to restore network.js after copying
+LOCAL_NETWORK_JS_DEV="$TARGET_DIR/network.js_dev"
+
 # Extract the current version from dev/app.js (BEFORE copying)
 current_version=$(grep -oP "(?<=^const version = ')[^']+" "$TARGET_DIR/app.js")
 
@@ -80,7 +85,20 @@ new_version_char_increment="${current_version:0:-1}$next_char"
 echo "Copying web-client-v2 contents to dev..."
 echo "Source: $SOURCE_DIR"
 echo "Target: $TARGET_DIR"
-cp -a "$SOURCE_DIR"/* "$TARGET_DIR"/
+
+# Use rsync to copy files while excluding gitignore patterns and network.js_dev
+rsync -av \
+  --exclude='node_modules' \
+  --exclude='.idea' \
+  --exclude='.next' \
+  --exclude='.DS_Store' \
+  --exclude='out' \
+  --exclude='network.js_dev' \
+  --exclude='network.js_test' \
+  --exclude='.vscode' \
+  --exclude='.cursorrles' \
+  --exclude='data_structures_flow' \
+  "$SOURCE_DIR/" "$TARGET_DIR/"
 
 echo "Removing unwanted folders..."
 rm -rf "$TARGET_DIR/data_structures_flow"
@@ -88,7 +106,13 @@ rm -rf "$TARGET_DIR/.vscode"
 rm -rf "$TARGET_DIR/.cursorrles"
 
 echo "Updating network configuration..."
-cp "$TARGET_DIR/network.js_web" "$TARGET_DIR/network.js"
+# Copy the local network.js_dev to network.js (restore from local file)
+if [ ! -f "$LOCAL_NETWORK_JS_DEV" ]; then
+    echo "Warning: network.js_dev not found in dev directory"
+else
+    cp "$LOCAL_NETWORK_JS_DEV" "$TARGET_DIR/network.js"
+    echo "Copied local network.js_dev to network.js"
+fi
 
 # Update the version in the newly copied dev/app.js with the incremented version
 sed -i "s/^const version = .*/const version = '$new_version_char_increment'/" "$TARGET_DIR/app.js"
