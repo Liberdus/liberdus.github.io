@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'a'
+const version = 'b'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -811,6 +811,8 @@ class Header {
   load() {
     this.header = document.getElementById('header');
     this.text = this.header.querySelector('.app-name');
+    this.avatarContainer = this.header.querySelector('.app-name-avatar');
+    this.nameContainer = this.header.querySelector('.app-name-container');
     this.logoLink = this.header.querySelector('.logo-link');
     this.menuButton = document.getElementById('toggleMenu');
     this.settingsButton = document.getElementById('toggleSettings');
@@ -821,8 +823,8 @@ class Header {
     this.settingsButton.addEventListener('click', () => settingsModal.open());
     this.upcomingCallsBtn.addEventListener('click', () => callsModal.open());
     
-    // Add click event for username display to open myInfoModal
-    this.text.addEventListener('click', () => {
+    // Add click event for whole name container
+    this.nameContainer.addEventListener('click', () => {
       if (myData && myData.account) {
         myInfoModal.open();
       }
@@ -843,6 +845,25 @@ class Header {
 
   setText(newText) {
     this.text.textContent = newText;
+  }
+
+  /**
+   * Updates the header avatar for the current user
+   */
+  async updateAvatar() {
+    try {
+      const avatarHtml = await getContactAvatarHtml(
+        {
+          address: myAccount.keys.address,
+          hasAvatar: myData?.account?.hasAvatar,
+          avatarId: myData?.account?.avatarId,
+        },
+        28 // Small size for header
+      );
+      this.avatarContainer.innerHTML = avatarHtml;
+    } catch (e) {
+      console.warn('Failed to update header avatar:', e);
+    }
   }
 
   /**
@@ -943,9 +964,15 @@ class Footer {
         const isPrivateAccount = myAccount?.private === true || myData?.account?.private === true;
         appName.textContent = `${myAccount.username}`;
         appName.classList.toggle('is-private', isPrivateAccount);
+        // Update avatar
+        await header.updateAvatar();
       } else {
         appName.textContent = '';
         appName.classList.remove('is-private');
+        // Clear avatar when not signed in
+        if (header.avatarContainer) {
+          header.avatarContainer.innerHTML = '';
+        }
       }
   
       // Show/hide new chat button
@@ -1177,7 +1204,7 @@ class ChatsScreen {
       // Determine what to show in the preview
 
       let displayPreview = previewHTML;
-      let displayPrefix = latestActivity.my ? 'You: ' : '';
+      let displayPrefix = latestActivity.my ? '< ' : '> ';
       let hasDraftAttachment = false;
 
       // Check for draft attachments
@@ -1188,7 +1215,7 @@ class ChatsScreen {
       // If there's draft text, show that (prioritize draft text over reply preview)
       if (contact.draft && contact.draft.trim() !== '') {
         displayPreview = truncateMessage(escapeHtml(contact.draft), 50);
-        displayPrefix = 'You: ';
+        displayPrefix = '< ';
       } else if (contact.draftReplyTxid) {
         // If there's only reply content (no text), show "Replying to: [message]"
         const replyMessage = contact.draftReplyMessage || '';
@@ -1206,7 +1233,7 @@ class ChatsScreen {
         displayPreview = attachmentCount === 1 
           ? '📎 Attachment' 
           : `📎 ${attachmentCount} attachments`;
-        displayPrefix = 'You: ';
+        displayPrefix = '< ';
       }
       // Create the list item element
       const li = document.createElement('li');
@@ -1217,7 +1244,7 @@ class ChatsScreen {
           <div class="chat-content">
               <div class="chat-header">
                   <div class="chat-name">${escapeHtml(contactName)}</div>
-                  <div class="chat-time">${timeDisplay} <span class="chat-time-chevron"></span></div>
+                  <div class="chat-time">${timeDisplay}</div>
               </div>
               <div class="chat-message">
                 ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : ((contact.draft || contact.draftReplyTxid || hasDraftAttachment) ? `<span class="chat-draft" title="Draft"></span>` : '')}
@@ -1760,6 +1787,10 @@ class MenuModal {
 
     // Reset header text
     header.setText('Liberdus');
+    // Clear avatar on sign out
+    if (header.avatarContainer) {
+      header.avatarContainer.innerHTML = '';
+    }
 
     // Hide all app screens
     document.querySelectorAll('.app-screen').forEach((screen) => {
@@ -2745,8 +2776,9 @@ class MyInfoModal {
     const { account = {} } = myData ?? {};
     const fields = {
       name:      { id: 'myInfoName',      label: 'Name' },
-      email:     { id: 'myInfoEmail',     label: 'Email',    href: v => `mailto:${v}` },
-      phone:     { id: 'myInfoPhone',     label: 'Phone' },
+      // Email and Phone fields hidden - may want to restore later
+      // email:     { id: 'myInfoEmail',     label: 'Email',    href: v => `mailto:${v}` },
+      // phone:     { id: 'myInfoPhone',     label: 'Phone' },
       linkedin:  { id: 'myInfoLinkedin',  label: 'LinkedIn', href: v => `https://linkedin.com/in/${v}` },
       x:         { id: 'myInfoX',         label: 'X',        href: v => `https://x.com/${v}` },
     };
@@ -2769,16 +2801,21 @@ class MyInfoModal {
           ? element.parentElement.parentElement // label + anchor live two levels up
           : element.parentElement;
 
-      const value = account[fieldKey] ?? ''; // empty string if undefined / null
+      const value = account[fieldKey] ?? '';
       const isEmpty = !value;
 
-      // Show / hide container with inline style (per your constraint)
-      container.style.display = isEmpty ? 'none' : 'block';
-      if (isEmpty) continue;
+      // Always show the Name field, hide others when empty
+      container.style.display = (fieldKey === 'name' || !isEmpty) ? 'block' : 'none';
+      if (isEmpty && fieldKey !== 'name') continue;
 
       // Populate the field with data
-      element.textContent = value;
-      if (fieldConfig.href) element.href = fieldConfig.href(value);
+      if (fieldKey === 'name') {
+        element.textContent = isEmpty ? 'Not Entered' : value;
+        element.classList.toggle('contact-info-value--empty', isEmpty);
+      } else {
+        element.textContent = value;
+        if (fieldConfig.href) element.href = fieldConfig.href(value);
+      }
     }
     this.renderUsernameQR();
   }
@@ -2849,6 +2886,7 @@ class ContactInfoModal {
   constructor() {
     this.currentContactAddress = null;
     this.needsContactListUpdate = false; // track if we need to update the contact list
+    this.fullAddress = null; // Store full address for copying
   }
 
   // Helper method to open avatar edit modal
@@ -2868,7 +2906,8 @@ class ContactInfoModal {
     this.avatarSection = this.modal.querySelector('.contact-avatar-section');
     this.avatarDiv = this.avatarSection.querySelector('.avatar');
     this.nameDiv = this.avatarSection.querySelector('.name');
-    this.subtitleDiv = this.avatarSection.querySelector('.subtitle');
+    this.subtitleDiv = document.getElementById('contactInfoDisplayAddress');
+    this.copyButton = document.getElementById('contactInfoCopyAddress');
     this.usernameDiv = document.getElementById('contactInfoUsername');
     this.avatarEditButton = document.createElement('button');
     this.avatarEditButton.className = 'icon-button edit-icon avatar-edit-button avatar-edit-button-outside';
@@ -2925,6 +2964,10 @@ class ContactInfoModal {
     if (!this.avatarDiv.contains(this.avatarEditButton)) {
       this.avatarDiv.appendChild(this.avatarEditButton);
     }
+
+    // Copy address functionality
+    this.copyButton.addEventListener('click', () => this.copyAddress());
+    this.subtitleDiv.addEventListener('click', () => this.copyAddress());
   }
 
   // Update contact info values
@@ -2939,14 +2982,19 @@ class ContactInfoModal {
       this.avatarDiv.appendChild(this.avatarEditButton);
     }
     this.nameDiv.textContent = displayInfo.name !== 'Not Entered' ? displayInfo.name : displayInfo.username;
-    this.subtitleDiv.textContent = displayInfo.address;
+    
+    // Store and display address
+    const addressWithPrefix = displayInfo.address?.startsWith('0x') ? displayInfo.address : `0x${displayInfo.address || ''}`;
+    this.fullAddress = addressWithPrefix;
+    this.subtitleDiv.textContent = addressWithPrefix;
 
     const fields = {
       Username: 'contactInfoUsername',
       Name: 'contactInfoName',
       ProvidedName: 'contactInfoProvidedName',
-      Email: 'contactInfoEmail',
-      Phone: 'contactInfoPhone',
+      // Email and Phone fields hidden - may want to restore later
+      // Email: 'contactInfoEmail',
+      // Phone: 'contactInfoPhone',
       LinkedIn: 'contactInfoLinkedin',
       X: 'contactInfoX',
     };
@@ -2984,12 +3032,20 @@ class ContactInfoModal {
         element.href = `https://x.com/${value}`;
       } else {
         element.textContent = value;
+        // Add empty class only if the stored value is actually empty
+        if (field === 'Name') {
+          const storedName = displayInfo.address && myData.contacts?.[displayInfo.address]?.name;
+          element.classList.toggle('contact-info-value--empty', value === 'Not Entered' && !storedName);
+        } else {
+          element.classList.toggle('contact-info-value--empty', value === 'Not Entered');
+        }
       }
     });
 
     // Notes
     const notesRaw = displayInfo.notes ?? (displayInfo.address && myData.contacts?.[displayInfo.address]?.notes);
     this.notesElement.textContent = notesRaw || 'Not Entered';
+    this.notesElement.classList.toggle('contact-info-value--empty', !notesRaw);
   }
 
   // Set up chat button functionality
@@ -2998,6 +3054,22 @@ class ContactInfoModal {
       this.chatButton.style.display = 'block';
     } else {
       this.chatButton.style.display = 'none';
+    }
+  }
+
+  async copyAddress() {
+    // Copy the full address, not the displayed truncated version and toast
+    const address = this.fullAddress || this.subtitleDiv.textContent;
+    try {
+      await navigator.clipboard.writeText(address);
+      showToast('Address copied to clipboard', 2000, 'success');
+      this.copyButton.classList.add('success');
+      setTimeout(() => {
+        this.copyButton.classList.remove('success');
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      showToast('Failed to copy address', 0, 'error');
     }
   }
 
@@ -5312,9 +5384,9 @@ class SearchMessagesModal {
 
       const avatarHtml = await getContactAvatarHtml(result.contactAddress);
 
-      // Format message preview with "You:" prefix if it's a sent message
+      // Format message preview with "<" for user messages and ">" for contact messages
       // make this textContent?
-      const messagePreview = result.my ? `You: ${result.preview}` : `${result.preview}`;
+      const messagePreview = result.my ? `< ${result.preview}` : `> ${result.preview}`;
 
       resultElement.innerHTML = `
               <div class="chat-avatar">
@@ -6276,6 +6348,8 @@ class AvatarEditModal {
         }
         // Update My Info modal UI
         myInfoModal.updateMyInfo();
+        // Update header avatar
+        header.updateAvatar();
       } else {
         const contact = myData?.contacts?.[this.currentAddress];
         if (!contact) {
@@ -6590,6 +6664,8 @@ class AvatarEditModal {
 
           // Update My Info modal UI
           myInfoModal.updateMyInfo();
+          // Update header avatar
+          header.updateAvatar();
         } else {
           const contact = myData?.contacts?.[this.currentAddress];
           if (!contact) {
@@ -9868,8 +9944,9 @@ class MyProfileModal {
     this.modal = document.getElementById('accountModal');
     this.closeButton = document.getElementById('closeAccountForm');
     this.name = document.getElementById('name');
-    this.email = document.getElementById('email');
-    this.phone = document.getElementById('phone');
+    // Email and Phone fields hidden - may want to restore later
+    // this.email = document.getElementById('email');
+    // this.phone = document.getElementById('phone');
     this.linkedin = document.getElementById('linkedin');
     this.x = document.getElementById('x');
     this.accountForm = document.getElementById('accountForm');
@@ -9882,9 +9959,10 @@ class MyProfileModal {
     // Add input event listeners for validation
     this.name.addEventListener('input', (e) => this.handleNameInput(e));
     this.name.addEventListener('blur', (e) => this.handleNameBlur(e));
-    this.phone.addEventListener('input', (e) => this.handlePhoneInput(e));
-    this.phone.addEventListener('blur', (e) => this.handlePhoneBlur(e));
-    this.email.addEventListener('input', (e) => this.handleEmailInput(e));
+    // Email and Phone event listeners hidden - may want to restore later
+    // this.phone.addEventListener('input', (e) => this.handlePhoneInput(e));
+    // this.phone.addEventListener('blur', (e) => this.handlePhoneBlur(e));
+    // this.email.addEventListener('input', (e) => this.handleEmailInput(e));
     this.linkedin.addEventListener('input', (e) => this.handleLinkedInInput(e));
     this.linkedin.addEventListener('blur', (e) => this.handleLinkedInBlur(e));
     this.x.addEventListener('input', (e) => this.handleXTwitterInput(e));
@@ -9904,22 +9982,23 @@ class MyProfileModal {
     e.target.value = normalized;
   }
 
-  handlePhoneInput(e) {
-    // Allow only numbers, spaces, dashes, and parentheses
-//    const normalized = e.target.value.replace(/[^\d\s\-()]/g, '');
-    const normalized = normalizePhone(e.target.value);
-    e.target.value = normalized;
-  }
+  // Email and Phone handler methods hidden - may want to restore later
+  // handlePhoneInput(e) {
+  //   // Allow only numbers, spaces, dashes, and parentheses
+  // //    const normalized = e.target.value.replace(/[^\d\s\-()]/g, '');
+  //   const normalized = normalizePhone(e.target.value);
+  //   e.target.value = normalized;
+  // }
 
-  handleEmailInput(e) {
-    const normalized = normalizeEmail(e.target.value);
-    e.target.value = normalized;
-  }
+  // handleEmailInput(e) {
+  //   const normalized = normalizeEmail(e.target.value);
+  //   e.target.value = normalized;
+  // }
 
-  handlePhoneBlur(e) {
-    const normalized = normalizePhone(e.target.value, true);
-    e.target.value = normalized;
-  }
+  // handlePhoneBlur(e) {
+  //   const normalized = normalizePhone(e.target.value, true);
+  //   e.target.value = normalized;
+  // }
 
   handleLinkedInInput(e) {
     // Allow letters, numbers, dashes, and underscores
@@ -9954,8 +10033,9 @@ class MyProfileModal {
     this.modal.classList.add('active');
     if (myData && myData.account) {
       this.name.value = myData.account.name || '';
-      this.email.value = myData.account.email || '';
-      this.phone.value = myData.account.phone || '';
+      // Email and Phone fields hidden - may want to restore later
+      // this.email.value = myData.account.email || '';
+      // this.phone.value = myData.account.phone || '';
       this.linkedin.value = myData.account.linkedin || '';
       this.x.value = myData.account.x || '';
     }
@@ -9972,8 +10052,9 @@ class MyProfileModal {
     // Get and sanitize form data
     const formData = {
       name: this.name.value.trim(),
-      email: this.email.value.trim(),
-      phone: this.phone.value.trim(),
+      // Email and Phone fields hidden - may want to restore later
+      // email: this.email.value.trim(),
+      // phone: this.phone.value.trim(),
       linkedin: this.linkedin.value.trim(),
       x: this.x.value.trim(),
     };
@@ -12056,6 +12137,14 @@ class ChatModal {
         }
       }
 
+      // Add timezone for friends and connections
+      if (Number(contact?.friend) >= 2) {
+        const tz = getLocalTimeZone();
+        if (tz) {
+          senderInfo.timezone = tz;
+        }
+      }
+
       // Always encrypt and send senderInfo (which will contain at least the username)
       payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
 
@@ -13125,31 +13214,42 @@ class ChatModal {
 
   /**
    * Best effort delete of files from attachment server
-   * @param {string|Array<{url: string}>} urlsOrAttachments - Single URL string or array of attachment objects with url property
+   * @param {string|Array<string>|Array<{url?: string, pUrl?: string}>} urlsOrAttachments - Single URL string, array of URLs, or array of attachment objects with url/pUrl
    * @returns {void}
    */
   deleteAttachmentsFromServer(urlsOrAttachments) {
     if (!urlsOrAttachments) return;
     
     const uploadUrl = network.attachmentServerUrl;
-    const urls = Array.isArray(urlsOrAttachments) 
-      ? urlsOrAttachments.map(att => att?.url).filter(Boolean)
-      : [urlsOrAttachments];
-    
-    urls.forEach(url => {
-      if (typeof url !== 'string') return;
-      
+    if (!uploadUrl) return;
+
+    const extractFileId = (url) => {
+      if (typeof url !== 'string') return null;
       // Extract ID from URL format: {attachmentServerUrl}/get/{id}
-      const urlMatch = url.match(/\/get\/([^\/]+)$/);
-      if (urlMatch && urlMatch[1]) {
-        const fileId = urlMatch[1];
-        fetch(`${uploadUrl}/delete/${fileId}`, {
-          method: 'DELETE'
-        }).catch(err => {
-          // Silently ignore errors - best effort delete
-          console.warn('Failed to delete attachment from server:', err);
-        });
-      }
+      // Be tolerant of query/hash suffixes.
+      const match = url.match(/\/get\/([^/?#]+)(?:[/?#]|$)/);
+      return match && match[1] ? match[1] : null;
+    };
+
+    const urls = Array.isArray(urlsOrAttachments)
+      ? urlsOrAttachments.flatMap((item) => {
+          if (typeof item === 'string') return [item];
+          if (item && typeof item === 'object') return [item.url, item.pUrl].filter(Boolean);
+          return [];
+        })
+      : [urlsOrAttachments];
+
+    // De-dupe to avoid double-deleting the same id.
+    const uniqueUrls = Array.from(new Set(urls.filter(u => typeof u === 'string')));
+
+    uniqueUrls.forEach((url) => {
+      const fileId = extractFileId(url);
+      if (!fileId) return;
+
+      fetch(`${uploadUrl}/delete/${fileId}`, { method: 'DELETE' }).catch((err) => {
+        // Silently ignore errors - best effort delete
+        console.warn('Failed to delete attachment from server:', err);
+      });
     });
   }
 
@@ -15301,6 +15401,14 @@ class ChatModal {
         }
       }
 
+      // Add timezone for friends and connections
+      if (Number(contact?.friend) >= 2) {
+        const tz = getLocalTimeZone();
+        if (tz) {
+          senderInfo.timezone = tz;
+        }
+      }
+
       // Always encrypt and send senderInfo
       payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
 
@@ -15441,6 +15549,14 @@ class ChatModal {
           senderInfo.avatarId = myData.account.avatarId;
           senderInfo.avatarKey = myData.account.avatarKey;
         }
+    }
+
+    // Add timezone for friends and connections
+    if (Number(contact?.friend) >= 2) {
+      const tz = getLocalTimeZone();
+      if (tz) {
+        senderInfo.timezone = tz;
+      }
     }
 
     payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
@@ -16105,6 +16221,33 @@ class CallInviteModal {
 
 const callInviteModal = new CallInviteModal();
 
+// ---- Call scheduling shared helpers (display-only) ----
+function getActiveChatContactTimeZone() {
+  const addr = chatModal?.address;
+  if (!addr) return '';
+  const tz = myData?.contacts?.[addr]?.senderInfo?.timezone;
+  return typeof tz === 'string' ? tz : '';
+}
+
+function roundToMinuteMs(ms) {
+  return Math.round(ms / 60000) * 60000;
+}
+
+function formatTimeInTimeZone(ms, tz) {
+  if (!tz || !ms) return '';
+  try {
+    const fmt = new Intl.DateTimeFormat(undefined, {
+      timeZone: tz,
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    });
+    return fmt.format(new Date(ms));
+  } catch (e) {
+    return '';
+  }
+}
+
 /**
  * Call Schedule Choice Modal
  * Presents: Call Now | Schedule | Cancel
@@ -16116,6 +16259,8 @@ class CallScheduleChoiceModal {
     this.scheduleBtn = null;
     this.cancelBtn = null;
     this.closeBtn = null;
+    this.recipientTime = null;
+    this._recipientTimeInterval = null;
     this.onSelect = null; // function(choice)
   }
 
@@ -16126,6 +16271,7 @@ class CallScheduleChoiceModal {
     this.scheduleBtn = document.getElementById('openCallScheduleDateBtn');
     this.cancelBtn = document.getElementById('cancelCallScheduleChoice');
     this.closeBtn = document.getElementById('closeCallScheduleChoiceModal');
+    this.recipientTime = document.getElementById('callScheduleChoiceRecipientTime');
 
     const onNow = () => this._select('now');
     const onSchedule = () => this._select('schedule');
@@ -16140,13 +16286,53 @@ class CallScheduleChoiceModal {
   open(onSelect) {
     this.onSelect = onSelect;
     this.modal?.classList.add('active');
+    this._startRecipientTimeUpdates();
   }
 
   _select(value) {
     if (this.modal) this.modal.classList.remove('active');
+    this._stopRecipientTimeUpdates();
     const cb = this.onSelect;
     this.onSelect = null;
     if (cb) cb(value);
+  }
+
+  _startRecipientTimeUpdates() {
+    this._stopRecipientTimeUpdates();
+    this._updateRecipientTimeNow();
+    this._recipientTimeInterval = setInterval(() => this._updateRecipientTimeNow(), 30000);
+  }
+
+  _stopRecipientTimeUpdates() {
+    if (this._recipientTimeInterval) {
+      clearInterval(this._recipientTimeInterval);
+      this._recipientTimeInterval = null;
+    }
+    if (this.recipientTime) {
+      this.recipientTime.textContent = '';
+      this.recipientTime.style.display = 'none';
+    }
+  }
+
+  _updateRecipientTimeNow() {
+    if (!this.recipientTime) return;
+    const tz = getActiveChatContactTimeZone();
+    if (!tz) {
+      this.recipientTime.textContent = '';
+      this.recipientTime.style.display = 'none';
+      return;
+    }
+
+    const now = roundToMinuteMs(getCorrectedTimestamp());
+    const s = formatTimeInTimeZone(now, tz);
+    if (!s) {
+      this.recipientTime.textContent = '';
+      this.recipientTime.style.display = 'none';
+      return;
+    }
+
+    this.recipientTime.textContent = `Recipient time: ${s}`;
+    this.recipientTime.style.display = '';
   }
 }
 
@@ -16162,6 +16348,7 @@ class CallScheduleDateModal {
     this.hourSelect = null;
     this.minuteSelect = null;
     this.ampmSelect = null;
+    this.recipientTime = null;
     this.submitBtn = null;
     this.cancelBtn = null;
     this.closeBtn = null;
@@ -16172,6 +16359,7 @@ class CallScheduleDateModal {
     this._onSubmit = this._onSubmit.bind(this);
     this._onSubmitBtn = this._onSubmitBtn.bind(this);
     this._onCancel = this._onCancel.bind(this);
+    this._onInputChange = this._onInputChange.bind(this);
   }
 
   load() {
@@ -16182,6 +16370,7 @@ class CallScheduleDateModal {
     this.hourSelect = document.getElementById('callScheduleHour');
     this.minuteSelect = document.getElementById('callScheduleMinute');
     this.ampmSelect = document.getElementById('callScheduleAmPm');
+    this.recipientTime = document.getElementById('callScheduleConvertedTime');
     this.submitBtn = document.getElementById('confirmCallSchedule');
     this.cancelBtn = document.getElementById('cancelCallScheduleDate');
     this.closeBtn = document.getElementById('closeCallScheduleDateModal');
@@ -16190,6 +16379,9 @@ class CallScheduleDateModal {
     if (this.submitBtn) this.submitBtn.addEventListener('click', this._onSubmitBtn);
     if (this.cancelBtn) this.cancelBtn.addEventListener('click', this._onCancel);
     if (this.closeBtn) this.closeBtn.addEventListener('click', this._onCancel);
+
+    // Live update of converted time preview (single listener for all inputs)
+    if (this.form) this.form.addEventListener('change', this._onInputChange);
   }
 
   open(onDone) {
@@ -16254,6 +16446,9 @@ class CallScheduleDateModal {
     }
     this.modal?.classList.add('active');
     this.clockTimer.start();
+
+    // Render the initial converted time preview
+    this._updateConvertedTimePreview();
   }
 
   _onSubmit(e) {
@@ -16266,6 +16461,71 @@ class CallScheduleDateModal {
   }
   _onCancel() {
     this._closeWith(null);
+  }
+
+  _onInputChange() {
+    this._updateConvertedTimePreview();
+  }
+
+  _getSelectedCorrectedTimestamp() {
+    if (!this.dateInput || !this.hourSelect || !this.minuteSelect || !this.ampmSelect) return 0;
+    const dateVal = this.dateInput.value;
+    const hourVal = this.hourSelect.value;
+    const minuteVal = this.minuteSelect.value;
+    const ampmVal = this.ampmSelect.value;
+    if (!dateVal || hourVal === '' || minuteVal === '') return 0;
+
+    const parsed = this._parseDateInput(dateVal);
+    const hour12 = Number(hourVal);
+    const minute = Number(minuteVal);
+    if (!parsed || Number.isNaN(hour12) || Number.isNaN(minute)) return 0;
+
+    const hour24 = this._convert12To24(hour12, ampmVal);
+    const { year, month, day } = parsed;
+    const localMs = new Date(year, month - 1, day, hour24, minute, 0, 0).getTime();
+    return localMs + timeSkew;
+  }
+
+  _updateConvertedTimePreview() {
+    if (!this.recipientTime) return;
+
+    const tz = getActiveChatContactTimeZone();
+    const tsRaw = this._getSelectedCorrectedTimestamp();
+    // Display-only: stabilize at the chosen minute even if timeSkew includes seconds.
+    const ts = tsRaw ? roundToMinuteMs(tsRaw) : 0;
+
+    if (!tz || !ts) {
+      this.recipientTime.textContent = '';
+      this.recipientTime.style.display = 'none';
+      return;
+    }
+
+    const s = (() => {
+      if (!tz || !ts) return '';
+      try {
+        const fmt = new Intl.DateTimeFormat(undefined, {
+          timeZone: tz,
+          year: 'numeric',
+          month: 'short',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZoneName: 'short'
+        });
+        return fmt.format(new Date(ts));
+      } catch (e) {
+        return '';
+      }
+    })();
+
+    if (!s) {
+      this.recipientTime.textContent = '';
+      this.recipientTime.style.display = 'none';
+      return;
+    }
+
+    this.recipientTime.textContent = `Recipient time: ${s}`;
+    this.recipientTime.style.display = '';
   }
 
   _submitValue() {
@@ -16354,6 +16614,12 @@ class CallScheduleDateModal {
     if (this.modal) this.modal.classList.remove('active');
     const cb = this.onDone;
     this.onDone = null;
+
+    // Hide converted time preview when closing
+    if (this.recipientTime) {
+      this.recipientTime.textContent = '';
+      this.recipientTime.style.display = 'none';
+    }
     if (cb) cb(value);
   }
 }
@@ -18801,20 +19067,27 @@ class SendAssetConfirmModal {
     let encSenderInfo = '';
     let senderInfo = '';
     if (sharedKeyMethod != 'none'){
-      if (myData.contacts[toAddress]?.friend === 3) {
-        // Create sender info object
-        senderInfo = {
-          username: myAccount.username,
-          name: myData.account.name,
-          email: myData.account.email,
-          phone: myData.account.phone,
-          linkedin: myData.account.linkedin,
-          x: myData.account.x,
-        };
-      } else {
-        senderInfo = {
-          username: myAccount.username,
-        };
+      const friendLevel = Number(myData.contacts[toAddress]?.friend) || 0;
+
+      // Always include username; include additional info only for full friends
+      senderInfo = {
+        username: myAccount.username,
+      };
+
+      if (friendLevel === 3) {
+        senderInfo.name = myData.account.name;
+        senderInfo.email = myData.account.email;
+        senderInfo.phone = myData.account.phone;
+        senderInfo.linkedin = myData.account.linkedin;
+        senderInfo.x = myData.account.x;
+      }
+
+      // Add timezone for friends and connections
+      if (friendLevel >= 2) {
+        const tz = getLocalTimeZone();
+        if (tz) {
+          senderInfo.timezone = tz;
+        }
       }
       encSenderInfo = encryptChacha(dhkey, stringify(senderInfo));
     } else {
@@ -21616,6 +21889,12 @@ function cleanSenderInfo(si) {
   if (si.x) {
     csi.x = normalizeXTwitterUsername(si.x)
   }
+  if (si.timezone) {
+    const tz = normalizeTimeZone(si.timezone);
+    if (tz) {
+      csi.timezone = tz;
+    }
+  }
   if (si.avatarId) {
     csi.avatarId = si.avatarId
   }
@@ -21623,6 +21902,27 @@ function cleanSenderInfo(si) {
     csi.avatarKey = si.avatarKey
   }
   return csi;
+}
+
+function getLocalTimeZone() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof tz === 'string' ? tz : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function normalizeTimeZone(tz) {
+  if (typeof tz !== 'string') {
+    return '';
+  }
+  const cleaned = tz.trim();
+  if (!cleaned) {
+    return '';
+  }
+  // Keep bounded to avoid storing arbitrarily large strings
+  return cleaned.slice(0, 64);
 }
 
 function stopLongPoll() {
