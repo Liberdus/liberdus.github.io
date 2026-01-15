@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'f'
+const version = 'g'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -36,6 +36,8 @@ async function checkVersion() {
       newUrl,
       'styles.css',
       'app.js',
+      'dao.repo.js',
+      'dao.mock-data.js',
       'lib.js',
       'network.js',
       'crypto.js',
@@ -72,6 +74,14 @@ async function forceReload(urls) {
 // Needed to stringify and parse bigints; also deterministic stringify
 //   modified to use export
 import { stringify, parse } from './external/stringify-shardus.js';
+
+import {
+  daoRepo,
+  DAO_STATES,
+  getDaoStateLabel,
+  getDaoTypeLabel,
+  getEffectiveDaoState,
+} from './dao.repo.js';
 
 // Import crypto functions from crypto.js
 import {
@@ -409,6 +419,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Menu Modal
   menuModal.load();
 
+  // DAO Modals
+  daoModal.load();
+  addProposalModal.load();
+  proposalInfoModal.load();
+
   // Settings Modal
   settingsModal.load();
 
@@ -456,6 +471,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Call Invite Modal
   callInviteModal.load();
+
+  // Share Contacts Modal
+  shareContactsModal.load();
 
   // Call Schedule Modals
   callScheduleChoiceModal.load();
@@ -1710,6 +1728,10 @@ class MenuModal {
     this.closeButton.addEventListener('click', () => this.close());
     this.validatorButton = document.getElementById('openValidator');
     this.validatorButton.addEventListener('click', () => validatorStakingModal.open());
+    this.daoButton = document.getElementById('openDao');
+    if (this.daoButton) {
+      this.daoButton.addEventListener('click', () => daoModal.open());
+    }
     this.inviteButton = document.getElementById('openInvite');
     this.inviteButton.addEventListener('click', () => inviteModal.open());
     this.explorerButton = document.getElementById('openExplorer');
@@ -1838,6 +1860,610 @@ class MenuModal {
 }
 
 const menuModal = new MenuModal();
+
+// =====================
+// DAO / Proposals
+// =====================
+
+// DAO proposals are loaded via `daoRepo` and kept in memory (no localStorage persistence).
+
+function getDaoVoterId() {
+  return myAccount?.address || myData?.account?.address || myAccount?.username || myData?.account?.username || 'anon';
+}
+
+function formatDaoTimestamp(ts) {
+  const n = Number(ts || 0);
+  if (!n) return '';
+  try {
+    return new Date(n).toLocaleString();
+  } catch {
+    return '';
+  }
+}
+
+class DaoModal {
+  constructor() {
+    this.selectedGroupKey = 'active';
+    this.selectedStateKey = 'voting';
+    this._outsideClickHandler = null;
+    this.isLoading = false;
+  }
+
+  load() {
+    this.modal = document.getElementById('daoModal');
+    this.closeButton = document.getElementById('closeDaoModal');
+    this.titleEl = document.getElementById('daoModalTitle');
+    this.statusMenuButton = document.getElementById('daoFilterButton');
+    this.statusMenu = document.getElementById('daoStatusContextMenu');
+    this.groupActiveButton = document.getElementById('daoGroupActiveButton');
+    this.groupArchivedButton = document.getElementById('daoGroupArchivedButton');
+    this.list = document.getElementById('daoProposalList');
+    this.emptyState = document.getElementById('daoProposalEmptyState');
+    this.addButton = document.getElementById('daoAddProposalButton');
+
+    if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
+    if (this.addButton) this.addButton.addEventListener('click', () => addProposalModal.open());
+
+    if (this.statusMenuButton) {
+      this.statusMenuButton.addEventListener('click', (e) => this.toggleStatusMenu(e));
+    }
+
+    if (this.groupActiveButton) {
+      this.groupActiveButton.addEventListener('click', () => {
+        this.setGroupFilter('active');
+      });
+    }
+    if (this.groupArchivedButton) {
+      this.groupArchivedButton.addEventListener('click', () => {
+        this.setGroupFilter('archived');
+      });
+    }
+
+    if (this.statusMenu) {
+      this.statusMenu.addEventListener('click', (e) => {
+        const option = e.target.closest('.context-menu-option');
+        if (!option) return;
+        const key = option.dataset.stateKey;
+        if (!key) return;
+        this.setStateFilter(key);
+      });
+    }
+
+    // Close the DAO menu on outside click
+    this._outsideClickHandler = (e) => {
+      if (!this.statusMenu || this.statusMenu.style.display !== 'block') return;
+      if (this.statusMenu.contains(e.target)) return;
+      if (this.statusMenuButton && this.statusMenuButton.contains(e.target)) return;
+      this.closeStatusMenu();
+    };
+    document.addEventListener('click', this._outsideClickHandler);
+  }
+
+  open() {
+    this._open();
+  }
+
+  async _open() {
+    this.isLoading = true;
+
+    // Close the main menu if opened from it
+    if (menuModal?.isActive?.()) menuModal.close();
+    footer?.closeNewChatButton?.();
+
+    this.modal.classList.add('active');
+    enterFullscreen();
+
+    // Default filter is Voting
+    this.selectedStateKey = this.selectedStateKey || 'voting';
+    this.selectedGroupKey = this.selectedGroupKey || 'active';
+    this.render();
+
+    try {
+      await daoRepo.refresh({ force: true });
+    } catch (e) {
+      console.warn('Failed to refresh DAO proposals:', e);
+      showToast('Failed to load proposals', 2500, 'error');
+    } finally {
+      this.isLoading = false;
+      this.render();
+    }
+  }
+
+  close() {
+    this.closeStatusMenu();
+    this.modal.classList.remove('active');
+    enterFullscreen();
+
+    if (this.addButton) {
+      this.addButton.classList.remove('visible');
+    }
+
+    // Restore new chat button if user is on chats/contacts
+    const activeScreenId = document.querySelector('.app-screen.active')?.id;
+    if (activeScreenId === 'chatsScreen' || activeScreenId === 'contactsScreen') {
+      footer?.openNewChatButton?.();
+    }
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  toggleStatusMenu(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!this.statusMenu) return;
+    if (this.statusMenu.style.display === 'block') {
+      this.closeStatusMenu();
+      return;
+    }
+    this.showStatusMenu();
+  }
+
+  showStatusMenu() {
+    if (!this.statusMenu || !this.statusMenuButton) return;
+    const buttonRect = this.statusMenuButton.getBoundingClientRect();
+    const menuWidth = 200;
+    const approxMenuHeight = 8 + DAO_STATES.length * 44; // padding + items
+
+    let left = buttonRect.right - menuWidth;
+    let top = buttonRect.bottom + 8;
+
+    if (left < 10) left = 10;
+    if (top + approxMenuHeight > window.innerHeight - 10) {
+      top = buttonRect.top - approxMenuHeight - 8;
+    }
+
+    Object.assign(this.statusMenu.style, {
+      left: `${left}px`,
+      top: `${top}px`,
+      display: 'block',
+    });
+  }
+
+  closeStatusMenu() {
+    if (!this.statusMenu) return;
+    this.statusMenu.style.display = 'none';
+  }
+
+  setStateFilter(key) {
+    this.selectedStateKey = key;
+    this.closeStatusMenu();
+    this.render();
+  }
+
+  setGroupFilter(key) {
+    this.selectedGroupKey = key;
+    this.render();
+  }
+
+  getProposals() {
+    return daoRepo.getProposalsForUi(this.selectedGroupKey);
+  }
+
+  render() {
+    const proposalsActive = daoRepo.getProposalsForUi('active');
+    const proposalsArchived = daoRepo.getProposalsForUi('archived');
+
+    const proposals = this.selectedGroupKey === 'archived' ? proposalsArchived : proposalsActive;
+
+    // Update counts by state (within selected group)
+    const counts = Object.fromEntries(DAO_STATES.map((s) => [s.key, 0]));
+    for (const p of proposals) {
+      const state = getEffectiveDaoState(p);
+      if (counts[state] !== undefined) counts[state] += 1;
+    }
+
+    // Update header title
+    const groupLabel = this.selectedGroupKey === 'archived' ? 'Archived' : 'Active';
+    const label = getDaoStateLabel(this.selectedStateKey);
+    if (this.titleEl) this.titleEl.textContent = `DAO · ${groupLabel} · ${label}`;
+
+    // Update group toggle labels + selection
+    if (this.groupActiveButton) {
+      this.groupActiveButton.textContent = `Active ${proposalsActive.length}`;
+      this.groupActiveButton.classList.toggle('active', this.selectedGroupKey !== 'archived');
+    }
+    if (this.groupArchivedButton) {
+      this.groupArchivedButton.textContent = `Archived ${proposalsArchived.length}`;
+      this.groupArchivedButton.classList.toggle('active', this.selectedGroupKey === 'archived');
+    }
+
+    for (const s of DAO_STATES) {
+      const el = document.getElementById(`daoStatusOption${s.label.replace(/\s+/g, '')}`);
+      if (el) el.textContent = `${s.label} ${counts[s.key] || 0}`;
+    }
+
+    // Filter + sort (newest entered into state first)
+    const filtered = proposals
+      .filter((p) => getEffectiveDaoState(p) === this.selectedStateKey)
+      .sort((a, b) => Number(b.stateEnteredAt || b.createdAt || 0) - Number(a.stateEnteredAt || a.createdAt || 0));
+
+    // Clear old list items
+    if (this.list) {
+      this.list.querySelectorAll('li.chat-item').forEach((el) => el.remove());
+    }
+
+    const hasAny = filtered.length > 0;
+    if (this.emptyState) this.emptyState.style.display = hasAny ? 'none' : 'block';
+
+    // Update empty state copy based on group.
+    if (this.emptyState && !hasAny) {
+      const lines = Array.from(this.emptyState.querySelectorAll('div'));
+      // Structure is: [0]=spacer, [1]=headline, [2]=subline, [3]=optional third line.
+      const headlineEl = lines[1] || null;
+      const sublineEl = lines[2] || null;
+      const isArchived = this.selectedGroupKey === 'archived';
+
+      if (this.isLoading) {
+        if (headlineEl) headlineEl.textContent = 'Loading proposals…';
+        if (sublineEl) sublineEl.textContent = 'Please wait';
+      } else {
+        if (headlineEl) headlineEl.textContent = isArchived ? 'No archived proposals found' : 'No proposals found';
+        if (sublineEl) {
+          sublineEl.textContent = isArchived
+            ? 'Archived proposals appear here after they age out'
+            : 'Use + to create a proposal';
+        }
+      }
+    }
+
+    if (!this.list) return;
+
+    for (const p of filtered) {
+      const li = document.createElement('li');
+      li.classList.add('chat-item');
+
+      const title = escapeHtml(p.title || 'Untitled Proposal');
+      const summary = escapeHtml((p.summary || '').trim());
+      const time = formatDaoTimestamp(p.stateEnteredAt || p.createdAt);
+
+      const numberPrefix = p.number ? `#${p.number} ` : '';
+
+      li.innerHTML = `
+        <div class="chat-content">
+          <div class="chat-header">
+            <div class="chat-name">${escapeHtml(numberPrefix)}${title}</div>
+            <div class="chat-time">${escapeHtml(time)}</div>
+          </div>
+          <div class="chat-message">${truncateMessage(summary || '—', 70)}</div>
+        </div>
+      `;
+      li.onclick = () => proposalInfoModal.open(p.id);
+      this.list.appendChild(li);
+    }
+
+    // Show + button when modal is active
+    if (this.addButton) {
+      this.addButton.classList.toggle('visible', this.isActive());
+    }
+  }
+}
+
+const daoModal = new DaoModal();
+
+class AddProposalModal {
+  load() {
+    this.modal = document.getElementById('addProposalModal');
+    this.closeButton = document.getElementById('closeAddProposalModal');
+    this.cancelButton = document.getElementById('cancelAddProposal');
+    this.form = document.getElementById('addProposalForm');
+    this.titleInput = document.getElementById('addProposalTitle');
+    this.typeSelect = document.getElementById('addProposalType');
+    this.summaryInput = document.getElementById('addProposalSummary');
+    this.typeFieldsContainer = document.getElementById('addProposalTypeFields');
+
+    if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
+    if (this.cancelButton) this.cancelButton.addEventListener('click', () => this.close());
+
+    if (this.form) {
+      this.form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        this.handleCreate();
+      });
+    }
+
+    if (this.typeSelect) {
+      this.typeSelect.addEventListener('change', () => {
+        this.renderTypeFields();
+      });
+    }
+  }
+
+  open() {
+    this.modal.classList.add('active');
+    enterFullscreen();
+    if (this.titleInput) this.titleInput.value = '';
+    if (this.typeSelect) this.typeSelect.value = 'treasury_project';
+    if (this.summaryInput) this.summaryInput.value = '';
+    this.renderTypeFields();
+    setTimeout(() => {
+      this.titleInput.focus();
+    }, 325);
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    enterFullscreen();
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  renderTypeFields() {
+    if (!this.typeFieldsContainer) return;
+    const typeKey = this.typeSelect?.value || 'treasury_project';
+
+    // Minimal, mock-only dynamic fields.
+    if (typeKey === 'treasury_project' || typeKey === 'treasury_mint') {
+      this.typeFieldsContainer.innerHTML = `
+        <div class="form-group">
+          <label for="addProposalAddress">Address</label>
+          <input id="addProposalAddress" class="form-control" type="text" maxlength="128" placeholder="Destination address" />
+        </div>
+        <div class="form-group">
+          <label for="addProposalAmount">Amount</label>
+          <input id="addProposalAmount" class="form-control" type="number" min="0" step="0.0001" placeholder="0" />
+        </div>
+      `;
+      return;
+    }
+
+    if (typeKey === 'params_governance') {
+      this.typeFieldsContainer.innerHTML = `
+        <div class="form-group">
+          <label for="addProposalVotingThreshold">Voting Threshold</label>
+          <input id="addProposalVotingThreshold" class="form-control" type="text" maxlength="20" placeholder="e.g. 60%" />
+        </div>
+        <div class="form-group">
+          <label for="addProposalVotingEligibility">Voting Eligibility</label>
+          <input id="addProposalVotingEligibility" class="form-control" type="text" maxlength="120" placeholder="e.g. validators + stakers" />
+        </div>
+      `;
+      return;
+    }
+
+    if (typeKey === 'params_economic') {
+      this.typeFieldsContainer.innerHTML = `
+        <div class="form-group">
+          <label for="addProposalMinTxFee">Min Tx Fee</label>
+          <input id="addProposalMinTxFee" class="form-control" type="text" maxlength="24" placeholder="e.g. 0.001" />
+        </div>
+        <div class="form-group">
+          <label for="addProposalNodeRewards">Node Rewards</label>
+          <input id="addProposalNodeRewards" class="form-control" type="text" maxlength="24" placeholder="e.g. unchanged" />
+        </div>
+        <div class="form-group">
+          <label for="addProposalValidatorPenalty">Validator Penalty</label>
+          <input id="addProposalValidatorPenalty" class="form-control" type="text" maxlength="24" placeholder="e.g. 50" />
+        </div>
+      `;
+      return;
+    }
+
+    // params_protocol
+    this.typeFieldsContainer.innerHTML = `
+      <div class="form-group">
+        <label for="addProposalMinActiveNodes">Min Active Nodes</label>
+        <input id="addProposalMinActiveNodes" class="form-control" type="number" min="0" step="1" placeholder="e.g. 100" />
+      </div>
+      <div class="form-group">
+        <label for="addProposalMaxActiveNodes">Max Active Nodes</label>
+        <input id="addProposalMaxActiveNodes" class="form-control" type="number" min="0" step="1" placeholder="e.g. 250" />
+      </div>
+      <div class="form-group">
+        <label for="addProposalMinValidatorVersion">Min Validator Version</label>
+        <input id="addProposalMinValidatorVersion" class="form-control" type="text" maxlength="40" placeholder="e.g. 1.2.3" />
+      </div>
+    `;
+  }
+
+  async handleCreate() {
+    const title = (this.titleInput?.value || '').trim();
+    const summary = (this.summaryInput?.value || '').trim();
+    const typeKey = (this.typeSelect?.value || '').trim();
+
+    if (!title) {
+      showToast('Please enter a title', 2000, 'warning');
+      return;
+    }
+    if (!summary) {
+      showToast('Please enter a summary', 2000, 'warning');
+      return;
+    }
+
+    if (!typeKey) {
+      showToast('Please select a type', 2000, 'warning');
+      return;
+    }
+
+    const fields = {};
+    // Collect dynamic fields if present.
+    const addrEl = document.getElementById('addProposalAddress');
+    const amtEl = document.getElementById('addProposalAmount');
+    const thrEl = document.getElementById('addProposalVotingThreshold');
+    const eligEl = document.getElementById('addProposalVotingEligibility');
+    const feeEl = document.getElementById('addProposalMinTxFee');
+    const rewardsEl = document.getElementById('addProposalNodeRewards');
+    const penEl = document.getElementById('addProposalValidatorPenalty');
+    const minNodesEl = document.getElementById('addProposalMinActiveNodes');
+    const maxNodesEl = document.getElementById('addProposalMaxActiveNodes');
+    const minVerEl = document.getElementById('addProposalMinValidatorVersion');
+
+    if (addrEl?.value) fields.address = addrEl.value.trim();
+    if (amtEl?.value) fields.amount = amtEl.value;
+    if (thrEl?.value) fields.votingThreshold = thrEl.value.trim();
+    if (eligEl?.value) fields.votingEligibility = eligEl.value.trim();
+    if (feeEl?.value) fields.minTxFee = feeEl.value.trim();
+    if (rewardsEl?.value) fields.nodeRewards = rewardsEl.value.trim();
+    if (penEl?.value) fields.validatorPenalty = penEl.value.trim();
+    if (minNodesEl?.value) fields.minActiveNodes = Number(minNodesEl.value);
+    if (maxNodesEl?.value) fields.maxActiveNodes = Number(maxNodesEl.value);
+    if (minVerEl?.value) fields.minValidatorVersion = minVerEl.value.trim();
+
+    try {
+      await daoRepo.createProposal({
+        title,
+        summary,
+        type: typeKey,
+        fields,
+        createdBy: myAccount?.username || myAccount?.address || 'unknown',
+      });
+    } catch (e) {
+      console.warn('Failed to create proposal:', e);
+      showToast(e?.message || 'Failed to create proposal', 2500, 'error');
+      return;
+    }
+
+    this.close();
+    // Ensure DAO modal shows the new proposal (Discussion by default for new proposals)
+    daoModal.selectedStateKey = 'discussion';
+    daoModal.selectedGroupKey = 'active';
+    if (!daoModal.isActive()) daoModal.open();
+    else daoModal.render();
+
+    showToast('Proposal submitted (Discussion)', 2000, 'success');
+  }
+}
+
+const addProposalModal = new AddProposalModal();
+
+class ProposalInfoModal {
+  load() {
+    this.modal = document.getElementById('proposalInfoModal');
+    this.closeButton = document.getElementById('closeProposalInfoModal');
+    this.numberEl = document.getElementById('proposalInfoNumber');
+    this.titleEl = document.getElementById('proposalInfoTitle');
+    this.typeEl = document.getElementById('proposalInfoType');
+    this.metaEl = document.getElementById('proposalInfoMeta');
+    this.summaryEl = document.getElementById('proposalInfoSummary');
+    this.fieldsEl = document.getElementById('proposalInfoFields');
+    this.voteSection = document.getElementById('proposalVoteSection');
+    this.voteYesBtn = document.getElementById('proposalVoteYes');
+    this.voteNoBtn = document.getElementById('proposalVoteNo');
+    this.voteCountsEl = document.getElementById('proposalVoteCounts');
+
+    this._currentProposalId = null;
+
+    if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
+
+    if (this.voteYesBtn) this.voteYesBtn.addEventListener('click', () => this.castVote('yes'));
+    if (this.voteNoBtn) this.voteNoBtn.addEventListener('click', () => this.castVote('no'));
+  }
+
+  open(proposalId) {
+    this._open(proposalId);
+  }
+
+  async _open(proposalId) {
+    this._currentProposalId = proposalId;
+
+    this.modal.classList.add('active');
+    enterFullscreen();
+
+    let p = null;
+    try {
+      await daoRepo.ensureLoaded();
+      p = daoRepo.getProposalById(proposalId);
+    } catch (e) {
+      console.warn('Failed to load proposal:', e);
+    }
+
+    if (!p) {
+      if (this.numberEl) this.numberEl.textContent = '';
+      if (this.titleEl) this.titleEl.textContent = 'Proposal not found';
+      if (this.typeEl) this.typeEl.textContent = '';
+      if (this.metaEl) this.metaEl.textContent = '';
+      if (this.summaryEl) this.summaryEl.textContent = '';
+      if (this.fieldsEl) this.fieldsEl.innerHTML = '';
+      if (this.voteSection) this.voteSection.style.display = 'none';
+      return;
+    }
+
+    const uiState = getDaoStateLabel(getEffectiveDaoState({ state: p.state, stateEnteredAt: p.state_changed, createdAt: p.created }));
+    const entered = formatDaoTimestamp(p.state_changed || p.created);
+    const createdBy = p.createdBy ? ` · by ${p.createdBy}` : '';
+    const typeLabel = getDaoTypeLabel(p.type);
+
+    if (this.numberEl) this.numberEl.textContent = p.number ? `Proposal #${p.number}` : 'Proposal';
+    if (this.titleEl) this.titleEl.textContent = p.title || 'Untitled Proposal';
+    if (this.typeEl) this.typeEl.textContent = typeLabel ? `Type: ${typeLabel}` : '';
+    if (this.metaEl) this.metaEl.textContent = `${uiState} · ${entered}${createdBy}`;
+    if (this.summaryEl) this.summaryEl.textContent = p.summary || '';
+
+    if (this.fieldsEl) {
+      const entries = Object.entries(p.fields || {}).filter(([, v]) => v !== undefined && v !== null && String(v).length > 0);
+      if (entries.length === 0) {
+        this.fieldsEl.innerHTML = '';
+      } else {
+        this.fieldsEl.innerHTML = entries
+          .map(([k, v]) => {
+            const key = escapeHtml(String(k));
+            const val = escapeHtml(String(v));
+            return `<div><span style="color: var(--secondary-text-color)">${key}</span>: ${val}</div>`;
+          })
+          .join('');
+      }
+    }
+
+    this.renderVotingSection(p);
+  }
+
+  renderVotingSection(p) {
+    if (!this.voteSection) return;
+    const effective = getEffectiveDaoState({ state: p.state, stateEnteredAt: p.state_changed, createdAt: p.created });
+    const showVoting = effective === 'voting';
+    this.voteSection.style.display = showVoting ? 'block' : 'none';
+    if (!showVoting) return;
+
+    const voterId = getDaoVoterId();
+    const votes = p.votes || { yes: 0, no: 0, by: {} };
+    const myVote = votes.by?.[voterId] || '';
+
+    if (this.voteCountsEl) this.voteCountsEl.textContent = `Yes: ${votes.yes || 0} · No: ${votes.no || 0}`;
+
+    if (this.voteYesBtn) {
+      this.voteYesBtn.classList.toggle('btn--primary', myVote === 'yes');
+      this.voteYesBtn.classList.toggle('btn--secondary', myVote !== 'yes');
+    }
+    if (this.voteNoBtn) {
+      this.voteNoBtn.classList.toggle('btn--primary', myVote === 'no');
+      this.voteNoBtn.classList.toggle('btn--secondary', myVote !== 'no');
+    }
+  }
+
+  async castVote(choice) {
+    if (!this._currentProposalId) return;
+
+    const voterId = getDaoVoterId();
+    const result = await daoRepo.castVote({
+      proposalId: this._currentProposalId,
+      voterId,
+      choice,
+    });
+
+    if (!result?.ok) {
+      showToast(result?.error || 'Failed to vote', 2000, 'warning');
+      return;
+    }
+
+    // Re-render this modal and the list counts.
+    this.open(this._currentProposalId);
+    if (daoModal?.isActive?.()) daoModal.render();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    enterFullscreen();
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+}
+
+const proposalInfoModal = new ProposalInfoModal();
 
 class SettingsModal {
   constructor() { }
@@ -2492,7 +3118,7 @@ class SignInModal {
       // set timeout to focus on the last item so shift+tab and tab prevention works
       setTimeout(() => {
         this.signInModalLastItem.focus();
-      }, 100);
+      }, 325);
     });
   }
 
@@ -2931,7 +3557,7 @@ class ContactInfoModal {
     // Back button
     this.backButton.addEventListener('click', () => this.close());
 
-    this.nameEditButton.addEventListener('click', () => editContactModal.open());
+    this.nameEditButton.addEventListener('click', () => editContactModal.open('name'));
 
     // Add chat button handler for contact info modal
     this.chatButton.addEventListener('click', () => {
@@ -2964,7 +3590,7 @@ class ContactInfoModal {
     // Notes edit button
     this.notesEditButton.addEventListener('click', (e) => {
       e.stopPropagation();
-      editContactModal.open();
+      editContactModal.open('notes');
     });
 
     // Make the avatar itself clickable
@@ -3401,6 +4027,8 @@ class EditContactModal {
     this.notesClearButton = document.getElementById('notesClearButton');
     this.saveButton = document.getElementById('saveEditContactButton');
     this.backButton = document.getElementById('closeEditContactModal');
+    this.avatarSection = this.modal.querySelector('#editContactModal .contact-avatar-section');
+    this.avatarDiv = this.avatarSection.querySelector('.avatar');
 
     // Setup event listeners
     this.nameInput.addEventListener('input', (e) => this.handleNameInput(e));
@@ -3411,18 +4039,16 @@ class EditContactModal {
     this.saveButton.addEventListener('click', () => this.handleSave());
     this.providedNameContainer.addEventListener('click', () => this.handleProvidedNameClick());
     this.backButton.addEventListener('click', () => this.close());
+    this.avatarDiv.addEventListener('click', (e) => this.handleAvatarEdit(e));
   }
 
-  open() {
+  open(focusField = 'name') {
     // Get the avatar section elements
-    const avatarSection = document.querySelector('#editContactModal .contact-avatar-section');
-    const avatarDiv = avatarSection.querySelector('.avatar');
-    const nameDiv = avatarSection.querySelector('.name');
-    const subtitleDiv = avatarSection.querySelector('.subtitle');
-    const identicon = document.getElementById('contactInfoAvatar').innerHTML;
+    const nameDiv = this.avatarSection.querySelector('.name');
+    const subtitleDiv = this.avatarSection.querySelector('.subtitle');
 
     // Update the avatar section
-    avatarDiv.innerHTML = identicon;
+    this.avatarDiv.innerHTML = document.getElementById('contactInfoAvatar').innerHTML;
     // update the name and subtitle
     nameDiv.textContent = contactInfoModal.usernameDiv.textContent;
     subtitleDiv.textContent = contactInfoModal.subtitleDiv.textContent;
@@ -3463,25 +4089,38 @@ class EditContactModal {
 
     // Show the edit contact modal
     this.modal.classList.add('active');
-
-    // Create a handler function to focus the input after the modal transition
-    const editContactFocusHandler = () => {
-      // add slight delay and focus on the the very right of the input
-      setTimeout(() => {
-        this.nameInput.focus();
-        // Set cursor position to the end of the input content
-        this.nameInput.setSelectionRange(this.nameInput.value.length, this.nameInput.value.length);
-      }, 200);
-      this.modal.removeEventListener('transitionend', editContactFocusHandler);
-    };
-
-    // Add the event listener
-    this.modal.addEventListener('transitionend', editContactFocusHandler);
+    // Delay focus to ensure transition completes (modal transition is 300ms)
+    setTimeout(() => {
+      const inputToFocus = focusField === 'notes' ? this.notesInput : this.nameInput;
+      inputToFocus.focus();
+      // Set cursor position to the end of the input content
+      inputToFocus.setSelectionRange(inputToFocus.value.length, inputToFocus.value.length);
+    }, 325);
   }
 
   close() {
     this.modal.classList.remove('active');
     this.currentContactAddress = null;
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  async updateAvatar(contact) {
+    const avatarHtml = await getContactAvatarHtml(contact, 96);
+    this.avatarDiv.innerHTML = avatarHtml;
+  }
+
+  handleAvatarEdit(e) {
+    // Open avatar edit modal when clicking anywhere in the avatar div (button or image)
+    e.stopPropagation();
+    this.openAvatarEdit();
+  }
+
+  openAvatarEdit() {
+    if (!this.currentContactAddress) return;
+    avatarEditModal.open(this.currentContactAddress);
   }
 
   handleProvidedNameClick() {
@@ -5291,7 +5930,10 @@ class SearchMessagesModal {
 
   open() {
     this.modal.classList.add('active');
-    this.searchInput.focus();
+    // Delay focus to ensure transition completes (modal transition is 300ms)
+    setTimeout(() => {
+      this.searchInput.focus();
+    }, 325);
   }
 
   close() {
@@ -5508,7 +6150,10 @@ class SearchContactsModal {
 
   open() {
     this.modal.classList.add('active');
-    this.searchInput.focus();
+    // Delay focus to ensure transition completes (modal transition is 300ms)
+    setTimeout(() => {
+      this.searchInput.focus();
+    }, 325);
   }
 
   close() {
@@ -6099,11 +6744,15 @@ class AvatarEditModal {
         try {
           const contact = myData.contacts[address];
           if (contactInfoModal && typeof contactInfoModal.updateContactInfo === 'function') {
-            contactInfoModal.updateContactInfo(createDisplayInfo(contact));
+            await contactInfoModal.updateContactInfo(createDisplayInfo(contact));
             contactInfoModal.needsContactListUpdate = true;
           }
           if (chatModal && chatModal.isActive && chatModal.isActive() && chatModal.address === address) {
             chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+          }
+          // Update EditContactModal avatar if it's active and showing this contact
+          if (editContactModal.isActive() && editContactModal.currentContactAddress === address) {
+            await editContactModal.updateAvatar(contact);
           }
         } catch (e) {
           console.warn('Failed to refresh avatar UI after selecting useAvatar:', e);
@@ -6695,10 +7344,14 @@ class AvatarEditModal {
           myData.contacts[this.currentAddress] ??= { address: this.currentAddress };
           myData.contacts[this.currentAddress].useAvatar = 'mine';
           saveState();
-          contactInfoModal.updateContactInfo(createDisplayInfo(contact));
+          await contactInfoModal.updateContactInfo(createDisplayInfo(contact));
           contactInfoModal.needsContactListUpdate = true;
           if (chatModal.isActive() && chatModal.address === this.currentAddress) {
             chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+          }
+          // Update EditContactModal avatar if it's active and showing this contact
+          if (editContactModal.isActive() && editContactModal.currentContactAddress === this.currentAddress ) {
+            await editContactModal.updateAvatar(contact);
           }
         }
       }
@@ -11179,6 +11832,13 @@ class ChatModal {
     this.imageAttachmentContextMenu = document.getElementById('imageAttachmentContextMenu');
     // Initialize attachment options context menu
     this.attachmentOptionsContextMenu = document.getElementById('attachmentOptionsContextMenu');
+    // Cache attachment options context menu option elements
+    this.cameraOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="camera"]');
+    this.photoLibraryOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="photo-library"]');
+    this.filesOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="files"]');
+    this.cameraFileOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="camera-file"]');
+    this.contactsOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="contacts"]');
+    
     this.currentImageAttachmentRow = null;
     
     // Add event delegation for message clicks (since messages are created dynamically)
@@ -11349,17 +12009,8 @@ class ChatModal {
     if (this.addAttachmentButton) {
       this.addAttachmentButton.addEventListener('click', (e) => {
         e.stopPropagation();
-        // On iOS, directly trigger file input to use native iOS picker
-        // On Android, show our custom context menu
-        if (isIOS()) {
-          // iOS will show its native picker with Camera, Photo Library, and Files options
-          if (this.chatFileInput) {
-            this.chatFileInput.click();
-          }
-        } else {
-          // Android: show our custom context menu
-          this.showAttachmentOptionsContextMenu(e);
-        }
+        // Always show our custom context menu (includes Camera, Photo Library, Files, Contacts)
+        this.showAttachmentOptionsContextMenu(e);
       });
     }
 
@@ -13367,6 +14018,7 @@ class ChatModal {
     if (type && type.startsWith('audio/')) return 'audio';
     if (type && type.startsWith('video/')) return 'video';
     if ((type === 'application/pdf') || (name && name.toLowerCase().endsWith('.pdf'))) return 'pdf';
+    if ((type === 'text/vcard') || (name && name.toLowerCase().endsWith('.vcf'))) return 'contacts';
     if (type && type.startsWith('text/')) return 'text';
     return 'file';
   }
@@ -14023,14 +14675,25 @@ class ChatModal {
     const menu = this.attachmentOptionsContextMenu;
     const buttonRect = this.addAttachmentButton.getBoundingClientRect();
 
-    // Desktop: only show "Camera" + "Files" (hide "Photo Library")
-    // Heuristic: devices with a fine pointer + hover are typically desktop/laptop.
-    try {
-      const isDesktopLike = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-      const photoLibraryOpt = menu.querySelector('.context-menu-option[data-action="photo-library"]');
-      if (photoLibraryOpt) photoLibraryOpt.style.display = isDesktopLike ? 'none' : '';
-    } catch (_) {
-      // ignore
+    if (isIOS()) {
+      // iOS: Only show "Camera/File" and "Contacts"
+      if (this.cameraOpt) this.cameraOpt.style.display = 'none';
+      if (this.photoLibraryOpt) this.photoLibraryOpt.style.display = 'none';
+      if (this.filesOpt) this.filesOpt.style.display = 'none';
+      if (this.cameraFileOpt) this.cameraFileOpt.style.display = '';
+      if (this.contactsOpt) this.contactsOpt.style.display = '';
+    } else {
+      // Non-iOS: Hide "Camera/File", show others
+      if (this.cameraFileOpt) this.cameraFileOpt.style.display = 'none';
+      
+      // Desktop: only show "Camera" + "Files" (hide "Photo Library")
+      // Heuristic: devices with a fine pointer + hover are typically desktop/laptop.
+      try {
+        const isDesktopLike = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+        if (this.photoLibraryOpt) this.photoLibraryOpt.style.display = isDesktopLike ? 'none' : '';
+      } catch (_) {
+        // ignore
+      }
     }
     
     // Show menu first to get its dimensions
@@ -14077,7 +14740,13 @@ class ChatModal {
     // (notably Android Chrome) to open native file pickers via input.click().
     switch (action) {
       case 'camera':
-        if (isAndroidLikeMobileUA()) {
+        if (isIOS()) {
+          // iOS: use photo library picker which includes camera option
+          if (this.chatPhotoLibraryInput) {
+            this.chatPhotoLibraryInput.value = '';
+            this.chatPhotoLibraryInput.click();
+          }
+        } else if (isAndroidLikeMobileUA()) {
           // Android: check/request permission, then open file picker or toast
           void this.handleAndroidCameraAction();
         } else {
@@ -14096,6 +14765,16 @@ class ChatModal {
           this.chatFilesInput.value = '';
           this.chatFilesInput.click();
         }
+        break;
+      case 'camera-file':
+        // iOS: open file input which includes Camera, Photo Library, and Files options
+        if (this.chatFileInput) {
+          this.chatFileInput.value = '';
+          this.chatFileInput.click();
+        }
+        break;
+      case 'contacts':
+        shareContactsModal.open();
         break;
     }
   }
@@ -14478,6 +15157,15 @@ class ChatModal {
     const previewOpt = this.imageAttachmentContextMenu.querySelector('[data-action="preview"]');
     if (previewOpt) previewOpt.style.display = (hasThumbnailSupport && !hasThumb) ? '' : 'none';
 
+    // Show Import Contacts option for VCF files
+    const importContactsOpt = this.imageAttachmentContextMenu.querySelector('[data-action="import-contacts"]');
+    if (importContactsOpt) {
+      const fileName = attachmentRow.dataset.name ? decodeURIComponent(attachmentRow.dataset.name) : '';
+      const fileType = attachmentRow.dataset.type || '';
+      const isVcf = fileType === 'text/vcard' || fileName.toLowerCase().endsWith('.vcf');
+      importContactsOpt.style.display = isVcf ? '' : 'none';
+    }
+
     this.positionContextMenu(this.imageAttachmentContextMenu, attachmentRow);
     this.imageAttachmentContextMenu.style.display = 'block';
   }
@@ -14488,6 +15176,9 @@ class ChatModal {
 
     const { messageEl } = this.getAttachmentContextFromRow(row);
     switch (action) {
+      case 'import-contacts':
+        void this.openImportContactsModal(row);
+        break;
       case 'preview':
         void this.previewMediaAttachment(row);
         break;
@@ -14509,6 +15200,41 @@ class ChatModal {
     }
 
     this.closeImageAttachmentContextMenu();
+  }
+
+  /**
+   * Opens the Import Contacts modal for a VCF attachment
+   * @param {HTMLElement} attachmentRow - The attachment row element
+   */
+  async openImportContactsModal(attachmentRow) {
+    const url = attachmentRow.dataset.url;
+    const name = attachmentRow.dataset.name ? decodeURIComponent(attachmentRow.dataset.name) : 'contacts.vcf';
+    const type = attachmentRow.dataset.type || 'text/vcard';
+    const msgIdx = attachmentRow.dataset.msgIdx;
+
+    // Get encryption keys from the message
+    const contact = myData.contacts[this.address];
+    const message = contact?.messages?.[msgIdx];
+    if (!message?.xattach) {
+      showToast('Could not find attachment data', 3000, 'error');
+      return;
+    }
+
+    // Find the attachment in xattach array
+    const attachment = message.xattach.find(att => att.url === url);
+    if (!attachment) {
+      showToast('Could not find attachment data', 3000, 'error');
+      return;
+    }
+
+    // Open the import contacts modal with attachment data
+    importContactsModal.open({
+      url: attachment.url,
+      name,
+      type,
+      pqEncSharedKey: attachment.pqEncSharedKey,
+      selfKey: attachment.selfKey
+    });
   }
 
   /**
@@ -16234,6 +16960,401 @@ class CallInviteModal {
 
 const callInviteModal = new CallInviteModal();
 
+/**
+ * Share Contacts Modal
+ * Allows users to select contacts (Friends and Connections) to share as a VCF file attachment
+ */
+class ShareContactsModal {
+  constructor() {
+    this.selectedContacts = new Set();
+    this.warningShown = false;
+    this.isUploading = false;
+  }
+
+  load() {
+    this.modal = document.getElementById('shareContactsModal');
+    this.contactsList = document.getElementById('shareContactsList');
+    this.emptyState = document.getElementById('shareContactsEmptyState');
+    this.allNoneButton = document.getElementById('shareContactsAllNoneBtn');
+    this.doneButton = document.getElementById('shareContactsDoneBtn');
+    this.closeButton = document.getElementById('closeShareContactsModal');
+
+    // Event listeners
+    this.closeButton.addEventListener('click', () => this.handleClose());
+    this.allNoneButton.addEventListener('click', () => this.toggleAllNone());
+    this.doneButton.addEventListener('click', () => this.handleDone());
+    this.contactsList.addEventListener('click', (e) => this.handleContactClick(e));
+  }
+
+  /**
+   * Opens the share contacts modal and populates the contact list
+   */
+  async open() {
+    // Reset state
+    this.selectedContacts.clear();
+    this.warningShown = false;
+    this.isUploading = false;
+    this.doneButton.classList.remove('loading');
+    this.doneButton.disabled = false;
+    this.allNoneButton.textContent = 'Select all';
+
+    // Clear existing list
+    this.contactsList.innerHTML = '';
+
+    // Get Friends (friend === 3) and Connections (friend === 2)
+    const allContacts = Object.values(myData.contacts || {});
+    const friends = allContacts
+      .filter(c => c.friend === 3)
+      .sort((a, b) => this.getContactDisplayNameForShare(a).toLowerCase().localeCompare(this.getContactDisplayNameForShare(b).toLowerCase()));
+    const connections = allContacts
+      .filter(c => c.friend === 2)
+      .sort((a, b) => this.getContactDisplayNameForShare(a).toLowerCase().localeCompare(this.getContactDisplayNameForShare(b).toLowerCase()));
+
+    const hasContacts = friends.length > 0 || connections.length > 0;
+
+    // Show/hide empty state
+    this.emptyState.style.display = hasContacts ? 'none' : 'block';
+    this.contactsList.style.display = hasContacts ? 'block' : 'none';
+    this.doneButton.disabled = !hasContacts;
+
+    if (hasContacts) {
+      // Render Friends section
+      if (friends.length > 0) {
+        await this.renderSection('Friends', friends);
+      }
+      // Render Connections section
+      if (connections.length > 0) {
+        await this.renderSection('Connections', connections);
+      }
+    }
+
+    // Show modal
+    this.modal.classList.add('active');
+  }
+
+  /**
+   * Gets display name for a contact with priority: contact's provided name → user-assigned name → username
+   * @param {Object} contact - Contact object
+   * @returns {string} Display name
+   */
+  getContactDisplayNameForShare(contact) {
+    return contact?.senderInfo?.name || 
+           contact?.name || 
+           contact?.username || 
+           `${contact?.address?.slice(0, 8)}…${contact?.address?.slice(-6)}`;
+  }
+
+  /**
+   * Gets avatar HTML for a contact with priority: contact's provided avatar → user-selected avatar → identicon
+   * Ignores useAvatar preference to always use the correct priority for sharing
+   * @param {Object} contact - Contact object
+   * @param {number} size - Avatar size in pixels
+   * @returns {Promise<string>} Avatar HTML
+   */
+  async getContactAvatarHtmlForShare(contact, size = 40) {
+    const address = contact?.address;
+    if (!address) return generateIdenticon('', size);
+
+    const makeImg = (url) => `<img src="${url}" class="contact-avatar-img" width="${size}" height="${size}" alt="avatar">`;
+
+    try {
+      // Priority 1: Contact's provided avatar
+      if (contact?.avatarId) {
+        const url = await contactAvatarCache.getBlobUrl(contact.avatarId);
+        if (url) return makeImg(url);
+      }
+
+      // Priority 2: User-selected avatar for this contact
+      if (contact?.mineAvatarId) {
+        const url = await contactAvatarCache.getBlobUrl(contact.mineAvatarId);
+        if (url) return makeImg(url);
+      }
+    } catch (err) {
+      console.warn('Failed to load avatar, falling back to identicon:', err);
+    }
+
+    // Priority 3: Identicon fallback
+    return generateIdenticon(address, size);
+  }
+
+  /**
+   * Renders a section of contacts with a header
+   * @param {string} label - Section label
+   * @param {Array} contacts - Array of contact objects
+   */
+  async renderSection(label, contacts) {
+    // Add section header
+    const header = document.createElement('div');
+    header.className = 'share-contacts-section-header';
+    header.textContent = label;
+    this.contactsList.appendChild(header);
+
+    // Batch avatar generation for better performance
+    // Use custom function that follows correct priority: contact avatar → user-selected → identicon
+    const avatarPromises = contacts.map(contact => this.getContactAvatarHtmlForShare(contact, 40));
+    const avatarHtmlList = await Promise.all(avatarPromises);
+
+    // Render each contact
+    contacts.forEach((contact, index) => {
+      const row = document.createElement('div');
+      row.className = 'share-contact-row';
+      row.dataset.address = contact.address;
+
+      const avatarHtml = avatarHtmlList[index];
+      const displayName = this.getContactDisplayNameForShare(contact);
+
+      row.innerHTML = `
+        <div class="share-contact-avatar">${avatarHtml}</div>
+        <div class="share-contact-info">
+          <div class="share-contact-name">${escapeHtml(displayName)}</div>
+        </div>
+        <input type="checkbox" class="share-contact-checkbox" />
+      `;
+
+      this.contactsList.appendChild(row);
+    });
+  }
+
+  /**
+   * Handles click on a contact row to toggle selection
+   * @param {Event} e - Click event
+   */
+  handleContactClick(e) {
+    const row = e.target.closest('.share-contact-row');
+    if (!row) return;
+
+    const checkbox = row.querySelector('.share-contact-checkbox');
+    const address = row.dataset.address;
+
+    // Toggle checkbox (unless clicking directly on checkbox, which toggles itself)
+    if (e.target !== checkbox) {
+      checkbox.checked = !checkbox.checked;
+    }
+
+    // Update selected contacts set
+    if (checkbox.checked) {
+      this.selectedContacts.add(address);
+    } else {
+      this.selectedContacts.delete(address);
+    }
+
+    // Update All/None button text
+    this.updateAllNoneButton();
+  }
+
+  /**
+   * Updates the All/None button text based on selection state
+   */
+  updateAllNoneButton() {
+    const checkboxes = this.contactsList.querySelectorAll('.share-contact-checkbox');
+    const allSelected = Array.from(checkboxes).every(cb => cb.checked);
+    this.allNoneButton.textContent = allSelected && checkboxes.length > 0 ? 'Clear' : 'Select all';
+  }
+
+  /**
+   * Toggles between selecting all and none
+   */
+  toggleAllNone() {
+    const checkboxes = this.contactsList.querySelectorAll('.share-contact-checkbox');
+    const allSelected = Array.from(checkboxes).every(cb => cb.checked);
+
+    checkboxes.forEach(cb => {
+      const row = cb.closest('.share-contact-row');
+      const address = row?.dataset.address;
+      if (allSelected) {
+        cb.checked = false;
+        if (address) this.selectedContacts.delete(address);
+      } else {
+        cb.checked = true;
+        if (address) this.selectedContacts.add(address);
+      }
+    });
+
+    this.updateAllNoneButton();
+  }
+
+  /**
+   * Handles back/close button click with warning if contacts are selected
+   */
+  handleClose() {
+    if (this.selectedContacts.size > 0 && !this.warningShown) {
+      this.warningShown = true;
+      showToast('You have contacts selected. Click back again to discard.', 3000, 'warning');
+      return;
+    }
+    this.close();
+  }
+
+  /**
+   * Closes the modal
+   */
+  close() {
+    this.modal.classList.remove('active');
+    // Reset warning state so it can be shown again on next open
+    this.warningShown = false;
+  }
+
+  /**
+   * Checks if the modal is active
+   * @returns {boolean}
+   */
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
+  }
+
+  /**
+   * Gets avatar blob for a contact with priority: contact's provided avatar → user-selected avatar → null
+   * @param {Object} contact - Contact object
+   * @returns {Promise<Blob|null>} Avatar blob or null if not available
+   */
+  async getContactAvatarBlobForShare(contact) {
+    try {
+      // Priority 1: Contact's provided avatar
+      if (contact?.avatarId) {
+        const blob = await contactAvatarCache.get(contact.avatarId);
+        if (blob) return blob;
+      }
+
+      // Priority 2: User-selected avatar for this contact
+      if (contact?.mineAvatarId) {
+        const blob = await contactAvatarCache.get(contact.mineAvatarId);
+        if (blob) return blob;
+      }
+    } catch (err) {
+      console.warn('Failed to get avatar blob for VCF:', err);
+    }
+
+    // No avatar available
+    return null;
+  }
+
+  /**
+   * Generates VCF content for selected contacts
+   * @returns {Promise<string>} VCF file content
+   */
+  async generateVcfContent() {
+    const vcards = [];
+
+    // First card contains X-LIBERDUS-NETID
+    vcards.push([
+      'BEGIN:VCARD',
+      'VERSION:3.0',
+      `X-LIBERDUS-NETID:${network.netid || ''}`,
+      'END:VCARD'
+    ].join('\r\n'));
+
+    // Generate vCard for each selected contact
+    for (const address of this.selectedContacts) {
+      const contact = myData.contacts[address];
+      if (!contact) continue;
+
+      const lines = [
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        `X-LIBERDUS-ADDRESS:${contact.address || ''}`,
+        `X-LIBERDUS-USERNAME:${contact.username || ''}`
+      ];
+
+      // FN - use contact's provided name, then user-assigned name
+      const displayName = contact?.senderInfo?.name || contact?.name;
+      if (displayName) {
+        lines.push(`FN:${displayName}`);
+      }
+
+      // PHOTO - base64 of avatar blob
+      const avatarBlob = await this.getContactAvatarBlobForShare(contact);
+      if (avatarBlob) {
+        const base64 = await contactAvatarCache.blobToBase64(avatarBlob);
+        if (base64) {
+          // Determine image type from blob MIME type
+          const imageType = avatarBlob.type === 'image/png' ? 'PNG' : 'JPEG';
+          lines.push(`PHOTO;ENCODING=b;TYPE=${imageType}:${base64}`);
+        }
+      }
+
+      lines.push('END:VCARD');
+      vcards.push(lines.join('\r\n'));
+    }
+
+    return vcards.join('\r\n');
+  }
+
+  /**
+   * Generates a filename for the VCF file
+   * @returns {string} Filename in format username-YYMMDD-HHMM.vcf
+   */
+  generateVcfFilename() {
+    const now = new Date();
+    const yy = String(now.getFullYear()).slice(-2);
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    
+    const username = myAccount?.username || 'user';
+    return `${username}-${yy}${mm}${dd}-${hh}${min}.vcf`;
+  }
+
+  /**
+   * Handles the Done button click - generates VCF, encrypts, and uploads
+   */
+  async handleDone() {
+    if (this.selectedContacts.size === 0) {
+      showToast('Please select at least one contact', 2000, 'info');
+      return;
+    }
+
+    if (this.isUploading) return;
+    this.isUploading = true;
+    this.doneButton.classList.add('loading');
+    this.doneButton.disabled = true;
+
+    try {
+      // Generate VCF content
+      const vcfContent = await this.generateVcfContent();
+      const vcfFilename = this.generateVcfFilename();
+      
+      // Create blob from VCF content
+      const vcfBlob = new Blob([vcfContent], { type: 'text/vcard' });
+
+      // Get recipient's DH key for encryption
+      const { dhkey, cipherText: pqEncSharedKey } = await chatModal.getRecipientDhKey(chatModal.address);
+      const password = myAccount.keys.secret + myAccount.keys.pqSeed;
+      const selfKey = encryptData(bin2hex(dhkey), password, true);
+
+      // Encrypt the VCF blob
+      const encryptedBlob = await encryptBlob(vcfBlob, dhkey);
+
+      // Upload encrypted file
+      const attachmentUrl = await chatModal.uploadEncryptedFile(encryptedBlob, vcfFilename);
+
+      // Add to chatModal's file attachments
+      chatModal.fileAttachments.push({
+        url: attachmentUrl,
+        name: vcfFilename,
+        size: vcfBlob.size,
+        type: 'text/vcard',
+        pqEncSharedKey: bin2base64(pqEncSharedKey),
+        selfKey
+      });
+
+      // Update attachment preview in chat modal
+      chatModal.showAttachmentPreview();
+
+      this.close();
+    } catch (err) {
+      console.error('Failed to generate/upload VCF:', err);
+      showToast('Failed to share contacts', 3000, 'error');
+    } finally {
+      this.isUploading = false;
+      this.doneButton.classList.remove('loading');
+      this.doneButton.disabled = false;
+    }
+  }
+}
+
+const shareContactsModal = new ShareContactsModal();
+
 // ---- Call scheduling shared helpers (display-only) ----
 function getActiveChatContactTimeZone() {
   const addr = chatModal?.address;
@@ -17395,16 +18516,10 @@ class NewChatModal {
     footer.closeNewChatButton();
     this.usernameAvailable.style.display = 'none';
     this.submitButton.disabled = true;
-
-    // Create the handler function
-    const focusHandler = () => {
+    // Delay focus to ensure transition completes (modal transition is 300ms)
+    setTimeout(() => {
       this.recipientInput.focus();
-      this.modal.removeEventListener('transitionend', focusHandler);
-    };
-
-    // Add the event listener
-    // TODO: move focusHandler out and move event listener to load()
-    this.modal.addEventListener('transitionend', focusHandler);
+    }, 325);
   }
 
   /**
@@ -17722,6 +18837,10 @@ class CreateAccountModal {
 
     this.modal.classList.add('active');
     enterFullscreen();
+    // Delay focus to ensure transition completes (modal transition is 300ms)
+    setTimeout(() => {
+      this.usernameInput.focus();
+    }, 325);
   }
 
   // we still need to keep this since it can be called by other modals
@@ -23270,6 +24389,15 @@ function closeTopModal(topModal){
       break;
     case 'menuModal':
       menuModal.close();
+      break;
+    case 'daoModal':
+      daoModal.close();
+      break;
+    case 'addProposalModal':
+      addProposalModal.close();
+      break;
+    case 'proposalInfoModal':
+      proposalInfoModal.close();
       break;
     case 'settingsModal':
       settingsModal.close();
