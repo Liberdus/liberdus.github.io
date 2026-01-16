@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'h'
+const version = 'i'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -688,6 +688,7 @@ class WelcomeScreen {
     // Show Apple Safari backup reminder toast after welcome screen has rendered
     setTimeout(() => {
       this.showAppleSafariBackupToast();
+      this.showGDriveBackupReminder();
     }, 500);
   }
 
@@ -725,6 +726,35 @@ class WelcomeScreen {
     // Show the toast
     const message = '<strong>Important:</strong> Apple will delete your data if you don\'t visit this site for a week. Please backup your account data regularly.';
     showToast(message, 0, 'warning', true);
+  }
+
+  /**
+   * Show Google Drive backup reminder toast when overdue and not recently reminded.
+   */
+  showGDriveBackupReminder() {
+    // Don't show reminder if user has no accounts to back up
+    const { usernames } = signInModal.getSignInUsernames() || { usernames: [] };
+    if (!usernames?.length) {
+      return;
+    }
+
+    const now = getCorrectedTimestamp();
+    const lastBackup = backupAccountModal.getGDriveBackupTs();
+    const lastReminder = backupAccountModal.getGDriveReminderTs();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+
+    if (now - lastBackup <= sevenDaysMs) {
+      return;
+    }
+
+    if (now - lastReminder <= threeDaysMs) {
+      return;
+    }
+
+    const message = 'Click "Menu" and "Backup" to Google drive. You can restore if anything happens to this device.';
+    showToast(message, 0, 'warning');
+    backupAccountModal.setGDriveReminderTs(now);
   }
 
   isActive() {
@@ -3773,6 +3803,8 @@ class FriendModal {
   constructor() {
     this.currentContactAddress = null;
     this.lastChangeTimeStamp = 0; // track the last time the friend status was changed
+    this.initialFriendStatus = null; // track the initial friend status when modal opens
+    this.warningShown = false; // track if warning has been shown
   }
 
   load() {
@@ -3791,7 +3823,7 @@ class FriendModal {
     });
 
     // Friend modal close button
-    this.modal.querySelector('.back-button').addEventListener('click', () => this.closeFriendModal());
+    this.modal.querySelector('.back-button').addEventListener('click', () => this.close());
   }
 
   // Open the friend modal
@@ -3843,15 +3875,33 @@ class FriendModal {
     const radio = this.friendForm.querySelector(`input[value="${status}"]`);
     if (radio) radio.checked = true;
 
+    // Store initial friend status for change detection
+    this.initialFriendStatus = contact.friend;
+    this.warningShown = false;
+
     // Initialize submit button state
     this.updateSubmitButtonState();
 
     this.modal.classList.add('active');
   }
 
-  // Close the friend modal
-  closeFriendModal() {
+  /**
+   * Closes the friend modal with optional warning if friend status has changed
+   * @param {boolean} skipWarning - If true, skip the warning check (e.g., when submitting form)
+   */
+  close(skipWarning = false) {
+    if (!skipWarning && this.initialFriendStatus != null) {
+      const currentStatus = Number(this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value);
+      if (!isNaN(currentStatus) && currentStatus !== this.initialFriendStatus && !this.warningShown) {
+        this.warningShown = true;
+        showToast('You have changed the friend status. Press back again to discard changes.', 3000, 'warning');
+        return;
+      }
+    }
+
     this.modal.classList.remove('active');
+    this.initialFriendStatus = null;
+    this.warningShown = false;
   }
 
   async postUpdateTollRequired(address, friend) {
@@ -3954,8 +4004,8 @@ class FriendModal {
       await chatsScreen.updateChatList();
     }
 
-    // Close the friend modal
-    this.closeFriendModal();
+    // Close the friend modal (skip warning since form was submitted)
+    this.close(true);
     this.submitButton.disabled = false;
   }
 
@@ -5882,8 +5932,10 @@ async function injectTx(tx, txid) {
       }
       myData.pending.push(pendingTxData);
 
-      // After submitting a transaction, warn if user is low on LIB.
-      maybeShowLowLibToast();
+      if (tx.type !== 'register') {
+        // After submitting a transaction, warn if user is low on LIB.
+        maybeShowLowLibToast();
+      }
     } else {
       let toastMessage = 'Error injecting transaction: ' + data?.result?.reason;
       console.error('Error injecting transaction:', data?.result?.reason);
@@ -8398,6 +8450,8 @@ const removeAccountsModal = new RemoveAccountsModal();
 class BackupAccountModal {
   constructor() {
     this.GOOGLE_TOKEN_STORAGE_KEY = 'google_drive_token';
+    this.GDRIVE_BACKUP_TS_KEY = 'googleDriveBackupTimestamp';
+    this.GDRIVE_REMINDER_TS_KEY = 'googleDriveReminderTimestamp';
   }
 
   load() {
@@ -8485,6 +8539,37 @@ class BackupAccountModal {
 
   clearGoogleToken() {
     localStorage.removeItem(this.GOOGLE_TOKEN_STORAGE_KEY);
+  }
+
+  // ======================================
+  // GOOGLE DRIVE BACKUP TIMESTAMP MANAGEMENT
+  // ======================================
+  _getStoredTimestamp(key) {
+    const rawValue = localStorage.getItem(key);
+    const parsed = Number(rawValue);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  getGDriveBackupTs() {
+    return this._getStoredTimestamp(this.GDRIVE_BACKUP_TS_KEY);
+  }
+
+  setGDriveBackupTs(timestamp = getCorrectedTimestamp()) {
+    localStorage.setItem(this.GDRIVE_BACKUP_TS_KEY, String(timestamp));
+  }
+
+  getGDriveReminderTs() {
+    // If this returns null, set timestamp to 3 days from now
+    const ts = this._getStoredTimestamp(this.GDRIVE_REMINDER_TS_KEY);
+    if (!ts) {
+      this.setGDriveReminderTs(getCorrectedTimestamp() + 3 * 24 * 60 * 60 * 1000);
+      return getCorrectedTimestamp() + 3 * 24 * 60 * 60 * 1000;
+    }
+    return ts;
+  }
+
+  setGDriveReminderTs(timestamp = getCorrectedTimestamp()) {
+    localStorage.setItem(this.GDRIVE_REMINDER_TS_KEY, String(timestamp));
   }
 
   // ======================================
@@ -9126,6 +9211,7 @@ class BackupAccountModal {
       showToast('Uploading backup to Google Drive...', 3000, 'info');
       await this.uploadToGoogleDrive(data, filename, tokenData);
       showToast('Backup uploaded to Google Drive successfully!', 5000, 'success');
+      this.setGDriveBackupTs();
       this.close();
     } catch (error) {
       console.error('Google Drive upload failed:', error);
@@ -9139,6 +9225,7 @@ class BackupAccountModal {
           showToast('Uploading backup to Google Drive...', 3000, 'info');
           await this.uploadToGoogleDrive(data, filename, tokenData);
           showToast('Backup uploaded to Google Drive successfully!', 5000, 'success');
+          this.setGDriveBackupTs();
           this.close();
         } catch (retryError) {
           console.error('Retry failed:', retryError);
@@ -19159,6 +19246,9 @@ class NewChatModal {
       }
 
       createNewContact(recipientAddress, username, 2);
+      // If the backend ultimately rejects this tx, the pending-tx failure handler
+      // reverts `friend` back to `friendOld` so initializing fieldOld to toll required (1).
+      chatsData.contacts[recipientAddress].friendOld = 1;
     }
     chatsData.contacts[recipientAddress].username = username;
 
