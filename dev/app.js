@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'j'
+const version = 'k'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -17234,10 +17234,20 @@ class ShareContactsModal {
     // For public accounts, proceed with contact list population
     // Get Friends (friend === 3) and Connections (friend === 2)
     const allContacts = Object.values(myData.contacts || {});
-    const friends = allContacts
+    
+    // Filter out the current chat contact (the person you're chatting with)
+    const currentChatAddress = chatModal.isActive() && chatModal.address 
+      ? normalizeAddress(chatModal.address) 
+      : null;
+    
+    const filteredContacts = currentChatAddress
+      ? allContacts.filter(c => normalizeAddress(c.address) !== currentChatAddress)
+      : allContacts;
+    
+    const friends = filteredContacts
       .filter(c => c.friend === 3)
       .sort((a, b) => this.getContactDisplayNameForShare(a).toLowerCase().localeCompare(this.getContactDisplayNameForShare(b).toLowerCase()));
-    const connections = allContacts
+    const connections = filteredContacts
       .filter(c => c.friend === 2)
       .sort((a, b) => this.getContactDisplayNameForShare(a).toLowerCase().localeCompare(this.getContactDisplayNameForShare(b).toLowerCase()));
 
