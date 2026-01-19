@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'i'
+const version = 'j'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -303,6 +303,14 @@ function newDataRecord(myAccount) {
 function clearMyData() {
   myData = null;
   myAccount = null;
+}
+
+/**
+ * Checks if the current account is private
+ * @returns {boolean} True if the account is private, false otherwise
+ */
+function isPrivateAccount() {
+  return myAccount?.private === true || myData?.account?.private === true;
 }
 
 // Load saved account data and update chat list on page load
@@ -1012,9 +1020,9 @@ class Footer {
       // Update header with username if signed in
       const appName = document.querySelector('.app-name');
       if (myAccount && myAccount.username) {
-        const isPrivateAccount = myAccount?.private === true || myData?.account?.private === true;
+        const accountIsPrivate = isPrivateAccount();
         appName.textContent = `${myAccount.username}`;
-        appName.classList.toggle('is-private', isPrivateAccount);
+        appName.classList.toggle('is-private', accountIsPrivate);
         // Update avatar
         await header.updateAvatar();
       } else {
@@ -1790,6 +1798,10 @@ class MenuModal {
     this.farmButton = document.getElementById('openFarm');
     this.farmButton.addEventListener('click', () => farmModal.open());
     
+    // Header sign out button
+    this.signOutHeaderButton = document.getElementById('signOutMenuHeader');
+    this.signOutHeaderButton.addEventListener('click', async () => await this.handleSignOut());
+    
     
     // Show launch button if ReactNativeWebView is available
     if (window?.ReactNativeWebView) {
@@ -1803,8 +1815,20 @@ class MenuModal {
     }
   }
 
+  enableSignOutButtonWithDelay() {
+    // Disable button initially
+    this.signOutHeaderButton.classList.remove('active');
+    // Re-enable after modal animation completes (300ms) + small buffer to prevent accidental double-taps
+    setTimeout(() => {
+      if (this.isActive()) {
+        this.signOutHeaderButton.classList.add('active');
+      }
+    }, 400); // 400ms = modal animation (300ms) + 100ms buffer
+  }
+
   open() {
     this.modal.classList.add('active');
+    this.enableSignOutButtonWithDelay();
     enterFullscreen();
   }
 
@@ -2535,10 +2559,26 @@ class SettingsModal {
     
     this.signOutButton = document.getElementById('handleSignOutSettings');
     this.signOutButton.addEventListener('click', async () => await menuModal.handleSignOut());
+    
+    // Header sign out button
+    this.signOutHeaderButton = document.getElementById('signOutSettingsHeader');
+    this.signOutHeaderButton.addEventListener('click', async () => await menuModal.handleSignOut());
+  }
+
+  enableSignOutButtonWithDelay() {
+    // Disable button initially
+    this.signOutHeaderButton.classList.remove('active');
+    // Re-enable after modal animation completes (300ms) + small buffer to prevent accidental double-taps
+    setTimeout(() => {
+      if (this.isActive()) {
+        this.signOutHeaderButton.classList.add('active');
+      }
+    }, 400); // 400ms = modal animation (300ms) + 100ms buffer
   }
 
   open() {
     this.modal.classList.add('active');
+    this.enableSignOutButtonWithDelay();
     enterFullscreen();
   }
 
@@ -3859,8 +3899,12 @@ class FriendModal {
 
         // Update contact's friend status if it differs from network
         if (networkFriendStatus !== undefined && networkFriendStatus !== contact.friend) {
+          const previousFriendStatus = contact.friend;
           contact.friend = networkFriendStatus;
           contact.friendOld = networkFriendStatus;
+          if (networkFriendStatus === 0 && previousFriendStatus !== 0) {
+            await this.clearContactAvatar(contact);
+          }
           // Update the friend button color
           this.updateFriendButton(contact, 'addFriendButtonContactInfo');
           this.updateFriendButton(contact, 'addFriendButtonChat');
@@ -3975,6 +4019,9 @@ class FriendModal {
     }
     // Update friend status based on selected value
     contact.friend = Number(selectedStatus);
+    if (contact.friend === 0 && prevFriendStatus !== 0) {
+      await this.clearContactAvatar(contact);
+    }
 
     this.lastChangeTimeStamp = Date.now();
 
@@ -4026,6 +4073,39 @@ class FriendModal {
     button.classList.remove('status-0', 'status-1', 'status-2', 'status-3');
     // Add the current status class
     button.classList.add(`status-${contact.friend}`);
+  }
+
+  async clearContactAvatar(contact) {
+    if (!contact) return;
+
+    const avatarId = contact.avatarId || contact?.senderInfo?.avatarId;
+    if (avatarId) {
+      try {
+        await contactAvatarCache.delete(avatarId);
+      } catch (e) {
+        console.warn('Failed to delete contact avatar:', e);
+      }
+    }
+
+    contact.avatarId = null;
+    contact.hasAvatar = false;
+    if (contact.senderInfo) {
+      delete contact.senderInfo.avatarId;
+      delete contact.senderInfo.avatarKey;
+    }
+    if (contact.useAvatar === 'contact') {
+      delete contact.useAvatar;
+    }
+
+    saveState();
+
+    if (chatModal.isActive() && chatModal.address === contact.address) {
+      chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+      chatModal.appendChatModal(true);
+    }
+    if (typeof chatsScreen !== 'undefined') {
+      chatsScreen.updateChatList();
+    }
   }
 
   // Update the submit button's enabled state based on current and selected status
@@ -17032,7 +17112,6 @@ class CallInviteModal {
         }
         await signObj(messageObj, keys);
         const txid = getTxid(messageObj);
-        await injectTx(messageObj, txid);
 
         // Create new message object for local display immediately
         const newMessage = {
@@ -17126,13 +17205,33 @@ class ShareContactsModal {
     this.warningShown = false;
     this.isUploading = false;
     this.doneButton.classList.remove('loading');
-    this.doneButton.disabled = false;
+    this.doneButton.disabled = true;
     this.allNoneButton.classList.remove('all-selected');
     this.allNoneButton.setAttribute('aria-label', 'Select all');
+    this.allNoneButton.disabled = false;
 
     // Clear existing list
     this.contactsList.innerHTML = '';
+    this.contactsList.style.display = 'none';
 
+    // Show modal
+    this.modal.classList.add('active');
+
+    // Check if account is private - show restriction message if so
+    if (isPrivateAccount()) {
+      // Update empty state message for private account restriction
+      const emptyStateChildren = this.emptyState.children;
+      if (emptyStateChildren.length >= 3) {
+        emptyStateChildren[1].textContent = 'Private accounts cannot share contacts';
+        emptyStateChildren[2].textContent = 'Only public accounts can share contacts';
+      }
+      this.emptyState.style.display = 'block';
+      this.doneButton.disabled = true;
+      this.allNoneButton.disabled = true;
+      return;
+    }
+
+    // For public accounts, proceed with contact list population
     // Get Friends (friend === 3) and Connections (friend === 2)
     const allContacts = Object.values(myData.contacts || {});
     const friends = allContacts
@@ -17148,6 +17247,7 @@ class ShareContactsModal {
     this.emptyState.style.display = hasContacts ? 'none' : 'block';
     this.contactsList.style.display = hasContacts ? 'block' : 'none';
     this.doneButton.disabled = !hasContacts;
+    this.allNoneButton.disabled = !hasContacts;
 
     if (hasContacts) {
       // Render Friends section
@@ -17159,9 +17259,6 @@ class ShareContactsModal {
         await this.renderSection('Connections', connections);
       }
     }
-
-    // Show modal
-    this.modal.classList.add('active');
   }
 
   /**
@@ -17437,6 +17534,12 @@ class ShareContactsModal {
    * Handles the Done button click - generates VCF, encrypts, and uploads
    */
   async handleDone() {
+    // Safety check: prevent sharing for private accounts
+    if (isPrivateAccount()) {
+      showToast('Private accounts cannot share contacts', 2000, 'error');
+      return;
+    }
+
     if (this.selectedContacts.size === 0) {
       showToast('Please select at least one contact', 2000, 'info');
       return;
@@ -17538,14 +17641,30 @@ class ImportContactsModal {
     this.allNoneButton.classList.remove('all-selected');
     this.allNoneButton.setAttribute('aria-label', 'Select all');
 
-    // Clear existing list and show loading
+    // Clear existing list
     this.contactsList.innerHTML = '';
-    this.emptyState.style.display = 'none';
-    this.loadingState.style.display = 'flex';
     this.contactsList.style.display = 'none';
+    this.loadingState.style.display = 'none';
 
     // Show modal
     this.modal.classList.add('active');
+
+    // Check if account is private - show restriction message if so
+    if (isPrivateAccount()) {
+      // Update empty state message for private account restriction
+      const emptyStateChildren = this.emptyState.children;
+      if (emptyStateChildren.length >= 3) {
+        emptyStateChildren[1].textContent = 'Private accounts cannot import contacts';
+        emptyStateChildren[2].textContent = 'Only public accounts can import contacts';
+      }
+      this.emptyState.style.display = 'block';
+      this.doneButton.disabled = true;
+      return;
+    }
+
+    // For public accounts, proceed with VCF processing
+    this.emptyState.style.display = 'none';
+    this.loadingState.style.display = 'flex';
 
     try {
       // Download and decrypt the VCF file
@@ -17931,20 +18050,22 @@ class ImportContactsModal {
           tolledDepositToastShown: true,
         };
 
-        // Store name in senderInfo since it came from the contact
+        // Store imported name in user input name field so it displays in contactList and can be changed by user
         if (parsedContact.name) {
-          contactRecord.senderInfo = { name: parsedContact.name };
+          contactRecord.name = parsedContact.name;
         }
 
-        // Save avatar if present
+        // Save avatar as user-uploaded so it can be changed or deleted locally
         if (parsedContact.photoBase64) {
           try {
             const mimeType = parsedContact.photoType === 'png' ? 'image/png' : 'image/jpeg';
             const avatarBlob = contactAvatarCache.base64ToBlob(parsedContact.photoBase64, mimeType);
-            const avatarId = `imported_${address}_${Date.now()}`;
-            await contactAvatarCache.save(avatarId, avatarBlob);
-            contactRecord.avatarId = avatarId;
+            // Generate ID like user-uploaded avatars for consistency
+            const mineId = bin2hex(generateRandomBytes(16));
+            await contactAvatarCache.save(mineId, avatarBlob);
+            contactRecord.mineAvatarId = mineId;
             contactRecord.hasAvatar = true;
+            contactRecord.useAvatar = 'mine';
           } catch (err) {
             console.warn('Failed to save imported avatar:', err);
           }

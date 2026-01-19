@@ -33,6 +33,7 @@
   --danger-color: #dc3545;
   --success-color: #28a745;
   --warning-color: #ef6c00;
+  --secondary-warning-color: #ffc107; /* Yellow color for secondary warnings (e.g., incomplete/newly imported contacts) */
   --info-color: #0066cc;
   --light-color: #f8f9fa;
   --dark-color: #343a40;
@@ -944,7 +945,7 @@ body {
   display: inline-block;
   width: 8px;
   height: 8px;
-  background-color: var(--warning-color);
+  background-color: var(--secondary-warning-color);
   border-radius: 50%;
   margin-right: 6px;
   vertical-align: middle;
@@ -1432,6 +1433,41 @@ button:disabled {
   white-space: nowrap;
   min-width: 0; /* Allow flex item to shrink below content size */
   max-width: 100%; /* Allow full width when possible */
+}
+
+.sign-out-header-button {
+  position: absolute;
+  right: 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #ef4444; /* Red color */
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  pointer-events: none; /* Disabled by default, enabled after delay */
+  opacity: 0.5; /* Visual indicator that it's not yet active */
+  transition: opacity 0.2s ease;
+}
+
+.sign-out-header-button.active {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+.sign-out-header-button::before {
+  content: '';
+  width: var(--icon-size-24);
+  height: var(--icon-size-24);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23ef4444' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'%3E%3C/path%3E%3Cpolyline points='16,17 21,12 16,7'%3E%3C/polyline%3E%3Cline x1='21' y1='12' x2='9' y2='12'%3E%3C/line%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.sign-out-header-button:hover {
+  opacity: 0.8;
 }
 
 /* Chat modal title specific styling - left-aligned like header */
