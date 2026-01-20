@@ -910,7 +910,7 @@
         </div>
         <div class="modal-content">
           <div class="form-container">
-            <div class="profile-sharing-note">This information is shared with your friends</div>
+            <div class="profile-sharing-note">This information is shared with your connections</div>
             <form id="accountForm" class="form--narrow">
               <div class="form-group">
                 <label for="name">Name</label>
@@ -1557,7 +1557,7 @@
           <ul>
             <li>If the toll line is green, you don't need to pay the toll</li>
             <li>The recipient sets the toll amount</li>
-            <li>No toll required if the recipent has set you as a friend or connection</li>
+            <li>No toll required if the recipent has set you as a connection</li>
             <li>Half the toll is given to the recipient if they read your message</li>
             <li>Half the toll is given to the recipient if they reply to your message</li>
             <li>Any toll that was not given to the recipient can be reclaimed</li>
@@ -1692,23 +1692,16 @@
       <div class="modal fixed-header" id="friendModal">
         <div class="modal-header">
           <button class="back-button" id="closeFriendModal"></button>
-          <div class="modal-title">Friend Status</div>
+          <div class="modal-title">Connection Status</div>
         </div>
         <div class="modal-content">
           <form id="friendForm" class="form--narrow">
             <div class="radio-group">
-              <label class="radio-option status-3">
-                <input type="radio" name="friendStatus" value="3" checked />
-                <div class="radio-content">
-                  <span class="radio-label">Friend</span>
-                  <span class="radio-description">Share my profile info and no toll required</span>
-                </div>
-              </label>
               <label class="radio-option status-2">
-                <input type="radio" name="friendStatus" value="2" />
+                <input type="radio" name="friendStatus" value="2" checked />
                 <div class="radio-content">
                   <span class="radio-label">Connection</span>
-                  <span class="radio-description">No toll required</span>
+                  <span class="radio-description">Share my profile info and no toll required</span>
                 </div>
               </label>
               <label class="radio-option status-1">

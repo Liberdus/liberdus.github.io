@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -303,6 +303,40 @@ function newDataRecord(myAccount) {
 function clearMyData() {
   myData = null;
   myAccount = null;
+}
+
+/**
+ * One-time migration: convert legacy friend status (3) to connection (2)
+ * @param {Object} data
+ * @returns {boolean} True if migration flag was applied
+ */
+function migrateFriendStatusToConnection(data) {
+  if (!data?.account) return false;
+
+  const migrations =
+    data.account.migrations && typeof data.account.migrations === 'object'
+      ? data.account.migrations
+      : null;
+
+  if (migrations?.friendStatusToConnection === true) {
+    return false;
+  }
+
+  if (data.contacts && typeof data.contacts === 'object') {
+    for (const contact of Object.values(data.contacts)) {
+      if (!contact || typeof contact !== 'object') continue;
+      if (contact.friend === 3) {
+        contact.friend = 2;
+      }
+      if (contact.friendOld === 3) {
+        contact.friendOld = 2;
+      }
+    }
+  }
+
+  data.account.migrations = migrations && typeof migrations === 'object' ? migrations : {};
+  data.account.migrations.friendStatusToConnection = true;
+  return true;
 }
 
 /**
@@ -1379,23 +1413,21 @@ class ContactsScreen {
     // Split into status groups in a single pass
     const statusGroups = contactsArray.reduce(
       (acc, contact) => {
-        // 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+        // 0 = blocked, 1 = Other, 2 = Connection
         switch (contact.friend) {
           case 0:
             acc.blocked.push(contact);
             break;
+          case 3: // legacy friend status treated as connection
           case 2:
             acc.acquaintances.push(contact);
-            break;
-          case 3:
-            acc.friends.push(contact);
             break;
           default:
             acc.others.push(contact);
         }
         return acc;
       },
-      { others: [], acquaintances: [], friends: [], blocked: [] }
+      { others: [], acquaintances: [], blocked: [] }
     );
 
     // Sort each group by name first, then by username if name is not available
@@ -1408,7 +1440,6 @@ class ContactsScreen {
 
     // Group metadata for rendering
     const groupMeta = [
-      { key: 'friends', label: 'Friends', itemClass: 'chat-item' },
       { key: 'acquaintances', label: 'Connections', itemClass: 'chat-item' },
       { key: 'others', label: 'Tolled', itemClass: 'chat-item' },
       { key: 'blocked', label: 'Blocked', itemClass: 'chat-item blocked' },
@@ -3257,6 +3288,11 @@ class SignInModal {
     myAccount = myData.account;
     logsModal.log(`SignIn as ${username}_${netid}`)
 
+    // One-time migration: convert legacy friend status to connection
+    if (migrateFriendStatusToConnection(myData)) {
+      saveState();
+    }
+
     // Clear notification address for this account when signing in
     // Notification storage is only for accounts the user is NOT signed in to
     if (reactNativeApp.isReactNativeWebView && myAccount?.keys?.address) {
@@ -3833,7 +3869,7 @@ const contactInfoModal = new ContactInfoModal();
 
 /**
  * Friend Modal
- * Frontend: 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+ * Frontend: 0 = blocked, 1 = Other, 2 = Connection
  * Backend: 1 = toll required, 0 = toll not required, 2 = blocked
  * 
  * @description Modal for setting the friend status for a contact
@@ -3883,18 +3919,17 @@ class FriendModal {
       const networkRequired = tollInfo?.toll?.required?.[myIndex];
 
       if (networkRequired !== undefined) {
-        // Map backend required value to frontend friend status
+        // Map backend required value to frontend status
         // Backend: 1 = toll required, 0 = toll not required, 2 = blocked
-        // Frontend: 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+        // Frontend: 0 = blocked, 1 = Other, 2 = Connection
         let networkFriendStatus;
         if (networkRequired === 2) {
           networkFriendStatus = 0; // blocked
         } else if (networkRequired === 1) {
           networkFriendStatus = 1; // Other (toll required)
         } else if (networkRequired === 0) {
-          // toll not required - could be Acquaintance (2) or Friend (3)
-          // Use the local contact.friend if it's 2 or 3, otherwise default to 2
-          networkFriendStatus = (contact.friend === 2 || contact.friend === 3) ? contact.friend : 2;
+          // toll not required - connection
+          networkFriendStatus = 2;
         }
 
         // Update contact's friend status if it differs from network
@@ -3938,7 +3973,7 @@ class FriendModal {
       const currentStatus = Number(this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value);
       if (!isNaN(currentStatus) && currentStatus !== this.initialFriendStatus && !this.warningShown) {
         this.warningShown = true;
-        showToast('You have changed the friend status. Press back again to discard changes.', 3000, 'warning');
+        showToast('Press back again to discard changes.', 5000, 'warning');
         return;
       }
     }
@@ -3949,9 +3984,9 @@ class FriendModal {
   }
 
   async postUpdateTollRequired(address, friend) {
-    // 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+    // 0 = blocked, 1 = Other, 2 = Connection
     // required = 1 if toll required, 0 if not and 2 to block other party
-    const requiredNum = friend === 3 || friend === 2 ? 0 : friend === 1 ? 1 : friend === 0 ? 2 : 1;
+    const requiredNum = friend === 2 ? 0 : friend === 1 ? 1 : friend === 0 ? 2 : 1;
     const fromAddr = longAddress(myAccount.keys.address);
     const toAddr = longAddress(address);
     const chatId_ = hashBytes([fromAddr, toAddr].sort().join(''));
@@ -3971,8 +4006,8 @@ class FriendModal {
   }
 
   /**
-   * Handle friend form submission
-   * 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+  * Handle friend form submission
+  * 0 = blocked, 1 = Other, 2 = Connection
    * @param {Event} event
    * @returns {Promise<void>}
    */
@@ -3989,10 +4024,9 @@ class FriendModal {
       return;
     }
 
-    if ([2,3].includes(contact.friend) && [2,3].includes(Number(selectedStatus))){
+    if (Number(contact.friend) === 2 && Number(selectedStatus) === 2) {
       console.log('no need to post a change to the network since toll required would be 0 for both cases')
-    }
-    else{
+    } else {
       try {
         // send transaction to update chat toll
         const res = await this.postUpdateTollRequired(this.currentContactAddress, Number(selectedStatus));
@@ -4010,7 +4044,7 @@ class FriendModal {
       }
     }
 
-    if ([2,3].includes(contact.friend) && [2,3].includes(Number(selectedStatus))) {
+    if (Number(contact.friend) === 2 && Number(selectedStatus) === 2) {
       // set friend and friendold the same since no transaction is needed
       contact.friendOld = Number(selectedStatus);
     } else {
@@ -4025,7 +4059,7 @@ class FriendModal {
 
     this.lastChangeTimeStamp = Date.now();
 
-    // Show appropriate toast message depending value 0,1,2,3
+    // Show appropriate toast message depending value 0,1,2
     const toastMessage =
       contact.friend === 0
         ? 'Blocked'
@@ -4033,9 +4067,7 @@ class FriendModal {
           ? 'Added as Tolled'
           : contact.friend === 2
             ? 'Added as Connection'
-            : contact.friend === 3
-              ? 'Added as Friend'
-              : 'Error updating friend status';
+            : 'Error updating friend status';
     const toastType = toastMessage === 'Error updating friend status' ? 'error' : 'success';
     showToast(toastMessage, 2000, toastType);
 
@@ -4070,7 +4102,7 @@ class FriendModal {
   updateFriendButton(contact, buttonId) {
     const button = document.getElementById(buttonId);
     // Remove all status classes
-    button.classList.remove('status-0', 'status-1', 'status-2', 'status-3');
+    button.classList.remove('status-0', 'status-1', 'status-2');
     // Add the current status class
     button.classList.add(`status-${contact.friend}`);
   }
@@ -12555,7 +12587,7 @@ class ChatModal {
       if (!this.isActive() || this.address !== address) return;
 
       showToast(
-        '<strong>This user has deposited a toll to message you.</strong><ul style="margin: 8px 0 0 0; padding-left: 20px;"><li>Change their status to a connection or friend to refund the toll</li><li>Reply to collect the full toll</li><li>Ignore to collect half the toll</li></ul>',
+        '<strong>This user has deposited a toll to message you.</strong><ul style="margin: 8px 0 0 0; padding-left: 20px;"><li>Change their status to a connection to refund the toll</li><li>Reply to collect the full toll</li><li>Ignore to collect half the toll</li></ul>',
         0,
         'toll',
         true
@@ -12995,12 +13027,10 @@ class ChatModal {
         username: myAccount.username,
       };
 
-      // Add additional info only if recipient is a friend
-      if (contact && contact?.friend && contact?.friend >= 3) {
-        // Add more personal details for friends
+      // Add additional info only if recipient is a connection
+      if (contact && contact?.friend && contact?.friend >= 2) {
+        // Add more personal details for connections
         senderInfo.name = myData.account.name;
-        senderInfo.email = myData.account.email;
-        senderInfo.phone = myData.account.phone;
         senderInfo.linkedin = myData.account.linkedin;
         senderInfo.x = myData.account.x;
         // Add avatar info if available
@@ -13008,10 +13038,7 @@ class ChatModal {
           senderInfo.avatarId = myData.account.avatarId;
           senderInfo.avatarKey = myData.account.avatarKey;
         }
-      }
-
-      // Add timezone for friends and connections
-      if (Number(contact?.friend) >= 2) {
+        // Add timezone if available
         const tz = getLocalTimeZone();
         if (tz) {
           senderInfo.timezone = tz;
@@ -15372,7 +15399,9 @@ class ChatModal {
       const fileName = attachmentRow.dataset.name ? decodeURIComponent(attachmentRow.dataset.name) : '';
       const fileType = attachmentRow.dataset.type || '';
       const isVcf = fileType === 'text/vcard' || fileName.toLowerCase().endsWith('.vcf');
-      importContactsOpt.style.display = isVcf ? '' : 'none';
+      const contact = this.address ? myData?.contacts?.[this.address] : null;
+      const isConnection = contact?.friend === 2;
+      importContactsOpt.style.display = (isVcf && isConnection) ? '' : 'none';
     }
 
     this.positionContextMenu(this.imageAttachmentContextMenu, attachmentRow);
@@ -16220,7 +16249,7 @@ class ChatModal {
           showToast('You are blocked by this user', 0, 'error');
         } else {
           showToast(
-            `You can only call people who have added you as a friend or connection. Ask ${username} to add you as a friend or connection`,
+            `You can only call people who have added you as a connection. Ask ${username} to add you as a connection`,
             0,
             'info'
           );
@@ -16337,11 +16366,9 @@ class ChatModal {
         username: myAccount.username,
       };
 
-      // Add additional info only if recipient is a friend
-      if (contact && contact?.friend && contact?.friend >= 3) {
+      // Add additional info only if recipient is a connection
+      if (contact && contact?.friend && contact?.friend >= 2) {
         senderInfo.name = myData.account.name;
-        senderInfo.email = myData.account.email;
-        senderInfo.phone = myData.account.phone;
         senderInfo.linkedin = myData.account.linkedin;
         senderInfo.x = myData.account.x;
         // Add avatar info if available
@@ -16349,10 +16376,7 @@ class ChatModal {
           senderInfo.avatarId = myData.account.avatarId;
           senderInfo.avatarKey = myData.account.avatarKey;
         }
-      }
-
-      // Add timezone for friends and connections
-      if (Number(contact?.friend) >= 2) {
+        // Add timezone if available
         const tz = getLocalTimeZone();
         if (tz) {
           senderInfo.timezone = tz;
@@ -16488,21 +16512,16 @@ class ChatModal {
       username: myAccount.username,
     };
 
-    if (contact && contact?.friend && contact?.friend >= 3) {
+    if (contact && contact?.friend && contact?.friend >= 2) {
       senderInfo.name = myData.account.name;
-      senderInfo.email = myData.account.email;
-      senderInfo.phone = myData.account.phone;
       senderInfo.linkedin = myData.account.linkedin;
       senderInfo.x = myData.account.x;
       // Add avatar info if available
-        if (myData.account.avatarId && myData.account.avatarKey) {
-          senderInfo.avatarId = myData.account.avatarId;
-          senderInfo.avatarKey = myData.account.avatarKey;
-        }
-    }
-
-    // Add timezone for friends and connections
-    if (Number(contact?.friend) >= 2) {
+      if (myData.account.avatarId && myData.account.avatarKey) {
+        senderInfo.avatarId = myData.account.avatarId;
+        senderInfo.avatarKey = myData.account.avatarKey;
+      }
+      // Add timezone if available
       const tz = getLocalTimeZone();
       if (tz) {
         senderInfo.timezone = tz;
@@ -17101,7 +17120,7 @@ class CallInviteModal {
         }
         if (tollRequiredToSend === 1) {
           const username = (contact?.username) || `${addr.slice(0, 8)}...${addr.slice(-6)}`;
-          showToast(`You can only invite people who have added you as a friend or connection. Ask ${username} to add you as a friend or connection`, 0, 'info');
+          showToast(`You can only invite people who have added you as a connection. Ask ${username} to add you as a connection`, 0, 'info');
           continue;
         }
 
@@ -17424,7 +17443,7 @@ class ShareContactsModal {
   handleClose() {
     if (this.selectedContacts.size > 0 && !this.warningShown) {
       this.warningShown = true;
-      showToast('You have contacts selected. Click back again to discard.', 3000, 'warning');
+      showToast('You have contacts selected. Click back again to discard.', 0, 'warning');
       return;
     }
     this.close();
@@ -17689,7 +17708,21 @@ class ImportContactsModal {
       }
 
       // Parse contacts
-      this.parsedContacts = this.parseVcfContacts(vcfContent);
+      const parsedContacts = this.parseVcfContacts(vcfContent);
+
+      // Deduplicate by username (keep first occurrence of each normalized username)
+      const seenUsernames = new Set();
+      this.parsedContacts = parsedContacts.filter(contact => {
+        if (!contact.username) return false;
+        
+        const normalizedUsername = normalizeUsername(contact.username);
+        if (seenUsernames.has(normalizedUsername)) {
+          return false; // Skip duplicate
+        }
+        
+        seenUsernames.add(normalizedUsername);
+        return true; // Keep first occurrence
+      });
 
       // Hide loading
       this.loadingState.style.display = 'none';
@@ -17810,12 +17843,58 @@ class ImportContactsModal {
   }
 
   /**
+   * Validates a contact on the network by username lookup
+   * @param {Object} parsedContact - Contact object with username
+   * @returns {Promise<Object>} { success: boolean, networkAddress?: string, error?: string }
+   */
+  async validateContactOnNetwork(parsedContact) {
+    if (!parsedContact.username) {
+      return { success: false, error: 'No username provided' };
+    }
+
+    try {
+      const username = normalizeUsername(parsedContact.username);
+      const usernameBytes = utf82bin(username);
+      const usernameHash = hashBytes(usernameBytes);
+
+      // Query network for username
+      const addressData = await queryNetwork(`/address/${usernameHash}`);
+      
+      if (!addressData || !addressData.address) {
+        return { success: false, error: 'Username not found on network' };
+      }
+
+      const networkAddress = normalizeAddress(addressData.address);
+
+      // Verify account exists and ensure it's a public account
+      const accountData = await queryNetwork(`/account/${longAddress(networkAddress)}`);
+      if (!accountData || !accountData.account) {
+        return { success: false, error: 'Account not found on network' };
+      }
+
+      // Only public accounts can import, so reject private contacts
+      const contactIsPrivate = accountData.account.private === true;
+      if (contactIsPrivate) {
+        return { 
+          success: false, 
+          error: 'Cannot import private account' 
+        };
+      }
+
+      return { success: true, networkAddress, username };
+    } catch (error) {
+      console.error('Error validating contact on network:', error);
+      return { success: false, error: 'Network error during validation' };
+    }
+  }
+
+  /**
    * Renders the contact list
    */
   async renderContactList() {
     const myAddress = normalizeAddress(myAccount?.keys?.address || '');
 
-    // Filter out self
+    // Filter out self (contacts are already deduplicated by username)
     const filteredContacts = this.parsedContacts.filter(c => 
       normalizeAddress(c.address) !== myAddress
     );
@@ -17999,7 +18078,7 @@ class ImportContactsModal {
   handleClose() {
     if (this.selectedContacts.size > 0 && !this.warningShown) {
       this.warningShown = true;
-      showToast('You have contacts selected. Click back again to discard.', 3000, 'warning');
+      showToast('You have contacts selected. Click back again to discard.', 0, 'warning');
       return;
     }
     this.close();
@@ -18039,15 +18118,52 @@ class ImportContactsModal {
 
     try {
       let importedCount = 0;
+      let failedCount = 0;
+      const failedContacts = [];
+      const importedContacts = [];
 
-      for (const address of this.selectedContacts) {
+      // Parallel validation of all selected contacts
+      const validationPromises = Array.from(this.selectedContacts).map(async (address) => {
         const parsedContact = this.parsedContacts.find(c => normalizeAddress(c.address) === address);
-        if (!parsedContact) continue;
+        if (!parsedContact) return { parsedContact: null, validation: null };
+        
+        const validation = await this.validateContactOnNetwork(parsedContact);
+        return { parsedContact, validation };
+      });
+
+      const results = await Promise.allSettled(validationPromises);
+
+      // Process validation results and create contacts
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          console.error('Validation promise rejected:', result.reason);
+          failedCount++;
+          continue;
+        }
+
+        const { parsedContact, validation } = result.value;
+        if (!parsedContact || !validation) continue;
+
+        if (!validation.success) {
+          console.warn(`Failed to validate contact ${parsedContact.username}:`, validation.error);
+          failedContacts.push({ username: parsedContact.username, error: validation.error });
+          failedCount++;
+          continue;
+        }
+
+        // Use the network address instead of the VCF address
+        const networkAddress = validation.networkAddress;
+
+        // Check if contact already exists
+        if (myData.contacts[networkAddress]) {
+          console.log(`Contact ${parsedContact.username} already exists, skipping`);
+          continue;
+        }
 
         // Create contact record (incomplete - missing public keys)
         const contactRecord = {
-          address: address,
-          username: parsedContact.username || '',
+          address: networkAddress,
+          username: validation.username,
           messages: [],
           timestamp: 0,
           unread: 0,
@@ -18055,8 +18171,8 @@ class ImportContactsModal {
           toll: 0n,
           tollRequiredToReceive: 1,
           tollRequiredToSend: 1,
-          friend: 3, // Friend status
-          friendOld: 3,
+          friend: 2, // Friend status
+          friendOld: 2,
           tolledDepositToastShown: true,
         };
 
@@ -18081,8 +18197,9 @@ class ImportContactsModal {
           }
         }
 
-        // Add to contacts
-        myData.contacts[address] = contactRecord;
+        // Add to contacts using network address
+        myData.contacts[networkAddress] = contactRecord;
+        importedContacts.push(parsedContact.username);
         importedCount++;
       }
 
@@ -18091,8 +18208,19 @@ class ImportContactsModal {
       // Refresh contacts screen if visible
       contactsScreen.updateContactsList();
       
+      // Show appropriate success/error message with usernames
+      if (importedCount > 0 && failedCount === 0) {
+        const successList = importedContacts.join(', ');
+        showToast(`Successfully imported: ${successList}`, 3000, 'success');
+      } else if (importedCount > 0 && failedCount > 0) {
+        const successList = importedContacts.join(', ');
+        const failedList = failedContacts.map(c => c.username).join(', ');
+        showToast(`Imported: ${successList}\n\nFailed: ${failedList}`, 0, 'warning');
+      } else if (failedCount > 0) {
+        const failedList = failedContacts.map(c => c.username).join(', ');
+        showToast(`Failed to import: ${failedList}`, 0, 'error');
+      }
 
-      showToast(`Imported ${importedCount} contact${importedCount !== 1 ? 's' : ''}`, 2000, 'success');
       this.close();
 
     } catch (err) {
@@ -20972,21 +21100,22 @@ class SendAssetConfirmModal {
         username: myAccount.username,
       };
 
-      if (friendLevel === 3) {
+      if (friendLevel === 2) {
         senderInfo.name = myData.account.name;
-        senderInfo.email = myData.account.email;
-        senderInfo.phone = myData.account.phone;
         senderInfo.linkedin = myData.account.linkedin;
         senderInfo.x = myData.account.x;
-      }
-
-      // Add timezone for friends and connections
-      if (friendLevel >= 2) {
+        // Add avatar info if available
+        if (myData.account.avatarId && myData.account.avatarKey) {
+          senderInfo.avatarId = myData.account.avatarId;
+          senderInfo.avatarKey = myData.account.avatarKey;
+        }
+        // Add timezone if available
         const tz = getLocalTimeZone();
         if (tz) {
           senderInfo.timezone = tz;
         }
       }
+
       encSenderInfo = encryptChacha(dhkey, stringify(senderInfo));
     } else {
       senderInfo = { username: myAccount.address };
