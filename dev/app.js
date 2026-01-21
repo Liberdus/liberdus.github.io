@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'l'
+const version = 'm'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -1807,7 +1807,8 @@ class MenuModal {
     this.validatorButton = document.getElementById('openValidator');
     this.validatorButton.addEventListener('click', () => validatorStakingModal.open());
     this.daoButton = document.getElementById('openDao');
-    if (this.daoButton) {
+    if (network.name === 'Devnet') {
+      this.daoButton.style.display = 'block';
       this.daoButton.addEventListener('click', () => daoModal.open());
     }
     this.inviteButton = document.getElementById('openInvite');
@@ -4759,6 +4760,8 @@ class CallsModal {
         if (msg?.type !== 'call') continue;
         // Skip deleted messages
         if (msg?.deleted === 1) continue;
+        // Skip messages that failed to send
+        if (msg?.status === 'failed') continue;
         const callTime = Number(msg.callTime);
         // Only include valid scheduled calls: positive timestamp within last 2h or in future
         if (!Number.isFinite(callTime) || callTime <= 0) continue;
@@ -5975,7 +5978,7 @@ async function injectTx(tx, txid) {
   function maybeShowLowLibToast() {
     try {
       // Keep this simple: check locally cached wallet values only.
-      const LOW_LIB_USD_THRESHOLD = 0.02;
+      const LOW_LIB_USD_THRESHOLD = 0.2;
       if (!myData?.wallet?.assets || !Array.isArray(myData.wallet.assets)) return;
       const libAsset = myData.wallet.assets.find((asset) => asset?.symbol === 'LIB');
       if (!libAsset) return;
@@ -14337,7 +14340,13 @@ class ChatModal {
    */
   isViewableInBrowser(mimeType) {
     if (!mimeType) return false;
-    
+
+    const normalizedMime = mimeType.toLowerCase().trim();
+
+    // Exclude vCard types (VCF). Many servers report vcf as a text/* subtype
+    // but vCard files shouldn't be opened inline in the browser here.
+    if (normalizedMime.includes('vcard')) return false;
+
     const viewableTypes = [
       'image/',           // All images
       'text/',            // Text files
@@ -14348,8 +14357,8 @@ class ChatModal {
       'application/xml',  // XML
       'text/xml'          // XML (alternative)
     ];
-    
-    return viewableTypes.some(type => mimeType.startsWith(type));
+
+    return viewableTypes.some(type => normalizedMime.startsWith(type));
   }
 
   /**
@@ -15010,7 +15019,7 @@ class ChatModal {
         }
         break;
       case 'contacts':
-        shareContactsModal.open();
+        shareContactsModal.open(chatModal.address);
         break;
     }
   }
@@ -15399,9 +15408,7 @@ class ChatModal {
       const fileName = attachmentRow.dataset.name ? decodeURIComponent(attachmentRow.dataset.name) : '';
       const fileType = attachmentRow.dataset.type || '';
       const isVcf = fileType === 'text/vcard' || fileName.toLowerCase().endsWith('.vcf');
-      const contact = this.address ? myData?.contacts?.[this.address] : null;
-      const isConnection = contact?.friend === 2;
-      importContactsOpt.style.display = (isVcf && isConnection) ? '' : 'none';
+      importContactsOpt.style.display = isVcf ? '' : 'none';
     }
 
     this.positionContextMenu(this.imageAttachmentContextMenu, attachmentRow);
@@ -17198,12 +17205,14 @@ class ShareContactsModal {
     this.selectedContacts = new Set();
     this.warningShown = false;
     this.isUploading = false;
+    this.recipientAddress = null;
   }
 
   load() {
     this.modal = document.getElementById('shareContactsModal');
     this.contactsList = document.getElementById('shareContactsList');
     this.emptyState = document.getElementById('shareContactsEmptyState');
+    this.actionButton = document.getElementById('shareContactsActionBtn');
     this.allNoneButton = document.getElementById('shareContactsAllNoneBtn');
     this.doneButton = document.getElementById('shareContactsDoneBtn');
     this.closeButton = document.getElementById('closeShareContactsModal');
@@ -17213,16 +17222,25 @@ class ShareContactsModal {
     this.allNoneButton.addEventListener('click', () => this.toggleAllNone());
     this.doneButton.addEventListener('click', () => this.handleDone());
     this.contactsList.addEventListener('click', (e) => this.handleContactClick(e));
+    this.actionButton.addEventListener('click', () => {
+      if (this.recipientAddress) {
+        this.close();
+        friendModal.setAddress(this.recipientAddress);
+        friendModal.open();
+      }
+    });
   }
 
   /**
    * Opens the share contacts modal and populates the contact list
+   * @param {string|null} recipientAddress - The address of the recipient (from chatModal)
    */
-  async open() {
+  async open(recipientAddress = null) {
     // Reset state
     this.selectedContacts.clear();
     this.warningShown = false;
     this.isUploading = false;
+    this.recipientAddress = recipientAddress;
     this.doneButton.classList.remove('loading');
     this.doneButton.disabled = true;
     this.allNoneButton.classList.remove('all-selected');
@@ -17232,6 +17250,9 @@ class ShareContactsModal {
     // Clear existing list
     this.contactsList.innerHTML = '';
     this.contactsList.style.display = 'none';
+
+    // Hide action button by default
+    this.actionButton.style.display = 'none';
 
     // Show modal
     this.modal.classList.add('active');
@@ -17248,6 +17269,44 @@ class ShareContactsModal {
       this.doneButton.disabled = true;
       this.allNoneButton.disabled = true;
       return;
+    }
+
+    // Check connection status if recipient address is provided
+    if (recipientAddress) {
+      const recipient = myData.contacts[recipientAddress];
+      if (recipient) {
+        // if undefined fallback to value 1 (toll required) so user cannot share contacts
+        const tollRequiredToSend = recipient.tollRequiredToSend ?? 1;
+
+        // Check if user hasn't added recipient as connection (contact.friend !== 2)
+        if (recipient.friend !== 2) {
+          const emptyStateChildren = this.emptyState.children;
+          if (emptyStateChildren.length >= 3) {
+            emptyStateChildren[1].textContent = 'Cannot share contacts';
+            emptyStateChildren[2].textContent = 'You need to add the recipient as a connection before you can share contacts with them';
+          }
+          this.emptyState.style.display = 'block';
+          this.doneButton.disabled = true;
+          this.allNoneButton.disabled = true;
+          // Show button to open Connection Status modal
+          this.actionButton.textContent = 'Change Connection Status';
+          this.actionButton.style.display = 'block';
+          return;
+        }
+
+        // Check if recipient hasn't added user as connection (tollRequiredToSend !== 0)
+        if (tollRequiredToSend !== 0) {
+          const emptyStateChildren = this.emptyState.children;
+          if (emptyStateChildren.length >= 3) {
+            emptyStateChildren[1].textContent = 'Cannot share contacts';
+            emptyStateChildren[2].textContent = 'The recipient must add you as a connection before you can share contacts with them. Ask them to add you as a connection';
+          }
+          this.emptyState.style.display = 'block';
+          this.doneButton.disabled = true;
+          this.allNoneButton.disabled = true;
+          return;
+        }
+      }
     }
 
     // For public accounts, proceed with contact list population
@@ -17636,6 +17695,7 @@ class ImportContactsModal {
     this.isImporting = false;
     this.parsedContacts = [];
     this.currentAttachment = null;
+    this.recipientAddress = null;
   }
 
   load() {
@@ -17643,6 +17703,7 @@ class ImportContactsModal {
     this.contactsList = document.getElementById('importContactsList');
     this.emptyState = document.getElementById('importContactsEmptyState');
     this.loadingState = document.getElementById('importContactsLoading');
+    this.actionButton = document.getElementById('importContactsActionBtn');
     this.allNoneButton = document.getElementById('importContactsAllNoneBtn');
     this.doneButton = document.getElementById('importContactsDoneBtn');
     this.closeButton = document.getElementById('closeImportContactsModal');
@@ -17652,6 +17713,13 @@ class ImportContactsModal {
     this.allNoneButton.addEventListener('click', () => this.toggleAllNone());
     this.doneButton.addEventListener('click', () => this.handleDone());
     this.contactsList.addEventListener('click', (e) => this.handleContactClick(e));
+    this.actionButton.addEventListener('click', () => {
+      if (this.recipientAddress) {
+        this.close();
+        friendModal.setAddress(this.recipientAddress);
+        friendModal.open();
+      }
+    });
   }
 
   /**
@@ -17665,6 +17733,7 @@ class ImportContactsModal {
     this.isImporting = false;
     this.parsedContacts = [];
     this.currentAttachment = attachment;
+    this.recipientAddress = attachment?.senderAddress || null;
     this.doneButton.classList.remove('loading');
     this.doneButton.disabled = true;
     this.allNoneButton.classList.remove('all-selected');
@@ -17674,6 +17743,9 @@ class ImportContactsModal {
     this.contactsList.innerHTML = '';
     this.contactsList.style.display = 'none';
     this.loadingState.style.display = 'none';
+
+    // Hide action button by default
+    this.actionButton.style.display = 'none';
 
     // Show modal
     this.modal.classList.add('active');
@@ -17689,6 +17761,26 @@ class ImportContactsModal {
       this.emptyState.style.display = 'block';
       this.doneButton.disabled = true;
       return;
+    }
+
+    // Check connection status if recipient address is provided
+    if (this.recipientAddress) {
+      const recipient = myData.contacts[this.recipientAddress];
+      if (recipient && recipient.friend !== 2) {
+        // Recipient is not a connection - show warning
+        const emptyStateChildren = this.emptyState.children;
+        if (emptyStateChildren.length >= 3) {
+          emptyStateChildren[1].textContent = 'Cannot import contacts';
+          emptyStateChildren[2].textContent = 'Contacts should only be imported from people you trust. If you trust this user add them as a connection before importing contacts.';
+        }
+        this.emptyState.style.display = 'block';
+        this.doneButton.disabled = true;
+        this.allNoneButton.disabled = true;
+        // Show button to open Connection Status modal
+        this.actionButton.textContent = 'Change Connection Status';
+        this.actionButton.style.display = 'block';
+        return;
+      }
     }
 
     // For public accounts, proceed with VCF processing
@@ -18122,8 +18214,14 @@ class ImportContactsModal {
       const failedContacts = [];
       const importedContacts = [];
 
-      // Parallel validation of all selected contacts
-      const validationPromises = Array.from(this.selectedContacts).map(async (address) => {
+      // Limit to 20 contacts maximum
+      const selectedContactsArray = Array.from(this.selectedContacts);
+      const totalSelected = selectedContactsArray.length;
+      const contactsToProcess = selectedContactsArray.slice(0, 20);
+      const hasMoreThan20 = totalSelected > 20;
+
+      // Parallel validation of selected contacts (limited to 20)
+      const validationPromises = contactsToProcess.map(async (address) => {
         const parsedContact = this.parsedContacts.find(c => normalizeAddress(c.address) === address);
         if (!parsedContact) return { parsedContact: null, validation: null };
         
@@ -18133,7 +18231,7 @@ class ImportContactsModal {
 
       const results = await Promise.allSettled(validationPromises);
 
-      // Process validation results and create contacts
+      // Process validation results and create contacts (limited to 20)
       for (const result of results) {
         if (result.status === 'rejected') {
           console.error('Validation promise rejected:', result.reason);
@@ -18219,6 +18317,11 @@ class ImportContactsModal {
       } else if (failedCount > 0) {
         const failedList = failedContacts.map(c => c.username).join(', ');
         showToast(`Failed to import: ${failedList}`, 0, 'error');
+      }
+
+      // Show warning if more than 20 contacts were selected
+      if (hasMoreThan20) {
+        showToast('Only 20 contacts can be imported at a time. Please import the remaining contacts in another batch.', 0, 'warning');
       }
 
       this.close();
