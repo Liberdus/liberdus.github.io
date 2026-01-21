@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'm'
+const version = 'n'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -19500,6 +19500,7 @@ class NewChatModal {
     footer.closeNewChatButton();
     this.usernameAvailable.style.display = 'none';
     this.submitButton.disabled = true;
+    walletScreen.updateWalletBalances();
     // Delay focus to ensure transition completes (modal transition is 300ms)
     setTimeout(() => {
       this.recipientInput.focus();
