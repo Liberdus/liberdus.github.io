@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'p'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -36,6 +36,8 @@ async function checkVersion() {
       newUrl,
       'styles.css',
       'app.js',
+      'dao.repo.js',
+      'dao.mock-data.js',
       'lib.js',
       'network.js',
       'crypto.js',
@@ -72,6 +74,14 @@ async function forceReload(urls) {
 // Needed to stringify and parse bigints; also deterministic stringify
 //   modified to use export
 import { stringify, parse } from './external/stringify-shardus.js';
+
+import {
+  daoRepo,
+  DAO_STATES,
+  getDaoStateLabel,
+  getDaoTypeLabel,
+  getEffectiveDaoState,
+} from './dao.repo.js';
 
 // Import crypto functions from crypto.js
 import {
@@ -295,6 +305,48 @@ function clearMyData() {
   myAccount = null;
 }
 
+/**
+ * One-time migration: convert legacy friend status (3) to connection (2)
+ * @param {Object} data
+ * @returns {boolean} True if migration flag was applied
+ */
+function migrateFriendStatusToConnection(data) {
+  if (!data?.account) return false;
+
+  const migrations =
+    data.account.migrations && typeof data.account.migrations === 'object'
+      ? data.account.migrations
+      : null;
+
+  if (migrations?.friendStatusToConnection === true) {
+    return false;
+  }
+
+  if (data.contacts && typeof data.contacts === 'object') {
+    for (const contact of Object.values(data.contacts)) {
+      if (!contact || typeof contact !== 'object') continue;
+      if (contact.friend === 3) {
+        contact.friend = 2;
+      }
+      if (contact.friendOld === 3) {
+        contact.friendOld = 2;
+      }
+    }
+  }
+
+  data.account.migrations = migrations && typeof migrations === 'object' ? migrations : {};
+  data.account.migrations.friendStatusToConnection = true;
+  return true;
+}
+
+/**
+ * Checks if the current account is private
+ * @returns {boolean} True if the account is private, false otherwise
+ */
+function isPrivateAccount() {
+  return myAccount?.private === true || myData?.account?.private === true;
+}
+
 // Load saved account data and update chat list on page load
 document.addEventListener('DOMContentLoaded', async () => {
   markConnectivityDependentElements();
@@ -409,6 +461,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Menu Modal
   menuModal.load();
 
+  // DAO Modals
+  daoModal.load();
+  addProposalModal.load();
+  proposalInfoModal.load();
+
   // Settings Modal
   settingsModal.load();
 
@@ -456,6 +513,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Call Invite Modal
   callInviteModal.load();
+
+  // Share Contacts Modal
+  shareContactsModal.load();
+
+  // Import Contacts Modal
+  importContactsModal.load();
 
   // Call Schedule Modals
   callScheduleChoiceModal.load();
@@ -667,6 +730,7 @@ class WelcomeScreen {
     // Show Apple Safari backup reminder toast after welcome screen has rendered
     setTimeout(() => {
       this.showAppleSafariBackupToast();
+      this.showGDriveBackupReminder();
     }, 500);
   }
 
@@ -704,6 +768,35 @@ class WelcomeScreen {
     // Show the toast
     const message = '<strong>Important:</strong> Apple will delete your data if you don\'t visit this site for a week. Please backup your account data regularly.';
     showToast(message, 0, 'warning', true);
+  }
+
+  /**
+   * Show Google Drive backup reminder toast when overdue and not recently reminded.
+   */
+  showGDriveBackupReminder() {
+    // Don't show reminder if user has no accounts to back up
+    const { usernames } = signInModal.getSignInUsernames() || { usernames: [] };
+    if (!usernames?.length) {
+      return;
+    }
+
+    const now = getCorrectedTimestamp();
+    const lastBackup = backupAccountModal.getGDriveBackupTs();
+    const lastReminder = backupAccountModal.getGDriveReminderTs();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+
+    if (now - lastBackup <= sevenDaysMs) {
+      return;
+    }
+
+    if (now - lastReminder <= threeDaysMs) {
+      return;
+    }
+
+    const message = 'Click "Menu" and "Backup" to Google drive. You can restore if anything happens to this device.';
+    showToast(message, 0, 'warning');
+    backupAccountModal.setGDriveReminderTs(now);
   }
 
   isActive() {
@@ -961,9 +1054,9 @@ class Footer {
       // Update header with username if signed in
       const appName = document.querySelector('.app-name');
       if (myAccount && myAccount.username) {
-        const isPrivateAccount = myAccount?.private === true || myData?.account?.private === true;
+        const accountIsPrivate = isPrivateAccount();
         appName.textContent = `${myAccount.username}`;
-        appName.classList.toggle('is-private', isPrivateAccount);
+        appName.classList.toggle('is-private', accountIsPrivate);
         // Update avatar
         await header.updateAvatar();
       } else {
@@ -1320,23 +1413,21 @@ class ContactsScreen {
     // Split into status groups in a single pass
     const statusGroups = contactsArray.reduce(
       (acc, contact) => {
-        // 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+        // 0 = blocked, 1 = Other, 2 = Connection
         switch (contact.friend) {
           case 0:
             acc.blocked.push(contact);
             break;
+          case 3: // legacy friend status treated as connection
           case 2:
             acc.acquaintances.push(contact);
-            break;
-          case 3:
-            acc.friends.push(contact);
             break;
           default:
             acc.others.push(contact);
         }
         return acc;
       },
-      { others: [], acquaintances: [], friends: [], blocked: [] }
+      { others: [], acquaintances: [], blocked: [] }
     );
 
     // Sort each group by name first, then by username if name is not available
@@ -1349,22 +1440,27 @@ class ContactsScreen {
 
     // Group metadata for rendering
     const groupMeta = [
-      { key: 'friends', label: 'Friends', itemClass: 'chat-item' },
       { key: 'acquaintances', label: 'Connections', itemClass: 'chat-item' },
       { key: 'others', label: 'Tolled', itemClass: 'chat-item' },
       { key: 'blocked', label: 'Blocked', itemClass: 'chat-item blocked' },
     ];
 
+    // Helper to check if contact is incomplete (missing public keys)
+    const isContactIncomplete = (contact) => !contact.public;
+
     // Helper to render a contact item
     const renderContactItem = async (contact, itemClass) => {
       const avatarHtml = await getContactAvatarHtml(contact);
       const contactName = getContactDisplayName(contact);
+      const incompleteIndicator = isContactIncomplete(contact) 
+        ? '<span class="contact-incomplete" title="Incomplete contact"></span>' 
+        : '';
       return `
             <li class="${itemClass}">
                 <div class="chat-avatar">${avatarHtml}</div>
                 <div class="chat-content">
                     <div class="chat-header">
-                        <div class="chat-name">${contactName}</div>
+                        <div class="chat-name">${incompleteIndicator}${contactName}</div>
                     </div>
                     <div class="contact-list-info">
                         ${contact.email || contact.x || contact.phone || `${contact.address.slice(0, 8)}…${contact.address.slice(-6)}`}
@@ -1710,6 +1806,11 @@ class MenuModal {
     this.closeButton.addEventListener('click', () => this.close());
     this.validatorButton = document.getElementById('openValidator');
     this.validatorButton.addEventListener('click', () => validatorStakingModal.open());
+    this.daoButton = document.getElementById('openDao');
+    if (network.name === 'Devnet') {
+      this.daoButton.style.display = 'block';
+      this.daoButton.addEventListener('click', () => daoModal.open());
+    }
     this.inviteButton = document.getElementById('openInvite');
     this.inviteButton.addEventListener('click', () => inviteModal.open());
     this.explorerButton = document.getElementById('openExplorer');
@@ -1729,6 +1830,10 @@ class MenuModal {
     this.farmButton = document.getElementById('openFarm');
     this.farmButton.addEventListener('click', () => farmModal.open());
     
+    // Header sign out button
+    this.signOutHeaderButton = document.getElementById('signOutMenuHeader');
+    this.signOutHeaderButton.addEventListener('click', async () => await this.handleSignOut());
+    
     
     // Show launch button if ReactNativeWebView is available
     if (window?.ReactNativeWebView) {
@@ -1742,8 +1847,20 @@ class MenuModal {
     }
   }
 
+  enableSignOutButtonWithDelay() {
+    // Disable button initially
+    this.signOutHeaderButton.classList.remove('active');
+    // Re-enable after modal animation completes (300ms) + small buffer to prevent accidental double-taps
+    setTimeout(() => {
+      if (this.isActive()) {
+        this.signOutHeaderButton.classList.add('active');
+      }
+    }, 400); // 400ms = modal animation (300ms) + 100ms buffer
+  }
+
   open() {
     this.modal.classList.add('active');
+    this.enableSignOutButtonWithDelay();
     enterFullscreen();
   }
 
@@ -1839,6 +1956,610 @@ class MenuModal {
 
 const menuModal = new MenuModal();
 
+// =====================
+// DAO / Proposals
+// =====================
+
+// DAO proposals are loaded via `daoRepo` and kept in memory (no localStorage persistence).
+
+function getDaoVoterId() {
+  return myAccount?.address || myData?.account?.address || myAccount?.username || myData?.account?.username || 'anon';
+}
+
+function formatDaoTimestamp(ts) {
+  const n = Number(ts || 0);
+  if (!n) return '';
+  try {
+    return new Date(n).toLocaleString();
+  } catch {
+    return '';
+  }
+}
+
+class DaoModal {
+  constructor() {
+    this.selectedGroupKey = 'active';
+    this.selectedStateKey = 'voting';
+    this._outsideClickHandler = null;
+    this.isLoading = false;
+  }
+
+  load() {
+    this.modal = document.getElementById('daoModal');
+    this.closeButton = document.getElementById('closeDaoModal');
+    this.titleEl = document.getElementById('daoModalTitle');
+    this.statusMenuButton = document.getElementById('daoFilterButton');
+    this.statusMenu = document.getElementById('daoStatusContextMenu');
+    this.groupActiveButton = document.getElementById('daoGroupActiveButton');
+    this.groupArchivedButton = document.getElementById('daoGroupArchivedButton');
+    this.list = document.getElementById('daoProposalList');
+    this.emptyState = document.getElementById('daoProposalEmptyState');
+    this.addButton = document.getElementById('daoAddProposalButton');
+
+    if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
+    if (this.addButton) this.addButton.addEventListener('click', () => addProposalModal.open());
+
+    if (this.statusMenuButton) {
+      this.statusMenuButton.addEventListener('click', (e) => this.toggleStatusMenu(e));
+    }
+
+    if (this.groupActiveButton) {
+      this.groupActiveButton.addEventListener('click', () => {
+        this.setGroupFilter('active');
+      });
+    }
+    if (this.groupArchivedButton) {
+      this.groupArchivedButton.addEventListener('click', () => {
+        this.setGroupFilter('archived');
+      });
+    }
+
+    if (this.statusMenu) {
+      this.statusMenu.addEventListener('click', (e) => {
+        const option = e.target.closest('.context-menu-option');
+        if (!option) return;
+        const key = option.dataset.stateKey;
+        if (!key) return;
+        this.setStateFilter(key);
+      });
+    }
+
+    // Close the DAO menu on outside click
+    this._outsideClickHandler = (e) => {
+      if (!this.statusMenu || this.statusMenu.style.display !== 'block') return;
+      if (this.statusMenu.contains(e.target)) return;
+      if (this.statusMenuButton && this.statusMenuButton.contains(e.target)) return;
+      this.closeStatusMenu();
+    };
+    document.addEventListener('click', this._outsideClickHandler);
+  }
+
+  open() {
+    this._open();
+  }
+
+  async _open() {
+    this.isLoading = true;
+
+    // Close the main menu if opened from it
+    if (menuModal?.isActive?.()) menuModal.close();
+    footer?.closeNewChatButton?.();
+
+    this.modal.classList.add('active');
+    enterFullscreen();
+
+    // Default filter is Voting
+    this.selectedStateKey = this.selectedStateKey || 'voting';
+    this.selectedGroupKey = this.selectedGroupKey || 'active';
+    this.render();
+
+    try {
+      await daoRepo.refresh({ force: true });
+    } catch (e) {
+      console.warn('Failed to refresh DAO proposals:', e);
+      showToast('Failed to load proposals', 2500, 'error');
+    } finally {
+      this.isLoading = false;
+      this.render();
+    }
+  }
+
+  close() {
+    this.closeStatusMenu();
+    this.modal.classList.remove('active');
+    enterFullscreen();
+
+    if (this.addButton) {
+      this.addButton.classList.remove('visible');
+    }
+
+    // Restore new chat button if user is on chats/contacts
+    const activeScreenId = document.querySelector('.app-screen.active')?.id;
+    if (activeScreenId === 'chatsScreen' || activeScreenId === 'contactsScreen') {
+      footer?.openNewChatButton?.();
+    }
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  toggleStatusMenu(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!this.statusMenu) return;
+    if (this.statusMenu.style.display === 'block') {
+      this.closeStatusMenu();
+      return;
+    }
+    this.showStatusMenu();
+  }
+
+  showStatusMenu() {
+    if (!this.statusMenu || !this.statusMenuButton) return;
+    const buttonRect = this.statusMenuButton.getBoundingClientRect();
+    const menuWidth = 200;
+    const approxMenuHeight = 8 + DAO_STATES.length * 44; // padding + items
+
+    let left = buttonRect.right - menuWidth;
+    let top = buttonRect.bottom + 8;
+
+    if (left < 10) left = 10;
+    if (top + approxMenuHeight > window.innerHeight - 10) {
+      top = buttonRect.top - approxMenuHeight - 8;
+    }
+
+    Object.assign(this.statusMenu.style, {
+      left: `${left}px`,
+      top: `${top}px`,
+      display: 'block',
+    });
+  }
+
+  closeStatusMenu() {
+    if (!this.statusMenu) return;
+    this.statusMenu.style.display = 'none';
+  }
+
+  setStateFilter(key) {
+    this.selectedStateKey = key;
+    this.closeStatusMenu();
+    this.render();
+  }
+
+  setGroupFilter(key) {
+    this.selectedGroupKey = key;
+    this.render();
+  }
+
+  getProposals() {
+    return daoRepo.getProposalsForUi(this.selectedGroupKey);
+  }
+
+  render() {
+    const proposalsActive = daoRepo.getProposalsForUi('active');
+    const proposalsArchived = daoRepo.getProposalsForUi('archived');
+
+    const proposals = this.selectedGroupKey === 'archived' ? proposalsArchived : proposalsActive;
+
+    // Update counts by state (within selected group)
+    const counts = Object.fromEntries(DAO_STATES.map((s) => [s.key, 0]));
+    for (const p of proposals) {
+      const state = getEffectiveDaoState(p);
+      if (counts[state] !== undefined) counts[state] += 1;
+    }
+
+    // Update header title
+    const groupLabel = this.selectedGroupKey === 'archived' ? 'Archived' : 'Active';
+    const label = getDaoStateLabel(this.selectedStateKey);
+    if (this.titleEl) this.titleEl.textContent = `DAO · ${groupLabel} · ${label}`;
+
+    // Update group toggle labels + selection
+    if (this.groupActiveButton) {
+      this.groupActiveButton.textContent = `Active ${proposalsActive.length}`;
+      this.groupActiveButton.classList.toggle('active', this.selectedGroupKey !== 'archived');
+    }
+    if (this.groupArchivedButton) {
+      this.groupArchivedButton.textContent = `Archived ${proposalsArchived.length}`;
+      this.groupArchivedButton.classList.toggle('active', this.selectedGroupKey === 'archived');
+    }
+
+    for (const s of DAO_STATES) {
+      const el = document.getElementById(`daoStatusOption${s.label.replace(/\s+/g, '')}`);
+      if (el) el.textContent = `${s.label} ${counts[s.key] || 0}`;
+    }
+
+    // Filter + sort (newest entered into state first)
+    const filtered = proposals
+      .filter((p) => getEffectiveDaoState(p) === this.selectedStateKey)
+      .sort((a, b) => Number(b.stateEnteredAt || b.createdAt || 0) - Number(a.stateEnteredAt || a.createdAt || 0));
+
+    // Clear old list items
+    if (this.list) {
+      this.list.querySelectorAll('li.chat-item').forEach((el) => el.remove());
+    }
+
+    const hasAny = filtered.length > 0;
+    if (this.emptyState) this.emptyState.style.display = hasAny ? 'none' : 'block';
+
+    // Update empty state copy based on group.
+    if (this.emptyState && !hasAny) {
+      const lines = Array.from(this.emptyState.querySelectorAll('div'));
+      // Structure is: [0]=spacer, [1]=headline, [2]=subline, [3]=optional third line.
+      const headlineEl = lines[1] || null;
+      const sublineEl = lines[2] || null;
+      const isArchived = this.selectedGroupKey === 'archived';
+
+      if (this.isLoading) {
+        if (headlineEl) headlineEl.textContent = 'Loading proposals…';
+        if (sublineEl) sublineEl.textContent = 'Please wait';
+      } else {
+        if (headlineEl) headlineEl.textContent = isArchived ? 'No archived proposals found' : 'No proposals found';
+        if (sublineEl) {
+          sublineEl.textContent = isArchived
+            ? 'Archived proposals appear here after they age out'
+            : 'Use + to create a proposal';
+        }
+      }
+    }
+
+    if (!this.list) return;
+
+    for (const p of filtered) {
+      const li = document.createElement('li');
+      li.classList.add('chat-item');
+
+      const title = escapeHtml(p.title || 'Untitled Proposal');
+      const summary = escapeHtml((p.summary || '').trim());
+      const time = formatDaoTimestamp(p.stateEnteredAt || p.createdAt);
+
+      const numberPrefix = p.number ? `#${p.number} ` : '';
+
+      li.innerHTML = `
+        <div class="chat-content">
+          <div class="chat-header">
+            <div class="chat-name">${escapeHtml(numberPrefix)}${title}</div>
+            <div class="chat-time">${escapeHtml(time)}</div>
+          </div>
+          <div class="chat-message">${truncateMessage(summary || '—', 70)}</div>
+        </div>
+      `;
+      li.onclick = () => proposalInfoModal.open(p.id);
+      this.list.appendChild(li);
+    }
+
+    // Show + button when modal is active
+    if (this.addButton) {
+      this.addButton.classList.toggle('visible', this.isActive());
+    }
+  }
+}
+
+const daoModal = new DaoModal();
+
+class AddProposalModal {
+  load() {
+    this.modal = document.getElementById('addProposalModal');
+    this.closeButton = document.getElementById('closeAddProposalModal');
+    this.cancelButton = document.getElementById('cancelAddProposal');
+    this.form = document.getElementById('addProposalForm');
+    this.titleInput = document.getElementById('addProposalTitle');
+    this.typeSelect = document.getElementById('addProposalType');
+    this.summaryInput = document.getElementById('addProposalSummary');
+    this.typeFieldsContainer = document.getElementById('addProposalTypeFields');
+
+    if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
+    if (this.cancelButton) this.cancelButton.addEventListener('click', () => this.close());
+
+    if (this.form) {
+      this.form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        this.handleCreate();
+      });
+    }
+
+    if (this.typeSelect) {
+      this.typeSelect.addEventListener('change', () => {
+        this.renderTypeFields();
+      });
+    }
+  }
+
+  open() {
+    this.modal.classList.add('active');
+    enterFullscreen();
+    if (this.titleInput) this.titleInput.value = '';
+    if (this.typeSelect) this.typeSelect.value = 'treasury_project';
+    if (this.summaryInput) this.summaryInput.value = '';
+    this.renderTypeFields();
+    setTimeout(() => {
+      this.titleInput.focus();
+    }, 325);
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    enterFullscreen();
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  renderTypeFields() {
+    if (!this.typeFieldsContainer) return;
+    const typeKey = this.typeSelect?.value || 'treasury_project';
+
+    // Minimal, mock-only dynamic fields.
+    if (typeKey === 'treasury_project' || typeKey === 'treasury_mint') {
+      this.typeFieldsContainer.innerHTML = `
+        <div class="form-group">
+          <label for="addProposalAddress">Address</label>
+          <input id="addProposalAddress" class="form-control" type="text" maxlength="128" placeholder="Destination address" />
+        </div>
+        <div class="form-group">
+          <label for="addProposalAmount">Amount</label>
+          <input id="addProposalAmount" class="form-control" type="number" min="0" step="0.0001" placeholder="0" />
+        </div>
+      `;
+      return;
+    }
+
+    if (typeKey === 'params_governance') {
+      this.typeFieldsContainer.innerHTML = `
+        <div class="form-group">
+          <label for="addProposalVotingThreshold">Voting Threshold</label>
+          <input id="addProposalVotingThreshold" class="form-control" type="text" maxlength="20" placeholder="e.g. 60%" />
+        </div>
+        <div class="form-group">
+          <label for="addProposalVotingEligibility">Voting Eligibility</label>
+          <input id="addProposalVotingEligibility" class="form-control" type="text" maxlength="120" placeholder="e.g. validators + stakers" />
+        </div>
+      `;
+      return;
+    }
+
+    if (typeKey === 'params_economic') {
+      this.typeFieldsContainer.innerHTML = `
+        <div class="form-group">
+          <label for="addProposalMinTxFee">Min Tx Fee</label>
+          <input id="addProposalMinTxFee" class="form-control" type="text" maxlength="24" placeholder="e.g. 0.001" />
+        </div>
+        <div class="form-group">
+          <label for="addProposalNodeRewards">Node Rewards</label>
+          <input id="addProposalNodeRewards" class="form-control" type="text" maxlength="24" placeholder="e.g. unchanged" />
+        </div>
+        <div class="form-group">
+          <label for="addProposalValidatorPenalty">Validator Penalty</label>
+          <input id="addProposalValidatorPenalty" class="form-control" type="text" maxlength="24" placeholder="e.g. 50" />
+        </div>
+      `;
+      return;
+    }
+
+    // params_protocol
+    this.typeFieldsContainer.innerHTML = `
+      <div class="form-group">
+        <label for="addProposalMinActiveNodes">Min Active Nodes</label>
+        <input id="addProposalMinActiveNodes" class="form-control" type="number" min="0" step="1" placeholder="e.g. 100" />
+      </div>
+      <div class="form-group">
+        <label for="addProposalMaxActiveNodes">Max Active Nodes</label>
+        <input id="addProposalMaxActiveNodes" class="form-control" type="number" min="0" step="1" placeholder="e.g. 250" />
+      </div>
+      <div class="form-group">
+        <label for="addProposalMinValidatorVersion">Min Validator Version</label>
+        <input id="addProposalMinValidatorVersion" class="form-control" type="text" maxlength="40" placeholder="e.g. 1.2.3" />
+      </div>
+    `;
+  }
+
+  async handleCreate() {
+    const title = (this.titleInput?.value || '').trim();
+    const summary = (this.summaryInput?.value || '').trim();
+    const typeKey = (this.typeSelect?.value || '').trim();
+
+    if (!title) {
+      showToast('Please enter a title', 2000, 'warning');
+      return;
+    }
+    if (!summary) {
+      showToast('Please enter a summary', 2000, 'warning');
+      return;
+    }
+
+    if (!typeKey) {
+      showToast('Please select a type', 2000, 'warning');
+      return;
+    }
+
+    const fields = {};
+    // Collect dynamic fields if present.
+    const addrEl = document.getElementById('addProposalAddress');
+    const amtEl = document.getElementById('addProposalAmount');
+    const thrEl = document.getElementById('addProposalVotingThreshold');
+    const eligEl = document.getElementById('addProposalVotingEligibility');
+    const feeEl = document.getElementById('addProposalMinTxFee');
+    const rewardsEl = document.getElementById('addProposalNodeRewards');
+    const penEl = document.getElementById('addProposalValidatorPenalty');
+    const minNodesEl = document.getElementById('addProposalMinActiveNodes');
+    const maxNodesEl = document.getElementById('addProposalMaxActiveNodes');
+    const minVerEl = document.getElementById('addProposalMinValidatorVersion');
+
+    if (addrEl?.value) fields.address = addrEl.value.trim();
+    if (amtEl?.value) fields.amount = amtEl.value;
+    if (thrEl?.value) fields.votingThreshold = thrEl.value.trim();
+    if (eligEl?.value) fields.votingEligibility = eligEl.value.trim();
+    if (feeEl?.value) fields.minTxFee = feeEl.value.trim();
+    if (rewardsEl?.value) fields.nodeRewards = rewardsEl.value.trim();
+    if (penEl?.value) fields.validatorPenalty = penEl.value.trim();
+    if (minNodesEl?.value) fields.minActiveNodes = Number(minNodesEl.value);
+    if (maxNodesEl?.value) fields.maxActiveNodes = Number(maxNodesEl.value);
+    if (minVerEl?.value) fields.minValidatorVersion = minVerEl.value.trim();
+
+    try {
+      await daoRepo.createProposal({
+        title,
+        summary,
+        type: typeKey,
+        fields,
+        createdBy: myAccount?.username || myAccount?.address || 'unknown',
+      });
+    } catch (e) {
+      console.warn('Failed to create proposal:', e);
+      showToast(e?.message || 'Failed to create proposal', 2500, 'error');
+      return;
+    }
+
+    this.close();
+    // Ensure DAO modal shows the new proposal (Discussion by default for new proposals)
+    daoModal.selectedStateKey = 'discussion';
+    daoModal.selectedGroupKey = 'active';
+    if (!daoModal.isActive()) daoModal.open();
+    else daoModal.render();
+
+    showToast('Proposal submitted (Discussion)', 2000, 'success');
+  }
+}
+
+const addProposalModal = new AddProposalModal();
+
+class ProposalInfoModal {
+  load() {
+    this.modal = document.getElementById('proposalInfoModal');
+    this.closeButton = document.getElementById('closeProposalInfoModal');
+    this.numberEl = document.getElementById('proposalInfoNumber');
+    this.titleEl = document.getElementById('proposalInfoTitle');
+    this.typeEl = document.getElementById('proposalInfoType');
+    this.metaEl = document.getElementById('proposalInfoMeta');
+    this.summaryEl = document.getElementById('proposalInfoSummary');
+    this.fieldsEl = document.getElementById('proposalInfoFields');
+    this.voteSection = document.getElementById('proposalVoteSection');
+    this.voteYesBtn = document.getElementById('proposalVoteYes');
+    this.voteNoBtn = document.getElementById('proposalVoteNo');
+    this.voteCountsEl = document.getElementById('proposalVoteCounts');
+
+    this._currentProposalId = null;
+
+    if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
+
+    if (this.voteYesBtn) this.voteYesBtn.addEventListener('click', () => this.castVote('yes'));
+    if (this.voteNoBtn) this.voteNoBtn.addEventListener('click', () => this.castVote('no'));
+  }
+
+  open(proposalId) {
+    this._open(proposalId);
+  }
+
+  async _open(proposalId) {
+    this._currentProposalId = proposalId;
+
+    this.modal.classList.add('active');
+    enterFullscreen();
+
+    let p = null;
+    try {
+      await daoRepo.ensureLoaded();
+      p = daoRepo.getProposalById(proposalId);
+    } catch (e) {
+      console.warn('Failed to load proposal:', e);
+    }
+
+    if (!p) {
+      if (this.numberEl) this.numberEl.textContent = '';
+      if (this.titleEl) this.titleEl.textContent = 'Proposal not found';
+      if (this.typeEl) this.typeEl.textContent = '';
+      if (this.metaEl) this.metaEl.textContent = '';
+      if (this.summaryEl) this.summaryEl.textContent = '';
+      if (this.fieldsEl) this.fieldsEl.innerHTML = '';
+      if (this.voteSection) this.voteSection.style.display = 'none';
+      return;
+    }
+
+    const uiState = getDaoStateLabel(getEffectiveDaoState({ state: p.state, stateEnteredAt: p.state_changed, createdAt: p.created }));
+    const entered = formatDaoTimestamp(p.state_changed || p.created);
+    const createdBy = p.createdBy ? ` · by ${p.createdBy}` : '';
+    const typeLabel = getDaoTypeLabel(p.type);
+
+    if (this.numberEl) this.numberEl.textContent = p.number ? `Proposal #${p.number}` : 'Proposal';
+    if (this.titleEl) this.titleEl.textContent = p.title || 'Untitled Proposal';
+    if (this.typeEl) this.typeEl.textContent = typeLabel ? `Type: ${typeLabel}` : '';
+    if (this.metaEl) this.metaEl.textContent = `${uiState} · ${entered}${createdBy}`;
+    if (this.summaryEl) this.summaryEl.textContent = p.summary || '';
+
+    if (this.fieldsEl) {
+      const entries = Object.entries(p.fields || {}).filter(([, v]) => v !== undefined && v !== null && String(v).length > 0);
+      if (entries.length === 0) {
+        this.fieldsEl.innerHTML = '';
+      } else {
+        this.fieldsEl.innerHTML = entries
+          .map(([k, v]) => {
+            const key = escapeHtml(String(k));
+            const val = escapeHtml(String(v));
+            return `<div><span style="color: var(--secondary-text-color)">${key}</span>: ${val}</div>`;
+          })
+          .join('');
+      }
+    }
+
+    this.renderVotingSection(p);
+  }
+
+  renderVotingSection(p) {
+    if (!this.voteSection) return;
+    const effective = getEffectiveDaoState({ state: p.state, stateEnteredAt: p.state_changed, createdAt: p.created });
+    const showVoting = effective === 'voting';
+    this.voteSection.style.display = showVoting ? 'block' : 'none';
+    if (!showVoting) return;
+
+    const voterId = getDaoVoterId();
+    const votes = p.votes || { yes: 0, no: 0, by: {} };
+    const myVote = votes.by?.[voterId] || '';
+
+    if (this.voteCountsEl) this.voteCountsEl.textContent = `Yes: ${votes.yes || 0} · No: ${votes.no || 0}`;
+
+    if (this.voteYesBtn) {
+      this.voteYesBtn.classList.toggle('btn--primary', myVote === 'yes');
+      this.voteYesBtn.classList.toggle('btn--secondary', myVote !== 'yes');
+    }
+    if (this.voteNoBtn) {
+      this.voteNoBtn.classList.toggle('btn--primary', myVote === 'no');
+      this.voteNoBtn.classList.toggle('btn--secondary', myVote !== 'no');
+    }
+  }
+
+  async castVote(choice) {
+    if (!this._currentProposalId) return;
+
+    const voterId = getDaoVoterId();
+    const result = await daoRepo.castVote({
+      proposalId: this._currentProposalId,
+      voterId,
+      choice,
+    });
+
+    if (!result?.ok) {
+      showToast(result?.error || 'Failed to vote', 2000, 'warning');
+      return;
+    }
+
+    // Re-render this modal and the list counts.
+    this.open(this._currentProposalId);
+    if (daoModal?.isActive?.()) daoModal.render();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    enterFullscreen();
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+}
+
+const proposalInfoModal = new ProposalInfoModal();
+
 class SettingsModal {
   constructor() { }
 
@@ -1870,10 +2591,26 @@ class SettingsModal {
     
     this.signOutButton = document.getElementById('handleSignOutSettings');
     this.signOutButton.addEventListener('click', async () => await menuModal.handleSignOut());
+    
+    // Header sign out button
+    this.signOutHeaderButton = document.getElementById('signOutSettingsHeader');
+    this.signOutHeaderButton.addEventListener('click', async () => await menuModal.handleSignOut());
+  }
+
+  enableSignOutButtonWithDelay() {
+    // Disable button initially
+    this.signOutHeaderButton.classList.remove('active');
+    // Re-enable after modal animation completes (300ms) + small buffer to prevent accidental double-taps
+    setTimeout(() => {
+      if (this.isActive()) {
+        this.signOutHeaderButton.classList.add('active');
+      }
+    }, 400); // 400ms = modal animation (300ms) + 100ms buffer
   }
 
   open() {
     this.modal.classList.add('active');
+    this.enableSignOutButtonWithDelay();
     enterFullscreen();
   }
 
@@ -2492,7 +3229,7 @@ class SignInModal {
       // set timeout to focus on the last item so shift+tab and tab prevention works
       setTimeout(() => {
         this.signInModalLastItem.focus();
-      }, 100);
+      }, 325);
     });
   }
 
@@ -2551,6 +3288,11 @@ class SignInModal {
     }
     myAccount = myData.account;
     logsModal.log(`SignIn as ${username}_${netid}`)
+
+    // One-time migration: convert legacy friend status to connection
+    if (migrateFriendStatusToConnection(myData)) {
+      saveState();
+    }
 
     // Clear notification address for this account when signing in
     // Notification storage is only for accounts the user is NOT signed in to
@@ -2931,7 +3673,7 @@ class ContactInfoModal {
     // Back button
     this.backButton.addEventListener('click', () => this.close());
 
-    this.nameEditButton.addEventListener('click', () => editContactModal.open());
+    this.nameEditButton.addEventListener('click', () => editContactModal.open('name'));
 
     // Add chat button handler for contact info modal
     this.chatButton.addEventListener('click', () => {
@@ -2964,7 +3706,7 @@ class ContactInfoModal {
     // Notes edit button
     this.notesEditButton.addEventListener('click', (e) => {
       e.stopPropagation();
-      editContactModal.open();
+      editContactModal.open('notes');
     });
 
     // Make the avatar itself clickable
@@ -3128,7 +3870,7 @@ const contactInfoModal = new ContactInfoModal();
 
 /**
  * Friend Modal
- * Frontend: 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+ * Frontend: 0 = blocked, 1 = Other, 2 = Connection
  * Backend: 1 = toll required, 0 = toll not required, 2 = blocked
  * 
  * @description Modal for setting the friend status for a contact
@@ -3138,6 +3880,8 @@ class FriendModal {
   constructor() {
     this.currentContactAddress = null;
     this.lastChangeTimeStamp = 0; // track the last time the friend status was changed
+    this.initialFriendStatus = null; // track the initial friend status when modal opens
+    this.warningShown = false; // track if warning has been shown
   }
 
   load() {
@@ -3156,7 +3900,7 @@ class FriendModal {
     });
 
     // Friend modal close button
-    this.modal.querySelector('.back-button').addEventListener('click', () => this.closeFriendModal());
+    this.modal.querySelector('.back-button').addEventListener('click', () => this.close());
   }
 
   // Open the friend modal
@@ -3176,24 +3920,27 @@ class FriendModal {
       const networkRequired = tollInfo?.toll?.required?.[myIndex];
 
       if (networkRequired !== undefined) {
-        // Map backend required value to frontend friend status
+        // Map backend required value to frontend status
         // Backend: 1 = toll required, 0 = toll not required, 2 = blocked
-        // Frontend: 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+        // Frontend: 0 = blocked, 1 = Other, 2 = Connection
         let networkFriendStatus;
         if (networkRequired === 2) {
           networkFriendStatus = 0; // blocked
         } else if (networkRequired === 1) {
           networkFriendStatus = 1; // Other (toll required)
         } else if (networkRequired === 0) {
-          // toll not required - could be Acquaintance (2) or Friend (3)
-          // Use the local contact.friend if it's 2 or 3, otherwise default to 2
-          networkFriendStatus = (contact.friend === 2 || contact.friend === 3) ? contact.friend : 2;
+          // toll not required - connection
+          networkFriendStatus = 2;
         }
 
         // Update contact's friend status if it differs from network
         if (networkFriendStatus !== undefined && networkFriendStatus !== contact.friend) {
+          const previousFriendStatus = contact.friend;
           contact.friend = networkFriendStatus;
           contact.friendOld = networkFriendStatus;
+          if (networkFriendStatus === 0 && previousFriendStatus !== 0) {
+            await this.clearContactAvatar(contact);
+          }
           // Update the friend button color
           this.updateFriendButton(contact, 'addFriendButtonContactInfo');
           this.updateFriendButton(contact, 'addFriendButtonChat');
@@ -3208,21 +3955,39 @@ class FriendModal {
     const radio = this.friendForm.querySelector(`input[value="${status}"]`);
     if (radio) radio.checked = true;
 
+    // Store initial friend status for change detection
+    this.initialFriendStatus = contact.friend;
+    this.warningShown = false;
+
     // Initialize submit button state
     this.updateSubmitButtonState();
 
     this.modal.classList.add('active');
   }
 
-  // Close the friend modal
-  closeFriendModal() {
+  /**
+   * Closes the friend modal with optional warning if friend status has changed
+   * @param {boolean} skipWarning - If true, skip the warning check (e.g., when submitting form)
+   */
+  close(skipWarning = false) {
+    if (!skipWarning && this.initialFriendStatus != null) {
+      const currentStatus = Number(this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value);
+      if (!isNaN(currentStatus) && currentStatus !== this.initialFriendStatus && !this.warningShown) {
+        this.warningShown = true;
+        showToast('Press back again to discard changes.', 5000, 'warning');
+        return;
+      }
+    }
+
     this.modal.classList.remove('active');
+    this.initialFriendStatus = null;
+    this.warningShown = false;
   }
 
   async postUpdateTollRequired(address, friend) {
-    // 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+    // 0 = blocked, 1 = Other, 2 = Connection
     // required = 1 if toll required, 0 if not and 2 to block other party
-    const requiredNum = friend === 3 || friend === 2 ? 0 : friend === 1 ? 1 : friend === 0 ? 2 : 1;
+    const requiredNum = friend === 2 ? 0 : friend === 1 ? 1 : friend === 0 ? 2 : 1;
     const fromAddr = longAddress(myAccount.keys.address);
     const toAddr = longAddress(address);
     const chatId_ = hashBytes([fromAddr, toAddr].sort().join(''));
@@ -3242,8 +4007,8 @@ class FriendModal {
   }
 
   /**
-   * Handle friend form submission
-   * 0 = blocked, 1 = Other, 2 = Acquaintance, 3 = Friend
+  * Handle friend form submission
+  * 0 = blocked, 1 = Other, 2 = Connection
    * @param {Event} event
    * @returns {Promise<void>}
    */
@@ -3260,10 +4025,9 @@ class FriendModal {
       return;
     }
 
-    if ([2,3].includes(contact.friend) && [2,3].includes(Number(selectedStatus))){
+    if (Number(contact.friend) === 2 && Number(selectedStatus) === 2) {
       console.log('no need to post a change to the network since toll required would be 0 for both cases')
-    }
-    else{
+    } else {
       try {
         // send transaction to update chat toll
         const res = await this.postUpdateTollRequired(this.currentContactAddress, Number(selectedStatus));
@@ -3281,7 +4045,7 @@ class FriendModal {
       }
     }
 
-    if ([2,3].includes(contact.friend) && [2,3].includes(Number(selectedStatus))) {
+    if (Number(contact.friend) === 2 && Number(selectedStatus) === 2) {
       // set friend and friendold the same since no transaction is needed
       contact.friendOld = Number(selectedStatus);
     } else {
@@ -3290,10 +4054,13 @@ class FriendModal {
     }
     // Update friend status based on selected value
     contact.friend = Number(selectedStatus);
+    if (contact.friend === 0 && prevFriendStatus !== 0) {
+      await this.clearContactAvatar(contact);
+    }
 
     this.lastChangeTimeStamp = Date.now();
 
-    // Show appropriate toast message depending value 0,1,2,3
+    // Show appropriate toast message depending value 0,1,2
     const toastMessage =
       contact.friend === 0
         ? 'Blocked'
@@ -3301,9 +4068,7 @@ class FriendModal {
           ? 'Added as Tolled'
           : contact.friend === 2
             ? 'Added as Connection'
-            : contact.friend === 3
-              ? 'Added as Friend'
-              : 'Error updating friend status';
+            : 'Error updating friend status';
     const toastType = toastMessage === 'Error updating friend status' ? 'error' : 'success';
     showToast(toastMessage, 2000, toastType);
 
@@ -3319,8 +4084,8 @@ class FriendModal {
       await chatsScreen.updateChatList();
     }
 
-    // Close the friend modal
-    this.closeFriendModal();
+    // Close the friend modal (skip warning since form was submitted)
+    this.close(true);
     this.submitButton.disabled = false;
   }
 
@@ -3338,9 +4103,42 @@ class FriendModal {
   updateFriendButton(contact, buttonId) {
     const button = document.getElementById(buttonId);
     // Remove all status classes
-    button.classList.remove('status-0', 'status-1', 'status-2', 'status-3');
+    button.classList.remove('status-0', 'status-1', 'status-2');
     // Add the current status class
     button.classList.add(`status-${contact.friend}`);
+  }
+
+  async clearContactAvatar(contact) {
+    if (!contact) return;
+
+    const avatarId = contact.avatarId || contact?.senderInfo?.avatarId;
+    if (avatarId) {
+      try {
+        await contactAvatarCache.delete(avatarId);
+      } catch (e) {
+        console.warn('Failed to delete contact avatar:', e);
+      }
+    }
+
+    contact.avatarId = null;
+    contact.hasAvatar = false;
+    if (contact.senderInfo) {
+      delete contact.senderInfo.avatarId;
+      delete contact.senderInfo.avatarKey;
+    }
+    if (contact.useAvatar === 'contact') {
+      delete contact.useAvatar;
+    }
+
+    saveState();
+
+    if (chatModal.isActive() && chatModal.address === contact.address) {
+      chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+      chatModal.appendChatModal(true);
+    }
+    if (typeof chatsScreen !== 'undefined') {
+      chatsScreen.updateChatList();
+    }
   }
 
   // Update the submit button's enabled state based on current and selected status
@@ -3401,6 +4199,8 @@ class EditContactModal {
     this.notesClearButton = document.getElementById('notesClearButton');
     this.saveButton = document.getElementById('saveEditContactButton');
     this.backButton = document.getElementById('closeEditContactModal');
+    this.avatarSection = this.modal.querySelector('#editContactModal .contact-avatar-section');
+    this.avatarDiv = this.avatarSection.querySelector('.avatar');
 
     // Setup event listeners
     this.nameInput.addEventListener('input', (e) => this.handleNameInput(e));
@@ -3411,18 +4211,16 @@ class EditContactModal {
     this.saveButton.addEventListener('click', () => this.handleSave());
     this.providedNameContainer.addEventListener('click', () => this.handleProvidedNameClick());
     this.backButton.addEventListener('click', () => this.close());
+    this.avatarDiv.addEventListener('click', (e) => this.handleAvatarEdit(e));
   }
 
-  open() {
+  open(focusField = 'name') {
     // Get the avatar section elements
-    const avatarSection = document.querySelector('#editContactModal .contact-avatar-section');
-    const avatarDiv = avatarSection.querySelector('.avatar');
-    const nameDiv = avatarSection.querySelector('.name');
-    const subtitleDiv = avatarSection.querySelector('.subtitle');
-    const identicon = document.getElementById('contactInfoAvatar').innerHTML;
+    const nameDiv = this.avatarSection.querySelector('.name');
+    const subtitleDiv = this.avatarSection.querySelector('.subtitle');
 
     // Update the avatar section
-    avatarDiv.innerHTML = identicon;
+    this.avatarDiv.innerHTML = document.getElementById('contactInfoAvatar').innerHTML;
     // update the name and subtitle
     nameDiv.textContent = contactInfoModal.usernameDiv.textContent;
     subtitleDiv.textContent = contactInfoModal.subtitleDiv.textContent;
@@ -3463,25 +4261,38 @@ class EditContactModal {
 
     // Show the edit contact modal
     this.modal.classList.add('active');
-
-    // Create a handler function to focus the input after the modal transition
-    const editContactFocusHandler = () => {
-      // add slight delay and focus on the the very right of the input
-      setTimeout(() => {
-        this.nameInput.focus();
-        // Set cursor position to the end of the input content
-        this.nameInput.setSelectionRange(this.nameInput.value.length, this.nameInput.value.length);
-      }, 200);
-      this.modal.removeEventListener('transitionend', editContactFocusHandler);
-    };
-
-    // Add the event listener
-    this.modal.addEventListener('transitionend', editContactFocusHandler);
+    // Delay focus to ensure transition completes (modal transition is 300ms)
+    setTimeout(() => {
+      const inputToFocus = focusField === 'notes' ? this.notesInput : this.nameInput;
+      inputToFocus.focus();
+      // Set cursor position to the end of the input content
+      inputToFocus.setSelectionRange(inputToFocus.value.length, inputToFocus.value.length);
+    }, 325);
   }
 
   close() {
     this.modal.classList.remove('active');
     this.currentContactAddress = null;
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  async updateAvatar(contact) {
+    const avatarHtml = await getContactAvatarHtml(contact, 96);
+    this.avatarDiv.innerHTML = avatarHtml;
+  }
+
+  handleAvatarEdit(e) {
+    // Open avatar edit modal when clicking anywhere in the avatar div (button or image)
+    e.stopPropagation();
+    this.openAvatarEdit();
+  }
+
+  openAvatarEdit() {
+    if (!this.currentContactAddress) return;
+    avatarEditModal.open(this.currentContactAddress);
   }
 
   handleProvidedNameClick() {
@@ -3949,6 +4760,8 @@ class CallsModal {
         if (msg?.type !== 'call') continue;
         // Skip deleted messages
         if (msg?.deleted === 1) continue;
+        // Skip messages that failed to send
+        if (msg?.status === 'failed') continue;
         const callTime = Number(msg.callTime);
         // Only include valid scheduled calls: positive timestamp within last 2h or in future
         if (!Number.isFinite(callTime) || callTime <= 0) continue;
@@ -5162,6 +5975,36 @@ async function injectTx(tx, txid) {
     return null;
   }
 
+  function maybeShowLowLibToast() {
+    try {
+      // Keep this simple: check locally cached wallet values only.
+      const LOW_LIB_USD_THRESHOLD = 0.2;
+      if (!myData?.wallet?.assets || !Array.isArray(myData.wallet.assets)) return;
+      const libAsset = myData.wallet.assets.find((asset) => asset?.symbol === 'LIB');
+      if (!libAsset) return;
+
+      let usd = Number(libAsset.networth);
+      if (!Number.isFinite(usd)) {
+        // Fallback: estimate from cached balance + price.
+        const balance = libAsset.balance ?? 0n;
+        const price = Number(libAsset.price);
+        if (!Number.isFinite(price) || typeof wei === 'undefined') return;
+        usd = (price * Number(balance)) / Number(wei);
+      }
+
+      if (Number.isFinite(usd) && usd < LOW_LIB_USD_THRESHOLD) {
+        showToast(
+          'Add more LIB before you run out. On the Wallet page click the Faucet button.',
+          0,
+          'warning'
+        );
+      }
+    } catch (e) {
+      // Never block the transaction flow on toast logic.
+      console.warn('Low-LIB toast check failed:', e);
+    }
+  }
+
   try {
     const timestamp = getCorrectedTimestamp();
     // initialize pending array if it doesn't exist
@@ -5203,6 +6046,11 @@ async function injectTx(tx, txid) {
         pendingTxData.to = tx.nominee; // Store 64-character address as-is for stake transactions
       }
       myData.pending.push(pendingTxData);
+
+      if (tx.type !== 'register') {
+        // After submitting a transaction, warn if user is low on LIB.
+        maybeShowLowLibToast();
+      }
     } else {
       let toastMessage = 'Error injecting transaction: ' + data?.result?.reason;
       console.error('Error injecting transaction:', data?.result?.reason);
@@ -5291,7 +6139,10 @@ class SearchMessagesModal {
 
   open() {
     this.modal.classList.add('active');
-    this.searchInput.focus();
+    // Delay focus to ensure transition completes (modal transition is 300ms)
+    setTimeout(() => {
+      this.searchInput.focus();
+    }, 325);
   }
 
   close() {
@@ -5508,7 +6359,10 @@ class SearchContactsModal {
 
   open() {
     this.modal.classList.add('active');
-    this.searchInput.focus();
+    // Delay focus to ensure transition completes (modal transition is 300ms)
+    setTimeout(() => {
+      this.searchInput.focus();
+    }, 325);
   }
 
   close() {
@@ -6099,11 +6953,15 @@ class AvatarEditModal {
         try {
           const contact = myData.contacts[address];
           if (contactInfoModal && typeof contactInfoModal.updateContactInfo === 'function') {
-            contactInfoModal.updateContactInfo(createDisplayInfo(contact));
+            await contactInfoModal.updateContactInfo(createDisplayInfo(contact));
             contactInfoModal.needsContactListUpdate = true;
           }
           if (chatModal && chatModal.isActive && chatModal.isActive() && chatModal.address === address) {
             chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+          }
+          // Update EditContactModal avatar if it's active and showing this contact
+          if (editContactModal.isActive() && editContactModal.currentContactAddress === address) {
+            await editContactModal.updateAvatar(contact);
           }
         } catch (e) {
           console.warn('Failed to refresh avatar UI after selecting useAvatar:', e);
@@ -6695,10 +7553,14 @@ class AvatarEditModal {
           myData.contacts[this.currentAddress] ??= { address: this.currentAddress };
           myData.contacts[this.currentAddress].useAvatar = 'mine';
           saveState();
-          contactInfoModal.updateContactInfo(createDisplayInfo(contact));
+          await contactInfoModal.updateContactInfo(createDisplayInfo(contact));
           contactInfoModal.needsContactListUpdate = true;
           if (chatModal.isActive() && chatModal.address === this.currentAddress) {
             chatModal.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
+          }
+          // Update EditContactModal avatar if it's active and showing this contact
+          if (editContactModal.isActive() && editContactModal.currentContactAddress === this.currentAddress ) {
+            await editContactModal.updateAvatar(contact);
           }
         }
       }
@@ -6826,7 +7688,7 @@ function showToast(message, duration = 2000, type = 'default', isHTML = false) {
     // Exception: loading toasts are never manually closable by user
     if (duration <= 0 && type !== 'loading') {
       // Sticky toast - add close button and click handler (but not for loading toasts)
-      toast.style.pointerEvents = 'auto';
+      toast.classList.add('sticky');
       const closeBtn = document.createElement('button');
       closeBtn.className = 'toast-close-btn';
       closeBtn.setAttribute('aria-label', 'Close');
@@ -7703,6 +8565,8 @@ const removeAccountsModal = new RemoveAccountsModal();
 class BackupAccountModal {
   constructor() {
     this.GOOGLE_TOKEN_STORAGE_KEY = 'google_drive_token';
+    this.GDRIVE_BACKUP_TS_KEY = 'googleDriveBackupTimestamp';
+    this.GDRIVE_REMINDER_TS_KEY = 'googleDriveReminderTimestamp';
   }
 
   load() {
@@ -7790,6 +8654,37 @@ class BackupAccountModal {
 
   clearGoogleToken() {
     localStorage.removeItem(this.GOOGLE_TOKEN_STORAGE_KEY);
+  }
+
+  // ======================================
+  // GOOGLE DRIVE BACKUP TIMESTAMP MANAGEMENT
+  // ======================================
+  _getStoredTimestamp(key) {
+    const rawValue = localStorage.getItem(key);
+    const parsed = Number(rawValue);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  getGDriveBackupTs() {
+    return this._getStoredTimestamp(this.GDRIVE_BACKUP_TS_KEY);
+  }
+
+  setGDriveBackupTs(timestamp = getCorrectedTimestamp()) {
+    localStorage.setItem(this.GDRIVE_BACKUP_TS_KEY, String(timestamp));
+  }
+
+  getGDriveReminderTs() {
+    // If this returns null, set timestamp to 3 days from now
+    const ts = this._getStoredTimestamp(this.GDRIVE_REMINDER_TS_KEY);
+    if (!ts) {
+      this.setGDriveReminderTs(getCorrectedTimestamp() + 3 * 24 * 60 * 60 * 1000);
+      return getCorrectedTimestamp() + 3 * 24 * 60 * 60 * 1000;
+    }
+    return ts;
+  }
+
+  setGDriveReminderTs(timestamp = getCorrectedTimestamp()) {
+    localStorage.setItem(this.GDRIVE_REMINDER_TS_KEY, String(timestamp));
   }
 
   // ======================================
@@ -8431,6 +9326,7 @@ class BackupAccountModal {
       showToast('Uploading backup to Google Drive...', 3000, 'info');
       await this.uploadToGoogleDrive(data, filename, tokenData);
       showToast('Backup uploaded to Google Drive successfully!', 5000, 'success');
+      this.setGDriveBackupTs();
       this.close();
     } catch (error) {
       console.error('Google Drive upload failed:', error);
@@ -8444,6 +9340,7 @@ class BackupAccountModal {
           showToast('Uploading backup to Google Drive...', 3000, 'info');
           await this.uploadToGoogleDrive(data, filename, tokenData);
           showToast('Backup uploaded to Google Drive successfully!', 5000, 'success');
+          this.setGDriveBackupTs();
           this.close();
         } catch (retryError) {
           console.error('Retry failed:', retryError);
@@ -11179,6 +12076,13 @@ class ChatModal {
     this.imageAttachmentContextMenu = document.getElementById('imageAttachmentContextMenu');
     // Initialize attachment options context menu
     this.attachmentOptionsContextMenu = document.getElementById('attachmentOptionsContextMenu');
+    // Cache attachment options context menu option elements
+    this.cameraOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="camera"]');
+    this.photoLibraryOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="photo-library"]');
+    this.filesOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="files"]');
+    this.cameraFileOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="camera-file"]');
+    this.contactsOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="contacts"]');
+    
     this.currentImageAttachmentRow = null;
     
     // Add event delegation for message clicks (since messages are created dynamically)
@@ -11349,17 +12253,8 @@ class ChatModal {
     if (this.addAttachmentButton) {
       this.addAttachmentButton.addEventListener('click', (e) => {
         e.stopPropagation();
-        // On iOS, directly trigger file input to use native iOS picker
-        // On Android, show our custom context menu
-        if (isIOS()) {
-          // iOS will show its native picker with Camera, Photo Library, and Files options
-          if (this.chatFileInput) {
-            this.chatFileInput.click();
-          }
-        } else {
-          // Android: show our custom context menu
-          this.showAttachmentOptionsContextMenu(e);
-        }
+        // Always show our custom context menu (includes Camera, Photo Library, Files, Contacts)
+        this.showAttachmentOptionsContextMenu(e);
       });
     }
 
@@ -11385,7 +12280,7 @@ class ChatModal {
         const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
         const sufficientBalance = await validateBalance(tollInLib);
         if (!sufficientBalance) {
-          const msg = `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}`;
+          const msg = `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}. Go to the wallet to add more LIB.`;
           showToast(msg, 0, 'error');
           return;
         }
@@ -11695,7 +12590,7 @@ class ChatModal {
       if (!this.isActive() || this.address !== address) return;
 
       showToast(
-        '<strong>This user has deposited a toll to message you.</strong><ul style="margin: 8px 0 0 0; padding-left: 20px;"><li>Change their status to a connection or friend to refund the toll</li><li>Reply to collect the full toll</li><li>Ignore to collect half the toll</li></ul>',
+        '<strong>This user has deposited a toll to message you.</strong><ul style="margin: 8px 0 0 0; padding-left: 20px;"><li>Change their status to a connection to refund the toll</li><li>Reply to collect the full toll</li><li>Ignore to collect half the toll</li></ul>',
         0,
         'toll',
         true
@@ -12012,7 +12907,7 @@ class ChatModal {
       const amount = myData.contacts[this.address].tollRequiredToSend == 1 ? this.toll : 0n;
       const sufficientBalance = await validateBalance(amount);
       if (!sufficientBalance) {
-        const msg = `Insufficient balance for fee${amount > 0n ? ' and toll' : ''}`;
+        const msg = `Insufficient balance for fee${amount > 0n ? ' and toll' : ''}. Go to the wallet to add more LIB.`;
         showToast(msg, 0, 'error');
         this.sendButton.disabled = false;
         return;
@@ -12135,12 +13030,10 @@ class ChatModal {
         username: myAccount.username,
       };
 
-      // Add additional info only if recipient is a friend
-      if (contact && contact?.friend && contact?.friend >= 3) {
-        // Add more personal details for friends
+      // Add additional info only if recipient is a connection
+      if (contact && contact?.friend && contact?.friend >= 2) {
+        // Add more personal details for connections
         senderInfo.name = myData.account.name;
-        senderInfo.email = myData.account.email;
-        senderInfo.phone = myData.account.phone;
         senderInfo.linkedin = myData.account.linkedin;
         senderInfo.x = myData.account.x;
         // Add avatar info if available
@@ -12148,10 +13041,7 @@ class ChatModal {
           senderInfo.avatarId = myData.account.avatarId;
           senderInfo.avatarKey = myData.account.avatarKey;
         }
-      }
-
-      // Add timezone for friends and connections
-      if (Number(contact?.friend) >= 2) {
+        // Add timezone if available
         const tz = getLocalTimeZone();
         if (tz) {
           senderInfo.timezone = tz;
@@ -12969,10 +13859,10 @@ class ChatModal {
       return;
     }
 
-    // File size limit (e.g., 10MB)
-    const maxSize = 10 * 1024 * 1024; // 10MB in bytes
+    // File size limit (e.g., 100MB)
+    const maxSize = 100 * 1024 * 1024; // 100MB in bytes
     if (file.size > maxSize) {
-      showToast('File size too large. Maximum size is 10MB.', 0, 'error');
+      showToast('File size too large. Maximum size is 100MB.', 0, 'error');
       event.target.value = ''; // Reset file input
       return;
     }
@@ -13367,6 +14257,7 @@ class ChatModal {
     if (type && type.startsWith('audio/')) return 'audio';
     if (type && type.startsWith('video/')) return 'video';
     if ((type === 'application/pdf') || (name && name.toLowerCase().endsWith('.pdf'))) return 'pdf';
+    if ((type === 'text/vcard') || (name && name.toLowerCase().endsWith('.vcf'))) return 'contacts';
     if (type && type.startsWith('text/')) return 'text';
     return 'file';
   }
@@ -13449,7 +14340,13 @@ class ChatModal {
    */
   isViewableInBrowser(mimeType) {
     if (!mimeType) return false;
-    
+
+    const normalizedMime = mimeType.toLowerCase().trim();
+
+    // Exclude vCard types (VCF). Many servers report vcf as a text/* subtype
+    // but vCard files shouldn't be opened inline in the browser here.
+    if (normalizedMime.includes('vcard')) return false;
+
     const viewableTypes = [
       'image/',           // All images
       'text/',            // Text files
@@ -13460,8 +14357,8 @@ class ChatModal {
       'application/xml',  // XML
       'text/xml'          // XML (alternative)
     ];
-    
-    return viewableTypes.some(type => mimeType.startsWith(type));
+
+    return viewableTypes.some(type => normalizedMime.startsWith(type));
   }
 
   /**
@@ -14023,14 +14920,25 @@ class ChatModal {
     const menu = this.attachmentOptionsContextMenu;
     const buttonRect = this.addAttachmentButton.getBoundingClientRect();
 
-    // Desktop: only show "Camera" + "Files" (hide "Photo Library")
-    // Heuristic: devices with a fine pointer + hover are typically desktop/laptop.
-    try {
-      const isDesktopLike = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-      const photoLibraryOpt = menu.querySelector('.context-menu-option[data-action="photo-library"]');
-      if (photoLibraryOpt) photoLibraryOpt.style.display = isDesktopLike ? 'none' : '';
-    } catch (_) {
-      // ignore
+    if (isIOS()) {
+      // iOS: Only show "Camera/File" and "Contacts"
+      if (this.cameraOpt) this.cameraOpt.style.display = 'none';
+      if (this.photoLibraryOpt) this.photoLibraryOpt.style.display = 'none';
+      if (this.filesOpt) this.filesOpt.style.display = 'none';
+      if (this.cameraFileOpt) this.cameraFileOpt.style.display = '';
+      if (this.contactsOpt) this.contactsOpt.style.display = '';
+    } else {
+      // Non-iOS: Hide "Camera/File", show others
+      if (this.cameraFileOpt) this.cameraFileOpt.style.display = 'none';
+      
+      // Desktop: only show "Camera" + "Files" (hide "Photo Library")
+      // Heuristic: devices with a fine pointer + hover are typically desktop/laptop.
+      try {
+        const isDesktopLike = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+        if (this.photoLibraryOpt) this.photoLibraryOpt.style.display = isDesktopLike ? 'none' : '';
+      } catch (_) {
+        // ignore
+      }
     }
     
     // Show menu first to get its dimensions
@@ -14077,7 +14985,13 @@ class ChatModal {
     // (notably Android Chrome) to open native file pickers via input.click().
     switch (action) {
       case 'camera':
-        if (isAndroidLikeMobileUA()) {
+        if (isIOS()) {
+          // iOS: use photo library picker which includes camera option
+          if (this.chatPhotoLibraryInput) {
+            this.chatPhotoLibraryInput.value = '';
+            this.chatPhotoLibraryInput.click();
+          }
+        } else if (isAndroidLikeMobileUA()) {
           // Android: check/request permission, then open file picker or toast
           void this.handleAndroidCameraAction();
         } else {
@@ -14096,6 +15010,16 @@ class ChatModal {
           this.chatFilesInput.value = '';
           this.chatFilesInput.click();
         }
+        break;
+      case 'camera-file':
+        // iOS: open file input which includes Camera, Photo Library, and Files options
+        if (this.chatFileInput) {
+          this.chatFileInput.value = '';
+          this.chatFileInput.click();
+        }
+        break;
+      case 'contacts':
+        shareContactsModal.open(chatModal.address);
         break;
     }
   }
@@ -14478,6 +15402,15 @@ class ChatModal {
     const previewOpt = this.imageAttachmentContextMenu.querySelector('[data-action="preview"]');
     if (previewOpt) previewOpt.style.display = (hasThumbnailSupport && !hasThumb) ? '' : 'none';
 
+    // Show Import Contacts option for VCF files
+    const importContactsOpt = this.imageAttachmentContextMenu.querySelector('[data-action="import-contacts"]');
+    if (importContactsOpt) {
+      const fileName = attachmentRow.dataset.name ? decodeURIComponent(attachmentRow.dataset.name) : '';
+      const fileType = attachmentRow.dataset.type || '';
+      const isVcf = fileType === 'text/vcard' || fileName.toLowerCase().endsWith('.vcf');
+      importContactsOpt.style.display = isVcf ? '' : 'none';
+    }
+
     this.positionContextMenu(this.imageAttachmentContextMenu, attachmentRow);
     this.imageAttachmentContextMenu.style.display = 'block';
   }
@@ -14488,6 +15421,9 @@ class ChatModal {
 
     const { messageEl } = this.getAttachmentContextFromRow(row);
     switch (action) {
+      case 'import-contacts':
+        void this.openImportContactsModal(row);
+        break;
       case 'preview':
         void this.previewMediaAttachment(row);
         break;
@@ -14509,6 +15445,43 @@ class ChatModal {
     }
 
     this.closeImageAttachmentContextMenu();
+  }
+
+  /**
+   * Opens the Import Contacts modal for a VCF attachment
+   * @param {HTMLElement} attachmentRow - The attachment row element
+   */
+  async openImportContactsModal(attachmentRow) {
+    const url = attachmentRow.dataset.url;
+    const name = attachmentRow.dataset.name ? decodeURIComponent(attachmentRow.dataset.name) : 'contacts.vcf';
+    const type = attachmentRow.dataset.type || 'text/vcard';
+    const msgIdx = attachmentRow.dataset.msgIdx;
+
+    // Get encryption keys from the message
+    const contact = myData.contacts[this.address];
+    const message = contact?.messages?.[msgIdx];
+    if (!message?.xattach) {
+      showToast('Could not find attachment data', 0, 'error');
+      return;
+    }
+
+    // Find the attachment in xattach array
+    const attachment = message.xattach.find(att => att.url === url);
+    if (!attachment) {
+      showToast('Could not find attachment data', 0, 'error');
+      return;
+    }
+
+    // Open the import contacts modal with attachment data
+    importContactsModal.open({
+      url: attachment.url,
+      name,
+      type,
+      pqEncSharedKey: attachment.pqEncSharedKey,
+      selfKey: attachment.selfKey,
+      my: message.my,
+      senderAddress: this.address
+    });
   }
 
   /**
@@ -15017,7 +15990,7 @@ class ChatModal {
 
       const sufficientBalance = await validateBalance(tollInLib);
       if (!sufficientBalance) {
-        const msg = `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}`;
+        const msg = `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}. Go to the wallet to add more LIB.`;
         showToast(msg, 0, 'error');
         return;
       }
@@ -15283,7 +16256,7 @@ class ChatModal {
           showToast('You are blocked by this user', 0, 'error');
         } else {
           showToast(
-            `You can only call people who have added you as a friend or connection. Ask ${username} to add you as a friend or connection`,
+            `You can only call people who have added you as a connection. Ask ${username} to add you as a connection`,
             0,
             'info'
           );
@@ -15293,7 +16266,7 @@ class ChatModal {
 
       const sufficientBalance = await validateBalance(0n);
       if (!sufficientBalance) {
-        showToast('Insufficient balance for fee', 0, 'error');
+        showToast('Insufficient balance for fee. Go to the wallet to add more LIB.', 0, 'error');
         return;
       }
 
@@ -15400,11 +16373,9 @@ class ChatModal {
         username: myAccount.username,
       };
 
-      // Add additional info only if recipient is a friend
-      if (contact && contact?.friend && contact?.friend >= 3) {
+      // Add additional info only if recipient is a connection
+      if (contact && contact?.friend && contact?.friend >= 2) {
         senderInfo.name = myData.account.name;
-        senderInfo.email = myData.account.email;
-        senderInfo.phone = myData.account.phone;
         senderInfo.linkedin = myData.account.linkedin;
         senderInfo.x = myData.account.x;
         // Add avatar info if available
@@ -15412,10 +16383,7 @@ class ChatModal {
           senderInfo.avatarId = myData.account.avatarId;
           senderInfo.avatarKey = myData.account.avatarKey;
         }
-      }
-
-      // Add timezone for friends and connections
-      if (Number(contact?.friend) >= 2) {
+        // Add timezone if available
         const tz = getLocalTimeZone();
         if (tz) {
           senderInfo.timezone = tz;
@@ -15551,21 +16519,16 @@ class ChatModal {
       username: myAccount.username,
     };
 
-    if (contact && contact?.friend && contact?.friend >= 3) {
+    if (contact && contact?.friend && contact?.friend >= 2) {
       senderInfo.name = myData.account.name;
-      senderInfo.email = myData.account.email;
-      senderInfo.phone = myData.account.phone;
       senderInfo.linkedin = myData.account.linkedin;
       senderInfo.x = myData.account.x;
       // Add avatar info if available
-        if (myData.account.avatarId && myData.account.avatarKey) {
-          senderInfo.avatarId = myData.account.avatarId;
-          senderInfo.avatarKey = myData.account.avatarKey;
-        }
-    }
-
-    // Add timezone for friends and connections
-    if (Number(contact?.friend) >= 2) {
+      if (myData.account.avatarId && myData.account.avatarKey) {
+        senderInfo.avatarId = myData.account.avatarId;
+        senderInfo.avatarKey = myData.account.avatarKey;
+      }
+      // Add timezone if available
       const tz = getLocalTimeZone();
       if (tz) {
         senderInfo.timezone = tz;
@@ -16164,7 +17127,7 @@ class CallInviteModal {
         }
         if (tollRequiredToSend === 1) {
           const username = (contact?.username) || `${addr.slice(0, 8)}...${addr.slice(-6)}`;
-          showToast(`You can only invite people who have added you as a friend or connection. Ask ${username} to add you as a friend or connection`, 0, 'info');
+          showToast(`You can only invite people who have added you as a connection. Ask ${username} to add you as a connection`, 0, 'info');
           continue;
         }
 
@@ -16175,7 +17138,6 @@ class CallInviteModal {
         }
         await signObj(messageObj, keys);
         const txid = getTxid(messageObj);
-        await injectTx(messageObj, txid);
 
         // Create new message object for local display immediately
         const newMessage = {
@@ -16233,6 +17195,1149 @@ class CallInviteModal {
 }
 
 const callInviteModal = new CallInviteModal();
+
+/**
+ * Share Contacts Modal
+ * Allows users to select contacts (Friends and Connections) to share as a VCF file attachment
+ */
+class ShareContactsModal {
+  constructor() {
+    this.selectedContacts = new Set();
+    this.warningShown = false;
+    this.isUploading = false;
+    this.recipientAddress = null;
+  }
+
+  load() {
+    this.modal = document.getElementById('shareContactsModal');
+    this.contactsList = document.getElementById('shareContactsList');
+    this.emptyState = document.getElementById('shareContactsEmptyState');
+    this.actionButton = document.getElementById('shareContactsActionBtn');
+    this.allNoneButton = document.getElementById('shareContactsAllNoneBtn');
+    this.doneButton = document.getElementById('shareContactsDoneBtn');
+    this.closeButton = document.getElementById('closeShareContactsModal');
+
+    // Event listeners
+    this.closeButton.addEventListener('click', () => this.handleClose());
+    this.allNoneButton.addEventListener('click', () => this.toggleAllNone());
+    this.doneButton.addEventListener('click', () => this.handleDone());
+    this.contactsList.addEventListener('click', (e) => this.handleContactClick(e));
+    this.actionButton.addEventListener('click', () => {
+      if (this.recipientAddress) {
+        this.close();
+        friendModal.setAddress(this.recipientAddress);
+        friendModal.open();
+      }
+    });
+  }
+
+  /**
+   * Opens the share contacts modal and populates the contact list
+   * @param {string|null} recipientAddress - The address of the recipient (from chatModal)
+   */
+  async open(recipientAddress = null) {
+    // Reset state
+    this.selectedContacts.clear();
+    this.warningShown = false;
+    this.isUploading = false;
+    this.recipientAddress = recipientAddress;
+    this.doneButton.classList.remove('loading');
+    this.doneButton.disabled = true;
+    this.allNoneButton.classList.remove('all-selected');
+    this.allNoneButton.setAttribute('aria-label', 'Select all');
+    this.allNoneButton.disabled = false;
+
+    // Clear existing list
+    this.contactsList.innerHTML = '';
+    this.contactsList.style.display = 'none';
+
+    // Hide action button by default
+    this.actionButton.style.display = 'none';
+
+    // Show modal
+    this.modal.classList.add('active');
+
+    // Check if account is private - show restriction message if so
+    if (isPrivateAccount()) {
+      // Update empty state message for private account restriction
+      const emptyStateChildren = this.emptyState.children;
+      if (emptyStateChildren.length >= 3) {
+        emptyStateChildren[1].textContent = 'Private accounts cannot share contacts';
+        emptyStateChildren[2].textContent = 'Only public accounts can share contacts';
+      }
+      this.emptyState.style.display = 'block';
+      this.doneButton.disabled = true;
+      this.allNoneButton.disabled = true;
+      return;
+    }
+
+    // Check contact status if recipient address is provided
+    if (recipientAddress) {
+      const recipient = myData.contacts[recipientAddress];
+      if (recipient) {
+        // if undefined fallback to value 1 (toll required) so user cannot share contacts
+        const tollRequiredToSend = recipient.tollRequiredToSend ?? 1;
+
+        // Check if user hasn't added recipient as connection (contact.friend !== 2)
+        if (recipient.friend !== 2) {
+          const emptyStateChildren = this.emptyState.children;
+          if (emptyStateChildren.length >= 3) {
+            emptyStateChildren[1].textContent = 'Cannot share contacts';
+            emptyStateChildren[2].textContent = 'You need to add the recipient as a connection before you can share contacts with them';
+          }
+          this.emptyState.style.display = 'block';
+          this.doneButton.disabled = true;
+          this.allNoneButton.disabled = true;
+          // Show button to open Contact Status modal
+          this.actionButton.textContent = 'Change Contact Status';
+          this.actionButton.style.display = 'block';
+          return;
+        }
+
+        // Check if recipient hasn't added user as connection (tollRequiredToSend !== 0)
+        if (tollRequiredToSend !== 0) {
+          const emptyStateChildren = this.emptyState.children;
+          if (emptyStateChildren.length >= 3) {
+            emptyStateChildren[1].textContent = 'Cannot share contacts';
+            emptyStateChildren[2].textContent = 'The recipient must add you as a connection before you can share contacts with them. Ask them to add you as a connection';
+          }
+          this.emptyState.style.display = 'block';
+          this.doneButton.disabled = true;
+          this.allNoneButton.disabled = true;
+          return;
+        }
+      }
+    }
+
+    // For public accounts, proceed with contact list population
+    // Get Friends (friend === 3) and Connections (friend === 2)
+    const allContacts = Object.values(myData.contacts || {});
+    
+    // Filter out the current chat contact (the person you're chatting with)
+    const currentChatAddress = chatModal.isActive() && chatModal.address 
+      ? normalizeAddress(chatModal.address) 
+      : null;
+    
+    const filteredContacts = currentChatAddress
+      ? allContacts.filter(c => normalizeAddress(c.address) !== currentChatAddress)
+      : allContacts;
+    
+    const friends = filteredContacts
+      .filter(c => c.friend === 3)
+      .sort((a, b) => this.getContactDisplayNameForShare(a).toLowerCase().localeCompare(this.getContactDisplayNameForShare(b).toLowerCase()));
+    const connections = filteredContacts
+      .filter(c => c.friend === 2)
+      .sort((a, b) => this.getContactDisplayNameForShare(a).toLowerCase().localeCompare(this.getContactDisplayNameForShare(b).toLowerCase()));
+
+    const hasContacts = friends.length > 0 || connections.length > 0;
+
+    // Show/hide empty state
+    this.emptyState.style.display = hasContacts ? 'none' : 'block';
+    this.contactsList.style.display = hasContacts ? 'block' : 'none';
+    this.doneButton.disabled = !hasContacts;
+    this.allNoneButton.disabled = !hasContacts;
+
+    if (hasContacts) {
+      // Render Friends section
+      if (friends.length > 0) {
+        await this.renderSection('Friends', friends);
+      }
+      // Render Connections section
+      if (connections.length > 0) {
+        await this.renderSection('Connections', connections);
+      }
+    }
+  }
+
+  /**
+   * Gets display name for a contact with priority: contact's provided name → user-assigned name → username
+   * @param {Object} contact - Contact object
+   * @returns {string} Display name
+   */
+  getContactDisplayNameForShare(contact) {
+    return contact?.senderInfo?.name || 
+           contact?.name || 
+           contact?.username || 
+           `${contact?.address?.slice(0, 8)}…${contact?.address?.slice(-6)}`;
+  }
+
+  /**
+   * Gets avatar HTML for a contact with priority: contact's provided avatar → user-selected avatar → identicon
+   * Ignores useAvatar preference to always use the correct priority for sharing
+   * @param {Object} contact - Contact object
+   * @param {number} size - Avatar size in pixels
+   * @returns {Promise<string>} Avatar HTML
+   */
+  async getContactAvatarHtmlForShare(contact, size = 40) {
+    const address = contact?.address;
+    if (!address) return generateIdenticon('', size);
+
+    const makeImg = (url) => `<img src="${url}" class="contact-avatar-img" width="${size}" height="${size}" alt="avatar">`;
+
+    try {
+      // Priority 1: Contact's provided avatar
+      if (contact?.avatarId) {
+        const url = await contactAvatarCache.getBlobUrl(contact.avatarId);
+        if (url) return makeImg(url);
+      }
+
+      // Priority 2: User-selected avatar for this contact
+      if (contact?.mineAvatarId) {
+        const url = await contactAvatarCache.getBlobUrl(contact.mineAvatarId);
+        if (url) return makeImg(url);
+      }
+    } catch (err) {
+      console.warn('Failed to load avatar, falling back to identicon:', err);
+    }
+
+    // Priority 3: Identicon fallback
+    return generateIdenticon(address, size);
+  }
+
+  /**
+   * Renders a section of contacts with a header
+   * @param {string} label - Section label
+   * @param {Array} contacts - Array of contact objects
+   */
+  async renderSection(label, contacts) {
+    // Add section header
+    const header = document.createElement('div');
+    header.className = 'share-contacts-section-header';
+    header.textContent = label;
+    this.contactsList.appendChild(header);
+
+    // Batch avatar generation for better performance
+    // Use custom function that follows correct priority: contact avatar → user-selected → identicon
+    const avatarPromises = contacts.map(contact => this.getContactAvatarHtmlForShare(contact, 40));
+    const avatarHtmlList = await Promise.all(avatarPromises);
+
+    // Render each contact
+    contacts.forEach((contact, index) => {
+      const row = document.createElement('div');
+      row.className = 'share-contact-row';
+      row.dataset.address = contact.address;
+
+      const avatarHtml = avatarHtmlList[index];
+      const displayName = this.getContactDisplayNameForShare(contact);
+
+      row.innerHTML = `
+        <div class="share-contact-avatar">${avatarHtml}</div>
+        <div class="share-contact-info">
+          <div class="share-contact-name">${escapeHtml(displayName)}</div>
+        </div>
+        <input type="checkbox" class="share-contact-checkbox" />
+      `;
+
+      this.contactsList.appendChild(row);
+    });
+  }
+
+  /**
+   * Handles click on a contact row to toggle selection
+   * @param {Event} e - Click event
+   */
+  handleContactClick(e) {
+    const row = e.target.closest('.share-contact-row');
+    if (!row) return;
+
+    const checkbox = row.querySelector('.share-contact-checkbox');
+    const address = row.dataset.address;
+
+    // Toggle checkbox (unless clicking directly on checkbox, which toggles itself)
+    if (e.target !== checkbox) {
+      checkbox.checked = !checkbox.checked;
+    }
+
+    // Update selected contacts set
+    if (checkbox.checked) {
+      this.selectedContacts.add(address);
+    } else {
+      this.selectedContacts.delete(address);
+    }
+
+    // Update All/None button text
+    this.updateAllNoneButton();
+  }
+
+  /**
+   * Updates the All/None button icon based on selection state
+   */
+  updateAllNoneButton() {
+    const checkboxes = this.contactsList.querySelectorAll('.share-contact-checkbox');
+    const allSelected = Array.from(checkboxes).every(cb => cb.checked);
+    if (allSelected && checkboxes.length > 0) {
+      this.allNoneButton.classList.add('all-selected');
+      this.allNoneButton.setAttribute('aria-label', 'Clear');
+    } else {
+      this.allNoneButton.classList.remove('all-selected');
+      this.allNoneButton.setAttribute('aria-label', 'Select all');
+    }
+  }
+
+  /**
+   * Toggles between selecting all and none
+   */
+  toggleAllNone() {
+    const checkboxes = this.contactsList.querySelectorAll('.share-contact-checkbox');
+    const allSelected = Array.from(checkboxes).every(cb => cb.checked);
+
+    checkboxes.forEach(cb => {
+      const row = cb.closest('.share-contact-row');
+      const address = row?.dataset.address;
+      if (allSelected) {
+        cb.checked = false;
+        if (address) this.selectedContacts.delete(address);
+      } else {
+        cb.checked = true;
+        if (address) this.selectedContacts.add(address);
+      }
+    });
+
+    this.updateAllNoneButton();
+  }
+
+  /**
+   * Handles back/close button click with warning if contacts are selected
+   */
+  handleClose() {
+    if (this.selectedContacts.size > 0 && !this.warningShown) {
+      this.warningShown = true;
+      showToast('You have contacts selected. Click back again to discard.', 0, 'warning');
+      return;
+    }
+    this.close();
+  }
+
+  /**
+   * Closes the modal
+   */
+  close() {
+    this.modal.classList.remove('active');
+    // Reset warning state so it can be shown again on next open
+    this.warningShown = false;
+  }
+
+  /**
+   * Checks if the modal is active
+   * @returns {boolean}
+   */
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
+  }
+
+  /**
+   * Gets avatar blob for a contact with priority: contact's provided avatar → user-selected avatar → null
+   * @param {Object} contact - Contact object
+   * @returns {Promise<Blob|null>} Avatar blob or null if not available
+   */
+  async getContactAvatarBlobForShare(contact) {
+    try {
+      // Priority 1: Contact's provided avatar
+      if (contact?.avatarId) {
+        const blob = await contactAvatarCache.get(contact.avatarId);
+        if (blob) return blob;
+      }
+
+      // Priority 2: User-selected avatar for this contact
+      if (contact?.mineAvatarId) {
+        const blob = await contactAvatarCache.get(contact.mineAvatarId);
+        if (blob) return blob;
+      }
+    } catch (err) {
+      console.warn('Failed to get avatar blob for VCF:', err);
+    }
+
+    // No avatar available
+    return null;
+  }
+
+  /**
+   * Generates VCF content for selected contacts
+   * @returns {Promise<string>} VCF file content
+   */
+  async generateVcfContent() {
+    const vcards = [];
+
+    // First card contains X-LIBERDUS-NETID
+    vcards.push([
+      'BEGIN:VCARD',
+      'VERSION:3.0',
+      `X-LIBERDUS-NETID:${network.netid || ''}`,
+      'END:VCARD'
+    ].join('\r\n'));
+
+    // Generate vCard for each selected contact
+    for (const address of this.selectedContacts) {
+      const contact = myData.contacts[address];
+      if (!contact) continue;
+
+      const lines = [
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        `X-LIBERDUS-ADDRESS:${contact.address || ''}`,
+        `X-LIBERDUS-USERNAME:${contact.username || ''}`
+      ];
+
+      // FN - use contact's provided name, then user-assigned name
+      const displayName = contact?.senderInfo?.name || contact?.name;
+      if (displayName) {
+        lines.push(`FN:${displayName}`);
+      }
+
+      // PHOTO - base64 of avatar blob
+      const avatarBlob = await this.getContactAvatarBlobForShare(contact);
+      if (avatarBlob) {
+        const base64 = await contactAvatarCache.blobToBase64(avatarBlob);
+        if (base64) {
+          // Determine image type from blob MIME type
+          const imageType = avatarBlob.type === 'image/png' ? 'PNG' : 'JPEG';
+          lines.push(`PHOTO;ENCODING=b;TYPE=${imageType}:${base64}`);
+        }
+      }
+
+      lines.push('END:VCARD');
+      vcards.push(lines.join('\r\n'));
+    }
+
+    return vcards.join('\r\n');
+  }
+
+  /**
+   * Generates a filename for the VCF file
+   * @returns {string} Filename in format username-YYMMDD-HHMM.vcf
+   */
+  generateVcfFilename() {
+    const now = new Date();
+    const yy = String(now.getFullYear()).slice(-2);
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    
+    const username = myAccount?.username || 'user';
+    return `${username}-${yy}${mm}${dd}-${hh}${min}.vcf`;
+  }
+
+  /**
+   * Handles the Done button click - generates VCF, encrypts, and uploads
+   */
+  async handleDone() {
+    // Safety check: prevent sharing for private accounts
+    if (isPrivateAccount()) {
+      showToast('Private accounts cannot share contacts', 2000, 'error');
+      return;
+    }
+
+    if (this.selectedContacts.size === 0) {
+      showToast('Please select at least one contact', 2000, 'info');
+      return;
+    }
+
+    if (this.isUploading) return;
+    this.isUploading = true;
+    this.doneButton.classList.add('loading');
+    this.doneButton.disabled = true;
+
+    try {
+      // Generate VCF content
+      const vcfContent = await this.generateVcfContent();
+      const vcfFilename = this.generateVcfFilename();
+      
+      // Create blob from VCF content
+      const vcfBlob = new Blob([vcfContent], { type: 'text/vcard' });
+
+      // Get recipient's DH key for encryption
+      const { dhkey, cipherText: pqEncSharedKey } = await chatModal.getRecipientDhKey(chatModal.address);
+      const password = myAccount.keys.secret + myAccount.keys.pqSeed;
+      const selfKey = encryptData(bin2hex(dhkey), password, true);
+
+      // Encrypt the VCF blob
+      const encryptedBlob = await encryptBlob(vcfBlob, dhkey);
+
+      // Upload encrypted file
+      const attachmentUrl = await chatModal.uploadEncryptedFile(encryptedBlob, vcfFilename);
+
+      // Add to chatModal's file attachments
+      chatModal.fileAttachments.push({
+        url: attachmentUrl,
+        name: vcfFilename,
+        size: vcfBlob.size,
+        type: 'text/vcard',
+        pqEncSharedKey: bin2base64(pqEncSharedKey),
+        selfKey
+      });
+
+      // Update attachment preview in chat modal
+      chatModal.showAttachmentPreview();
+
+      this.close();
+    } catch (err) {
+      console.error('Failed to generate/upload VCF:', err);
+      showToast('Failed to share contacts', 0, 'error');
+    } finally {
+      this.isUploading = false;
+      this.doneButton.classList.remove('loading');
+      this.doneButton.disabled = false;
+    }
+  }
+}
+
+const shareContactsModal = new ShareContactsModal();
+
+/**
+ * Import Contacts Modal
+ * Allows users to import contacts from a shared VCF file attachment
+ */
+class ImportContactsModal {
+  constructor() {
+    this.selectedContacts = new Set();
+    this.warningShown = false;
+    this.isImporting = false;
+    this.parsedContacts = [];
+    this.currentAttachment = null;
+    this.recipientAddress = null;
+  }
+
+  load() {
+    this.modal = document.getElementById('importContactsModal');
+    this.contactsList = document.getElementById('importContactsList');
+    this.emptyState = document.getElementById('importContactsEmptyState');
+    this.loadingState = document.getElementById('importContactsLoading');
+    this.actionButton = document.getElementById('importContactsActionBtn');
+    this.allNoneButton = document.getElementById('importContactsAllNoneBtn');
+    this.doneButton = document.getElementById('importContactsDoneBtn');
+    this.closeButton = document.getElementById('closeImportContactsModal');
+
+    // Event listeners
+    this.closeButton.addEventListener('click', () => this.handleClose());
+    this.allNoneButton.addEventListener('click', () => this.toggleAllNone());
+    this.doneButton.addEventListener('click', () => this.handleDone());
+    this.contactsList.addEventListener('click', (e) => this.handleContactClick(e));
+    this.actionButton.addEventListener('click', () => {
+      if (this.recipientAddress) {
+        this.close();
+        friendModal.setAddress(this.recipientAddress);
+        friendModal.open();
+      }
+    });
+  }
+
+  /**
+   * Opens the import contacts modal with an attachment
+   * @param {Object} attachment - The VCF attachment object with url, pqEncSharedKey, selfKey
+   */
+  async open(attachment) {
+    // Reset state
+    this.selectedContacts.clear();
+    this.warningShown = false;
+    this.isImporting = false;
+    this.parsedContacts = [];
+    this.currentAttachment = attachment;
+    this.recipientAddress = attachment?.senderAddress || null;
+    this.doneButton.classList.remove('loading');
+    this.doneButton.disabled = true;
+    this.allNoneButton.classList.remove('all-selected');
+    this.allNoneButton.setAttribute('aria-label', 'Select all');
+
+    // Clear existing list
+    this.contactsList.innerHTML = '';
+    this.contactsList.style.display = 'none';
+    this.loadingState.style.display = 'none';
+
+    // Hide action button by default
+    this.actionButton.style.display = 'none';
+
+    // Show modal
+    this.modal.classList.add('active');
+
+    // Check if account is private - show restriction message if so
+    if (isPrivateAccount()) {
+      // Update empty state message for private account restriction
+      const emptyStateChildren = this.emptyState.children;
+      if (emptyStateChildren.length >= 3) {
+        emptyStateChildren[1].textContent = 'Private accounts cannot import contacts';
+        emptyStateChildren[2].textContent = 'Only public accounts can import contacts';
+      }
+      this.emptyState.style.display = 'block';
+      this.doneButton.disabled = true;
+      return;
+    }
+
+    // Check contact status if recipient address is provided
+    if (this.recipientAddress) {
+      const recipient = myData.contacts[this.recipientAddress];
+      if (recipient && recipient.friend !== 2) {
+        // Recipient is not a connection - show warning
+        const emptyStateChildren = this.emptyState.children;
+        if (emptyStateChildren.length >= 3) {
+          emptyStateChildren[1].textContent = 'Cannot import contacts';
+          emptyStateChildren[2].textContent = 'Contacts should only be imported from people you trust. If you trust this user add them as a connection before importing contacts.';
+        }
+        this.emptyState.style.display = 'block';
+        this.doneButton.disabled = true;
+        this.allNoneButton.disabled = true;
+        // Show button to open Contact Status modal
+        this.actionButton.textContent = 'Change Contact Status';
+        this.actionButton.style.display = 'block';
+        return;
+      }
+    }
+
+    // For public accounts, proceed with VCF processing
+    this.emptyState.style.display = 'none';
+    this.loadingState.style.display = 'flex';
+
+    try {
+      // Download and decrypt the VCF file
+      const vcfContent = await this.downloadAndDecryptVcf(attachment);
+      
+      // Extract and validate network ID from first vCard before parsing all contacts
+      const netId = this.extractNetId(vcfContent);
+      if (netId && netId !== network.netid) {
+        showToast('Network ID mismatch - contacts are from a different network', 0, 'error');
+        this.close();
+        return;
+      }
+
+      // Parse contacts
+      const parsedContacts = this.parseVcfContacts(vcfContent);
+
+      // Deduplicate by username (keep first occurrence of each normalized username)
+      const seenUsernames = new Set();
+      this.parsedContacts = parsedContacts.filter(contact => {
+        if (!contact.username) return false;
+        
+        const normalizedUsername = normalizeUsername(contact.username);
+        if (seenUsernames.has(normalizedUsername)) {
+          return false; // Skip duplicate
+        }
+        
+        seenUsernames.add(normalizedUsername);
+        return true; // Keep first occurrence
+      });
+
+      // Hide loading
+      this.loadingState.style.display = 'none';
+
+      // Render contacts
+      await this.renderContactList();
+
+    } catch (err) {
+      console.error('Failed to load VCF:', err);
+      showToast('Failed to load contacts file', 0, 'error');
+      this.close();
+    }
+  }
+
+  /**
+   * Downloads and decrypts the VCF file
+   * @param {Object} attachment - The attachment object
+   * @returns {Promise<string>} Decrypted VCF content
+   */
+  async downloadAndDecryptVcf(attachment) {
+    // Download encrypted file
+    const response = await fetch(attachment.url);
+    if (!response.ok) {
+      throw new Error(`Download failed: ${response.status}`);
+    }
+
+    const encryptedData = new Uint8Array(await response.arrayBuffer());
+
+    // Determine which key to use for decryption (same logic as decryptAttachmentToBlob)
+    let dhkey;
+    if (attachment.my) {
+      // We sent this file - decrypt with selfKey
+      if (!attachment.selfKey) throw new Error('Missing selfKey for decrypt');
+      const password = myAccount.keys.secret + myAccount.keys.pqSeed;
+      const dhkeyHex = decryptData(attachment.selfKey, password, true);
+      if (!dhkeyHex) throw new Error('Failed to decrypt selfKey');
+      dhkey = hex2bin(dhkeyHex);
+    } else {
+      // Someone else sent this - decrypt with pqEncSharedKey
+      if (!attachment.pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
+      const ok = await ensureContactKeys(attachment.senderAddress);
+      const senderPublicKey = myData.contacts[attachment.senderAddress]?.public;
+      if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${attachment.senderAddress}`);
+      
+      const pqCipher = (typeof attachment.pqEncSharedKey === 'string') 
+        ? base642bin(attachment.pqEncSharedKey) 
+        : attachment.pqEncSharedKey;
+      dhkey = dhkeyCombined(
+        myAccount.keys.secret,
+        senderPublicKey,
+        myAccount.keys.pqSeed,
+        pqCipher
+      ).dhkey;
+    }
+
+    // Decrypt the file
+    const cipherB64 = bin2base64(encryptedData);
+    const plainB64 = decryptChacha(dhkey, cipherB64);
+    if (!plainB64) {
+      throw new Error('Decryption failed');
+    }
+
+    // Convert base64 to string
+    const plainBin = base642bin(plainB64);
+    const decoder = new TextDecoder('utf-8');
+    return decoder.decode(plainBin);
+  }
+
+  /**
+   * Extracts network ID from the first vCard in VCF content
+   * @param {string} vcfContent - Raw VCF file content
+   * @returns {string|null} Network ID or null if not found
+   */
+  extractNetId(vcfContent) {
+    const match = vcfContent.match(/X-LIBERDUS-NETID:(.+)/i);
+    return match ? match[1].trim() : null;
+  }
+
+  /**
+   * Parses VCF content into contact objects
+   * @param {string} vcfContent - Raw VCF file content
+   * @returns {Array} Array of contact objects
+   */
+  parseVcfContacts(vcfContent) {
+    const vcards = vcfContent.split(/(?=BEGIN:VCARD)/i).filter(v => v.trim());
+    const contacts = [];
+
+    for (const vcard of vcards) {
+      const contact = {};
+      const lines = vcard.split(/\r?\n/);
+
+      for (const line of lines) {
+        if (line.startsWith('X-LIBERDUS-ADDRESS:')) {
+          contact.address = line.substring('X-LIBERDUS-ADDRESS:'.length).trim();
+        } else if (line.startsWith('X-LIBERDUS-USERNAME:')) {
+          contact.username = line.substring('X-LIBERDUS-USERNAME:'.length).trim();
+        } else if (line.startsWith('FN:')) {
+          contact.name = line.substring('FN:'.length).trim();
+        } else if (line.startsWith('PHOTO;')) {
+          // Parse PHOTO field: PHOTO;ENCODING=b;TYPE=JPEG:base64data
+          const photoMatch = line.match(/PHOTO;.*:(.+)/i);
+          if (photoMatch) {
+            contact.photoBase64 = photoMatch[1];
+            // Extract type
+            const typeMatch = line.match(/TYPE=(\w+)/i);
+            contact.photoType = typeMatch ? typeMatch[1].toLowerCase() : 'jpeg';
+          }
+        }
+      }
+
+      // Only add if we have an address and username (skip the header card with just netId)
+      if (contact.address && contact.username) {
+        contacts.push(contact);
+      }
+    }
+
+    return contacts;
+  }
+
+  /**
+   * Validates a contact on the network by username lookup
+   * @param {Object} parsedContact - Contact object with username
+   * @returns {Promise<Object>} { success: boolean, networkAddress?: string, error?: string }
+   */
+  async validateContactOnNetwork(parsedContact) {
+    if (!parsedContact.username) {
+      return { success: false, error: 'No username provided' };
+    }
+
+    try {
+      const username = normalizeUsername(parsedContact.username);
+      const usernameBytes = utf82bin(username);
+      const usernameHash = hashBytes(usernameBytes);
+
+      // Query network for username
+      const addressData = await queryNetwork(`/address/${usernameHash}`);
+      
+      if (!addressData || !addressData.address) {
+        return { success: false, error: 'Username not found on network' };
+      }
+
+      const networkAddress = normalizeAddress(addressData.address);
+
+      // Verify account exists and ensure it's a public account
+      const accountData = await queryNetwork(`/account/${longAddress(networkAddress)}`);
+      if (!accountData || !accountData.account) {
+        return { success: false, error: 'Account not found on network' };
+      }
+
+      // Only public accounts can import, so reject private contacts
+      const contactIsPrivate = accountData.account.private === true;
+      if (contactIsPrivate) {
+        return { 
+          success: false, 
+          error: 'Cannot import private account' 
+        };
+      }
+
+      return { success: true, networkAddress, username };
+    } catch (error) {
+      console.error('Error validating contact on network:', error);
+      return { success: false, error: 'Network error during validation' };
+    }
+  }
+
+  /**
+   * Renders the contact list
+   */
+  async renderContactList() {
+    const myAddress = normalizeAddress(myAccount?.keys?.address || '');
+
+    // Filter out self (contacts are already deduplicated by username)
+    const filteredContacts = this.parsedContacts.filter(c => 
+      normalizeAddress(c.address) !== myAddress
+    );
+
+    if (filteredContacts.length === 0) {
+      this.emptyState.style.display = 'block';
+      this.contactsList.style.display = 'none';
+      this.doneButton.disabled = true;
+      return;
+    }
+
+    // Separate new and existing contacts
+    const newContacts = [];
+    const existingContacts = [];
+
+    for (const contact of filteredContacts) {
+      const normalizedAddr = normalizeAddress(contact.address);
+      if (myData.contacts[normalizedAddr]) {
+        existingContacts.push({ ...contact, address: normalizedAddr, isExisting: true });
+      } else {
+        newContacts.push({ ...contact, address: normalizedAddr, isExisting: false });
+      }
+    }
+
+    // Sort each group by name
+    const sortByName = (a, b) => {
+      const nameA = (a.name || a.username || a.address).toLowerCase();
+      const nameB = (b.name || b.username || b.address).toLowerCase();
+      return nameA.localeCompare(nameB);
+    };
+    newContacts.sort(sortByName);
+    existingContacts.sort(sortByName);
+
+    // Combine: new contacts first, then existing
+    const sortedContacts = [...newContacts, ...existingContacts];
+
+    // Generate avatars in parallel
+    const avatarPromises = sortedContacts.map(contact => this.getAvatarHtml(contact, 40));
+    const avatarHtmlList = await Promise.all(avatarPromises);
+
+    // Render contacts
+    this.contactsList.innerHTML = '';
+    
+    // Add section headers
+    if (newContacts.length > 0) {
+      const header = document.createElement('div');
+      header.className = 'share-contacts-section-header';
+      header.textContent = 'New Contacts';
+      this.contactsList.appendChild(header);
+    }
+
+    let existingHeaderAdded = false;
+
+    sortedContacts.forEach((contact, index) => {
+      // Add existing contacts header when we reach them
+      if (contact.isExisting && !existingHeaderAdded && existingContacts.length > 0) {
+        const header = document.createElement('div');
+        header.className = 'share-contacts-section-header';
+        header.textContent = 'Already Added';
+        this.contactsList.appendChild(header);
+        existingHeaderAdded = true;
+      }
+
+      const row = document.createElement('div');
+      row.className = 'share-contact-row' + (contact.isExisting ? ' existing' : '');
+      row.dataset.address = contact.address;
+
+      const avatarHtml = avatarHtmlList[index];
+      const displayName = contact.name || contact.username || `${contact.address.slice(0, 8)}…${contact.address.slice(-6)}`;
+
+      row.innerHTML = `
+        <div class="share-contact-avatar">${avatarHtml}</div>
+        <div class="share-contact-info">
+          <div class="share-contact-name">${escapeHtml(displayName)}</div>
+        </div>
+        ${contact.isExisting 
+          ? '<span class="existing-label">Already added</span>' 
+          : '<input type="checkbox" class="share-contact-checkbox" />'}
+      `;
+
+      this.contactsList.appendChild(row);
+    });
+
+    this.contactsList.style.display = 'block';
+    this.doneButton.disabled = newContacts.length === 0;
+  }
+
+  /**
+   * Gets avatar HTML for a parsed contact
+   * @param {Object} contact - Parsed contact object
+   * @param {number} size - Avatar size
+   * @returns {Promise<string>} Avatar HTML
+   */
+  async getAvatarHtml(contact, size = 40) {
+    const makeImg = (url) => `<img src="${url}" class="contact-avatar-img" width="${size}" height="${size}" alt="avatar">`;
+
+    // If contact has photo data from VCF
+    if (contact.photoBase64) {
+      try {
+        const mimeType = contact.photoType === 'png' ? 'image/png' : 'image/jpeg';
+        const blob = contactAvatarCache.base64ToBlob(contact.photoBase64, mimeType);
+        const url = URL.createObjectURL(blob);
+        return makeImg(url);
+      } catch (err) {
+        console.warn('Failed to create avatar from VCF photo:', err);
+      }
+    }
+
+    // Fallback to identicon
+    return generateIdenticon(contact.address || '', size);
+  }
+
+  /**
+   * Handles click on a contact row to toggle selection
+   * @param {Event} e - Click event
+   */
+  handleContactClick(e) {
+    const row = e.target.closest('.share-contact-row');
+    if (!row || row.classList.contains('existing')) return;
+
+    const checkbox = row.querySelector('.share-contact-checkbox');
+    if (!checkbox) return;
+
+    const address = row.dataset.address;
+
+    // Toggle checkbox (unless clicking directly on checkbox)
+    if (e.target !== checkbox) {
+      checkbox.checked = !checkbox.checked;
+    }
+
+    // Update selected contacts set
+    if (checkbox.checked) {
+      this.selectedContacts.add(address);
+    } else {
+      this.selectedContacts.delete(address);
+    }
+
+    this.updateAllNoneButton();
+  }
+
+  /**
+   * Updates the All/None button icon based on selection state
+   */
+  updateAllNoneButton() {
+    const checkboxes = this.contactsList.querySelectorAll('.share-contact-row:not(.existing) .share-contact-checkbox');
+    const allSelected = checkboxes.length > 0 && Array.from(checkboxes).every(cb => cb.checked);
+    if (allSelected) {
+      this.allNoneButton.classList.add('all-selected');
+      this.allNoneButton.setAttribute('aria-label', 'Clear');
+    } else {
+      this.allNoneButton.classList.remove('all-selected');
+      this.allNoneButton.setAttribute('aria-label', 'Select all');
+    }
+  }
+
+  /**
+   * Toggles between selecting all and none
+   */
+  toggleAllNone() {
+    const checkboxes = this.contactsList.querySelectorAll('.share-contact-row:not(.existing) .share-contact-checkbox');
+    const allSelected = checkboxes.length > 0 && Array.from(checkboxes).every(cb => cb.checked);
+
+    checkboxes.forEach(cb => {
+      const row = cb.closest('.share-contact-row');
+      const address = row?.dataset.address;
+      if (allSelected) {
+        cb.checked = false;
+        if (address) this.selectedContacts.delete(address);
+      } else {
+        cb.checked = true;
+        if (address) this.selectedContacts.add(address);
+      }
+    });
+
+    this.updateAllNoneButton();
+  }
+
+  /**
+   * Handles back/close button click with warning if contacts are selected
+   */
+  handleClose() {
+    if (this.selectedContacts.size > 0 && !this.warningShown) {
+      this.warningShown = true;
+      showToast('You have contacts selected. Click back again to discard.', 0, 'warning');
+      return;
+    }
+    this.close();
+  }
+
+  /**
+   * Closes the modal
+   */
+  close() {
+    this.modal.classList.remove('active');
+    this.warningShown = false;
+    this.parsedContacts = [];
+    this.currentAttachment = null;
+  }
+
+  /**
+   * Checks if the modal is active
+   * @returns {boolean}
+   */
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
+  }
+
+  /**
+   * Handles the Done button click - imports selected contacts
+   */
+  async handleDone() {
+    if (this.selectedContacts.size === 0) {
+      showToast('Please select at least one contact', 2000, 'info');
+      return;
+    }
+
+    if (this.isImporting) return;
+    this.isImporting = true;
+    this.doneButton.classList.add('loading');
+    this.doneButton.disabled = true;
+
+    try {
+      let importedCount = 0;
+      let failedCount = 0;
+      const failedContacts = [];
+      const importedContacts = [];
+
+      // Limit to 20 contacts maximum
+      const selectedContactsArray = Array.from(this.selectedContacts);
+      const totalSelected = selectedContactsArray.length;
+      const contactsToProcess = selectedContactsArray.slice(0, 20);
+      const hasMoreThan20 = totalSelected > 20;
+
+      // Parallel validation of selected contacts (limited to 20)
+      const validationPromises = contactsToProcess.map(async (address) => {
+        const parsedContact = this.parsedContacts.find(c => normalizeAddress(c.address) === address);
+        if (!parsedContact) return { parsedContact: null, validation: null };
+        
+        const validation = await this.validateContactOnNetwork(parsedContact);
+        return { parsedContact, validation };
+      });
+
+      const results = await Promise.allSettled(validationPromises);
+
+      // Process validation results and create contacts (limited to 20)
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          console.error('Validation promise rejected:', result.reason);
+          failedCount++;
+          continue;
+        }
+
+        const { parsedContact, validation } = result.value;
+        if (!parsedContact || !validation) continue;
+
+        if (!validation.success) {
+          console.warn(`Failed to validate contact ${parsedContact.username}:`, validation.error);
+          failedContacts.push({ username: parsedContact.username, error: validation.error });
+          failedCount++;
+          continue;
+        }
+
+        // Use the network address instead of the VCF address
+        const networkAddress = validation.networkAddress;
+
+        // Check if contact already exists
+        if (myData.contacts[networkAddress]) {
+          console.log(`Contact ${parsedContact.username} already exists, skipping`);
+          continue;
+        }
+
+        // Create contact record (incomplete - missing public keys)
+        const contactRecord = {
+          address: networkAddress,
+          username: validation.username,
+          messages: [],
+          timestamp: 0,
+          unread: 0,
+          hasAvatar: false,
+          toll: 0n,
+          tollRequiredToReceive: 1,
+          tollRequiredToSend: 1,
+          friend: 2, // Friend status
+          friendOld: 2,
+          tolledDepositToastShown: true,
+        };
+
+        // Store imported name in user input name field so it displays in contactList and can be changed by user
+        if (parsedContact.name) {
+          contactRecord.name = parsedContact.name;
+        }
+
+        // Save avatar as user-uploaded so it can be changed or deleted locally
+        if (parsedContact.photoBase64) {
+          try {
+            const mimeType = parsedContact.photoType === 'png' ? 'image/png' : 'image/jpeg';
+            const avatarBlob = contactAvatarCache.base64ToBlob(parsedContact.photoBase64, mimeType);
+            // Generate ID like user-uploaded avatars for consistency
+            const mineId = bin2hex(generateRandomBytes(16));
+            await contactAvatarCache.save(mineId, avatarBlob);
+            contactRecord.mineAvatarId = mineId;
+            contactRecord.hasAvatar = true;
+            contactRecord.useAvatar = 'mine';
+          } catch (err) {
+            console.warn('Failed to save imported avatar:', err);
+          }
+        }
+
+        // Add to contacts using network address
+        myData.contacts[networkAddress] = contactRecord;
+        importedContacts.push(parsedContact.username);
+        importedCount++;
+      }
+
+      saveState();
+      
+      // Refresh contacts screen if visible
+      contactsScreen.updateContactsList();
+      
+      // Show appropriate success/error message with usernames
+      if (importedCount > 0 && failedCount === 0) {
+        const successList = importedContacts.join(', ');
+        showToast(`Successfully imported: ${successList}`, 3000, 'success');
+      } else if (importedCount > 0 && failedCount > 0) {
+        const successList = importedContacts.join(', ');
+        const failedList = failedContacts.map(c => c.username).join(', ');
+        showToast(`Imported: ${successList}\n\nFailed: ${failedList}`, 0, 'warning');
+      } else if (failedCount > 0) {
+        const failedList = failedContacts.map(c => c.username).join(', ');
+        showToast(`Failed to import: ${failedList}`, 0, 'error');
+      }
+
+      // Show warning if more than 20 contacts were selected
+      if (hasMoreThan20) {
+        showToast('Only 20 contacts can be imported at a time. Please import the remaining contacts in another batch.', 0, 'warning');
+      }
+
+      this.close();
+
+    } catch (err) {
+      console.error('Failed to import contacts:', err);
+      showToast('Failed to import contacts', 0, 'error');
+    } finally {
+      this.isImporting = false;
+      this.doneButton.classList.remove('loading');
+      this.doneButton.disabled = false;
+    }
+  }
+}
+
+const importContactsModal = new ImportContactsModal();
 
 // ---- Call scheduling shared helpers (display-only) ----
 function getActiveChatContactTimeZone() {
@@ -17395,16 +19500,11 @@ class NewChatModal {
     footer.closeNewChatButton();
     this.usernameAvailable.style.display = 'none';
     this.submitButton.disabled = true;
-
-    // Create the handler function
-    const focusHandler = () => {
+    walletScreen.updateWalletBalances();
+    // Delay focus to ensure transition completes (modal transition is 300ms)
+    setTimeout(() => {
       this.recipientInput.focus();
-      this.modal.removeEventListener('transitionend', focusHandler);
-    };
-
-    // Add the event listener
-    // TODO: move focusHandler out and move event listener to load()
-    this.modal.addEventListener('transitionend', focusHandler);
+    }, 325);
   }
 
   /**
@@ -17496,9 +19596,22 @@ class NewChatModal {
 
     // Check if contact exists
     if (!chatsData.contacts[recipientAddress]) {
+      // Default to 2 (Acquaintance) so recipient does not need to pay toll.
+      // Only create the local contact if the network inject succeeds.
+      try {
+        const res = await friendModal.postUpdateTollRequired(recipientAddress, 2);
+        if (res?.result?.success !== true) {
+          return;
+        }
+      } catch (error) {
+        console.error('Error updating toll in create when creating new contact:', error);
+        return;
+      }
+
       createNewContact(recipientAddress, username, 2);
-      // default to 2 (Acquaintance) so recipient does not need to pay toll
-      friendModal.postUpdateTollRequired(recipientAddress, 2);
+      // If the backend ultimately rejects this tx, the pending-tx failure handler
+      // reverts `friend` back to `friendOld` so initializing fieldOld to toll required (1).
+      chatsData.contacts[recipientAddress].friendOld = 1;
     }
     chatsData.contacts[recipientAddress].username = username;
 
@@ -17722,6 +19835,10 @@ class CreateAccountModal {
 
     this.modal.classList.add('active');
     enterFullscreen();
+    // Delay focus to ensure transition completes (modal transition is 300ms)
+    setTimeout(() => {
+      this.usernameInput.focus();
+    }, 325);
   }
 
   // we still need to keep this since it can be called by other modals
@@ -18990,7 +21107,7 @@ class SendAssetConfirmModal {
       const amountStr = big2str(amount, 18).slice(0, -16);
       const feeStr = big2str(txFeeInLIB, 18).slice(0, -16);
       const balanceStr = big2str(balance, 18).slice(0, -16);
-      showToast(`Insufficient balance: ${amountStr} + ${feeStr} (fee) > ${balanceStr} LIB`, 0, 'error');
+      showToast(`Insufficient balance: ${amountStr} + ${feeStr} (fee) > ${balanceStr} LIB. Go to the wallet to add more LIB`, 0, 'error');
       cancelButton.disabled = false;
       return;
     }
@@ -19087,21 +21204,22 @@ class SendAssetConfirmModal {
         username: myAccount.username,
       };
 
-      if (friendLevel === 3) {
+      if (friendLevel === 2) {
         senderInfo.name = myData.account.name;
-        senderInfo.email = myData.account.email;
-        senderInfo.phone = myData.account.phone;
         senderInfo.linkedin = myData.account.linkedin;
         senderInfo.x = myData.account.x;
-      }
-
-      // Add timezone for friends and connections
-      if (friendLevel >= 2) {
+        // Add avatar info if available
+        if (myData.account.avatarId && myData.account.avatarKey) {
+          senderInfo.avatarId = myData.account.avatarId;
+          senderInfo.avatarKey = myData.account.avatarKey;
+        }
+        // Add timezone if available
         const tz = getLocalTimeZone();
         if (tz) {
           senderInfo.timezone = tz;
         }
       }
+
       encSenderInfo = encryptChacha(dhkey, stringify(senderInfo));
     } else {
       senderInfo = { username: myAccount.address };
@@ -23270,6 +25388,15 @@ function closeTopModal(topModal){
       break;
     case 'menuModal':
       menuModal.close();
+      break;
+    case 'daoModal':
+      daoModal.close();
+      break;
+    case 'addProposalModal':
+      addProposalModal.close();
+      break;
+    case 'proposalInfoModal':
+      proposalInfoModal.close();
       break;
     case 'settingsModal':
       settingsModal.close();
