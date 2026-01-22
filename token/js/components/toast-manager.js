@@ -32,7 +32,8 @@ export class ToastManager {
 
     const create = () => {
       const el = document.createElement('div');
-      el.className = `toast toast--${type}`;
+      const isSticky = typeof timeoutMs === 'number' && timeoutMs <= 0;
+      el.className = `toast toast--${type}${isSticky ? ' toast--sticky' : ''}`;
       el.setAttribute('data-toast-id', toastId);
       el.setAttribute('role', type === 'error' ? 'alert' : 'status');
 
@@ -52,6 +53,8 @@ export class ToastManager {
       closeBtn?.addEventListener('click', () => this.dismiss(toastId));
 
       this.container.appendChild(el);
+      // Trigger entry animation (match web-client-v2 style).
+      requestAnimationFrame(() => el.classList.add('toast--show'));
 
       const rec = { el, timeoutId: null, showTimerId: null };
       this._toasts.set(toastId, rec);
