@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'o'
+const version = 'p'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -17271,7 +17271,7 @@ class ShareContactsModal {
       return;
     }
 
-    // Check connection status if recipient address is provided
+    // Check contact status if recipient address is provided
     if (recipientAddress) {
       const recipient = myData.contacts[recipientAddress];
       if (recipient) {
@@ -17288,8 +17288,8 @@ class ShareContactsModal {
           this.emptyState.style.display = 'block';
           this.doneButton.disabled = true;
           this.allNoneButton.disabled = true;
-          // Show button to open Connection Status modal
-          this.actionButton.textContent = 'Change Connection Status';
+          // Show button to open Contact Status modal
+          this.actionButton.textContent = 'Change Contact Status';
           this.actionButton.style.display = 'block';
           return;
         }
@@ -17763,7 +17763,7 @@ class ImportContactsModal {
       return;
     }
 
-    // Check connection status if recipient address is provided
+    // Check contact status if recipient address is provided
     if (this.recipientAddress) {
       const recipient = myData.contacts[this.recipientAddress];
       if (recipient && recipient.friend !== 2) {
@@ -17776,8 +17776,8 @@ class ImportContactsModal {
         this.emptyState.style.display = 'block';
         this.doneButton.disabled = true;
         this.allNoneButton.disabled = true;
-        // Show button to open Connection Status modal
-        this.actionButton.textContent = 'Change Connection Status';
+        // Show button to open Contact Status modal
+        this.actionButton.textContent = 'Change Contact Status';
         this.actionButton.style.display = 'block';
         return;
       }
