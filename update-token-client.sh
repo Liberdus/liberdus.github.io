@@ -23,7 +23,8 @@
 # WHAT IT DOES:
 # - Copies all files from liberdus-dao-ui/liberdus-token-ui/* to liberdus.github.io/token/
 # - Excludes node_modules, .git, and other build/IDE artifacts
-# - Uses VERSION from the source config.js without modification
+# - Mirrors source to target (removes files not in source)
+# - Increments VERSION in token/js/config.js (patch increment: 0.0.X -> 0.0.X+1)
 #
 # =============================================================================
 
@@ -64,9 +65,29 @@ fi
 echo "Copying token UI contents..."
 echo "Source: $SOURCE_DIR"
 echo "Target: $TARGET_DIR"
+echo "Note: If no files are listed, source and target are identical."
+
+# Read current VERSION (prefer target's existing version)
+CONFIG_SRC="$SOURCE_DIR/js/config.js"
+CONFIG_TGT="$TARGET_DIR/js/config.js"
+current_version="0.0.0"
+
+if [ -f "$CONFIG_SRC" ]; then
+    current_version=$(grep -oP "VERSION: '\K[0-9.]+" "$CONFIG_SRC" 2>/dev/null || echo "0.0.0")
+fi
+
+if [ -f "$CONFIG_TGT" ]; then
+    tgt_ver=$(grep -oP "VERSION: '\K[0-9.]+" "$CONFIG_TGT" 2>/dev/null)
+    [ -n "$tgt_ver" ] && current_version="$tgt_ver"
+fi
+
+# Parse semver and increment patch (0.0.X -> 0.0.X+1)
+IFS=. read -r maj min patch _ <<< "${current_version}.0"
+patch=$((patch + 1))
+new_version="$maj.$min.$patch"
 
 # Copy files while excluding build artifacts and IDE config
-rsync -av \
+rsync -av --delete \
   --exclude='node_modules' \
   --exclude='.git' \
   --exclude='.idea' \
@@ -76,9 +97,18 @@ rsync -av \
   --exclude='*.log' \
   "$SOURCE_DIR/" "$TARGET_DIR/"
 
+echo "Updating version in token/js/config.js..."
+if [ -f "$TARGET_DIR/js/config.js" ]; then
+    sed -i "s/VERSION: '[0-9.]*'/VERSION: '$new_version'/" "$TARGET_DIR/js/config.js"
+    echo "Set VERSION to $new_version"
+else
+    echo "Warning: token/js/config.js not found, skipping version bump"
+fi
+
 # Debugging output
 echo "Current directory: $(pwd)"
 echo "Config version source: $SOURCE_DIR/js/config.js"
+echo "New VERSION in config.js: $new_version"
 
 # Check that key files exist
 if [ ! -f "$TARGET_DIR/index.html" ]; then
