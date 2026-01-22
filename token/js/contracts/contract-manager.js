@@ -128,7 +128,15 @@ export class ContractManager {
   }
 
   getWriteContract() {
-    return this.contractWrite;
+    const txEnabled = !!this.networkManager?.isTxEnabled?.();
+    if (!txEnabled || !window.ethereum || !window.ethers) {
+      return this.contractWrite;
+    }
+
+    // Create a fresh provider/signer for each write to avoid stale network caching.
+    const freshProvider = new window.ethers.providers.Web3Provider(window.ethereum, 'any');
+    const freshSigner = freshProvider.getSigner();
+    return this._makeContract(freshSigner);
   }
 
   async getRequiredSignatures() {
