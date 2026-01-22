@@ -19,6 +19,7 @@ export class WalletPopup {
   load() {
     this._ensureContainer();
     this._attachGlobalClickListener();
+    this._attachContainerHandlers();
 
     document.addEventListener('walletDisconnected', () => this.hide());
     document.addEventListener('walletAccountChanged', () => this.refresh());
@@ -40,7 +41,6 @@ export class WalletPopup {
     this.isOpen = true;
 
     this._position(anchorEl);
-    this._wireEvents();
 
     // Load balance (best-effort)
     try {
@@ -94,6 +94,50 @@ export class WalletPopup {
     });
   }
 
+  _attachContainerHandlers() {
+    if (!this._containerEl) return;
+
+    // Event delegation on container - handles all popup interactions
+    this._containerEl.addEventListener('click', async (e) => {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+
+      // Close button
+      if (target.closest('[data-wallet-close]')) {
+        e.stopPropagation();
+        this.hide();
+        return;
+      }
+
+      // Copy button or address text
+      const copyBtn = target.closest('[data-wallet-copy]');
+      const addressText = target.closest('.address-text');
+      if (copyBtn || addressText) {
+        e.stopPropagation();
+        const addr = copyBtn?.getAttribute('data-address') || 
+                     this._containerEl.querySelector('[data-wallet-copy]')?.getAttribute('data-address') ||
+                     this.walletManager?.getAddress?.();
+        if (addr) {
+          await this._copy(addr);
+        }
+        return;
+      }
+
+      // Disconnect button
+      if (target.closest('[data-wallet-disconnect]')) {
+        e.stopPropagation();
+        await this.walletManager?.disconnect?.();
+        this.hide();
+        return;
+      }
+
+      // Prevent closing when clicking inside popup
+      if (target.closest('.wallet-popup')) {
+        e.stopPropagation();
+      }
+    });
+  }
+
   _position(anchorEl) {
     if (!this.popupEl || !anchorEl) return;
     const rect = anchorEl.getBoundingClientRect();
@@ -111,34 +155,6 @@ export class WalletPopup {
     this.popupEl.style.left = `${left}px`;
   }
 
-  _wireEvents() {
-    if (!this.popupEl) return;
-
-    const closeBtn = this.popupEl.querySelector('[data-wallet-close]');
-    const copyBtn = this.popupEl.querySelector('[data-wallet-copy]');
-    const disconnectBtn = this.popupEl.querySelector('[data-wallet-disconnect]');
-
-    closeBtn?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.hide();
-    });
-
-    copyBtn?.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const addr = copyBtn.getAttribute('data-address');
-      if (!addr) return;
-      await this._copy(addr);
-    });
-
-    disconnectBtn?.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await this.walletManager?.disconnect?.();
-      this.hide();
-    });
-
-    // prevent closing when clicking inside
-    this.popupEl.addEventListener('click', (e) => e.stopPropagation());
-  }
 
   _renderHTML({ address, balanceText }) {
     const short = this._shortAddress(address);
@@ -175,6 +191,8 @@ export class WalletPopup {
   async _copy(text) {
     try {
       await navigator.clipboard.writeText(text);
+      // Show success toast (matching web-client-v2 pattern)
+      window.toastManager?.success?.('Address copied to clipboard', { timeoutMs: 2000 });
     } catch {
       // fallback
       const ta = document.createElement('textarea');
@@ -183,7 +201,13 @@ export class WalletPopup {
       ta.style.opacity = '0';
       document.body.appendChild(ta);
       ta.select();
-      document.execCommand('copy');
+      try {
+        document.execCommand('copy');
+        // Show success toast even with fallback
+        window.toastManager?.success?.('Address copied to clipboard', { timeoutMs: 2000 });
+      } catch {
+        window.toastManager?.error?.('Failed to copy address');
+      }
       document.body.removeChild(ta);
     }
   }

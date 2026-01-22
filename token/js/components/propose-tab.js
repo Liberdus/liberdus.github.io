@@ -240,10 +240,13 @@ export class ProposeTab {
   _populateOpTypes() {
     if (!this.typeSelect) return;
 
-    const opts = [
+    const preLaunchOps = [
       { value: 0, label: 'Mint (3,000,000 LIB → contract)' },
       { value: 1, label: 'Burn (from contract balance)' },
       { value: 8, label: 'Distribute (contract → recipient)' },
+    ];
+
+    const postLaunchOps = [
       { value: 2, label: 'PostLaunch' },
       { value: 3, label: 'Pause' },
       { value: 4, label: 'Unpause' },
@@ -254,7 +257,12 @@ export class ProposeTab {
 
     this.typeSelect.innerHTML = [
       `<option value="">Select an operation…</option>`,
-      ...opts.map((o) => `<option value="${o.value}">${o.label}</option>`),
+      `<optgroup label="Pre-Launch">`,
+      ...preLaunchOps.map((o) => `<option value="${o.value}">${o.label}</option>`),
+      `</optgroup>`,
+      `<optgroup label="Post-Launch">`,
+      ...postLaunchOps.map((o) => `<option value="${o.value}">${o.label}</option>`),
+      `</optgroup>`,
     ].join('');
   }
 

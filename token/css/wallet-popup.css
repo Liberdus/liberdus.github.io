@@ -71,6 +71,8 @@
 .address-text {
   font-family: var(--font-monospace);
   font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  user-select: none;
 }
 
 .copy-icon-button {
