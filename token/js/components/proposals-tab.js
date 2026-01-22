@@ -40,12 +40,22 @@ export class ProposalsTab {
     this.panel.innerHTML = `
       <div class="panel-header">
         <h2>Proposals</h2>
-        <p class="muted">Paginated (25/page). Click a row for details.</p>
+        <p class="muted">Click a row for details.</p>
       </div>
 
       <div class="card">
         <div class="card-title-row">
-          <div class="card-title">OperationRequested</div>
+          <div class="proposals-description">
+            <p class="muted">
+              Proposals for operations (Mint, Burn, Distribute, etc.) that require multiple signatures to execute.
+            </p>
+            <div class="proposals-status-list">
+              <span class="muted" style="font-size: var(--font-size-sm);">Status: </span>
+              <span class="status-items">
+                <strong>Pending</strong>, <strong>Executed</strong>, <strong>Expired</strong>
+              </span>
+            </div>
+          </div>
           <div style="display:flex; align-items:center; gap:8px;">
             <div class="muted" data-proposals-status style="display:none;"></div>
             <button type="button" class="btn btn--ghost" data-proposals-refresh title="Refresh proposals">Refresh</button>

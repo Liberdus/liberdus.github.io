@@ -15,7 +15,12 @@ export class ProposeTab {
 
     // Mint readiness (liberdus-sc-dao parity)
     this.mintReadinessWrap = null;
-    this.mintReadinessTextEl = null;
+    this.mintLastDateEl = null;
+    this.mintStatusEl = null;
+    this.mintCountdownWrap = null;
+    this.mintCountdownEl = null;
+    this.mintReadyDateWrap = null;
+    this.mintReadyDateEl = null;
     this._mintLastMintSec = null; // number (unix seconds)
     this._mintCountdownTimer = null;
     // 3 weeks + 6 days + 9 hours (matches liberdus-sc-dao)
@@ -42,8 +47,23 @@ export class ProposeTab {
       </div>
 
       <div class="mint-readiness" data-mint-readiness>
-        <div data-mint-readiness-text style="color: var(--secondary-text-color);">
-          Last Mint: — - Loading…
+        <div class="mint-readiness-content">
+          <div class="mint-readiness-row">
+            <span class="mint-readiness-label">Last Mint:</span>
+            <span class="mint-readiness-value" data-mint-last-date>—</span>
+          </div>
+          <div class="mint-readiness-row">
+            <span class="mint-readiness-label">Status:</span>
+            <span class="mint-readiness-value" data-mint-status style="color: var(--secondary-text-color);">Loading…</span>
+          </div>
+          <div class="mint-readiness-row" data-mint-countdown-wrap style="display: none;">
+            <span class="mint-readiness-label">Time Remaining:</span>
+            <span class="mint-readiness-value" data-mint-countdown style="color: var(--danger-color);">—</span>
+          </div>
+          <div class="mint-readiness-row" data-mint-ready-date-wrap style="display: none;">
+            <span class="mint-readiness-label">Ready Date:</span>
+            <span class="mint-readiness-value" data-mint-ready-date style="color: var(--secondary-text-color);">—</span>
+          </div>
         </div>
       </div>
 
@@ -94,7 +114,12 @@ export class ProposeTab {
     this.dataInput = this.panel.querySelector('[data-propose-data]');
     this.submitBtn = this.panel.querySelector('[data-propose-submit]');
     this.mintReadinessWrap = this.panel.querySelector('[data-mint-readiness]');
-    this.mintReadinessTextEl = this.panel.querySelector('[data-mint-readiness-text]');
+    this.mintLastDateEl = this.panel.querySelector('[data-mint-last-date]');
+    this.mintStatusEl = this.panel.querySelector('[data-mint-status]');
+    this.mintCountdownWrap = this.panel.querySelector('[data-mint-countdown-wrap]');
+    this.mintCountdownEl = this.panel.querySelector('[data-mint-countdown]');
+    this.mintReadyDateWrap = this.panel.querySelector('[data-mint-ready-date-wrap]');
+    this.mintReadyDateEl = this.panel.querySelector('[data-mint-ready-date]');
 
     this._populateOpTypes();
     this.typeSelect?.addEventListener('change', () => this._onOperationTypeChange());
@@ -108,7 +133,7 @@ export class ProposeTab {
   }
 
   async _loadMintReadiness() {
-    if (!this.mintReadinessTextEl) return;
+    if (!this.mintStatusEl) return;
 
     // Ensure we don't create multiple timers
     if (this._mintCountdownTimer) {
@@ -124,17 +149,17 @@ export class ProposeTab {
   }
 
   async _refreshMintReadinessFromChain() {
-    if (!this.mintReadinessTextEl) return;
+    if (!this.mintStatusEl) return;
 
     const contractManager = window.contractManager;
     const contract = contractManager?.getReadContract?.();
     if (!contract) {
-      this._setMintReadinessText({ text: 'Last Mint: — - Contract not ready', tone: 'muted' });
+      this._setMintReadinessState({ lastDate: '—', status: 'Contract not ready', statusTone: 'muted' });
       return;
     }
 
     if (typeof contract.lastMintTime !== 'function') {
-      this._setMintReadinessText({ text: 'Last Mint: — - Not supported by contract', tone: 'muted' });
+      this._setMintReadinessState({ lastDate: '—', status: 'Not supported by contract', statusTone: 'muted' });
       return;
     }
 
@@ -143,22 +168,18 @@ export class ProposeTab {
       const sec = Number(v?.toString?.() ?? v);
       if (!Number.isFinite(sec) || sec <= 0) {
         this._mintLastMintSec = null;
-        this._setMintReadinessText({ text: 'Last Mint: — - Unknown', tone: 'muted' });
+        this._setMintReadinessState({ lastDate: '—', status: 'Unknown', statusTone: 'muted' });
         return;
       }
       this._mintLastMintSec = sec;
     } catch (e) {
       this._mintLastMintSec = null;
-      this._setMintReadinessText({
-        text: `Last Mint: — - Failed to load`,
-        tone: 'error',
-      });
+      this._setMintReadinessState({ lastDate: '—', status: 'Failed to load', statusTone: 'error' });
     }
   }
 
   _renderMintReadiness() {
-    if (!this.mintReadinessTextEl) return;
-    if (!this._mintLastMintSec) return;
+    if (!this.mintStatusEl || !this._mintLastMintSec) return;
 
     const lastMintDate = new Date(this._mintLastMintSec * 1000);
     const nowSec = BigInt(Math.ceil(Date.now() / 1000));
@@ -167,9 +188,12 @@ export class ProposeTab {
 
     const ready = elapsed > this._mintIntervalSec;
     if (ready) {
-      this._setMintReadinessText({
-        text: `Last Mint: ${lastMintDate.toLocaleString()} - Ready`,
-        tone: 'success',
+      this._setMintReadinessState({
+        lastDate: lastMintDate.toLocaleString(),
+        status: 'Ready',
+        statusTone: 'success',
+        showCountdown: false,
+        showReadyDate: false,
       });
       return;
     }
@@ -177,20 +201,40 @@ export class ProposeTab {
     const remaining = this._mintIntervalSec - elapsed;
     const nextReadyMs = Number(lastSec + this._mintIntervalSec) * 1000;
     const nextReadyDate = new Date(nextReadyMs);
-    this._setMintReadinessText({
-      text: `Last Mint: ${lastMintDate.toLocaleString()} - Not Ready : ${formatCountdown(remaining)} (Ready: ${nextReadyDate.toLocaleString()})`,
-      tone: 'error',
+
+    this._setMintReadinessState({
+      lastDate: lastMintDate.toLocaleString(),
+      status: 'Not Ready',
+      statusTone: 'error',
+      countdown: formatCountdown(remaining),
+      readyDate: nextReadyDate.toLocaleString(),
+      showCountdown: true,
+      showReadyDate: true,
     });
   }
 
-  _setMintReadinessText({ text, tone }) {
-    if (!this.mintReadinessTextEl) return;
-    this.mintReadinessTextEl.textContent = text || '';
-
-    // Match liberdus-sc-dao: green when ready, red when not ready. Muted for unknown states.
-    if (tone === 'success') this.mintReadinessTextEl.style.color = 'var(--success-color)';
-    else if (tone === 'error') this.mintReadinessTextEl.style.color = 'var(--danger-color)';
-    else this.mintReadinessTextEl.style.color = 'var(--secondary-text-color)';
+  _setMintReadinessState({ lastDate, status, statusTone, countdown, readyDate, showCountdown = false, showReadyDate = false }) {
+    if (this.mintLastDateEl) {
+      this.mintLastDateEl.textContent = lastDate || '—';
+    }
+    if (this.mintStatusEl) {
+      this.mintStatusEl.textContent = status || '—';
+      if (statusTone === 'success') this.mintStatusEl.style.color = 'var(--success-color)';
+      else if (statusTone === 'error') this.mintStatusEl.style.color = 'var(--danger-color)';
+      else this.mintStatusEl.style.color = 'var(--secondary-text-color)';
+    }
+    if (this.mintCountdownEl) {
+      this.mintCountdownEl.textContent = countdown || '—';
+    }
+    if (this.mintCountdownWrap) {
+      this.mintCountdownWrap.style.display = showCountdown ? 'flex' : 'none';
+    }
+    if (this.mintReadyDateEl) {
+      this.mintReadyDateEl.textContent = readyDate || '—';
+    }
+    if (this.mintReadyDateWrap) {
+      this.mintReadyDateWrap.style.display = showReadyDate ? 'flex' : 'none';
+    }
   }
 
   _populateOpTypes() {

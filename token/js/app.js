@@ -28,6 +28,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Basic config exposure (helpful during dev)
   window.CONFIG = CONFIG;
 
+  // Set app version in header
+  const versionEl = document.querySelector('.app-version');
+  if (versionEl && CONFIG?.APP?.VERSION) {
+    versionEl.textContent = `(${CONFIG.APP.VERSION})`;
+  }
+
   // Wallet system globals (lp-staking pattern; used by Header/Popup)
   window.walletManager = walletManager;
   window.networkManager = networkManager;

@@ -272,6 +272,35 @@ textarea:focus-visible {
   font-weight: var(--font-weight-semibold);
 }
 
+.proposals-description {
+  flex: 1;
+  min-width: 0;
+}
+
+.proposals-description > .muted {
+  margin: 0 0 8px 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.proposals-status-list {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: var(--font-size-sm);
+  flex-wrap: wrap;
+}
+
+.status-items {
+  color: var(--secondary-text-color);
+  line-height: 1.4;
+}
+
+.status-items strong {
+  color: var(--text-color);
+  font-weight: var(--font-weight-medium);
+}
+
 .stack {
   display: flex;
   flex-direction: column;
@@ -288,6 +317,33 @@ textarea:focus-visible {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   background: var(--hover-background);
+}
+
+.mint-readiness-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mint-readiness-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: baseline;
+  column-gap: 12px;
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+}
+
+.mint-readiness-label {
+  color: var(--secondary-text-color);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  width: 140px;
+}
+
+.mint-readiness-value {
+  color: var(--text-color);
+  flex: 1;
 }
 
 .panel-header h2 {
