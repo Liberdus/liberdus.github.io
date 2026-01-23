@@ -214,6 +214,8 @@ export class ContractManager {
         maxSupply: null,
         mintAmount: null,
         signers: [],
+        symbol: null,
+        decimals: null,
       };
 
       const hasFn = (name) => !!(contract && typeof contract[name] === 'function');
@@ -241,6 +243,8 @@ export class ContractManager {
           addCall('mintInterval', 'MINT_INTERVAL');
           addCall('maxSupply', 'MAX_SUPPLY');
           addCall('mintAmount', 'MINT_AMOUNT');
+          addCall('symbol', 'symbol');
+          addCall('decimals', 'decimals');
 
           // Signers (UI currently renders up to 4)
           if (hasFn('signers')) {
@@ -263,7 +267,12 @@ export class ContractManager {
                 if (decoded) out.signers.push(String(decoded));
                 return;
               }
-              out[m.key] = decoded;
+              // Convert decimals to number if it's the decimals field
+              if (m.key === 'decimals' && decoded != null) {
+                out[m.key] = Number(decoded?.toString?.() ?? decoded);
+              } else {
+                out[m.key] = decoded;
+              }
             });
 
             this._parametersCache = out;
@@ -297,6 +306,8 @@ export class ContractManager {
         mintInterval,
         maxSupply,
         mintAmount,
+        symbol,
+        decimals,
       ] = await Promise.all([
         safeCall('chainId'),
         safeCall('REQUIRED_SIGNATURES'),
@@ -309,6 +320,8 @@ export class ContractManager {
         safeCall('MINT_INTERVAL'),
         safeCall('MAX_SUPPLY'),
         safeCall('MINT_AMOUNT'),
+        safeCall('symbol'),
+        safeCall('decimals'),
       ]);
 
       out.chainId = chainId;
@@ -322,11 +335,31 @@ export class ContractManager {
       out.mintInterval = mintInterval;
       out.maxSupply = maxSupply;
       out.mintAmount = mintAmount;
+      out.symbol = symbol || null;
+      out.decimals = decimals != null ? Number(decimals?.toString?.() ?? decimals) : null;
 
       if (hasFn('signers')) {
         for (let i = 0; i < 4; i += 1) {
           const addr = await safeCall('signers', [i]);
           if (addr) out.signers.push(String(addr));
+        }
+      }
+
+      // Fallback: fetch symbol and decimals if not already set
+      if (out.symbol == null && hasFn('symbol')) {
+        try {
+          out.symbol = await contract.symbol();
+        } catch {
+          // ignore
+        }
+      }
+      
+      if (out.decimals == null && hasFn('decimals')) {
+        try {
+          const dec = await contract.decimals();
+          out.decimals = dec != null ? Number(dec?.toString?.() ?? dec) : null;
+        } catch {
+          // ignore
         }
       }
 
@@ -340,6 +373,39 @@ export class ContractManager {
     } finally {
       this._parametersBatchPromise = null;
     }
+  }
+
+  getTokenSymbol() {
+    // Try to get from cached parameters first
+    const batch = this._parametersCache;
+    if (batch?.symbol) {
+      return String(batch.symbol);
+    }
+    
+    // Fallback to hardcoded (for backwards compatibility)
+    return 'LIB';
+  }
+
+  getTokenDecimals() {
+    const batch = this._parametersCache;
+    if (batch?.decimals != null) {
+      return Number(batch.decimals);
+    }
+    return 18; // Default ERC20 decimals
+  }
+
+  getMintAmount() {
+    const batch = this._parametersCache;
+    if (batch?.mintAmount != null) {
+      try {
+        return window.ethers.BigNumber.isBigNumber(batch.mintAmount)
+          ? batch.mintAmount
+          : window.ethers.BigNumber.from(batch.mintAmount);
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 
   async _getMulticallService() {

@@ -50,6 +50,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   networkManager.load();
   walletPopup.load();
   await contractManager.load();
+  
+  // Pre-fetch parameters to ensure symbol is available for components
+  contractManager.getParametersBatch?.().catch(() => {});
 
   header.load();
   proposalDetailModal.load();

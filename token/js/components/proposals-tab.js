@@ -256,6 +256,7 @@ export class ProposalsTab {
         }
         this._updateLoadMoreVisibility();
         this._renderCount();
+        toast?.dismiss?.(toastId);
         return;
       }
 

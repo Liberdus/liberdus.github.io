@@ -41,7 +41,9 @@ export class ProposeTab {
     this.panel = document.querySelector('.tab-panel[data-panel="propose"]');
     if (!this.panel) return;
 
-    const symbol = 'LIB';
+    // Get symbol dynamically from contract manager, fallback to 'LIB'
+    const contractManager = window.contractManager;
+    const symbol = contractManager?.getTokenSymbol?.() || 'LIB';
 
     this.panel.innerHTML = `
       <div class="panel-header">
