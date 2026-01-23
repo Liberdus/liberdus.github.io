@@ -431,13 +431,7 @@ export class ProposalsTab {
     const contractManager = window.contractManager;
     if (!contractManager?.isReady?.()) return;
 
-    // Only hydrate rows that can still change (pending/unknown).
     const visibleEvents = this._loadedEvents.slice(0, this.pageSize);
-    const visible = visibleEvents
-      .filter((e) => !(e?.executed === true || e?.expired === true))
-      .map((e) => e.operationId)
-      .filter(Boolean);
-    if (visible.length === 0) return;
 
     if (this._requiredSignatures == null) {
       try {
@@ -447,7 +441,29 @@ export class ProposalsTab {
       }
     }
 
-    await this._hydrateRows(visible);
+    // Update visible rows' denominator immediately once REQUIRED_SIGNATURES is known.
+    // This avoids showing `?/` indefinitely when the first page is all terminal ops.
+    for (const ev of visibleEvents) {
+      const opId = ev?.operationId;
+      if (!opId) continue;
+      const row = this.listEl?.querySelector?.(`[data-proposal-row="${opId}"]`);
+      if (!row) continue;
+
+      const required = Number(ev.opType) === 7 ? 2 : (this._requiredSignatures ?? '?');
+      const num = typeof ev.numSignatures === 'number' ? ev.numSignatures : null;
+      if (num != null) {
+        row.querySelector('[data-proposal-sigs]')?.replaceChildren(document.createTextNode(`${num}/${required}`));
+      }
+    }
+
+    // Only hydrate rows that can still change (pending/unknown).
+    const pendingIds = visibleEvents
+      .filter((e) => !(e?.executed === true || e?.expired === true))
+      .map((e) => e.operationId)
+      .filter(Boolean);
+    if (pendingIds.length === 0) return;
+
+    await this._hydrateRows(pendingIds);
   }
 
   _appendRow(ev) {
