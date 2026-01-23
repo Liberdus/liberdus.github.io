@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#ffffff" />
+
+    <title>Liberdus</title>
+
+    <link rel="icon" type="image/png" href="./assets/logo.png" />
+
+    <link rel="stylesheet" href="./css/base.css" />
+    <link rel="stylesheet" href="./css/header.css" />
+    <link rel="stylesheet" href="./css/tabs.css" />
+    <link rel="stylesheet" href="./css/wallet-popup.css" />
+    <link rel="stylesheet" href="./css/notifications.css" />
+  </head>
+
+  <body>
+    <!-- Libraries (non-module) -->
+    <script src="./libs/ethers.umd.min.js"></script>
+
+    <!-- Follow web-client-v2 pattern: load app script early, initialize on DOMContentLoaded -->
+    <script src="./js/app.js" type="module"></script>
+
+    <div class="container" id="app">
+      <header class="header" id="header">
+        <div class="header-toolbar">
+          <a
+            href="https://liberdus.com"
+            target="_blank"
+            rel="noopener"
+            class="logo-link"
+            aria-label="Visit Liberdus website"
+          >
+            <img class="logo" src="./assets/logo.png" alt="Liberdus logo" />
+          </a>
+          <div class="logo-text">
+            <div class="app-title">Liberdus <span class="app-version"></span></div>
+            <div class="app-subtitle">DAO + Token Operations</div>
+          </div>
+
+          <nav class="nav-section" aria-label="Header actions">
+            <button
+              id="connect-wallet-btn"
+              class="connect-wallet-btn"
+              type="button"
+              title="Connect MetaMask (Polygon-only)"
+            >
+              Connect Wallet
+            </button>
+          </nav>
+        </div>
+      </header>
+
+      <main class="main" id="main-content">
+        <section class="tabs" aria-label="Main tabs">
+          <div class="tab-bar" role="tablist" aria-label="Liberdus Token UI tabs">
+            <button
+              class="tab-button is-active"
+              role="tab"
+              aria-selected="true"
+              aria-controls="tab-panel-proposals"
+              id="tab-proposals"
+              data-tab="proposals"
+              type="button"
+            >
+              Proposals
+            </button>
+            <button
+              class="tab-button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="tab-panel-propose"
+              id="tab-propose"
+              data-tab="propose"
+              type="button"
+            >
+              Propose
+            </button>
+            <button
+              class="tab-button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="tab-panel-bridge"
+              id="tab-bridge"
+              data-tab="bridge"
+              type="button"
+            >
+              Bridge
+            </button>
+            <button
+              class="tab-button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="tab-panel-parameters"
+              id="tab-parameters"
+              data-tab="parameters"
+              type="button"
+            >
+              Parameters
+            </button>
+          </div>
+
+          <div class="tab-panels">
+            <section
+              class="tab-panel is-active"
+              id="tab-panel-proposals"
+              role="tabpanel"
+              aria-labelledby="tab-proposals"
+              tabindex="0"
+              data-panel="proposals"
+            >
+              <!-- Filled by js/components/proposals-tab.js -->
+            </section>
+
+            <section
+              class="tab-panel"
+              id="tab-panel-propose"
+              role="tabpanel"
+              aria-labelledby="tab-propose"
+              tabindex="0"
+              hidden
+              data-panel="propose"
+            >
+              <!-- Filled by js/components/propose-tab.js -->
+            </section>
+
+            <section
+              class="tab-panel"
+              id="tab-panel-bridge"
+              role="tabpanel"
+              aria-labelledby="tab-bridge"
+              tabindex="0"
+              hidden
+              data-panel="bridge"
+            >
+              <!-- Filled by js/components/bridge-tab.js -->
+            </section>
+
+            <section
+              class="tab-panel"
+              id="tab-panel-parameters"
+              role="tabpanel"
+              aria-labelledby="tab-parameters"
+              tabindex="0"
+              hidden
+              data-panel="parameters"
+            >
+              <!-- Filled by js/components/parameters-tab.js -->
+            </section>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <div class="footer-inner">
+          <div class="footer-left">
+            <span>© Liberdus</span>
+            <span class="footer-sep">•</span>
+            <a
+              href="https://github.com/Liberdus"
+              target="_blank"
+              rel="noopener"
+            >GitHub</a>
+          </div>
+          <button type="button" class="btn btn--ghost btn--footer" id="proposals-clear-cache" title="Clear cached proposals">Clear cache</button>
+        </div>
+      </footer>
+
+      <!-- Phase 2+ -->
+      <div id="notification-container" class="notification-container"></div>
+    </div>
+
+    <!-- Phase 2+ -->
+    <div id="wallet-popup-container"></div>
+  </body>
+</html>
+
