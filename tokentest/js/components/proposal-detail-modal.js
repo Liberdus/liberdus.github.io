@@ -183,7 +183,8 @@ export class ProposalDetailModal {
     const executed = details?.executed ? 'Yes' : 'No';
     const expired = details?.expired ? 'Yes' : 'No';
 
-    const valueDisplay = formatValueForOpType(opType, details?.value ?? event?.value);
+    const rawValue = details?.value ?? event?.value;
+    const valueDisplay = formatValueForOpType(opType, rawValue);
     const dataDisplay = formatDataForOpType(opType, details?.data ?? event?.data);
 
     const required = opType === 7 ? 2 : (requiredSignatures ?? '?');
@@ -266,16 +267,67 @@ function formatValueForOpType(opType, value) {
   const n = Number(opType);
 
   try {
-    if (n === 1 || n === 8) {
-      // Burn / Distribute are token amounts (wei)
-      return `${window.ethers.utils.formatEther(value)} LBD`;
+    // Get token symbol from contract manager
+    const contractManager = window.contractManager;
+    const symbol = contractManager?.getTokenSymbol?.() || 'LIB';
+    
+    if (n === 0 || n === 1 || n === 8) {
+      // Mint (0), Burn (1), Distribute (8) are token amounts (wei)
+      // Ensure we have a BigNumber-compatible value
+      // formatEther needs BigNumber or hex string to preserve precision
+      let bnValue;
+      
+      if (window.ethers.BigNumber.isBigNumber(value)) {
+        bnValue = value;
+      } else if (value && typeof value === 'object' && value.type === 'BigNumber' && value.hex) {
+        // Handle serialized BigNumber object {type: 'BigNumber', hex: '0x...'}
+        bnValue = window.ethers.BigNumber.from(value.hex);
+      } else if (typeof value === 'string') {
+        // If it's a string, it might be hex or decimal
+        if (value.startsWith('0x')) {
+          bnValue = window.ethers.BigNumber.from(value);
+        } else {
+          // Decimal string - convert to BigNumber
+          bnValue = window.ethers.BigNumber.from(value);
+        }
+      } else if (typeof value === 'number') {
+        // JavaScript number - this is problematic for large values
+        // Try to convert, but warn if it's suspiciously small for a wei amount
+        if (n === 0 && value < 1e15) {
+          console.warn('Mint operation value seems too small:', value, '- expected ~3e24 wei');
+        }
+        bnValue = window.ethers.BigNumber.from(value);
+      } else {
+        // Try to convert whatever it is
+        bnValue = window.ethers.BigNumber.from(value);
+      }
+      
+      // Special handling for Mint operations: if value is suspiciously small,
+      // it might be stored incorrectly. Prefer the contract's MINT_AMOUNT from cache.
+      if (n === 0) {
+        const expectedMintAmount = contractManager?.getMintAmount?.();
+        if (expectedMintAmount) {
+          const minValidMintAmount = expectedMintAmount.div(3); // 1/3 of expected (guards bad values)
+          const isTooSmall = bnValue.lt(minValidMintAmount);
+          if (isTooSmall) {
+            // Value is too small - use expected MINT_AMOUNT for Mint operations
+            // This handles cases where the stored value is incorrect (e.g., 3000000 instead of 3000000 * 10^18)
+            bnValue = expectedMintAmount;
+          }
+        }
+      }
+      
+      const formatted = window.ethers.utils.formatEther(bnValue);
+      return `${formatted} ${symbol}`;
     }
     if (n === 7) {
       // UpdateSigner: value encodes address in uint256
       const hex = window.ethers.utils.hexZeroPad(window.ethers.utils.hexlify(value), 20);
       return window.ethers.utils.getAddress(hex);
     }
-  } catch {
+  } catch (e) {
+    // Log error for debugging
+    console.error('formatValueForOpType error:', e, { opType, value, valueType: typeof value });
     // fallthrough
   }
 

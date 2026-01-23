@@ -436,9 +436,11 @@ function formatDuration(value) {
 function formatLib(value) {
   if (value == null) return '—';
   try {
+    const contractManager = window.contractManager;
+    const symbol = contractManager?.getTokenSymbol?.() || 'LIB';
     const s = window.ethers.utils.formatEther(value);
     const trimmed = trimZeros(s);
-    return `${trimmed} LIB`;
+    return `${trimmed} ${symbol}`;
   } catch {
     return '—';
   }
