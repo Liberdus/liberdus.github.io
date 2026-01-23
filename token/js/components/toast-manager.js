@@ -32,29 +32,38 @@ export class ToastManager {
 
     const create = () => {
       const el = document.createElement('div');
-      const isSticky = typeof timeoutMs === 'number' && timeoutMs <= 0;
-      el.className = `toast toast--${type}${isSticky ? ' toast--sticky' : ''}`;
+      el.className = `notification ${type}`;
       el.setAttribute('data-toast-id', toastId);
       el.setAttribute('role', type === 'error' ? 'alert' : 'status');
 
+      // Icon based on type
+      const iconMap = {
+        success: '✓',
+        error: '✕',
+        warning: '⚠',
+        info: 'ℹ',
+        loading: '⟳',
+      };
+      const icon = iconMap[type] || 'ℹ';
+
       el.innerHTML = `
-        <div class="toast__icon" aria-hidden="true"></div>
-        <div class="toast__content">
-          ${title ? `<div class="toast__title"></div>` : ''}
-          <div class="toast__message"></div>
+        <div class="notification-icon" aria-hidden="true">${icon}</div>
+        <div class="notification-content">
+          ${title ? `<div class="notification-title"></div>` : ''}
+          <div class="notification-message"></div>
         </div>
-        ${dismissible ? `<button type="button" class="toast__close" aria-label="Dismiss">×</button>` : ''}
+        ${dismissible ? `<button type="button" class="notification-close" aria-label="Dismiss">×</button>` : ''}
       `;
 
-      if (title) el.querySelector('.toast__title').textContent = String(title);
-      el.querySelector('.toast__message').textContent = String(message || '');
+      if (title) el.querySelector('.notification-title').textContent = String(title);
+      el.querySelector('.notification-message').textContent = String(message || '');
 
-      const closeBtn = el.querySelector('.toast__close');
+      const closeBtn = el.querySelector('.notification-close');
       closeBtn?.addEventListener('click', () => this.dismiss(toastId));
 
       this.container.appendChild(el);
-      // Trigger entry animation (match web-client-v2 style).
-      requestAnimationFrame(() => el.classList.add('toast--show'));
+      // Trigger entry animation (match lib-lp-staking-frontend style).
+      requestAnimationFrame(() => el.classList.add('show'));
 
       const rec = { el, timeoutId: null, showTimerId: null };
       this._toasts.set(toastId, rec);
@@ -103,15 +112,26 @@ export class ToastManager {
     if (!el) return false;
 
     if (type) {
-      el.className = `toast toast--${type}`;
+      el.className = `notification ${type}`;
       el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+      // Update icon
+      const iconMap = {
+        success: '✓',
+        error: '✕',
+        warning: '⚠',
+        info: 'ℹ',
+        loading: '⟳',
+      };
+      const iconEl = el.querySelector('.notification-icon');
+      if (iconEl) iconEl.textContent = iconMap[type] || 'ℹ';
     }
     if (typeof title === 'string') {
-      const titleEl = el.querySelector('.toast__title');
+      const titleEl = el.querySelector('.notification-title');
       if (titleEl) titleEl.textContent = title;
     }
     if (typeof message === 'string') {
-      el.querySelector('.toast__message').textContent = message;
+      const msgEl = el.querySelector('.notification-message');
+      if (msgEl) msgEl.textContent = message;
     }
 
     if (rec.timeoutId) window.clearTimeout(rec.timeoutId);
@@ -121,12 +141,12 @@ export class ToastManager {
     }
 
     if (typeof dismissible === 'boolean') {
-      const closeBtn = el.querySelector('.toast__close');
+      const closeBtn = el.querySelector('.notification-close');
       if (!dismissible && closeBtn) closeBtn.remove();
       if (dismissible && !closeBtn) {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'toast__close';
+        btn.className = 'notification-close';
         btn.setAttribute('aria-label', 'Dismiss');
         btn.textContent = '×';
         btn.addEventListener('click', () => this.dismiss(id));
@@ -144,7 +164,14 @@ export class ToastManager {
     if (rec.showTimerId) window.clearTimeout(rec.showTimerId);
     if (rec.timeoutId) window.clearTimeout(rec.timeoutId);
 
-    rec.el?.remove();
+    const el = rec.el;
+    if (el) {
+      el.classList.add('hide');
+      // Remove after animation
+      setTimeout(() => {
+        el.remove();
+      }, 400);
+    }
     this._toasts.delete(id);
     return true;
   }

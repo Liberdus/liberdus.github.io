@@ -191,7 +191,7 @@ export class WalletPopup {
   async _copy(text) {
     try {
       await navigator.clipboard.writeText(text);
-      // Show success toast (matching web-client-v2 pattern)
+      this._showCopyFeedback();
       window.toastManager?.success?.('Address copied to clipboard', { timeoutMs: 2000 });
     } catch {
       // fallback
@@ -203,12 +203,31 @@ export class WalletPopup {
       ta.select();
       try {
         document.execCommand('copy');
-        // Show success toast even with fallback
+        this._showCopyFeedback();
         window.toastManager?.success?.('Address copied to clipboard', { timeoutMs: 2000 });
       } catch {
         window.toastManager?.error?.('Failed to copy address');
       }
       document.body.removeChild(ta);
+    }
+  }
+
+  _showCopyFeedback() {
+    const copyButton = this.popupEl?.querySelector('.copy-icon-button');
+    const addressText = this.popupEl?.querySelector('.address-text');
+    
+    if (copyButton) {
+      copyButton.classList.add('success');
+      setTimeout(() => {
+        copyButton.classList.remove('success');
+      }, 1500);
+    }
+    
+    if (addressText) {
+      addressText.classList.add('copied');
+      setTimeout(() => {
+        addressText.classList.remove('copied');
+      }, 500);
     }
   }
 

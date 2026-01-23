@@ -2,7 +2,7 @@ export const CONFIG = {
   APP: {
     NAME: 'Liberdus Token UI',
     // Bump manually for now; later we can automate if needed.
-    VERSION: '0.0.4',
+    VERSION: '0.0.5',
   },
 
   // Phase 3+

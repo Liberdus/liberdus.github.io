@@ -31,6 +31,10 @@ export class ProposalsTab {
     this._lastFetchedBlock = 0; // latest block number at time of last scan (for incremental refresh)
     this._refreshInFlight = false;
     this._resolvedThroughBlock = 0; // highest block where all proposals at/below are terminal
+
+    // Filters
+    this._filterOpType = null; // null = all, or number (0-8)
+    this._filterStatus = null; // null = all, or 'Pending', 'Executed', 'Expired'
   }
 
   load() {
@@ -61,6 +65,32 @@ export class ProposalsTab {
             <button type="button" class="btn btn--ghost" data-proposals-refresh title="Refresh proposals">Refresh</button>
           </div>
         </div>
+        <div class="proposals-filters">
+          <label class="filter-field">
+            <span class="filter-label">Operation</span>
+            <select class="field-input" data-proposals-filter-optype>
+              <option value="">All Operations</option>
+              <option value="0">Mint</option>
+              <option value="1">Burn</option>
+              <option value="8">Distribute</option>
+              <option value="2">PostLaunch</option>
+              <option value="3">Pause</option>
+              <option value="4">Unpause</option>
+              <option value="5">SetBridgeInCaller</option>
+              <option value="6">SetBridgeInLimits</option>
+              <option value="7">UpdateSigner</option>
+            </select>
+          </label>
+          <label class="filter-field">
+            <span class="filter-label">Status</span>
+            <select class="field-input" data-proposals-filter-status>
+              <option value="">All Status</option>
+              <option value="Pending">Pending</option>
+              <option value="Executed">Executed</option>
+              <option value="Expired">Expired</option>
+            </select>
+          </label>
+        </div>
         <div class="proposal-list" data-proposals-list></div>
         <div class="proposal-footer">
           <button type="button" class="btn" data-proposals-load-more>Load more</button>
@@ -75,10 +105,14 @@ export class ProposalsTab {
     this.countEl = this.panel.querySelector('[data-proposals-count]');
     this.refreshBtn = this.panel.querySelector('[data-proposals-refresh]');
     this.clearCacheBtn = document.getElementById('proposals-clear-cache');
+    this.filterOpTypeEl = this.panel.querySelector('[data-proposals-filter-optype]');
+    this.filterStatusEl = this.panel.querySelector('[data-proposals-filter-status]');
 
     this.loadMoreBtn?.addEventListener('click', () => this.loadMore());
     this.refreshBtn?.addEventListener('click', () => this.refresh());
     this.clearCacheBtn?.addEventListener('click', () => this._clearCacheAndReload());
+    this.filterOpTypeEl?.addEventListener('change', () => this._onFilterChange());
+    this.filterStatusEl?.addEventListener('change', () => this._onFilterChange());
 
     // When a signature is submitted from modal, refresh that row.
     document.addEventListener('proposalSigned', async (e) => {
@@ -94,6 +128,9 @@ export class ProposalsTab {
       this._updateLoadMoreVisibility();
       this._renderCount();
     });
+
+    // Restore filters from localStorage (before loading cache/events)
+    this._restoreFilters();
 
     // Restore cached proposals (if any) for instant reload UX.
     const cache = this._loadCache();
@@ -162,17 +199,16 @@ export class ProposalsTab {
       const page = this._pendingEvents.splice(0, this.pageSize); // may be < pageSize
       this._loadedEvents.push(...page);
 
-      // Render rows quickly from event data
-      for (const ev of page) {
-        this._appendRow(ev);
-      }
+      // Re-render all loaded events (filtered)
+      this._renderLoadedFromState();
 
       // Ensure required signatures exists (doesn't block initial row render)
       if (this._requiredSignatures == null) {
         this._requiredSignatures = await contractManager.getRequiredSignatures();
       }
 
-      // Hydrate with on-chain details via multicall
+      // Hydrate with on-chain details via direct contract calls (only newly loaded page).
+      // Filters should be purely client-side and should not trigger extra queries.
       await this._hydrateRows(page.map((e) => e.operationId));
 
       this._setStatus(this._allLogsLoaded && this._pendingEvents.length === 0 ? 'Done' : 'Ready');
@@ -263,22 +299,40 @@ export class ProposalsTab {
       const details = detailsMap.get(opId);
       if (!details) continue;
 
-      const row = this.listEl.querySelector(`[data-proposal-row="${opId}"]`);
-      if (!row) continue;
-
-      const required = details.opType === 7 ? 2 : (this._requiredSignatures ?? '?');
-      const sigs = `${details.numSignatures}/${required}`;
-
-      row.querySelector('[data-proposal-sigs]')?.replaceChildren(document.createTextNode(sigs));
-      row.querySelector('[data-proposal-executed]')?.replaceChildren(document.createTextNode(details.executed ? 'Executed' : (details.expired ? 'Expired' : 'Pending')));
-
-      row.classList.toggle('is-executed', !!details.executed);
-      row.classList.toggle('is-expired', !!details.expired);
-
       const ev = eventMap.get(opId);
       if (ev) {
+        const oldStatus =
+          ev.executed === true ? 'Executed'
+            : (ev.expired === true ? 'Expired'
+              : (ev.executed === false && ev.expired === false ? 'Pending' : 'Unknown'));
         ev.executed = !!details.executed;
         ev.expired = !!details.expired;
+        ev.numSignatures = Number(details.numSignatures);
+        const newStatus =
+          ev.executed === true ? 'Executed'
+            : (ev.expired === true ? 'Expired'
+              : (ev.executed === false && ev.expired === false ? 'Pending' : 'Unknown'));
+        
+        // If status filter is active and status changed, re-render filtered view
+        if (this._filterStatus != null && oldStatus !== newStatus) {
+          this._renderLoadedFromState();
+          this._renderCount();
+        }
+      }
+
+      // Update DOM row if it's currently rendered (it may be filtered out).
+      const row = this.listEl?.querySelector?.(`[data-proposal-row="${opId}"]`);
+      if (row) {
+        const required = details.opType === 7 ? 2 : (this._requiredSignatures ?? '?');
+        const sigs = `${details.numSignatures}/${required}`;
+        row.querySelector('[data-proposal-sigs]')?.replaceChildren(document.createTextNode(sigs));
+        row.querySelector('[data-proposal-executed]')?.replaceChildren(
+          document.createTextNode(details.executed ? 'Executed' : (details.expired ? 'Expired' : 'Pending'))
+        );
+      const isExecuted = !!details.executed;
+      const isExpired = !!details.expired && !isExecuted;
+      row.classList.toggle('is-executed', isExecuted);
+      row.classList.toggle('is-expired', isExpired);
       }
     }
 
@@ -287,8 +341,6 @@ export class ProposalsTab {
 
   async refreshOne(operationId) {
     if (!this.listEl) return;
-    const contractManager = window.contractManager;
-    const detailsMap = await contractManager.getOperationsBatch([operationId]);
     await this._hydrateRows([operationId]);
   }
 
@@ -331,21 +383,30 @@ export class ProposalsTab {
     const typeLabel = operationEnumToString(ev.opType);
     const when = ev.timestamp ? new Date(ev.timestamp * 1000).toLocaleString() : '';
     const shortOpId = shortHex(ev.operationId);
+    const status =
+      ev.executed === true ? 'Executed'
+        : (ev.expired === true ? 'Expired'
+          : (ev.executed === false && ev.expired === false ? 'Pending' : null));
+    const statusText = status || 'Loading…';
+    const required = Number(ev.opType) === 7 ? 2 : (this._requiredSignatures ?? '?');
+    const sigsText = typeof ev.numSignatures === 'number' ? `${ev.numSignatures}/${required}` : '—';
 
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'proposal-row';
     row.setAttribute('data-proposal-row', ev.operationId);
+    row.classList.toggle('is-executed', status === 'Executed');
+    row.classList.toggle('is-expired', status === 'Expired' && status !== 'Executed');
 
     row.innerHTML = `
       <div class="proposal-row-main">
         <div class="proposal-row-top">
           <div class="proposal-opid"><code>${shortOpId}</code></div>
-          <div class="proposal-status" data-proposal-executed>Loading…</div>
+          <div class="proposal-status" data-proposal-executed>${statusText}</div>
         </div>
         <div class="proposal-row-bottom">
           <div class="proposal-meta">${typeLabel} • ${when}</div>
-          <div class="proposal-sigs" data-proposal-sigs>—</div>
+          <div class="proposal-sigs" data-proposal-sigs>${sigsText}</div>
         </div>
       </div>
     `;
@@ -370,10 +431,13 @@ export class ProposalsTab {
 
   _renderCount() {
     if (!this.countEl) return;
-    const shown = this._loadedEvents.length;
+    const filtered = this._getFilteredEvents();
+    const shown = filtered.length;
+    const total = this._loadedEvents.length;
     const pending = this._pendingEvents.length;
     const suffix = pending > 0 ? ` (+${pending} prefetched)` : '';
-    this.countEl.textContent = `Showing ${shown}${suffix}`;
+    const filterSuffix = shown < total ? ` (filtered from ${total})` : '';
+    this.countEl.textContent = `Showing ${shown}${filterSuffix}${suffix}`;
   }
 
   _updateLoadMoreVisibility() {
@@ -387,9 +451,83 @@ export class ProposalsTab {
   _renderLoadedFromState() {
     if (!this.listEl) return;
     this.listEl.innerHTML = '';
-    for (const ev of this._loadedEvents) {
+    const filtered = this._getFilteredEvents();
+    for (const ev of filtered) {
       this._appendRow(ev);
     }
+  }
+
+  _getFilteredEvents() {
+    return this._loadedEvents.filter((ev) => {
+      // Filter by operation type
+      if (this._filterOpType != null) {
+        if (ev.opType !== this._filterOpType) return false;
+      }
+
+      // Filter by status
+      if (this._filterStatus != null) {
+        if (this._filterStatus === 'Executed' && ev.executed !== true) return false;
+        if (this._filterStatus === 'Expired' && !(ev.expired === true && ev.executed !== true)) return false;
+        if (this._filterStatus === 'Pending' && !(ev.executed !== true && ev.expired !== true)) return false;
+      }
+
+      return true;
+    });
+  }
+
+  _onFilterChange() {
+    const opTypeValue = this.filterOpTypeEl?.value || '';
+    const statusValue = this.filterStatusEl?.value || '';
+
+    this._filterOpType = opTypeValue === '' ? null : Number(opTypeValue);
+    this._filterStatus = statusValue === '' ? null : statusValue;
+
+    this._saveFilters();
+    this._renderLoadedFromState();
+    this._renderCount();
+  }
+
+  _restoreFilters() {
+    try {
+      const key = this._getFilterCacheKey();
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.opType !== undefined) {
+          this._filterOpType = parsed.opType === null ? null : Number(parsed.opType);
+          if (this.filterOpTypeEl) {
+            this.filterOpTypeEl.value = parsed.opType === null ? '' : String(parsed.opType);
+          }
+        }
+        if (parsed.status !== undefined) {
+          this._filterStatus = parsed.status;
+          if (this.filterStatusEl) {
+            this.filterStatusEl.value = parsed.status || '';
+          }
+        }
+      }
+    } catch {
+      // Ignore parse errors
+    }
+  }
+
+  _saveFilters() {
+    try {
+      const key = this._getFilterCacheKey();
+      const data = {
+        opType: this._filterOpType,
+        status: this._filterStatus,
+      };
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  _getFilterCacheKey() {
+    const chainId = Number(CONFIG?.NETWORK?.CHAIN_ID || 0);
+    const address = String(CONFIG?.CONTRACT?.ADDRESS || '').toLowerCase();
+    return `liberdus_token_ui:proposals:filters:v1:${chainId}:${address}`;
   }
 
   _getCacheKey() {

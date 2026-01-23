@@ -189,7 +189,7 @@ export class ProposeTab {
     const ready = elapsed > this._mintIntervalSec;
     if (ready) {
       this._setMintReadinessState({
-        lastDate: lastMintDate.toLocaleString(),
+        lastDate: lastMintDate.toLocaleString() + ' YLT',
         status: 'Ready',
         statusTone: 'success',
         showCountdown: false,
@@ -203,11 +203,11 @@ export class ProposeTab {
     const nextReadyDate = new Date(nextReadyMs);
 
     this._setMintReadinessState({
-      lastDate: lastMintDate.toLocaleString(),
+      lastDate: lastMintDate.toLocaleString() + ' YLT',
       status: 'Not Ready',
       statusTone: 'error',
       countdown: formatCountdown(remaining),
-      readyDate: nextReadyDate.toLocaleString(),
+      readyDate: nextReadyDate.toLocaleString() + ' YLT',
       showCountdown: true,
       showReadyDate: true,
     });

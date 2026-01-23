@@ -4,6 +4,7 @@ import { TabBar } from './components/tab-bar.js';
 import { ProposalsTab } from './components/proposals-tab.js';
 import { ProposeTab } from './components/propose-tab.js';
 import { BridgeTab } from './components/bridge-tab.js';
+import { ParametersTab } from './components/parameters-tab.js';
 import { ProposalDetailModal } from './components/proposal-detail-modal.js';
 import { ToastManager } from './components/toast-manager.js';
 import { WalletManager } from './wallet/wallet-manager.js';
@@ -17,6 +18,7 @@ const tabBar = new TabBar();
 const proposalsTab = new ProposalsTab();
 const proposeTab = new ProposeTab();
 const bridgeTab = new BridgeTab();
+const parametersTab = new ParametersTab();
 const proposalDetailModal = new ProposalDetailModal();
 const toastManager = new ToastManager();
 const walletManager = new WalletManager();
@@ -57,5 +59,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   proposalsTab.load();
   proposeTab.load();
   bridgeTab.load();
+  parametersTab.load();
 });
 
