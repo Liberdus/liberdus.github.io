@@ -19,6 +19,11 @@ export class BridgeTab {
     this._mode = 'out'; // 'out' | 'in'
     this._bridgeInCaller = null;
     this._isSubmitting = false;
+
+    // Phase 9.4: lazy tab loading
+    this._isActive = false;
+    this._bridgeConfigLoadedAt = 0;
+    this._bridgeConfigTtlMs = 60 * 1000;
   }
 
   load() {
@@ -94,8 +99,28 @@ export class BridgeTab {
     this.submitBtn?.addEventListener('click', () => this._onSubmit());
 
     this._onModeChange();
-    this._loadBridgeConfig().catch(() => {});
     window.networkManager?.updateUIState?.();
+
+    document.addEventListener('tabActivated', (e) => {
+      if (e?.detail?.tabName === 'bridge') this._onActivated();
+    });
+    document.addEventListener('tabDeactivated', (e) => {
+      if (e?.detail?.tabName === 'bridge') this._onDeactivated();
+    });
+  }
+
+  _onActivated() {
+    this._isActive = true;
+    const fresh = this._bridgeConfigLoadedAt && Date.now() - this._bridgeConfigLoadedAt < this._bridgeConfigTtlMs;
+    if (!fresh) {
+      this._loadBridgeConfig().catch(() => {});
+    } else {
+      this._updateInfo();
+    }
+  }
+
+  _onDeactivated() {
+    this._isActive = false;
   }
 
   _onModeChange() {
@@ -148,8 +173,21 @@ export class BridgeTab {
     if (!read) return;
 
     try {
-      const caller = await read.bridgeInCaller();
+      // Prefer batched parameters (reduces duplicate calls when Parameters tab also loads).
+      let caller = null;
+      if (typeof contractManager?.getParametersBatch === 'function') {
+        try {
+          const batch = await contractManager.getParametersBatch();
+          caller = batch?.bridgeInCaller ?? null;
+        } catch {
+          // ignore
+        }
+      }
+      if (caller == null && typeof read.bridgeInCaller === 'function') {
+        caller = await read.bridgeInCaller();
+      }
       this._bridgeInCaller = caller ? String(caller) : null;
+      this._bridgeConfigLoadedAt = Date.now();
     } catch {
       this._bridgeInCaller = null;
     }

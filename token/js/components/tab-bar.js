@@ -3,6 +3,7 @@ export class TabBar {
     this.tabButtons = [];
     this.tabPanelsByName = new Map();
     this.activeTab = null;
+    this._activatedTabs = new Set();
   }
 
   load() {
@@ -35,7 +36,10 @@ export class TabBar {
     if (!tabName || !this.tabPanelsByName.has(tabName)) return;
     if (this.activeTab === tabName) return;
 
+    const previousTabName = this.activeTab;
     this.activeTab = tabName;
+    const isFirstActivation = !this._activatedTabs.has(tabName);
+    this._activatedTabs.add(tabName);
 
     // Tabs (buttons)
     this.tabButtons.forEach((btn) => {
@@ -63,6 +67,16 @@ export class TabBar {
     if (focusPanel) {
       this.tabPanelsByName.get(tabName)?.focus();
     }
+
+    // Notify app components
+    if (previousTabName) {
+      document.dispatchEvent(
+        new CustomEvent('tabDeactivated', { detail: { tabName: previousTabName, nextTabName: tabName } })
+      );
+    }
+    document.dispatchEvent(
+      new CustomEvent('tabActivated', { detail: { tabName, previousTabName, isFirstActivation } })
+    );
   }
 
   onTabKeyDown(e) {

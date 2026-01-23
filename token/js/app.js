@@ -52,7 +52,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   await contractManager.load();
 
   header.load();
-  tabBar.load();
   proposalDetailModal.load();
 
   // Tab panel components (Phase 1: placeholders)
@@ -60,5 +59,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   proposeTab.load();
   bridgeTab.load();
   parametersTab.load();
+
+  // Load TabBar last so the initial `tabActivated` event
+  // is received by all tab components (lazy tab loading).
+  tabBar.load();
+
+  // Optional: low-priority prefetch to warm shared caches (Phase 9.4).
+  if (CONFIG?.APP?.PREFETCH_ON_IDLE) {
+    const ric =
+      window.requestIdleCallback ||
+      ((cb) => setTimeout(() => cb({ didTimeout: true, timeRemaining: () => 0 }), 800));
+    ric(() => {
+      // Warm “header reads” batch so non-default tabs are snappy later.
+      contractManager.getParametersBatch?.().catch(() => {});
+    });
+  }
 });
 

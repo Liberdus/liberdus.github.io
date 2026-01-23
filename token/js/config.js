@@ -2,7 +2,9 @@ export const CONFIG = {
   APP: {
     NAME: 'Liberdus Token UI',
     // Bump manually for now; later we can automate if needed.
-    VERSION: '0.0.5',
+    VERSION: '0.0.6',
+    // Phase 9.4 (optional): enable low-priority prefetch of shared reads
+    PREFETCH_ON_IDLE: false,
   },
 
   // Phase 3+

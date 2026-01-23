@@ -5,6 +5,14 @@ export class ParametersTab {
     this.panel = null;
     this.refreshBtn = null;
     this._isLoading = false;
+
+    // Phase 9.4: lazy tab loading
+    this._isActive = false;
+    this._needsRefresh = true;
+    this._lastLoadedAt = 0;
+    this._refreshDebounceTimer = null;
+    this._autoRefreshTimer = null;
+    this._autoRefreshIntervalMs = 60 * 1000;
   }
 
   load() {
@@ -107,34 +115,85 @@ export class ParametersTab {
     `;
 
     this.refreshBtn = this.panel.querySelector('[data-params-refresh]');
-    this.refreshBtn?.addEventListener('click', () => this.refresh());
+    this.refreshBtn?.addEventListener('click', () => this.refresh({ forceRefresh: true }));
 
     this.panel.addEventListener('click', (e) => this._handleCopyClick(e));
-    document.addEventListener('contractManagerUpdated', () => this.refresh());
+    document.addEventListener('contractManagerUpdated', () => this._onContractManagerUpdated());
 
-    this.refresh();
+    document.addEventListener('tabActivated', (e) => {
+      if (e?.detail?.tabName === 'parameters') this._onActivated();
+    });
+    document.addEventListener('tabDeactivated', (e) => {
+      if (e?.detail?.tabName === 'parameters') this._onDeactivated();
+    });
   }
 
-  async refresh() {
+  _onActivated() {
+    this._isActive = true;
+    // Refresh if stale or never loaded.
+    const stale = !this._lastLoadedAt || Date.now() - this._lastLoadedAt > 30 * 1000;
+    if (this._needsRefresh || stale) {
+      this._scheduleRefresh({ forceRefresh: this._needsRefresh });
+    }
+
+    // Refresh dynamic values while active (Phase 9.3 / 9.6).
+    if (!this._autoRefreshTimer) {
+      this._autoRefreshTimer = setInterval(() => {
+        if (!this._isActive) return;
+        this.refresh({ forceRefresh: false, silent: true }).catch(() => {});
+      }, this._autoRefreshIntervalMs);
+    }
+  }
+
+  _onDeactivated() {
+    this._isActive = false;
+    if (this._autoRefreshTimer) {
+      clearInterval(this._autoRefreshTimer);
+      this._autoRefreshTimer = null;
+    }
+  }
+
+  _onContractManagerUpdated() {
+    // Mark stale; refresh only if tab is active to avoid background RPC calls.
+    this._needsRefresh = true;
+    if (this._isActive) {
+      this._scheduleRefresh({ forceRefresh: true });
+    }
+  }
+
+  _scheduleRefresh({ forceRefresh = false } = {}) {
+    if (this._refreshDebounceTimer) {
+      clearTimeout(this._refreshDebounceTimer);
+      this._refreshDebounceTimer = null;
+    }
+    this._refreshDebounceTimer = setTimeout(() => {
+      this._refreshDebounceTimer = null;
+      this.refresh({ forceRefresh }).catch(() => {});
+    }, 200);
+  }
+
+  async refresh({ forceRefresh = false, silent = false } = {}) {
     if (this._isLoading) return;
     this._isLoading = true;
-    if (this.refreshBtn) {
+    if (!silent && this.refreshBtn) {
       this.refreshBtn.disabled = true;
       this.refreshBtn.textContent = 'Refreshing…';
     }
 
     try {
-      await this._loadParameters();
+      await this._loadParameters({ forceRefresh });
+      this._lastLoadedAt = Date.now();
+      this._needsRefresh = false;
     } finally {
       this._isLoading = false;
-      if (this.refreshBtn) {
+      if (!silent && this.refreshBtn) {
         this.refreshBtn.disabled = false;
         this.refreshBtn.textContent = 'Refresh';
       }
     }
   }
 
-  async _loadParameters() {
+  async _loadParameters({ forceRefresh = false } = {}) {
     const contractManager = window.contractManager;
     const contract = contractManager?.getReadContract?.();
     if (!contract) {
@@ -152,6 +211,48 @@ export class ParametersTab {
       this._renderAddress('[data-param-bridge-caller]', '');
       this._renderSigners([]);
       return;
+    }
+
+    // Prefer batched reads to reduce RPC call count.
+    if (typeof contractManager?.getParametersBatch === 'function') {
+      try {
+        const batch = await contractManager.getParametersBatch({ forceRefresh: !!forceRefresh });
+        if (batch) {
+          const chainId = batch.chainId;
+          const requiredSigs = batch.requiredSignatures;
+          const isPreLaunch = batch.isPreLaunch;
+          const paused = batch.paused;
+          const bridgeInCaller = batch.bridgeInCaller;
+          const maxBridgeInAmount = batch.maxBridgeInAmount;
+          const bridgeInCooldown = batch.bridgeInCooldown;
+          const lastMintTime = batch.lastMintTime;
+          const mintInterval = batch.mintInterval;
+          const maxSupply = batch.maxSupply;
+          const mintAmount = batch.mintAmount;
+          const signers = Array.isArray(batch.signers) ? batch.signers : [];
+
+          const chainIdValue = chainId != null ? Number(chainId.toString?.() ?? chainId) : CONFIG?.NETWORK?.CHAIN_ID;
+          this._setText('[data-param-chain-id]', chainIdValue ?? '—');
+          this._setText('[data-param-required-sigs]', requiredSigs != null ? Number(requiredSigs.toString?.() ?? requiredSigs) : '—');
+          this._setText('[data-param-launch-state]', isPreLaunch == null ? '—' : (isPreLaunch ? 'Pre-launch' : 'Post-launch'));
+          this._setText('[data-param-paused]', paused == null ? '—' : (paused ? 'Yes' : 'No'));
+
+          this._renderAddress('[data-param-contract-address]', CONFIG?.CONTRACT?.ADDRESS || '');
+          this._renderAddress('[data-param-bridge-caller]', bridgeInCaller);
+
+          this._setText('[data-param-bridge-max]', formatLib(maxBridgeInAmount));
+          this._setText('[data-param-bridge-cooldown]', formatDuration(bridgeInCooldown));
+          this._setText('[data-param-last-mint]', formatTimestamp(lastMintTime));
+          this._setText('[data-param-mint-interval]', formatDuration(mintInterval));
+          this._setText('[data-param-max-supply]', formatLib(maxSupply));
+          this._setText('[data-param-mint-amount]', formatLib(mintAmount));
+
+          this._renderSigners(signers);
+          return;
+        }
+      } catch {
+        // Fall through to per-call fallback
+      }
     }
 
     const [

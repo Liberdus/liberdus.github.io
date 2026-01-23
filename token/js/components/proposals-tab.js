@@ -35,6 +35,14 @@ export class ProposalsTab {
     // Filters
     this._filterOpType = null; // null = all, or number (0-8)
     this._filterStatus = null; // null = all, or 'Pending', 'Executed', 'Expired'
+
+    // Phase 9.4: lazy tab loading
+    this._isActive = false;
+    this._needsRefresh = false;
+    this._cacheWasFresh = false;
+    this._refreshDebounceTimer = null;
+    this._lastRefreshAtMs = 0;
+    this._activationRefreshMinIntervalMs = 30 * 1000;
   }
 
   load() {
@@ -118,46 +126,101 @@ export class ProposalsTab {
     document.addEventListener('proposalSigned', async (e) => {
       const opId = e?.detail?.operationId;
       if (!opId) return;
+      if (!this._isActive) {
+        this._needsRefresh = true;
+        return;
+      }
       await this.refreshOne(opId);
     });
 
     // When a new operation is requested (Phase 5), refresh proposals in background.
-    document.addEventListener('operationRequested', async () => {
-      // Mark cache stale-ish and pull new logs since lastFetchedBlock.
-      await this._refreshNewEventsInBackground().catch(() => {});
-      this._updateLoadMoreVisibility();
-      this._renderCount();
+    document.addEventListener('operationRequested', () => {
+      // Mark stale; only hit RPC if the tab is active.
+      this._needsRefresh = true;
+      if (this._isActive) {
+        this._scheduleBackgroundRefresh();
+      }
+    });
+
+    document.addEventListener('tabActivated', (e) => {
+      if (e?.detail?.tabName === 'proposals') this._onActivated();
+    });
+    document.addEventListener('tabDeactivated', (e) => {
+      if (e?.detail?.tabName === 'proposals') this._onDeactivated();
     });
 
     // Restore filters from localStorage (before loading cache/events)
     this._restoreFilters();
 
-    // Restore cached proposals (if any) for instant reload UX.
+    // Restore cached proposals (if any) for instant reload UX (no RPC here).
     const cache = this._loadCache();
     if (cache) {
       const fresh = this._isCacheFresh(cache);
+      this._cacheWasFresh = fresh;
+      this._lastRefreshAtMs = Number(cache?.cachedAtMs || 0) || 0;
       this._applyCache(cache);
       this._renderLoadedFromState();
       this._renderCount();
       this._updateLoadMoreVisibility();
-
-      // Re-hydrate currently visible rows (best-effort).
-      this._ensureRequiredSignaturesAndHydrateVisible().catch(() => {});
-
-      if (!fresh) {
-        // Background refresh - no UI change needed
-        this._refreshNewEventsInBackground().catch(() => {});
-      }
-
-      // If cache had nothing visible, do a normal load.
-      if (this._loadedEvents.length < this.initialMinItems) {
-        this.loadMore();
-      }
       return;
     }
 
-    // First-time visitors: normal load.
-    this.loadMore();
+    // First-time visitors: render empty state and wait for activation to fetch.
+    this._cacheWasFresh = false;
+    this._renderLoadedFromState();
+    this._renderCount();
+    this._updateLoadMoreVisibility();
+    this._setStatus('Ready');
+  }
+
+  _onActivated() {
+    this._isActive = true;
+
+    // Hydrate visible rows best-effort (only pending/unknown).
+    this._ensureRequiredSignaturesAndHydrateVisible().catch(() => {});
+
+    // If we have little/no visible data, load a page now.
+    if (this._loadedEvents.length < this.initialMinItems) {
+      this.loadMore().catch(() => {});
+    }
+
+    // If cache was stale (or an operation was requested while inactive), refresh incrementally.
+    // Avoid doing an "incremental refresh" before we've ever loaded anything.
+    const hasAnyState = this._lastFetchedBlock > 0 || this._loadedEvents.length > 0 || this._pendingEvents.length > 0;
+    const staleForRefresh =
+      !this._lastRefreshAtMs || Date.now() - this._lastRefreshAtMs > this._activationRefreshMinIntervalMs;
+    if (hasAnyState && (this._needsRefresh || !this._cacheWasFresh || staleForRefresh)) {
+      this._scheduleBackgroundRefresh();
+    }
+  }
+
+  _onDeactivated() {
+    this._isActive = false;
+    if (this._refreshDebounceTimer) {
+      clearTimeout(this._refreshDebounceTimer);
+      this._refreshDebounceTimer = null;
+    }
+  }
+
+  _scheduleBackgroundRefresh() {
+    if (this._refreshDebounceTimer) {
+      clearTimeout(this._refreshDebounceTimer);
+      this._refreshDebounceTimer = null;
+    }
+    this._refreshDebounceTimer = setTimeout(async () => {
+      this._refreshDebounceTimer = null;
+      if (!this._isActive) return;
+      this._needsRefresh = false;
+      try {
+        await this._refreshNewEventsInBackground();
+        this._cacheWasFresh = true;
+        this._lastRefreshAtMs = Date.now();
+      } catch {
+        // ignore
+      }
+      this._updateLoadMoreVisibility();
+      this._renderCount();
+    }, 250);
   }
 
   async loadMore() {
@@ -214,6 +277,8 @@ export class ProposalsTab {
       this._setStatus(this._allLogsLoaded && this._pendingEvents.length === 0 ? 'Done' : 'Ready');
       this._renderCount();
       this._saveCache();
+      this._cacheWasFresh = true;
+      this._lastRefreshAtMs = Date.now();
       toast?.dismiss?.(toastId);
     } catch (e) {
       this._setStatus('Error loading proposals');
@@ -366,6 +431,14 @@ export class ProposalsTab {
     const contractManager = window.contractManager;
     if (!contractManager?.isReady?.()) return;
 
+    // Only hydrate rows that can still change (pending/unknown).
+    const visibleEvents = this._loadedEvents.slice(0, this.pageSize);
+    const visible = visibleEvents
+      .filter((e) => !(e?.executed === true || e?.expired === true))
+      .map((e) => e.operationId)
+      .filter(Boolean);
+    if (visible.length === 0) return;
+
     if (this._requiredSignatures == null) {
       try {
         this._requiredSignatures = await contractManager.getRequiredSignatures();
@@ -374,8 +447,6 @@ export class ProposalsTab {
       }
     }
 
-    const visible = this._loadedEvents.slice(0, this.pageSize).map((e) => e.operationId);
-    if (visible.length === 0) return;
     await this._hydrateRows(visible);
   }
 
@@ -640,8 +711,13 @@ export class ProposalsTab {
     this._renderCount();
     this.loadMoreBtn?.classList.remove('hidden');
 
-    // Reload
-    this.loadMore();
+    // Reload only if tab is active (Phase 9.4 lazy loading).
+    if (this._isActive) {
+      this.loadMore().catch(() => {});
+    } else {
+      this._needsRefresh = true;
+      this._setStatus('Ready');
+    }
   }
 
   async _refreshNewEventsInBackground() {

@@ -608,6 +608,28 @@ Tasks:
 - [x] Use `resolvedThroughBlock + 1` as scan `fromBlock`
 - [x] Guard against regressions (only move forward)
 
+### Step 4.7 - Proposals Filters (Operation + Status)
+
+**Goal:** Add two dropdown filters to the Proposals card header: one for operation type and one for status.
+
+**UI placement:**
+- Add a small filter row inside the Proposals card header area, above the list.
+- Two `<select>` inputs:
+  - **Operation**: All, Mint, Burn, Distribute, PostLaunch, Pause, Unpause, SetBridgeInCaller, SetBridgeInLimits, UpdateSigner
+  - **Status**: All, Pending, Executed, Expired
+
+**Behavior:**
+- Filtering is **client-side** on the currently loaded proposals (including cached items).
+- Keep pagination behavior intact (filters apply to displayed items).
+- When filters change, re-render the list and re-run hydration only for visible rows.
+- Persist filter selections in `localStorage` (keyed by chainId + contract address).
+
+Tasks:
+- [ ] Add filter dropdowns to `ProposalsTab` header markup
+- [ ] Implement filter state + localStorage persistence
+- [ ] Apply filters to cached and freshly loaded proposals
+- [ ] Ensure "Load more" respects current filters
+
 ### PHASE 4 DELIVERABLE
 
 ✅ View and interact with existing proposals.
@@ -781,6 +803,142 @@ Tasks:
 
 ---
 
+## PHASE 8: Parameters Tab
+
+**Goal:** Add a read-only Parameters tab with useful contract details (signers, addresses, limits).
+
+### Step 8.1 - Parameters Tab Component
+
+Create `ParametersTab` class
+
+Methods:
+- `load()` - Get DOM elements, initialize
+
+Tasks:
+- [ ] Create `ParametersTab` class in `js/components/parameters-tab.js`
+- [ ] Add a new tab button and panel (`Parameters`) in `index.html`
+- [ ] Instantiate: `const parametersTab = new ParametersTab();` and load in `app.js`
+
+### Step 8.2 - Contract Detail Fetching
+
+Read-only data to display (from contract):
+- Contract address
+- Chain ID
+- Signers list (addresses)
+- Required signatures (`REQUIRED_SIGNATURES`)
+- Launch state (`isPreLaunch`)
+- Paused state (`paused`)
+- Bridge-in caller (`bridgeInCaller`)
+- Bridge-in limits (`maxBridgeInAmount`, `bridgeInCooldown`)
+- Minting info (`lastMintTime`, `MINT_INTERVAL`, `MAX_SUPPLY`, `MINT_AMOUNT`)
+
+Tasks:
+- [ ] Add a `refresh()` method to fetch and render details
+- [ ] Format addresses (short + copy)
+- [ ] Format amounts (LIB with 18 decimals) and durations (human readable)
+
+### Step 8.3 - UI Layout & UX
+
+Present details in a clean, scan-friendly layout:
+- Use a two-column key/value grid (desktop)
+- Stack layout on mobile
+- Add copy-to-clipboard controls for addresses
+- Add a small refresh control
+
+Tasks:
+- [ ] Add styles to `base.css` (or a new `parameters.css`)
+- [ ] Add loading and error states (toast + inline placeholders)
+- [ ] Respect tx-enabled gating (read-only OK without wallet)
+
+### PHASE 8 DELIVERABLE
+
+✅ Parameters tab shows contract metadata and signer info.
+
+---
+
+## PHASE 9: Performance & RPC Optimization (Reduce Request Count)
+
+**Goal:** Reduce the number of JSON-RPC calls (especially bursts) while keeping UI data fresh.
+
+**Why this matters:** On page load, the app currently performs many `eth_call` reads to populate UI. When the wallet is **not connected**, all of those reads go through the configured RPC (Infura) so they show up as a large number of requests and can hit rate limits. When the wallet **is connected**, many reads shift to the wallet provider (MetaMask) so they are less visible in Infura logs, but the app is still doing similar work.
+
+### Key principles (best practice)
+
+- **One provider instance** per transport (read-only RPC; wallet provider when connected).
+- **Static network** providers whenever chainId is known (prevents repeated `eth_chainId` / network detection).
+- **Batch reads with Multicall** instead of per-item `eth_call` loops.
+- **Lazy-load** tab data (only fetch for the active tab; prefetch others later).
+- **Cache + dedupe** (avoid re-fetching the same data repeatedly during a single session and across reloads).
+- **Cap concurrency** (avoid bursting many calls at once).
+
+### Step 9.1 - Provider layer hardening (reduce `eth_chainId`)
+
+**Target outcome:** The app should perform at most **one** `eth_chainId` + **one** `eth_blockNumber` on startup for the read-only provider.
+
+Tasks:
+- [x] Use a shared singleton read-only provider (avoid creating multiple `JsonRpcProvider` instances)
+- [x] Prefer static-network providers when chainId is known (`CONFIG.NETWORK.CHAIN_ID`)
+- [x] Remove any helper APIs that create new read-only providers per call (return the singleton instead)
+
+### Step 9.2 - Proposals hydration: Multicall-first (biggest call-count reduction)
+
+**Problem:** Hydrating N proposals via `operations(opId)` + `isOperationExpired(opId)` does \(2N\) RPC calls.
+
+**Solution:** Use `Multicall2.tryAggregate` to batch these reads:
+- Build an array of calls: `operations(opId)` and `isOperationExpired(opId)` per opId
+- Send in one `eth_call` (via Multicall2) per page
+- Decode results and update rows
+
+Tasks:
+- [x] Add a `MulticallService` instance to the app (or wire one into `ContractManager`)
+- [x] Implement `ContractManager.getOperationsBatch(operationIds)` as multicall-first (fallback to per-call when multicall is unavailable)
+- [x] Update `ProposalsTab` hydration to call the batch API (`ContractManager.getOperationsBatch(...)`)
+- [x] Ensure hydration is limited to visible rows (current page) to keep calls bounded
+
+### Step 9.3 - Parameters + Propose: batch “header” reads
+
+**Problem:** These tabs often read multiple independent constants (e.g., signers + required signatures + paused + mint params).
+
+**Solution:** Batch “summary reads” with multicall (or at least parallelize with a small concurrency limit).
+
+Tasks:
+- [x] Add `ContractManager.getParametersBatch()` that batches common reads (signers, REQUIRED_SIGNATURES, paused, isPreLaunch, bridge params, mint params)
+- [x] Use a short TTL in-memory cache for “mostly static” values (e.g., signers, REQUIRED_SIGNATURES)
+- [x] Refresh “dynamic” values (e.g., `paused`, mint readiness) on a short interval or on relevant events only
+
+### Step 9.4 - Lazy-load tabs + prefetch strategy
+
+**Target outcome:** Initial load should fetch only what is required for the default visible tab.
+
+Tasks:
+- [x] Make each tab `load()` only set up DOM + listeners; do not fetch until tab becomes active
+- [x] Add tab activation events in `TabBar` (e.g., `tabActivated` with `{ tabName }`)
+- [x] On first activation, fetch and render; on subsequent activations, use cached state and refresh only if stale
+- [x] Optional: prefetch the next likely tab with low priority after idle (`requestIdleCallback`)
+
+### Step 9.5 - Cache + dedupe + concurrency control
+
+Tasks:
+- [x] Add an in-memory cache for request results keyed by `{ method, params, blockTag }` with a short TTL (10–30s)
+- [x] Deduplicate in-flight RPC calls (same key → share the same Promise)
+- [x] Add a small concurrency limiter for per-item fallbacks (e.g., max 3–5 concurrent `eth_call`s)
+
+### Step 9.6 - Incremental updates (avoid full refresh work)
+
+Tasks:
+- [x] For proposals: check `latestBlock` and only scan `eth_getLogs` from `lastSeenBlock + 1` → `latest`
+- [x] Only re-hydrate proposals whose status can change (pending)
+- [x] Debounce refresh triggers from wallet events (account/chain changes can fire in bursts)
+
+### PHASE 9 DELIVERABLE
+
+✅ On typical page load, requests are reduced from “many per proposal” to “few per page”:
+- Read-only provider init: ~2 RPC calls
+- Proposals list load: 1 `eth_getLogs` (or chunked) + 1 multicall hydration per page
+- Other tabs: minimal until activated
+
+---
+
 ## Summary Timeline
 
 | Phase | Description | Dependency |
@@ -792,6 +950,8 @@ Tasks:
 | 5 | Propose Tab | Phase 3 |
 | 6 | Bridge Tab | Phase 3 |
 | 7 | Polish & Mobile | Phases 4-6 |
+| 8 | Parameters Tab | Phase 3 |
+| 9 | Performance & RPC Optimization | Phases 4-8 |
 
 Note: Phases 4, 5, 6 can be developed in parallel once Phase 3 is complete.
 

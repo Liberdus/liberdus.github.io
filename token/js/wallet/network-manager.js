@@ -1,4 +1,5 @@
 import { CONFIG } from '../config.js';
+import { peekReadOnlyProvider } from '../utils/read-only-provider.js';
 
 /**
  * NetworkManager (Phase 2)
@@ -35,8 +36,8 @@ export class NetworkManager {
   }
 
   getReadOnlyProvider() {
-    if (!window.ethers) return null;
-    return new window.ethers.providers.JsonRpcProvider(CONFIG.NETWORK.RPC_URL);
+    // Reuse the singleton read-only provider (do not create new providers here).
+    return peekReadOnlyProvider() || null;
   }
 
   getTxProvider() {

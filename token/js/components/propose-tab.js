@@ -23,11 +23,18 @@ export class ProposeTab {
     this.mintReadyDateEl = null;
     this._mintLastMintSec = null; // number (unix seconds)
     this._mintCountdownTimer = null;
+    this._mintLastFetchAt = 0;
+    this._mintFetchTtlMs = 30 * 1000;
+    this._mintChainRefreshTimer = null;
+    this._mintChainRefreshIntervalMs = 60 * 1000;
     // 3 weeks + 6 days + 9 hours (matches liberdus-sc-dao)
     this._mintIntervalSec =
       BigInt(3 * 7 * 24 * 60 * 60) + BigInt(6 * 24 * 60 * 60) + BigInt(9 * 60 * 60);
 
     this._isSubmitting = false;
+
+    // Phase 9.4: lazy tab loading
+    this._isActive = false;
   }
 
   load() {
@@ -128,8 +135,58 @@ export class ProposeTab {
     this._onOperationTypeChange();
     window.networkManager?.updateUIState?.();
 
-    // Mint readiness banner (runs even if wallet not connected; uses read-only provider)
+    document.addEventListener('tabActivated', (e) => {
+      if (e?.detail?.tabName === 'propose') this._onActivated();
+    });
+    document.addEventListener('tabDeactivated', (e) => {
+      if (e?.detail?.tabName === 'propose') this._onDeactivated();
+    });
+  }
+
+  _onActivated() {
+    this._isActive = true;
+
+    // Refresh from chain periodically while active (dynamic value).
+    if (!this._mintChainRefreshTimer) {
+      this._mintChainRefreshTimer = setInterval(async () => {
+        if (!this._isActive) return;
+        try {
+          await this._refreshMintReadinessFromChain();
+          this._mintLastFetchAt = Date.now();
+          this._renderMintReadiness();
+        } catch {
+          // ignore
+        }
+      }, this._mintChainRefreshIntervalMs);
+    }
+
+    // If we already have lastMintTime and it's still fresh, just resume countdown.
+    const fresh = this._mintLastFetchAt && Date.now() - this._mintLastFetchAt < this._mintFetchTtlMs;
+    if (fresh && this._mintLastMintSec) {
+      // Ensure we don't create multiple timers
+      if (this._mintCountdownTimer) {
+        clearInterval(this._mintCountdownTimer);
+        this._mintCountdownTimer = null;
+      }
+      this._renderMintReadiness();
+      this._mintCountdownTimer = setInterval(() => this._renderMintReadiness(), 1000);
+      return;
+    }
+
+    // Mint readiness banner (uses read-only provider; network only when activated)
     this._loadMintReadiness().catch(() => {});
+  }
+
+  _onDeactivated() {
+    this._isActive = false;
+    if (this._mintCountdownTimer) {
+      clearInterval(this._mintCountdownTimer);
+      this._mintCountdownTimer = null;
+    }
+    if (this._mintChainRefreshTimer) {
+      clearInterval(this._mintChainRefreshTimer);
+      this._mintChainRefreshTimer = null;
+    }
   }
 
   async _loadMintReadiness() {
@@ -142,6 +199,7 @@ export class ProposeTab {
     }
 
     await this._refreshMintReadinessFromChain();
+    this._mintLastFetchAt = Date.now();
 
     // Update every second for countdown UX
     this._renderMintReadiness();
@@ -164,7 +222,19 @@ export class ProposeTab {
     }
 
     try {
-      const v = await contract.lastMintTime();
+      // Prefer batched parameters (reduces duplicate calls when other tabs also load mint params).
+      let v = null;
+      if (typeof contractManager?.getParametersBatch === 'function') {
+        try {
+          const batch = await contractManager.getParametersBatch();
+          v = batch?.lastMintTime ?? null;
+        } catch {
+          // ignore
+        }
+      }
+      if (v == null) {
+        v = await contract.lastMintTime();
+      }
       const sec = Number(v?.toString?.() ?? v);
       if (!Number.isFinite(sec) || sec <= 0) {
         this._mintLastMintSec = null;
