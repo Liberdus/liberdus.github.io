@@ -382,8 +382,8 @@ export class ContractManager {
       return String(batch.symbol);
     }
     
-    // Fallback to hardcoded (for backwards compatibility)
-    return 'LIB';
+    // Return null if symbol not available from contract
+    return null;
   }
 
   getTokenDecimals() {

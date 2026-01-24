@@ -30,9 +30,11 @@ export class BridgeTab {
     this.panel = document.querySelector('.tab-panel[data-panel="bridge"]');
     if (!this.panel) return;
 
-    // Get symbol dynamically from contract manager, fallback to 'LIB'
+    // Get symbol dynamically from contract manager (only use if available from contract)
     const contractManager = window.contractManager;
-    const symbol = contractManager?.getTokenSymbol?.() || 'LIB';
+    const symbol = contractManager?.getTokenSymbol?.();
+    const symbolText = symbol || 'tokens';
+    const symbolDisplay = symbol ? `<strong>${symbol}</strong>` : 'tokens';
 
     this.panel.innerHTML = `
       <div class="panel-header">
@@ -40,7 +42,7 @@ export class BridgeTab {
         <p class="muted">Bridge tokens in/out.</p>
         <ul class="list">
           <li>Transactions are only enabled when MetaMask is connected on Polygon.</li>
-          <li>Amounts are entered in <strong>${symbol}</strong> (18 decimals).</li>
+          <li>Amounts are entered in ${symbolDisplay} (18 decimals).</li>
         </ul>
       </div>
 
@@ -50,8 +52,8 @@ export class BridgeTab {
             <span class="field-label">Bridge Type</span>
             <select class="field-input" data-requires-tx="true" data-bridge-mode>
               <option value="">Select bridge type…</option>
-              <option value="out">Bridge Out (${symbol} → coin)</option>
-              <option value="in">Bridge In (coin → ${symbol})</option>
+              <option value="out">Bridge Out (${symbolText} → coin)</option>
+              <option value="in">Bridge In (coin → ${symbolText})</option>
             </select>
           </label>
 
@@ -65,7 +67,7 @@ export class BridgeTab {
           </label>
 
           <label class="field" data-bridge-amount-wrap>
-            <span class="field-label">Amount (${symbol})</span>
+            <span class="field-label">Amount (${symbolText})</span>
             <input class="field-input" type="text" placeholder="0" data-requires-tx="true" data-bridge-amount />
           </label>
 
