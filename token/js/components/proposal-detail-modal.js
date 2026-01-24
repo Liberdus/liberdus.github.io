@@ -70,6 +70,10 @@ export class ProposalDetailModal {
 
     // Refresh on-chain details for this opId
     const contractManager = window.contractManager;
+    
+    // Ensure parameters are loaded (needed for getMintAmount() to fix corrupted cache values)
+    await contractManager.getParametersBatch?.().catch(() => {});
+    
     const detailsMap = await contractManager.getOperationsBatch([event.operationId]);
     const details = detailsMap.get(event.operationId) || null;
 
@@ -267,12 +271,25 @@ function formatValueForOpType(opType, value) {
   const n = Number(opType);
 
   try {
-    // Get token symbol from contract manager
+    // Get token symbol from contract manager (only use if available from contract)
     const contractManager = window.contractManager;
-    const symbol = contractManager?.getTokenSymbol?.() || 'LIB';
+    const symbol = contractManager?.getTokenSymbol?.();
     
     if (n === 0 || n === 1 || n === 8) {
       // Mint (0), Burn (1), Distribute (8) are token amounts (wei)
+      
+      // IMPORTANT: For Mint operations, the contract ignores the `value` parameter
+      // and always uses MINT_AMOUNT constant. The event may have incorrect historical
+      // values from old proposals. Always use MINT_AMOUNT from the contract for Mint.
+      if (n === 0) {
+        const mintAmount = contractManager?.getMintAmount?.();
+        if (mintAmount) {
+          const formatted = window.ethers.utils.formatEther(mintAmount);
+          return symbol ? `${formatted} ${symbol}` : formatted;
+        }
+        // Fallback to value if MINT_AMOUNT not available
+      }
+      
       // Ensure we have a BigNumber-compatible value
       // formatEther needs BigNumber or hex string to preserve precision
       let bnValue;
@@ -291,34 +308,17 @@ function formatValueForOpType(opType, value) {
           bnValue = window.ethers.BigNumber.from(value);
         }
       } else if (typeof value === 'number') {
-        // JavaScript number - this is problematic for large values
-        // Try to convert, but warn if it's suspiciously small for a wei amount
-        if (n === 0 && value < 1e15) {
-          console.warn('Mint operation value seems too small:', value, '- expected ~3e24 wei');
-        }
+        // JavaScript number - this is problematic for large values and indicates a parsing/caching issue
+        // Numbers lose precision for large values, so this shouldn't happen if value is properly stored as BigNumber
+        console.warn('Value is a JavaScript number instead of BigNumber. This indicates a parsing or caching issue:', { opType: n, value, valueType: typeof value });
         bnValue = window.ethers.BigNumber.from(value);
       } else {
         // Try to convert whatever it is
         bnValue = window.ethers.BigNumber.from(value);
       }
       
-      // Special handling for Mint operations: if value is suspiciously small,
-      // it might be stored incorrectly. Prefer the contract's MINT_AMOUNT from cache.
-      if (n === 0) {
-        const expectedMintAmount = contractManager?.getMintAmount?.();
-        if (expectedMintAmount) {
-          const minValidMintAmount = expectedMintAmount.div(3); // 1/3 of expected (guards bad values)
-          const isTooSmall = bnValue.lt(minValidMintAmount);
-          if (isTooSmall) {
-            // Value is too small - use expected MINT_AMOUNT for Mint operations
-            // This handles cases where the stored value is incorrect (e.g., 3000000 instead of 3000000 * 10^18)
-            bnValue = expectedMintAmount;
-          }
-        }
-      }
-      
       const formatted = window.ethers.utils.formatEther(bnValue);
-      return `${formatted} ${symbol}`;
+      return symbol ? `${formatted} ${symbol}` : formatted;
     }
     if (n === 7) {
       // UpdateSigner: value encodes address in uint256

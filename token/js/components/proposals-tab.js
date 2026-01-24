@@ -26,7 +26,7 @@ export class ProposalsTab {
     // Cache / refresh
     this.cacheTtlMs = 5 * 60 * 1000;
     this.cacheMaxItems = 500;
-    this._cacheSchemaVersion = 2;
+    this._cacheSchemaVersion = 3; // Bumped to invalidate old caches that may have stored values incorrectly
 
     this._lastFetchedBlock = 0; // latest block number at time of last scan (for incremental refresh)
     this._refreshInFlight = false;
@@ -326,12 +326,26 @@ export class ProposalsTab {
       .map((log) => {
         try {
           const ev = contract.interface.parseLog(log);
+          const rawValue = ev.args.value || ev.args[4];
+          
+          // Ensure value is preserved as BigNumber (ethers.js should return BigNumber for uint256, but be defensive)
+          let value = rawValue;
+          if (rawValue && window.ethers?.BigNumber?.isBigNumber?.(rawValue)) {
+            value = rawValue; // Already a BigNumber, keep it
+          } else if (rawValue && typeof rawValue === 'object' && rawValue.type === 'BigNumber' && rawValue.hex) {
+            // Serialized BigNumber - restore it
+            value = window.ethers?.BigNumber?.from?.(rawValue.hex) || rawValue;
+          } else if (rawValue != null && window.ethers?.BigNumber) {
+            // Convert to BigNumber to preserve precision
+            value = window.ethers.BigNumber.from(rawValue);
+          }
+          
           return {
             operationId: String(ev.args.operationId || ev.args[0]),
             opType: Number(ev.args.opType?.toString?.() ?? ev.args[1]?.toString?.() ?? 0),
             requester: String(ev.args.requester || ev.args[2]),
             target: String(ev.args.target || ev.args[3]),
-            value: ev.args.value || ev.args[4],
+            value: value,
             data: String(ev.args.data || ev.args[5]),
             deadline: Number((ev.args.deadline || ev.args[6]).toString()),
             timestamp: Number((ev.args.timestamp || ev.args[7]).toString()),
@@ -657,12 +671,44 @@ export class ProposalsTab {
   _applyCache(cache) {
     const events = Array.isArray(cache?.events) ? cache.events : [];
     
+    // Restore BigNumber instances from serialized format (localStorage converts them to {type: 'BigNumber', hex: '...'})
+    // Also handle cases where value might be stored as a plain number (shouldn't happen, but defensive)
+    const restored = events.map((ev) => {
+      if (ev && typeof ev === 'object') {
+        const restored = { ...ev };
+        // Restore value if it's a serialized BigNumber
+        if (restored.value && typeof restored.value === 'object' && restored.value.type === 'BigNumber' && restored.value.hex) {
+          try {
+            restored.value = window.ethers?.BigNumber?.from?.(restored.value.hex) || restored.value;
+          } catch {
+            // Keep original if conversion fails
+          }
+        } else if (typeof restored.value === 'number' && window.ethers?.BigNumber) {
+          // If value is stored as a plain number (shouldn't happen, but handle it defensively)
+          try {
+            restored.value = window.ethers.BigNumber.from(restored.value);
+          } catch {
+            // Keep original if conversion fails
+          }
+        } else if (typeof restored.value === 'string' && !restored.value.startsWith('0x') && window.ethers?.BigNumber) {
+          // If value is stored as a decimal string, convert to BigNumber
+          try {
+            restored.value = window.ethers.BigNumber.from(restored.value);
+          } catch {
+            // Keep original if conversion fails
+          }
+        }
+        return restored;
+      }
+      return ev;
+    });
+    
     // Limit initial render to initialMinItems (5) for fast first paint
     // This prevents "Loading..." rows beyond what we hydrate immediately
-    const visibleCount = Math.min(this.initialMinItems, events.length);
+    const visibleCount = Math.min(this.initialMinItems, restored.length);
 
-    this._loadedEvents = events.slice(0, visibleCount);
-    this._pendingEvents = events.slice(visibleCount);
+    this._loadedEvents = restored.slice(0, visibleCount);
+    this._pendingEvents = restored.slice(visibleCount);
 
     this._allLogsLoaded = !!cache?.allLogsLoaded;
     this._lastFetchedBlock = Number(cache?.lastFetchedBlock || 0) || this._lastFetchedBlock;

@@ -437,10 +437,10 @@ function formatLib(value) {
   if (value == null) return '—';
   try {
     const contractManager = window.contractManager;
-    const symbol = contractManager?.getTokenSymbol?.() || 'LIB';
+    const symbol = contractManager?.getTokenSymbol?.();
     const s = window.ethers.utils.formatEther(value);
     const trimmed = trimZeros(s);
-    return `${trimmed} ${symbol}`;
+    return symbol ? `${trimmed} ${symbol}` : trimmed;
   } catch {
     return '—';
   }

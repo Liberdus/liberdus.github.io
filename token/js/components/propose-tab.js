@@ -41,9 +41,10 @@ export class ProposeTab {
     this.panel = document.querySelector('.tab-panel[data-panel="propose"]');
     if (!this.panel) return;
 
-    // Get symbol dynamically from contract manager, fallback to 'LIB'
+    // Get symbol dynamically from contract manager (only use if available from contract)
     const contractManager = window.contractManager;
-    const symbol = contractManager?.getTokenSymbol?.() || 'LIB';
+    const symbol = contractManager?.getTokenSymbol?.();
+    const symbolText = symbol ? `<strong>${symbol}</strong>` : 'tokens';
 
     this.panel.innerHTML = `
       <div class="panel-header">
@@ -51,7 +52,7 @@ export class ProposeTab {
         <p class="muted">Request a new operation. <strong>Only signers/owner</strong> can submit.</p>
         <ul class="list">
           <li>Transactions are only enabled when MetaMask is connected on Polygon.</li>
-          <li>Amounts are entered in <strong>${symbol}</strong> (18 decimals) unless stated otherwise.</li>
+          <li>Amounts are entered in ${symbolText} (18 decimals) unless stated otherwise.</li>
         </ul>
       </div>
 
