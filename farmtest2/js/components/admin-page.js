@@ -4386,8 +4386,9 @@ class AdminPage {
                     if (balanceBig && obligationBig && rateBig && rateBig.gt(0)) {
                         const effectiveBalance = balanceBig.sub(obligationBig);
                         if (effectiveBalance.gt(0)) {
-                            const runwayHoursBig = effectiveBalance.div(rateBig);
-                            const runwayHours = Number(ethers.utils.formatEther(runwayHoursBig));
+                            // runwayHours = (effectiveBalance * 1e18) / rateBig, then formatEther to get decimal
+                            const scaledHours = effectiveBalance.mul(ethers.constants.WeiPerEther).div(rateBig);
+                            const runwayHours = Number(ethers.utils.formatEther(scaledHours));
                             const runwayDays = runwayHours / 24;
                             return `${runwayHours.toFixed(1)} hours (${runwayDays.toFixed(1)} days)`;
                         } else {

@@ -351,22 +351,11 @@ class HomePage {
                 </tr>
             `;
         } else {
-            // Show data rows
+            // Show data rows sorted alphabetically by pair name
             tbodyContent = [...displayPairs].sort((a, b) => {
-                const parseValue = (value) => {
-                    const num = parseFloat(value ?? '0');
-                    return Number.isFinite(num) ? num : 0;
-                };
-
-                const aprA = parseValue(a.apr);
-                const aprB = parseValue(b.apr);
-                if (aprB !== aprA) {
-                    return aprB - aprA;
-                }
-
-                const tvlA = parseValue(a.tvl ?? a.totalStaked);
-                const tvlB = parseValue(b.tvl ?? b.totalStaked);
-                return tvlB - tvlA;
+                const nameA = (a.name || '').toLowerCase();
+                const nameB = (b.name || '').toLowerCase();
+                return nameA.localeCompare(nameB);
             }).map(pair => this.renderPairRow(pair)).join('');
         }
 
@@ -865,11 +854,18 @@ class HomePage {
             const hourlyRate = Number(this.hourlyRewardRate) || 0;
             const totalWeight = Number(this.totalWeight) || 1;
 
+            const breakdowns = await window.contractManager.getLPStakeBreakdowns(this.pairs);
             const calculations = this.pairs.map(async (pair, index) => {
                 try {
                     console.log(`🔍 Calculating TVL/APR for ${pair.name}...`);
 
-                    const breakdown = await window.contractManager.getLPStakeBreakdown(pair.address);
+                    const pairIdentifier = pair.address || pair.lpToken || pair.name;
+                    const resolvedAddress = window.contractManager.resolveLPTokenAddress(pairIdentifier);
+                    const breakdown = resolvedAddress ? breakdowns.get(resolvedAddress) : null;
+                    if (!breakdown) {
+                        console.warn(`⚠️ LP breakdown not available for ${pair.name}, skipping`);
+                        return;
+                    }
                     const lpDecimals = Number(breakdown?.lpToken?.decimals) || 18;
                     const stakedBn = ethers.BigNumber.from(breakdown?.lpToken?.stakedBalance?.raw || '0');
                     const tvlInTokens = Number(ethers.utils.formatUnits(stakedBn, lpDecimals)) || 0;

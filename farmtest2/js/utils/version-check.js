@@ -10,6 +10,7 @@
     const isAdminPage = window.location.pathname.includes('admin');
     const VERSION_FILE = isAdminPage ? '../version.html' : 'version.html';
     const STORAGE_KEY = 'version';
+    let cachedVersion = null;
 
     /**
      * Get current version from localStorage or version.html
@@ -17,6 +18,16 @@
      */
     async function getCurrentVersion() {
         try {
+            if (cachedVersion) {
+                return cachedVersion;
+            }
+
+            const stored = localStorage.getItem(STORAGE_KEY);
+            if (stored) {
+                cachedVersion = stored;
+                return stored;
+            }
+
             const response = await fetch(VERSION_FILE, {
                 cache: 'reload',
                 headers: {
@@ -26,7 +37,9 @@
             });
             
             if (response.ok) {
-                return (await response.text()).trim();
+                const version = (await response.text()).trim();
+                cachedVersion = version;
+                return version;
             }
         } catch (error) {
             console.error('Failed to fetch version:', error);
@@ -70,6 +83,7 @@
         if (storedVer !== newVer) {
             console.log(`🔄 Updating to version: ${newVersion} (from ${storedVersion})`);
             localStorage.setItem(STORAGE_KEY, newVersion);
+            cachedVersion = newVersion;
             
             if (criticalFiles.length > 0) {
                 await forceReloadFiles(criticalFiles);
@@ -77,6 +91,7 @@
             
             window.location.replace(window.location.href.split('?')[0]);
         } else {
+            cachedVersion = storedVersion;
             console.log(`✅ Running version: ${storedVersion}`);
         }
     }
