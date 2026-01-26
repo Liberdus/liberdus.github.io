@@ -1,4 +1,4 @@
-﻿(function(global) {
+(function(global) {
     'use strict';
 
 
@@ -24,6 +24,14 @@ class ContractManager {
         this.fallbackProviders = [];
         this.currentProviderIndex = 0;
         this.disabledFeatures = new Set(); // Track disabled features due to contract limitations
+        this.cachedNetwork = null; // Cache network info to avoid repeated detection
+        this.fallbackProvidersInitialized = false; // Lazy init to reduce startup RPCs
+        this.rpcProviderCache = new Map(); // Reuse providers per RPC URL (reduces detectNetwork/eth_chainId)
+        this.lpStaticMetaCache = new Map();
+        this.tokenDecimalsCache = new Map();
+        this.cachedPairs = null;
+        this.cachedBasicData = null;
+        this.cachedBasicDataTimestamp = 0;
 
         // State management
         this.isInitialized = false;
@@ -110,15 +118,14 @@ class ContractManager {
             this.signer = null; // No signer in read-only mode
             console.log('✅ Using working provider:', this.provider.connection?.url || 'Unknown');
 
-            // Initialize fallback providers (read-only)
-            await this.initializeFallbackProviders();
+            // Defer fallback provider initialization until needed to reduce startup RPCs
 
             // Initialize Multicall service for batch loading optimization
             if (window.MulticallService && this.provider) {
                 try {
                     this.multicallService = new window.MulticallService();
-                    const network = await this.provider.getNetwork();
-                    const initialized = await this.multicallService.initialize(this.provider, network.chainId);
+                    const chainId = this.getCurrentChainIdSafe() ?? (await this.provider.getNetwork()).chainId;
+                    const initialized = await this.multicallService.initialize(this.provider, chainId);
                     if (!initialized) {
                         console.warn('⚠️ Multicall service not available - using fallback methods');
                     }
@@ -184,7 +191,7 @@ class ContractManager {
             }
 
             try {
-                await this.loadContractAddresses();
+                await this.loadBootstrapContractData();
             } catch (addressError) {
                 console.error('Failed to refresh reward/LP addresses from contract (read-only):', addressError.message);
             }
@@ -284,13 +291,12 @@ class ContractManager {
             this.provider = provider;
             this.signer = signer;
 
-            // Initialize fallback providers
-            await this.initializeFallbackProviders();
+            // Defer fallback provider initialization until needed to reduce startup RPCs
 
             // Initialize Multicall service for batch loading optimization
             if (window.MulticallService) {
                 this.multicallService = new window.MulticallService();
-                const chainId = await this.provider.getNetwork().then(n => n.chainId);
+                const chainId = this.getCurrentChainIdSafe() ?? await this.provider.getNetwork().then(n => n.chainId);
                 const initialized = await this.multicallService.initialize(this.provider, chainId);
                 if (!initialized) {
                     console.warn('⚠️ Multicall service not available - using fallback methods');
@@ -324,40 +330,52 @@ class ContractManager {
 
     /**
      * Get a working provider with comprehensive RPC testing (ENHANCED)
+     * Optimized to prevent rate limiting by caching network info and adding delays
      */
     async getWorkingProvider() {
         const rpcUrls = this.getAllRPCUrls();
 
         console.log(`🔄 Testing ${rpcUrls.length} RPC endpoints for reliability...`);
 
+        // Prefer config-derived chainId (no RPC) to avoid eth_chainId calls
+        const expectedChainId = this.getCurrentChainIdSafe();
+        const networkName = this.getCurrentNetworkConfigSafe()?.NAME || window.networkSelector?.getCurrentNetworkName?.() || 'unknown';
+
         for (let i = 0; i < rpcUrls.length; i++) {
             const rpcUrl = rpcUrls[i];
+            
+            // Add delay between provider tests to avoid rate limiting (except for first one)
+            if (i > 0) {
+                await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
+            }
+
             try {
                 console.log(`🔄 Testing RPC ${i + 1}/${rpcUrls.length}: ${rpcUrl}`);
 
-                // Use longer timeout for local development
+                const timeout = this.getRpcTimeoutMs(rpcUrl);
                 const isLocalhost = rpcUrl.includes('127.0.0.1') || rpcUrl.includes('localhost');
-                const timeout = isLocalhost ? 15000 : 8000; // 15 seconds for localhost, 8 for others
 
-                const provider = new ethers.providers.JsonRpcProvider({
-                    url: rpcUrl,
-                    timeout: timeout
-                });
+                // Reuse a cached provider per URL (prevents repeated detectNetwork / eth_chainId)
+                const provider = this.getRpcProvider(rpcUrl);
+                if (!provider) {
+                    throw new Error('Provider not available');
+                }
 
                 console.log(`🔧 Using ${timeout}ms timeout for ${isLocalhost ? 'local' : 'remote'} RPC: ${rpcUrl}`);
 
-                // Test basic connectivity
-                const networkPromise = provider.getNetwork();
-                const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Network timeout')), 8000)
-                );
-
-                const network = await Promise.race([networkPromise, timeoutPromise]);
+                // Use cached/expected network info when available (avoid provider.getNetwork calls)
+                const network = expectedChainId != null
+                    ? { chainId: expectedChainId, name: networkName }
+                    : await provider.getNetwork();
 
                 // Verify correct network (using centralized config)
-                const expectedChainId = window.networkSelector?.getCurrentChainId();
-                if (network.chainId !== expectedChainId) {
+                if (expectedChainId != null && network.chainId !== expectedChainId) {
                     throw new Error(`Wrong network: expected ${expectedChainId}, got ${network.chainId}`);
+                }
+
+                // Cache network info for reuse in fallback providers
+                if (!this.cachedNetwork && network?.chainId != null) {
+                    this.cachedNetwork = network;
                 }
 
                 // Test block number retrieval (tests node sync)
@@ -377,6 +395,11 @@ class ContractManager {
                     console.error(`❌ RPC ${i + 1} failed: Access forbidden (403) - ${rpcUrl}`);
                 } else if (error.message?.includes('429') || error.message?.includes('rate limit')) {
                     console.error(`❌ RPC ${i + 1} failed: Rate limited (429) - ${rpcUrl}`);
+                    // Add longer delay after rate limit error
+                    if (i < rpcUrls.length - 1) {
+                        console.log('⏳ Waiting 2 seconds before trying next RPC due to rate limit...');
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
                 } else {
                     console.error(`❌ RPC ${i + 1} failed: ${error.message}`);
                 }
@@ -407,18 +430,163 @@ class ContractManager {
     }
 
     /**
+     * Get current network config safely (read from NetworkSelector/CONFIG).
+     */
+    getCurrentNetworkConfigSafe() {
+        try {
+            return window.networkSelector?.getCurrentNetworkConfig?.() ?? undefined;
+        } catch (_) {
+            return undefined;
+        }
+    }
+
+    /**
+     * Best-effort chainId for the currently selected network.
+     * Prefer CONFIG (no RPC) to avoid unnecessary eth_chainId calls.
+     */
+    getCurrentChainIdSafe() {
+        const cfg = this.getCurrentNetworkConfigSafe();
+        const chainId = cfg?.CHAIN_ID ?? window.networkSelector?.getCurrentChainId?.();
+        const parsed = typeof chainId === 'string' ? Number(chainId) : chainId;
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    /**
+     * Provider timeout for an RPC URL.
+     */
+    getRpcTimeoutMs(rpcUrl) {
+        const isLocalhost = typeof rpcUrl === 'string' && (rpcUrl.includes('127.0.0.1') || rpcUrl.includes('localhost'));
+        if (isLocalhost) return 15000;
+
+        const cfgTimeout = window.CONFIG?.API?.RPC_TIMEOUT ?? window.CONFIG?.API?.TIMEOUT ?? 10000;
+        const parsed = typeof cfgTimeout === 'string' ? Number(cfgTimeout) : cfgTimeout;
+        return Number.isFinite(parsed) ? parsed : 10000;
+    }
+
+    /**
+     * Get or create a cached JSON-RPC provider for a URL.
+     * Uses StaticJsonRpcProvider when available to avoid repeated network detection.
+     */
+    getRpcProvider(rpcUrl) {
+        if (!rpcUrl || typeof rpcUrl !== 'string') return null;
+
+        const cached = this.rpcProviderCache.get(rpcUrl);
+        if (cached) return cached;
+
+        const chainId = this.getCurrentChainIdSafe();
+        const timeout = this.getRpcTimeoutMs(rpcUrl);
+        const connection = { url: rpcUrl, timeout };
+
+        const ProviderCtor =
+            (window.ethers?.providers?.StaticJsonRpcProvider) ? window.ethers.providers.StaticJsonRpcProvider :
+            window.ethers?.providers?.JsonRpcProvider;
+
+        if (!ProviderCtor) return null;
+
+        const provider = chainId != null
+            ? new ProviderCtor(connection, chainId)
+            : new ProviderCtor(connection);
+
+        this.rpcProviderCache.set(rpcUrl, provider);
+        return provider;
+    }
+
+    buildLpStaticMetaKey(chainId, lpAddress) {
+        if (!chainId || !lpAddress) return null;
+        return `staticMeta:v1:${chainId}:lp:${lpAddress.toLowerCase()}`;
+    }
+
+    buildTokenDecimalsKey(chainId, tokenAddress) {
+        if (!chainId || !tokenAddress) return null;
+        return `staticMeta:v1:${chainId}:token:${tokenAddress.toLowerCase()}`;
+    }
+
+    getLpStaticMeta(chainId, lpAddress) {
+        const key = this.buildLpStaticMetaKey(chainId, lpAddress);
+        if (!key) return null;
+
+        const cached = this.lpStaticMetaCache.get(key);
+        if (cached) return cached;
+
+        try {
+            const stored = window.localStorage?.getItem(key);
+            if (!stored) return null;
+            const parsed = JSON.parse(stored);
+            if (!parsed || !parsed.token0 || !parsed.token1 || parsed.decimals == null) return null;
+            this.lpStaticMetaCache.set(key, parsed);
+            return parsed;
+        } catch (error) {
+            console.warn('Failed to read LP static metadata cache:', error.message);
+            return null;
+        }
+    }
+
+    setLpStaticMeta(chainId, lpAddress, metadata) {
+        const key = this.buildLpStaticMetaKey(chainId, lpAddress);
+        if (!key || !metadata) return;
+
+        this.lpStaticMetaCache.set(key, metadata);
+        try {
+            window.localStorage?.setItem(key, JSON.stringify(metadata));
+        } catch (error) {
+            console.warn('Failed to persist LP static metadata cache:', error.message);
+        }
+    }
+
+    getTokenDecimals(chainId, tokenAddress) {
+        const key = this.buildTokenDecimalsKey(chainId, tokenAddress);
+        if (!key) return null;
+
+        const cached = this.tokenDecimalsCache.get(key);
+        if (cached != null) return cached;
+
+        try {
+            const stored = window.localStorage?.getItem(key);
+            if (stored == null) return null;
+            const parsed = Number(JSON.parse(stored));
+            if (!Number.isFinite(parsed)) return null;
+            this.tokenDecimalsCache.set(key, parsed);
+            return parsed;
+        } catch (error) {
+            console.warn('Failed to read token decimals cache:', error.message);
+            return null;
+        }
+    }
+
+    setTokenDecimals(chainId, tokenAddress, decimals) {
+        const key = this.buildTokenDecimalsKey(chainId, tokenAddress);
+        if (!key || decimals == null) return;
+
+        this.tokenDecimalsCache.set(key, decimals);
+        try {
+            window.localStorage?.setItem(key, JSON.stringify(decimals));
+        } catch (error) {
+            console.warn('Failed to persist token decimals cache:', error.message);
+        }
+    }
+
+    /**
      * Initialize fallback providers for redundancy
+     * Optimized to prevent rate limiting by using cached network info and adding delays
      */
     async initializeFallbackProviders() {
         try {
             this.fallbackProviders = [];
             this.currentProviderIndex = 0;
+            this.fallbackProvidersInitialized = false;
 
             const rpcUrls = this.getAllRPCUrls();
 
             if (rpcUrls.length === 0) {
                 throw new Error('No RPC URLs available for fallback providers');
             }
+
+            // Prefer config-derived chainId (no RPC) to avoid eth_chainId calls
+            const expectedChainId = this.getCurrentChainIdSafe();
+            const networkName = this.getCurrentNetworkConfigSafe()?.NAME || window.networkSelector?.getCurrentNetworkName?.() || 'unknown';
+            
+            // Use cached network if available (from getWorkingProvider)
+            const networkToUse = this.cachedNetwork || (expectedChainId ? { chainId: expectedChainId, name: networkName } : null);
 
             // Test each RPC URL with enhanced error handling
             const testResults = [];
@@ -427,25 +595,57 @@ class ContractManager {
                 const rpcUrl = rpcUrls[i];
                 const testResult = { url: rpcUrl, success: false, error: null, chainId: null };
 
+                // Add delay between provider tests to avoid rate limiting (except for first one)
+                if (i > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
+                }
+
                 try {
                     console.log(`🔄 Testing RPC ${i + 1}/${rpcUrls.length}:`, rpcUrl);
 
-                    // Create provider with connection info
-                    const fallbackProvider = new ethers.providers.JsonRpcProvider({
-                        url: rpcUrl,
-                        timeout: 10000 // 10 second timeout
-                    });
+                    // Create provider with static network info if available to skip automatic detectNetwork()
+                    let fallbackProvider;
+                    if (networkToUse) {
+                        // Use static network to prevent automatic detectNetwork() call
+                        fallbackProvider = new ethers.providers.JsonRpcProvider({
+                            url: rpcUrl,
+                            timeout: 10000 // 10 second timeout
+                        }, networkToUse);
+                    } else {
+                        // Fallback to dynamic detection if network not known
+                        fallbackProvider = new ethers.providers.JsonRpcProvider({
+                            url: rpcUrl,
+                            timeout: 10000 // 10 second timeout
+                        });
+                    }
 
-                    // Test connection with multiple timeouts
-                    const networkPromise = fallbackProvider.getNetwork();
-                    const timeoutPromise = new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('Connection timeout (10s)')), 10000)
-                    );
-
-                    const network = await Promise.race([networkPromise, timeoutPromise]);
+                    // Test connection (validate chainId once even with static network)
+                    let network;
+                    if (networkToUse) {
+                        const chainIdPromise = fallbackProvider.send('eth_chainId', []);
+                        const timeoutPromise = new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('Chain ID timeout (10s)')), 10000)
+                        );
+                        const chainIdHex = await Promise.race([chainIdPromise, timeoutPromise]);
+                        const actualChainId = typeof chainIdHex === 'string'
+                            ? parseInt(chainIdHex, 16)
+                            : Number(chainIdHex);
+                        if (!Number.isFinite(actualChainId)) {
+                            throw new Error(`Invalid chainId response: ${chainIdHex}`);
+                        }
+                        if (expectedChainId != null && actualChainId !== expectedChainId) {
+                            throw new Error(`Wrong network: expected ${expectedChainId}, got ${actualChainId}`);
+                        }
+                        network = { ...networkToUse, chainId: actualChainId };
+                    } else {
+                        const networkPromise = fallbackProvider.getNetwork();
+                        const timeoutPromise = new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('Connection timeout (10s)')), 10000)
+                        );
+                        network = await Promise.race([networkPromise, timeoutPromise]);
+                    }
 
                     // Verify correct network (using centralized config when available)
-                    const expectedChainId = window.networkSelector?.getCurrentChainId();
                     if (expectedChainId != null && network.chainId !== expectedChainId) {
                         throw new Error(`Wrong network: expected ${expectedChainId}, got ${network.chainId}`);
                     }
@@ -471,6 +671,14 @@ class ContractManager {
                 } catch (error) {
                     testResult.error = error.message;
                     console.error(`❌ RPC ${i + 1} FAILED:`, rpcUrl, '→', error.message);
+                    
+                    // Add longer delay after rate limit error
+                    if (error.message?.includes('429') || error.message?.includes('rate limit')) {
+                        if (i < rpcUrls.length - 1) {
+                            console.log('⏳ Waiting 2 seconds before trying next RPC due to rate limit...');
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        }
+                    }
                 }
 
                 testResults.push(testResult);
@@ -494,6 +702,8 @@ class ContractManager {
                 console.error('❌ Test results:', testResults.map(r => `${r.url}: ${r.error || 'Success'}`));
                 throw new Error(errorMsg);
             }
+
+            this.fallbackProvidersInitialized = true;
 
         } catch (error) {
             console.error('❌ Failed to initialize fallback providers:', error);
@@ -615,6 +825,55 @@ class ContractManager {
     }
 
     /**
+     * Update LP contract addresses from contract-provided pairs list.
+     */
+    applyPairsFromContract(pairs) {
+        const existingLPKeys = new Set(
+            [...this.contractAddresses.keys()].filter(key => key.startsWith('LP_'))
+        );
+        const activeLPKeys = new Set();
+
+        if (Array.isArray(pairs)) {
+            pairs.forEach((pair, index) => {
+                if (!pair) {
+                    return;
+                }
+
+                const tuple = Array.isArray(pair) ? pair : [];
+                const lpTokenAddress = tuple[0] || pair.lpToken;
+                const rawPairName = tuple[1] || pair.pairName || pair.name;
+                const isActive = tuple[4] ?? pair.isActive;
+
+                if (!isActive) {
+                    return;
+                }
+
+                if (!this.isValidContractAddress(lpTokenAddress)) {
+                    console.log(`Skipping LP pair with invalid address at index ${index}:`, lpTokenAddress);
+                    return;
+                }
+
+                const normalizedName = this.normalizePairKey(rawPairName);
+                if (!normalizedName) {
+                    console.log(`Skipping LP pair with missing name at index ${index}`);
+                    return;
+                }
+
+                const mapKey = `LP_${normalizedName}`;
+                this.contractAddresses.set(mapKey, lpTokenAddress);
+                activeLPKeys.add(mapKey);
+            });
+        }
+
+        // Remove stale LP entries that are no longer returned by the contract
+        for (const key of existingLPKeys) {
+            if (!activeLPKeys.has(key)) {
+                this.contractAddresses.delete(key);
+            }
+        }
+    }
+
+    /**
      * Load reward token and LP token addresses from the staking contract.
      */
     async loadContractAddresses() {
@@ -630,78 +889,122 @@ class ContractManager {
                 return;
             }
 
-            try {
-                const rewardTokenAddress = await this.stakingContract.rewardToken();
+            const multicall = this.multicallService;
+            if (!multicall || !multicall.isReady?.()) {
+                console.log('⏳ Multicall not ready; deferring rewardToken/getPairs calls');
+                return;
+            }
+
+            const calls = [
+                multicall.createCall(this.stakingContract, 'rewardToken'),
+                multicall.createCall(this.stakingContract, 'getPairs')
+            ];
+
+            const results = await multicall.tryAggregate(calls);
+            if (!results || results.length !== calls.length) {
+                console.warn('⚠️ Multicall contract address load failed; skipping for now');
+                return;
+            }
+
+            const rewardTokenResult = results[0];
+            if (rewardTokenResult?.success) {
+                const rewardTokenAddress = multicall.decodeResult(this.stakingContract, 'rewardToken', rewardTokenResult.returnData);
                 if (this.isValidContractAddress(rewardTokenAddress)) {
                     this.contractAddresses.set('REWARD_TOKEN', rewardTokenAddress);
                 } else {
                     this.contractAddresses.delete('REWARD_TOKEN');
                     console.warn('⚠️ Received invalid reward token address from contract');
                 }
-            } catch (error) {
+            } else {
                 this.contractAddresses.delete('REWARD_TOKEN');
-                console.error('⚠️ Unable to read reward token from contract:', error.message);
+                console.warn('⚠️ Unable to read reward token from contract via multicall');
             }
 
-            const existingLPKeys = new Set(
-                [...this.contractAddresses.keys()].filter(key => key.startsWith('LP_'))
-            );
-            const activeLPKeys = new Set();
-
-            let pairsRetrieved = false;
-
-            try {
-                const pairs = await this.stakingContract.getPairs();
+            const pairsResult = results[1];
+            if (pairsResult?.success) {
+                const pairs = multicall.decodeResult(this.stakingContract, 'getPairs', pairsResult.returnData);
                 if (Array.isArray(pairs)) {
-                    pairsRetrieved = true;
                     console.log(`✅ Loaded ${pairs.length} LP pair definitions from contract`);
-
-                    pairs.forEach((pair, index) => {
-                        if (!pair) {
-                            return;
-                        }
-
-                        const tuple = Array.isArray(pair) ? pair : [];
-                        const lpTokenAddress = tuple[0] || pair.lpToken;
-                        const rawPairName = tuple[1] || pair.pairName || pair.name;
-                        const isActive = tuple[4] ?? pair.isActive;
-
-                        if (!isActive) {
-                            return;
-                        }
-
-                        if (!this.isValidContractAddress(lpTokenAddress)) {
-                            console.log(`Skipping LP pair with invalid address at index ${index}:`, lpTokenAddress);
-                            return;
-                        }
-
-                        const normalizedName = this.normalizePairKey(rawPairName);
-                        if (!normalizedName) {
-                            console.log(`Skipping LP pair with missing name at index ${index}`);
-                            return;
-                        }
-
-                        const mapKey = `LP_${normalizedName}`;
-                        this.contractAddresses.set(mapKey, lpTokenAddress);
-                        activeLPKeys.add(mapKey);
-                    });
+                    this.cachedPairs = pairs;
+                    this.applyPairsFromContract(pairs);
                 } else {
                     console.warn('⚠️ getPairs() did not return an array');
                 }
-            } catch (error) {
-                console.error('⚠️ getPairs() call failed:', error.message);
-            }
-
-            // Remove stale LP entries that are no longer returned by the contract
-            if (pairsRetrieved) {
-                for (const key of existingLPKeys) {
-                    if (!activeLPKeys.has(key)) {
-                        this.contractAddresses.delete(key);
-                    }
-                }
+            } else {
+                console.warn('⚠️ getPairs() call failed via multicall');
             }
         } catch (error) {
             console.error('Failed to load contract addresses:', error);
+        }
+    }
+
+    /**
+     * Load core staking data in a single multicall pass.
+     */
+    async loadBootstrapContractData() {
+        try {
+            if (!this.stakingContract) {
+                console.log('Staking contract not initialized; skipping bootstrap load');
+                return;
+            }
+
+            const multicall = this.multicallService;
+            if (!multicall || !multicall.isReady?.()) {
+                console.log('Multicall not ready; skipping bootstrap load (data will be loaded when multicall becomes available)'); 
+                return;
+            }
+
+            const calls = [
+                multicall.createCall(this.stakingContract, 'rewardToken'),
+                multicall.createCall(this.stakingContract, 'getPairs'),
+                multicall.createCall(this.stakingContract, 'hourlyRewardRate'),
+                multicall.createCall(this.stakingContract, 'totalWeight')
+            ];
+
+            const results = await multicall.tryAggregate(calls);
+            if (!results || results.length !== calls.length) {
+                console.warn('⚠️ Bootstrap multicall failed; skipping');
+                return;
+            }
+
+            const now = Date.now();
+            const rewardTokenResult = results[0];
+            if (rewardTokenResult?.success) {
+                const rewardTokenAddress = multicall.decodeResult(this.stakingContract, 'rewardToken', rewardTokenResult.returnData);
+                if (this.isValidContractAddress(rewardTokenAddress)) {
+                    this.contractAddresses.set('REWARD_TOKEN', rewardTokenAddress);
+                } else {
+                    this.contractAddresses.delete('REWARD_TOKEN');
+                }
+            }
+
+            const pairsResult = results[1];
+            if (pairsResult?.success) {
+                const pairs = multicall.decodeResult(this.stakingContract, 'getPairs', pairsResult.returnData);
+                if (Array.isArray(pairs)) {
+                    this.cachedPairs = pairs;
+                    this.applyPairsFromContract(pairs);
+                }
+            }
+
+            const hourlyRewardRateResult = results[2];
+            const totalWeightResult = results[3];
+            if (hourlyRewardRateResult?.success || totalWeightResult?.success) {
+                const hourlyRewardRate = hourlyRewardRateResult?.success
+                    ? multicall.decodeResult(this.stakingContract, 'hourlyRewardRate', hourlyRewardRateResult.returnData)
+                    : null;
+                const totalWeight = totalWeightResult?.success
+                    ? multicall.decodeResult(this.stakingContract, 'totalWeight', totalWeightResult.returnData)
+                    : null;
+
+                this.cachedBasicData = {
+                    hourlyRewardRate: hourlyRewardRate ?? null,
+                    totalWeight: totalWeight ?? null
+                };
+                this.cachedBasicDataTimestamp = now;
+            }
+        } catch (error) {
+            console.error('Failed to load bootstrap contract data:', error);
         }
     }
 
@@ -733,7 +1036,7 @@ class ContractManager {
             }
 
             try {
-                await this.loadContractAddresses();
+                await this.loadBootstrapContractData();
             } catch (addressError) {
                 console.error('⚠️ Failed to refresh reward/LP addresses from contract (wallet mode):', addressError.message);
             }
@@ -906,6 +1209,29 @@ class ContractManager {
         try {
             if (!this.stakingContract) {
                 throw new Error('Staking contract not initialized');
+            }
+
+            const multicall = this.multicallService;
+            if (multicall?.isReady?.()) {
+                const calls = [
+                    multicall.createCall(this.stakingContract, 'rewardToken'),
+                    multicall.createCall(this.stakingContract, 'hourlyRewardRate'),
+                    multicall.createCall(this.stakingContract, 'REQUIRED_APPROVALS'),
+                    multicall.createCall(this.stakingContract, 'actionCounter')
+                ];
+
+                const results = await multicall.tryAggregate(calls);
+                if (results && results.length === calls.length) {
+                    const names = ['rewardToken', 'hourlyRewardRate', 'REQUIRED_APPROVALS', 'actionCounter'];
+                    results.forEach((entry, index) => {
+                        if (!entry?.success) {
+                            const name = names[index];
+                            console.warn(`⚠️ Optional function ${name} not available (multicall)`);
+                            this.disabledFeatures.add(name);
+                        }
+                    });
+                    return true;
+                }
             }
 
             // Test required functions with timeout
@@ -1211,7 +1537,7 @@ class ContractManager {
                 multicall.createCall(pairContract, 'decimals')
             ];
 
-            const pairResults = await multicall.batchCall(pairCalls, { requireSuccess: true, maxRetries: 0 });
+            const pairResults = await multicall.batchCall(pairCalls, { requireSuccess: true });
             if (!pairResults || pairResults.length !== pairCalls.length) {
                 throw new Error('Multicall pair query failed');
             }
@@ -1265,7 +1591,7 @@ class ContractManager {
                 multicall.createCall(token1Contract, 'symbol')
             ];
 
-            const tokenMetadataResults = await multicall.batchCall(tokenMetadataCalls, { requireSuccess: true, maxRetries: 0 });
+            const tokenMetadataResults = await multicall.batchCall(tokenMetadataCalls, { requireSuccess: true });
             if (!tokenMetadataResults || tokenMetadataResults.length !== tokenMetadataCalls.length) {
                 throw new Error('Multicall token metadata query failed');
             }
@@ -1370,6 +1696,322 @@ class ContractManager {
                 }
             };
         }, 'getLPStakeBreakdown');
+    }
+
+    /**
+     * Batch LP stake breakdowns for multiple pairs using multicall.
+     * Returns a Map of lpTokenAddress -> breakdown data.
+     */
+    async getLPStakeBreakdowns(pairs) {
+        return await this.executeWithRetry(async () => {
+            if (!Array.isArray(pairs) || pairs.length === 0) {
+                return new Map();
+            }
+
+            const stakingAddress = this.contractAddresses.get('STAKING') || window.networkSelector?.getStakingContractAddress();
+            if (!stakingAddress || !this.isValidContractAddress(stakingAddress)) {
+                throw new Error('Staking contract address not available');
+            }
+
+            const provider = this.provider || this.signer?.provider;
+            if (!provider) {
+                throw new Error('Provider not initialized');
+            }
+
+            const multicall = this.multicallService;
+            if (!multicall || typeof multicall.isReady !== 'function' || !multicall.isReady()) {
+                throw new Error('Multicall service not ready');
+            }
+
+            const chainId = this.getCurrentChainIdSafe() ?? (await provider.getNetwork()).chainId;
+            const pairAbi = [
+                'function token0() view returns (address)',
+                'function token1() view returns (address)',
+                'function getReserves() view returns (uint112,uint112,uint32)',
+                'function totalSupply() view returns (uint256)',
+                'function balanceOf(address owner) view returns (uint256)',
+                'function decimals() view returns (uint8)'
+            ];
+            const pairInterface = new ethers.utils.Interface(pairAbi);
+
+            const pairEntries = [];
+            const dynamicCalls = [];
+            const staticCalls = [];
+            let lpMetaHits = 0;
+            let lpMetaMisses = 0;
+            pairs.forEach((pair) => {
+                const identifier = pair?.address || pair?.lpToken || pair?.name || pair;
+                const lpTokenAddress = this.resolveLPTokenAddress(identifier);
+                if (!lpTokenAddress) {
+                    return;
+                }
+
+                const cached = this.getLpStaticMeta(chainId, lpTokenAddress);
+                if (cached) {
+                    lpMetaHits += 1;
+                    pairEntries.push({
+                        lpTokenAddress,
+                        token0Address: cached.token0,
+                        token1Address: cached.token1,
+                        lpDecimalsRaw: cached.decimals,
+                        needsStaticMeta: false
+                    });
+                } else {
+                    lpMetaMisses += 1;
+                    pairEntries.push({ lpTokenAddress, needsStaticMeta: true });
+                    staticCalls.push(
+                        multicall.createCall({ address: lpTokenAddress, interface: pairInterface }, 'token0'),
+                        multicall.createCall({ address: lpTokenAddress, interface: pairInterface }, 'token1'),
+                        multicall.createCall({ address: lpTokenAddress, interface: pairInterface }, 'decimals')
+                    );
+                }
+
+                dynamicCalls.push(
+                    multicall.createCall({ address: lpTokenAddress, interface: pairInterface }, 'getReserves'),
+                    multicall.createCall({ address: lpTokenAddress, interface: pairInterface }, 'totalSupply'),
+                    multicall.createCall({ address: lpTokenAddress, interface: pairInterface }, 'balanceOf', [stakingAddress])
+                );
+            });
+
+            if (pairEntries.length === 0) {
+                return new Map();
+            }
+
+            const dynamicResults = await multicall.batchCall(dynamicCalls, { requireSuccess: true });
+            if (!dynamicResults || dynamicResults.length !== dynamicCalls.length) {
+                throw new Error('Multicall pair query failed');
+            }
+
+            if (staticCalls.length > 0) {
+                const staticResults = await multicall.batchCall(staticCalls, { requireSuccess: true });
+                if (!staticResults || staticResults.length !== staticCalls.length) {
+                    throw new Error('Multicall pair metadata query failed');
+                }
+
+                let staticIndex = 0;
+                pairEntries.forEach((entry) => {
+                    if (!entry.needsStaticMeta) {
+                        return;
+                    }
+
+                    const decode = (method) => {
+                        const result = staticResults[staticIndex];
+                        staticIndex += 1;
+                        if (!result || result.success !== true) {
+                            throw new Error(`Multicall failed for pair.${method}`);
+                        }
+                        const decoded = multicall.decodeResult(pairInterface, method, result.returnData);
+                        if (decoded === null || decoded === undefined) {
+                            throw new Error(`Unable to decode pair.${method}`);
+                        }
+                        return decoded;
+                    };
+
+                    entry.token0Address = decode('token0');
+                    entry.token1Address = decode('token1');
+                    entry.lpDecimalsRaw = decode('decimals');
+                    entry.needsStaticMeta = false;
+
+                    this.setLpStaticMeta(chainId, entry.lpTokenAddress, {
+                        token0: entry.token0Address,
+                        token1: entry.token1Address,
+                        decimals: entry.lpDecimalsRaw
+                    });
+                });
+            }
+
+            const tokenAddresses = new Set();
+            const pairData = [];
+            pairEntries.forEach((entry, index) => {
+                const baseIndex = index * 3;
+                const decodeDynamic = (method, offset) => {
+                    const result = dynamicResults[baseIndex + offset];
+                    if (!result || result.success !== true) {
+                        throw new Error(`Multicall failed for pair.${method}`);
+                    }
+                    const decoded = multicall.decodeResult(pairInterface, method, result.returnData);
+                    if (decoded === null || decoded === undefined) {
+                        throw new Error(`Unable to decode pair.${method}`);
+                    }
+                    return decoded;
+                };
+                const token0Address = entry.token0Address;
+                const token1Address = entry.token1Address;
+                const lpDecimalsRaw = entry.lpDecimalsRaw;
+
+                if (!token0Address || !token1Address || lpDecimalsRaw == null) {
+                    return;
+                }
+
+                const reserves = decodeDynamic('getReserves', 0);
+                const totalSupplyRaw = decodeDynamic('totalSupply', 1);
+                const stakedBalanceRaw = decodeDynamic('balanceOf', 2);
+
+                tokenAddresses.add(token0Address);
+                tokenAddresses.add(token1Address);
+
+                pairData.push({
+                    lpTokenAddress: entry.lpTokenAddress,
+                    token0Address,
+                    token1Address,
+                    reserves,
+                    totalSupplyRaw,
+                    stakedBalanceRaw,
+                    lpDecimalsRaw
+                });
+            });
+
+            const metadataAbi = [
+                'function decimals() view returns (uint8)',
+            ];
+            const metadataInterface = new ethers.utils.Interface(metadataAbi);
+
+            const metadataCalls = [];
+            const tokenList = Array.from(tokenAddresses);
+            let tokenDecimalsHits = 0;
+            let tokenDecimalsMisses = 0;
+            tokenList.forEach((tokenAddress) => {
+                const cachedDecimals = this.getTokenDecimals(chainId, tokenAddress);
+                if (cachedDecimals != null) {
+                    tokenDecimalsHits += 1;
+                    return;
+                }
+                tokenDecimalsMisses += 1;
+                metadataCalls.push(
+                    multicall.createCall({ address: tokenAddress, interface: metadataInterface }, 'decimals')
+                );
+            });
+
+            if (metadataCalls.length > 0) {
+                const metadataResults = await multicall.batchCall(metadataCalls, { requireSuccess: true });
+                if (!metadataResults || metadataResults.length !== metadataCalls.length) {
+                    throw new Error('Multicall token metadata query failed');
+                }
+
+                let metaIndex = 0;
+                tokenList.forEach((tokenAddress) => {
+                    const cachedDecimals = this.getTokenDecimals(chainId, tokenAddress);
+                    if (cachedDecimals != null) {
+                        return;
+                    }
+                    const result = metadataResults[metaIndex];
+                    metaIndex += 1;
+                    if (!result || result.success !== true) {
+                        throw new Error(`Multicall failed for ${tokenAddress}.decimals`);
+                    }
+                    const decoded = multicall.decodeResult(metadataInterface, 'decimals', result.returnData);
+                    if (decoded === null || decoded === undefined) {
+                        throw new Error(`Unable to decode ${tokenAddress}.decimals`);
+                    }
+                    this.setTokenDecimals(chainId, tokenAddress, decoded);
+                });
+            }
+
+            const tokenMetadata = new Map();
+            tokenList.forEach((tokenAddress, index) => {
+                const decimals = this.getTokenDecimals(chainId, tokenAddress);
+                if (decimals == null) {
+                    return;
+                }
+                tokenMetadata.set(tokenAddress.toLowerCase(), {
+                    decimals
+                });
+            });
+
+            const breakdowns = new Map();
+            pairData.forEach((entry) => {
+                const reserve0 = ethers.BigNumber.from(entry.reserves[0]);
+                const reserve1 = ethers.BigNumber.from(entry.reserves[1]);
+                const reserveTimestampRaw = Number(entry.reserves[2]);
+                if (!Number.isFinite(reserveTimestampRaw)) {
+                    throw new Error('Invalid reserve timestamp');
+                }
+                const blockTimestampLast = Math.trunc(reserveTimestampRaw);
+
+                const totalSupply = ethers.BigNumber.from(entry.totalSupplyRaw);
+                const stakedBalance = ethers.BigNumber.from(entry.stakedBalanceRaw);
+                if (stakedBalance.gt(totalSupply)) {
+                    throw new Error('Staked balance exceeds total supply');
+                }
+
+                const lpDecimalsNum = Number(entry.lpDecimalsRaw);
+                if (!Number.isFinite(lpDecimalsNum)) {
+                    throw new Error('Invalid LP decimals');
+                }
+
+                const token0Meta = tokenMetadata.get(entry.token0Address.toLowerCase());
+                const token1Meta = tokenMetadata.get(entry.token1Address.toLowerCase());
+                if (!token0Meta || !token1Meta) {
+                    throw new Error('Token metadata missing');
+                }
+
+                const token0Decimals = Number(token0Meta.decimals);
+                const token1Decimals = Number(token1Meta.decimals);
+                if (!Number.isFinite(token0Decimals) || !Number.isFinite(token1Decimals)) {
+                    throw new Error('Invalid token decimals');
+                }
+
+                if (totalSupply.isZero()) {
+                    throw new Error('LP total supply is zero');
+                }
+
+                const token0Staked = stakedBalance.mul(reserve0).div(totalSupply);
+                const token1Staked = stakedBalance.mul(reserve1).div(totalSupply);
+                const outstandingBalance = totalSupply.sub(stakedBalance);
+
+                breakdowns.set(entry.lpTokenAddress, {
+                    lpTokenAddress: entry.lpTokenAddress,
+                    stakingContractAddress: stakingAddress,
+                    blockTimestampLast,
+                    lpToken: {
+                        decimals: Math.trunc(lpDecimalsNum),
+                        totalSupply: {
+                            raw: totalSupply.toString(),
+                            formatted: ethers.utils.formatUnits(totalSupply, lpDecimalsNum)
+                        },
+                        stakedBalance: {
+                            raw: stakedBalance.toString(),
+                            formatted: ethers.utils.formatUnits(stakedBalance, lpDecimalsNum)
+                        },
+                        outstandingBalance: {
+                            raw: outstandingBalance.toString(),
+                            formatted: ethers.utils.formatUnits(outstandingBalance, lpDecimalsNum)
+                        }
+                    },
+                    token0: {
+                        address: entry.token0Address,
+                        decimals: Math.trunc(token0Decimals),
+                        reserve: {
+                            raw: reserve0.toString(),
+                            formatted: ethers.utils.formatUnits(reserve0, token0Decimals)
+                        },
+                        staked: {
+                            raw: token0Staked.toString(),
+                            formatted: ethers.utils.formatUnits(token0Staked, token0Decimals)
+                        }
+                    },
+                    token1: {
+                        address: entry.token1Address,
+                        decimals: Math.trunc(token1Decimals),
+                        reserve: {
+                            raw: reserve1.toString(),
+                            formatted: ethers.utils.formatUnits(reserve1, token1Decimals)
+                        },
+                        staked: {
+                            raw: token1Staked.toString(),
+                            formatted: ethers.utils.formatUnits(token1Staked, token1Decimals)
+                        }
+                    }
+                });
+            });
+
+            if (window.CONFIG?.DEV?.DEBUG) {
+                console.log('[LP CACHE] Static LP meta hits/misses:', lpMetaHits, lpMetaMisses);
+                console.log('[TOKEN CACHE] Decimals hits/misses:', tokenDecimalsHits, tokenDecimalsMisses);
+            }
+
+            return breakdowns;
+        }, 'getLPStakeBreakdowns');
     }
 
     // ============ ADMIN CONTRACT FUNCTIONS ============
@@ -2640,18 +3282,29 @@ class ContractManager {
                 // Try multiple methods to get pairs
                 let pairs = [];
 
-                // Method 1: Try getPairs() if it exists
-                try {
-                    pairs = await this.stakingContract.getPairs();
-                    console.log('✅ Got pairs from getPairs():', pairs.length);
-                } catch (error) {
-                    console.error('⚠️ getPairs() not available:', error.message);
+                if (Array.isArray(this.cachedPairs) && this.cachedPairs.length > 0) {
+                    pairs = this.cachedPairs;
+                    console.log('✅ Using cached pairs:', pairs.length);
+                } else {
+                    // Method 1: Try getPairs() if it exists
+                    try {
+                        pairs = await this.stakingContract.getPairs();
+                        if (Array.isArray(pairs)) {
+                            this.cachedPairs = pairs;
+                        }
+                        console.log('✅ Got pairs from getPairs():', pairs.length);
+                    } catch (error) {
+                        console.error('⚠️ getPairs() not available:', error.message);
+                    }
                 }
 
                 // Method 2: If no pairs, try getActivePairs()
                 if (!pairs || pairs.length === 0) {
                     try {
                         pairs = await this.stakingContract.getActivePairs();
+                        if (Array.isArray(pairs)) {
+                            this.cachedPairs = pairs;
+                        }
                         console.log('✅ Got pairs from getActivePairs():', pairs.length);
                     } catch (error) {
                         console.error('⚠️ getActivePairs() not available:', error.message);
@@ -2943,13 +3596,16 @@ class ContractManager {
                                      error.message?.includes('Internal JSON-RPC error') ||
                                      error.message?.includes('could not detect network');
                 
-                if (isNetworkError && this.canUseFallbackProvider()) {
-                    console.log('🌐 Network/RPC error detected, trying fallback provider...');
-                    const switched = await this.tryFallbackProvider();
-                    if (switched) {
-                        console.log('✅ Successfully switched to fallback provider');
-                    } else {
-                        console.warn('⚠️ Failed to switch to fallback provider, continuing with current provider');
+                if (isNetworkError) {
+                    const hasFallback = await this.ensureFallbackProvidersInitialized();
+                    if (hasFallback && this.canUseFallbackProvider()) {
+                        console.log('🌐 Network/RPC error detected, trying fallback provider...');
+                        const switched = await this.tryFallbackProvider();
+                        if (switched) {
+                            console.log('✅ Successfully switched to fallback provider');
+                        } else {
+                            console.warn('⚠️ Failed to switch to fallback provider, continuing with current provider');
+                        }
                     }
                 }
 
@@ -2965,23 +3621,43 @@ class ContractManager {
      * Execute operation with provider fallback and block number strategies - PERFORMANCE OPTIMIZED
      */
     async executeWithProviderFallback(operation, operationName, retries = 3) {
-        // Get working RPC providers in order of preference
-        const workingProviders = await this.getWorkingProvidersForHistoricalState();
-
         // OPTIMIZATION: Reduced block strategies to only most reliable ones
         const blockStrategies = ['latest', null]; // Removed 'pending' to reduce attempts
 
-        for (let i = 0; i < workingProviders.length; i++) {
-            const provider = workingProviders[i];
-            const providerUrl = provider.connection?.url || 'Unknown';
+        // Best practice: reuse the existing provider(s); don't create/test new providers per call
+        const providersToTry = [];
+        if (this.provider) {
+            providersToTry.push(this.provider);
+        }
+
+        // Lazily expand to fallback providers only when an RPC error happens
+        let fallbacksLoaded = false;
+
+        const isLikelyRpcError = (err) => {
+            const msg = err?.message || '';
+            return (
+                err?.code === 'NETWORK_ERROR' ||
+                err?.code === 'SERVER_ERROR' ||
+                err?.code === -32603 ||
+                msg.includes('NETWORK_ERROR') ||
+                msg.includes('SERVER_ERROR') ||
+                msg.includes('timeout') ||
+                msg.includes('429') ||
+                msg.toLowerCase().includes('rate limit') ||
+                msg.includes('could not detect network')
+            );
+        };
+
+        for (let i = 0; i < providersToTry.length; i++) {
+            const provider = providersToTry[i];
+            const providerUrl = provider?.connection?.url || 'Unknown';
 
             for (let j = 0; j < blockStrategies.length; j++) {
                 const blockTag = blockStrategies[j];
                 const strategyDesc = blockTag || 'no-block-tag';
 
                 try {
-                    const result = await operation(provider, blockTag);
-                    return result;
+                    return await operation(provider, blockTag);
 
                 } catch (error) {
                     const errorMsg = error?.message || 'Unknown error';
@@ -2991,6 +3667,19 @@ class ContractManager {
                     if (errorMsg.includes && errorMsg.includes('missing trie node')) {
                         console.error('Missing trie node error, trying next block strategy');
                         continue;
+                    }
+
+                    // On likely RPC errors, load fallbacks once and retry against them
+                    if (!fallbacksLoaded && isLikelyRpcError(error)) {
+                        fallbacksLoaded = true;
+                        const hasFallback = await this.ensureFallbackProvidersInitialized();
+                        if (hasFallback) {
+                            for (const fp of this.fallbackProviders) {
+                                if (fp && !providersToTry.includes(fp)) {
+                                    providersToTry.push(fp);
+                                }
+                            }
+                        }
                     }
 
                     // For other errors, try next provider
@@ -3008,35 +3697,23 @@ class ContractManager {
     async getWorkingProvidersForHistoricalState() {
         const providers = [];
 
-        // OPTIMIZATION: Only use configured providers to reduce fallback time
-        const rpcUrls = this.getAllRPCUrls();
-
-        if (!rpcUrls || rpcUrls.length === 0) {
-            throw new Error('No RPC URLs configured for historical state queries');
+        // Best practice: reuse providers already created; don't probe RPCs on each call
+        if (this.provider) {
+            providers.push(this.provider);
         }
 
-        for (const rpcUrl of rpcUrls) {
-            try {
-                const provider = new ethers.providers.JsonRpcProvider({
-                    url: rpcUrl,
-                    timeout: 4000  // OPTIMIZATION: Reduced timeout from 8000ms to 4000ms for faster failover
-                });
-
-                // Quick connectivity test with shorter timeout
-                await provider.getBlockNumber();
-                providers.push(provider);
-
-            } catch (error) {
-                console.error(`⚠️ Provider not available: ${rpcUrl} - ${error.message}`);
-                continue;
+        if (this.fallbackProvidersInitialized && Array.isArray(this.fallbackProviders)) {
+            for (const fp of this.fallbackProviders) {
+                if (fp && !providers.includes(fp)) {
+                    providers.push(fp);
+                }
             }
         }
 
         if (providers.length === 0) {
-            throw new Error('No working providers available for historical state queries');
+            throw new Error('No provider initialized');
         }
 
-        console.log(`📡 Found ${providers.length} working providers for historical queries`);
         return providers;
     }
 
@@ -3253,6 +3930,23 @@ class ContractManager {
 
 
     /**
+     * Ensure fallback providers are initialized before use
+     */
+    async ensureFallbackProvidersInitialized() {
+        if (this.fallbackProvidersInitialized) {
+            return this.fallbackProviders.length > 0;
+        }
+
+        try {
+            await this.initializeFallbackProviders();
+        } catch (error) {
+            console.error('⚠️ Failed to initialize fallback providers:', error.message);
+        }
+
+        return this.fallbackProviders.length > 0;
+    }
+
+    /**
      * Check if fallback provider can be used
      */
     canUseFallbackProvider() {
@@ -3263,6 +3957,8 @@ class ContractManager {
      * Try switching to fallback provider with enhanced error handling
      */
     async tryFallbackProvider() {
+        await this.ensureFallbackProvidersInitialized();
+
         if (!this.canUseFallbackProvider()) {
             console.log('No more fallback providers available');
             return false;
@@ -3331,6 +4027,20 @@ class ContractManager {
         this.provider = null;
         this.signer = null;
         this.fallbackProviders = [];
+        this.cachedNetwork = null;
+        this.fallbackProvidersInitialized = false;
+        if (this.rpcProviderCache && typeof this.rpcProviderCache.clear === 'function') {
+            this.rpcProviderCache.clear();
+        }
+        if (this.lpStaticMetaCache && typeof this.lpStaticMetaCache.clear === 'function') {
+            this.lpStaticMetaCache.clear();
+        }
+        if (this.tokenDecimalsCache && typeof this.tokenDecimalsCache.clear === 'function') {
+            this.tokenDecimalsCache.clear();
+        }
+        this.cachedPairs = null;
+        this.cachedBasicData = null;
+        this.cachedBasicDataTimestamp = 0;
         this.contractABIs.clear();
         this.contractAddresses.clear();
         this.isInitialized = false;
@@ -3395,6 +4105,7 @@ class ContractManager {
 
     /**
      * Switch to next available RPC provider
+     * Optimized to prevent rate limiting by using cached network info
      */
     async switchToNextProvider() {
         const rpcUrls = this.getAllRPCUrls();
@@ -3415,14 +4126,19 @@ class ContractManager {
                 continue;
             }
 
+            // Add delay between attempts to avoid rate limiting (except for first one)
+            if (attempt > 0) {
+                await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
+            }
+
             console.log(`🔄 Switching to RPC: ${newRpcUrl}`);
 
             try {
-                // Create new provider with timeout
-                this.provider = new ethers.providers.JsonRpcProvider({
-                    url: newRpcUrl,
-                    timeout: 5000 // 5 second timeout
-                });
+                // Reuse cached provider per URL (prevents repeated detectNetwork / eth_chainId)
+                this.provider = this.getRpcProvider(newRpcUrl);
+                if (!this.provider) {
+                    throw new Error('Provider not available');
+                }
 
                 // Test the new provider with timeout
                 const testPromise = this.provider.getBlockNumber();
@@ -3521,6 +4237,15 @@ class ContractManager {
      * @returns {Object} Object containing hourlyRewardRate and totalWeight in wei
      */
     async getBasicContractData() {
+        const now = Date.now();
+        const cacheTtl = window.CONFIG?.APP?.REFRESH_INTERVAL ?? 30000;
+        if (this.cachedBasicData && (now - this.cachedBasicDataTimestamp) < cacheTtl) {
+            return {
+                hourlyRewardRate: this.cachedBasicData.hourlyRewardRate ?? ethers.BigNumber.from(0),
+                totalWeight: this.cachedBasicData.totalWeight ?? ethers.BigNumber.from(0)
+            };
+        }
+
         // Wait up to 2 seconds for multicall to initialize if it exists but isn't ready (race condition fix)
         if (!this.multicallService?.isReady()) {
             for (let i = 0; i < 40 && !this.multicallService?.isReady(); i++) {
@@ -3537,10 +4262,13 @@ class ContractManager {
             const results = await this.multicallService.tryAggregate(calls);
             
             if (results?.length >= 2) {
-                return {
+                const basicData = {
                     hourlyRewardRate: results[0]?.success ? this.multicallService.decodeResult(this.stakingContract, 'hourlyRewardRate', results[0].returnData) || ethers.BigNumber.from(0) : ethers.BigNumber.from(0),
                     totalWeight: results[1]?.success ? this.multicallService.decodeResult(this.stakingContract, 'totalWeight', results[1].returnData) || ethers.BigNumber.from(0) : ethers.BigNumber.from(0)
                 };
+                this.cachedBasicData = basicData;
+                this.cachedBasicDataTimestamp = now;
+                return basicData;
             }
         }
         console.warn('Multicall service not available, falling back to individual contract calls');
