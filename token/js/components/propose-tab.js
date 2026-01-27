@@ -1,4 +1,5 @@
 import { CONFIG } from '../config.js';
+import { formatTxMessage, extractErrorMessage, normalizeErrorMessage } from '../utils/transaction-helpers.js';
 
 export class ProposeTab {
   constructor() {
@@ -459,6 +460,27 @@ export class ProposeTab {
     this._normalizeDisabledForHiddenFields();
   }
 
+  _resetForm() {
+    // Clear operation type selector
+    if (this.typeSelect) {
+      this.typeSelect.value = '';
+    }
+
+    // Clear all input fields
+    if (this.targetInput) {
+      this.targetInput.value = '';
+    }
+    if (this.valueInput) {
+      this.valueInput.value = '';
+    }
+    if (this.dataInput) {
+      this.dataInput.value = '';
+    }
+
+    // Reset form to initial state (field visibility, labels, etc.)
+    this._onOperationTypeChange();
+  }
+
   _normalizeDisabledForHiddenFields() {
     // If a field is hidden, disable it. If visible, enable it (network manager will still gate).
     const set = (wrap, input) => {
@@ -542,17 +564,21 @@ export class ProposeTab {
       this.submitBtn.textContent = 'Submitting…';
     }
 
-    const loadingId = toast?.loading?.('Submitting proposal…', { id: 'propose-submit', delayMs: 100 });
+    const submittingId = toast?.loading?.('Submitting proposal…', { id: 'propose-submit', delayMs: 100 });
+    let confirmationId = null;
+    let confirmationUpdated = false; // Track if confirmation toast was updated to success/error
 
     try {
       const tx = await write.requestOperation(opType, target, value, data);
-      toast?.update?.(loadingId, {
-        type: 'loading',
-        title: 'Transaction sent',
-        message: `Waiting for confirmation…`,
-        dismissible: false,
-        timeoutMs: 0,
-      });
+
+      // Dismiss submitting toast and show confirmation toast
+      toast?.dismiss?.(submittingId);
+      confirmationId = toast?.loading?.('Waiting for confirmation…', { id: 'propose-confirm', title: 'Confirming', delayMs: 0 });
+      
+      // Update button text to "Confirming…" while waiting for confirmation
+      if (this.submitBtn) {
+        this.submitBtn.textContent = 'Confirming…';
+      }
 
       const receipt = await tx.wait();
 
@@ -571,15 +597,27 @@ export class ProposeTab {
         opId = null;
       }
 
-      const explorer = CONFIG?.NETWORK?.BLOCK_EXPLORER || 'https://polygonscan.com';
       const msg = opId ? `Operation requested: ${opId}` : 'Operation requested.';
-      toast?.update?.(loadingId, {
-        type: 'success',
+      
+      // Dismiss confirmation toast and create a fresh success toast to ensure it's visible
+      if (confirmationId) {
+        toast?.dismiss?.(confirmationId);
+      }
+      
+      // Format message with clickable transaction hash link on its own line
+      const message = formatTxMessage(tx.hash, msg);
+      
+      // Create success toast (user must dismiss manually)
+      toast?.success?.(message, {
         title: 'Proposal submitted',
-        message: `${msg} Tx: ${explorer}/tx/${tx.hash}`,
-        dismissible: true,
-        timeoutMs: 7000,
+        id: 'propose-success',
+        timeoutMs: 0, // User must dismiss manually
+        allowHtml: true,
       });
+      confirmationUpdated = true;
+
+      // Reset form to initial state after successful submission
+      this._resetForm();
 
       // Ask proposals list to refresh (best-effort).
       document.dispatchEvent(new CustomEvent('operationRequested', { detail: { txHash: tx.hash, operationId: opId } }));
@@ -590,14 +628,32 @@ export class ProposeTab {
         this._renderMintReadiness();
       }
     } catch (e) {
-      toast?.update?.(loadingId, {
-        type: 'error',
+      // Dismiss any loading toasts first
+      if (submittingId) {
+        toast?.dismiss?.(submittingId);
+      }
+      if (confirmationId) {
+        toast?.dismiss?.(confirmationId);
+      }
+      
+      // Extract and normalize error message
+      let errorMessage = extractErrorMessage(e, 'Failed to submit proposal');
+      errorMessage = normalizeErrorMessage(errorMessage);
+      
+      // Create a dedicated error toast that will persist
+      const errorId = 'propose-error';
+      toast?.error?.(errorMessage, {
         title: 'Submit failed',
-        message: e?.data?.message || e?.message || 'Failed to submit proposal',
-        dismissible: true,
+        id: errorId,
         timeoutMs: 0, // Errors persist until user dismisses
       });
+      confirmationUpdated = true;
     } finally {
+      // Dismiss confirmation toast if it's still in loading state (button re-enabled)
+      // Success/error toasts will remain visible
+      if (confirmationId && !confirmationUpdated) {
+        toast?.dismiss?.(confirmationId);
+      }
       this._isSubmitting = false;
       if (this.submitBtn) {
         this.submitBtn.textContent = 'Request Operation';

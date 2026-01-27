@@ -326,12 +326,17 @@ export class ParametersTab {
     if (!el) return;
     const addr = normalizeAddress(address);
     const display = addr ? shortAddress(addr) : '—';
-    el.textContent = display;
+    
     if (addr) {
-      el.setAttribute('title', addr);
+      // Create clickable link to block explorer
+      const explorer = CONFIG?.NETWORK?.BLOCK_EXPLORER || 'https://polygonscan.com';
+      const explorerUrl = `${explorer}/address/${addr}`;
+      el.innerHTML = `<a href="${explorerUrl}" target="_blank" rel="noopener noreferrer" title="${addr}">${display}</a>`;
     } else {
+      el.textContent = display;
       el.removeAttribute('title');
     }
+    
     const copyBtn = el.closest('.param-address')?.querySelector('[data-copy-address]');
     if (copyBtn) {
       copyBtn.dataset.address = addr || '';

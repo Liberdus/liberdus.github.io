@@ -111,6 +111,26 @@
   opacity: 0.9;
 }
 
+/* CSS-based spinner for loading icon */
+.notification-icon .spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Content */
 .notification-content {
   flex: 1;
@@ -131,6 +151,21 @@
   margin: 0;
   line-height: 1.4;
   word-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+}
+
+.notification-message a {
+  color: #0066cc;
+  text-decoration: underline;
+  word-break: break-all;
+  transition: opacity 0.2s ease;
+}
+
+.notification-message a:hover {
+  color: #0052a3;
+  opacity: 1;
 }
 
 /* Close Button */

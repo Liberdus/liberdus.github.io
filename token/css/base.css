@@ -119,6 +119,16 @@ pre {
   font-family: var(--font-monospace);
 }
 
+code a {
+  color: #0066cc;
+  text-decoration: underline;
+  transition: color 0.2s ease;
+}
+
+code a:hover {
+  color: #0052a3;
+}
+
 a {
   color: var(--primary-color);
   text-decoration: none;
