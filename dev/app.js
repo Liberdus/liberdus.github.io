@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'p'
+const version = 'q'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -340,6 +340,93 @@ function migrateFriendStatusToConnection(data) {
 }
 
 /**
+ * One-time migration: extract DH-derived encryption keys to random encKey field
+ * This decouples attachment encryption from recipient keys for easier sharing
+ * @param {Object} data
+ * @returns {Promise<boolean>} True if migration flag was applied
+ */
+async function migrateAttachmentKeysToEncKey(data) {
+  if (!data?.account) return false;
+
+  const migrations =
+    data.account.migrations && typeof data.account.migrations === 'object'
+      ? data.account.migrations
+      : null;
+
+  if (migrations?.attachmentKeysToEncKey === true) {
+    return false;
+  }
+
+  if (data.contacts && typeof data.contacts === 'object') {
+    for (const [address, contact] of Object.entries(data.contacts)) {
+      if (!contact || typeof contact !== 'object') continue;
+      if (!Array.isArray(contact.messages)) continue;
+
+      for (const message of contact.messages) {
+        if (!message || typeof message !== 'object') continue;
+        if (!Array.isArray(message.xattach)) continue;
+
+        for (const attachment of message.xattach) {
+          if (!attachment || typeof attachment !== 'object') continue;
+          
+          // Skip if already has encKey
+          if (attachment.encKey) continue;
+
+          let dhkey;
+          
+          if (message.my) {
+            // Sent message: decrypt selfKey to get dhkey
+            if (!attachment.selfKey) continue;
+            try {
+              const password = data.account.keys.secret + data.account.keys.pqSeed;
+              dhkey = hex2bin(decryptData(attachment.selfKey, password, true));
+            } catch (e) {
+              console.warn('Failed to decrypt attachment selfKey during migration:', e);
+              continue;
+            }
+          } else {
+            // Received message: decrypt pqEncSharedKey to get dhkey
+            if (!attachment.pqEncSharedKey) continue;
+            try {
+              // Ensure contact keys are available
+              await ensureContactKeys(address);
+              const senderPublicKey = data.contacts[address]?.public;
+              if (!senderPublicKey) {
+                console.warn('No public key found for sender during migration:', address);
+                continue;
+              }
+              
+              const pqCipher = (typeof attachment.pqEncSharedKey === 'string') 
+                ? base642bin(attachment.pqEncSharedKey) 
+                : attachment.pqEncSharedKey;
+              
+              dhkey = dhkeyCombined(
+                data.account.keys.secret,
+                senderPublicKey,
+                data.account.keys.pqSeed,
+                pqCipher
+              ).dhkey;
+            } catch (e) {
+              console.warn('Failed to decrypt attachment pqEncSharedKey during migration:', e);
+              continue;
+            }
+          }
+
+          // Store the dhkey as encKey
+          if (dhkey) {
+            attachment.encKey = bin2base64(dhkey);
+          }
+        }
+      }
+    }
+  }
+
+  data.account.migrations = migrations && typeof migrations === 'object' ? migrations : {};
+  data.account.migrations.attachmentKeysToEncKey = true;
+  return true;
+}
+
+/**
  * Checks if the current account is private
  * @returns {boolean} True if the account is private, false otherwise
  */
@@ -513,6 +600,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Call Invite Modal
   callInviteModal.load();
+
+  // Share Attachment Modal
+  shareAttachmentModal.load();
 
   // Share Contacts Modal
   shareContactsModal.load();
@@ -3294,6 +3384,12 @@ class SignInModal {
       saveState();
     }
 
+
+    // One-time migration: extract attachment encryption keys to encKey field
+    if (await migrateAttachmentKeysToEncKey(myData)) {
+      saveState();
+    }
+
     // Clear notification address for this account when signing in
     // Notification storage is only for accounts the user is NOT signed in to
     if (reactNativeApp.isReactNativeWebView && myAccount?.keys?.address) {
@@ -5292,82 +5388,83 @@ async function processChats(chats, keys) {
                   
                   // Verify that the sender is the same who sent the message they're trying to delete
                   const messageToDelete = contact.messages.find(msg => msg.txid === txidToDelete);
-                  
-                  if (messageToDelete) {
-                    // Only allow deletion if the sender of this delete tx is the same who sent the original message
-                    // (normalize addresses for comparison)
-                    const originalSender = normalizeAddress(tx.from);
-                    
-                    if (!messageToDelete.my && originalSender === from) {
-                      // This is a message received from sender, who is now deleting it - valid
-                      // Purge cached thumbnails for image attachments, if any
-                      chatModal.purgeThumbnail(messageToDelete.xattach);
-
-                      // Mark the message as deleted
-                      messageToDelete.deleted = 1;
-                      messageToDelete.message = "Deleted by sender";
-                      // Remove attachments so we don't keep references around
-                      delete messageToDelete.xattach;
-                      
-                      // Remove payment-specific fields if present
-                      if (messageToDelete.amount) {
-                        if (messageToDelete.payment) delete messageToDelete.payment;
-                        if (messageToDelete.memo) messageToDelete.memo = "Deleted by sender";
-                        if (messageToDelete.amount) delete messageToDelete.amount;
-                        if (messageToDelete.symbol) delete messageToDelete.symbol;
-                        
-                        // Update corresponding transaction in wallet history
-                        const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
-                        if (txIndex !== -1) {
-                          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted by sender' });
-                          delete myData.wallet.history[txIndex].amount;
-                          delete myData.wallet.history[txIndex].symbol;
-                          delete myData.wallet.history[txIndex].payment;
-                          delete myData.wallet.history[txIndex].sign;
-                          delete myData.wallet.history[txIndex].address;
-                        }
-                      }
-                    } else if (messageToDelete.my && normalizeAddress(keys.address) === normalizeAddress(tx.from)) {
-                      // This is our own message, and we're deleting it - valid
-                      // Purge cached thumbnails for image attachments, if any
-                      chatModal.purgeThumbnail(messageToDelete.xattach);
-
-                      // Mark the message as deleted
-                      messageToDelete.deleted = 1;
-                      messageToDelete.message = "Deleted for all";
-                      // Remove attachments so we don't keep references around
-                      delete messageToDelete.xattach;
-                      
-                      // Remove payment-specific fields if present - same logic as above
-                      if (messageToDelete.amount) {
-                        if (messageToDelete.payment) delete messageToDelete.payment;
-                        if (messageToDelete.memo) messageToDelete.memo = "Deleted for all";
-                        if (messageToDelete.amount) delete messageToDelete.amount;
-                        if (messageToDelete.symbol) delete messageToDelete.symbol;
-                        
-                        // Update corresponding transaction in wallet history
-                        const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
-                        if (txIndex !== -1) {
-                          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted for all' });
-                          delete myData.wallet.history[txIndex].amount;
-                          delete myData.wallet.history[txIndex].symbol;
-                          delete myData.wallet.history[txIndex].payment;
-                          delete myData.wallet.history[txIndex].sign;
-                          delete myData.wallet.history[txIndex].address;
-                        }
-                      }
-                    }
-
-                    if (reactNativeApp.isReactNativeWebView && messageToDelete.type === 'call' && Number(messageToDelete.callTime) > 0) {
-                      reactNativeApp.sendCancelScheduledCall(contact?.username, Number(messageToDelete.callTime));
-                    }
-                    
-                    if (chatModal.isActive() && chatModal.address === from) {
-                      chatModal.appendChatModal();
-                    }
-                    // Don't process this message further - it's just a control message
-                    continue;
+                  if (!messageToDelete) {
+                    continue; // ignore delete control messages for missing txid
                   }
+                  
+                  // Only allow deletion if the sender of this delete tx is the same who sent the original message
+                  // (normalize addresses for comparison)
+                  const originalSender = normalizeAddress(tx.from);
+                  
+                  if (!messageToDelete.my && originalSender === from) {
+                    // This is a message received from sender, who is now deleting it - valid
+                    // Purge cached thumbnails for image attachments, if any
+                    chatModal.purgeThumbnail(messageToDelete.xattach);
+
+                    // Mark the message as deleted
+                    messageToDelete.deleted = 1;
+                    messageToDelete.message = "Deleted by sender";
+                    // Remove attachments so we don't keep references around
+                    delete messageToDelete.xattach;
+                    
+                    // Remove payment-specific fields if present
+                    if (messageToDelete.amount) {
+                      if (messageToDelete.payment) delete messageToDelete.payment;
+                      if (messageToDelete.memo) messageToDelete.memo = "Deleted by sender";
+                      if (messageToDelete.amount) delete messageToDelete.amount;
+                      if (messageToDelete.symbol) delete messageToDelete.symbol;
+                      
+                      // Update corresponding transaction in wallet history
+                      const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
+                      if (txIndex !== -1) {
+                        Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted by sender' });
+                        delete myData.wallet.history[txIndex].amount;
+                        delete myData.wallet.history[txIndex].symbol;
+                        delete myData.wallet.history[txIndex].payment;
+                        delete myData.wallet.history[txIndex].sign;
+                        delete myData.wallet.history[txIndex].address;
+                      }
+                    }
+                  } else if (messageToDelete.my && normalizeAddress(keys.address) === normalizeAddress(tx.from)) {
+                    // This is our own message, and we're deleting it - valid
+                    // Purge cached thumbnails for image attachments, if any
+                    chatModal.purgeThumbnail(messageToDelete.xattach);
+
+                    // Mark the message as deleted
+                    messageToDelete.deleted = 1;
+                    messageToDelete.message = "Deleted for all";
+                    // Remove attachments so we don't keep references around
+                    delete messageToDelete.xattach;
+                    
+                    // Remove payment-specific fields if present - same logic as above
+                    if (messageToDelete.amount) {
+                      if (messageToDelete.payment) delete messageToDelete.payment;
+                      if (messageToDelete.memo) messageToDelete.memo = "Deleted for all";
+                      if (messageToDelete.amount) delete messageToDelete.amount;
+                      if (messageToDelete.symbol) delete messageToDelete.symbol;
+                      
+                      // Update corresponding transaction in wallet history
+                      const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
+                      if (txIndex !== -1) {
+                        Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted for all' });
+                        delete myData.wallet.history[txIndex].amount;
+                        delete myData.wallet.history[txIndex].symbol;
+                        delete myData.wallet.history[txIndex].payment;
+                        delete myData.wallet.history[txIndex].sign;
+                        delete myData.wallet.history[txIndex].address;
+                      }
+                    }
+                  }
+
+                  if (reactNativeApp.isReactNativeWebView && messageToDelete.type === 'call' && Number(messageToDelete.callTime) > 0) {
+                    reactNativeApp.sendCancelScheduledCall(contact?.username, Number(messageToDelete.callTime));
+                  }
+                  
+                  if (chatModal.isActive() && chatModal.address === from) {
+                    chatModal.appendChatModal();
+                  }
+                  // Don't process this message further - it's just a control message
+                  continue;
                 } else if (parsedMessage.type === 'edit') {
                   const txidToEdit = parsedMessage.txid;
                   const newText = parsedMessage.text;
@@ -13900,9 +13997,9 @@ class ChatModal {
       this.sendButton.disabled = true; // Disable send button during encryption
       this.addAttachmentButton.disabled = true;
       loadingToastId = showToast(`Attaching file...`, 0, 'loading');
-      const { dhkey, cipherText: pqEncSharedKey } = await this.getRecipientDhKey(this.address);
-      const password = myAccount.keys.secret + myAccount.keys.pqSeed;
-      const selfKey = encryptData(bin2hex(dhkey), password, true)
+      
+      // Generate random encryption key for this attachment
+      const encKey = generateRandomBytes(32);
 
       const worker = new Worker('encryption.worker.js', { type: 'module' });
       worker.onmessage = async (e) => {
@@ -13930,8 +14027,8 @@ class ChatModal {
             let previewUrl = null;
             if (capturedThumbnailBlob) {
               try {
-                // Encrypt thumbnail using same dhkey as main file
-                const encryptedThumbnailBlob = await encryptBlob(capturedThumbnailBlob, dhkey);
+                // Encrypt thumbnail using same random key as main file
+                const encryptedThumbnailBlob = await encryptBlob(capturedThumbnailBlob, encKey);
                 // Upload encrypted thumbnail
                 previewUrl = await this.uploadEncryptedFile(encryptedThumbnailBlob, file.name);
               } catch (error) {
@@ -13944,12 +14041,11 @@ class ChatModal {
             
             this.fileAttachments.push({
               url: attachmentUrl,
-              pUrl: previewUrl,  // NEW FIELD (undefined if upload failed)
+              pUrl: previewUrl,
               name: file.name,
               size: file.size,
               type: normalizedType,
-              pqEncSharedKey: bin2base64(pqEncSharedKey),  // Same key for main file AND thumbnail
-              selfKey  // Same key for main file AND thumbnail
+              encKey: bin2base64(encKey)
             });
             
             // Cache thumbnail if we generated one - use captured variable
@@ -14006,7 +14102,7 @@ class ChatModal {
       // read the file and send it to the worker for encryption
       const reader = new FileReader();
       reader.onload = async (e) => {
-        worker.postMessage({ fileBuffer: e.target.result, dhkey }, [e.target.result]);
+        worker.postMessage({ fileBuffer: e.target.result, dhkey: encKey }, [e.target.result]);
       };
       reader.readAsArrayBuffer(file);
       
@@ -14388,47 +14484,67 @@ class ChatModal {
   async decryptAttachmentToBlob(item, linkEl, urlOverride = null) {
     if (!item || !linkEl) throw new Error('Missing item or attachment element');
 
-    // 1) Derive dhkey
-    // - Attachments: use per-attachment keys from item.xattach (not stored in DOM)
-    // - Voice messages: use audio keys from the message item
-    let selfKey;
-    let pqEncSharedKey;
-
     // Use urlOverride if provided, otherwise use the main attachment URL
     const mainUrl = linkEl.dataset.url;
     const fetchUrl = urlOverride || mainUrl;
     if (!mainUrl || mainUrl === '#') throw new Error('Missing attachment url');
 
     const isVoice = item.type === 'vm';
-    if (isVoice) {
-      // Voice message: audio keys (fallback to message keys)
-      selfKey = item.audioSelfKey || item.selfKey;
-      pqEncSharedKey = item.audioPqEncSharedKey || item.pqEncSharedKey;
-    } else {
-      // Attachment: look up attachment entry by main url (keys are stored there)
-      const att = Array.isArray(item.xattach) ? item.xattach.find((a) => a?.url === mainUrl) : null;
-      selfKey = att?.selfKey;
-      pqEncSharedKey = att?.pqEncSharedKey;
-    }
-
     let dhkey;
-    if (item.my) {
-      if (!selfKey) throw new Error('Missing selfKey for decrypt');
-      const password = myAccount.keys.secret + myAccount.keys.pqSeed;
-      dhkey = hex2bin(decryptData(selfKey, password, true));
+    
+    // 1) Get encryption key
+    if (isVoice) {
+      // Voice message: use audio keys from the message item (no encKey for voice messages)
+      const selfKey = item.audioSelfKey || item.selfKey;
+      const pqEncSharedKey = item.audioPqEncSharedKey || item.pqEncSharedKey;
+      
+      if (item.my) {
+        if (!selfKey) throw new Error('Missing selfKey for decrypt');
+        const password = myAccount.keys.secret + myAccount.keys.pqSeed;
+        dhkey = hex2bin(decryptData(selfKey, password, true));
+      } else {
+        if (!pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
+        const ok = await ensureContactKeys(this.address);
+        const senderPublicKey = myData.contacts[this.address]?.public;
+        if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
+        const pqCipher = (typeof pqEncSharedKey === 'string') ? base642bin(pqEncSharedKey) : pqEncSharedKey;
+        dhkey = dhkeyCombined(
+          myAccount.keys.secret,
+          senderPublicKey,
+          myAccount.keys.pqSeed,
+          pqCipher
+        ).dhkey;
+      }
     } else {
-      if (!pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
-      const ok = await ensureContactKeys(this.address);
-      const senderPublicKey = myData.contacts[this.address]?.public;
-      if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
-      // dhkeyCombined/pqSharedKey expect ciphertext bytes; accept base64 strings too by converting here.
-      const pqCipher = (typeof pqEncSharedKey === 'string') ? base642bin(pqEncSharedKey) : pqEncSharedKey;
-      dhkey = dhkeyCombined(
-        myAccount.keys.secret,
-        senderPublicKey,
-        myAccount.keys.pqSeed,
-        pqCipher
-      ).dhkey;
+      // Attachment: look up attachment entry by main url
+      const att = Array.isArray(item.xattach) ? item.xattach.find((a) => a?.url === mainUrl) : null;
+      if (!att) throw new Error('Attachment entry not found');
+      
+      // Use encKey if available (new attachments), otherwise fall back to DH-derived keys (migrated/legacy)
+      if (att.encKey) {
+        dhkey = base642bin(att.encKey);
+      } else {
+        const selfKey = att.selfKey;
+        const pqEncSharedKey = att.pqEncSharedKey;
+        
+        if (item.my) {
+          if (!selfKey) throw new Error('Missing selfKey for decrypt');
+          const password = myAccount.keys.secret + myAccount.keys.pqSeed;
+          dhkey = hex2bin(decryptData(selfKey, password, true));
+        } else {
+          if (!pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
+          const ok = await ensureContactKeys(this.address);
+          const senderPublicKey = myData.contacts[this.address]?.public;
+          if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
+          const pqCipher = (typeof pqEncSharedKey === 'string') ? base642bin(pqEncSharedKey) : pqEncSharedKey;
+          dhkey = dhkeyCombined(
+            myAccount.keys.secret,
+            senderPublicKey,
+            myAccount.keys.pqSeed,
+            pqCipher
+          ).dhkey;
+        }
+      }
     }
 
     // 2) Download encrypted bytes (use fetchUrl which may be pUrl or main url)
@@ -15430,6 +15546,9 @@ class ChatModal {
       case 'save':
         void this.saveImageAttachment(row);
         break;
+      case 'share':
+        if (messageEl) shareAttachmentModal.open(messageEl);
+        break;
       case 'reply':
         if (messageEl) this.startReplyToMessage(messageEl);
         break;
@@ -16079,7 +16198,9 @@ class ChatModal {
     if (isNaN(usdValue) || isNaN(libValue)) {
       text = `${tollFloat.toFixed(6)} USD`;
     } else {
-      text = `${usdValue.toFixed(6)} USD (≈ ${libValue.toFixed(6)} LIB)`;
+      // text = `${usdValue.toFixed(6)} USD (≈ ${libValue.toFixed(6)} LIB)`;
+      // Only show USD in display; LIB calculations kept for potential future use
+      text = `${usdValue.toFixed(6)} USD`;
     }
 
     // Calculate libWei using BigInt arithmetic to preserve precision
@@ -17195,6 +17316,342 @@ class CallInviteModal {
 }
 
 const callInviteModal = new CallInviteModal();
+
+/**
+ * Share Attachment Modal
+ * Allows users to select contacts to share an attachment with
+ */
+class ShareAttachmentModal {
+  constructor() {
+    this.messageEl = null;
+    this.attachmentData = null;
+  }
+
+  load() {
+    this.modal = document.getElementById('shareAttachmentModal');
+    this.contactsList = document.getElementById('shareAttachmentContactsList');
+    this.template = document.getElementById('shareAttachmentContactTemplate');
+    this.counter = document.getElementById('shareAttachmentCounter');
+    this.sendButton = document.getElementById('shareAttachmentSendBtn');
+    this.cancelButton = document.getElementById('shareAttachmentCancelBtn');
+    this.closeButton = document.getElementById('closeShareAttachmentModal');
+
+    this.contactsList.addEventListener('change', this.updateCounter.bind(this));
+    this.sendButton.addEventListener('click', this.sendAttachments.bind(this));
+    this.cancelButton.addEventListener('click', () => {
+      this.close();
+    });
+    this.closeButton.addEventListener('click', this.close.bind(this));
+  }
+
+  /**
+   * Opens the share modal and populates contact list.
+   * @param {HTMLElement} messageEl - The message element containing the attachment
+   */
+  open(messageEl) {
+    this.messageEl = messageEl;
+    this.attachmentData = this.extractAttachmentData(messageEl);
+
+    if (!this.attachmentData) {
+      showToast('No attachment data found', 2000, 'error');
+      return;
+    }
+
+    this.contactsList.innerHTML = '';
+    this.modal.classList.add('active');
+
+    // Build contacts list (exclude self and current chat contact) and group by status
+    const currentChatAddress = chatModal.address;
+    const allContacts = Object.values(myData.contacts || {})
+      .filter(c => c.address !== myAccount.address && c.address !== currentChatAddress)
+      .map(c => ({
+        address: c.address,
+        username: c.username || c.address,
+        friend: c.friend || 1
+      }));
+
+    // Group contacts by friend status
+    const groups = {
+      friends: allContacts.filter(c => c.friend === 3).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
+      acquaintances: allContacts.filter(c => c.friend === 2).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
+      others: allContacts.filter(c => ![2,3,0].includes(c.friend)).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
+    };
+
+    if (allContacts.length === 0) {
+      this.modal.querySelector('.empty-state').style.display = 'block';
+      this.updateCounter();
+      return;
+    }
+
+    const sectionMeta = [
+      { key: 'friends', label: 'Friends' },
+      { key: 'acquaintances', label: 'Connections' },
+      { key: 'others', label: 'Tolled' },
+    ];
+
+    for (const { key, label } of sectionMeta) {
+      const list = groups[key];
+      if (!list || list.length === 0) continue;
+      const header = document.createElement('div');
+      header.className = 'call-invite-section-header';
+      header.textContent = label;
+      this.contactsList.appendChild(header);
+
+      for (const contact of list) {
+        const clone = this.template.content ? this.template.content.cloneNode(true) : null;
+        if (!clone) continue;
+        const row = clone.querySelector('.call-invite-contact-row');
+        const checkbox = clone.querySelector('.call-invite-contact-checkbox');
+        const nameSpan = clone.querySelector('.call-invite-contact-name');
+        if (row) row.dataset.address = contact.address || '';
+        if (checkbox) {
+          checkbox.value = contact.address || '';
+          checkbox.id = `share_cb_${(contact.address||'').replace(/[^a-zA-Z0-9]/g,'')}`;
+        }
+        if (nameSpan) nameSpan.textContent = contact.username || contact.address || 'Unknown';
+        const labelEl = clone.querySelector('.call-invite-contact-label');
+        if (labelEl && checkbox) {
+          labelEl.addEventListener('click', (ev) => {
+            if (checkbox.disabled) return;
+            if (ev.target === checkbox) return;
+            ev.preventDefault();
+            checkbox.checked = !checkbox.checked;
+            this.updateCounter();
+          });
+        }
+        this.contactsList.appendChild(clone);
+      }
+    }
+
+    this.updateCounter();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  updateCounter() {
+    const selected = this.contactsList.querySelectorAll('.call-invite-contact-checkbox:checked').length;
+    this.counter.textContent = `${selected} selected (max 10)`;
+    this.sendButton.disabled = selected === 0;
+    const unchecked = Array.from(this.contactsList.querySelectorAll('.call-invite-contact-checkbox:not(:checked)'));
+    if (selected >= 10) {
+      unchecked.forEach(cb => cb.disabled = true);
+    } else {
+      unchecked.forEach(cb => cb.disabled = false);
+    }
+  }
+
+  /**
+   * Extract attachment data from message element
+   * @param {HTMLElement} messageEl
+   * @returns {Object|null} Attachment data
+   */
+  extractAttachmentData(messageEl) {
+    const attachmentRow = messageEl.querySelector('.attachment-row');
+    if (!attachmentRow) return null;
+
+    const url = attachmentRow.dataset.url;
+    const name = attachmentRow.dataset.name;
+    const type = attachmentRow.dataset.type;
+    const msgIdx = attachmentRow.dataset.msgIdx;
+
+    if (!url) return null;
+
+    // Get the actual message data from myData to access encryption keys
+    const contactAddress = chatModal.address;
+    const contact = myData.contacts[contactAddress];
+    
+    if (!contact || !contact.messages || !msgIdx) {
+      console.error('Cannot find message data for attachment');
+      return null;
+    }
+
+    const messageData = contact.messages[parseInt(msgIdx)];
+    if (!messageData || !messageData.xattach || !messageData.xattach[0]) {
+      console.error('Cannot find attachment in message data');
+      return null;
+    }
+
+    const attachmentData = messageData.xattach[0];
+
+    return {
+      url: attachmentData.url,
+      pUrl: attachmentData.pUrl || null,
+      name: attachmentData.name || name || 'attachment',
+      size: attachmentData.size || 0,
+      type: attachmentData.type || type || 'application/octet-stream',
+      encKey: attachmentData.encKey
+    };
+  }
+
+  async sendAttachments() {
+    const selectedBoxes = Array.from(this.contactsList.querySelectorAll('.call-invite-contact-checkbox:checked'));
+    const addresses = selectedBoxes.map(cb => cb.value).slice(0, 10);
+    
+    if (!this.attachmentData) {
+      showToast('No attachment data found', 2000, 'error');
+      return;
+    }
+
+    this.sendButton.disabled = true;
+    this.sendButton.textContent = 'Sending...';
+
+    try {
+      const keys = myAccount.keys;
+      if (!keys) {
+        showToast('Keys not found', 0, 'error');
+        return;
+      }
+
+      // Get the file's encryption key (migration ensures all attachments have encKey)
+      const encKey = this.attachmentData.encKey;
+      if (!encKey) {
+        showToast('Missing encryption key for attachment', 0, 'error');
+        return;
+      }
+
+      for (const addr of addresses) {
+        const contact = myData.contacts[addr];
+        const ok = await ensureContactKeys(addr);
+        if (!ok) {
+          showToast(`Skipping ${contact?.username || addr} (cannot get public key)`, 2000, 'warning');
+          continue;
+        }
+
+        const recipientPubKey = myData.contacts[addr].public;
+        const pqRecPubKey = myData.contacts[addr].pqPublic;
+        
+        // Create new dhkey for sharing recipient
+        const {dhkey: recipientDhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey);
+
+        // Create attachment object - encKey will be encrypted in the message envelope
+        const sharedAttachment = {
+          url: this.attachmentData.url,
+          pUrl: this.attachmentData.pUrl,
+          name: this.attachmentData.name,
+          size: this.attachmentData.size,
+          type: this.attachmentData.type,
+          encKey: encKey  // File encryption key (will be encrypted with message)
+        };
+
+        // Build message with attachment
+        const messageObj = {
+          type: 'message',
+          message: '',  // Empty message text
+          attachments: [sharedAttachment]
+        };
+
+        const encMessage = encryptChacha(recipientDhkey, stringify(messageObj));
+        
+        // For ourselves: re-encrypt encKey with our password for local storage
+        const password = keys.secret + keys.pqSeed;
+        const selfKey = encryptData(bin2hex(base642bin(encKey)), password, true);
+
+        const messagePayload = {
+          message: encMessage,
+          encrypted: true,
+          encryptionMethod: 'xchacha20poly1305',
+          pqEncSharedKey: bin2base64(cipherText),
+          selfKey: selfKey,
+          sent_timestamp: getCorrectedTimestamp()
+        };
+
+        // Get toll amount
+        const sortedAddresses = [longAddress(keys.address), longAddress(addr)].sort();
+        const chatId = hashBytes(sortedAddresses.join(''));
+        const chatIdAccount = await queryNetwork(`/messages/${chatId}/toll`);
+        const toIndex = sortedAddresses.indexOf(longAddress(addr));
+        const tollRequiredToSend = chatIdAccount?.toll?.required?.[toIndex] ?? 1;
+
+        if (tollRequiredToSend === 2) {
+          showToast(`You cannot share with ${contact?.username || addr} (you are blocked)`, 0, 'warning');
+          continue;
+        }
+        
+        // Calculate toll amount: 0 for connections, recipient's required toll for others
+        let tollInLib = tollRequiredToSend === 0 ? 0n : (contact.toll || 0n);
+        
+        // Add network fee to the toll amount
+        tollInLib = tollInLib + getTransactionFeeWei();
+        // if (tollRequiredToSend === 1) {
+        //   const username = (contact?.username) || `${addr.slice(0, 8)}...${addr.slice(-6)}`;
+        //   showToast(`You can only share with people who have added you as a connection. Ask ${username} to add you as a connection`, 0, 'info');
+        //   continue;
+        // }
+
+        const chatMessageObj = await chatModal.createChatMessage(addr, messagePayload, tollInLib, keys);
+        await signObj(chatMessageObj, keys);
+        const txid = getTxid(chatMessageObj);
+
+        // Create new message object for local display (with encKey in plaintext for our use)
+        const newMessage = {
+          message: '',
+          timestamp: messagePayload.sent_timestamp,
+          sent_timestamp: messagePayload.sent_timestamp,
+          my: true,
+          txid: txid,
+          status: 'sent',
+          xattach: [{
+            url: this.attachmentData.url,
+            pUrl: this.attachmentData.pUrl,
+            name: this.attachmentData.name,
+            size: this.attachmentData.size,
+            type: this.attachmentData.type,
+            encKey: encKey  // Store in plaintext locally
+          }]
+        };
+        insertSorted(contact.messages, newMessage, 'timestamp');
+
+        // Update chats list
+        const chatUpdate = {
+          address: addr,
+          timestamp: newMessage.sent_timestamp,
+          txid: txid,
+        };
+
+        const existingChatIndex = myData.chats.findIndex((chat) => chat.address === addr);
+        if (existingChatIndex !== -1) {
+          myData.chats.splice(existingChatIndex, 1);
+        }
+        insertSorted(myData.chats, chatUpdate, 'timestamp');
+
+        // Update the chat modal UI if open
+        if (chatModal.isActive() && chatModal.address === addr) {
+          chatModal.appendChatModal();
+        }
+
+        // Send the message transaction
+        const response = await injectTx(chatMessageObj, txid);
+
+        if (!response || !response.result || !response.result.success) {
+          console.error('attachment share message failed to send', response);
+          updateTransactionStatus(txid, addr, 'failed', 'message');
+          if (chatModal.isActive() && chatModal.address === addr) {
+            chatModal.appendChatModal();
+          }
+          showToast(`Failed to share with ${contact?.username || addr}`, 3000, 'error');
+        } else {
+          showToast(`Attachment shared with ${contact?.username || addr}`, 3000, 'success');
+        }
+      }
+
+    } catch (err) {
+      console.error('Share send error', err);
+      showToast('Failed to share attachment', 0, 'error');
+    } finally {
+      this.sendButton.disabled = false;
+      this.sendButton.textContent = 'Share';
+      this.close();
+    }
+  }
+}
+
+const shareAttachmentModal = new ShareAttachmentModal();
 
 /**
  * Share Contacts Modal
@@ -19484,10 +19941,12 @@ class NewChatModal {
     this.scanButton = document.getElementById('newChatScanQRButton');
     this.uploadButton = document.getElementById('newChatUploadQRButton');
     this.hiddenFileInput = document.getElementById('newChatQRFileInput');
+    this.inviteButton = document.getElementById('newChatInviteButton');
 
     this.scanButton.addEventListener('click', () => this.scanUsernameFromQR());
     this.uploadButton.addEventListener('click', () => this.hiddenFileInput.click());
     this.hiddenFileInput.addEventListener('change', (e) => this.handleQRImageUpload(e.target.files?.[0] || null));
+    this.inviteButton.addEventListener('click', () => this.handleInviteClick());
   }
 
   /**
@@ -19768,6 +20227,16 @@ class NewChatModal {
         this.submitButton.disabled = true;
       }
     }, 1000);
+  }
+
+  /**
+   * Invoked when the user clicks the Invite button
+   * It will close the new chat modal and open the invite modal
+   * @returns {void}
+   */
+  handleInviteClick() {
+    this.closeNewChatModal();
+    inviteModal.open();
   }
 }
 
