@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'
+const version = 'r'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -555,6 +555,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Settings Modal
   settingsModal.load();
+
+  // Manage Contacts Modal
+  manageContactsModal.load();
 
   // Secret Modal
   secretModal.load();
@@ -1671,13 +1674,10 @@ class WalletScreen {
 
   open() {
     this.screen.classList.add('active');
-    // Show testnet warning toast if on testnet and not shown this session
-    if (!this.isMainnet()) {
-      const hasBeenShown = sessionStorage.getItem('testnetWarningShown');
-      if (hasBeenShown !== 'true') {
-        showToast('The LIB in this Testnet is not of any value and will not be transferred to the Mainnet.', 0, 'info');
-        sessionStorage.setItem('testnetWarningShown', 'true');
-      }
+    // Show testnet warning toast once per account (first-time tip).
+    if (!this.isMainnet() && !checkFirstTimeTip('testnetWarning')) {
+      showToast('The LIB in this Testnet is not of any value and will not be transferred to the Mainnet.', 0, 'info');
+      setFirstTimeTipShown('testnetWarning');
     }
   }
 
@@ -2661,6 +2661,9 @@ class SettingsModal {
     this.callsButton = document.getElementById('openCallsModal');
     this.callsButton.addEventListener('click', () => callsModal.open());
     
+    this.contactsButton = document.getElementById('openManageContactsModal');
+    this.contactsButton.addEventListener('click', () => manageContactsModal.open());
+    
     this.profileButton = document.getElementById('openAccountForm');
     this.profileButton.addEventListener('click', () => myProfileModal.open());
     
@@ -2715,6 +2718,124 @@ class SettingsModal {
 }
 
 const settingsModal = new SettingsModal();
+
+/**
+ * Manage Contacts Modal
+ * Allows users to import contacts from a VCF file
+ */
+class ManageContactsModal {
+  constructor() {
+    this.selectedFile = null;
+  }
+
+  load() {
+    this.modal = document.getElementById('manageContactsModal');
+    this.closeButton = document.getElementById('closeManageContactsModal');
+    this.fileInput = document.getElementById('manageContactsFileInput');
+    this.selectedFileDisplay = document.getElementById('manageContactsSelectedFile');
+    this.clearFileBtn = document.getElementById('manageContactsClearFile');
+    this.importBtn = document.getElementById('manageContactsImportBtn');
+
+    // Event listeners
+    this.closeButton.addEventListener('click', () => this.close());
+    this.fileInput.addEventListener('change', (e) => this.handleFileSelected(e));
+    this.clearFileBtn.addEventListener('click', () => this.clearFile());
+    this.importBtn.addEventListener('click', () => this.handleImport());
+  }
+
+  /**
+   * Opens the manage contacts modal
+   */
+  open() {
+    this.clearFile();
+    this.modal.classList.add('active');
+    enterFullscreen();
+  }
+
+  /**
+   * Closes the modal
+   */
+  close() {
+    this.modal.classList.remove('active');
+    this.clearFile();
+    enterFullscreen();
+  }
+
+  /**
+   * Checks if the modal is active
+   * @returns {boolean}
+   */
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
+  }
+
+  /**
+   * Handles file selection
+   * @param {Event} e - Change event
+   */
+  handleFileSelected(e) {
+    const file = e.target.files?.[0];
+    if (!file) {
+      this.clearFile();
+      return;
+    }
+
+    // Validate file type
+    const isVcf = file.name.toLowerCase().endsWith('.vcf') || 
+                  file.type === 'text/vcard' || 
+                  file.type === 'text/x-vcard';
+    if (!isVcf) {
+      showToast('Please select a VCF file', 2000, 'error');
+      this.clearFile();
+      return;
+    }
+
+    this.selectedFile = file;
+    this.selectedFileDisplay.style.display = 'flex';
+    this.selectedFileDisplay.querySelector('.selected-file-name').textContent = file.name;
+    this.fileInput.style.display = 'none';
+    this.importBtn.disabled = false;
+  }
+
+  /**
+   * Clears the selected file
+   */
+  clearFile() {
+    this.selectedFile = null;
+    this.fileInput.value = '';
+    this.fileInput.style.display = 'block';
+    this.selectedFileDisplay.style.display = 'none';
+    this.importBtn.disabled = true;
+  }
+
+  /**
+   * Handles the import button click
+   */
+  async handleImport() {
+    if (!this.selectedFile) {
+      showToast('Please select a VCF file first', 2000, 'error');
+      return;
+    }
+
+    try {
+      // Read the file content
+      const vcfContent = await this.selectedFile.text();
+
+      // Close this modal
+      this.close();
+
+      // Open the import contacts modal with local VCF content
+      // The import modal handles network ID validation and parsing
+      importContactsModal.open({ vcfContent, isLocal: true });
+
+    } catch (err) {
+      console.error('Failed to read VCF file:', err);
+      showToast('Failed to read the VCF file', 0, 'error');
+    }
+  }
+}
+
+const manageContactsModal = new ManageContactsModal();
 
 class SecretModal {
   constructor() { }
@@ -16227,13 +16348,16 @@ class ChatModal {
    */
   updateTollAmountUI(address) {
     const tollValue = document.getElementById('tollValue');
-    tollValue.style.color = 'black';
+    const tollLabel = document.getElementById('tollLabel');
     const contact = myData.contacts[address] || {};
     const isOffline = !isOnline;
 
+    // Remove any existing color classes
+    tollValue.classList.remove('toll-cost', 'toll-free');
+
     // If offline and no cached toll, show a clear offline status and exit
     if (isOffline && (contact.toll === undefined || contact.toll === null)) {
-      tollValue.style.color = 'black';
+      tollLabel.textContent = 'Toll:';
       tollValue.textContent = 'offline';
       this.toll = 0n;
       this.tollUnit = 'LIB';
@@ -16248,14 +16372,25 @@ class ChatModal {
 
     let display;
     if (contact.tollRequiredToSend == 1) {
-      display = `${usdString}`;
+      // Toll is required - show as "Toll cost:" with amount in red
+      tollLabel.textContent = 'Toll cost:';
+      display = usdString;
+      // if the value of toll is 0, use toll-free class instead
+      if(contact.toll == 0n) {  
+        tollValue.classList.add('toll-free');
+      } else {
+        tollValue.classList.add('toll-cost');
+      }
     } else if (contact.tollRequiredToSend == 2) {
-      tollValue.style.color = 'red';
-      display = `blocked`;
+      // User is blocked - show as "Toll cost:" with "blocked" in red
+      tollLabel.textContent = 'Toll cost:';
+      display = 'blocked';
+      tollValue.classList.add('toll-cost');
     } else {
-      // light green used to show success
-      tollValue.style.color = '#28a745';
-      display = `free; ${usdString}`;
+      // Toll is free - show as "Toll free:" with amount in green
+      tollLabel.textContent = 'Toll free:';
+      display = usdString;
+      tollValue.classList.add('toll-free');
     }
     tollValue.textContent = display;
 
@@ -18180,21 +18315,25 @@ class ImportContactsModal {
   }
 
   /**
-   * Opens the import contacts modal with an attachment
+   * Opens the import contacts modal with an attachment or local VCF file
    * @param {Object} attachment - The VCF attachment object with url, pqEncSharedKey, selfKey
+   *                              OR { vcfContent: string, isLocal: true } for local file uploads
    */
   async open(attachment) {
+    const isLocalUpload = attachment?.isLocal === true;
+
     // Reset state
     this.selectedContacts.clear();
     this.warningShown = false;
     this.isImporting = false;
     this.parsedContacts = [];
-    this.currentAttachment = attachment;
-    this.recipientAddress = attachment?.senderAddress || null;
+    this.currentAttachment = isLocalUpload ? null : attachment;
+    this.recipientAddress = isLocalUpload ? null : (attachment?.senderAddress || null);
     this.doneButton.classList.remove('loading');
     this.doneButton.disabled = true;
     this.allNoneButton.classList.remove('all-selected');
     this.allNoneButton.setAttribute('aria-label', 'Select all');
+    this.allNoneButton.disabled = false;
 
     // Clear existing list
     this.contactsList.innerHTML = '';
@@ -18220,8 +18359,8 @@ class ImportContactsModal {
       return;
     }
 
-    // Check contact status if recipient address is provided
-    if (this.recipientAddress) {
+    // Check contact status if recipient address is provided (skip for local uploads - user explicitly chose the file)
+    if (!isLocalUpload && this.recipientAddress) {
       const recipient = myData.contacts[this.recipientAddress];
       if (recipient && recipient.friend !== 2) {
         // Recipient is not a connection - show warning
@@ -18245,8 +18384,8 @@ class ImportContactsModal {
     this.loadingState.style.display = 'flex';
 
     try {
-      // Download and decrypt the VCF file
-      const vcfContent = await this.downloadAndDecryptVcf(attachment);
+      // Get VCF content - either from local file or download/decrypt from attachment
+      const vcfContent = isLocalUpload ? attachment.vcfContent : await this.downloadAndDecryptVcf(attachment);
       
       // Extract and validate network ID from first vCard before parsing all contacts
       const netId = this.extractNetId(vcfContent);
@@ -20231,11 +20370,10 @@ class NewChatModal {
 
   /**
    * Invoked when the user clicks the Invite button
-   * It will close the new chat modal and open the invite modal
+   * It will open the invite modal without closing newChatModal
    * @returns {void}
    */
   handleInviteClick() {
-    this.closeNewChatModal();
     inviteModal.open();
   }
 }
