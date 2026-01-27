@@ -1,4 +1,5 @@
 import { CONFIG } from '../config.js';
+import { formatTxMessage, extractErrorMessage, normalizeErrorMessage, formatSignatureError } from '../utils/transaction-helpers.js';
 
 export class ProposalDetailModal {
   constructor() {
@@ -96,12 +97,13 @@ export class ProposalDetailModal {
     if (!this.current?.event?.operationId) return;
     const opId = this.current.event.operationId;
 
+    const toast = window.toastManager;
     const contractManager = window.contractManager;
     const walletManager = window.walletManager;
     const networkManager = window.networkManager;
 
     if (!networkManager?.isTxEnabled?.()) {
-      window.alert('Connect MetaMask on Polygon to sign.');
+      toast?.error?.('Connect MetaMask on Polygon to sign.');
       return;
     }
 
@@ -111,7 +113,7 @@ export class ProposalDetailModal {
     const address = walletManager?.getAddress?.();
 
     if (!read || !write || !signer) {
-      window.alert('Wallet/signing not ready.');
+      toast?.error?.('Wallet/signing not ready.');
       return;
     }
 
@@ -119,7 +121,7 @@ export class ProposalDetailModal {
     try {
       const isSigner = await read.isSigner(address);
       if (!isSigner) {
-        window.alert('This wallet is not a signer for this contract.');
+        toast?.error?.('This wallet is not a signer for this contract.');
         return;
       }
     } catch {
@@ -128,23 +130,33 @@ export class ProposalDetailModal {
 
     // prevent signing executed/expired ops
     if (this.current.details?.executed) {
-      window.alert('This operation is already executed.');
+      toast?.error?.('This operation is already executed.');
       return;
     }
     if (this.current.details?.expired) {
-      window.alert('This operation is expired.');
+      toast?.error?.('This operation is expired.');
       return;
     }
 
     this.signBtn.disabled = true;
     this.signBtn.textContent = 'Signing…';
 
+    const signingId = toast?.loading?.('Signing proposal…', { id: 'proposal-sign', delayMs: 100 });
+    let confirmationId = null;
+    let confirmationUpdated = false; // Track if confirmation toast was updated to success/error
+
     try {
       const hash = await read.getOperationHash(opId);
       const sig = await signer.signMessage(window.ethers.utils.arrayify(hash));
       const tx = await write.submitSignature(opId, sig);
 
-      window.alert(`Submitted signature: ${tx.hash}`);
+      // Dismiss signing toast and show confirmation toast
+      toast?.dismiss?.(signingId);
+      confirmationId = toast?.loading?.('Waiting for confirmation…', { id: 'proposal-sign-confirm', title: 'Confirming', delayMs: 0 });
+      
+      // Update button text to "Confirming…" while waiting for confirmation
+      this.signBtn.textContent = 'Confirming…';
+
       await tx.wait();
 
       // Refresh details in modal
@@ -154,9 +166,53 @@ export class ProposalDetailModal {
 
       // Notify list to refresh row
       document.dispatchEvent(new CustomEvent('proposalSigned', { detail: { operationId: opId } }));
+
+      // Dismiss confirmation toast and create a fresh success toast to ensure it's visible
+      if (confirmationId) {
+        toast?.dismiss?.(confirmationId);
+      }
+      
+      // Format message with clickable transaction hash link on its own line
+      const message = formatTxMessage(tx.hash);
+      
+      // Create success toast (user must dismiss manually)
+      toast?.success?.(message, {
+        title: 'Signature submitted',
+        id: 'proposal-sign-success',
+        timeoutMs: 0, // User must dismiss manually
+        allowHtml: true,
+      });
+      confirmationUpdated = true;
     } catch (e) {
-      window.alert(e?.message || 'Failed to submit signature');
+      // Dismiss any loading toasts first
+      if (signingId) {
+        toast?.dismiss?.(signingId);
+      }
+      if (confirmationId) {
+        toast?.dismiss?.(confirmationId);
+      }
+      
+      // Extract and normalize error message
+      let errorMessage = extractErrorMessage(e, 'Failed to submit signature');
+      errorMessage = normalizeErrorMessage(errorMessage);
+      
+      // Detect "Signature already submitted" and show user-friendly message
+      const { title: errorTitle, message: errorMsg } = formatSignatureError(errorMessage);
+      
+      // Create a dedicated error toast that will persist
+      const errorId = 'proposal-sign-error';
+      toast?.error?.(errorMsg, {
+        title: errorTitle,
+        id: errorId,
+        timeoutMs: 0, // Errors persist until user dismisses
+      });
+      confirmationUpdated = true;
     } finally {
+      // Dismiss confirmation toast if it's still in loading state (button re-enabled)
+      // Success/error toasts will remain visible
+      if (confirmationId && !confirmationUpdated) {
+        toast?.dismiss?.(confirmationId);
+      }
       this.signBtn.textContent = 'Sign';
       this.signBtn.disabled = false;
       this._updateSignButtonState();
