@@ -897,7 +897,7 @@
                 </div>
               </div>
               <!-- My info fields -->
-              <div class="contact-info-item" style="display: block">
+              <div class="contact-info-item" style="display: flex">
                 <div class="contact-info-label">Name</div>
                 <div class="contact-info-value-container">
                   <div class="contact-info-value" id="myInfoName"></div>
@@ -1005,7 +1005,7 @@
               </div>
               <div class="form-group">
                 <label for="importPassword">
-                  Password
+                  File Password
                   <span id="importPasswordRequired" style="color: var(--danger-color); display: none;">required</span>
                 </label>
                 <input
@@ -1501,14 +1501,6 @@
                 <!-- Contacts will be populated here -->
               </div>
             </div>
-            <template id="callInviteContactTemplate">
-              <div class="call-invite-contact-row" data-address="">
-                <label class="call-invite-contact-label">
-                  <input type="checkbox" class="call-invite-contact-checkbox" value="" />
-                  <span class="call-invite-contact-name"></span>
-                </label>
-              </div>
-            </template>
             <div class="call-invite-modal-footer">
               <div id="callInviteCounter" class="call-invite-counter">0 selected (max 10)</div>
               <div class="call-invite-footer-actions">
@@ -2163,7 +2155,7 @@
               </div>
               <div class="form-group">
                 <label for="backupPassword">
-                  Password
+                  File Password
                   <span id="backupPasswordWarning" style="color: #dc3545; display: none">too short</span>
                   <span id="backupPasswordRequired" style="color: #dc3545; display: none">required</span>
                 </label>
@@ -2176,14 +2168,14 @@
               </div>
               <div class="form-group">
                 <label for="backupPasswordConfirm">
-                  Confirm Password
+                  Confirm File Password
                   <span id="backupPasswordConfirmWarning" style="color: #dc3545; display: none">passwords don't match</span>
                 </label>
                 <input
                   type="password"
                   id="backupPasswordConfirm"
                   class="form-control"
-                  placeholder="Confirm your password"
+                  placeholder="Confirm your file password"
                 />
               </div>
               <div class="form-actions">
