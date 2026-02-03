@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Liberdus Status System</title>
+  <link
+    rel="icon"
+    type="image/png"
+    href="https://liberdus.com/site/img/logo.png"
+  >
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="page">
+    <header class="site-header">
+      <a
+        href="https://discord.com"
+        class="brand-link"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <img
+          src="https://liberdus.com/token/assets/logo.png"
+          alt="Liberdus logo"
+          class="brand-logo"
+        >
+        <div class="brand-text">
+          <div class="brand-title-row">
+            <span class="brand-title-main">Liberdus</span>
+            <span class="brand-title-version">(0.0.10)</span>
+          </div>
+          <div class="brand-subtitle">Service Status</div>
+        </div>
+      </a>
+    </header>
+
+    <div class="status-banner overall-status" id="overall-status-pill">
+      <span id="overall-status-label">All Systems Operational</span>
+    </div>
+
+    <main class="site-main">
+      <section class="section section-uptime">
+        <div class="uptime-header">
+          <div class="uptime-header-left">
+            <h1 class="uptime-title">Service status</h1>
+          </div>
+          <div class="uptime-header-right">
+            <span class="uptime-caption">Recent uptime history by interval.</span>
+            <a href="#" class="uptime-link" id="uptime-history-link">View historical uptime.</a>
+            <div class="uptime-filter">
+              <span id="uptime-interval-label" class="uptime-filter-label">Interval: 1 day</span>
+              <select id="uptime-interval-select" class="uptime-filter-select">
+                <option value="5m">5 minutes</option>
+                <option value="10m">10 minutes</option>
+                <option value="20m">20 minutes</option>
+                <option value="30m">30 minutes</option>
+                <option value="1h">1 hour</option>
+                <option value="1d" selected>1 day</option>
+              </select>
+              <span id="network-filter-label" class="uptime-filter-label">Network: Devnet</span>
+              <select id="network-filter-select" class="uptime-filter-select">
+                <option value="devnet" selected>Devnet</option>
+                <option value="testnet">Testnet</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div id="service-uptime-list" class="service-uptime-list"></div>
+        <div id="historical-uptime-panel" class="historical-uptime-panel hidden">
+          <div class="historical-header">
+            <div class="historical-title">Historical uptime (last 90 days, UTC)</div>
+            <button id="historical-close-button" class="historical-close-button" type="button">Close</button>
+          </div>
+          <div id="historical-calendar-grid" class="historical-calendar-grid"></div>
+        </div>
+      </section>
+    </main>
+
+    <div id="uptime-tooltip" class="uptime-tooltip"></div>
+
+    <footer class="site-footer">
+      <div class="footer-left">
+        <span class="footer-brand">Status</span>
+        <span class="footer-divider">•</span>
+        <span>Realtime uptime at a glance</span>
+      </div>
+      <div class="footer-right">
+        <span id="backend-status-label" class="backend-status-label">Status server: checking…</span>
+        <span class="footer-divider">•</span>
+        <span id="last-updated-label">Last updated: just now</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
