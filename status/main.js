@@ -141,15 +141,15 @@ async function loadBackendHistory(days, interval) {
       const rawHistory = Array.isArray(service.history)
         ? service.history
         : [];
-    const counts = service.counts || {};
-    const countsUp = Array.isArray(counts.up) ? counts.up : [];
-    const countsSlow = Array.isArray(counts.slow) ? counts.slow : [];
-    const countsIssue = Array.isArray(counts.issue) ? counts.issue : [];
-    const countsDown = Array.isArray(counts.down) ? counts.down : [];
-    const countsTotal = Array.isArray(counts.total) ? counts.total : [];
-    const firstDownAtArray = Array.isArray(service.firstDownAt)
-      ? service.firstDownAt
-      : [];
+      const counts = service.counts || {};
+      const countsUp = Array.isArray(counts.up) ? counts.up : [];
+      const countsSlow = Array.isArray(counts.slow) ? counts.slow : [];
+      const countsIssue = Array.isArray(counts.issue) ? counts.issue : [];
+      const countsDown = Array.isArray(counts.down) ? counts.down : [];
+      const countsTotal = Array.isArray(counts.total) ? counts.total : [];
+      const firstDownAtArray = Array.isArray(service.firstDownAt)
+        ? service.firstDownAt
+        : [];
       if (!rawHistory.length) {
         historyByService.set(service.id, []);
         continue;
