@@ -71,7 +71,7 @@ body {
 }
 
 .brand-logo {
-  width: 32px;
+  width: 115px;
   height: 32px;
   border-radius: 999px;
   display: flex;
@@ -523,7 +523,11 @@ body {
   background: #16a34a;
 }
 
-.uptime-bar-partial {
+.uptime-bar-slow {
+  background: #facc15;
+}
+
+.uptime-bar-issue {
   background: #f59e0b;
 }
 

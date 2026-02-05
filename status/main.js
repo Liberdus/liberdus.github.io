@@ -141,6 +141,15 @@ async function loadBackendHistory(days, interval) {
       const rawHistory = Array.isArray(service.history)
         ? service.history
         : [];
+      const counts = service.counts || {};
+      const countsUp = Array.isArray(counts.up) ? counts.up : [];
+      const countsSlow = Array.isArray(counts.slow) ? counts.slow : [];
+      const countsIssue = Array.isArray(counts.issue) ? counts.issue : [];
+      const countsDown = Array.isArray(counts.down) ? counts.down : [];
+      const countsTotal = Array.isArray(counts.total) ? counts.total : [];
+      const firstDownAtArray = Array.isArray(service.firstDownAt)
+        ? service.firstDownAt
+        : [];
       if (!rawHistory.length) {
         historyByService.set(service.id, []);
         continue;
@@ -158,6 +167,11 @@ async function loadBackendHistory(days, interval) {
             : Number(pctRaw);
         const timestamp = startTimeMs + index * intervalMs;
         const date = new Date(timestamp);
+        const firstDownMs = firstDownAtArray[index];
+        const firstDownAt =
+          typeof firstDownMs === "number" && Number.isFinite(firstDownMs)
+            ? new Date(firstDownMs)
+            : null;
         const state =
           successPctValue == null || Number.isNaN(successPctValue)
             ? "up"
@@ -166,6 +180,12 @@ async function loadBackendHistory(days, interval) {
           date,
           state,
           successPct: successPctValue,
+          total: countsTotal[index] != null ? countsTotal[index] : null,
+          upCount: countsUp[index] != null ? countsUp[index] : null,
+          slowCount: countsSlow[index] != null ? countsSlow[index] : null,
+          issueCount: countsIssue[index] != null ? countsIssue[index] : null,
+          downCount: countsDown[index] != null ? countsDown[index] : null,
+          firstDownAt,
         });
       }
       historyByService.set(service.id, list);
@@ -519,9 +539,9 @@ function getMaxHistoryPoints() {
 
 function classifyStateFromPct(successPct) {
   if (successPct == null || Number.isNaN(successPct)) return "up";
-  if (successPct < 10) return "down";
-  if (successPct < 50) return "partial";
-  if (successPct < 95) return "partial";
+  if (successPct <= 0) return "down";
+  if (successPct <= 20) return "issue";
+  if (successPct < 100) return "slow";
   return "up";
 }
 
@@ -686,6 +706,31 @@ function buildServiceHistory(service, days) {
           date,
           state,
           successPct: successPctValue,
+          total:
+            entry.total != null && !Number.isNaN(entry.total)
+              ? entry.total
+              : null,
+          upCount:
+            entry.upCount != null && !Number.isNaN(entry.upCount)
+              ? entry.upCount
+              : null,
+          slowCount:
+            entry.slowCount != null && !Number.isNaN(entry.slowCount)
+              ? entry.slowCount
+              : null,
+          issueCount:
+            entry.issueCount != null && !Number.isNaN(entry.issueCount)
+              ? entry.issueCount
+              : null,
+          downCount:
+            entry.downCount != null && !Number.isNaN(entry.downCount)
+              ? entry.downCount
+              : null,
+          firstDownAt:
+            entry.firstDownAt instanceof Date &&
+            !Number.isNaN(entry.firstDownAt.getTime())
+              ? entry.firstDownAt
+              : null,
         });
       }
       if (result.length) {
@@ -726,24 +771,104 @@ function handleBarEnter(event) {
   const dateValue = bar.dataset.date;
   const pctValue = bar.dataset.pct;
   const pctNumber = pctValue ? Number(pctValue) : null;
+  const totalValue = bar.dataset.total ? Number(bar.dataset.total) : null;
+  const upValue = bar.dataset.up ? Number(bar.dataset.up) : null;
+  const slowValue = bar.dataset.slow ? Number(bar.dataset.slow) : null;
+  const issueValue = bar.dataset.issue ? Number(bar.dataset.issue) : null;
+  const downValue = bar.dataset.down ? Number(bar.dataset.down) : null;
+  const firstDownAtValue = bar.dataset.firstDownAt;
   const date = dateValue ? new Date(dateValue) : null;
+  const firstDownAt =
+    firstDownAtValue && typeof firstDownAtValue === "string"
+      ? new Date(firstDownAtValue)
+      : null;
   let statusLabel = "Unknown";
   let description = "";
   if (status === "up") {
     statusLabel = "Operational";
-  } else if (status === "partial") {
-    statusLabel = "Partial outage";
+  } else if (status === "slow") {
+    statusLabel = "Latency detected";
+  } else if (status === "issue") {
+    statusLabel = "Degraded";
   } else if (status === "down") {
     statusLabel = "Complete outage";
   }
-  if (pctNumber != null && !Number.isNaN(pctNumber)) {
+  if (
+    totalValue != null &&
+    !Number.isNaN(totalValue) &&
+    totalValue > 0 &&
+    (upValue != null ||
+      slowValue != null ||
+      issueValue != null ||
+      downValue != null)
+  ) {
+    const upCount = upValue != null && !Number.isNaN(upValue) ? upValue : 0;
+    const slowCount =
+      slowValue != null && !Number.isNaN(slowValue) ? slowValue : 0;
+    const issueCount =
+      issueValue != null && !Number.isNaN(issueValue) ? issueValue : 0;
+    const downCount =
+      downValue != null && !Number.isNaN(downValue) ? downValue : 0;
+    const parts = [];
+    if (downCount > 0) {
+      const pct = (downCount / totalValue) * 100;
+      parts.push(
+        `Down: ${downCount}/${totalValue} (${pct.toFixed(1)}%)`
+      );
+    }
+    if (issueCount > 0) {
+      const pct = (issueCount / totalValue) * 100;
+      parts.push(
+        `Degraded: ${issueCount}/${totalValue} (${pct.toFixed(1)}%)`
+      );
+    }
+    if (slowCount > 0) {
+      const pct = (slowCount / totalValue) * 100;
+      parts.push(
+        `Latency: ${slowCount}/${totalValue} (${pct.toFixed(1)}%)`
+      );
+    }
+    if (upCount > 0) {
+      const pct = (upCount / totalValue) * 100;
+      parts.push(
+        `Up: ${upCount}/${totalValue} (${pct.toFixed(1)}%)`
+      );
+    }
+    if (parts.length) {
+      description = parts.join(" • ");
+    } else if (pctNumber != null && !Number.isNaN(pctNumber)) {
+      description = `${pctNumber.toFixed(
+        1
+      )}% successful checks during this period.`;
+    }
+    if (
+      status === "down" &&
+      firstDownAt &&
+      !Number.isNaN(firstDownAt.getTime()) &&
+      downCount > 0 &&
+      downCount < totalValue
+    ) {
+      const firstDownLabel = `${firstDownAt.toLocaleDateString(undefined, {
+        timeZone: "UTC",
+        month: "short",
+        day: "2-digit",
+      })} ${firstDownAt.toLocaleTimeString(undefined, {
+        timeZone: "UTC",
+        hour: "2-digit",
+        minute: "2-digit",
+      })} UTC`;
+      statusLabel = `First outage detected: ${firstDownLabel}`;
+    }
+  } else if (pctNumber != null && !Number.isNaN(pctNumber)) {
     description = `${pctNumber.toFixed(
       1
     )}% successful checks during this period.`;
   } else if (status === "up") {
     description = "No downtime recorded during this period.";
-  } else if (status === "partial") {
-    description = "Partial outage recorded during this period.";
+  } else if (status === "slow") {
+    description = "Latency detected during this period.";
+  } else if (status === "issue") {
+    description = "Degraded performance recorded during this period.";
   } else if (status === "down") {
     description = "Complete outage recorded during this period.";
   }
@@ -863,8 +988,10 @@ function renderServiceUptimeList(services, days) {
         bar.className = "uptime-bar";
         if (entry.state === "up") {
           bar.classList.add("uptime-bar-up");
-        } else if (entry.state === "partial") {
-          bar.classList.add("uptime-bar-partial");
+        } else if (entry.state === "slow") {
+          bar.classList.add("uptime-bar-slow");
+        } else if (entry.state === "issue") {
+          bar.classList.add("uptime-bar-issue");
         } else if (entry.state === "down") {
           bar.classList.add("uptime-bar-down");
         }
@@ -872,6 +999,27 @@ function renderServiceUptimeList(services, days) {
         bar.dataset.status = entry.state;
         bar.dataset.service = service.name;
         bar.dataset.pct = entry.successPct.toFixed(1);
+        if (entry.total != null && !Number.isNaN(entry.total)) {
+          bar.dataset.total = String(entry.total);
+        }
+        if (entry.upCount != null && !Number.isNaN(entry.upCount)) {
+          bar.dataset.up = String(entry.upCount);
+        }
+        if (entry.slowCount != null && !Number.isNaN(entry.slowCount)) {
+          bar.dataset.slow = String(entry.slowCount);
+        }
+        if (entry.issueCount != null && !Number.isNaN(entry.issueCount)) {
+          bar.dataset.issue = String(entry.issueCount);
+        }
+        if (entry.downCount != null && !Number.isNaN(entry.downCount)) {
+          bar.dataset.down = String(entry.downCount);
+        }
+        if (
+          entry.firstDownAt instanceof Date &&
+          !Number.isNaN(entry.firstDownAt.getTime())
+        ) {
+          bar.dataset.firstDownAt = entry.firstDownAt.toISOString();
+        }
         bar.addEventListener("mouseenter", handleBarEnter);
         bar.addEventListener("mouseleave", handleBarLeave);
         bars.appendChild(bar);
@@ -939,8 +1087,10 @@ function buildDailyHistoryMap() {
       if (prev) {
         if (prev === "down" || state === "down") {
           nextState = "down";
-        } else if (prev === "partial" || state === "partial") {
-          nextState = "partial";
+        } else if (prev === "issue" || state === "issue") {
+          nextState = "issue";
+        } else if (prev === "slow" || state === "slow") {
+          nextState = "slow";
         } else {
           nextState = "up";
         }
