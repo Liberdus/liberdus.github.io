@@ -891,7 +891,7 @@ function handleBarEnter(event) {
   tooltip.innerHTML = `${firstLine}<br>${secondLine}<br>${details}`;
   const rect = bar.getBoundingClientRect();
   tooltip.style.left = `${rect.left + rect.width / 2}px`;
-  tooltip.style.top = `${rect.top - 8}px`;
+  tooltip.style.top = `${rect.bottom + 8}px`;
   tooltip.classList.add("visible");
 }
 

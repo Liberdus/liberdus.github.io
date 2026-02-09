@@ -399,6 +399,7 @@ body {
 }
 
 .uptime-link:hover {
+  
   text-decoration: underline;
 }
 
@@ -739,7 +740,7 @@ body {
   font-size: 11px;
   pointer-events: none;
   opacity: 0;
-  transform: translate(-50%, -4px);
+  transform: translate(-50%, 4px);
   transition: opacity 0.12s ease, transform 0.12s ease;
 }
 
