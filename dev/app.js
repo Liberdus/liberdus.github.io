@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 't'
+const version = 'u'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -139,6 +139,7 @@ const wei = 10n ** BigInt(weiDigits);
 const MAX_MEMO_BYTES = 1000; // 1000 bytes for memos
 const MAX_CHAT_MESSAGE_BYTES = 1000; // 1000 bytes for chat messages
 const BRIDGE_USERNAME = 'liberdusbridge';
+const TRANSACTION_TIMESTAMP_OFFSET_MS = 500; // Transaction offset to allow for slow connections
 
 let myData = null;
 let myAccount = null; // this is set to myData.account for convience
@@ -4236,7 +4237,7 @@ class FriendModal {
       chatId: chatId_,
       required: requiredNum,
       type: 'update_toll_required',
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       networkId: network.netid,
     };
     const txid = await signObj(tx, myAccount.keys);
@@ -6184,7 +6185,7 @@ async function postAssetTransfer(to, amount, memo, keys) {
     // TODO backend is not allowing memo > 140 characters; by pass using xmemo; we might have to check the total tx size instead
     // memo: stringify(memo),
     xmemo: memo,
-    timestamp: getCorrectedTimestamp(),
+    timestamp: getTransactionTimestamp(),
     fee: getTransactionFeeWei(), // This is not used by the backend
     networkId: network.netid,
   };
@@ -6207,7 +6208,7 @@ async function postRegisterAlias(alias, keys, isPrivate = false) {
     alias: alias,
     publicKey: keys.public,
     pqPublicKey: pqPublicKey,
-    timestamp: getCorrectedTimestamp(),
+    timestamp: getTransactionTimestamp(),
     networkId: network.netid,
     private: isPrivate,
   };
@@ -7902,6 +7903,31 @@ function generateMessageHash(message) {
   return hex.slice(0, 20);
 }
 
+function normalizeFailureReason(error) {
+  if (!error) return 'Unknown reason';
+  if (typeof error === 'string') return error;
+  if (error?.message) return error.message;
+  try {
+    return JSON.stringify(error);
+  } catch (jsonError) {
+    return String(error);
+  }
+}
+
+function buildUserListToastHtml(title, usernames) {
+  const listItems = usernames
+    .filter(Boolean)
+    .map(name => `<li><strong>${escapeHtml(name)}</strong></li>`)
+    .join('');
+
+  return [
+    '<div class="toast-list-content">',
+    `<div class="toast-list-title toast-list-title-centered">${escapeHtml(title)}</div>`,
+    `<ul class="toast-list">${listItems}</ul>`,
+    '</div>'
+  ].join('');
+}
+
 // Add this function before the ContactInfoModal class
 function showToast(message, duration = 2000, type = 'default', isHTML = false, options = {}) {
   const toastContainer = document.getElementById('toastContainer');
@@ -8457,6 +8483,10 @@ function getCorrectedTimestamp() {
   const correctedTime = clientNow + timeSkew;
 
   return correctedTime;
+}
+
+function getTransactionTimestamp() {
+  return getCorrectedTimestamp() + TRANSACTION_TIMESTAMP_OFFSET_MS;
 }
 
 // Validator Modals
@@ -10642,7 +10672,7 @@ class TollModal {
       from: longAddress(myAccount.keys.address),
       toll: toll,
       type: 'toll',
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       tollUnit: tollUnit,
       networkId: network.netid,
     };
@@ -11071,6 +11101,20 @@ class LogsModal {
     if (this.clearButton) {
       this.clearButton.addEventListener('click', () => this.clear());
     }
+
+    // Event delegation for dynamically created toast button.
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target && target.classList.contains('toast-open-logs-button')) {
+        event.preventDefault();
+        event.stopPropagation();
+        const toastElement = target.closest('.toast');
+        if (toastElement && toastElement.id) {
+          hideToast(toastElement.id);
+        }
+        this.open();
+      }
+    }, { capture: true });
   }
 
   open() {
@@ -11678,7 +11722,7 @@ class ValidatorStakingModal {
       nominator: longAddress(myAccount?.keys?.address),
       nominee: nodeAddress,
       force: false,
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       networkId: network.netid,
     };
 
@@ -12017,7 +12061,7 @@ class StakeValidatorModal {
       nominator: longAddress(myAccount.keys.address),
       nominee: nodeAddress,
       stake: amount,
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       networkId: network.netid,
     };
 
@@ -12241,6 +12285,9 @@ class ChatModal {
     this.toll = null;
     this.tollUnit = null;
     this.address = null;
+
+    // True when the active chat recipient has blocked me (tollRequiredToSend === 2)
+    this.blockedByRecipient = false;
 
     // file attachments
     this.fileAttachments = [];
@@ -12813,6 +12860,9 @@ class ChatModal {
    * @returns {Promise<void>}
    */
   async open(address, skipAutoScroll = false) {
+    // Set active chat address early so async refreshes target the correct chat.
+    this.address = address;
+
     // clear message input
     this.messageInput.value = '';
     this.messageInput.style.height = '48px';
@@ -12827,6 +12877,9 @@ class ChatModal {
     friendModal.setAddress(address);
     footer.closeNewChatButton();
     const contact = myData.contacts[address];
+    // Cache whether the contact has me blocked, and disable attachments accordingly
+    this.blockedByRecipient = Number(contact?.tollRequiredToSend) === 2;
+    this.addAttachmentButton.disabled = this.blockedByRecipient;
     friendModal.updateFriendButton(contact, 'addFriendButtonChat');
     // Set user info
     this.modalTitle.textContent = getContactDisplayName(contact);
@@ -12894,9 +12947,6 @@ class ChatModal {
     }
 
     this.clearNotificationsIfAllRead();
-
-    // Setup state for appendChatModal and perform initial render
-    this.address = address;
 
     // One-time tolled deposit toast (only if explicitly enabled on the contact)
     this.maybeShowTolledDepositToast(address);
@@ -13138,7 +13188,7 @@ class ChatModal {
       from: longAddress(myData.account.keys.address),
       to: longAddress(contactAddress),
       chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join('')),
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       networkId: network.netid,
     };
     const txid = await signObj(tx, myAccount.keys);
@@ -13205,7 +13255,7 @@ class ChatModal {
       from: longAddress(myData.account.keys.address),
       to: longAddress(contactAddress),
       chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join('')),
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       oldContactTimestamp: myData.contacts[contactAddress].timestamp,
       networkId: network.netid,
     };
@@ -13452,8 +13502,8 @@ class ChatModal {
         // Clear edit marker only after capturing state and hide cancel button
         editInput.value = '';
         this.cancelEditButton.style.display = 'none';
-        // Leaving edit mode optimistically; re-enable attachments
-        this.addAttachmentButton.disabled = false;
+        // Leaving edit mode optimistically; re-enable attachments unless blocked
+        this.addAttachmentButton.disabled = this.blockedByRecipient;
       } else {
         newMessage = {
           message,
@@ -13580,7 +13630,7 @@ class ChatModal {
         // Success: for normal message nothing extra; for edit we already updated locally
         if (isEdit) {
           showToast('Message edited', 2000, 'success');
-          this.addAttachmentButton.disabled = false;
+          this.addAttachmentButton.disabled = this.blockedByRecipient;
         }
       }
     } catch (error) {
@@ -13625,7 +13675,7 @@ class ChatModal {
       // Toggle button visibility (should show microphone when empty)
       this.toggleSendButtonVisibility();
       // Re-enable attachments on cancel
-      this.addAttachmentButton.disabled = false;
+      this.addAttachmentButton.disabled = this.blockedByRecipient;
       // Give feedback
       showToast('Edit cancelled', 1500, 'info');
     } catch (e) {
@@ -13685,7 +13735,7 @@ class ChatModal {
       chatId: hashBytes([fromAddr, toAddr].sort().join('')),
       message: 'x',
       xmessage: payload,
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       fee: getTransactionFeeWei(), // This is not used by the backend
       networkId: network.netid,
     };
@@ -14297,8 +14347,8 @@ class ChatModal {
           
           const messageValidation = this.validateMessageSize(this.messageInput.value);
           this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
-          
-          this.addAttachmentButton.disabled = this.isEditingMessage();
+
+          this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
         } else {
           // Encryption successful
           // upload to get url here 
@@ -14367,8 +14417,8 @@ class ChatModal {
             const messageValidation = this.validateMessageSize(this.messageInput.value);
             this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
             this.toggleSendButtonVisibility();
-            
-            this.addAttachmentButton.disabled = false;
+
+            this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
             if (activeChatMatchesUpload) {
               showToast(
                 `Attached "${file.name}" to ${uploadContactName}`,
@@ -14405,9 +14455,9 @@ class ChatModal {
             
             const messageValidation = this.validateMessageSize(this.messageInput.value);
             this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
-            
-            this.addAttachmentButton.disabled = this.isEditingMessage();
             this.isEncrypting = false;
+
+            this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
           }
         }
         worker.terminate();
@@ -14427,8 +14477,8 @@ class ChatModal {
         
         const messageValidation = this.validateMessageSize(this.messageInput.value);
         this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
-        
-        this.addAttachmentButton.disabled = this.isEditingMessage();
+
+            this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
         worker.terminate();
       };
       
@@ -14458,9 +14508,9 @@ class ChatModal {
       // Re-enable buttons
       const messageValidation = this.validateMessageSize(this.messageInput.value);
       this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
-      
-      this.addAttachmentButton.disabled = this.isEditingMessage();
       this.isEncrypting = false;
+
+      this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
     } finally {
       event.target.value = ''; // Reset the file input value
     }
@@ -16703,8 +16753,14 @@ class ChatModal {
       localContact.tollRequiredToSend = contactAccountData.toll.required[toIndex];
       localContact.tollRequiredToReceive = contactAccountData.toll.required[myIndex];
 
+      // Keep a cached flag for the currently open chat
+      if (this.address === address) {
+        this.blockedByRecipient = Number(localContact?.tollRequiredToSend) === 2;
+      }
+
       if (this.isActive() && this.address === address) {
         this.updateTollAmountUI(address);
+        this.addAttachmentButton.disabled = this.isEncrypting || this.isEditingMessage() || this.blockedByRecipient;
       }
 
       // console.log(`localContact.tollRequiredToSend: ${localContact.tollRequiredToSend}`);
@@ -17509,6 +17565,99 @@ class CallInviteModal {
   }
 
   /**
+   * Returns a call URL in comparable form by removing hash params.
+   * @param {string} callUrl
+   * @returns {string}
+   */
+  getComparableCallUrl(callUrl) {
+    const raw = (callUrl || '').trim();
+    if (!raw) return '';
+    return raw.split('#')[0];
+  }
+
+  /**
+   * Extracts the call URL from a call message element in comparable form.
+   * @param {HTMLElement} messageEl
+   * @returns {string}
+   */
+  getInviteCallUrl(messageEl) {
+    const anchorHref = messageEl?.querySelector('.call-message a')?.href || '';
+    return this.getComparableCallUrl(anchorHref);
+  }
+
+  /**
+   * Checks whether a contact already has this call URL in their call messages.
+   * @param {Object} contact
+   * @param {string} comparableCallUrl
+   * @returns {boolean}
+   */
+  contactHasCallUrl(contact, comparableCallUrl) {
+    if (!comparableCallUrl) return false;
+    return (contact?.messages || []).some((message) => {
+      if (!message || message.type !== 'call') return false;
+      if (message.deleted === 1 || message.status === 'failed') return false;
+      return this.getComparableCallUrl(message.message) === comparableCallUrl;
+    });
+  }
+
+  /**
+   * Maps a contact record to the display model used by the invite list.
+   * @param {Object} contact
+   * @returns {Object}
+   */
+  buildInviteContact(contact) {
+    const displayName = getContactDisplayName(contact);
+    return {
+      address: contact.address,
+      friend: contact.friend || 1,
+      avatarId: contact.avatarId,
+      mineAvatarId: contact.mineAvatarId,
+      displayName,
+      displayNameLower: (displayName || '').toLowerCase()
+    };
+  }
+
+  /**
+   * Builds invite groups while filtering out ineligible contacts.
+   * @param {string} currentChatAddress
+   * @param {string} myAddress
+   * @param {string} comparableCallUrl
+   * @returns {{groups: {friends: Object[], acquaintances: Object[], others: Object[]}, total: number}}
+   */
+  buildInviteGroups(currentChatAddress, myAddress, comparableCallUrl) {
+    const groups = {
+      friends: [],
+      acquaintances: [],
+      others: [],
+    };
+
+    for (const contact of Object.values(myData.contacts || {})) {
+      const address = contact?.address || '';
+      if (!address) continue;
+      if (address === currentChatAddress) continue;
+      if (address === myAddress) continue;
+      if (isFaucetAddress(address)) continue;
+      if (this.contactHasCallUrl(contact, comparableCallUrl)) continue;
+
+      const preparedContact = this.buildInviteContact(contact);
+      if (preparedContact.friend === 3) {
+        groups.friends.push(preparedContact);
+      } else if (preparedContact.friend === 2) {
+        groups.acquaintances.push(preparedContact);
+      } else if (preparedContact.friend !== 0) {
+        groups.others.push(preparedContact);
+      }
+    }
+
+    groups.friends.sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower));
+    groups.acquaintances.sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower));
+    groups.others.sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower));
+
+    const total = groups.friends.length + groups.acquaintances.length + groups.others.length;
+    return { groups, total };
+  }
+
+  /**
    * Renders a section of contacts with a header
    * @param {string} label - Section label
    * @param {Array} contacts - Array of contact objects
@@ -17553,29 +17702,11 @@ class CallInviteModal {
     this.emptyState.style.display = 'none';
     this.modal.classList.add('active');
 
-    // Build contacts list (exclude the current chat participant, self, and faucet) and group by status
-    const allContacts = Object.values(myData.contacts || {})
-      .filter(c => c.address !== chatModal.address && c.address !== myAccount.address && !isFaucetAddress(c.address))
-      .map(c => {
-        const displayName = getContactDisplayName(c);
-        return {
-          address: c.address,
-          friend: c.friend || 1,
-          avatarId: c.avatarId,
-          mineAvatarId: c.mineAvatarId,
-          displayName,
-          displayNameLower: (displayName || '').toLowerCase()
-        };
-      });
-
-    // Group contacts by friend status: friends (3), acquaintances (2), others (1), blocked (0)
-    const groups = {
-      friends: allContacts.filter(c => c.friend === 3).sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower)),
-      acquaintances: allContacts.filter(c => c.friend === 2).sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower)),
-      others: allContacts.filter(c => ![2, 3, 0].includes(c.friend)).sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower)),
-    };
-
-    if (allContacts.length === 0) {
+    const currentChatAddress = chatModal.address || '';
+    const myAddress = myAccount?.keys?.address || '';
+    const comparableCallUrl = this.getInviteCallUrl(messageEl);
+    const { groups, total: totalContacts } = this.buildInviteGroups(currentChatAddress, myAddress, comparableCallUrl);
+    if (totalContacts === 0) {
       this.emptyState.style.display = 'block';
       // initial counter update to ensure Invite button is disabled
       this.updateCounter();
@@ -18950,6 +19081,27 @@ class ImportContactsModal {
     return contacts;
   }
 
+  hasLocalAvatar(contact) {
+    if (!contact) return false;
+    return !!contact.mineAvatarId;
+  }
+
+  getExistingContactUpdateEligibility(existingContact, parsedContact) {
+    const hasImportedName = !!(parsedContact?.name && parsedContact.name.trim());
+    const hasLocalName = !!(existingContact?.name && existingContact.name.trim());
+    const canUpdateName = !hasLocalName && hasImportedName;
+
+    const hasImportedAvatar = !!parsedContact?.photoBase64;
+    const hasLocalAvatar = this.hasLocalAvatar(existingContact);
+    const canUpdateAvatar = !hasLocalAvatar && hasImportedAvatar;
+
+    return {
+      canUpdateName,
+      canUpdateAvatar,
+      canUpdate: canUpdateName || canUpdateAvatar,
+    };
+  }
+
   /**
    * Validates a contact on the network by username lookup
    * Also verifies that VCF address matches network-resolved address.
@@ -19028,11 +19180,20 @@ class ImportContactsModal {
     // Separate new and existing contacts
     const newContacts = [];
     const existingContacts = [];
+    let updatableExistingCount = 0;
 
     for (const contact of filteredContacts) {
       const normalizedAddr = normalizeAddress(contact.address);
-      if (myData.contacts[normalizedAddr]) {
-        existingContacts.push({ ...contact, address: normalizedAddr, isExisting: true });
+      const existingContact = myData.contacts[normalizedAddr];
+      if (existingContact) {
+        const updateEligibility = this.getExistingContactUpdateEligibility(existingContact, contact);
+        if (updateEligibility.canUpdate) updatableExistingCount++;
+        existingContacts.push({
+          ...contact,
+          address: normalizedAddr,
+          isExisting: true,
+          canUpdateExisting: updateEligibility.canUpdate,
+        });
       } else {
         newContacts.push({ ...contact, address: normalizedAddr, isExisting: false });
       }
@@ -19078,18 +19239,23 @@ class ImportContactsModal {
       }
 
       const row = document.createElement('div');
-      row.className = 'share-contact-row' + (contact.isExisting ? ' existing' : '');
+      const shouldDisableExisting = contact.isExisting && !contact.canUpdateExisting;
+      row.className = 'share-contact-row' + (shouldDisableExisting ? ' existing' : '');
       row.dataset.address = contact.address;
 
       const avatarHtml = avatarHtmlList[index];
       const displayName = contact.name || contact.username || `${contact.address.slice(0, 8)}…${contact.address.slice(-6)}`;
+      const usernameSubtitle = (contact.name && contact.username)
+        ? `<div class="share-contact-username">${escapeHtml(contact.username)}</div>`
+        : '';
 
       row.innerHTML = `
         <div class="share-contact-avatar">${avatarHtml}</div>
         <div class="share-contact-info">
           <div class="share-contact-name">${escapeHtml(displayName)}</div>
+          ${usernameSubtitle}
         </div>
-        ${contact.isExisting 
+        ${(contact.isExisting && !contact.canUpdateExisting)
           ? '<span class="existing-label">Already added</span>' 
           : '<input type="checkbox" class="share-contact-checkbox" />'}
       `;
@@ -19098,7 +19264,7 @@ class ImportContactsModal {
     });
 
     this.contactsList.style.display = 'block';
-    this.doneButton.disabled = newContacts.length === 0;
+    this.doneButton.disabled = (newContacts.length + updatableExistingCount) === 0;
   }
 
   /**
@@ -19132,7 +19298,7 @@ class ImportContactsModal {
    */
   handleContactClick(e) {
     const row = e.target.closest('.share-contact-row');
-    if (!row || row.classList.contains('existing')) return;
+    if (!row) return;
 
     const checkbox = row.querySelector('.share-contact-checkbox');
     if (!checkbox) return;
@@ -19158,7 +19324,7 @@ class ImportContactsModal {
    * Updates the All/None button icon based on selection state
    */
   updateAllNoneButton() {
-    const checkboxes = this.contactsList.querySelectorAll('.share-contact-row:not(.existing) .share-contact-checkbox');
+    const checkboxes = this.contactsList.querySelectorAll('.share-contact-checkbox');
     const allSelected = checkboxes.length > 0 && Array.from(checkboxes).every(cb => cb.checked);
     if (allSelected) {
       this.allNoneButton.classList.add('all-selected');
@@ -19173,7 +19339,7 @@ class ImportContactsModal {
    * Toggles between selecting all and none
    */
   toggleAllNone() {
-    const checkboxes = this.contactsList.querySelectorAll('.share-contact-row:not(.existing) .share-contact-checkbox');
+    const checkboxes = this.contactsList.querySelectorAll('.share-contact-checkbox');
     const allSelected = checkboxes.length > 0 && Array.from(checkboxes).every(cb => cb.checked);
 
     checkboxes.forEach(cb => {
@@ -19259,10 +19425,17 @@ class ImportContactsModal {
       const results = await Promise.allSettled(validationPromises);
 
       // Process validation results and create contacts (limited to 20)
-      for (const result of results) {
+      for (let index = 0; index < results.length; index++) {
+        const result = results[index];
+        const address = contactsToProcess[index];
+        const fallbackContact = this.parsedContacts.find(c => normalizeAddress(c.address) === address);
+        const fallbackUsername = fallbackContact?.username || address || 'unknown';
+
         if (result.status === 'rejected') {
-          console.error('Validation promise rejected:', result.reason);
-          logsModal.log('❌ Validation promise rejected:', result.reason?.message || String(result.reason));
+          const failureReason = normalizeFailureReason(result.reason);
+          console.error(`Validation promise rejected for ${fallbackUsername}:`, result.reason);
+          logsModal.log(`❌ Failed to validate contact ${fallbackUsername}: ${failureReason}`);
+          failedContacts.push({ username: fallbackUsername, error: failureReason });
           failedCount++;
           continue;
         }
@@ -19271,9 +19444,10 @@ class ImportContactsModal {
         if (!parsedContact || !validation) continue;
 
         if (!validation.success) {
-          console.warn(`Failed to validate contact ${parsedContact.username}:`, validation.error);
-          logsModal.log(`⚠️ Failed to validate contact ${parsedContact.username}:`, validation.error);
-          failedContacts.push({ username: parsedContact.username, error: validation.error });
+          const failureReason = normalizeFailureReason(validation.error);
+          console.warn(`Failed to validate contact ${parsedContact.username}:`, failureReason);
+          logsModal.log(`⚠️ Failed to validate contact ${parsedContact.username}: ${failureReason}`);
+          failedContacts.push({ username: parsedContact.username, error: failureReason });
           failedCount++;
           continue;
         }
@@ -19283,8 +19457,38 @@ class ImportContactsModal {
 
         // Check if contact already exists
         if (myData.contacts[networkAddress]) {
-          console.log(`Contact ${parsedContact.username} already exists, skipping`);
-          logsModal.log(`ℹ️ Contact ${parsedContact.username} already exists, skipping`);
+          const existingContact = myData.contacts[networkAddress];
+          const updateEligibility = this.getExistingContactUpdateEligibility(existingContact, parsedContact);
+          let updated = false;
+
+          if (updateEligibility.canUpdateName) {
+            existingContact.name = parsedContact.name.trim();
+            updated = true;
+          }
+
+          if (updateEligibility.canUpdateAvatar) {
+            try {
+              const mimeType = parsedContact.photoType === 'png' ? 'image/png' : 'image/jpeg';
+              const avatarBlob = contactAvatarCache.base64ToBlob(parsedContact.photoBase64, mimeType);
+              const mineId = bin2hex(generateRandomBytes(16));
+              await contactAvatarCache.save(mineId, avatarBlob);
+              existingContact.mineAvatarId = mineId;
+              existingContact.hasAvatar = true;
+              existingContact.useAvatar = 'mine';
+              updated = true;
+            } catch (err) {
+              console.warn('Failed to save imported avatar for existing contact:', err);
+              logsModal.log('⚠️ Failed to save imported avatar for existing contact:', err?.message || String(err));
+            }
+          }
+
+          if (updated) {
+            importedContacts.push(validation.username || parsedContact.username);
+            importedCount++;
+          } else {
+            console.log(`Contact ${parsedContact.username} already exists, skipping`);
+            logsModal.log(`ℹ️ Contact ${parsedContact.username} already exists, skipping`);
+          }
           continue;
         }
 
@@ -19336,17 +19540,20 @@ class ImportContactsModal {
       // Refresh contacts screen if visible
       contactsScreen.updateContactsList();
       
-      // Show appropriate success/error message with usernames
-      if (importedCount > 0 && failedCount === 0) {
-        const successList = importedContacts.join(', ');
-        showToast(`Successfully imported: ${successList}`, 3000, 'success');
-      } else if (importedCount > 0 && failedCount > 0) {
-        const successList = importedContacts.join(', ');
-        const failedList = failedContacts.map(c => c.username).join(', ');
-        showToast(`Imported: ${successList}\n\nFailed: ${failedList}`, 0, 'warning');
-      } else if (failedCount > 0) {
-        const failedList = failedContacts.map(c => c.username).join(', ');
-        showToast(`Failed to import: ${failedList}`, 0, 'error');
+      // Show import result toasts separately for better mobile UX.
+      if (importedCount > 0) {
+        const successLabel = importedCount === 1 ? 'contact' : 'contacts';
+        const successHtml = buildUserListToastHtml(`Imported ${importedCount} ${successLabel}`, importedContacts);
+        showToast(successHtml, 3500, 'success', true);
+      }
+
+      if (failedCount > 0) {
+        const failedLabel = failedCount === 1 ? 'contact' : 'contacts';
+        const failedHtml = [
+          buildUserListToastHtml(`Failed to import ${failedCount} ${failedLabel}`, failedContacts.map(c => c.username)),
+          '<button type="button" class="toast-open-logs-button">Open Logs</button>'
+        ].join('');
+        showToast(failedHtml, 0, 'error', true);
       }
 
       // Show warning if more than 20 contacts were selected
@@ -23770,7 +23977,7 @@ const unlockModal = new UnlockModal();
 
 class LaunchModal {
   constructor() {
-
+    this.hasShownBackupReminderThisOpen = false;
   }
 
   load() {
@@ -23784,15 +23991,30 @@ class LaunchModal {
     this.launchForm.addEventListener('submit', async (event) => await this.handleSubmit(event));
     this.urlInput.addEventListener('input', () => this.updateButtonState());
     this.backupButton.addEventListener('click', () => backupAccountModal.open());
+
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target && target.classList.contains('toast-launch-backup-button')) {
+        event.preventDefault();
+        event.stopPropagation();
+        const toastElement = target.closest('.toast');
+        if (toastElement && toastElement.id) {
+          hideToast(toastElement.id);
+        }
+        backupAccountModal.open();
+      }
+    }, { capture: true });
   }
 
   open() {
     this.modal.classList.add('active');
+    this.hasShownBackupReminderThisOpen = false;
     this.urlInput.value = window.location.href.split('?')[0];
     this.updateButtonState();
   }
 
   close() {
+    this.hasShownBackupReminderThisOpen = false;
     this.urlInput.value = '';
     this.modal.classList.remove('active');
   }
@@ -23802,6 +24024,12 @@ class LaunchModal {
     const url = this.urlInput.value;
     if (!url) {
       showToast('Please enter a URL', 0, 'error');
+      return;
+    }
+
+    if (!this.hasShownBackupReminderThisOpen) {
+      this.hasShownBackupReminderThisOpen = true;
+      this.showBackupReminderToast();
       return;
     }
     
@@ -23884,6 +24112,16 @@ class LaunchModal {
       this.launchButton.disabled = false;
       this.launchButton.textContent = 'Launch';
     }
+  }
+
+  showBackupReminderToast() {
+    showToast(
+      '<div class="toast-update-title">Backup before launching a new network</div><button type="button" class="toast-update-button toast-launch-backup-button">Open Backup</button>',
+      0,
+      'warning',
+      true,
+      { dedupe: false },
+    );
   }
 
   updateButtonState() {
