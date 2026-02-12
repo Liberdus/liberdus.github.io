@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 's'
+const version = 't'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -163,6 +163,13 @@ const NETWORK_ACCOUNT_ID = '0'.repeat(64);
 const MAX_TOLL = 1_000_000; // 1M limit
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000; // 15 minute limit for editing messages
+
+// Migration for attachment encryption keys.
+// Set this numeric timestamp (YYYYMMDDHHMM) to force re-running the
+// `migrateAttachmentKeysToEncKey` migration for existing users.
+// Use YYYYMMDDHHMM (year, month, day, hour, minute) so migrations
+// can be re-run multiple times per day by bumping this value.
+const MIGRATION_ATTACHMENT_KEYS_TO_ENC_KEY_TS = 202602010000;
 
 let parameters = {
   current: {
@@ -353,7 +360,20 @@ async function migrateAttachmentKeysToEncKey(data) {
       ? data.account.migrations
       : null;
 
-  if (migrations?.attachmentKeysToEncKey === true) {
+  // Determine whether this migration has already been applied.
+  // Previously this flag was a boolean; now we store a numeric timestamp.
+  // Legacy boolean `true` is treated as NOT applied so the migration
+  // will run for those accounts (we set appliedTs to 0).
+  const appliedTsRaw = migrations?.attachmentKeysToEncKey;
+  let appliedTs = 0;
+  if (typeof appliedTsRaw === 'number') {
+    appliedTs = appliedTsRaw;
+  } else if (appliedTsRaw === true) {
+    appliedTs = 0;
+  }
+
+  // If the migration timestamp stored is >= current migration ts, skip running.
+  if (appliedTs >= MIGRATION_ATTACHMENT_KEYS_TO_ENC_KEY_TS) {
     return false;
   }
 
@@ -422,7 +442,8 @@ async function migrateAttachmentKeysToEncKey(data) {
   }
 
   data.account.migrations = migrations && typeof migrations === 'object' ? migrations : {};
-  data.account.migrations.attachmentKeysToEncKey = true;
+  // Record the migration application timestamp so future runs can be gated.
+  data.account.migrations.attachmentKeysToEncKey = MIGRATION_ATTACHMENT_KEYS_TO_ENC_KEY_TS;
   return true;
 }
 
@@ -4990,11 +5011,16 @@ class CallsModal {
             callGroups.set(groupKey, {
               callTime,
               callUrl,
-              participants: []
+              participants: [],
+              participantAddresses: new Set()
             });
           }
-          
-          callGroups.get(groupKey).participants.push({
+
+          const group = callGroups.get(groupKey);
+          if (!address || group.participantAddresses.has(address)) continue;
+
+          group.participantAddresses.add(address);
+          group.participants.push({
             address,
             calling: displayName,
             txid: msg.txid || ''
@@ -5004,7 +5030,9 @@ class CallsModal {
     }
     
     // Convert grouped calls to array and sort by call time
-    this.calls = Array.from(callGroups.values()).sort((a, b) => (a.callTime || 0) - (b.callTime || 0));
+    this.calls = Array.from(callGroups.values())
+      .map(({ participantAddresses, ...callGroup }) => callGroup)
+      .sort((a, b) => (a.callTime || 0) - (b.callTime || 0));
   }
 
   /** 
@@ -5206,15 +5234,20 @@ class GroupCallParticipantsModal {
     if (callGroup?.participants) {
       const template = document.getElementById('groupCallParticipantTemplate');
       if (template) {
+        const renderedAddresses = new Set();
         callGroup.participants.forEach(participant => {
+          const participantAddress = participant?.address || '';
+          if (!participantAddress || renderedAddresses.has(participantAddress)) return;
+          renderedAddresses.add(participantAddress);
+
           const participantEl = template.content.cloneNode(true).querySelector('.participant-item');
-          participantEl.setAttribute('data-address', participant.address);
+          participantEl.setAttribute('data-address', participantAddress);
           
           const avatar = participantEl.querySelector('.participant-avatar');
           const name = participantEl.querySelector('.participant-name');
           
-          if (avatar) avatar.innerHTML = generateIdenticon(participant.address);
-          if (name) name.textContent = participant.calling;
+          if (avatar) avatar.innerHTML = generateIdenticon(participantAddress);
+          if (name) name.textContent = participant.calling || participantAddress;
           
           this.participantsList.appendChild(participantEl);
         });
@@ -5465,8 +5498,14 @@ async function processChats(chats, keys) {
           }
         }
         if (tx.type == 'message') {
-          const payload = tx.xmessage; // changed to use .message
-          if (useTxTimestamp){ 
+          // Handle messages without xmessage (same as transfer handling)
+          // Ensure payload is always an object, even if xmessage is null/undefined
+          let payload = tx.xmessage;
+          if (!payload || typeof payload !== 'object') {
+            payload = {};
+          }
+          // Set sent_timestamp - use tx.timestamp if useTxTimestamp is true, otherwise use payload.sent_timestamp or tx.timestamp
+          if (useTxTimestamp || !payload.sent_timestamp) {
             payload.sent_timestamp = tx.timestamp;
           }
           if (mine){
@@ -7864,17 +7903,21 @@ function generateMessageHash(message) {
 }
 
 // Add this function before the ContactInfoModal class
-function showToast(message, duration = 2000, type = 'default', isHTML = false) {
+function showToast(message, duration = 2000, type = 'default', isHTML = false, options = {}) {
   const toastContainer = document.getElementById('toastContainer');
   
+  const dedupeEnabled = options?.dedupe !== false;
+
   // Generate deduplication key from message hash
-  const deduplicateKey = generateMessageHash(message);
+  const deduplicateKey = dedupeEnabled ? generateMessageHash(message) : null;
   
   // Check for duplicate toasts using the deduplication key
-  const existingToast = document.querySelector(`[data-deduplicate-key="${deduplicateKey}"]`);
-  if (existingToast) {
-    // Toast with this key already exists, don't create another one
-    return existingToast.id;
+  if (dedupeEnabled) {
+    const existingToast = document.querySelector(`[data-deduplicate-key="${deduplicateKey}"]`);
+    if (existingToast) {
+      // Toast with this key already exists, don't create another one
+      return existingToast.id;
+    }
   }
   
   const toast = document.createElement('div');
@@ -7890,8 +7933,10 @@ function showToast(message, duration = 2000, type = 'default', isHTML = false) {
   const toastId = 'toast-' + getCorrectedTimestamp() + '-' + Math.floor(Math.random() * 1000);
   toast.id = toastId;
   
-  // Add deduplication key (always set since we generate one if not provided)
-  toast.setAttribute('data-deduplicate-key', deduplicateKey);
+  // Add deduplication key only when dedupe is enabled for this toast
+  if (dedupeEnabled && deduplicateKey) {
+    toast.setAttribute('data-deduplicate-key', deduplicateKey);
+  }
 
   toastContainer.appendChild(toast);
 
@@ -12218,6 +12263,9 @@ class ChatModal {
 
     // Track which voice message element is playing
     this.playingVoiceMessageElement = null;
+
+    // Track active attachment loading toasts by contact so closing a chat can hide only its loading toasts.
+    this.attachmentLoadingToastsByContact = new Map();
   }
 
   /**
@@ -12239,6 +12287,51 @@ class ChatModal {
   cancelAllOperations() {
     this.abortController.abort();
     this.abortController = new AbortController();
+  }
+
+  /**
+   * Track an attachment loading toast for a specific contact
+   * @param {string} contactAddress
+   * @param {string} toastId
+   * @returns {void}
+   */
+  trackAttachmentLoadingToast(contactAddress, toastId) {
+    if (!contactAddress || !toastId) return;
+    let toastSet = this.attachmentLoadingToastsByContact.get(contactAddress);
+    if (!toastSet) {
+      toastSet = new Set();
+      this.attachmentLoadingToastsByContact.set(contactAddress, toastSet);
+    }
+    toastSet.add(toastId);
+  }
+
+  /**
+   * Untrack an attachment loading toast for a specific contact
+   * @param {string} contactAddress
+   * @param {string} toastId
+   * @returns {void}
+   */
+  untrackAttachmentLoadingToast(contactAddress, toastId) {
+    if (!contactAddress || !toastId) return;
+    const toastSet = this.attachmentLoadingToastsByContact.get(contactAddress);
+    if (!toastSet) return;
+    toastSet.delete(toastId);
+    if (toastSet.size === 0) {
+      this.attachmentLoadingToastsByContact.delete(contactAddress);
+    }
+  }
+
+  /**
+   * Hide all active attachment loading toasts for a contact
+   * @param {string} contactAddress
+   * @returns {void}
+   */
+  hideAttachmentLoadingToastsForContact(contactAddress) {
+    if (!contactAddress) return;
+    const toastSet = this.attachmentLoadingToastsByContact.get(contactAddress);
+    if (!toastSet || toastSet.size === 0) return;
+    toastSet.forEach((toastId) => hideToast(toastId));
+    this.attachmentLoadingToastsByContact.delete(contactAddress);
   }
 
   /**
@@ -12683,6 +12776,37 @@ class ChatModal {
   }
 
   /**
+   * Returns whether the composer is currently in edit mode.
+   * @returns {boolean}
+   */
+  isEditingMessage() {
+    const editInput = document.getElementById('editOfTxId');
+    return !!(editInput?.value?.trim?.());
+  }
+
+  /**
+   * Clears all staged composer attachments.
+   * @param {{ deleteFromServer?: boolean }} options
+   * @returns {void}
+   */
+  clearComposerAttachments({ deleteFromServer = false } = {}) {
+    if (!Array.isArray(this.fileAttachments) || this.fileAttachments.length === 0) return;
+
+    const removedAttachments = this.fileAttachments.splice(0, this.fileAttachments.length);
+    this.purgeThumbnail(removedAttachments);
+
+    if (deleteFromServer) {
+      this.deleteAttachmentsFromServer(removedAttachments);
+    }
+
+    this.showAttachmentPreview();
+
+    if (this.address && myData.contacts[this.address]) {
+      this.saveAttachmentState(myData.contacts[this.address]);
+    }
+  }
+
+  /**
    * Opens the chat modal for the given address.
    * @param {string} address - The address of the contact to open the chat modal for.
    * @param {boolean} skipAutoScroll - Whether to skip auto-scrolling to bottom (used when scrolling to a specific message)
@@ -12866,6 +12990,9 @@ class ChatModal {
    * @returns {void}
    */
   close() {
+    const closingAddress = this.address;
+    this.hideAttachmentLoadingToastsForContact(closingAddress);
+
     // Ensure scroll is unlocked when closing
     this.unlockBackgroundScroll();
     if (isOnline) {
@@ -13201,6 +13328,10 @@ class ChatModal {
       }
 
       if (isEdit) {
+        // Edit sends are text-only. Drop any stale attachments and clean them up from server.
+        if (this.fileAttachments?.length) {
+          this.clearComposerAttachments({ deleteFromServer: true });
+        }
         messageObj = {
           type: 'edit',
             txid: editTargetTxId,
@@ -13223,7 +13354,7 @@ class ChatModal {
       }
 
       // Handle attachments - add them to the JSON structure instead of using xattach
-      if (this.fileAttachments && this.fileAttachments.length > 0) {
+      if (!isEdit && this.fileAttachments && this.fileAttachments.length > 0) {
         messageObj.attachments = this.fileAttachments;
       }
 
@@ -14070,6 +14201,16 @@ class ChatModal {
       return; // No file selected
     }
 
+    // Lock this upload to the chat that started it so completion always lands in that draft.
+    const uploadContactAddress = this.address;
+    if (!uploadContactAddress || !myData.contacts?.[uploadContactAddress]) {
+      showToast('Unable to attach file: no active chat found.', 0, 'error');
+      event.target.value = '';
+      return;
+    }
+    const uploadContact = myData.contacts[uploadContactAddress];
+    const uploadContactName = getContactDisplayName(uploadContact) || uploadContactAddress.slice(0, 8);
+
     // limit to 5 files
     if (this.fileAttachments.length >= 5) {
       showToast('You can only attach up to 5 files.', 0, 'error');
@@ -14112,12 +14253,30 @@ class ChatModal {
     }
 
     const capturedThumbnailBlob = thumbnailBlob;
+    const clearLoadingToast = () => {
+      if (!loadingToastId) return;
+      hideToast(loadingToastId);
+      this.untrackAttachmentLoadingToast(uploadContactAddress, loadingToastId);
+      loadingToastId = null;
+    };
+    const refreshChatsScreenIfActive = () => {
+      if (chatsScreen?.isActive?.()) {
+        chatsScreen.updateChatList();
+      }
+    };
     
     try {
       this.isEncrypting = true;
       this.sendButton.disabled = true; // Disable send button during encryption
       this.addAttachmentButton.disabled = true;
-      loadingToastId = showToast(`Attaching file...`, 0, 'loading');
+      loadingToastId = showToast(
+        `Attaching "${file.name}" to ${uploadContactName}...`,
+        0,
+        'loading',
+        false,
+        { dedupe: false }
+      );
+      this.trackAttachmentLoadingToast(uploadContactAddress, loadingToastId);
       
       // Generate random encryption key for this attachment
       const encKey = generateRandomBytes(32);
@@ -14126,13 +14285,20 @@ class ChatModal {
       worker.onmessage = async (e) => {
         this.isEncrypting = false;
         if (e.data.error) {
-          hideToast(loadingToastId);
-          showToast(e.data.error, 0, 'error');
+          clearLoadingToast();
+          showToast(
+            `Attachment failed for ${uploadContactName}: ${e.data.error}`,
+            0,
+            'error',
+            false,
+            { dedupe: false }
+          );
+          refreshChatsScreenIfActive();
           
           const messageValidation = this.validateMessageSize(this.messageInput.value);
           this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
           
-          this.addAttachmentButton.disabled = false;
+          this.addAttachmentButton.disabled = this.isEditingMessage();
         } else {
           // Encryption successful
           // upload to get url here 
@@ -14160,14 +14326,28 @@ class ChatModal {
               }
             }
             
-            this.fileAttachments.push({
+            const newAttachment = {
               url: attachmentUrl,
               pUrl: previewUrl,
               name: file.name,
               size: file.size,
               type: normalizedType,
               encKey: bin2base64(encKey)
-            });
+            };
+
+            const activeChatMatchesUpload = this.isActive() && this.address === uploadContactAddress;
+            if (activeChatMatchesUpload) {
+              this.fileAttachments.push(newAttachment);
+            } else {
+              const uploadContact = myData.contacts?.[uploadContactAddress];
+              if (!uploadContact) {
+                throw new Error('Original chat no longer exists for this upload');
+              }
+              const existingDraftAttachments = Array.isArray(uploadContact.draftAttachments)
+                ? uploadContact.draftAttachments
+                : [];
+              uploadContact.draftAttachments = [...existingDraftAttachments, newAttachment];
+            }
             
             // Cache thumbnail if we generated one - use captured variable
             if (capturedThumbnailBlob && (isImage || isVideo)) {
@@ -14176,11 +14356,12 @@ class ChatModal {
               });
             }
             
-            hideToast(loadingToastId);
-            this.showAttachmentPreview(file);
-
-            if (this.address && myData.contacts[this.address]) {
-              this.saveAttachmentState(myData.contacts[this.address]);
+            clearLoadingToast();
+            if (activeChatMatchesUpload) {
+              this.showAttachmentPreview(file);
+              if (myData.contacts[uploadContactAddress]) {
+                this.saveAttachmentState(myData.contacts[uploadContactAddress]);
+              }
             }
             
             const messageValidation = this.validateMessageSize(this.messageInput.value);
@@ -14188,20 +14369,44 @@ class ChatModal {
             this.toggleSendButtonVisibility();
             
             this.addAttachmentButton.disabled = false;
-            showToast(`File "${file.name}" attached successfully`, 2000, 'success');
+            if (activeChatMatchesUpload) {
+              showToast(
+                `Attached "${file.name}" to ${uploadContactName}`,
+                3000,
+                'success',
+                false,
+                { dedupe: false }
+              );
+            } else {
+              showToast(
+                `Uploaded "${file.name}" for ${uploadContactName}; saved to that draft`,
+                3000,
+                'success',
+                false,
+                { dedupe: false }
+              );
+            }
+            refreshChatsScreenIfActive();
           } catch (fetchError) {
             // Handle fetch errors (including AbortError) inside the worker callback
             if (fetchError.name === 'AbortError') {
-              hideToast(loadingToastId);
+              clearLoadingToast();
             } else {
-              hideToast(loadingToastId);
-              showToast(`Upload failed: ${fetchError.message}`, 0, 'error');
+              clearLoadingToast();
+              showToast(
+                `Upload failed for ${uploadContactName} ("${file.name}"): ${fetchError.message}`,
+                0,
+                'error',
+                false,
+                { dedupe: false }
+              );
+              refreshChatsScreenIfActive();
             }
             
             const messageValidation = this.validateMessageSize(this.messageInput.value);
             this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
             
-            this.addAttachmentButton.disabled = false;
+            this.addAttachmentButton.disabled = this.isEditingMessage();
             this.isEncrypting = false;
           }
         }
@@ -14209,14 +14414,21 @@ class ChatModal {
       };
 
       worker.onerror = (err) => {
-        hideToast(loadingToastId);
-        showToast(`File encryption failed: ${err.message}`, 0, 'error');
+        clearLoadingToast();
+        showToast(
+          `File encryption failed for ${uploadContactName} ("${file.name}"): ${err.message}`,
+          0,
+          'error',
+          false,
+          { dedupe: false }
+        );
+        refreshChatsScreenIfActive();
         this.isEncrypting = false;
         
         const messageValidation = this.validateMessageSize(this.messageInput.value);
         this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
         
-        this.addAttachmentButton.disabled = false;
+        this.addAttachmentButton.disabled = this.isEditingMessage();
         worker.terminate();
       };
       
@@ -14230,17 +14442,24 @@ class ChatModal {
     } catch (error) {
       console.error('Error handling file attachment:', error);
       
-      hideToast(loadingToastId);
+      clearLoadingToast();
 
       if (error.name !== 'AbortError') {
-        showToast('Error processing file attachment', 0, 'error');
+        showToast(
+          `Error processing attachment for ${uploadContactName} ("${file.name}")`,
+          0,
+          'error',
+          false,
+          { dedupe: false }
+        );
+        refreshChatsScreenIfActive();
       }
       
       // Re-enable buttons
       const messageValidation = this.validateMessageSize(this.messageInput.value);
       this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
       
-      this.addAttachmentButton.disabled = false;
+      this.addAttachmentButton.disabled = this.isEditingMessage();
       this.isEncrypting = false;
     } finally {
       event.target.value = ''; // Reset the file input value
@@ -14260,8 +14479,7 @@ class ChatModal {
     const uploadUrl = network.attachmentServerUrl;
     const response = await fetch(`${uploadUrl}/post`, {
       method: 'POST',
-      body: form,
-      signal: this.abortController.signal
+      body: form
     });
 
     if (!response.ok) {
@@ -14381,6 +14599,7 @@ class ChatModal {
   removeAttachment(index) {
     if (this.fileAttachments && index >= 0 && index < this.fileAttachments.length) {
       const removedFile = this.fileAttachments.splice(index, 1)[0];
+      this.purgeThumbnail([removedFile]);
       this.showAttachmentPreview(); // Refresh the preview
       showToast(`"${removedFile.name}" removed`, 2000, 'info');
 
@@ -14389,7 +14608,7 @@ class ChatModal {
       }
 
       // Best effort delete from server
-      this.deleteAttachmentsFromServer(removedFile.url);
+      this.deleteAttachmentsFromServer(removedFile);
     }
   }
 
@@ -14985,25 +15204,75 @@ class ChatModal {
    * @param {HTMLElement} messageEl - The message element to position relative to
    */
   positionContextMenu(menu, messageEl) {
+    if (!menu || !messageEl) return;
+
     const rect = messageEl.getBoundingClientRect();
     const container = messageEl.closest('.messages-container');
-    const containerRect = container?.getBoundingClientRect() || { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
-    
-    const menuWidth = 200;
-    const menuHeight = 100;
-    
-    // Center horizontally, clamp to container
-    let left = Math.max(containerRect.left + 10, 
-                        Math.min(containerRect.right - menuWidth - 10, 
-                                 rect.left + rect.width/2 - menuWidth/2));
-    
-    // Prefer below, fallback to above, clamp to container
-    let top = rect.bottom + 10;
-    if (top + menuHeight > containerRect.bottom) {
-      top = Math.max(containerRect.top + 10, rect.top - menuHeight - 10);
+    const containerRect = container?.getBoundingClientRect() || {
+      left: 0,
+      top: 0,
+      right: window.innerWidth,
+      bottom: window.innerHeight
+    };
+
+    const margin = 10;
+    const wasHidden = window.getComputedStyle(menu).display === 'none';
+    const prevDisplay = menu.style.display;
+    const prevVisibility = menu.style.visibility;
+
+    // Temporarily render hidden so we can measure the real size after option toggles.
+    if (wasHidden) {
+      menu.style.visibility = 'hidden';
+      menu.style.display = 'block';
     }
-    
-    Object.assign(menu.style, { left: `${left}px`, top: `${top}px` });
+
+    let menuRect = menu.getBoundingClientRect();
+    let menuWidth = menuRect.width || 200;
+    let menuHeight = menuRect.height || 100;
+
+    // Keep long menus usable in small viewports by making them internally scrollable.
+    const availableHeight = Math.max(80, containerRect.bottom - containerRect.top - margin * 2);
+    if (menuHeight > availableHeight) {
+      menu.style.maxHeight = `${Math.floor(availableHeight)}px`;
+      menu.style.overflowY = 'auto';
+      menuRect = menu.getBoundingClientRect();
+      menuWidth = menuRect.width || menuWidth;
+      menuHeight = menuRect.height || availableHeight;
+    } else {
+      menu.style.maxHeight = '';
+      menu.style.overflowY = '';
+    }
+
+    // Center horizontally, then clamp to container bounds.
+    const minLeft = containerRect.left + margin;
+    const maxLeft = containerRect.right - menuWidth - margin;
+    let left = rect.left + rect.width / 2 - menuWidth / 2;
+    left = maxLeft < minLeft ? minLeft : Math.max(minLeft, Math.min(maxLeft, left));
+
+    // Prefer below, otherwise above; finally clamp to bounds.
+    const minTop = containerRect.top + margin;
+    const maxTop = containerRect.bottom - menuHeight - margin;
+    const belowTop = rect.bottom + margin;
+    const aboveTop = rect.top - menuHeight - margin;
+    let top;
+
+    if (belowTop <= maxTop) {
+      top = belowTop;
+    } else if (aboveTop >= minTop) {
+      top = aboveTop;
+    } else {
+      top = Math.max(minTop, Math.min(maxTop, belowTop));
+    }
+
+    Object.assign(menu.style, {
+      left: `${Math.round(left)}px`,
+      top: `${Math.round(top)}px`
+    });
+
+    if (wasHidden) {
+      menu.style.display = prevDisplay;
+      menu.style.visibility = prevVisibility;
+    }
   }
 
   /**
@@ -15712,16 +15981,15 @@ class ChatModal {
       return;
     }
 
-    // Open the import contacts modal with attachment data
-    importContactsModal.open({
-      url: attachment.url,
+    // Open the import contacts modal with the full attachment object so
+    // fields like `encKey` (new flow) are preserved for backwards compatibility.
+    const importAttachment = Object.assign({}, attachment, {
       name,
       type,
-      pqEncSharedKey: attachment.pqEncSharedKey,
-      selfKey: attachment.selfKey,
       my: message.my,
       senderAddress: this.address
     });
+    importContactsModal.open(importAttachment);
   }
 
   /**
@@ -15850,6 +16118,11 @@ class ChatModal {
         ? messageEl.querySelector('.payment-memo')
         : messageEl.querySelector('.message-content');
       if (!contentEl) return;
+      // Editing does not support attachments; abort in-flight uploads and clear staged files.
+      this.cancelAllOperations();
+      if (this.fileAttachments?.length) {
+        this.clearComposerAttachments({ deleteFromServer: true });
+      }
       const text = contentEl.textContent || '';
       this.messageInput.value = text;
       const editInput = document.getElementById('editOfTxId');
@@ -17232,29 +17505,7 @@ class CallInviteModal {
    * @returns {Promise<string>} Avatar HTML
    */
   async getContactAvatarHtmlForInvite(contact, size = 40) {
-    const address = contact?.address;
-    if (!address) return generateIdenticon('', size);
-
-    const makeImg = (url) => `<img src="${url}" class="contact-avatar-img" width="${size}" height="${size}" alt="avatar">`;
-
-    try {
-      // Priority 1: User-selected avatar for this contact
-      if (contact?.mineAvatarId) {
-        const url = await contactAvatarCache.getBlobUrl(contact.mineAvatarId);
-        if (url) return makeImg(url);
-      }
-
-      // Priority 2: Contact's provided avatar
-      if (contact?.avatarId) {
-        const url = await contactAvatarCache.getBlobUrl(contact.avatarId);
-        if (url) return makeImg(url);
-      }
-    } catch (err) {
-      console.warn('Failed to load avatar, falling back to identicon:', err);
-    }
-
-    // Priority 3: Identicon fallback
-    return generateIdenticon(address, size);
+    return getContactAvatarHtml(contact, size);
   }
 
   /**
@@ -17302,9 +17553,9 @@ class CallInviteModal {
     this.emptyState.style.display = 'none';
     this.modal.classList.add('active');
 
-    // Build contacts list (exclude the current chat participant and self) and group by status
+    // Build contacts list (exclude the current chat participant, self, and faucet) and group by status
     const allContacts = Object.values(myData.contacts || {})
-      .filter(c => c.address !== chatModal.address && c.address !== myAccount.address)
+      .filter(c => c.address !== chatModal.address && c.address !== myAccount.address && !isFaucetAddress(c.address))
       .map(c => {
         const displayName = getContactDisplayName(c);
         return {
@@ -17599,13 +17850,14 @@ class ShareAttachmentModal {
   load() {
     this.modal = document.getElementById('shareAttachmentModal');
     this.contactsList = document.getElementById('shareAttachmentContactsList');
-    this.template = document.getElementById('shareAttachmentContactTemplate');
+    this.emptyState = this.modal.querySelector('.empty-state');
     this.counter = document.getElementById('shareAttachmentCounter');
     this.sendButton = document.getElementById('shareAttachmentSendBtn');
     this.cancelButton = document.getElementById('shareAttachmentCancelBtn');
     this.closeButton = document.getElementById('closeShareAttachmentModal');
 
     this.contactsList.addEventListener('change', this.updateCounter.bind(this));
+    this.contactsList.addEventListener('click', this.handleContactClick.bind(this));
     this.sendButton.addEventListener('click', this.sendAttachments.bind(this));
     this.cancelButton.addEventListener('click', () => {
       this.close();
@@ -17617,7 +17869,7 @@ class ShareAttachmentModal {
    * Opens the share modal and populates contact list.
    * @param {HTMLElement} messageEl - The message element containing the attachment
    */
-  open(messageEl) {
+  async open(messageEl) {
     this.messageEl = messageEl;
     this.attachmentData = this.extractAttachmentData(messageEl);
 
@@ -17627,27 +17879,35 @@ class ShareAttachmentModal {
     }
 
     this.contactsList.innerHTML = '';
+    this.emptyState.style.display = 'none';
     this.modal.classList.add('active');
 
     // Build contacts list (exclude self and current chat contact) and group by status
     const currentChatAddress = chatModal.address;
     const allContacts = Object.values(myData.contacts || {})
       .filter(c => c.address !== myAccount.address && c.address !== currentChatAddress)
-      .map(c => ({
-        address: c.address,
-        username: c.username || c.address,
-        friend: c.friend || 1
-      }));
+      .filter(c => !isFaucetAddress(c.address))
+      .map(c => {
+        const displayName = getContactDisplayName(c);
+        return {
+          address: c.address,
+          friend: c.friend || 1,
+          avatarId: c.avatarId,
+          mineAvatarId: c.mineAvatarId,
+          displayName,
+          displayNameLower: (displayName || '').toLowerCase()
+        };
+      });
 
     // Group contacts by friend status
     const groups = {
-      friends: allContacts.filter(c => c.friend === 3).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
-      acquaintances: allContacts.filter(c => c.friend === 2).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
-      others: allContacts.filter(c => ![2,3,0].includes(c.friend)).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
+      friends: allContacts.filter(c => c.friend === 3).sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower)),
+      acquaintances: allContacts.filter(c => c.friend === 2).sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower)),
+      others: allContacts.filter(c => ![2,3,0].includes(c.friend)).sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower)),
     };
 
     if (allContacts.length === 0) {
-      this.modal.querySelector('.empty-state').style.display = 'block';
+      this.emptyState.style.display = 'block';
       this.updateCounter();
       return;
     }
@@ -17661,37 +17921,50 @@ class ShareAttachmentModal {
     for (const { key, label } of sectionMeta) {
       const list = groups[key];
       if (!list || list.length === 0) continue;
-      const header = document.createElement('div');
-      header.className = 'call-invite-section-header';
-      header.textContent = label;
-      this.contactsList.appendChild(header);
-
-      for (const contact of list) {
-        const clone = this.template.content ? this.template.content.cloneNode(true) : null;
-        if (!clone) continue;
-        const row = clone.querySelector('.call-invite-contact-row');
-        const checkbox = clone.querySelector('.call-invite-contact-checkbox');
-        const nameSpan = clone.querySelector('.call-invite-contact-name');
-        if (row) row.dataset.address = contact.address || '';
-        if (checkbox) {
-          checkbox.value = contact.address || '';
-          checkbox.id = `share_cb_${(contact.address||'').replace(/[^a-zA-Z0-9]/g,'')}`;
-        }
-        if (nameSpan) nameSpan.textContent = contact.username || contact.address || 'Unknown';
-        const labelEl = clone.querySelector('.call-invite-contact-label');
-        if (labelEl && checkbox) {
-          labelEl.addEventListener('click', (ev) => {
-            if (checkbox.disabled) return;
-            if (ev.target === checkbox) return;
-            ev.preventDefault();
-            checkbox.checked = !checkbox.checked;
-            this.updateCounter();
-          });
-        }
-        this.contactsList.appendChild(clone);
-      }
+      await this.renderSection(label, list);
     }
 
+    this.updateCounter();
+  }
+
+  async renderSection(label, contacts) {
+    const header = document.createElement('div');
+    header.className = 'share-contacts-section-header';
+    header.textContent = label;
+    this.contactsList.appendChild(header);
+
+    const avatarPromises = contacts.map(contact => getContactAvatarHtml(contact, 40));
+    const avatarHtmlList = await Promise.all(avatarPromises);
+
+    contacts.forEach((contact, index) => {
+      const row = document.createElement('div');
+      row.className = 'share-contact-row';
+      row.dataset.address = contact.address;
+
+      const avatarHtml = avatarHtmlList[index];
+      const displayName = contact.displayName || contact.address || 'Unknown';
+
+      row.innerHTML = `
+        <div class="share-contact-avatar">${avatarHtml}</div>
+        <div class="share-contact-info">
+          <div class="share-contact-name">${escapeHtml(displayName)}</div>
+        </div>
+        <input type="checkbox" class="share-contact-checkbox call-invite-checkbox" value="${escapeHtml(contact.address || '')}" />
+      `;
+
+      this.contactsList.appendChild(row);
+    });
+  }
+
+  handleContactClick(e) {
+    const row = e.target.closest('.share-contact-row');
+    if (!row) return;
+    const checkbox = row.querySelector('.call-invite-checkbox');
+    if (!checkbox) return;
+    if (checkbox.disabled && !checkbox.checked) return;
+    if (e.target !== checkbox) {
+      checkbox.checked = !checkbox.checked;
+    }
     this.updateCounter();
   }
 
@@ -17704,10 +17977,10 @@ class ShareAttachmentModal {
   }
 
   updateCounter() {
-    const selected = this.contactsList.querySelectorAll('.call-invite-contact-checkbox:checked').length;
+    const selected = this.contactsList.querySelectorAll('.call-invite-checkbox:checked').length;
     this.counter.textContent = `${selected} selected (max 10)`;
     this.sendButton.disabled = selected === 0;
-    const unchecked = Array.from(this.contactsList.querySelectorAll('.call-invite-contact-checkbox:not(:checked)'));
+    const unchecked = Array.from(this.contactsList.querySelectorAll('.call-invite-checkbox:not(:checked)'));
     if (selected >= 10) {
       unchecked.forEach(cb => cb.disabled = true);
     } else {
@@ -17759,7 +18032,7 @@ class ShareAttachmentModal {
   }
 
   async sendAttachments() {
-    const selectedBoxes = Array.from(this.contactsList.querySelectorAll('.call-invite-contact-checkbox:checked'));
+    const selectedBoxes = Array.from(this.contactsList.querySelectorAll('.call-invite-checkbox:checked'));
     const addresses = selectedBoxes.map(cb => cb.value).slice(0, 10);
     
     if (!this.attachmentData) {
@@ -17924,7 +18197,7 @@ const shareAttachmentModal = new ShareAttachmentModal();
 
 /**
  * Share Contacts Modal
- * Allows users to select contacts (Friends and Connections) to share as a VCF file attachment
+ * Allows users to select contacts to share as a VCF file attachment
  */
 class ShareContactsModal {
   constructor() {
@@ -18036,7 +18309,7 @@ class ShareContactsModal {
     }
 
     // For public accounts, proceed with contact list population
-    // Get Friends (friend === 3) and Connections (friend === 2)
+    // Get Friends (friend === 3), Connections (friend === 2), and Tolled (friend === 1)
     const allContacts = Object.values(myData.contacts || {});
     
     // Filter out the current chat contact (the person you're chatting with)
@@ -18045,17 +18318,25 @@ class ShareContactsModal {
       : null;
     
     const filteredContacts = currentChatAddress
-      ? allContacts.filter(c => normalizeAddress(c.address) !== currentChatAddress)
-      : allContacts;
+      ? allContacts.filter(c => !isFaucetAddress(c.address) && normalizeAddress(c.address) !== currentChatAddress)
+      : allContacts.filter(c => !isFaucetAddress(c.address));
     
+    const sortByShareDisplayName = (a, b) =>
+      this.getContactDisplayNameForShare(a)
+        .toLowerCase()
+        .localeCompare(this.getContactDisplayNameForShare(b).toLowerCase());
+
     const friends = filteredContacts
       .filter(c => c.friend === 3)
-      .sort((a, b) => this.getContactDisplayNameForShare(a).toLowerCase().localeCompare(this.getContactDisplayNameForShare(b).toLowerCase()));
+      .sort(sortByShareDisplayName);
     const connections = filteredContacts
       .filter(c => c.friend === 2)
-      .sort((a, b) => this.getContactDisplayNameForShare(a).toLowerCase().localeCompare(this.getContactDisplayNameForShare(b).toLowerCase()));
+      .sort(sortByShareDisplayName);
+    const tolled = filteredContacts
+      .filter(c => c.friend === 1)
+      .sort(sortByShareDisplayName);
 
-    const hasContacts = friends.length > 0 || connections.length > 0;
+    const hasContacts = friends.length > 0 || connections.length > 0 || tolled.length > 0;
 
     // Show/hide empty state
     this.emptyState.style.display = hasContacts ? 'none' : 'block';
@@ -18071,6 +18352,10 @@ class ShareContactsModal {
       // Render Connections section
       if (connections.length > 0) {
         await this.renderSection('Connections', connections);
+      }
+      // Render Tolled section
+      if (tolled.length > 0) {
+        await this.renderSection('Tolled', tolled);
       }
     }
   }
@@ -18372,13 +18657,11 @@ class ShareContactsModal {
       // Create blob from VCF content
       const vcfBlob = new Blob([vcfContent], { type: 'text/vcard' });
 
-      // Get recipient's DH key for encryption
-      const { dhkey, cipherText: pqEncSharedKey } = await chatModal.getRecipientDhKey(chatModal.address);
-      const password = myAccount.keys.secret + myAccount.keys.pqSeed;
-      const selfKey = encryptData(bin2hex(dhkey), password, true);
+      // Use a random encryption key for the attachment (matches chat attachments)
+      const encKey = generateRandomBytes(32);
 
-      // Encrypt the VCF blob
-      const encryptedBlob = await encryptBlob(vcfBlob, dhkey);
+      // Encrypt the VCF blob using the random key
+      const encryptedBlob = await encryptBlob(vcfBlob, encKey);
 
       // Upload encrypted file
       const attachmentUrl = await chatModal.uploadEncryptedFile(encryptedBlob, vcfFilename);
@@ -18389,8 +18672,7 @@ class ShareContactsModal {
         name: vcfFilename,
         size: vcfBlob.size,
         type: 'text/vcard',
-        pqEncSharedKey: bin2base64(pqEncSharedKey),
-        selfKey
+        encKey: bin2base64(encKey)
       });
 
       // Update attachment preview in chat modal
@@ -18554,6 +18836,7 @@ class ImportContactsModal {
 
     } catch (err) {
       console.error('Failed to load VCF:', err);
+      logsModal.log('❌ Failed to load VCF:', err?.message || String(err));
       showToast('Failed to load contacts file', 0, 'error');
       this.close();
     }
@@ -18573,17 +18856,20 @@ class ImportContactsModal {
 
     const encryptedData = new Uint8Array(await response.arrayBuffer());
 
-    // Determine which key to use for decryption (same logic as decryptAttachmentToBlob)
+    // Determine which key to use for decryption.
+    // New flow: prefer `encKey` (random key, base64). Fall back to legacy fields for backwards compatibility.
     let dhkey;
-    if (attachment.my) {
-      // We sent this file - decrypt with selfKey
+    if (attachment.encKey) {
+      dhkey = typeof attachment.encKey === 'string' ? base642bin(attachment.encKey) : attachment.encKey;
+    } else if (attachment.my) {
+      // We sent this file - decrypt with selfKey (legacy)
       if (!attachment.selfKey) throw new Error('Missing selfKey for decrypt');
       const password = myAccount.keys.secret + myAccount.keys.pqSeed;
       const dhkeyHex = decryptData(attachment.selfKey, password, true);
       if (!dhkeyHex) throw new Error('Failed to decrypt selfKey');
       dhkey = hex2bin(dhkeyHex);
     } else {
-      // Someone else sent this - decrypt with pqEncSharedKey
+      // Someone else sent this - decrypt with pqEncSharedKey (legacy)
       if (!attachment.pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
       const ok = await ensureContactKeys(attachment.senderAddress);
       const senderPublicKey = myData.contacts[attachment.senderAddress]?.public;
@@ -18666,16 +18952,21 @@ class ImportContactsModal {
 
   /**
    * Validates a contact on the network by username lookup
-   * @param {Object} parsedContact - Contact object with username
+   * Also verifies that VCF address matches network-resolved address.
+   * @param {Object} parsedContact - Contact object with username and address
    * @returns {Promise<Object>} { success: boolean, networkAddress?: string, error?: string }
    */
   async validateContactOnNetwork(parsedContact) {
     if (!parsedContact.username) {
       return { success: false, error: 'No username provided' };
     }
+    if (!parsedContact.address) {
+      return { success: false, error: 'No address provided' };
+    }
 
     try {
       const username = normalizeUsername(parsedContact.username);
+      const vcfAddress = normalizeAddress(parsedContact.address);
       const usernameBytes = utf82bin(username);
       const usernameHash = hashBytes(usernameBytes);
 
@@ -18687,6 +18978,11 @@ class ImportContactsModal {
       }
 
       const networkAddress = normalizeAddress(addressData.address);
+
+      // Reject tampered VCF entries where username/address pairing doesn't match network.
+      if (vcfAddress !== networkAddress) {
+        return { success: false, error: 'VCF address does not match network username record' };
+      }
 
       // Verify account exists and ensure it's a public account
       const accountData = await queryNetwork(`/account/${longAddress(networkAddress)}`);
@@ -18706,6 +19002,7 @@ class ImportContactsModal {
       return { success: true, networkAddress, username };
     } catch (error) {
       console.error('Error validating contact on network:', error);
+      logsModal.log('❌ Error validating contact on network:', error?.message || String(error));
       return { success: false, error: 'Network error during validation' };
     }
   }
@@ -18965,6 +19262,7 @@ class ImportContactsModal {
       for (const result of results) {
         if (result.status === 'rejected') {
           console.error('Validation promise rejected:', result.reason);
+          logsModal.log('❌ Validation promise rejected:', result.reason?.message || String(result.reason));
           failedCount++;
           continue;
         }
@@ -18974,6 +19272,7 @@ class ImportContactsModal {
 
         if (!validation.success) {
           console.warn(`Failed to validate contact ${parsedContact.username}:`, validation.error);
+          logsModal.log(`⚠️ Failed to validate contact ${parsedContact.username}:`, validation.error);
           failedContacts.push({ username: parsedContact.username, error: validation.error });
           failedCount++;
           continue;
@@ -18985,6 +19284,7 @@ class ImportContactsModal {
         // Check if contact already exists
         if (myData.contacts[networkAddress]) {
           console.log(`Contact ${parsedContact.username} already exists, skipping`);
+          logsModal.log(`ℹ️ Contact ${parsedContact.username} already exists, skipping`);
           continue;
         }
 
@@ -19058,6 +19358,7 @@ class ImportContactsModal {
 
     } catch (err) {
       console.error('Failed to import contacts:', err);
+      logsModal.log('❌ Failed to import contacts:', err?.message || String(err));
       showToast('Failed to import contacts', 0, 'error');
     } finally {
       this.isImporting = false;
