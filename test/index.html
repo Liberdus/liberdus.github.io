@@ -252,6 +252,10 @@
               <div class="form-actions">
                 <button type="submit" class="btn btn--primary btn--pill btn--full">Continue</button>
               </div>
+              <div class="form-group form-group--divider">
+                <p>Or invite contacts from your other apps.</p>
+                <button type="button" id="newChatInviteButton" class="btn btn--secondary btn--pill btn--full">Invite</button>
+              </div>
             </form>
           </div>
         </div>
@@ -426,6 +430,7 @@
           <ul class="menu-list">
             <li class="menu-item" id="openCallsModal" data-icon="call">Calls</li>
             <li class="menu-item" id="openAccountForm" data-icon="user">Profile</li>
+            <li class="menu-item" id="openManageContactsModal" data-icon="contacts">Contacts</li>
             <li class="menu-item" id="openToll" data-icon="dollar-sign">Toll</li>
             <li class="menu-item" id="openLockModal" data-icon="lock">Lock</li>
             <li class="menu-item" id="openSecretModal" data-icon="key">Secret</li>
@@ -434,6 +439,33 @@
             <li class="menu-item" id="openLaunchUrl" data-icon="launch" style="display: none;">Launch</li>
             <li class="menu-item sign-out" id="handleSignOutSettings" data-icon="log-out">Sign Out</li>
           </ul>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Manage Contacts Modal -->
+      <div class="modal fixed-header" id="manageContactsModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeManageContactsModal"></button>
+          <div class="modal-title">Manage Contacts</div>
+        </div>
+        <div class="modal-content">
+          <p>Import contacts from a VCF file.</p>
+          <div class="form-container">
+            <div class="form-group">
+              <label for="manageContactsFileInput">Select VCF File</label>
+              <div class="file-input-wrapper">
+                <input type="file" id="manageContactsFileInput" class="form-control" accept=".vcf,text/vcard,text/x-vcard" />
+                <div class="selected-file-display" id="manageContactsSelectedFile" style="display: none;">
+                  <span class="selected-file-name"></span>
+                  <button type="button" class="clear-file-btn" id="manageContactsClearFile">×</button>
+                </div>
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn btn--primary btn--pill btn--full" id="manageContactsImportBtn" disabled>Import Contacts</button>
+            </div>
+          </div>
         </div>
         <a class="last-item" href="#"> </a>
       </div>
@@ -498,25 +530,6 @@
               <div class="form-actions">
                 <button id="continueToFarm" class="btn btn--primary btn--pill btn--full">Continue</button>
               </div>
-            </div>
-          </div>
-        </div>
-        <a class="last-item" href="#"> </a>
-      </div>
-
-      <!-- Logs Modal -->
-      <div class="modal fixed-header" id="logsModal">
-        <div class="modal-header">
-          <button class="back-button" id="closeLogsModal"></button>
-          <div class="modal-title">Logs</div>
-        </div>
-        <div class="modal-content">
-          <div class="form-container">
-            <div style="padding: 1rem">
-              <textarea id="logsTextarea" placeholder="Logs will appear here..." rows="40" readonly></textarea>
-            </div>
-            <div class="form-actions">
-              <button id="clearLogsButton" class="btn btn--primary btn--pill btn--full">Clear</button>
             </div>
           </div>
         </div>
@@ -865,7 +878,7 @@
                 </div>
               </div>
               <!-- My info fields -->
-              <div class="contact-info-item" style="display: block">
+              <div class="contact-info-item" style="display: flex">
                 <div class="contact-info-label">Name</div>
                 <div class="contact-info-value-container">
                   <div class="contact-info-value" id="myInfoName"></div>
@@ -973,7 +986,7 @@
               </div>
               <div class="form-group">
                 <label for="importPassword">
-                  Password
+                  File Password
                   <span id="importPasswordRequired" style="color: var(--danger-color); display: none;">required</span>
                 </label>
                 <input
@@ -1179,7 +1192,7 @@
             <div class="message-input-wrapper">
               <textarea class="message-input" placeholder="Type a message..."></textarea>
               <div class="toll-container">
-                <span class="toll-label">Toll:</span>
+                <span class="toll-label" id="tollLabel">Toll:</span>
                 <span class="toll-value" id="tollValue"></span>
                 <span class="toll-info-icon" data-icon="info"></span>
               </div>
@@ -1392,6 +1405,10 @@
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Save</span>
         </div>
+        <div class="context-menu-option" data-action="share" data-icon="share">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Share</span>
+        </div>
         <div class="context-menu-option" data-action="reply" data-icon="reply">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Reply</span>
@@ -1465,19 +1482,41 @@
                 <!-- Contacts will be populated here -->
               </div>
             </div>
-            <template id="callInviteContactTemplate">
-              <div class="call-invite-contact-row" data-address="">
-                <label class="call-invite-contact-label">
-                  <input type="checkbox" class="call-invite-contact-checkbox" value="" />
-                  <span class="call-invite-contact-name"></span>
-                </label>
-              </div>
-            </template>
             <div class="call-invite-modal-footer">
               <div id="callInviteCounter" class="call-invite-counter">0 selected (max 10)</div>
               <div class="call-invite-footer-actions">
                 <button id="callInviteCancelBtn" class="btn btn--secondary btn--pill">Cancel</button>
                 <button id="callInviteSendBtn" class="btn btn--primary btn--pill">Invite</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Share Attachment Modal -->
+      <div class="modal fixed-header" id="shareAttachmentModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeShareAttachmentModal"></button>
+          <div class="modal-title">Share Attachment</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container call-invite-modal-container">
+            <div class="call-invite-contacts-scroll">
+                <div class="empty-state">
+                  <div></div>
+                  <div>No Contacts Found</div>
+                  <div>Add contacts to share with them</div>
+                </div>
+              <div class="contacts-list" id="shareAttachmentContactsList">
+                <!-- Contacts will be populated here -->
+              </div>
+            </div>
+            <div class="call-invite-modal-footer">
+              <div id="shareAttachmentCounter" class="call-invite-counter">0 selected (max 10)</div>
+              <div class="call-invite-footer-actions">
+                <button id="shareAttachmentCancelBtn" class="btn btn--secondary btn--pill">Cancel</button>
+                <button id="shareAttachmentSendBtn" class="btn btn--primary btn--pill">Share</button>
               </div>
             </div>
           </div>
@@ -2089,7 +2128,7 @@
               </div>
               <div class="form-group">
                 <label for="backupPassword">
-                  Password
+                  File Password
                   <span id="backupPasswordWarning" style="color: #dc3545; display: none">too short</span>
                   <span id="backupPasswordRequired" style="color: #dc3545; display: none">required</span>
                 </label>
@@ -2102,14 +2141,14 @@
               </div>
               <div class="form-group">
                 <label for="backupPasswordConfirm">
-                  Confirm Password
+                  Confirm File Password
                   <span id="backupPasswordConfirmWarning" style="color: #dc3545; display: none">passwords don't match</span>
                 </label>
                 <input
                   type="password"
                   id="backupPasswordConfirm"
                   class="form-control"
-                  placeholder="Confirm your password"
+                  placeholder="Confirm your file password"
                 />
               </div>
               <div class="form-actions">
@@ -2673,6 +2712,25 @@
             <button type="button" id="submitMigrateAccounts" class="btn btn--primary btn--pill btn--full">Migrate Accounts</button>
             <div id="errorAndInconsistentAccounts" class="form-text warning-text-migrate-accounts">
               <!-- Error and inconsistent accounts will be rendered here -->
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Logs Modal -->
+      <div class="modal fixed-header" id="logsModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeLogsModal"></button>
+          <div class="modal-title">Logs</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <div style="padding: 1rem">
+              <textarea id="logsTextarea" placeholder="Logs will appear here..." rows="40" readonly></textarea>
+            </div>
+            <div class="form-actions">
+              <button id="clearLogsButton" class="btn btn--primary btn--pill btn--full">Clear</button>
             </div>
           </div>
         </div>

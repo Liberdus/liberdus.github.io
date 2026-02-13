@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'p'
+const version = 'q'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -139,6 +139,7 @@ const wei = 10n ** BigInt(weiDigits);
 const MAX_MEMO_BYTES = 1000; // 1000 bytes for memos
 const MAX_CHAT_MESSAGE_BYTES = 1000; // 1000 bytes for chat messages
 const BRIDGE_USERNAME = 'liberdusbridge';
+const TRANSACTION_TIMESTAMP_OFFSET_MS = 500; // Transaction offset to allow for slow connections
 
 let myData = null;
 let myAccount = null; // this is set to myData.account for convience
@@ -163,6 +164,13 @@ const NETWORK_ACCOUNT_ID = '0'.repeat(64);
 const MAX_TOLL = 1_000_000; // 1M limit
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000; // 15 minute limit for editing messages
+
+// Migration for attachment encryption keys.
+// Set this numeric timestamp (YYYYMMDDHHMM) to force re-running the
+// `migrateAttachmentKeysToEncKey` migration for existing users.
+// Use YYYYMMDDHHMM (year, month, day, hour, minute) so migrations
+// can be re-run multiple times per day by bumping this value.
+const MIGRATION_ATTACHMENT_KEYS_TO_ENC_KEY_TS = 202602010000;
 
 let parameters = {
   current: {
@@ -340,6 +348,107 @@ function migrateFriendStatusToConnection(data) {
 }
 
 /**
+ * One-time migration: extract DH-derived encryption keys to random encKey field
+ * This decouples attachment encryption from recipient keys for easier sharing
+ * @param {Object} data
+ * @returns {Promise<boolean>} True if migration flag was applied
+ */
+async function migrateAttachmentKeysToEncKey(data) {
+  if (!data?.account) return false;
+
+  const migrations =
+    data.account.migrations && typeof data.account.migrations === 'object'
+      ? data.account.migrations
+      : null;
+
+  // Determine whether this migration has already been applied.
+  // Previously this flag was a boolean; now we store a numeric timestamp.
+  // Legacy boolean `true` is treated as NOT applied so the migration
+  // will run for those accounts (we set appliedTs to 0).
+  const appliedTsRaw = migrations?.attachmentKeysToEncKey;
+  let appliedTs = 0;
+  if (typeof appliedTsRaw === 'number') {
+    appliedTs = appliedTsRaw;
+  } else if (appliedTsRaw === true) {
+    appliedTs = 0;
+  }
+
+  // If the migration timestamp stored is >= current migration ts, skip running.
+  if (appliedTs >= MIGRATION_ATTACHMENT_KEYS_TO_ENC_KEY_TS) {
+    return false;
+  }
+
+  if (data.contacts && typeof data.contacts === 'object') {
+    for (const [address, contact] of Object.entries(data.contacts)) {
+      if (!contact || typeof contact !== 'object') continue;
+      if (!Array.isArray(contact.messages)) continue;
+
+      for (const message of contact.messages) {
+        if (!message || typeof message !== 'object') continue;
+        if (!Array.isArray(message.xattach)) continue;
+
+        for (const attachment of message.xattach) {
+          if (!attachment || typeof attachment !== 'object') continue;
+          
+          // Skip if already has encKey
+          if (attachment.encKey) continue;
+
+          let dhkey;
+          
+          if (message.my) {
+            // Sent message: decrypt selfKey to get dhkey
+            if (!attachment.selfKey) continue;
+            try {
+              const password = data.account.keys.secret + data.account.keys.pqSeed;
+              dhkey = hex2bin(decryptData(attachment.selfKey, password, true));
+            } catch (e) {
+              console.warn('Failed to decrypt attachment selfKey during migration:', e);
+              continue;
+            }
+          } else {
+            // Received message: decrypt pqEncSharedKey to get dhkey
+            if (!attachment.pqEncSharedKey) continue;
+            try {
+              // Ensure contact keys are available
+              await ensureContactKeys(address);
+              const senderPublicKey = data.contacts[address]?.public;
+              if (!senderPublicKey) {
+                console.warn('No public key found for sender during migration:', address);
+                continue;
+              }
+              
+              const pqCipher = (typeof attachment.pqEncSharedKey === 'string') 
+                ? base642bin(attachment.pqEncSharedKey) 
+                : attachment.pqEncSharedKey;
+              
+              dhkey = dhkeyCombined(
+                data.account.keys.secret,
+                senderPublicKey,
+                data.account.keys.pqSeed,
+                pqCipher
+              ).dhkey;
+            } catch (e) {
+              console.warn('Failed to decrypt attachment pqEncSharedKey during migration:', e);
+              continue;
+            }
+          }
+
+          // Store the dhkey as encKey
+          if (dhkey) {
+            attachment.encKey = bin2base64(dhkey);
+          }
+        }
+      }
+    }
+  }
+
+  data.account.migrations = migrations && typeof migrations === 'object' ? migrations : {};
+  // Record the migration application timestamp so future runs can be gated.
+  data.account.migrations.attachmentKeysToEncKey = MIGRATION_ATTACHMENT_KEYS_TO_ENC_KEY_TS;
+  return true;
+}
+
+/**
  * Checks if the current account is private
  * @returns {boolean} True if the account is private, false otherwise
  */
@@ -469,6 +578,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Settings Modal
   settingsModal.load();
 
+  // Manage Contacts Modal
+  manageContactsModal.load();
+
   // Secret Modal
   secretModal.load();
 
@@ -513,6 +625,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Call Invite Modal
   callInviteModal.load();
+
+  // Share Attachment Modal
+  shareAttachmentModal.load();
 
   // Share Contacts Modal
   shareContactsModal.load();
@@ -1581,13 +1696,10 @@ class WalletScreen {
 
   open() {
     this.screen.classList.add('active');
-    // Show testnet warning toast if on testnet and not shown this session
-    if (!this.isMainnet()) {
-      const hasBeenShown = sessionStorage.getItem('testnetWarningShown');
-      if (hasBeenShown !== 'true') {
-        showToast('The LIB in this Testnet is not of any value and will not be transferred to the Mainnet.', 0, 'info');
-        sessionStorage.setItem('testnetWarningShown', 'true');
-      }
+    // Show testnet warning toast once per account (first-time tip).
+    if (!this.isMainnet() && !checkFirstTimeTip('testnetWarning')) {
+      showToast('The LIB in this Testnet is not of any value and will not be transferred to the Mainnet.', 0, 'info');
+      setFirstTimeTipShown('testnetWarning');
     }
   }
 
@@ -2571,6 +2683,9 @@ class SettingsModal {
     this.callsButton = document.getElementById('openCallsModal');
     this.callsButton.addEventListener('click', () => callsModal.open());
     
+    this.contactsButton = document.getElementById('openManageContactsModal');
+    this.contactsButton.addEventListener('click', () => manageContactsModal.open());
+    
     this.profileButton = document.getElementById('openAccountForm');
     this.profileButton.addEventListener('click', () => myProfileModal.open());
     
@@ -2625,6 +2740,124 @@ class SettingsModal {
 }
 
 const settingsModal = new SettingsModal();
+
+/**
+ * Manage Contacts Modal
+ * Allows users to import contacts from a VCF file
+ */
+class ManageContactsModal {
+  constructor() {
+    this.selectedFile = null;
+  }
+
+  load() {
+    this.modal = document.getElementById('manageContactsModal');
+    this.closeButton = document.getElementById('closeManageContactsModal');
+    this.fileInput = document.getElementById('manageContactsFileInput');
+    this.selectedFileDisplay = document.getElementById('manageContactsSelectedFile');
+    this.clearFileBtn = document.getElementById('manageContactsClearFile');
+    this.importBtn = document.getElementById('manageContactsImportBtn');
+
+    // Event listeners
+    this.closeButton.addEventListener('click', () => this.close());
+    this.fileInput.addEventListener('change', (e) => this.handleFileSelected(e));
+    this.clearFileBtn.addEventListener('click', () => this.clearFile());
+    this.importBtn.addEventListener('click', () => this.handleImport());
+  }
+
+  /**
+   * Opens the manage contacts modal
+   */
+  open() {
+    this.clearFile();
+    this.modal.classList.add('active');
+    enterFullscreen();
+  }
+
+  /**
+   * Closes the modal
+   */
+  close() {
+    this.modal.classList.remove('active');
+    this.clearFile();
+    enterFullscreen();
+  }
+
+  /**
+   * Checks if the modal is active
+   * @returns {boolean}
+   */
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
+  }
+
+  /**
+   * Handles file selection
+   * @param {Event} e - Change event
+   */
+  handleFileSelected(e) {
+    const file = e.target.files?.[0];
+    if (!file) {
+      this.clearFile();
+      return;
+    }
+
+    // Validate file type
+    const isVcf = file.name.toLowerCase().endsWith('.vcf') || 
+                  file.type === 'text/vcard' || 
+                  file.type === 'text/x-vcard';
+    if (!isVcf) {
+      showToast('Please select a VCF file', 2000, 'error');
+      this.clearFile();
+      return;
+    }
+
+    this.selectedFile = file;
+    this.selectedFileDisplay.style.display = 'flex';
+    this.selectedFileDisplay.querySelector('.selected-file-name').textContent = file.name;
+    this.fileInput.style.display = 'none';
+    this.importBtn.disabled = false;
+  }
+
+  /**
+   * Clears the selected file
+   */
+  clearFile() {
+    this.selectedFile = null;
+    this.fileInput.value = '';
+    this.fileInput.style.display = 'block';
+    this.selectedFileDisplay.style.display = 'none';
+    this.importBtn.disabled = true;
+  }
+
+  /**
+   * Handles the import button click
+   */
+  async handleImport() {
+    if (!this.selectedFile) {
+      showToast('Please select a VCF file first', 2000, 'error');
+      return;
+    }
+
+    try {
+      // Read the file content
+      const vcfContent = await this.selectedFile.text();
+
+      // Close this modal
+      this.close();
+
+      // Open the import contacts modal with local VCF content
+      // The import modal handles network ID validation and parsing
+      importContactsModal.open({ vcfContent, isLocal: true });
+
+    } catch (err) {
+      console.error('Failed to read VCF file:', err);
+      showToast('Failed to read the VCF file', 0, 'error');
+    }
+  }
+}
+
+const manageContactsModal = new ManageContactsModal();
 
 class SecretModal {
   constructor() { }
@@ -3294,6 +3527,12 @@ class SignInModal {
       saveState();
     }
 
+
+    // One-time migration: extract attachment encryption keys to encKey field
+    if (await migrateAttachmentKeysToEncKey(myData)) {
+      saveState();
+    }
+
     // Clear notification address for this account when signing in
     // Notification storage is only for accounts the user is NOT signed in to
     if (reactNativeApp.isReactNativeWebView && myAccount?.keys?.address) {
@@ -3560,7 +3799,7 @@ class MyInfoModal {
       const isEmpty = !value;
 
       // Always show the Name field, hide others when empty
-      container.style.display = (fieldKey === 'name' || !isEmpty) ? 'block' : 'none';
+      container.style.display = (fieldKey === 'name' || !isEmpty) ? 'flex' : 'none';
       if (isEmpty && fieldKey !== 'name') continue;
 
       // Populate the field with data
@@ -3773,8 +4012,8 @@ class ContactInfoModal {
         return;
       }
 
-      // Show the container and set the value
-      container.style.display = 'block';
+      // Show the container and set the value (use flex to maintain side-by-side layout)
+      container.style.display = 'flex';
       
       if (field === 'Email') {
         element.textContent = value;
@@ -3998,7 +4237,7 @@ class FriendModal {
       chatId: chatId_,
       required: requiredNum,
       type: 'update_toll_required',
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       networkId: network.netid,
     };
     const txid = await signObj(tx, myAccount.keys);
@@ -4234,7 +4473,7 @@ class EditContactModal {
       this.providedNameContainer.style.display = 'none';
     } else {
       providedNameDiv.textContent = providedName;
-      this.providedNameContainer.style.display = 'block';
+      this.providedNameContainer.style.display = 'flex';
     }
 
     // Get the original name from the contact info display
@@ -4773,11 +5012,16 @@ class CallsModal {
             callGroups.set(groupKey, {
               callTime,
               callUrl,
-              participants: []
+              participants: [],
+              participantAddresses: new Set()
             });
           }
-          
-          callGroups.get(groupKey).participants.push({
+
+          const group = callGroups.get(groupKey);
+          if (!address || group.participantAddresses.has(address)) continue;
+
+          group.participantAddresses.add(address);
+          group.participants.push({
             address,
             calling: displayName,
             txid: msg.txid || ''
@@ -4787,7 +5031,9 @@ class CallsModal {
     }
     
     // Convert grouped calls to array and sort by call time
-    this.calls = Array.from(callGroups.values()).sort((a, b) => (a.callTime || 0) - (b.callTime || 0));
+    this.calls = Array.from(callGroups.values())
+      .map(({ participantAddresses, ...callGroup }) => callGroup)
+      .sort((a, b) => (a.callTime || 0) - (b.callTime || 0));
   }
 
   /** 
@@ -4989,15 +5235,20 @@ class GroupCallParticipantsModal {
     if (callGroup?.participants) {
       const template = document.getElementById('groupCallParticipantTemplate');
       if (template) {
+        const renderedAddresses = new Set();
         callGroup.participants.forEach(participant => {
+          const participantAddress = participant?.address || '';
+          if (!participantAddress || renderedAddresses.has(participantAddress)) return;
+          renderedAddresses.add(participantAddress);
+
           const participantEl = template.content.cloneNode(true).querySelector('.participant-item');
-          participantEl.setAttribute('data-address', participant.address);
+          participantEl.setAttribute('data-address', participantAddress);
           
           const avatar = participantEl.querySelector('.participant-avatar');
           const name = participantEl.querySelector('.participant-name');
           
-          if (avatar) avatar.innerHTML = generateIdenticon(participant.address);
-          if (name) name.textContent = participant.calling;
+          if (avatar) avatar.innerHTML = generateIdenticon(participantAddress);
+          if (name) name.textContent = participant.calling || participantAddress;
           
           this.participantsList.appendChild(participantEl);
         });
@@ -5248,8 +5499,14 @@ async function processChats(chats, keys) {
           }
         }
         if (tx.type == 'message') {
-          const payload = tx.xmessage; // changed to use .message
-          if (useTxTimestamp){ 
+          // Handle messages without xmessage (same as transfer handling)
+          // Ensure payload is always an object, even if xmessage is null/undefined
+          let payload = tx.xmessage;
+          if (!payload || typeof payload !== 'object') {
+            payload = {};
+          }
+          // Set sent_timestamp - use tx.timestamp if useTxTimestamp is true, otherwise use payload.sent_timestamp or tx.timestamp
+          if (useTxTimestamp || !payload.sent_timestamp) {
             payload.sent_timestamp = tx.timestamp;
           }
           if (mine){
@@ -5292,82 +5549,83 @@ async function processChats(chats, keys) {
                   
                   // Verify that the sender is the same who sent the message they're trying to delete
                   const messageToDelete = contact.messages.find(msg => msg.txid === txidToDelete);
-                  
-                  if (messageToDelete) {
-                    // Only allow deletion if the sender of this delete tx is the same who sent the original message
-                    // (normalize addresses for comparison)
-                    const originalSender = normalizeAddress(tx.from);
-                    
-                    if (!messageToDelete.my && originalSender === from) {
-                      // This is a message received from sender, who is now deleting it - valid
-                      // Purge cached thumbnails for image attachments, if any
-                      chatModal.purgeThumbnail(messageToDelete.xattach);
-
-                      // Mark the message as deleted
-                      messageToDelete.deleted = 1;
-                      messageToDelete.message = "Deleted by sender";
-                      // Remove attachments so we don't keep references around
-                      delete messageToDelete.xattach;
-                      
-                      // Remove payment-specific fields if present
-                      if (messageToDelete.amount) {
-                        if (messageToDelete.payment) delete messageToDelete.payment;
-                        if (messageToDelete.memo) messageToDelete.memo = "Deleted by sender";
-                        if (messageToDelete.amount) delete messageToDelete.amount;
-                        if (messageToDelete.symbol) delete messageToDelete.symbol;
-                        
-                        // Update corresponding transaction in wallet history
-                        const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
-                        if (txIndex !== -1) {
-                          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted by sender' });
-                          delete myData.wallet.history[txIndex].amount;
-                          delete myData.wallet.history[txIndex].symbol;
-                          delete myData.wallet.history[txIndex].payment;
-                          delete myData.wallet.history[txIndex].sign;
-                          delete myData.wallet.history[txIndex].address;
-                        }
-                      }
-                    } else if (messageToDelete.my && normalizeAddress(keys.address) === normalizeAddress(tx.from)) {
-                      // This is our own message, and we're deleting it - valid
-                      // Purge cached thumbnails for image attachments, if any
-                      chatModal.purgeThumbnail(messageToDelete.xattach);
-
-                      // Mark the message as deleted
-                      messageToDelete.deleted = 1;
-                      messageToDelete.message = "Deleted for all";
-                      // Remove attachments so we don't keep references around
-                      delete messageToDelete.xattach;
-                      
-                      // Remove payment-specific fields if present - same logic as above
-                      if (messageToDelete.amount) {
-                        if (messageToDelete.payment) delete messageToDelete.payment;
-                        if (messageToDelete.memo) messageToDelete.memo = "Deleted for all";
-                        if (messageToDelete.amount) delete messageToDelete.amount;
-                        if (messageToDelete.symbol) delete messageToDelete.symbol;
-                        
-                        // Update corresponding transaction in wallet history
-                        const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
-                        if (txIndex !== -1) {
-                          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted for all' });
-                          delete myData.wallet.history[txIndex].amount;
-                          delete myData.wallet.history[txIndex].symbol;
-                          delete myData.wallet.history[txIndex].payment;
-                          delete myData.wallet.history[txIndex].sign;
-                          delete myData.wallet.history[txIndex].address;
-                        }
-                      }
-                    }
-
-                    if (reactNativeApp.isReactNativeWebView && messageToDelete.type === 'call' && Number(messageToDelete.callTime) > 0) {
-                      reactNativeApp.sendCancelScheduledCall(contact?.username, Number(messageToDelete.callTime));
-                    }
-                    
-                    if (chatModal.isActive() && chatModal.address === from) {
-                      chatModal.appendChatModal();
-                    }
-                    // Don't process this message further - it's just a control message
-                    continue;
+                  if (!messageToDelete) {
+                    continue; // ignore delete control messages for missing txid
                   }
+                  
+                  // Only allow deletion if the sender of this delete tx is the same who sent the original message
+                  // (normalize addresses for comparison)
+                  const originalSender = normalizeAddress(tx.from);
+                  
+                  if (!messageToDelete.my && originalSender === from) {
+                    // This is a message received from sender, who is now deleting it - valid
+                    // Purge cached thumbnails for image attachments, if any
+                    chatModal.purgeThumbnail(messageToDelete.xattach);
+
+                    // Mark the message as deleted
+                    messageToDelete.deleted = 1;
+                    messageToDelete.message = "Deleted by sender";
+                    // Remove attachments so we don't keep references around
+                    delete messageToDelete.xattach;
+                    
+                    // Remove payment-specific fields if present
+                    if (messageToDelete.amount) {
+                      if (messageToDelete.payment) delete messageToDelete.payment;
+                      if (messageToDelete.memo) messageToDelete.memo = "Deleted by sender";
+                      if (messageToDelete.amount) delete messageToDelete.amount;
+                      if (messageToDelete.symbol) delete messageToDelete.symbol;
+                      
+                      // Update corresponding transaction in wallet history
+                      const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
+                      if (txIndex !== -1) {
+                        Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted by sender' });
+                        delete myData.wallet.history[txIndex].amount;
+                        delete myData.wallet.history[txIndex].symbol;
+                        delete myData.wallet.history[txIndex].payment;
+                        delete myData.wallet.history[txIndex].sign;
+                        delete myData.wallet.history[txIndex].address;
+                      }
+                    }
+                  } else if (messageToDelete.my && normalizeAddress(keys.address) === normalizeAddress(tx.from)) {
+                    // This is our own message, and we're deleting it - valid
+                    // Purge cached thumbnails for image attachments, if any
+                    chatModal.purgeThumbnail(messageToDelete.xattach);
+
+                    // Mark the message as deleted
+                    messageToDelete.deleted = 1;
+                    messageToDelete.message = "Deleted for all";
+                    // Remove attachments so we don't keep references around
+                    delete messageToDelete.xattach;
+                    
+                    // Remove payment-specific fields if present - same logic as above
+                    if (messageToDelete.amount) {
+                      if (messageToDelete.payment) delete messageToDelete.payment;
+                      if (messageToDelete.memo) messageToDelete.memo = "Deleted for all";
+                      if (messageToDelete.amount) delete messageToDelete.amount;
+                      if (messageToDelete.symbol) delete messageToDelete.symbol;
+                      
+                      // Update corresponding transaction in wallet history
+                      const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
+                      if (txIndex !== -1) {
+                        Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted for all' });
+                        delete myData.wallet.history[txIndex].amount;
+                        delete myData.wallet.history[txIndex].symbol;
+                        delete myData.wallet.history[txIndex].payment;
+                        delete myData.wallet.history[txIndex].sign;
+                        delete myData.wallet.history[txIndex].address;
+                      }
+                    }
+                  }
+
+                  if (reactNativeApp.isReactNativeWebView && messageToDelete.type === 'call' && Number(messageToDelete.callTime) > 0) {
+                    reactNativeApp.sendCancelScheduledCall(contact?.username, Number(messageToDelete.callTime));
+                  }
+                  
+                  if (chatModal.isActive() && chatModal.address === from) {
+                    chatModal.appendChatModal();
+                  }
+                  // Don't process this message further - it's just a control message
+                  continue;
                 } else if (parsedMessage.type === 'edit') {
                   const txidToEdit = parsedMessage.txid;
                   const newText = parsedMessage.text;
@@ -5927,7 +6185,7 @@ async function postAssetTransfer(to, amount, memo, keys) {
     // TODO backend is not allowing memo > 140 characters; by pass using xmemo; we might have to check the total tx size instead
     // memo: stringify(memo),
     xmemo: memo,
-    timestamp: getCorrectedTimestamp(),
+    timestamp: getTransactionTimestamp(),
     fee: getTransactionFeeWei(), // This is not used by the backend
     networkId: network.netid,
   };
@@ -5950,7 +6208,7 @@ async function postRegisterAlias(alias, keys, isPrivate = false) {
     alias: alias,
     publicKey: keys.public,
     pqPublicKey: pqPublicKey,
-    timestamp: getCorrectedTimestamp(),
+    timestamp: getTransactionTimestamp(),
     networkId: network.netid,
     private: isPrivate,
   };
@@ -7645,18 +7903,47 @@ function generateMessageHash(message) {
   return hex.slice(0, 20);
 }
 
+function normalizeFailureReason(error) {
+  if (!error) return 'Unknown reason';
+  if (typeof error === 'string') return error;
+  if (error?.message) return error.message;
+  try {
+    return JSON.stringify(error);
+  } catch (jsonError) {
+    return String(error);
+  }
+}
+
+function buildUserListToastHtml(title, usernames) {
+  const listItems = usernames
+    .filter(Boolean)
+    .map(name => `<li><strong>${escapeHtml(name)}</strong></li>`)
+    .join('');
+
+  return [
+    '<div class="toast-list-content">',
+    `<div class="toast-list-title toast-list-title-centered">${escapeHtml(title)}</div>`,
+    `<ul class="toast-list">${listItems}</ul>`,
+    '</div>'
+  ].join('');
+}
+
 // Add this function before the ContactInfoModal class
-function showToast(message, duration = 2000, type = 'default', isHTML = false) {
+function showToast(message, duration = 2000, type = 'default', isHTML = false, options = {}) {
   const toastContainer = document.getElementById('toastContainer');
   
+  const dedupeEnabled = options?.dedupe !== false;
+
   // Generate deduplication key from message hash
-  const deduplicateKey = generateMessageHash(message);
+  const deduplicateKey = dedupeEnabled ? generateMessageHash(message) : null;
   
   // Check for duplicate toasts using the deduplication key
-  const existingToast = document.querySelector(`[data-deduplicate-key="${deduplicateKey}"]`);
-  if (existingToast) {
-    // Toast with this key already exists, don't create another one
-    return existingToast.id;
+  if (dedupeEnabled) {
+    const existingToast = document.querySelector(`[data-deduplicate-key="${deduplicateKey}"]`);
+    if (existingToast) {
+      // Toast with this key already exists, don't create another one
+      return existingToast.id;
+    }
   }
   
   const toast = document.createElement('div');
@@ -7672,8 +7959,10 @@ function showToast(message, duration = 2000, type = 'default', isHTML = false) {
   const toastId = 'toast-' + getCorrectedTimestamp() + '-' + Math.floor(Math.random() * 1000);
   toast.id = toastId;
   
-  // Add deduplication key (always set since we generate one if not provided)
-  toast.setAttribute('data-deduplicate-key', deduplicateKey);
+  // Add deduplication key only when dedupe is enabled for this toast
+  if (dedupeEnabled && deduplicateKey) {
+    toast.setAttribute('data-deduplicate-key', deduplicateKey);
+  }
 
   toastContainer.appendChild(toast);
 
@@ -8194,6 +8483,10 @@ function getCorrectedTimestamp() {
   const correctedTime = clientNow + timeSkew;
 
   return correctedTime;
+}
+
+function getTransactionTimestamp() {
+  return getCorrectedTimestamp() + TRANSACTION_TIMESTAMP_OFFSET_MS;
 }
 
 // Validator Modals
@@ -10379,7 +10672,7 @@ class TollModal {
       from: longAddress(myAccount.keys.address),
       toll: toll,
       type: 'toll',
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       tollUnit: tollUnit,
       networkId: network.netid,
     };
@@ -10808,6 +11101,20 @@ class LogsModal {
     if (this.clearButton) {
       this.clearButton.addEventListener('click', () => this.clear());
     }
+
+    // Event delegation for dynamically created toast button.
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target && target.classList.contains('toast-open-logs-button')) {
+        event.preventDefault();
+        event.stopPropagation();
+        const toastElement = target.closest('.toast');
+        if (toastElement && toastElement.id) {
+          hideToast(toastElement.id);
+        }
+        this.open();
+      }
+    }, { capture: true });
   }
 
   open() {
@@ -11415,7 +11722,7 @@ class ValidatorStakingModal {
       nominator: longAddress(myAccount?.keys?.address),
       nominee: nodeAddress,
       force: false,
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       networkId: network.netid,
     };
 
@@ -11754,7 +12061,7 @@ class StakeValidatorModal {
       nominator: longAddress(myAccount.keys.address),
       nominee: nodeAddress,
       stake: amount,
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       networkId: network.netid,
     };
 
@@ -11979,6 +12286,9 @@ class ChatModal {
     this.tollUnit = null;
     this.address = null;
 
+    // True when the active chat recipient has blocked me (tollRequiredToSend === 2)
+    this.blockedByRecipient = false;
+
     // file attachments
     this.fileAttachments = [];
     // context menu properties
@@ -12000,6 +12310,9 @@ class ChatModal {
 
     // Track which voice message element is playing
     this.playingVoiceMessageElement = null;
+
+    // Track active attachment loading toasts by contact so closing a chat can hide only its loading toasts.
+    this.attachmentLoadingToastsByContact = new Map();
   }
 
   /**
@@ -12021,6 +12334,51 @@ class ChatModal {
   cancelAllOperations() {
     this.abortController.abort();
     this.abortController = new AbortController();
+  }
+
+  /**
+   * Track an attachment loading toast for a specific contact
+   * @param {string} contactAddress
+   * @param {string} toastId
+   * @returns {void}
+   */
+  trackAttachmentLoadingToast(contactAddress, toastId) {
+    if (!contactAddress || !toastId) return;
+    let toastSet = this.attachmentLoadingToastsByContact.get(contactAddress);
+    if (!toastSet) {
+      toastSet = new Set();
+      this.attachmentLoadingToastsByContact.set(contactAddress, toastSet);
+    }
+    toastSet.add(toastId);
+  }
+
+  /**
+   * Untrack an attachment loading toast for a specific contact
+   * @param {string} contactAddress
+   * @param {string} toastId
+   * @returns {void}
+   */
+  untrackAttachmentLoadingToast(contactAddress, toastId) {
+    if (!contactAddress || !toastId) return;
+    const toastSet = this.attachmentLoadingToastsByContact.get(contactAddress);
+    if (!toastSet) return;
+    toastSet.delete(toastId);
+    if (toastSet.size === 0) {
+      this.attachmentLoadingToastsByContact.delete(contactAddress);
+    }
+  }
+
+  /**
+   * Hide all active attachment loading toasts for a contact
+   * @param {string} contactAddress
+   * @returns {void}
+   */
+  hideAttachmentLoadingToastsForContact(contactAddress) {
+    if (!contactAddress) return;
+    const toastSet = this.attachmentLoadingToastsByContact.get(contactAddress);
+    if (!toastSet || toastSet.size === 0) return;
+    toastSet.forEach((toastId) => hideToast(toastId));
+    this.attachmentLoadingToastsByContact.delete(contactAddress);
   }
 
   /**
@@ -12465,12 +12823,46 @@ class ChatModal {
   }
 
   /**
+   * Returns whether the composer is currently in edit mode.
+   * @returns {boolean}
+   */
+  isEditingMessage() {
+    const editInput = document.getElementById('editOfTxId');
+    return !!(editInput?.value?.trim?.());
+  }
+
+  /**
+   * Clears all staged composer attachments.
+   * @param {{ deleteFromServer?: boolean }} options
+   * @returns {void}
+   */
+  clearComposerAttachments({ deleteFromServer = false } = {}) {
+    if (!Array.isArray(this.fileAttachments) || this.fileAttachments.length === 0) return;
+
+    const removedAttachments = this.fileAttachments.splice(0, this.fileAttachments.length);
+    this.purgeThumbnail(removedAttachments);
+
+    if (deleteFromServer) {
+      this.deleteAttachmentsFromServer(removedAttachments);
+    }
+
+    this.showAttachmentPreview();
+
+    if (this.address && myData.contacts[this.address]) {
+      this.saveAttachmentState(myData.contacts[this.address]);
+    }
+  }
+
+  /**
    * Opens the chat modal for the given address.
    * @param {string} address - The address of the contact to open the chat modal for.
    * @param {boolean} skipAutoScroll - Whether to skip auto-scrolling to bottom (used when scrolling to a specific message)
    * @returns {Promise<void>}
    */
   async open(address, skipAutoScroll = false) {
+    // Set active chat address early so async refreshes target the correct chat.
+    this.address = address;
+
     // clear message input
     this.messageInput.value = '';
     this.messageInput.style.height = '48px';
@@ -12485,6 +12877,9 @@ class ChatModal {
     friendModal.setAddress(address);
     footer.closeNewChatButton();
     const contact = myData.contacts[address];
+    // Cache whether the contact has me blocked, and disable attachments accordingly
+    this.blockedByRecipient = Number(contact?.tollRequiredToSend) === 2;
+    this.addAttachmentButton.disabled = this.blockedByRecipient;
     friendModal.updateFriendButton(contact, 'addFriendButtonChat');
     // Set user info
     this.modalTitle.textContent = getContactDisplayName(contact);
@@ -12552,9 +12947,6 @@ class ChatModal {
     }
 
     this.clearNotificationsIfAllRead();
-
-    // Setup state for appendChatModal and perform initial render
-    this.address = address;
 
     // One-time tolled deposit toast (only if explicitly enabled on the contact)
     this.maybeShowTolledDepositToast(address);
@@ -12648,6 +13040,9 @@ class ChatModal {
    * @returns {void}
    */
   close() {
+    const closingAddress = this.address;
+    this.hideAttachmentLoadingToastsForContact(closingAddress);
+
     // Ensure scroll is unlocked when closing
     this.unlockBackgroundScroll();
     if (isOnline) {
@@ -12793,7 +13188,7 @@ class ChatModal {
       from: longAddress(myData.account.keys.address),
       to: longAddress(contactAddress),
       chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join('')),
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       networkId: network.netid,
     };
     const txid = await signObj(tx, myAccount.keys);
@@ -12860,7 +13255,7 @@ class ChatModal {
       from: longAddress(myData.account.keys.address),
       to: longAddress(contactAddress),
       chatId: hashBytes([longAddress(myData.account.keys.address), longAddress(contactAddress)].sort().join('')),
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       oldContactTimestamp: myData.contacts[contactAddress].timestamp,
       networkId: network.netid,
     };
@@ -12983,6 +13378,10 @@ class ChatModal {
       }
 
       if (isEdit) {
+        // Edit sends are text-only. Drop any stale attachments and clean them up from server.
+        if (this.fileAttachments?.length) {
+          this.clearComposerAttachments({ deleteFromServer: true });
+        }
         messageObj = {
           type: 'edit',
             txid: editTargetTxId,
@@ -13005,7 +13404,7 @@ class ChatModal {
       }
 
       // Handle attachments - add them to the JSON structure instead of using xattach
-      if (this.fileAttachments && this.fileAttachments.length > 0) {
+      if (!isEdit && this.fileAttachments && this.fileAttachments.length > 0) {
         messageObj.attachments = this.fileAttachments;
       }
 
@@ -13103,8 +13502,8 @@ class ChatModal {
         // Clear edit marker only after capturing state and hide cancel button
         editInput.value = '';
         this.cancelEditButton.style.display = 'none';
-        // Leaving edit mode optimistically; re-enable attachments
-        this.addAttachmentButton.disabled = false;
+        // Leaving edit mode optimistically; re-enable attachments unless blocked
+        this.addAttachmentButton.disabled = this.blockedByRecipient;
       } else {
         newMessage = {
           message,
@@ -13231,7 +13630,7 @@ class ChatModal {
         // Success: for normal message nothing extra; for edit we already updated locally
         if (isEdit) {
           showToast('Message edited', 2000, 'success');
-          this.addAttachmentButton.disabled = false;
+          this.addAttachmentButton.disabled = this.blockedByRecipient;
         }
       }
     } catch (error) {
@@ -13276,7 +13675,7 @@ class ChatModal {
       // Toggle button visibility (should show microphone when empty)
       this.toggleSendButtonVisibility();
       // Re-enable attachments on cancel
-      this.addAttachmentButton.disabled = false;
+      this.addAttachmentButton.disabled = this.blockedByRecipient;
       // Give feedback
       showToast('Edit cancelled', 1500, 'info');
     } catch (e) {
@@ -13336,7 +13735,7 @@ class ChatModal {
       chatId: hashBytes([fromAddr, toAddr].sort().join('')),
       message: 'x',
       xmessage: payload,
-      timestamp: getCorrectedTimestamp(),
+      timestamp: getTransactionTimestamp(),
       fee: getTransactionFeeWei(), // This is not used by the backend
       networkId: network.netid,
     };
@@ -13852,6 +14251,16 @@ class ChatModal {
       return; // No file selected
     }
 
+    // Lock this upload to the chat that started it so completion always lands in that draft.
+    const uploadContactAddress = this.address;
+    if (!uploadContactAddress || !myData.contacts?.[uploadContactAddress]) {
+      showToast('Unable to attach file: no active chat found.', 0, 'error');
+      event.target.value = '';
+      return;
+    }
+    const uploadContact = myData.contacts[uploadContactAddress];
+    const uploadContactName = getContactDisplayName(uploadContact) || uploadContactAddress.slice(0, 8);
+
     // limit to 5 files
     if (this.fileAttachments.length >= 5) {
       showToast('You can only attach up to 5 files.', 0, 'error');
@@ -13894,27 +14303,52 @@ class ChatModal {
     }
 
     const capturedThumbnailBlob = thumbnailBlob;
+    const clearLoadingToast = () => {
+      if (!loadingToastId) return;
+      hideToast(loadingToastId);
+      this.untrackAttachmentLoadingToast(uploadContactAddress, loadingToastId);
+      loadingToastId = null;
+    };
+    const refreshChatsScreenIfActive = () => {
+      if (chatsScreen?.isActive?.()) {
+        chatsScreen.updateChatList();
+      }
+    };
     
     try {
       this.isEncrypting = true;
       this.sendButton.disabled = true; // Disable send button during encryption
       this.addAttachmentButton.disabled = true;
-      loadingToastId = showToast(`Attaching file...`, 0, 'loading');
-      const { dhkey, cipherText: pqEncSharedKey } = await this.getRecipientDhKey(this.address);
-      const password = myAccount.keys.secret + myAccount.keys.pqSeed;
-      const selfKey = encryptData(bin2hex(dhkey), password, true)
+      loadingToastId = showToast(
+        `Attaching "${file.name}" to ${uploadContactName}...`,
+        0,
+        'loading',
+        false,
+        { dedupe: false }
+      );
+      this.trackAttachmentLoadingToast(uploadContactAddress, loadingToastId);
+      
+      // Generate random encryption key for this attachment
+      const encKey = generateRandomBytes(32);
 
       const worker = new Worker('encryption.worker.js', { type: 'module' });
       worker.onmessage = async (e) => {
         this.isEncrypting = false;
         if (e.data.error) {
-          hideToast(loadingToastId);
-          showToast(e.data.error, 0, 'error');
+          clearLoadingToast();
+          showToast(
+            `Attachment failed for ${uploadContactName}: ${e.data.error}`,
+            0,
+            'error',
+            false,
+            { dedupe: false }
+          );
+          refreshChatsScreenIfActive();
           
           const messageValidation = this.validateMessageSize(this.messageInput.value);
           this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
-          
-          this.addAttachmentButton.disabled = false;
+
+          this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
         } else {
           // Encryption successful
           // upload to get url here 
@@ -13930,8 +14364,8 @@ class ChatModal {
             let previewUrl = null;
             if (capturedThumbnailBlob) {
               try {
-                // Encrypt thumbnail using same dhkey as main file
-                const encryptedThumbnailBlob = await encryptBlob(capturedThumbnailBlob, dhkey);
+                // Encrypt thumbnail using same random key as main file
+                const encryptedThumbnailBlob = await encryptBlob(capturedThumbnailBlob, encKey);
                 // Upload encrypted thumbnail
                 previewUrl = await this.uploadEncryptedFile(encryptedThumbnailBlob, file.name);
               } catch (error) {
@@ -13942,15 +14376,28 @@ class ChatModal {
               }
             }
             
-            this.fileAttachments.push({
+            const newAttachment = {
               url: attachmentUrl,
-              pUrl: previewUrl,  // NEW FIELD (undefined if upload failed)
+              pUrl: previewUrl,
               name: file.name,
               size: file.size,
               type: normalizedType,
-              pqEncSharedKey: bin2base64(pqEncSharedKey),  // Same key for main file AND thumbnail
-              selfKey  // Same key for main file AND thumbnail
-            });
+              encKey: bin2base64(encKey)
+            };
+
+            const activeChatMatchesUpload = this.isActive() && this.address === uploadContactAddress;
+            if (activeChatMatchesUpload) {
+              this.fileAttachments.push(newAttachment);
+            } else {
+              const uploadContact = myData.contacts?.[uploadContactAddress];
+              if (!uploadContact) {
+                throw new Error('Original chat no longer exists for this upload');
+              }
+              const existingDraftAttachments = Array.isArray(uploadContact.draftAttachments)
+                ? uploadContact.draftAttachments
+                : [];
+              uploadContact.draftAttachments = [...existingDraftAttachments, newAttachment];
+            }
             
             // Cache thumbnail if we generated one - use captured variable
             if (capturedThumbnailBlob && (isImage || isVideo)) {
@@ -13959,72 +14406,111 @@ class ChatModal {
               });
             }
             
-            hideToast(loadingToastId);
-            this.showAttachmentPreview(file);
-
-            if (this.address && myData.contacts[this.address]) {
-              this.saveAttachmentState(myData.contacts[this.address]);
+            clearLoadingToast();
+            if (activeChatMatchesUpload) {
+              this.showAttachmentPreview(file);
+              if (myData.contacts[uploadContactAddress]) {
+                this.saveAttachmentState(myData.contacts[uploadContactAddress]);
+              }
             }
             
             const messageValidation = this.validateMessageSize(this.messageInput.value);
             this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
             this.toggleSendButtonVisibility();
-            
-            this.addAttachmentButton.disabled = false;
-            showToast(`File "${file.name}" attached successfully`, 2000, 'success');
+
+            this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
+            if (activeChatMatchesUpload) {
+              showToast(
+                `Attached "${file.name}" to ${uploadContactName}`,
+                3000,
+                'success',
+                false,
+                { dedupe: false }
+              );
+            } else {
+              showToast(
+                `Uploaded "${file.name}" for ${uploadContactName}; saved to that draft`,
+                3000,
+                'success',
+                false,
+                { dedupe: false }
+              );
+            }
+            refreshChatsScreenIfActive();
           } catch (fetchError) {
             // Handle fetch errors (including AbortError) inside the worker callback
             if (fetchError.name === 'AbortError') {
-              hideToast(loadingToastId);
+              clearLoadingToast();
             } else {
-              hideToast(loadingToastId);
-              showToast(`Upload failed: ${fetchError.message}`, 0, 'error');
+              clearLoadingToast();
+              showToast(
+                `Upload failed for ${uploadContactName} ("${file.name}"): ${fetchError.message}`,
+                0,
+                'error',
+                false,
+                { dedupe: false }
+              );
+              refreshChatsScreenIfActive();
             }
             
             const messageValidation = this.validateMessageSize(this.messageInput.value);
             this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
-            
-            this.addAttachmentButton.disabled = false;
             this.isEncrypting = false;
+
+            this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
           }
         }
         worker.terminate();
       };
 
       worker.onerror = (err) => {
-        hideToast(loadingToastId);
-        showToast(`File encryption failed: ${err.message}`, 0, 'error');
+        clearLoadingToast();
+        showToast(
+          `File encryption failed for ${uploadContactName} ("${file.name}"): ${err.message}`,
+          0,
+          'error',
+          false,
+          { dedupe: false }
+        );
+        refreshChatsScreenIfActive();
         this.isEncrypting = false;
         
         const messageValidation = this.validateMessageSize(this.messageInput.value);
         this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
-        
-        this.addAttachmentButton.disabled = false;
+
+            this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
         worker.terminate();
       };
       
       // read the file and send it to the worker for encryption
       const reader = new FileReader();
       reader.onload = async (e) => {
-        worker.postMessage({ fileBuffer: e.target.result, dhkey }, [e.target.result]);
+        worker.postMessage({ fileBuffer: e.target.result, dhkey: encKey }, [e.target.result]);
       };
       reader.readAsArrayBuffer(file);
       
     } catch (error) {
       console.error('Error handling file attachment:', error);
       
-      hideToast(loadingToastId);
+      clearLoadingToast();
 
       if (error.name !== 'AbortError') {
-        showToast('Error processing file attachment', 0, 'error');
+        showToast(
+          `Error processing attachment for ${uploadContactName} ("${file.name}")`,
+          0,
+          'error',
+          false,
+          { dedupe: false }
+        );
+        refreshChatsScreenIfActive();
       }
       
       // Re-enable buttons
       const messageValidation = this.validateMessageSize(this.messageInput.value);
       this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
-      
-      this.addAttachmentButton.disabled = false;
       this.isEncrypting = false;
+
+      this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
     } finally {
       event.target.value = ''; // Reset the file input value
     }
@@ -14043,8 +14529,7 @@ class ChatModal {
     const uploadUrl = network.attachmentServerUrl;
     const response = await fetch(`${uploadUrl}/post`, {
       method: 'POST',
-      body: form,
-      signal: this.abortController.signal
+      body: form
     });
 
     if (!response.ok) {
@@ -14164,6 +14649,7 @@ class ChatModal {
   removeAttachment(index) {
     if (this.fileAttachments && index >= 0 && index < this.fileAttachments.length) {
       const removedFile = this.fileAttachments.splice(index, 1)[0];
+      this.purgeThumbnail([removedFile]);
       this.showAttachmentPreview(); // Refresh the preview
       showToast(`"${removedFile.name}" removed`, 2000, 'info');
 
@@ -14172,7 +14658,7 @@ class ChatModal {
       }
 
       // Best effort delete from server
-      this.deleteAttachmentsFromServer(removedFile.url);
+      this.deleteAttachmentsFromServer(removedFile);
     }
   }
 
@@ -14388,47 +14874,67 @@ class ChatModal {
   async decryptAttachmentToBlob(item, linkEl, urlOverride = null) {
     if (!item || !linkEl) throw new Error('Missing item or attachment element');
 
-    // 1) Derive dhkey
-    // - Attachments: use per-attachment keys from item.xattach (not stored in DOM)
-    // - Voice messages: use audio keys from the message item
-    let selfKey;
-    let pqEncSharedKey;
-
     // Use urlOverride if provided, otherwise use the main attachment URL
     const mainUrl = linkEl.dataset.url;
     const fetchUrl = urlOverride || mainUrl;
     if (!mainUrl || mainUrl === '#') throw new Error('Missing attachment url');
 
     const isVoice = item.type === 'vm';
-    if (isVoice) {
-      // Voice message: audio keys (fallback to message keys)
-      selfKey = item.audioSelfKey || item.selfKey;
-      pqEncSharedKey = item.audioPqEncSharedKey || item.pqEncSharedKey;
-    } else {
-      // Attachment: look up attachment entry by main url (keys are stored there)
-      const att = Array.isArray(item.xattach) ? item.xattach.find((a) => a?.url === mainUrl) : null;
-      selfKey = att?.selfKey;
-      pqEncSharedKey = att?.pqEncSharedKey;
-    }
-
     let dhkey;
-    if (item.my) {
-      if (!selfKey) throw new Error('Missing selfKey for decrypt');
-      const password = myAccount.keys.secret + myAccount.keys.pqSeed;
-      dhkey = hex2bin(decryptData(selfKey, password, true));
+    
+    // 1) Get encryption key
+    if (isVoice) {
+      // Voice message: use audio keys from the message item (no encKey for voice messages)
+      const selfKey = item.audioSelfKey || item.selfKey;
+      const pqEncSharedKey = item.audioPqEncSharedKey || item.pqEncSharedKey;
+      
+      if (item.my) {
+        if (!selfKey) throw new Error('Missing selfKey for decrypt');
+        const password = myAccount.keys.secret + myAccount.keys.pqSeed;
+        dhkey = hex2bin(decryptData(selfKey, password, true));
+      } else {
+        if (!pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
+        const ok = await ensureContactKeys(this.address);
+        const senderPublicKey = myData.contacts[this.address]?.public;
+        if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
+        const pqCipher = (typeof pqEncSharedKey === 'string') ? base642bin(pqEncSharedKey) : pqEncSharedKey;
+        dhkey = dhkeyCombined(
+          myAccount.keys.secret,
+          senderPublicKey,
+          myAccount.keys.pqSeed,
+          pqCipher
+        ).dhkey;
+      }
     } else {
-      if (!pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
-      const ok = await ensureContactKeys(this.address);
-      const senderPublicKey = myData.contacts[this.address]?.public;
-      if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
-      // dhkeyCombined/pqSharedKey expect ciphertext bytes; accept base64 strings too by converting here.
-      const pqCipher = (typeof pqEncSharedKey === 'string') ? base642bin(pqEncSharedKey) : pqEncSharedKey;
-      dhkey = dhkeyCombined(
-        myAccount.keys.secret,
-        senderPublicKey,
-        myAccount.keys.pqSeed,
-        pqCipher
-      ).dhkey;
+      // Attachment: look up attachment entry by main url
+      const att = Array.isArray(item.xattach) ? item.xattach.find((a) => a?.url === mainUrl) : null;
+      if (!att) throw new Error('Attachment entry not found');
+      
+      // Use encKey if available (new attachments), otherwise fall back to DH-derived keys (migrated/legacy)
+      if (att.encKey) {
+        dhkey = base642bin(att.encKey);
+      } else {
+        const selfKey = att.selfKey;
+        const pqEncSharedKey = att.pqEncSharedKey;
+        
+        if (item.my) {
+          if (!selfKey) throw new Error('Missing selfKey for decrypt');
+          const password = myAccount.keys.secret + myAccount.keys.pqSeed;
+          dhkey = hex2bin(decryptData(selfKey, password, true));
+        } else {
+          if (!pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
+          const ok = await ensureContactKeys(this.address);
+          const senderPublicKey = myData.contacts[this.address]?.public;
+          if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
+          const pqCipher = (typeof pqEncSharedKey === 'string') ? base642bin(pqEncSharedKey) : pqEncSharedKey;
+          dhkey = dhkeyCombined(
+            myAccount.keys.secret,
+            senderPublicKey,
+            myAccount.keys.pqSeed,
+            pqCipher
+          ).dhkey;
+        }
+      }
     }
 
     // 2) Download encrypted bytes (use fetchUrl which may be pUrl or main url)
@@ -14748,25 +15254,75 @@ class ChatModal {
    * @param {HTMLElement} messageEl - The message element to position relative to
    */
   positionContextMenu(menu, messageEl) {
+    if (!menu || !messageEl) return;
+
     const rect = messageEl.getBoundingClientRect();
     const container = messageEl.closest('.messages-container');
-    const containerRect = container?.getBoundingClientRect() || { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
-    
-    const menuWidth = 200;
-    const menuHeight = 100;
-    
-    // Center horizontally, clamp to container
-    let left = Math.max(containerRect.left + 10, 
-                        Math.min(containerRect.right - menuWidth - 10, 
-                                 rect.left + rect.width/2 - menuWidth/2));
-    
-    // Prefer below, fallback to above, clamp to container
-    let top = rect.bottom + 10;
-    if (top + menuHeight > containerRect.bottom) {
-      top = Math.max(containerRect.top + 10, rect.top - menuHeight - 10);
+    const containerRect = container?.getBoundingClientRect() || {
+      left: 0,
+      top: 0,
+      right: window.innerWidth,
+      bottom: window.innerHeight
+    };
+
+    const margin = 10;
+    const wasHidden = window.getComputedStyle(menu).display === 'none';
+    const prevDisplay = menu.style.display;
+    const prevVisibility = menu.style.visibility;
+
+    // Temporarily render hidden so we can measure the real size after option toggles.
+    if (wasHidden) {
+      menu.style.visibility = 'hidden';
+      menu.style.display = 'block';
     }
-    
-    Object.assign(menu.style, { left: `${left}px`, top: `${top}px` });
+
+    let menuRect = menu.getBoundingClientRect();
+    let menuWidth = menuRect.width || 200;
+    let menuHeight = menuRect.height || 100;
+
+    // Keep long menus usable in small viewports by making them internally scrollable.
+    const availableHeight = Math.max(80, containerRect.bottom - containerRect.top - margin * 2);
+    if (menuHeight > availableHeight) {
+      menu.style.maxHeight = `${Math.floor(availableHeight)}px`;
+      menu.style.overflowY = 'auto';
+      menuRect = menu.getBoundingClientRect();
+      menuWidth = menuRect.width || menuWidth;
+      menuHeight = menuRect.height || availableHeight;
+    } else {
+      menu.style.maxHeight = '';
+      menu.style.overflowY = '';
+    }
+
+    // Center horizontally, then clamp to container bounds.
+    const minLeft = containerRect.left + margin;
+    const maxLeft = containerRect.right - menuWidth - margin;
+    let left = rect.left + rect.width / 2 - menuWidth / 2;
+    left = maxLeft < minLeft ? minLeft : Math.max(minLeft, Math.min(maxLeft, left));
+
+    // Prefer below, otherwise above; finally clamp to bounds.
+    const minTop = containerRect.top + margin;
+    const maxTop = containerRect.bottom - menuHeight - margin;
+    const belowTop = rect.bottom + margin;
+    const aboveTop = rect.top - menuHeight - margin;
+    let top;
+
+    if (belowTop <= maxTop) {
+      top = belowTop;
+    } else if (aboveTop >= minTop) {
+      top = aboveTop;
+    } else {
+      top = Math.max(minTop, Math.min(maxTop, belowTop));
+    }
+
+    Object.assign(menu.style, {
+      left: `${Math.round(left)}px`,
+      top: `${Math.round(top)}px`
+    });
+
+    if (wasHidden) {
+      menu.style.display = prevDisplay;
+      menu.style.visibility = prevVisibility;
+    }
   }
 
   /**
@@ -15430,6 +15986,9 @@ class ChatModal {
       case 'save':
         void this.saveImageAttachment(row);
         break;
+      case 'share':
+        if (messageEl) shareAttachmentModal.open(messageEl);
+        break;
       case 'reply':
         if (messageEl) this.startReplyToMessage(messageEl);
         break;
@@ -15472,16 +16031,15 @@ class ChatModal {
       return;
     }
 
-    // Open the import contacts modal with attachment data
-    importContactsModal.open({
-      url: attachment.url,
+    // Open the import contacts modal with the full attachment object so
+    // fields like `encKey` (new flow) are preserved for backwards compatibility.
+    const importAttachment = Object.assign({}, attachment, {
       name,
       type,
-      pqEncSharedKey: attachment.pqEncSharedKey,
-      selfKey: attachment.selfKey,
       my: message.my,
       senderAddress: this.address
     });
+    importContactsModal.open(importAttachment);
   }
 
   /**
@@ -15610,6 +16168,11 @@ class ChatModal {
         ? messageEl.querySelector('.payment-memo')
         : messageEl.querySelector('.message-content');
       if (!contentEl) return;
+      // Editing does not support attachments; abort in-flight uploads and clear staged files.
+      this.cancelAllOperations();
+      if (this.fileAttachments?.length) {
+        this.clearComposerAttachments({ deleteFromServer: true });
+      }
       const text = contentEl.textContent || '';
       this.messageInput.value = text;
       const editInput = document.getElementById('editOfTxId');
@@ -16079,7 +16642,9 @@ class ChatModal {
     if (isNaN(usdValue) || isNaN(libValue)) {
       text = `${tollFloat.toFixed(6)} USD`;
     } else {
-      text = `${usdValue.toFixed(6)} USD (≈ ${libValue.toFixed(6)} LIB)`;
+      // text = `${usdValue.toFixed(6)} USD (≈ ${libValue.toFixed(6)} LIB)`;
+      // Only show USD in display; LIB calculations kept for potential future use
+      text = `${usdValue.toFixed(6)} USD`;
     }
 
     // Calculate libWei using BigInt arithmetic to preserve precision
@@ -16106,13 +16671,16 @@ class ChatModal {
    */
   updateTollAmountUI(address) {
     const tollValue = document.getElementById('tollValue');
-    tollValue.style.color = 'black';
+    const tollLabel = document.getElementById('tollLabel');
     const contact = myData.contacts[address] || {};
     const isOffline = !isOnline;
 
+    // Remove any existing color classes
+    tollValue.classList.remove('toll-cost', 'toll-free');
+
     // If offline and no cached toll, show a clear offline status and exit
     if (isOffline && (contact.toll === undefined || contact.toll === null)) {
-      tollValue.style.color = 'black';
+      tollLabel.textContent = 'Toll:';
       tollValue.textContent = 'offline';
       this.toll = 0n;
       this.tollUnit = 'LIB';
@@ -16127,14 +16695,25 @@ class ChatModal {
 
     let display;
     if (contact.tollRequiredToSend == 1) {
-      display = `${usdString}`;
+      // Toll is required - show as "Toll cost:" with amount in red
+      tollLabel.textContent = 'Toll cost:';
+      display = usdString;
+      // if the value of toll is 0, use toll-free class instead
+      if(contact.toll == 0n) {  
+        tollValue.classList.add('toll-free');
+      } else {
+        tollValue.classList.add('toll-cost');
+      }
     } else if (contact.tollRequiredToSend == 2) {
-      tollValue.style.color = 'red';
-      display = `blocked`;
+      // User is blocked - show as "Toll cost:" with "blocked" in red
+      tollLabel.textContent = 'Toll cost:';
+      display = 'blocked';
+      tollValue.classList.add('toll-cost');
     } else {
-      // light green used to show success
-      tollValue.style.color = '#28a745';
-      display = `free; ${usdString}`;
+      // Toll is free - show as "Toll free:" with amount in green
+      tollLabel.textContent = 'Toll free:';
+      display = usdString;
+      tollValue.classList.add('toll-free');
     }
     tollValue.textContent = display;
 
@@ -16174,8 +16753,14 @@ class ChatModal {
       localContact.tollRequiredToSend = contactAccountData.toll.required[toIndex];
       localContact.tollRequiredToReceive = contactAccountData.toll.required[myIndex];
 
+      // Keep a cached flag for the currently open chat
+      if (this.address === address) {
+        this.blockedByRecipient = Number(localContact?.tollRequiredToSend) === 2;
+      }
+
       if (this.isActive() && this.address === address) {
         this.updateTollAmountUI(address);
+        this.addAttachmentButton.disabled = this.isEncrypting || this.isEditingMessage() || this.blockedByRecipient;
       }
 
       // console.log(`localContact.tollRequiredToSend: ${localContact.tollRequiredToSend}`);
@@ -16954,13 +17539,14 @@ class CallInviteModal {
   load() {
     this.modal = document.getElementById('callInviteModal');
     this.contactsList = document.getElementById('callInviteContactsList');
-    this.template = document.getElementById('callInviteContactTemplate');
+    this.emptyState = this.modal.querySelector('.empty-state');
     this.inviteCounter = document.getElementById('callInviteCounter');
     this.inviteSendButton = document.getElementById('callInviteSendBtn');
     this.cancelButton = document.getElementById('callInviteCancelBtn');
     this.closeButton = document.getElementById('closeCallInviteModal');
 
     this.contactsList.addEventListener('change', this.updateCounter.bind(this));
+    this.contactsList.addEventListener('click', this.handleContactClick.bind(this));
     this.inviteSendButton.addEventListener('click', this.sendInvites.bind(this));
     this.cancelButton.addEventListener('click', () => {
       this.close();
@@ -16969,33 +17555,159 @@ class CallInviteModal {
   }
 
   /**
+   * Gets avatar HTML for a contact with priority: user-selected avatar → contact's provided avatar → identicon
+   * @param {Object} contact - Contact object
+   * @param {number} size - Avatar size in pixels
+   * @returns {Promise<string>} Avatar HTML
+   */
+  async getContactAvatarHtmlForInvite(contact, size = 40) {
+    return getContactAvatarHtml(contact, size);
+  }
+
+  /**
+   * Returns a call URL in comparable form by removing hash params.
+   * @param {string} callUrl
+   * @returns {string}
+   */
+  getComparableCallUrl(callUrl) {
+    const raw = (callUrl || '').trim();
+    if (!raw) return '';
+    return raw.split('#')[0];
+  }
+
+  /**
+   * Extracts the call URL from a call message element in comparable form.
+   * @param {HTMLElement} messageEl
+   * @returns {string}
+   */
+  getInviteCallUrl(messageEl) {
+    const anchorHref = messageEl?.querySelector('.call-message a')?.href || '';
+    return this.getComparableCallUrl(anchorHref);
+  }
+
+  /**
+   * Checks whether a contact already has this call URL in their call messages.
+   * @param {Object} contact
+   * @param {string} comparableCallUrl
+   * @returns {boolean}
+   */
+  contactHasCallUrl(contact, comparableCallUrl) {
+    if (!comparableCallUrl) return false;
+    return (contact?.messages || []).some((message) => {
+      if (!message || message.type !== 'call') return false;
+      if (message.deleted === 1 || message.status === 'failed') return false;
+      return this.getComparableCallUrl(message.message) === comparableCallUrl;
+    });
+  }
+
+  /**
+   * Maps a contact record to the display model used by the invite list.
+   * @param {Object} contact
+   * @returns {Object}
+   */
+  buildInviteContact(contact) {
+    const displayName = getContactDisplayName(contact);
+    return {
+      address: contact.address,
+      friend: contact.friend || 1,
+      avatarId: contact.avatarId,
+      mineAvatarId: contact.mineAvatarId,
+      displayName,
+      displayNameLower: (displayName || '').toLowerCase()
+    };
+  }
+
+  /**
+   * Builds invite groups while filtering out ineligible contacts.
+   * @param {string} currentChatAddress
+   * @param {string} myAddress
+   * @param {string} comparableCallUrl
+   * @returns {{groups: {friends: Object[], acquaintances: Object[], others: Object[]}, total: number}}
+   */
+  buildInviteGroups(currentChatAddress, myAddress, comparableCallUrl) {
+    const groups = {
+      friends: [],
+      acquaintances: [],
+      others: [],
+    };
+
+    for (const contact of Object.values(myData.contacts || {})) {
+      const address = contact?.address || '';
+      if (!address) continue;
+      if (address === currentChatAddress) continue;
+      if (address === myAddress) continue;
+      if (isFaucetAddress(address)) continue;
+      if (this.contactHasCallUrl(contact, comparableCallUrl)) continue;
+
+      const preparedContact = this.buildInviteContact(contact);
+      if (preparedContact.friend === 3) {
+        groups.friends.push(preparedContact);
+      } else if (preparedContact.friend === 2) {
+        groups.acquaintances.push(preparedContact);
+      } else if (preparedContact.friend !== 0) {
+        groups.others.push(preparedContact);
+      }
+    }
+
+    groups.friends.sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower));
+    groups.acquaintances.sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower));
+    groups.others.sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower));
+
+    const total = groups.friends.length + groups.acquaintances.length + groups.others.length;
+    return { groups, total };
+  }
+
+  /**
+   * Renders a section of contacts with a header
+   * @param {string} label - Section label
+   * @param {Array} contacts - Array of contact objects
+   */
+  async renderSection(label, contacts) {
+    const header = document.createElement('div');
+    header.className = 'share-contacts-section-header';
+    header.textContent = label;
+    this.contactsList.appendChild(header);
+
+    const avatarPromises = contacts.map(contact => this.getContactAvatarHtmlForInvite(contact, 40));
+    const avatarHtmlList = await Promise.all(avatarPromises);
+
+    contacts.forEach((contact, index) => {
+      const row = document.createElement('div');
+      row.className = 'share-contact-row';
+      row.dataset.address = contact.address;
+
+      const avatarHtml = avatarHtmlList[index];
+      const displayName = contact.displayName || contact.address || 'Unknown';
+
+      row.innerHTML = `
+        <div class="share-contact-avatar">${avatarHtml}</div>
+        <div class="share-contact-info">
+          <div class="share-contact-name">${escapeHtml(displayName)}</div>
+        </div>
+        <input type="checkbox" class="share-contact-checkbox call-invite-checkbox" value="${escapeHtml(contact.address || '')}" />
+      `;
+
+      this.contactsList.appendChild(row);
+    });
+  }
+
+  /**
    * Opens the invite modal and populates contact list.
    * @param {HTMLElement} messageEl
    */
-  open(messageEl) {
+  async open(messageEl) {
     this.messageEl = messageEl;
 
     this.contactsList.innerHTML = '';
+    this.emptyState.style.display = 'none';
     this.modal.classList.add('active');
 
-    // Build contacts list (exclude the current chat participant and self) and group by status
-    const allContacts = Object.values(myData.contacts || {})
-      .filter(c => c.address !== chatModal.address && c.address !== myAccount.address)
-      .map(c => ({
-        address: c.address,
-        username: c.username || c.address,
-        friend: c.friend || 1
-      }));
-
-    // Group contacts by friend status: friends (3), acquaintances (2), others (1), blocked (0)
-    const groups = {
-      friends: allContacts.filter(c => c.friend === 3).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
-      acquaintances: allContacts.filter(c => c.friend === 2).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
-      others: allContacts.filter(c => ![2,3,0].includes(c.friend)).sort((a,b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase())),
-    };
-
-    if (allContacts.length === 0) {
-      this.modal.querySelector('.empty-state').style.display = 'block';
+    const currentChatAddress = chatModal.address || '';
+    const myAddress = myAccount?.keys?.address || '';
+    const comparableCallUrl = this.getInviteCallUrl(messageEl);
+    const { groups, total: totalContacts } = this.buildInviteGroups(currentChatAddress, myAddress, comparableCallUrl);
+    if (totalContacts === 0) {
+      this.emptyState.style.display = 'block';
       // initial counter update to ensure Invite button is disabled
       this.updateCounter();
       return;
@@ -17010,36 +17722,7 @@ class CallInviteModal {
     for (const { key, label } of sectionMeta) {
       const list = groups[key];
       if (!list || list.length === 0) continue;
-      const header = document.createElement('div');
-      header.className = 'call-invite-section-header';
-      header.textContent = label;
-      this.contactsList.appendChild(header);
-
-      for (const contact of list) {
-        const clone = this.template.content ? this.template.content.cloneNode(true) : null;
-        if (!clone) continue;
-        const row = clone.querySelector('.call-invite-contact-row');
-        const checkbox = clone.querySelector('.call-invite-contact-checkbox');
-        const nameSpan = clone.querySelector('.call-invite-contact-name');
-        if (row) row.dataset.address = contact.address || '';
-        if (checkbox) {
-          checkbox.value = contact.address || '';
-          checkbox.id = `invite_cb_${(contact.address||'').replace(/[^a-zA-Z0-9]/g,'')}`;
-        }
-        if (nameSpan) nameSpan.textContent = contact.username || contact.address || 'Unknown';
-        const labelEl = clone.querySelector('.call-invite-contact-label');
-        if (labelEl && checkbox) {
-            labelEl.addEventListener('click', (ev) => {
-              // If the checkbox is disabled (max reached), do nothing
-              if (checkbox.disabled) return;
-              if (ev.target === checkbox) return;
-              ev.preventDefault();
-              checkbox.checked = !checkbox.checked;
-              this.updateCounter();
-            });
-        }
-        this.contactsList.appendChild(clone);
-      }
+      await this.renderSection(label, list);
     }
 
     // initial counter update
@@ -17054,12 +17737,24 @@ class CallInviteModal {
     return this.modal.classList.contains('active');
   }
 
+  handleContactClick(e) {
+    const row = e.target.closest('.share-contact-row');
+    if (!row) return;
+    const checkbox = row.querySelector('.call-invite-checkbox');
+    if (!checkbox) return;
+    if (checkbox.disabled && !checkbox.checked) return;
+    if (e.target !== checkbox) {
+      checkbox.checked = !checkbox.checked;
+    }
+    this.updateCounter();
+  }
+
   updateCounter() {
-    const selected = this.contactsList.querySelectorAll('.call-invite-contact-checkbox:checked').length;
+    const selected = this.contactsList.querySelectorAll('.call-invite-checkbox:checked').length;
     this.inviteCounter.textContent = `${selected} selected (max 10)`;
     this.inviteSendButton.disabled = selected === 0;
     // enforce max 10: disable unchecked boxes when limit reached
-    const unchecked = Array.from(this.contactsList.querySelectorAll('.call-invite-contact-checkbox:not(:checked)'));
+    const unchecked = Array.from(this.contactsList.querySelectorAll('.call-invite-checkbox:not(:checked)'));
     if (selected >= 10) {
       unchecked.forEach(cb => cb.disabled = true);
     } else {
@@ -17068,7 +17763,7 @@ class CallInviteModal {
   }
 
   async sendInvites() {
-    const selectedBoxes = Array.from(this.contactsList.querySelectorAll('.call-invite-contact-checkbox:checked'));
+    const selectedBoxes = Array.from(this.contactsList.querySelectorAll('.call-invite-checkbox:checked'));
     const addresses = selectedBoxes.map(cb => cb.value).slice(0,10);
     // get call link from original message up to the first # so we don't duplicate callUrlParams
     const anchorHref = this.messageEl.querySelector('.call-message a')?.href || '';
@@ -17079,10 +17774,20 @@ class CallInviteModal {
     this.inviteSendButton.textContent = 'Sending...';
 
     try {
+      const successMessages = [];
+      const failureGroups = new Map();
+      const addFailure = (reason, name) => {
+        if (!failureGroups.has(reason)) {
+          failureGroups.set(reason, new Set());
+        }
+        if (name) {
+          failureGroups.get(reason).add(name);
+        }
+      };
       for (const addr of addresses) {
         const keys = myAccount.keys;
         if (!keys) {
-          showToast('Keys not found', 0, 'error');
+          addFailure('keysMissing');
           break;
         }
 
@@ -17092,7 +17797,7 @@ class CallInviteModal {
         const contact = myData.contacts[addr];
         const ok = await ensureContactKeys(addr);
         if (!ok) {
-          showToast(`Skipping ${contact.username || addr} (cannot get public key)`, 2000, 'warning');
+          addFailure('noPublicKey', contact.username || addr);
           continue;
         }
         const recipientPubKey = myData.contacts[addr].public;
@@ -17122,12 +17827,12 @@ class CallInviteModal {
         // 1 => toll required (recipient has NOT added you)
         // 2 => blocked
         if (tollRequiredToSend === 2) {
-          showToast(`You cannot invite ${contact.username || addr} (you are blocked)`, 0, 'warning');
+          addFailure('blocked', contact.username || addr);
           continue;
         }
         if (tollRequiredToSend === 1) {
           const username = (contact?.username) || `${addr.slice(0, 8)}...${addr.slice(-6)}`;
-          showToast(`You can only invite people who have added you as a connection. Ask ${username} to add you as a connection`, 0, 'info');
+          addFailure('notConnection', username);
           continue;
         }
 
@@ -17179,8 +17884,75 @@ class CallInviteModal {
           if (chatModal.isActive() && chatModal.address === addr) {
             chatModal.appendChatModal();
           }
+          addFailure('sendFailed', contact.username || addr);
+        } else {
+          successMessages.push(`Call invite sent to ${contact.username || addr}`);
         }
-        showToast(`Call invite sent to ${contact.username || addr}`, 3000, 'success');
+      }
+
+      if (successMessages.length > 0) {
+        const successNames = successMessages.map(message => {
+          const match = message.match(/^Call invite sent to (.+)$/);
+          return match ? match[1] : message;
+        });
+        const successHtml = [
+          '<div class="toast-list-content">',
+          '<div class="toast-list-title">Invite sent:</div>',
+          '<ul class="toast-list">',
+          ...successNames.map(name => `<li><strong>${escapeHtml(name)}</strong></li>`),
+          '</ul>',
+          '</div>'
+        ].join('');
+        showToast(successHtml, 3000, 'success', true);
+      }
+      if (failureGroups.size > 0) {
+        const failureItems = [];
+        for (const [reason, names] of failureGroups.entries()) {
+          const nameList = Array.from(names);
+          switch (reason) {
+            case 'keysMissing':
+              failureItems.push({ text: 'Keys not found' });
+              break;
+            case 'noPublicKey':
+              failureItems.push({
+                text: 'Cannot get public key for:',
+                sublist: nameList
+              });
+              break;
+            case 'blocked':
+              failureItems.push({
+                text: 'You cannot invite these contacts (you are blocked):',
+                sublist: nameList
+              });
+              break;
+            case 'notConnection':
+              failureItems.push({
+                text: 'You can only invite people who have added you as a connection. Ask the listed contacts to add you as a connection.',
+                sublist: nameList
+              });
+              break;
+            case 'sendFailed':
+              failureItems.push({
+                text: 'Call invite failed to send to:',
+                sublist: nameList
+              });
+              break;
+          }
+        }
+        const failureHtml = [
+          '<div class="toast-list-content">',
+          '<div class="toast-list-title">Invite not sent:</div>',
+          '<ul class="toast-list">',
+          ...failureItems.map(item => {
+            const sublist = Array.isArray(item.sublist) && item.sublist.length > 0
+              ? `<ul class="toast-sublist">${item.sublist.map(name => `<li><strong>${escapeHtml(name)}</strong></li>`).join('')}</ul>`
+              : '';
+            return `<li>${item.text}${sublist}</li>`;
+          }),
+          '</ul>',
+          '</div>'
+        ].join('');
+        showToast(failureHtml, 0, 'warning', true);
       }
 
     } catch (err) {
@@ -17197,8 +17969,366 @@ class CallInviteModal {
 const callInviteModal = new CallInviteModal();
 
 /**
+ * Share Attachment Modal
+ * Allows users to select contacts to share an attachment with
+ */
+class ShareAttachmentModal {
+  constructor() {
+    this.messageEl = null;
+    this.attachmentData = null;
+  }
+
+  load() {
+    this.modal = document.getElementById('shareAttachmentModal');
+    this.contactsList = document.getElementById('shareAttachmentContactsList');
+    this.emptyState = this.modal.querySelector('.empty-state');
+    this.counter = document.getElementById('shareAttachmentCounter');
+    this.sendButton = document.getElementById('shareAttachmentSendBtn');
+    this.cancelButton = document.getElementById('shareAttachmentCancelBtn');
+    this.closeButton = document.getElementById('closeShareAttachmentModal');
+
+    this.contactsList.addEventListener('change', this.updateCounter.bind(this));
+    this.contactsList.addEventListener('click', this.handleContactClick.bind(this));
+    this.sendButton.addEventListener('click', this.sendAttachments.bind(this));
+    this.cancelButton.addEventListener('click', () => {
+      this.close();
+    });
+    this.closeButton.addEventListener('click', this.close.bind(this));
+  }
+
+  /**
+   * Opens the share modal and populates contact list.
+   * @param {HTMLElement} messageEl - The message element containing the attachment
+   */
+  async open(messageEl) {
+    this.messageEl = messageEl;
+    this.attachmentData = this.extractAttachmentData(messageEl);
+
+    if (!this.attachmentData) {
+      showToast('No attachment data found', 2000, 'error');
+      return;
+    }
+
+    this.contactsList.innerHTML = '';
+    this.emptyState.style.display = 'none';
+    this.modal.classList.add('active');
+
+    // Build contacts list (exclude self and current chat contact) and group by status
+    const currentChatAddress = chatModal.address;
+    const allContacts = Object.values(myData.contacts || {})
+      .filter(c => c.address !== myAccount.address && c.address !== currentChatAddress)
+      .filter(c => !isFaucetAddress(c.address))
+      .map(c => {
+        const displayName = getContactDisplayName(c);
+        return {
+          address: c.address,
+          friend: c.friend || 1,
+          avatarId: c.avatarId,
+          mineAvatarId: c.mineAvatarId,
+          displayName,
+          displayNameLower: (displayName || '').toLowerCase()
+        };
+      });
+
+    // Group contacts by friend status
+    const groups = {
+      friends: allContacts.filter(c => c.friend === 3).sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower)),
+      acquaintances: allContacts.filter(c => c.friend === 2).sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower)),
+      others: allContacts.filter(c => ![2,3,0].includes(c.friend)).sort((a,b) => a.displayNameLower.localeCompare(b.displayNameLower)),
+    };
+
+    if (allContacts.length === 0) {
+      this.emptyState.style.display = 'block';
+      this.updateCounter();
+      return;
+    }
+
+    const sectionMeta = [
+      { key: 'friends', label: 'Friends' },
+      { key: 'acquaintances', label: 'Connections' },
+      { key: 'others', label: 'Tolled' },
+    ];
+
+    for (const { key, label } of sectionMeta) {
+      const list = groups[key];
+      if (!list || list.length === 0) continue;
+      await this.renderSection(label, list);
+    }
+
+    this.updateCounter();
+  }
+
+  async renderSection(label, contacts) {
+    const header = document.createElement('div');
+    header.className = 'share-contacts-section-header';
+    header.textContent = label;
+    this.contactsList.appendChild(header);
+
+    const avatarPromises = contacts.map(contact => getContactAvatarHtml(contact, 40));
+    const avatarHtmlList = await Promise.all(avatarPromises);
+
+    contacts.forEach((contact, index) => {
+      const row = document.createElement('div');
+      row.className = 'share-contact-row';
+      row.dataset.address = contact.address;
+
+      const avatarHtml = avatarHtmlList[index];
+      const displayName = contact.displayName || contact.address || 'Unknown';
+
+      row.innerHTML = `
+        <div class="share-contact-avatar">${avatarHtml}</div>
+        <div class="share-contact-info">
+          <div class="share-contact-name">${escapeHtml(displayName)}</div>
+        </div>
+        <input type="checkbox" class="share-contact-checkbox call-invite-checkbox" value="${escapeHtml(contact.address || '')}" />
+      `;
+
+      this.contactsList.appendChild(row);
+    });
+  }
+
+  handleContactClick(e) {
+    const row = e.target.closest('.share-contact-row');
+    if (!row) return;
+    const checkbox = row.querySelector('.call-invite-checkbox');
+    if (!checkbox) return;
+    if (checkbox.disabled && !checkbox.checked) return;
+    if (e.target !== checkbox) {
+      checkbox.checked = !checkbox.checked;
+    }
+    this.updateCounter();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  updateCounter() {
+    const selected = this.contactsList.querySelectorAll('.call-invite-checkbox:checked').length;
+    this.counter.textContent = `${selected} selected (max 10)`;
+    this.sendButton.disabled = selected === 0;
+    const unchecked = Array.from(this.contactsList.querySelectorAll('.call-invite-checkbox:not(:checked)'));
+    if (selected >= 10) {
+      unchecked.forEach(cb => cb.disabled = true);
+    } else {
+      unchecked.forEach(cb => cb.disabled = false);
+    }
+  }
+
+  /**
+   * Extract attachment data from message element
+   * @param {HTMLElement} messageEl
+   * @returns {Object|null} Attachment data
+   */
+  extractAttachmentData(messageEl) {
+    const attachmentRow = messageEl.querySelector('.attachment-row');
+    if (!attachmentRow) return null;
+
+    const url = attachmentRow.dataset.url;
+    const name = attachmentRow.dataset.name;
+    const type = attachmentRow.dataset.type;
+    const msgIdx = attachmentRow.dataset.msgIdx;
+
+    if (!url) return null;
+
+    // Get the actual message data from myData to access encryption keys
+    const contactAddress = chatModal.address;
+    const contact = myData.contacts[contactAddress];
+    
+    if (!contact || !contact.messages || !msgIdx) {
+      console.error('Cannot find message data for attachment');
+      return null;
+    }
+
+    const messageData = contact.messages[parseInt(msgIdx)];
+    if (!messageData || !messageData.xattach || !messageData.xattach[0]) {
+      console.error('Cannot find attachment in message data');
+      return null;
+    }
+
+    const attachmentData = messageData.xattach[0];
+
+    return {
+      url: attachmentData.url,
+      pUrl: attachmentData.pUrl || null,
+      name: attachmentData.name || name || 'attachment',
+      size: attachmentData.size || 0,
+      type: attachmentData.type || type || 'application/octet-stream',
+      encKey: attachmentData.encKey
+    };
+  }
+
+  async sendAttachments() {
+    const selectedBoxes = Array.from(this.contactsList.querySelectorAll('.call-invite-checkbox:checked'));
+    const addresses = selectedBoxes.map(cb => cb.value).slice(0, 10);
+    
+    if (!this.attachmentData) {
+      showToast('No attachment data found', 2000, 'error');
+      return;
+    }
+
+    this.sendButton.disabled = true;
+    this.sendButton.textContent = 'Sending...';
+
+    try {
+      const keys = myAccount.keys;
+      if (!keys) {
+        showToast('Keys not found', 0, 'error');
+        return;
+      }
+
+      // Get the file's encryption key (migration ensures all attachments have encKey)
+      const encKey = this.attachmentData.encKey;
+      if (!encKey) {
+        showToast('Missing encryption key for attachment', 0, 'error');
+        return;
+      }
+
+      for (const addr of addresses) {
+        const contact = myData.contacts[addr];
+        const ok = await ensureContactKeys(addr);
+        if (!ok) {
+          showToast(`Skipping ${contact?.username || addr} (cannot get public key)`, 2000, 'warning');
+          continue;
+        }
+
+        const recipientPubKey = myData.contacts[addr].public;
+        const pqRecPubKey = myData.contacts[addr].pqPublic;
+        
+        // Create new dhkey for sharing recipient
+        const {dhkey: recipientDhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey);
+
+        // Create attachment object - encKey will be encrypted in the message envelope
+        const sharedAttachment = {
+          url: this.attachmentData.url,
+          pUrl: this.attachmentData.pUrl,
+          name: this.attachmentData.name,
+          size: this.attachmentData.size,
+          type: this.attachmentData.type,
+          encKey: encKey  // File encryption key (will be encrypted with message)
+        };
+
+        // Build message with attachment
+        const messageObj = {
+          type: 'message',
+          message: '',  // Empty message text
+          attachments: [sharedAttachment]
+        };
+
+        const encMessage = encryptChacha(recipientDhkey, stringify(messageObj));
+        
+        // For ourselves: re-encrypt encKey with our password for local storage
+        const password = keys.secret + keys.pqSeed;
+        const selfKey = encryptData(bin2hex(base642bin(encKey)), password, true);
+
+        const messagePayload = {
+          message: encMessage,
+          encrypted: true,
+          encryptionMethod: 'xchacha20poly1305',
+          pqEncSharedKey: bin2base64(cipherText),
+          selfKey: selfKey,
+          sent_timestamp: getCorrectedTimestamp()
+        };
+
+        // Get toll amount
+        const sortedAddresses = [longAddress(keys.address), longAddress(addr)].sort();
+        const chatId = hashBytes(sortedAddresses.join(''));
+        const chatIdAccount = await queryNetwork(`/messages/${chatId}/toll`);
+        const toIndex = sortedAddresses.indexOf(longAddress(addr));
+        const tollRequiredToSend = chatIdAccount?.toll?.required?.[toIndex] ?? 1;
+
+        if (tollRequiredToSend === 2) {
+          showToast(`You cannot share with ${contact?.username || addr} (you are blocked)`, 0, 'warning');
+          continue;
+        }
+        
+        // Calculate toll amount: 0 for connections, recipient's required toll for others
+        let tollInLib = tollRequiredToSend === 0 ? 0n : (contact.toll || 0n);
+        
+        // Add network fee to the toll amount
+        tollInLib = tollInLib + getTransactionFeeWei();
+        // if (tollRequiredToSend === 1) {
+        //   const username = (contact?.username) || `${addr.slice(0, 8)}...${addr.slice(-6)}`;
+        //   showToast(`You can only share with people who have added you as a connection. Ask ${username} to add you as a connection`, 0, 'info');
+        //   continue;
+        // }
+
+        const chatMessageObj = await chatModal.createChatMessage(addr, messagePayload, tollInLib, keys);
+        await signObj(chatMessageObj, keys);
+        const txid = getTxid(chatMessageObj);
+
+        // Create new message object for local display (with encKey in plaintext for our use)
+        const newMessage = {
+          message: '',
+          timestamp: messagePayload.sent_timestamp,
+          sent_timestamp: messagePayload.sent_timestamp,
+          my: true,
+          txid: txid,
+          status: 'sent',
+          xattach: [{
+            url: this.attachmentData.url,
+            pUrl: this.attachmentData.pUrl,
+            name: this.attachmentData.name,
+            size: this.attachmentData.size,
+            type: this.attachmentData.type,
+            encKey: encKey  // Store in plaintext locally
+          }]
+        };
+        insertSorted(contact.messages, newMessage, 'timestamp');
+
+        // Update chats list
+        const chatUpdate = {
+          address: addr,
+          timestamp: newMessage.sent_timestamp,
+          txid: txid,
+        };
+
+        const existingChatIndex = myData.chats.findIndex((chat) => chat.address === addr);
+        if (existingChatIndex !== -1) {
+          myData.chats.splice(existingChatIndex, 1);
+        }
+        insertSorted(myData.chats, chatUpdate, 'timestamp');
+
+        // Update the chat modal UI if open
+        if (chatModal.isActive() && chatModal.address === addr) {
+          chatModal.appendChatModal();
+        }
+
+        // Send the message transaction
+        const response = await injectTx(chatMessageObj, txid);
+
+        if (!response || !response.result || !response.result.success) {
+          console.error('attachment share message failed to send', response);
+          updateTransactionStatus(txid, addr, 'failed', 'message');
+          if (chatModal.isActive() && chatModal.address === addr) {
+            chatModal.appendChatModal();
+          }
+          showToast(`Failed to share with ${contact?.username || addr}`, 3000, 'error');
+        } else {
+          showToast(`Attachment shared with ${contact?.username || addr}`, 3000, 'success');
+        }
+      }
+
+    } catch (err) {
+      console.error('Share send error', err);
+      showToast('Failed to share attachment', 0, 'error');
+    } finally {
+      this.sendButton.disabled = false;
+      this.sendButton.textContent = 'Share';
+      this.close();
+    }
+  }
+}
+
+const shareAttachmentModal = new ShareAttachmentModal();
+
+/**
  * Share Contacts Modal
- * Allows users to select contacts (Friends and Connections) to share as a VCF file attachment
+ * Allows users to select contacts to share as a VCF file attachment
  */
 class ShareContactsModal {
   constructor() {
@@ -17310,7 +18440,7 @@ class ShareContactsModal {
     }
 
     // For public accounts, proceed with contact list population
-    // Get Friends (friend === 3) and Connections (friend === 2)
+    // Get Friends (friend === 3), Connections (friend === 2), and Tolled (friend === 1)
     const allContacts = Object.values(myData.contacts || {});
     
     // Filter out the current chat contact (the person you're chatting with)
@@ -17319,17 +18449,25 @@ class ShareContactsModal {
       : null;
     
     const filteredContacts = currentChatAddress
-      ? allContacts.filter(c => normalizeAddress(c.address) !== currentChatAddress)
-      : allContacts;
+      ? allContacts.filter(c => !isFaucetAddress(c.address) && normalizeAddress(c.address) !== currentChatAddress)
+      : allContacts.filter(c => !isFaucetAddress(c.address));
     
+    const sortByShareDisplayName = (a, b) =>
+      this.getContactDisplayNameForShare(a)
+        .toLowerCase()
+        .localeCompare(this.getContactDisplayNameForShare(b).toLowerCase());
+
     const friends = filteredContacts
       .filter(c => c.friend === 3)
-      .sort((a, b) => this.getContactDisplayNameForShare(a).toLowerCase().localeCompare(this.getContactDisplayNameForShare(b).toLowerCase()));
+      .sort(sortByShareDisplayName);
     const connections = filteredContacts
       .filter(c => c.friend === 2)
-      .sort((a, b) => this.getContactDisplayNameForShare(a).toLowerCase().localeCompare(this.getContactDisplayNameForShare(b).toLowerCase()));
+      .sort(sortByShareDisplayName);
+    const tolled = filteredContacts
+      .filter(c => c.friend === 1)
+      .sort(sortByShareDisplayName);
 
-    const hasContacts = friends.length > 0 || connections.length > 0;
+    const hasContacts = friends.length > 0 || connections.length > 0 || tolled.length > 0;
 
     // Show/hide empty state
     this.emptyState.style.display = hasContacts ? 'none' : 'block';
@@ -17345,6 +18483,10 @@ class ShareContactsModal {
       // Render Connections section
       if (connections.length > 0) {
         await this.renderSection('Connections', connections);
+      }
+      // Render Tolled section
+      if (tolled.length > 0) {
+        await this.renderSection('Tolled', tolled);
       }
     }
   }
@@ -17646,13 +18788,11 @@ class ShareContactsModal {
       // Create blob from VCF content
       const vcfBlob = new Blob([vcfContent], { type: 'text/vcard' });
 
-      // Get recipient's DH key for encryption
-      const { dhkey, cipherText: pqEncSharedKey } = await chatModal.getRecipientDhKey(chatModal.address);
-      const password = myAccount.keys.secret + myAccount.keys.pqSeed;
-      const selfKey = encryptData(bin2hex(dhkey), password, true);
+      // Use a random encryption key for the attachment (matches chat attachments)
+      const encKey = generateRandomBytes(32);
 
-      // Encrypt the VCF blob
-      const encryptedBlob = await encryptBlob(vcfBlob, dhkey);
+      // Encrypt the VCF blob using the random key
+      const encryptedBlob = await encryptBlob(vcfBlob, encKey);
 
       // Upload encrypted file
       const attachmentUrl = await chatModal.uploadEncryptedFile(encryptedBlob, vcfFilename);
@@ -17663,8 +18803,7 @@ class ShareContactsModal {
         name: vcfFilename,
         size: vcfBlob.size,
         type: 'text/vcard',
-        pqEncSharedKey: bin2base64(pqEncSharedKey),
-        selfKey
+        encKey: bin2base64(encKey)
       });
 
       // Update attachment preview in chat modal
@@ -17723,21 +18862,25 @@ class ImportContactsModal {
   }
 
   /**
-   * Opens the import contacts modal with an attachment
+   * Opens the import contacts modal with an attachment or local VCF file
    * @param {Object} attachment - The VCF attachment object with url, pqEncSharedKey, selfKey
+   *                              OR { vcfContent: string, isLocal: true } for local file uploads
    */
   async open(attachment) {
+    const isLocalUpload = attachment?.isLocal === true;
+
     // Reset state
     this.selectedContacts.clear();
     this.warningShown = false;
     this.isImporting = false;
     this.parsedContacts = [];
-    this.currentAttachment = attachment;
-    this.recipientAddress = attachment?.senderAddress || null;
+    this.currentAttachment = isLocalUpload ? null : attachment;
+    this.recipientAddress = isLocalUpload ? null : (attachment?.senderAddress || null);
     this.doneButton.classList.remove('loading');
     this.doneButton.disabled = true;
     this.allNoneButton.classList.remove('all-selected');
     this.allNoneButton.setAttribute('aria-label', 'Select all');
+    this.allNoneButton.disabled = false;
 
     // Clear existing list
     this.contactsList.innerHTML = '';
@@ -17763,8 +18906,8 @@ class ImportContactsModal {
       return;
     }
 
-    // Check contact status if recipient address is provided
-    if (this.recipientAddress) {
+    // Check contact status if recipient address is provided (skip for local uploads - user explicitly chose the file)
+    if (!isLocalUpload && this.recipientAddress) {
       const recipient = myData.contacts[this.recipientAddress];
       if (recipient && recipient.friend !== 2) {
         // Recipient is not a connection - show warning
@@ -17788,8 +18931,8 @@ class ImportContactsModal {
     this.loadingState.style.display = 'flex';
 
     try {
-      // Download and decrypt the VCF file
-      const vcfContent = await this.downloadAndDecryptVcf(attachment);
+      // Get VCF content - either from local file or download/decrypt from attachment
+      const vcfContent = isLocalUpload ? attachment.vcfContent : await this.downloadAndDecryptVcf(attachment);
       
       // Extract and validate network ID from first vCard before parsing all contacts
       const netId = this.extractNetId(vcfContent);
@@ -17824,6 +18967,7 @@ class ImportContactsModal {
 
     } catch (err) {
       console.error('Failed to load VCF:', err);
+      logsModal.log('❌ Failed to load VCF:', err?.message || String(err));
       showToast('Failed to load contacts file', 0, 'error');
       this.close();
     }
@@ -17843,17 +18987,20 @@ class ImportContactsModal {
 
     const encryptedData = new Uint8Array(await response.arrayBuffer());
 
-    // Determine which key to use for decryption (same logic as decryptAttachmentToBlob)
+    // Determine which key to use for decryption.
+    // New flow: prefer `encKey` (random key, base64). Fall back to legacy fields for backwards compatibility.
     let dhkey;
-    if (attachment.my) {
-      // We sent this file - decrypt with selfKey
+    if (attachment.encKey) {
+      dhkey = typeof attachment.encKey === 'string' ? base642bin(attachment.encKey) : attachment.encKey;
+    } else if (attachment.my) {
+      // We sent this file - decrypt with selfKey (legacy)
       if (!attachment.selfKey) throw new Error('Missing selfKey for decrypt');
       const password = myAccount.keys.secret + myAccount.keys.pqSeed;
       const dhkeyHex = decryptData(attachment.selfKey, password, true);
       if (!dhkeyHex) throw new Error('Failed to decrypt selfKey');
       dhkey = hex2bin(dhkeyHex);
     } else {
-      // Someone else sent this - decrypt with pqEncSharedKey
+      // Someone else sent this - decrypt with pqEncSharedKey (legacy)
       if (!attachment.pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
       const ok = await ensureContactKeys(attachment.senderAddress);
       const senderPublicKey = myData.contacts[attachment.senderAddress]?.public;
@@ -17934,18 +19081,44 @@ class ImportContactsModal {
     return contacts;
   }
 
+  hasLocalAvatar(contact) {
+    if (!contact) return false;
+    return !!contact.mineAvatarId;
+  }
+
+  getExistingContactUpdateEligibility(existingContact, parsedContact) {
+    const hasImportedName = !!(parsedContact?.name && parsedContact.name.trim());
+    const hasLocalName = !!(existingContact?.name && existingContact.name.trim());
+    const canUpdateName = !hasLocalName && hasImportedName;
+
+    const hasImportedAvatar = !!parsedContact?.photoBase64;
+    const hasLocalAvatar = this.hasLocalAvatar(existingContact);
+    const canUpdateAvatar = !hasLocalAvatar && hasImportedAvatar;
+
+    return {
+      canUpdateName,
+      canUpdateAvatar,
+      canUpdate: canUpdateName || canUpdateAvatar,
+    };
+  }
+
   /**
    * Validates a contact on the network by username lookup
-   * @param {Object} parsedContact - Contact object with username
+   * Also verifies that VCF address matches network-resolved address.
+   * @param {Object} parsedContact - Contact object with username and address
    * @returns {Promise<Object>} { success: boolean, networkAddress?: string, error?: string }
    */
   async validateContactOnNetwork(parsedContact) {
     if (!parsedContact.username) {
       return { success: false, error: 'No username provided' };
     }
+    if (!parsedContact.address) {
+      return { success: false, error: 'No address provided' };
+    }
 
     try {
       const username = normalizeUsername(parsedContact.username);
+      const vcfAddress = normalizeAddress(parsedContact.address);
       const usernameBytes = utf82bin(username);
       const usernameHash = hashBytes(usernameBytes);
 
@@ -17957,6 +19130,11 @@ class ImportContactsModal {
       }
 
       const networkAddress = normalizeAddress(addressData.address);
+
+      // Reject tampered VCF entries where username/address pairing doesn't match network.
+      if (vcfAddress !== networkAddress) {
+        return { success: false, error: 'VCF address does not match network username record' };
+      }
 
       // Verify account exists and ensure it's a public account
       const accountData = await queryNetwork(`/account/${longAddress(networkAddress)}`);
@@ -17976,6 +19154,7 @@ class ImportContactsModal {
       return { success: true, networkAddress, username };
     } catch (error) {
       console.error('Error validating contact on network:', error);
+      logsModal.log('❌ Error validating contact on network:', error?.message || String(error));
       return { success: false, error: 'Network error during validation' };
     }
   }
@@ -18001,11 +19180,20 @@ class ImportContactsModal {
     // Separate new and existing contacts
     const newContacts = [];
     const existingContacts = [];
+    let updatableExistingCount = 0;
 
     for (const contact of filteredContacts) {
       const normalizedAddr = normalizeAddress(contact.address);
-      if (myData.contacts[normalizedAddr]) {
-        existingContacts.push({ ...contact, address: normalizedAddr, isExisting: true });
+      const existingContact = myData.contacts[normalizedAddr];
+      if (existingContact) {
+        const updateEligibility = this.getExistingContactUpdateEligibility(existingContact, contact);
+        if (updateEligibility.canUpdate) updatableExistingCount++;
+        existingContacts.push({
+          ...contact,
+          address: normalizedAddr,
+          isExisting: true,
+          canUpdateExisting: updateEligibility.canUpdate,
+        });
       } else {
         newContacts.push({ ...contact, address: normalizedAddr, isExisting: false });
       }
@@ -18051,18 +19239,23 @@ class ImportContactsModal {
       }
 
       const row = document.createElement('div');
-      row.className = 'share-contact-row' + (contact.isExisting ? ' existing' : '');
+      const shouldDisableExisting = contact.isExisting && !contact.canUpdateExisting;
+      row.className = 'share-contact-row' + (shouldDisableExisting ? ' existing' : '');
       row.dataset.address = contact.address;
 
       const avatarHtml = avatarHtmlList[index];
       const displayName = contact.name || contact.username || `${contact.address.slice(0, 8)}…${contact.address.slice(-6)}`;
+      const usernameSubtitle = (contact.name && contact.username)
+        ? `<div class="share-contact-username">${escapeHtml(contact.username)}</div>`
+        : '';
 
       row.innerHTML = `
         <div class="share-contact-avatar">${avatarHtml}</div>
         <div class="share-contact-info">
           <div class="share-contact-name">${escapeHtml(displayName)}</div>
+          ${usernameSubtitle}
         </div>
-        ${contact.isExisting 
+        ${(contact.isExisting && !contact.canUpdateExisting)
           ? '<span class="existing-label">Already added</span>' 
           : '<input type="checkbox" class="share-contact-checkbox" />'}
       `;
@@ -18071,7 +19264,7 @@ class ImportContactsModal {
     });
 
     this.contactsList.style.display = 'block';
-    this.doneButton.disabled = newContacts.length === 0;
+    this.doneButton.disabled = (newContacts.length + updatableExistingCount) === 0;
   }
 
   /**
@@ -18105,7 +19298,7 @@ class ImportContactsModal {
    */
   handleContactClick(e) {
     const row = e.target.closest('.share-contact-row');
-    if (!row || row.classList.contains('existing')) return;
+    if (!row) return;
 
     const checkbox = row.querySelector('.share-contact-checkbox');
     if (!checkbox) return;
@@ -18131,7 +19324,7 @@ class ImportContactsModal {
    * Updates the All/None button icon based on selection state
    */
   updateAllNoneButton() {
-    const checkboxes = this.contactsList.querySelectorAll('.share-contact-row:not(.existing) .share-contact-checkbox');
+    const checkboxes = this.contactsList.querySelectorAll('.share-contact-checkbox');
     const allSelected = checkboxes.length > 0 && Array.from(checkboxes).every(cb => cb.checked);
     if (allSelected) {
       this.allNoneButton.classList.add('all-selected');
@@ -18146,7 +19339,7 @@ class ImportContactsModal {
    * Toggles between selecting all and none
    */
   toggleAllNone() {
-    const checkboxes = this.contactsList.querySelectorAll('.share-contact-row:not(.existing) .share-contact-checkbox');
+    const checkboxes = this.contactsList.querySelectorAll('.share-contact-checkbox');
     const allSelected = checkboxes.length > 0 && Array.from(checkboxes).every(cb => cb.checked);
 
     checkboxes.forEach(cb => {
@@ -18232,9 +19425,17 @@ class ImportContactsModal {
       const results = await Promise.allSettled(validationPromises);
 
       // Process validation results and create contacts (limited to 20)
-      for (const result of results) {
+      for (let index = 0; index < results.length; index++) {
+        const result = results[index];
+        const address = contactsToProcess[index];
+        const fallbackContact = this.parsedContacts.find(c => normalizeAddress(c.address) === address);
+        const fallbackUsername = fallbackContact?.username || address || 'unknown';
+
         if (result.status === 'rejected') {
-          console.error('Validation promise rejected:', result.reason);
+          const failureReason = normalizeFailureReason(result.reason);
+          console.error(`Validation promise rejected for ${fallbackUsername}:`, result.reason);
+          logsModal.log(`❌ Failed to validate contact ${fallbackUsername}: ${failureReason}`);
+          failedContacts.push({ username: fallbackUsername, error: failureReason });
           failedCount++;
           continue;
         }
@@ -18243,8 +19444,10 @@ class ImportContactsModal {
         if (!parsedContact || !validation) continue;
 
         if (!validation.success) {
-          console.warn(`Failed to validate contact ${parsedContact.username}:`, validation.error);
-          failedContacts.push({ username: parsedContact.username, error: validation.error });
+          const failureReason = normalizeFailureReason(validation.error);
+          console.warn(`Failed to validate contact ${parsedContact.username}:`, failureReason);
+          logsModal.log(`⚠️ Failed to validate contact ${parsedContact.username}: ${failureReason}`);
+          failedContacts.push({ username: parsedContact.username, error: failureReason });
           failedCount++;
           continue;
         }
@@ -18254,7 +19457,38 @@ class ImportContactsModal {
 
         // Check if contact already exists
         if (myData.contacts[networkAddress]) {
-          console.log(`Contact ${parsedContact.username} already exists, skipping`);
+          const existingContact = myData.contacts[networkAddress];
+          const updateEligibility = this.getExistingContactUpdateEligibility(existingContact, parsedContact);
+          let updated = false;
+
+          if (updateEligibility.canUpdateName) {
+            existingContact.name = parsedContact.name.trim();
+            updated = true;
+          }
+
+          if (updateEligibility.canUpdateAvatar) {
+            try {
+              const mimeType = parsedContact.photoType === 'png' ? 'image/png' : 'image/jpeg';
+              const avatarBlob = contactAvatarCache.base64ToBlob(parsedContact.photoBase64, mimeType);
+              const mineId = bin2hex(generateRandomBytes(16));
+              await contactAvatarCache.save(mineId, avatarBlob);
+              existingContact.mineAvatarId = mineId;
+              existingContact.hasAvatar = true;
+              existingContact.useAvatar = 'mine';
+              updated = true;
+            } catch (err) {
+              console.warn('Failed to save imported avatar for existing contact:', err);
+              logsModal.log('⚠️ Failed to save imported avatar for existing contact:', err?.message || String(err));
+            }
+          }
+
+          if (updated) {
+            importedContacts.push(validation.username || parsedContact.username);
+            importedCount++;
+          } else {
+            console.log(`Contact ${parsedContact.username} already exists, skipping`);
+            logsModal.log(`ℹ️ Contact ${parsedContact.username} already exists, skipping`);
+          }
           continue;
         }
 
@@ -18306,17 +19540,20 @@ class ImportContactsModal {
       // Refresh contacts screen if visible
       contactsScreen.updateContactsList();
       
-      // Show appropriate success/error message with usernames
-      if (importedCount > 0 && failedCount === 0) {
-        const successList = importedContacts.join(', ');
-        showToast(`Successfully imported: ${successList}`, 3000, 'success');
-      } else if (importedCount > 0 && failedCount > 0) {
-        const successList = importedContacts.join(', ');
-        const failedList = failedContacts.map(c => c.username).join(', ');
-        showToast(`Imported: ${successList}\n\nFailed: ${failedList}`, 0, 'warning');
-      } else if (failedCount > 0) {
-        const failedList = failedContacts.map(c => c.username).join(', ');
-        showToast(`Failed to import: ${failedList}`, 0, 'error');
+      // Show import result toasts separately for better mobile UX.
+      if (importedCount > 0) {
+        const successLabel = importedCount === 1 ? 'contact' : 'contacts';
+        const successHtml = buildUserListToastHtml(`Imported ${importedCount} ${successLabel}`, importedContacts);
+        showToast(successHtml, 3500, 'success', true);
+      }
+
+      if (failedCount > 0) {
+        const failedLabel = failedCount === 1 ? 'contact' : 'contacts';
+        const failedHtml = [
+          buildUserListToastHtml(`Failed to import ${failedCount} ${failedLabel}`, failedContacts.map(c => c.username)),
+          '<button type="button" class="toast-open-logs-button">Open Logs</button>'
+        ].join('');
+        showToast(failedHtml, 0, 'error', true);
       }
 
       // Show warning if more than 20 contacts were selected
@@ -18328,6 +19565,7 @@ class ImportContactsModal {
 
     } catch (err) {
       console.error('Failed to import contacts:', err);
+      logsModal.log('❌ Failed to import contacts:', err?.message || String(err));
       showToast('Failed to import contacts', 0, 'error');
     } finally {
       this.isImporting = false;
@@ -19484,10 +20722,12 @@ class NewChatModal {
     this.scanButton = document.getElementById('newChatScanQRButton');
     this.uploadButton = document.getElementById('newChatUploadQRButton');
     this.hiddenFileInput = document.getElementById('newChatQRFileInput');
+    this.inviteButton = document.getElementById('newChatInviteButton');
 
     this.scanButton.addEventListener('click', () => this.scanUsernameFromQR());
     this.uploadButton.addEventListener('click', () => this.hiddenFileInput.click());
     this.hiddenFileInput.addEventListener('change', (e) => this.handleQRImageUpload(e.target.files?.[0] || null));
+    this.inviteButton.addEventListener('click', () => this.handleInviteClick());
   }
 
   /**
@@ -19768,6 +21008,15 @@ class NewChatModal {
         this.submitButton.disabled = true;
       }
     }, 1000);
+  }
+
+  /**
+   * Invoked when the user clicks the Invite button
+   * It will open the invite modal without closing newChatModal
+   * @returns {void}
+   */
+  handleInviteClick() {
+    inviteModal.open();
   }
 }
 
@@ -22728,7 +23977,7 @@ const unlockModal = new UnlockModal();
 
 class LaunchModal {
   constructor() {
-
+    this.hasShownBackupReminderThisOpen = false;
   }
 
   load() {
@@ -22742,15 +23991,30 @@ class LaunchModal {
     this.launchForm.addEventListener('submit', async (event) => await this.handleSubmit(event));
     this.urlInput.addEventListener('input', () => this.updateButtonState());
     this.backupButton.addEventListener('click', () => backupAccountModal.open());
+
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target && target.classList.contains('toast-launch-backup-button')) {
+        event.preventDefault();
+        event.stopPropagation();
+        const toastElement = target.closest('.toast');
+        if (toastElement && toastElement.id) {
+          hideToast(toastElement.id);
+        }
+        backupAccountModal.open();
+      }
+    }, { capture: true });
   }
 
   open() {
     this.modal.classList.add('active');
+    this.hasShownBackupReminderThisOpen = false;
     this.urlInput.value = window.location.href.split('?')[0];
     this.updateButtonState();
   }
 
   close() {
+    this.hasShownBackupReminderThisOpen = false;
     this.urlInput.value = '';
     this.modal.classList.remove('active');
   }
@@ -22760,6 +24024,12 @@ class LaunchModal {
     const url = this.urlInput.value;
     if (!url) {
       showToast('Please enter a URL', 0, 'error');
+      return;
+    }
+
+    if (!this.hasShownBackupReminderThisOpen) {
+      this.hasShownBackupReminderThisOpen = true;
+      this.showBackupReminderToast();
       return;
     }
     
@@ -22842,6 +24112,16 @@ class LaunchModal {
       this.launchButton.disabled = false;
       this.launchButton.textContent = 'Launch';
     }
+  }
+
+  showBackupReminderToast() {
+    showToast(
+      '<div class="toast-update-title">Backup before launching a new network</div><button type="button" class="toast-update-button toast-launch-backup-button">Open Backup</button>',
+      0,
+      'warning',
+      true,
+      { dedupe: false },
+    );
   }
 
   updateButtonState() {
