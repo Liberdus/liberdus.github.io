@@ -53,13 +53,16 @@ body {
 }
 
 .site-header {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
   padding: 20px 18px;
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
+}
+
+.site-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .brand-link {
@@ -82,6 +85,16 @@ body {
 .brand-text {
   display: flex;
   flex-direction: column;
+}
+
+.header-meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.header-last-updated {
+  white-space: nowrap;
 }
 
 .brand-title-row {

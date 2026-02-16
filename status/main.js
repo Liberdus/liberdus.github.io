@@ -5,7 +5,7 @@ const API_BASE =
     ? window.LIBERDUS_STATUS_API
     : "https://status.liberdus.com";
 
-let CURRENT_NETWORK = "devnet";
+let CURRENT_NETWORK = "testnet";
 
 const INTERVAL_OPTIONS = [
   { value: "5m", label: "5 minutes" },
@@ -350,6 +350,9 @@ function renderOverview(services, incidents, snapshot) {
   const pill = document.getElementById("overall-status-pill");
   const label = document.getElementById("overall-status-label");
   const lastUpdated = document.getElementById("last-updated-label");
+  const headerLastUpdated = document.getElementById(
+    "header-last-updated-label"
+  );
 
   if (pill) {
     pill.classList.remove("degraded", "outage");
@@ -368,16 +371,21 @@ function renderOverview(services, incidents, snapshot) {
     }
   }
 
-  if (lastUpdated) {
+  const targets = [];
+  if (lastUpdated) targets.push(lastUpdated);
+  if (headerLastUpdated) targets.push(headerLastUpdated);
+  if (targets.length) {
+    let value = null;
     if (snapshot && snapshot.generatedAt) {
       const date = new Date(snapshot.generatedAt);
-      if (!Number.isNaN(date.getTime())) {
-        lastUpdated.textContent = `Last updated: ${date.toLocaleTimeString()}`;
-      } else {
-        lastUpdated.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
-      }
+      value = !Number.isNaN(date.getTime())
+        ? date.toLocaleTimeString()
+        : new Date().toLocaleTimeString();
     } else {
-      lastUpdated.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+      value = new Date().toLocaleTimeString();
+    }
+    for (const el of targets) {
+      el.textContent = `Last updated: ${value}`;
     }
   }
 }
@@ -1219,7 +1227,7 @@ function setupNetworkFilter() {
   const select = document.getElementById("network-filter-select");
   const label = document.getElementById("network-filter-label");
   if (!select) return;
-  select.value = CURRENT_NETWORK || "devnet";
+  select.value = CURRENT_NETWORK || "testnet";
   if (label) {
     const selected = NETWORK_OPTIONS.find(
       (option) => option.value === CURRENT_NETWORK
@@ -1229,7 +1237,7 @@ function setupNetworkFilter() {
       : "Network";
   }
   select.addEventListener("change", async (event) => {
-    const next = event.target.value || "devnet";
+    const next = event.target.value || "testnet";
     if (next === CURRENT_NETWORK) {
       return;
     }
