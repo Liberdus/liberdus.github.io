@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -127,6 +127,8 @@ import {
   linkifyUrls,
   escapeHtml,
   debounce,
+  withButtonCooldown,
+  BUTTON_COOLDOWN_MS,
   truncateMessage,
   normalizeUnsignedFloat,
   EthNum,
@@ -175,6 +177,8 @@ const MIGRATION_ATTACHMENT_KEYS_TO_ENC_KEY_TS = 202602010000;
 let parameters = {
   current: {
     transactionFee: 1n * wei,
+    transactionFeeUsdStr: '',
+    stabilityFactorStr: '',
   },
 };
 
@@ -3181,7 +3185,7 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
   const asset = myData.wallet.assets[assetIndex];
   
   // Check if transaction fee is available from network parameters
-  if (!parameters.current || !parameters.current.transactionFeeUsdStr) {
+  if (!parameters.current || !parameters.current.transactionFeeUsdStr || !parameters.current.stabilityFactorStr) {
     console.error('Transaction fee not available from network parameters');
     if (balanceWarning) {
       balanceWarning.textContent = 'Network error: Cannot determine transaction fee';
@@ -3212,6 +3216,81 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
 
   // use ! to return true if the balance is sufficient, false otherwise
   return !hasInsufficientBalance;
+}
+
+/**
+ * Check whether the wallet can cover a fee-only transaction.
+ * @returns {Promise<{success: boolean, reason: ('insufficient_balance'|'network_error'|'wallet_unavailable'|null)}>}
+ */
+async function getFeeBalanceStatus() {
+  await getNetworkParams();
+
+  if (!parameters.current || !parameters.current.transactionFeeUsdStr || !parameters.current.stabilityFactorStr) {
+    console.error('Transaction fee not available from network parameters');
+    return { success: false, reason: 'network_error' };
+  }
+
+  const asset = myData?.wallet?.assets?.[0];
+  if (!asset || asset.balance == null) {
+    console.error('Wallet asset unavailable while checking fee balance');
+    return { success: false, reason: 'wallet_unavailable' };
+  }
+
+  const feeInWei = getTransactionFeeWei();
+  const hasSufficientBalance = BigInt(asset.balance) >= feeInWei;
+  if (!hasSufficientBalance) {
+    return { success: false, reason: 'insufficient_balance' };
+  }
+
+  return { success: true, reason: null };
+}
+
+/**
+ * Show a standard fee-balance failure toast.
+ * @param {'insufficient_balance'|'network_error'|'wallet_unavailable'|null} reason
+ * @returns {void}
+ */
+function showFeeBalanceFailureToast(reason) {
+  if (reason === 'insufficient_balance') {
+    showToast('Insufficient balance for fee. Go to the wallet to add more LIB.', 0, 'error');
+  } else if (reason === 'wallet_unavailable') {
+    showToast('Wallet balance is unavailable right now. Please reopen the wallet and try again.', 0, 'error');
+  } else {
+    showToast('Network error: cannot determine transaction fee. Please try again.', 0, 'error');
+  }
+}
+
+/**
+ * Show a close-flow fee warning toast once per close action.
+ * @param {'insufficient_balance'|'network_error'|'wallet_unavailable'|null} reason
+ * @param {'claim_fee'|'send_read'} action
+ * @param {boolean} alreadyShown
+ * @returns {boolean}
+ */
+function showCloseFeeFailureWarningOnce(reason, action, alreadyShown = false) {
+  if (alreadyShown) {
+    return true;
+  }
+
+  if (action === 'claim_fee') {
+    if (reason === 'insufficient_balance') {
+      showToast('Cannot claim fee: insufficient LIB balance for network fee.', 0, 'warning');
+    } else if (reason === 'wallet_unavailable') {
+      showToast('Cannot claim fee because wallet balance data is unavailable.', 0, 'warning');
+    } else {
+      showToast('Cannot claim fee due to a network fee lookup error.', 0, 'warning');
+    }
+  } else {
+    if (reason === 'insufficient_balance') {
+      showToast('Cannot send read transaction: insufficient LIB balance for network fee.', 0, 'warning');
+    } else if (reason === 'wallet_unavailable') {
+      showToast('Cannot send read transaction because wallet balance data is unavailable right now.', 0, 'warning');
+    } else {
+      showToast('Cannot send read transaction right now due to a network fee lookup error.', 0, 'warning');
+    }
+  }
+
+  return true;
 }
 
 // Sign In Modal Management
@@ -4129,7 +4208,12 @@ class FriendModal {
     this.submitButton = document.getElementById('friendSubmitButton');
 
     // Friend modal form submission
-    this.friendForm.addEventListener('submit', (event) => this.handleFriendSubmit(event));
+    this.friendForm.addEventListener('submit', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      () => this.updateSubmitButtonState(),
+      (event) => this.handleFriendSubmit(event)
+    ));
 
     // Enable/disable submit button based on selection changes
     this.friendForm.addEventListener('change', (e) => {
@@ -4198,10 +4282,9 @@ class FriendModal {
     this.initialFriendStatus = contact.friend;
     this.warningShown = false;
 
-    // Initialize submit button state
-    this.updateSubmitButtonState();
-
     this.modal.classList.add('active');
+    // Initialize submit button state after modal is active so updateSubmitButtonState()'s isActive() guard passes
+    this.updateSubmitButtonState();
   }
 
   /**
@@ -4224,6 +4307,12 @@ class FriendModal {
   }
 
   async postUpdateTollRequired(address, friend) {
+    const feeBalanceStatus = await getFeeBalanceStatus();
+    if (!feeBalanceStatus.success) {
+      showFeeBalanceFailureToast(feeBalanceStatus.reason);
+      return { result: { success: false, reason: feeBalanceStatus.reason || 'fee_check_failed' }, toastAlreadyShown: true };
+    }
+
     // 0 = blocked, 1 = Other, 2 = Connection
     // required = 1 if toll required, 0 if not and 2 to block other party
     const requiredNum = friend === 2 ? 0 : friend === 1 ? 1 : friend === 0 ? 2 : 1;
@@ -4242,6 +4331,15 @@ class FriendModal {
     };
     const txid = await signObj(tx, myAccount.keys);
     const res = await injectTx(tx, txid);
+    if (res?.result?.success !== true) {
+      // injectTx surfaces API/network failures when it can. Add fallback for silent null responses.
+      const reason = res?.result?.reason || 'inject_failed';
+      const injectToastShown = !!res;
+      if (!injectToastShown) {
+        showToast('Failed to update friend status. Please try again.', 0, 'error');
+      }
+      return { result: { success: false, reason }, toastAlreadyShown: true };
+    }
     return res;
   }
 
@@ -4253,13 +4351,11 @@ class FriendModal {
    */
   async handleFriendSubmit(event) {
     event.preventDefault();
-    this.submitButton.disabled = true;
     const contact = myData.contacts[this.currentContactAddress];
     const selectedStatus = this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value;
     const prevFriendStatus = Number(contact?.friend);
 
     if (selectedStatus == null || Number(selectedStatus) === contact.friend) {
-      this.submitButton.disabled = true;
       console.log('No change in friend status or no status selected.');
       return;
     }
@@ -4274,7 +4370,10 @@ class FriendModal {
           console.log(
             `[handleFriendSubmit] update_toll_required transaction failed: ${res?.result?.reason}. Did not update contact status.`
           );
-          showToast('Failed to update friend status. Please try again.', 0, 'error');
+          const toastAlreadyShown = res?.toastAlreadyShown === true;
+          if (!toastAlreadyShown) {
+            showToast('Failed to update friend status. Please try again.', 0, 'error');
+          }
           return;
         }
       } catch (error) {
@@ -4325,7 +4424,6 @@ class FriendModal {
 
     // Close the friend modal (skip warning since form was submitted)
     this.close(true);
-    this.submitButton.disabled = false;
   }
 
   // setAddress fuction that sets a global variable that can be used to set the currentContactAddress
@@ -4382,6 +4480,7 @@ class FriendModal {
 
   // Update the submit button's enabled state based on current and selected status
   updateSubmitButtonState() {
+    if (!this.isActive()) return;
     const contact = myData?.contacts?.[this.currentContactAddress];
     // return early if contact is not found or offline
     if (!contact || !isOnline) {
@@ -5214,6 +5313,28 @@ class CallsModal {
 
 const callsModal = new CallsModal();
 
+/**
+ * Recomputes scheduled calls and updates the global header calls icon state.
+ * @returns {void}
+ */
+function refreshUpcomingCallsUi() {
+  callsModal.refreshCalls();
+  header.updateCallsIcon();
+}
+
+/**
+ * Returns whether deleting a scheduled call could affect the header calls icon state.
+ * Mirrors CallsModal refresh eligibility: valid positive callTime within last 2 hours or in the future.
+ * @param {number|string} callTime - Scheduled call timestamp in ms since epoch.
+ * @returns {boolean}
+ */
+function shouldRefreshUpcomingCallsUiForCallTime(callTime) {
+  const callTimeNum = Number(callTime);
+  if (!Number.isFinite(callTimeNum) || callTimeNum <= 0) return false;
+  const twoHoursMs = 2 * 60 * 60 * 1000;
+  return callTimeNum >= (getCorrectedTimestamp() - twoHoursMs);
+}
+
 class GroupCallParticipantsModal {
   constructor() {}
 
@@ -5453,6 +5574,7 @@ async function processChats(chats, keys) {
   const timestamp = myAccount.chatTimestamp || 0;
   const messageQueryTimestamp = Math.max(0, timestamp+1);
   let hasAnyTransfer = false;
+  let needsUpcomingCallsUiRefresh = false;
 
   for (let sender in chats) {
     // Fetch messages using the adjusted timestamp
@@ -5552,6 +5674,7 @@ async function processChats(chats, keys) {
                   if (!messageToDelete) {
                     continue; // ignore delete control messages for missing txid
                   }
+                  let didDeleteMessage = false;
                   
                   // Only allow deletion if the sender of this delete tx is the same who sent the original message
                   // (normalize addresses for comparison)
@@ -5565,6 +5688,7 @@ async function processChats(chats, keys) {
                     // Mark the message as deleted
                     messageToDelete.deleted = 1;
                     messageToDelete.message = "Deleted by sender";
+                    didDeleteMessage = true;
                     // Remove attachments so we don't keep references around
                     delete messageToDelete.xattach;
                     
@@ -5594,6 +5718,7 @@ async function processChats(chats, keys) {
                     // Mark the message as deleted
                     messageToDelete.deleted = 1;
                     messageToDelete.message = "Deleted for all";
+                    didDeleteMessage = true;
                     // Remove attachments so we don't keep references around
                     delete messageToDelete.xattach;
                     
@@ -5619,6 +5744,9 @@ async function processChats(chats, keys) {
 
                   if (reactNativeApp.isReactNativeWebView && messageToDelete.type === 'call' && Number(messageToDelete.callTime) > 0) {
                     reactNativeApp.sendCancelScheduledCall(contact?.username, Number(messageToDelete.callTime));
+                  }
+                  if (didDeleteMessage && messageToDelete.type === 'call' && shouldRefreshUpcomingCallsUiForCallTime(messageToDelete.callTime)) {
+                    needsUpcomingCallsUiRefresh = true;
                   }
                   
                   if (chatModal.isActive() && chatModal.address === from) {
@@ -5824,6 +5952,9 @@ async function processChats(chats, keys) {
           }
           
           insertSorted(contact.messages, payload, 'timestamp');
+          if (payload.type === 'call' && shouldRefreshUpcomingCallsUiForCallTime(payload.callTime)) {
+            needsUpcomingCallsUiRefresh = true;
+          }
           // if we are not in the chatModal of who sent it, playChatSound or if device visibility is hidden play sound
           if (!inActiveChatWithSender || document.visibilityState === 'hidden') {
             playChatSound();
@@ -6061,6 +6192,10 @@ async function processChats(chats, keys) {
     if (walletScreen.isActive()) walletScreen.updateWalletView();
   }
 
+  if (needsUpcomingCallsUiRefresh) {
+    refreshUpcomingCallsUi();
+  }
+
   // Update the global timestamp AFTER processing all senders
   if (newTimestamp > 0) {
     // Update the timestamp
@@ -6197,6 +6332,8 @@ async function postAssetTransfer(to, amount, memo, keys) {
 
 // TODO - backend - when account is being registered, ensure that loserCase(alias)=alias and hash(alias)==aliasHash
 async function postRegisterAlias(alias, keys, isPrivate = false) {
+  // no need for sufficient balance check due to `register` transaction
+
   const aliasBytes = utf82bin(alias);
   const aliasHash = hashBytes(aliasBytes);
   const { publicKey } = generatePQKeys(keys.pqSeed);
@@ -8239,6 +8376,14 @@ function revalidateButtonStates() {
   if (typeof sendAssetFormModal !== 'undefined' && sendAssetFormModal.isActive()) {
     sendAssetFormModal.refreshSendButtonDisabledState();
   }
+
+  // re-validate chat modal buttons
+  if (typeof chatModal !== 'undefined' && chatModal.isActive() && chatModal.address) {
+    chatModal.revalidateSendButtonState();
+    if (chatModal.voiceRecordButton) {
+      chatModal.voiceRecordButton.disabled = chatModal.blockedByRecipient || !isOnline;
+    }
+  }
 }
 
 // Prevent form submissions when offline
@@ -8627,8 +8772,18 @@ class RemoveAccountsModal {
     this.submitButton = document.getElementById('submitRemoveAccounts');
     this.removeAllButton = document.getElementById('removeAllAccountsButton');
     this.closeButton.addEventListener('click', () => this.close());
-    this.submitButton.addEventListener('click', () => this.handleSubmit());
-    this.removeAllButton.addEventListener('click', () => this.handleRemoveAllAccounts());
+    this.submitButton.addEventListener('click', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this.handleSubmit()
+    ));
+    this.removeAllButton.addEventListener('click', withButtonCooldown(
+      this.removeAllButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this.handleRemoveAllAccounts()
+    ));
   }
 
   open() {
@@ -8876,9 +9031,12 @@ class BackupAccountModal {
     this.storageLocationSelect = document.getElementById('backupStorageLocation');
     
     document.getElementById('closeBackupForm').addEventListener('click', () => this.close());
-    document.getElementById('backupForm').addEventListener('submit', (event) => {
-      this.handleSubmit(event);
-    });
+    document.getElementById('backupForm').addEventListener('submit', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      () => this.updateButtonState(),
+      (event) => this.handleSubmit(event)
+    ));
 
     this.passwordInput.addEventListener('input', () => this.updateButtonState());
     this.passwordConfirmInput.addEventListener('input', () => this.updateButtonState());
@@ -9401,7 +9559,6 @@ class BackupAccountModal {
     const password = this.passwordInput.value || '';
     const confirmPassword = this.passwordConfirmInput.value || '';
     if (password.length > 0 && confirmPassword !== password) {
-      this.updateButtonState();
       return;
     }
 
@@ -9422,9 +9579,6 @@ class BackupAccountModal {
    * @param {boolean} toGoogleDrive - Whether to upload to Google Drive
    */
   async handleSubmitOne(toGoogleDrive = false) {
-    // Disable button to prevent multiple submissions
-    this.submitButton.disabled = true;
-
     saveState();
 
     const password = this.passwordInput.value;
@@ -9508,8 +9662,6 @@ class BackupAccountModal {
     } catch (error) {
       console.error('Backup failed:', error);
       showToast('Failed to create backup. Please try again.', 0, 'error');
-      // Re-enable button so user can try again
-      this.updateButtonState();
     }
   }
 
@@ -9518,10 +9670,6 @@ class BackupAccountModal {
    * @param {boolean} toGoogleDrive - Whether to upload to Google Drive
    */
   async handleSubmitAll(toGoogleDrive = false) {
-
-    // Disable button to prevent multiple submissions
-    this.submitButton.disabled = true;
-
     const password = this.passwordInput.value;
     const myLocalStore = this.copyLocalStorageToObject();
 
@@ -9588,8 +9736,6 @@ class BackupAccountModal {
     } catch (error) {
       console.error('Backup failed:', error);
       showToast('Failed to create backup. Please try again.', 0, 'error');
-      // Re-enable button so user can try again
-      this.updateButtonState();
     }
   }
 
@@ -9757,7 +9903,12 @@ class RestoreAccountModal {
     this.pickerEmpty = document.getElementById('googleDrivePickerEmpty');
 
     this.closeImportForm.addEventListener('click', () => this.close());
-    this.importForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.importForm.addEventListener('submit', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      () => this.updateButtonState(),
+      (event) => this.handleSubmit(event)
+    ));
 
     // Add new event listeners for developer options
     this.developerOptionsToggle.addEventListener('change', () => this.toggleDeveloperOptions());
@@ -10668,6 +10819,12 @@ class TollModal {
    * @returns {Promise<Object>} - The response from the network
    */
   async postToll(toll, tollUnit) {
+    const feeBalanceStatus = await getFeeBalanceStatus();
+    if (!feeBalanceStatus.success) {
+      showFeeBalanceFailureToast(feeBalanceStatus.reason);
+      return { result: { success: false, reason: feeBalanceStatus.reason || 'fee_check_failed' } };
+    }
+
     const tollTx = {
       from: longAddress(myAccount.keys.address),
       toll: toll,
@@ -10784,7 +10941,15 @@ class InviteModal {
     this.resetInviteButton = document.getElementById('resetInviteMessage');
 
     this.closeButton.addEventListener('click', () => this.close());
-    this.inviteForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.inviteForm.addEventListener('submit', withButtonCooldown(
+      [this.submitButton, this.resetInviteButton],
+      BUTTON_COOLDOWN_MS,
+      () => {
+        this.validateInputs();
+        this.resetInviteButton.disabled = false;
+      },
+      (event) => this.handleSubmit(event)
+    ));
 
     // input listener for editable message
     this.inviteMessageInput.addEventListener('input', () => this.validateInputs());
@@ -10843,18 +11008,9 @@ class InviteModal {
       saveState();
     }
 
-    // 2-second cooldown on Share button
-    this.submitButton.disabled = true;
-    this.resetInviteButton.disabled = true;
-    setTimeout(() => {
-      this.validateInputs();
-      this.resetInviteButton.disabled = false;
-    }, 2000);
-
     try {
       await this.shareLiberdusInvite(message);
     } catch (err) {
-      // shareLiberdusInvite will show its own errors; rely on cooldown to re-enable
       showToast('Could not share invitation. Try copying manually.', 0, 'error');
     }
   }
@@ -11170,8 +11326,16 @@ class MyProfileModal {
     this.submitButton = document.querySelector('#accountForm .btn.btn--primary');
 
     this.closeButton.addEventListener('click', () => this.close());
-    this.accountForm.addEventListener('submit', (event) => this.handleSubmit(event));
-    
+    this.accountForm.addEventListener('submit', withButtonCooldown(
+      [this.closeButton, this.submitButton],
+      BUTTON_COOLDOWN_MS,
+      () => {
+        this.close();
+        this.closeButton.disabled = false;
+        this.submitButton.disabled = false;
+      },
+      (event) => this.handleSubmit(event)
+    ));
 
     // Add input event listeners for validation
     this.name.addEventListener('input', (e) => this.handleNameInput(e));
@@ -11280,22 +11444,11 @@ class MyProfileModal {
     myData.account = { ...myData.account, ...formData };
 
     showToast('Profile updated successfully', 2000, 'success');
-    // disable the close button and submit button
-    this.closeButton.disabled = true;
-    this.submitButton.disabled = true;
 
     // if myInfo modal is open update the info
     if (myInfoModal && myInfoModal.isActive()) {
       myInfoModal.updateMyInfo();
     }
-
-    // Hide success message after 2 seconds
-    setTimeout(() => {
-      this.close();
-      // enable the close button and submit button
-      this.closeButton.disabled = false;
-      this.submitButton.disabled = false;
-    }, 2000);
   }
 }
 const myProfileModal = new MyProfileModal();
@@ -11716,6 +11869,12 @@ class ValidatorStakingModal {
   }
 
   async postUnstake(nodeAddress) {
+    const feeBalanceStatus = await getFeeBalanceStatus();
+    if (!feeBalanceStatus.success) {
+      showFeeBalanceFailureToast(feeBalanceStatus.reason);
+      return { result: { success: false, reason: feeBalanceStatus.reason || 'fee_check_failed' } };
+    }
+
     // TODO: need to query network for the correct nominator address
     const unstakeTx = {
       type: 'withdraw_stake',
@@ -12313,6 +12472,8 @@ class ChatModal {
 
     // Track active attachment loading toasts by contact so closing a chat can hide only its loading toasts.
     this.attachmentLoadingToastsByContact = new Map();
+    // Prevent multiple fee-failure warnings when close triggers read + reclaim checks.
+    this.closeFeeFailureToastShown = false;
   }
 
   /**
@@ -12500,7 +12661,12 @@ class ChatModal {
         this.closeHeaderContextMenu();
       }
     });
-    this.sendButton.addEventListener('click', this.handleSendMessage.bind(this));
+    this.sendButton.addEventListener('click', withButtonCooldown(
+      this.sendButton,
+      BUTTON_COOLDOWN_MS,
+      () => this.revalidateSendButtonState(),
+      () => this.handleSendMessage()
+    ));
     this.cancelEditButton.addEventListener('click', () => this.cancelEdit());
     this.closeButton.addEventListener('click', this.close.bind(this));
     this.sendButton.addEventListener('keydown', ignoreTabKey);
@@ -12516,12 +12682,10 @@ class ChatModal {
       this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
 
       const messageText = e.target.value;
-      const messageValidation = this.validateMessageSize(messageText);
-      this.updateMessageByteCounter(messageValidation);
+      this.revalidateSendButtonState();
 
       // Save draft (text is already limited to 2000 chars by maxlength attribute)
-      this.debouncedSaveDraft(e.target.value);
-      this.toggleSendButtonVisibility();
+      this.debouncedSaveDraft(messageText);
     });
 
     // allow ctlr+enter or cmd+enter to send message
@@ -12873,6 +13037,7 @@ class ChatModal {
     editInputInit.value = '';
     this.cancelEditButton.style.display = 'none';
     this.addAttachmentButton.disabled = false;
+    if (this.voiceRecordButton) this.voiceRecordButton.disabled = !isOnline;
 
     friendModal.setAddress(address);
     footer.closeNewChatButton();
@@ -12880,6 +13045,7 @@ class ChatModal {
     // Cache whether the contact has me blocked, and disable attachments accordingly
     this.blockedByRecipient = Number(contact?.tollRequiredToSend) === 2;
     this.addAttachmentButton.disabled = this.blockedByRecipient;
+    if (this.voiceRecordButton) this.voiceRecordButton.disabled = this.blockedByRecipient || !isOnline;
     friendModal.updateFriendButton(contact, 'addFriendButtonChat');
     // Set user info
     this.modalTitle.textContent = getContactDisplayName(contact);
@@ -13047,6 +13213,8 @@ class ChatModal {
     this.unlockBackgroundScroll();
     if (isOnline) {
       const needsToSendReadTx = this.needsToSend();
+      // Reset close-scoped fee warning dedupe flag.
+      this.closeFeeFailureToastShown = false;
       // if newestRecevied message does not have an amount property and user has not responded, then send a read transaction
       if (needsToSendReadTx) {
         this.sendReadTransaction(this.address);
@@ -13182,6 +13350,15 @@ class ChatModal {
       // );
       return;
     }
+    const feeBalanceStatus = await getFeeBalanceStatus();
+    if (!feeBalanceStatus.success) {
+      this.closeFeeFailureToastShown = showCloseFeeFailureWarningOnce(
+        feeBalanceStatus.reason,
+        'claim_fee',
+        this.closeFeeFailureToastShown
+      );
+      return;
+    }
 
     const tx = {
       type: 'reclaim_toll',
@@ -13231,6 +13408,15 @@ class ChatModal {
    */
   async sendReadTransaction(contactAddress) {
     const contact = myData.contacts[contactAddress];
+    const feeBalanceStatus = await getFeeBalanceStatus();
+    if (!feeBalanceStatus.success) {
+      this.closeFeeFailureToastShown = showCloseFeeFailureWarningOnce(
+        feeBalanceStatus.reason,
+        'send_read',
+        this.closeFeeFailureToastShown
+      );
+      return;
+    }
 
     const readTransaction = await this.createReadTransaction(contactAddress);
     const txid = await signObj(readTransaction, myAccount.keys);
@@ -13268,8 +13454,6 @@ class ChatModal {
    * @returns {void}
    */
   async handleSendMessage() {
-    this.sendButton.disabled = true; // Disable the button
-
     // Check if user is offline - prevent sending messages when offline
     if (!isOnline) {
       showToast('You are offline. Please check your internet connection.', 3000, 'error');
@@ -13279,7 +13463,6 @@ class ChatModal {
     // if user is blocked, don't send message, show toast
     if (myData.contacts[this.address].tollRequiredToSend == 2) {
       showToast('You are blocked by this user', 0, 'error');
-      this.sendButton.disabled = false;
       return;
     }
 
@@ -13295,7 +13478,6 @@ class ChatModal {
 
       const message = this.messageInput.value.trim();
       if (!message && !this.fileAttachments?.length) {
-        this.sendButton.disabled = false;
         return;
       }
 
@@ -13304,7 +13486,6 @@ class ChatModal {
       if (!sufficientBalance) {
         const msg = `Insufficient balance for fee${amount > 0n ? ' and toll' : ''}. Go to the wallet to add more LIB.`;
         showToast(msg, 0, 'error');
-        this.sendButton.disabled = false;
         return;
       }
 
@@ -13562,6 +13743,8 @@ class ChatModal {
       this.clearReplyState(contact);
       // Clear attachment draft state
       this.clearAttachmentState(contact);
+      // Clear retry draft state
+      this.clearRetryState(contact);
 
       // Update the chat modal UI immediately
       if (!isEdit) this.appendChatModal(); // This should now display the 'sending' message
@@ -13651,7 +13834,7 @@ class ChatModal {
         this.appendChatModal();
       }
     } finally {
-      this.sendButton.disabled = false; // Re-enable the button
+      // Cooldown and re-enable handled by withButtonCooldown wrapper
     }
   }
 
@@ -14106,6 +14289,27 @@ class ChatModal {
   }
 
   /**
+   * Saves retry state to a contact object
+   * @param {Object} contact - The contact object to save retry state to
+   */
+  saveRetryState(contact) {
+    const retryTxid = this.retryOfTxId?.value?.trim?.() || '';
+    if (retryTxid) {
+      contact.draftRetryTxid = retryTxid;
+    } else {
+      this.clearRetryState(contact);
+    }
+  }
+
+  /**
+   * Clears retry state from a contact object
+   * @param {Object} contact - The contact object to clear retry state from
+   */
+  clearRetryState(contact) {
+    delete contact.draftRetryTxid;
+  }
+
+  /**
    * Saves attachment state to a contact object
    * @param {Object} contact - The contact object to save attachment state to
    */
@@ -14140,6 +14344,9 @@ class ChatModal {
       
       // Save or clear attachment state
       this.saveAttachmentState(myData.contacts[this.address]);
+
+      // Save or clear retry state
+      this.saveRetryState(myData.contacts[this.address]);
     }
   }
 
@@ -14157,6 +14364,9 @@ class ChatModal {
     // Clear any existing attachments
     this.fileAttachments = [];
     this.showAttachmentPreview();
+
+    // Clear retry state in composer; restored below if contact has one
+    if (this.retryOfTxId) this.retryOfTxId.value = '';
 
     // Load draft if exists
     const contact = myData.contacts[address];
@@ -14188,6 +14398,11 @@ class ChatModal {
     if (contact?.draftAttachments && Array.isArray(contact.draftAttachments) && contact.draftAttachments.length > 0) {
       this.fileAttachments = JSON.parse(JSON.stringify(contact.draftAttachments));
       this.showAttachmentPreview();
+    }
+
+    // Restore retry state if it exists
+    if (contact?.draftRetryTxid && this.retryOfTxId) {
+      this.retryOfTxId.value = contact.draftRetryTxid;
     }
   }
 
@@ -14238,6 +14453,18 @@ class ChatModal {
       // Only enable if online
       if (isOnline) this.sendButton.disabled = false;
     }
+  }
+
+  /**
+   * Revalidates the send button disabled state and visibility from current message and byte limit.
+   * No-op if the chat modal is not active (e.g. when cooldown timer fires after modal was closed).
+   */
+  revalidateSendButtonState() {
+    if (!this.isActive()) return;
+    const messageText = this.messageInput?.value ?? '';
+    const messageValidation = this.validateMessageSize(messageText);
+    this.updateMessageByteCounter(messageValidation);
+    this.toggleSendButtonVisibility();
   }
 
   /**
@@ -14345,8 +14572,7 @@ class ChatModal {
           );
           refreshChatsScreenIfActive();
           
-          const messageValidation = this.validateMessageSize(this.messageInput.value);
-          this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
+          this.revalidateSendButtonState();
 
           this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
         } else {
@@ -14414,9 +14640,7 @@ class ChatModal {
               }
             }
             
-            const messageValidation = this.validateMessageSize(this.messageInput.value);
-            this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
-            this.toggleSendButtonVisibility();
+            this.revalidateSendButtonState();
 
             this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
             if (activeChatMatchesUpload) {
@@ -14453,8 +14677,7 @@ class ChatModal {
               refreshChatsScreenIfActive();
             }
             
-            const messageValidation = this.validateMessageSize(this.messageInput.value);
-            this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
+            this.revalidateSendButtonState();
             this.isEncrypting = false;
 
             this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
@@ -14475,8 +14698,7 @@ class ChatModal {
         refreshChatsScreenIfActive();
         this.isEncrypting = false;
         
-        const messageValidation = this.validateMessageSize(this.messageInput.value);
-        this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
+        this.revalidateSendButtonState();
 
             this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
         worker.terminate();
@@ -14506,8 +14728,7 @@ class ChatModal {
       }
       
       // Re-enable buttons
-      const messageValidation = this.validateMessageSize(this.messageInput.value);
-      this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
+      this.revalidateSendButtonState();
       this.isEncrypting = false;
 
       this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
@@ -15118,6 +15339,18 @@ class ChatModal {
     if (attachmentRow) {
       e.preventDefault();
       e.stopPropagation();
+
+      const messageEl = attachmentRow.closest('.message');
+      if (messageEl?.dataset?.status === 'failed') {
+        const isPayment = messageEl.classList.contains('payment-info');
+        if (isPayment) {
+          this.showMessageContextMenu(e, messageEl);
+          return;
+        }
+        failedMessageMenu.open(e, messageEl);
+        return;
+      }
+
       await this.showAttachmentContextMenu(e, attachmentRow);
       return;
     }
@@ -15207,7 +15440,7 @@ class ChatModal {
       if (inviteOption) inviteOption.style.display = isExpired ? 'none' : 'flex';
       if (editResendOption) editResendOption.style.display = 'none';
       if (editOption) editOption.style.display = 'none';
-      if (replyOption) replyOption.style.display = isFuture ? 'flex' : 'none';
+      if (replyOption) replyOption.style.display = 'flex';
     } else if (isVoice) {
       if (copyOption) copyOption.style.display = 'none';
       if (inviteOption) inviteOption.style.display = 'none';
@@ -16458,6 +16691,7 @@ class ChatModal {
       if (messageIndex === -1) return;
       
       const message = contact.messages[messageIndex];
+      const shouldRefreshCallsUi = message.type === 'call' && shouldRefreshUpcomingCallsUiForCallTime(message.callTime);
       
       if (message.deleted) {
         return showToast('Message already deleted', 2000, 'info');
@@ -16499,6 +16733,9 @@ class ChatModal {
       delete message.xattach;
       
       this.appendChatModal();
+      if (shouldRefreshCallsUi) {
+        refreshUpcomingCallsUi();
+      }
       showToast('Message deleted', 2000, 'success');
       setTimeout(() => {
         const selector = `[data-message-timestamp="${timestamp}"]`;
@@ -16761,6 +16998,10 @@ class ChatModal {
       if (this.isActive() && this.address === address) {
         this.updateTollAmountUI(address);
         this.addAttachmentButton.disabled = this.isEncrypting || this.isEditingMessage() || this.blockedByRecipient;
+        // Ensure voice recorder reflects updated blocked/connectivity state as well
+        if (this.voiceRecordButton) {
+          this.voiceRecordButton.disabled = this.blockedByRecipient || !isOnline;
+        }
       }
 
       // console.log(`localContact.tollRequiredToSend: ${localContact.tollRequiredToSend}`);
@@ -16849,9 +17090,9 @@ class ChatModal {
         return;
       }
 
-      const sufficientBalance = await validateBalance(0n);
-      if (!sufficientBalance) {
-        showToast('Insufficient balance for fee. Go to the wallet to add more LIB.', 0, 'error');
+      const feeBalanceStatus = await getFeeBalanceStatus();
+      if (!feeBalanceStatus.success) {
+        showFeeBalanceFailureToast(feeBalanceStatus.reason);
         return;
       }
 
@@ -17028,6 +17269,10 @@ class ChatModal {
         return false;
       }
 
+      if (shouldRefreshUpcomingCallsUiForCallTime(normalizedCallTime)) {
+        refreshUpcomingCallsUi();
+      }
+
       return true;
       
     } catch (error) {
@@ -17059,6 +17304,14 @@ class ChatModal {
    * @returns {Promise<void>}
    */
   async sendVoiceMessageTx(voiceMessageUrl, duration, audioPqEncSharedKey, audioSelfKey, replyInfo = null) {
+    const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
+    const sufficientBalance = await validateBalance(tollInLib);
+    if (!sufficientBalance) {
+      throw new Error(
+        `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}. Go to the wallet to add more LIB.`
+      );
+    }
+
     // Create voice message object
     const messageObj = {
       type: 'vm',
@@ -17121,9 +17374,6 @@ class ChatModal {
     }
 
     payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
-
-    // Calculate toll
-    const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
 
     // Create and send transaction
     const chatMessageObj = await this.createChatMessage(this.address, payload, tollInLib, myAccount.keys);
@@ -17774,6 +18024,12 @@ class CallInviteModal {
     this.inviteSendButton.textContent = 'Sending...';
 
     try {
+      let availableBalanceWei = getLibBalanceWei();
+      const feeInWei = getTransactionFeeWei({ allowNull: true });
+      if (feeInWei === null) {
+        showToast('Network error: Cannot determine transaction fee', 0, 'error');
+        return;
+      }
       const successMessages = [];
       const failureGroups = new Map();
       const addFailure = (reason, name) => {
@@ -17836,6 +18092,14 @@ class CallInviteModal {
           continue;
         }
 
+        const totalRequired = toll + feeInWei;
+        if (availableBalanceWei < totalRequired) {
+          addFailure('insufficientBalance', contact.username || addr);
+          continue;
+        }
+        // Reserve balance locally to prevent over-attempting within this batch.
+        availableBalanceWei -= totalRequired;
+
         const messageObj = await chatModal.createChatMessage(addr, messagePayload, toll, keys);
         // set callType to true if callTime is within 5 minutes of now or after callTime
         if (payload?.callTime <= getCorrectedTimestamp() + 5 * 60 * 1000) {
@@ -17879,6 +18143,8 @@ class CallInviteModal {
         const response = await injectTx(messageObj, txid);
 
         if (!response || !response.result || !response.result.success) {
+          // Refund local reservation when tx broadcast/injection fails.
+          availableBalanceWei += totalRequired;
           console.error('call message failed to send', response);
           updateTransactionStatus(txid, addr, 'failed', 'message');
           if (chatModal.isActive() && chatModal.address === addr) {
@@ -17934,6 +18200,12 @@ class CallInviteModal {
             case 'sendFailed':
               failureItems.push({
                 text: 'Call invite failed to send to:',
+                sublist: nameList
+              });
+              break;
+            case 'insufficientBalance':
+              failureItems.push({
+                text: 'Insufficient LIB balance to invite:',
                 sublist: nameList
               });
               break;
@@ -18175,11 +18447,27 @@ class ShareAttachmentModal {
     this.sendButton.textContent = 'Sending...';
 
     try {
+      let availableBalanceWei = getLibBalanceWei();
+      const feeInWei = getTransactionFeeWei({ allowNull: true });
+      if (feeInWei === null) {
+        showToast('Network error: Cannot determine transaction fee', 0, 'error');
+        return;
+      }
       const keys = myAccount.keys;
       if (!keys) {
         showToast('Keys not found', 0, 'error');
         return;
       }
+      const successMessages = [];
+      const failureGroups = new Map();
+      const addFailure = (reason, name) => {
+        if (!failureGroups.has(reason)) {
+          failureGroups.set(reason, new Set());
+        }
+        if (name) {
+          failureGroups.get(reason).add(name);
+        }
+      };
 
       // Get the file's encryption key (migration ensures all attachments have encKey)
       const encKey = this.attachmentData.encKey;
@@ -18190,9 +18478,10 @@ class ShareAttachmentModal {
 
       for (const addr of addresses) {
         const contact = myData.contacts[addr];
+        const contactName = contact?.username || addr;
         const ok = await ensureContactKeys(addr);
         if (!ok) {
-          showToast(`Skipping ${contact?.username || addr} (cannot get public key)`, 2000, 'warning');
+          addFailure('noPublicKey', contactName);
           continue;
         }
 
@@ -18242,15 +18531,21 @@ class ShareAttachmentModal {
         const tollRequiredToSend = chatIdAccount?.toll?.required?.[toIndex] ?? 1;
 
         if (tollRequiredToSend === 2) {
-          showToast(`You cannot share with ${contact?.username || addr} (you are blocked)`, 0, 'warning');
+          addFailure('blocked', contactName);
           continue;
         }
         
         // Calculate toll amount: 0 for connections, recipient's required toll for others
         let tollInLib = tollRequiredToSend === 0 ? 0n : (contact.toll || 0n);
-        
-        // Add network fee to the toll amount
-        tollInLib = tollInLib + getTransactionFeeWei();
+
+        const totalRequired = tollInLib + feeInWei;
+        if (availableBalanceWei < totalRequired) {
+          addFailure('insufficientBalance', contactName);
+          continue;
+        }
+        // Reserve balance locally to prevent over-attempting within this batch.
+        availableBalanceWei -= totalRequired;
+
         // if (tollRequiredToSend === 1) {
         //   const username = (contact?.username) || `${addr.slice(0, 8)}...${addr.slice(-6)}`;
         //   showToast(`You can only share with people who have added you as a connection. Ask ${username} to add you as a connection`, 0, 'info');
@@ -18302,15 +18597,80 @@ class ShareAttachmentModal {
         const response = await injectTx(chatMessageObj, txid);
 
         if (!response || !response.result || !response.result.success) {
+          // Refund local reservation when tx broadcast/injection fails.
+          availableBalanceWei += totalRequired;
           console.error('attachment share message failed to send', response);
           updateTransactionStatus(txid, addr, 'failed', 'message');
           if (chatModal.isActive() && chatModal.address === addr) {
             chatModal.appendChatModal();
           }
-          showToast(`Failed to share with ${contact?.username || addr}`, 3000, 'error');
+          addFailure('sendFailed', contactName);
         } else {
-          showToast(`Attachment shared with ${contact?.username || addr}`, 3000, 'success');
+          successMessages.push(`Attachment shared with ${contactName}`);
         }
+      }
+
+      if (successMessages.length > 0) {
+        const successNames = successMessages.map((message) => {
+          const match = message.match(/^Attachment shared with (.+)$/);
+          return match ? match[1] : message;
+        });
+        const successHtml = [
+          '<div class="toast-list-content">',
+          '<div class="toast-list-title">Attachment(s) shared with:</div>',
+          '<ul class="toast-list">',
+          ...successNames.map((name) => `<li><strong>${escapeHtml(name)}</strong></li>`),
+          '</ul>',
+          '</div>'
+        ].join('');
+        showToast(successHtml, 3000, 'success', true);
+      }
+
+      if (failureGroups.size > 0) {
+        const failureItems = [];
+        for (const [reason, names] of failureGroups.entries()) {
+          const nameList = Array.from(names);
+          switch (reason) {
+            case 'noPublicKey':
+              failureItems.push({
+                text: 'Cannot get public key for:',
+                sublist: nameList
+              });
+              break;
+            case 'blocked':
+              failureItems.push({
+                text: 'You cannot share with these contacts (you are blocked):',
+                sublist: nameList
+              });
+              break;
+            case 'insufficientBalance':
+              failureItems.push({
+                text: 'Insufficient LIB balance to share with:',
+                sublist: nameList
+              });
+              break;
+            case 'sendFailed':
+              failureItems.push({
+                text: 'Attachment share failed for:',
+                sublist: nameList
+              });
+              break;
+          }
+        }
+        const failureHtml = [
+          '<div class="toast-list-content">',
+          '<div class="toast-list-title">Attachment not shared:</div>',
+          '<ul class="toast-list">',
+          ...failureItems.map((item) => {
+            const sublist = Array.isArray(item.sublist) && item.sublist.length > 0
+              ? `<ul class="toast-sublist">${item.sublist.map((name) => `<li><strong>${escapeHtml(name)}</strong></li>`).join('')}</ul>`
+              : '';
+            return `<li>${item.text}${sublist}</li>`;
+          }),
+          '</ul>',
+          '</div>'
+        ].join('');
+        showToast(failureHtml, 0, 'warning', true);
       }
 
     } catch (err) {
@@ -19188,11 +19548,17 @@ class ImportContactsModal {
       if (existingContact) {
         const updateEligibility = this.getExistingContactUpdateEligibility(existingContact, contact);
         if (updateEligibility.canUpdate) updatableExistingCount++;
+        const updateParts = [];
+        if (updateEligibility.canUpdateAvatar) updateParts.push('photo');
+        if (updateEligibility.canUpdateName) updateParts.push('name');
+        const updateSummary = updateParts.length > 0 ? `import ${updateParts.join(' & ')}` : '';
+
         existingContacts.push({
           ...contact,
           address: normalizedAddr,
           isExisting: true,
           canUpdateExisting: updateEligibility.canUpdate,
+          updateSummary,
         });
       } else {
         newContacts.push({ ...contact, address: normalizedAddr, isExisting: false });
@@ -19248,6 +19614,9 @@ class ImportContactsModal {
       const usernameSubtitle = (contact.name && contact.username)
         ? `<div class="share-contact-username">${escapeHtml(contact.username)}</div>`
         : '';
+      const updateSummaryHtml = (contact.isExisting && contact.canUpdateExisting && contact.updateSummary)
+        ? `<div class="share-contact-update-summary">${escapeHtml(contact.updateSummary)}</div>`
+        : '';
 
       row.innerHTML = `
         <div class="share-contact-avatar">${avatarHtml}</div>
@@ -19257,7 +19626,7 @@ class ImportContactsModal {
         </div>
         ${(contact.isExisting && !contact.canUpdateExisting)
           ? '<span class="existing-label">Already added</span>' 
-          : '<input type="checkbox" class="share-contact-checkbox" />'}
+          : `<div class="share-contact-action"><input type="checkbox" class="share-contact-checkbox" />${updateSummaryHtml}</div>`}
       `;
 
       this.contactsList.appendChild(row);
@@ -20081,6 +20450,10 @@ class FailedMessageMenu {
   handleFailedMessageRetry(messageEl) {
     const txid = messageEl.dataset.txid;
     const voiceEl = messageEl.querySelector('.voice-message');
+    const contact = myData?.contacts?.[chatModal.address];
+    const message = (txid && contact && Array.isArray(contact.messages))
+      ? contact.messages.find(msg => msg.txid === txid)
+      : null;
 
     // Voice message retry: resend the same voice message (no re-upload)
     if (voiceEl) {
@@ -20093,19 +20466,15 @@ class FailedMessageMenu {
       }
 
       // Get message item to retrieve encryption keys
-      const contact = myData.contacts[chatModal.address];
       if (!contact || !Array.isArray(contact.messages)) {
         console.error('Error preparing voice message retry: Contact/messages not found.');
         return;
       }
-      const messageIndex = contact.messages.findIndex(msg => msg.txid === txid);
       
-      if (messageIndex < 0) {
+      if (!message) {
         console.error('Error preparing voice message retry: Message not found.');
         return;
       }
-
-      const message = contact.messages[messageIndex];
       const pqEncSharedKey = message.audioPqEncSharedKey || message.pqEncSharedKey;
       const selfKey = message.audioSelfKey || message.selfKey;
 
@@ -20121,19 +20490,56 @@ class FailedMessageMenu {
           .sendVoiceMessageTx(voiceUrl, duration, pqEncSharedKeyBin, selfKey)
           .catch((err) => {
             console.error('Voice message retry failed:', err);
-            showToast('Failed to retry voice message', 0, 'error');
+            showToast(err?.message || 'Failed to retry voice message', 0, 'error');
           });
       } catch (err) {
         console.error('Voice message retry failed:', err);
-        showToast('Failed to retry voice message', 0, 'error');
+        showToast(err?.message || 'Failed to retry voice message', 0, 'error');
       }
       return;
     }
 
-    // Text message retry: prefill input and store txid so next send removes failed tx
-    const messageContent = messageEl.querySelector('.message-content')?.textContent;
-    if (chatModal.messageInput && chatModal.retryOfTxId && messageContent && txid) {
-      chatModal.messageInput.value = messageContent;
+    // Message/attachment retry: prefill text and restore attachments so next send removes failed tx
+    const messageContent = typeof message?.message === 'string' ? message.message : '';
+    const messageAttachments = Array.isArray(message?.xattach) ? message.xattach : [];
+    const hasRetryableContent = !!txid && (
+      messageAttachments.length > 0
+      || (typeof messageContent === 'string' && messageContent.trim().length > 0)
+    );
+
+    if (chatModal.messageInput && chatModal.retryOfTxId && hasRetryableContent) {
+      // Replace current staged attachments with failed message attachments (if any)
+      // Delete only unsent uploads that are NOT part of the currently staged failed message.
+      // This avoids deleting server files still referenced by failed-message retries.
+      const previousRetryTxId = chatModal.retryOfTxId?.value?.trim?.() || '';
+      let safeUrlsFromPreviousFailedMessage = new Set();
+      if (previousRetryTxId && contact && Array.isArray(contact.messages)) {
+        const previousRetryMessage = contact.messages.find((msg) => msg.txid === previousRetryTxId);
+        const previousRetryAttachments = Array.isArray(previousRetryMessage?.xattach) ? previousRetryMessage.xattach : [];
+        safeUrlsFromPreviousFailedMessage = new Set(
+          previousRetryAttachments.flatMap((att) => [att?.url, att?.pUrl]).filter(Boolean)
+        );
+      }
+
+      const composerAttachments = Array.isArray(chatModal.fileAttachments) ? chatModal.fileAttachments : [];
+      const attachmentsToDeleteFromServer = composerAttachments.filter((att) => {
+        const url = att?.url;
+        const pUrl = att?.pUrl;
+        if (!url && !pUrl) return false;
+        return !(safeUrlsFromPreviousFailedMessage.has(url) || safeUrlsFromPreviousFailedMessage.has(pUrl));
+      });
+
+      chatModal.cancelAllOperations();
+      chatModal.clearComposerAttachments({ deleteFromServer: false });
+      if (attachmentsToDeleteFromServer.length > 0) {
+        chatModal.deleteAttachmentsFromServer(attachmentsToDeleteFromServer);
+      }
+      chatModal.fileAttachments = messageAttachments.length > 0
+        ? JSON.parse(JSON.stringify(messageAttachments))
+        : [];
+      chatModal.showAttachmentPreview();
+
+      chatModal.messageInput.value = messageContent || '';
       chatModal.retryOfTxId.value = txid;
       
       // Trigger input event to ensure all listeners fire (byte counter, draft save, etc.)
@@ -20151,7 +20557,7 @@ class FailedMessageMenu {
       return;
     }
 
-    console.error('Error preparing message retry: Necessary elements or data missing.');
+    console.error('Error preparing message retry: No message text or attachments found.');
   }
 
   /**
@@ -20716,7 +21122,21 @@ class NewChatModal {
     this.submitButton = document.querySelector('#newChatForm button[type="submit"]');
 
     this.closeNewChatModalButton.addEventListener('click', this.closeNewChatModal.bind(this));
-    this.newChatForm.addEventListener('submit', this.handleNewChat.bind(this));
+    this.newChatForm.addEventListener('submit', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      () => {
+        if (!this.isActive()) return;
+        // Re-run username validation so submit button disabled state is refreshed from current recipient.
+        this.recipientInput.dispatchEvent(new Event('input', { bubbles: true }));
+      },
+      (event) => this.handleNewChat(event)
+    ));
+    // Disable submit and clear status immediately so there is no 300ms window where the button stays enabled after input change
+    this.recipientInput.addEventListener('input', () => {
+      this.submitButton.disabled = true;
+      this.usernameAvailable.style.display = 'none';
+    });
     this.recipientInput.addEventListener('input', debounce(this.handleUsernameInput.bind(this), 300));
 
     this.scanButton = document.getElementById('newChatScanQRButton');
@@ -20761,6 +21181,10 @@ class NewChatModal {
     if (contactsScreen.isActive()) {
       footer.openNewChatButton();
     }
+  }
+
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
   }
 
   /**
@@ -21049,7 +21473,20 @@ class CreateAccountModal {
     this.privateAccountTemplate = document.getElementById('privateAccountHelpMessageTemplate');
 
     // Setup event listeners
-    this.form.addEventListener('submit', (e) => this.handleSubmit(e));
+    this.form.addEventListener('submit', withButtonCooldown(
+      [
+        this.submitButton,
+        this.migrateAccountsButton,
+        this.toggleButton,
+        this.usernameInput,
+        this.privateKeyInput,
+        this.backButton,
+        this.privateAccountCheckbox
+      ],
+      BUTTON_COOLDOWN_MS,
+      null,
+      (e) => this.handleSubmit(e)
+    ));
     this.usernameInput.addEventListener('input', (e) => this.handleUsernameInput(e));
     this.toggleButton.addEventListener('change', () => this.handleTogglePrivateKeyInput());
     this.toggleMoreOptions.addEventListener('change', () => this.handleToggleMoreOptions());
@@ -21242,17 +21679,6 @@ class CreateAccountModal {
   }
 
   async handleSubmit(event) {
-    // Disable submit button
-    this.submitButton.disabled = true;
-    // disable migrate accounts button
-    this.migrateAccountsButton.disabled = true;
-    // Disable input fields, back button, and toggle button
-    this.toggleButton.disabled = true;
-    this.usernameInput.disabled = true;
-    this.privateKeyInput.disabled = true;
-    this.backButton.disabled = true;
-    this.privateAccountCheckbox.disabled = true;
-
     event.preventDefault();
     
     // Validate username at submit time after normalization
@@ -21263,7 +21689,6 @@ class CreateAccountModal {
       this.usernameAvailable.textContent = 'too short';
       this.usernameAvailable.style.color = '#dc3545';
       this.usernameAvailable.style.display = 'inline';
-      this.reEnableControls();
       return;
     }
     
@@ -21290,8 +21715,6 @@ class CreateAccountModal {
         this.privateKeyError.textContent = validation.message;
         this.privateKeyError.style.color = '#dc3545';
         this.privateKeyError.style.display = 'inline';
-        // Re-enable controls on validation failure
-        this.reEnableControls();
         return;
       }
 
@@ -21326,8 +21749,6 @@ class CreateAccountModal {
           this.privateKeyError.textContent = 'An account already exists for this private key.';
           this.privateKeyError.style.color = '#dc3545';
           this.privateKeyError.style.display = 'inline';
-          // Re-enable controls when account already exists
-          this.reEnableControls();
           return; // Stop the account creation process
         } else {
           this.privateKeyError.style.display = 'none';
@@ -21337,8 +21758,6 @@ class CreateAccountModal {
         this.privateKeyError.textContent = 'Network error checking key. Please try again.';
         this.privateKeyError.style.color = '#dc3545';
         this.privateKeyError.style.display = 'inline';
-        // Re-enable controls on network error
-        this.reEnableControls();
         return; // Stop process on error
       }
     }
@@ -21374,7 +21793,6 @@ class CreateAccountModal {
       }
       res = await postRegisterAlias(username, myAccount.keys, myAccount.private || false);
     } catch (error) {
-      this.reEnableControls();
       if (waitingToastId) hideToast(waitingToastId);
       showToast(`Failed to fetch network parameters, try again later.`, 0, 'error');
       console.error('Failed to fetch network parameters, using defaults:', error);
@@ -21401,7 +21819,6 @@ class CreateAccountModal {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         if (waitingToastId) hideToast(waitingToastId);
 //        showToast('Account created successfully!', 3000, 'success');
-        this.reEnableControls();
         this.close();
         welcomeScreen.close();
         // TODO: may not need to get set since gets set in `getChats`. Need to check signin flow.
@@ -21417,7 +21834,6 @@ class CreateAccountModal {
         if (waitingToastId) hideToast(waitingToastId);
         console.error(`DEBUG: handleCreateAccount error`, JSON.stringify(error, null, 2));
         showToast(`account creation failed: ${error}`, 0, 'error');
-        this.reEnableControls();
 
         // Clear interval
         if (checkPendingTransactionsIntervalId) {
@@ -21447,19 +21863,8 @@ class CreateAccountModal {
       clearMyData();
 
       // no toast here since injectTx will show it
-      this.reEnableControls();
       return;
     }
-  }
-
-  reEnableControls() {
-    this.submitButton.disabled = false;
-    this.toggleButton.disabled = false;
-    this.usernameInput.disabled = false;
-    this.privateKeyInput.disabled = false;
-    this.backButton.disabled = false;
-    this.migrateAccountsButton.disabled = false;
-    this.privateAccountCheckbox.disabled = false;
   }
 }
 // Initialize the create account modal
@@ -23178,12 +23583,17 @@ class MigrateAccountsModal {
     this.submitButton = document.getElementById('submitMigrateAccounts');
 
     this.closeButton.addEventListener('click', () => this.close());
-    this.submitButton.addEventListener('click', (event) => this.handleSubmit(event));
+    this.submitButton.addEventListener('click', withButtonCooldown(
+      [this.submitButton, this.closeButton],
+      BUTTON_COOLDOWN_MS,
+      () => {
+        this.refreshSubmitButtonFromCheckboxes();
+        this.closeButton.disabled = false;
+      },
+      (event) => this.handleSubmit(event)
+    ));
 
-    // if no check boxes are checked, disable the submit button
-    this.accountList.addEventListener('change', () => {
-      this.submitButton.disabled = this.accountList.querySelectorAll('input[type="checkbox"]:checked').length === 0;
-    });
+    this.accountList.addEventListener('change', () => this.refreshSubmitButtonFromCheckboxes());
   }
 
   async open() {
@@ -23227,6 +23637,7 @@ class MigrateAccountsModal {
     // Check for inconsistencies and render them
     const inconsistencies = await this.checkAccountsInconsistency();
     this.renderInconsistencies(inconsistencies);
+    this.refreshSubmitButtonFromCheckboxes();
   }
 
   /**
@@ -23363,9 +23774,6 @@ class MigrateAccountsModal {
   async handleSubmit(event) {
     event.preventDefault();
 
-    this.submitButton.disabled = true;
-    this.closeButton.disabled = true;
-      
     const selectedAccounts = this.accountList.querySelectorAll('input[type="checkbox"]:checked');
   
     const results = {}
@@ -23426,9 +23834,7 @@ class MigrateAccountsModal {
         hideToast(loadingToastId);
       }
     }
-    this.populateAccounts();
-    this.submitButton.disabled = false;
-    this.closeButton.disabled = false;
+    await this.populateAccounts();
   }
   
   /**
@@ -23493,10 +23899,14 @@ class MigrateAccountsModal {
     localStorage.setItem('accounts', stringify(accountsObj));
   }
 
+  refreshSubmitButtonFromCheckboxes() {
+    this.submitButton.disabled = this.accountList.querySelectorAll('input[type="checkbox"]:checked').length === 0;
+  }
+
   clearForm() {
     const checkboxes = this.accountList.querySelectorAll('input[type="checkbox"]');
     checkboxes.forEach(checkbox => checkbox.checked = false);
-    this.submitButton.disabled = true;
+    this.refreshSubmitButtonFromCheckboxes();
   }
   
   /**
@@ -26631,8 +27041,23 @@ function getStabilityFactor() {
 }
 
 // returns transaction fee in wei
-function getTransactionFeeWei() {
+// pass { allowNull: true } to return null when fee params are unavailable
+function getTransactionFeeWei(options = {}) {
+  const { allowNull = false } = options;
+  if (!parameters?.current?.transactionFeeUsdStr || !parameters?.current?.stabilityFactorStr) {
+    return allowNull ? null : 1n * wei;
+  }
   return EthNum.toWei(EthNum.div(parameters.current.transactionFeeUsdStr, parameters.current.stabilityFactorStr)) || 1n * wei;
+}
+
+/**
+ * Returns current LIB balance from local wallet state.
+ * Falls back to first asset for compatibility with existing wallet structure.
+ * @returns {bigint}
+ */
+function getLibBalanceWei() {
+  const libAsset = (myData?.wallet?.assets || []).find((asset) => asset?.symbol === 'LIB') || myData?.wallet?.assets?.[0];
+  return BigInt(libAsset?.balance ?? 0n);
 }
 
 
