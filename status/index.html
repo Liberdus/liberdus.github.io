@@ -14,25 +14,32 @@
 <body>
   <div class="page">
     <header class="site-header">
-      <a
-        href="https://discord.com"
-        class="brand-link"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        <img
-          src="https://liberdus.com/site/img/logo.png"
-          alt="Liberdus logo"
-          class="brand-logo"
+      <div class="site-header-inner">
+        <a
+          href="https://discord.com"
+          class="brand-link"
+          target="_blank"
+          rel="noopener noreferrer"
         >
-        <div class="brand-text">
-          <div class="brand-title-row">
-            <!-- <span class="brand-title-main">Liberdus</span> -->
-            <span class="brand-title-version">(0.0.10)</span>
+          <img
+            src="https://liberdus.com/site/img/logo.png"
+            alt="Liberdus logo"
+            class="brand-logo"
+          >
+          <div class="brand-text">
+            <div class="brand-title-row">
+              <!-- <span class="brand-title-main">Liberdus</span> -->
+              <span class="brand-title-version">(0.0.10)</span>
+            </div>
+            <div class="brand-subtitle">Service Status</div>
           </div>
-          <div class="brand-subtitle">Service Status</div>
+        </a>
+        <div class="header-meta">
+          <span id="header-last-updated-label" class="header-last-updated">
+            Last updated: just now
+          </span>
         </div>
-      </a>
+      </div>
     </header>
 
     <div class="status-banner overall-status" id="overall-status-pill">
@@ -58,10 +65,10 @@
                 <option value="1h">1 hour</option>
                 <option value="1d" selected>1 day</option>
               </select>
-              <span id="network-filter-label" class="uptime-filter-label">Network: Devnet</span>
+              <span id="network-filter-label" class="uptime-filter-label">Network: Testnet</span>
               <select id="network-filter-select" class="uptime-filter-select">
-                <option value="devnet" selected>Devnet</option>
-                <option value="testnet">Testnet</option>
+                <option value="devnet">Devnet</option>
+                <option value="testnet" selected>Testnet</option>
               </select>
             </div>
           </div>
