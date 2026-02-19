@@ -300,6 +300,7 @@ export function withButtonCooldown(buttons, ms, revalidateFn, handler) {
     }
 
     return async function wrappedHandler(event) {
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
         if (inProgress) return;
         inProgress = true;
         liftDone = false;
