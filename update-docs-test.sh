@@ -8,6 +8,8 @@
 #          liberdus-docs/build to liberdus.github.io/docs
 #
 # PREREQUISITES:
+# 0. WINDOWS USERS: This is a bash script. You must use Git Bash (included with
+#    Git for Windows) or WSL to run it. PowerShell will not work.
 # 1. This script must be located in the liberdus.github.io directory
 # 2. The liberdus-docs repository must be in the same parent directory as liberdus.github.io
 #    example structure:
@@ -15,14 +17,14 @@
 #    ├── liberdus.github.io/     (this repo, contains this script)
 #    └── liberdus-docs/          (source repo with build folder)
 # 3. The liberdus-docs/build folder must exist (run npm run build in liberdus-docs first)
-# 4. The script must have execute permissions: chmod +x update-docs.sh
+# 4. The script must have execute permissions: chmod +x update-docs-test.sh
 #
 # USAGE:
 # 1. First, build the docs in liberdus-docs:
 #    cd ../liberdus-docs
 #    npm run build
-# 2. Run the script from anywhere: ./update-docs.sh
-#    (or: cd liberdus.github.io && ./update-docs.sh)
+# 2. Run the script from anywhere: ./update-docs-test.sh
+#    (or: cd liberdus.github.io && ./update-docs-test.sh)
 #
 # WHAT IT DOES:
 # - Copies all files from liberdus-docs/build/* to liberdus.github.io/docs/
@@ -42,7 +44,7 @@ REPO_DIR="$SCRIPT_DIR"
 SOURCE_DIR="$(dirname "$REPO_DIR")/liberdus-docs/build"
 
 # Target directory is the docs folder in this repo
-TARGET_DIR="$REPO_DIR/docs-test"
+TARGET_DIR="$REPO_DIR/docs"
 
 # Change to the repo directory
 cd "$REPO_DIR" || exit 1
