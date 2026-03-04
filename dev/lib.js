@@ -271,6 +271,7 @@ export function escapeHtml(str) {
 }
 
 export const BUTTON_COOLDOWN_MS = 2000;
+export const FAUCET_COOLDOWN_MS = 5000;
 
 /**
  * Wraps an async handler so the given buttons are disabled for a minimum cooldown (ms).

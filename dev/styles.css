@@ -4999,7 +4999,8 @@ small {
   margin-left: 8px;
 }
 
-#shareContactsDoneBtn.loading::after {
+#shareContactsDoneBtn.loading::after,
+#importContactsDoneBtn.loading::after {
   content: '';
   display: inline-block;
   width: 12px;

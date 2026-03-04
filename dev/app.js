@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'w'
+const version = 'x'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -129,6 +129,7 @@ import {
   debounce,
   withButtonCooldown,
   BUTTON_COOLDOWN_MS,
+  FAUCET_COOLDOWN_MS,
   truncateMessage,
   normalizeUnsignedFloat,
   EthNum,
@@ -1671,7 +1672,7 @@ class WalletScreen {
     });
 
     // Faucet/Bridge button handler
-    this.openFaucetBridgeButton.addEventListener('click', async () => {
+    const handleOpenFaucetBridge = async () => {
       if (this.isMainnet()) {
         // Mainnet: open bridge modal
         bridgeModal.open();
@@ -1679,14 +1680,19 @@ class WalletScreen {
         // Not mainnet: request from faucet API
         await this.requestFromFaucet();
       }
-    });
+    };
+    this.openFaucetBridgeButton.addEventListener('click', withButtonCooldown(
+      this.openFaucetBridgeButton,
+      FAUCET_COOLDOWN_MS,
+      null,
+      handleOpenFaucetBridge
+    ));
 
     // Add refresh balance button handler
-    this.refreshBalanceButton.addEventListener('click', async () => {
-      
+    const handleRefreshBalance = async () => {
       // Add active class for animation
       this.refreshBalanceButton.classList.add('active');
-      
+
       // Remove active class after animation completes
       setTimeout(() => {
         this.refreshBalanceButton.classList.remove('active');
@@ -1695,7 +1701,13 @@ class WalletScreen {
       }, 300);
 
       this.updateWalletView();
-    });
+    };
+    this.refreshBalanceButton.addEventListener('click', withButtonCooldown(
+      this.refreshBalanceButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      handleRefreshBalance
+    ));
   }
 
   open() {
@@ -1833,16 +1845,6 @@ class WalletScreen {
    * @returns {Promise<void>}
    */
   async requestFromFaucet() {
-    // Disable button immediately to prevent spam clicking
-    if (this.openFaucetBridgeButton.disabled) {
-      return;
-    }
-    this.openFaucetBridgeButton.disabled = true;
-    // Re-enable button after 5 seconds
-    setTimeout(() => {
-      this.openFaucetBridgeButton.disabled = false;
-    }, 5000);
-
     if (this.isFaucetRequestInProgress) {
       return;
     }
@@ -1938,17 +1940,16 @@ class MenuModal {
     this.aboutButton = document.getElementById('openAbout');
     this.aboutButton.addEventListener('click', () => aboutModal.open());
     this.signOutButton = document.getElementById('handleSignOut');
-    this.signOutButton.addEventListener('click', async () => await this.handleSignOut());
+    this.signOutHeaderButton = document.getElementById('signOutMenuHeader');
+    const menuWrappedSignOut = withButtonCooldown([this.signOutButton, this.signOutHeaderButton], BUTTON_COOLDOWN_MS, null, async () => await this.handleSignOut());
+    this.signOutButton.addEventListener('click', menuWrappedSignOut);
+    this.signOutHeaderButton.addEventListener('click', menuWrappedSignOut);
     this.bridgeButton = document.getElementById('openBridge');
     this.bridgeButton.addEventListener('click', () => bridgeModal.open());
     this.logsButton = document.getElementById('openLogs');
     this.logsButton.addEventListener('click', () => logsModal.open());
     this.farmButton = document.getElementById('openFarm');
     this.farmButton.addEventListener('click', () => farmModal.open());
-    
-    // Header sign out button
-    this.signOutHeaderButton = document.getElementById('signOutMenuHeader');
-    this.signOutHeaderButton.addEventListener('click', async () => await this.handleSignOut());
     
     
     // Show launch button if ReactNativeWebView is available
@@ -2364,14 +2365,18 @@ class AddProposalModal {
     this.summaryInput = document.getElementById('addProposalSummary');
     this.typeFieldsContainer = document.getElementById('addProposalTypeFields');
 
+    this.submitButton = this.form?.querySelector('button[type="submit"]');
+
     if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
     if (this.cancelButton) this.cancelButton.addEventListener('click', () => this.close());
 
-    if (this.form) {
-      this.form.addEventListener('submit', (e) => {
-        e.preventDefault();
-        this.handleCreate();
-      });
+    if (this.form && this.submitButton) {
+      this.form.addEventListener('submit', withButtonCooldown(
+        this.submitButton,
+        BUTTON_COOLDOWN_MS,
+        null,
+        () => this.handleCreate()
+      ));
     }
 
     if (this.typeSelect) {
@@ -2709,11 +2714,10 @@ class SettingsModal {
     this.secretButton.addEventListener('click', () => secretModal.open());
     
     this.signOutButton = document.getElementById('handleSignOutSettings');
-    this.signOutButton.addEventListener('click', async () => await menuModal.handleSignOut());
-    
-    // Header sign out button
     this.signOutHeaderButton = document.getElementById('signOutSettingsHeader');
-    this.signOutHeaderButton.addEventListener('click', async () => await menuModal.handleSignOut());
+    const settingsWrappedSignOut = withButtonCooldown([this.signOutButton, this.signOutHeaderButton], BUTTON_COOLDOWN_MS, null, async () => await menuModal.handleSignOut());
+    this.signOutButton.addEventListener('click', settingsWrappedSignOut);
+    this.signOutHeaderButton.addEventListener('click', settingsWrappedSignOut);
   }
 
   enableSignOutButtonWithDelay() {
@@ -2766,7 +2770,7 @@ class ManageContactsModal {
     this.closeButton.addEventListener('click', () => this.close());
     this.fileInput.addEventListener('change', (e) => this.handleFileSelected(e));
     this.clearFileBtn.addEventListener('click', () => this.clearFile());
-    this.importBtn.addEventListener('click', () => this.handleImport());
+    this.importBtn.addEventListener('click', withButtonCooldown(this.importBtn, BUTTON_COOLDOWN_MS, null, () => this.handleImport()));
   }
 
   /**
@@ -3335,14 +3339,28 @@ class SignInModal {
     this.signInModalLastItem = document.getElementById('signInModalLastItem');
     this.backButton = document.getElementById('closeSignInModal');
 
-    // Sign in form submission
-    document.getElementById('signInForm').addEventListener('submit', (event) => this.handleSignIn(event));
-    
+    // Sign in form submission (2s cooldown; both buttons disabled; revalidate restores state)
+    const signInRevalidate = () => {
+      this.removeButton.disabled = false;
+      if (this.isActive()) this.handleUsernameChange();
+    };
+    document.getElementById('signInForm').addEventListener('submit', withButtonCooldown(
+      [this.submitButton, this.removeButton],
+      BUTTON_COOLDOWN_MS,
+      signInRevalidate,
+      (event) => this.handleSignIn(event)
+    ));
+
     // Username selection change
     this.usernameSelect.addEventListener('change', () => this.handleUsernameChange());
-    
-    // Remove account button
-    this.removeButton.addEventListener('click', () => this.handleRemoveAccount());
+
+    // Remove account button (2s cooldown; both buttons disabled)
+    this.removeButton.addEventListener('click', withButtonCooldown(
+      [this.removeButton, this.submitButton],
+      BUTTON_COOLDOWN_MS,
+      signInRevalidate,
+      () => this.handleRemoveAccount()
+    ));
 
     // Back button
     this.backButton.addEventListener('click', () => this.close());
@@ -7259,7 +7277,12 @@ class AvatarEditModal {
     this.backButton.addEventListener('click', () => this.close());
     this.uploadButton.addEventListener('click', () => this.handleUploadButton());
     this.deleteButton.addEventListener('click', () => this.handleDelete());
-    this.saveActionButton.addEventListener('click', () => this.handleSave());
+    this.saveActionButton.addEventListener('click', withButtonCooldown(
+      this.saveActionButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this.handleSave()
+    ));
     this.cancelButton.addEventListener('click', () => this.handleCancel());
     this.fileInput.addEventListener('change', (e) => this.handleFileSelected(e));
 
@@ -7513,7 +7536,7 @@ class AvatarEditModal {
     if (this.avatarOptionUploaded) this.avatarOptionUploaded.onclick = () => selectOption('mine', this.avatarOptionUploaded);
     if (this.avatarOptionIdenticon) this.avatarOptionIdenticon.onclick = () => selectOption('identicon', this.avatarOptionIdenticon);
 
-    useBtn.onclick = async () => {
+    useBtn.onclick = withButtonCooldown(useBtn, BUTTON_COOLDOWN_MS, null, async () => {
       if (!this._avatarEditSelected || !address) return;
       if (this.isOwnAvatar) {
         // Own-avatar options are not shown; do not persist an account-level preference.
@@ -7551,7 +7574,7 @@ class AvatarEditModal {
       }
       // Close modal
       this.close();
-    };
+    });
 
     // wire close button to hide our controls when closed
     const closeBtn = document.getElementById('closeAvatarEditModal');
@@ -11331,7 +11354,12 @@ class UpdateWarningModal {
     // Set up event listeners
     this.closeButton.addEventListener('click', () => this.close());
     this.backupFirstBtn.addEventListener('click', () => backupAccountModal.open());
-    this.proceedToStoreBtn.addEventListener('click', () => this.proceedToStore());
+    this.proceedToStoreBtn.addEventListener('click', withButtonCooldown(
+      this.proceedToStoreBtn,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this.proceedToStore()
+    ));
 
     // Event delegation for dynamically created update toast button
     document.addEventListener('click', (event) => {
@@ -11381,12 +11409,18 @@ class HelpModal {
     this.joinDiscordButton = document.getElementById('joinDiscord');
 
     this.closeButton.addEventListener('click', () => this.close());
-    this.submitFeedbackButton.addEventListener('click', () => {
-      window.open('https://github.com/liberdus/web-client-v2/issues', '_blank');
-    });
-    this.joinDiscordButton.addEventListener('click', () => {
-      window.open('https://discord.gg/2cpJzFnwCR', '_blank');
-    });
+    this.submitFeedbackButton.addEventListener('click', withButtonCooldown(
+      this.submitFeedbackButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => { window.open('https://github.com/liberdus/web-client-v2/issues', '_blank'); }
+    ));
+    this.joinDiscordButton.addEventListener('click', withButtonCooldown(
+      this.joinDiscordButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => { window.open('https://discord.gg/2cpJzFnwCR', '_blank'); }
+    ));
   }
 
   open() {
@@ -11690,7 +11724,12 @@ class ValidatorStakingModal {
     this.stakeForm = document.getElementById('stakeForm');
 
 
-    this.unstakeButton.addEventListener('click', () => this.handleUnstake());
+    this.unstakeButton.addEventListener('click', withButtonCooldown(
+      [this.unstakeButton, this.backButton, this.stakeButton],
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this.handleUnstake()
+    ));
     this.backButton.addEventListener('click', () => this.close());
     
     // Set up the learn more button click handler
@@ -11990,10 +12029,10 @@ class ValidatorStakingModal {
       return;
     }
 
-    // If the button is disabled for any reason, show the current reason and exit
-    if (this.unstakeButton.disabled) {
-      const message = this.unstakeButton.title || this.unstakeLockInfoElement?.textContent || 'Unstake unavailable.';
-      if (message) showToast(message, 0, 'error');
+    // If there is a pending stake/unstake tx, do not proceed (same condition that disables the button in the UI)
+    const currentPendingTx = myData.pending?.find((tx) => tx.type === 'deposit_stake' || tx.type === 'withdraw_stake');
+    if (currentPendingTx) {
+      showToast('A stake or unstake transaction is already pending.', 0, 'error');
       return;
     }
 
@@ -12022,11 +12061,6 @@ class ValidatorStakingModal {
   }
 
   async submitUnstakeTransaction(nodeAddress) {
-    // disable the unstake button, back button, and submitStake button
-    this.unstakeButton.disabled = true;
-    this.backButton.disabled = true;
-    this.stakeButton.disabled = true;
-
     try {
       const response = await this.postUnstake(nodeAddress);
       if (response && response.result && response.result.success) {
@@ -12050,10 +12084,6 @@ class ValidatorStakingModal {
       console.error('Error submitting unstake transaction:', error);
       // Provide a user-friendly error message
       showToast('Unstake transaction failed. Network or server error.', 0, 'error');
-    } finally {
-      this.unstakeButton.disabled = false;
-      this.backButton.disabled = false;
-      this.stakeButton.disabled = false;
     }
   }
 
@@ -12270,7 +12300,6 @@ class StakeValidatorModal {
     this.stakedAmount = 0n;
     this.lastValidationTimestamp = 0;
     this.hasNominee = false;
-    this.isFaucetRequestInProgress = false;
   }
 
   load() {
@@ -12292,18 +12321,32 @@ class StakeValidatorModal {
     this.faucetButton = document.getElementById('faucetButton');
 
     // Setup event listeners
-    this.form.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.form.addEventListener('submit', withButtonCooldown(
+      [this.submitButton, this.backButton],
+      BUTTON_COOLDOWN_MS,
+      null,
+      (event) => this.handleSubmit(event)
+    ));
     this.backButton.addEventListener('click', () => this.close());
 
     this.debouncedValidateStakeInputs = debounce(() => this.validateStakeInputs(), 300);
 
+    this.nodeAddressInput.addEventListener('input', () => { this.submitButton.disabled = true; });
     this.nodeAddressInput.addEventListener('input', this.debouncedValidateStakeInputs);
-    this.amountInput.addEventListener('input', () => this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value));
+    this.amountInput.addEventListener('input', () => {
+      this.submitButton.disabled = true;
+      this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value);
+    });
     this.amountInput.addEventListener('input', this.debouncedValidateStakeInputs);
     this.scanStakeQRButton.addEventListener('click', () => scanQRModal.open());
     this.uploadStakeQRButton.addEventListener('click', () => this.stakeQRFileInput.click());
     this.stakeQRFileInput.addEventListener('change', (event) => sendAssetFormModal.handleQRFileSelect(event, this));
-    this.faucetButton.addEventListener('click', () => this.requestFromFaucet());
+    this.faucetButton.addEventListener('click', withButtonCooldown(
+      this.faucetButton,
+      FAUCET_COOLDOWN_MS,
+      null,
+      () => this.requestFromFaucet()
+    ));
 
     // Add listener for opening the modal
     document.getElementById('openStakeModal').addEventListener('click', () => this.open());
@@ -12329,7 +12372,6 @@ class StakeValidatorModal {
     
     // Reset faucet button state
     this.faucetButton.disabled = true;
-    this.isFaucetRequestInProgress = false;
 
     // Set minimum stake amount
     const minStakeAmount = this.form.dataset.minStake || '0';
@@ -12349,7 +12391,6 @@ class StakeValidatorModal {
 
   async handleSubmit(event) {
     event.preventDefault();
-    this.submitButton.disabled = true;
 
     const nodeAddress = this.nodeAddressInput.value.trim();
     const amountStr = this.amountInput.value.trim();
@@ -12357,7 +12398,6 @@ class StakeValidatorModal {
     // Basic Validation
     if (!nodeAddress || !amountStr) {
       showToast('Please fill in all fields.', 0, 'error');
-      this.submitButton.disabled = false;
       return;
     }
 
@@ -12366,13 +12406,10 @@ class StakeValidatorModal {
       amount_in_wei = bigxnum2big(wei, amountStr);
     } catch (error) {
       showToast('Invalid amount entered.', 0, 'error');
-      this.submitButton.disabled = false;
       return;
     }
 
     try {
-      this.backButton.disabled = true;
-
       const response = await this.postStake(nodeAddress, amount_in_wei, myAccount.keys);
 
       if (response && response.result && response.result.success) {
@@ -12397,9 +12434,6 @@ class StakeValidatorModal {
     } catch (error) {
       console.error('Stake transaction error:', error);
       showToast('Stake transaction failed. See console for details.', 0, 'error');
-    } finally {
-      this.submitButton.disabled = false;
-      this.backButton.disabled = false;
     }
   }
 
@@ -12575,15 +12609,8 @@ class StakeValidatorModal {
    * @returns {Promise<void>}
    */
   async requestFromFaucet() {
-    if (this.isFaucetRequestInProgress) {
-      return;
-    }
-
     const toastId = showToast('Requesting from faucet...', 0, 'loading');
     try {
-      this.isFaucetRequestInProgress = true;
-      this.faucetButton.disabled = true;
-      
       const payload = {
         username: myAccount.username,
         userAddress: longAddress(myAccount.keys.address),
@@ -12617,7 +12644,6 @@ class StakeValidatorModal {
       showToast(`Faucet request failed: ${error.message || 'Unknown error'}`, 0, 'error');
     } finally {
       hideToast(toastId);
-      this.isFaucetRequestInProgress = false;
     }
   }
 }
@@ -17987,7 +18013,12 @@ class CallInviteModal {
 
     this.contactsList.addEventListener('change', this.updateCounter.bind(this));
     this.contactsList.addEventListener('click', this.handleContactClick.bind(this));
-    this.inviteSendButton.addEventListener('click', this.sendInvites.bind(this));
+    this.inviteSendButton.addEventListener('click', withButtonCooldown(
+      [this.inviteSendButton, this.cancelButton],
+      BUTTON_COOLDOWN_MS,
+      null,
+      (e) => this.sendInvites(e)
+    ));
     this.cancelButton.addEventListener('click', () => {
       this.close();
     });
@@ -18210,7 +18241,6 @@ class CallInviteModal {
     const msgCallLink = anchorHref.split('#')[0];
     if (!msgCallLink) return showToast('Call link not found', 2000, 'error');
     let msgCallTime = Number(this.messageEl.getAttribute('data-call-time')) || 0;
-    this.inviteSendButton.disabled = true;
     this.inviteSendButton.textContent = 'Sending...';
 
     try {
@@ -18421,7 +18451,6 @@ class CallInviteModal {
       console.error('Invite send error', err);
       showToast('Failed to send invites', 0, 'error');
     } finally {
-      this.inviteSendButton.disabled = false;
       this.inviteSendButton.textContent = 'Invite';
       this.close();
     }
@@ -18451,7 +18480,12 @@ class ShareAttachmentModal {
 
     this.contactsList.addEventListener('change', this.updateCounter.bind(this));
     this.contactsList.addEventListener('click', this.handleContactClick.bind(this));
-    this.sendButton.addEventListener('click', this.sendAttachments.bind(this));
+    this.sendButton.addEventListener('click', withButtonCooldown(
+      [this.sendButton, this.cancelButton],
+      BUTTON_COOLDOWN_MS,
+      null,
+      (e) => this.sendAttachments(e)
+    ));
     this.cancelButton.addEventListener('click', () => {
       this.close();
     });
@@ -18479,7 +18513,7 @@ class ShareAttachmentModal {
     const currentChatAddress = chatModal.address;
     const allContacts = Object.values(myData.contacts || {})
       .filter(c => c.address !== myAccount.address && c.address !== currentChatAddress)
-      .filter(c => !isFaucetAddress(c.address))
+      .filter(c => !isFaucetAddress(c.address) && !isBridgeContact(c))
       .map(c => {
         const displayName = getContactDisplayName(c);
         return {
@@ -18632,8 +18666,6 @@ class ShareAttachmentModal {
       showToast('No attachment data found', 2000, 'error');
       return;
     }
-
-    this.sendButton.disabled = true;
     this.sendButton.textContent = 'Sending...';
 
     try {
@@ -18700,9 +18732,9 @@ class ShareAttachmentModal {
 
         const encMessage = encryptChacha(recipientDhkey, stringify(messageObj));
         
-        // For ourselves: re-encrypt encKey with our password for local storage
+        // For ourselves: store message encryption key (recipientDhkey) for local decryption
         const password = keys.secret + keys.pqSeed;
-        const selfKey = encryptData(bin2hex(base642bin(encKey)), password, true);
+        const selfKey = encryptData(bin2hex(recipientDhkey), password, true);
 
         const messagePayload = {
           message: encMessage,
@@ -18867,7 +18899,6 @@ class ShareAttachmentModal {
       console.error('Share send error', err);
       showToast('Failed to share attachment', 0, 'error');
     } finally {
-      this.sendButton.disabled = false;
       this.sendButton.textContent = 'Share';
       this.close();
     }
@@ -18884,7 +18915,6 @@ class ShareContactsModal {
   constructor() {
     this.selectedContacts = new Set();
     this.warningShown = false;
-    this.isUploading = false;
     this.recipientAddress = null;
   }
 
@@ -18900,7 +18930,7 @@ class ShareContactsModal {
     // Event listeners
     this.closeButton.addEventListener('click', () => this.handleClose());
     this.allNoneButton.addEventListener('click', () => this.toggleAllNone());
-    this.doneButton.addEventListener('click', () => this.handleDone());
+    this.doneButton.addEventListener('click', withButtonCooldown(this.doneButton, BUTTON_COOLDOWN_MS, null, () => this.handleDone()));
     this.contactsList.addEventListener('click', (e) => this.handleContactClick(e));
     this.actionButton.addEventListener('click', () => {
       if (this.recipientAddress) {
@@ -18919,7 +18949,6 @@ class ShareContactsModal {
     // Reset state
     this.selectedContacts.clear();
     this.warningShown = false;
-    this.isUploading = false;
     this.recipientAddress = recipientAddress;
     this.doneButton.classList.remove('loading');
     this.doneButton.disabled = true;
@@ -18999,8 +19028,8 @@ class ShareContactsModal {
       : null;
     
     const filteredContacts = currentChatAddress
-      ? allContacts.filter(c => !isFaucetAddress(c.address) && normalizeAddress(c.address) !== currentChatAddress)
-      : allContacts.filter(c => !isFaucetAddress(c.address));
+      ? allContacts.filter(c => !isFaucetAddress(c.address) && !isBridgeContact(c) && normalizeAddress(c.address) !== currentChatAddress)
+      : allContacts.filter(c => !isFaucetAddress(c.address) && !isBridgeContact(c));
     
     const sortByShareDisplayName = (a, b) =>
       this.getContactDisplayNameForShare(a)
@@ -19325,11 +19354,7 @@ class ShareContactsModal {
       return;
     }
 
-    if (this.isUploading) return;
-    this.isUploading = true;
     this.doneButton.classList.add('loading');
-    this.doneButton.disabled = true;
-
     try {
       // Generate VCF content
       const vcfContent = await this.generateVcfContent();
@@ -19364,9 +19389,7 @@ class ShareContactsModal {
       console.error('Failed to generate/upload VCF:', err);
       showToast('Failed to share contacts', 0, 'error');
     } finally {
-      this.isUploading = false;
       this.doneButton.classList.remove('loading');
-      this.doneButton.disabled = false;
     }
   }
 }
@@ -19381,7 +19404,6 @@ class ImportContactsModal {
   constructor() {
     this.selectedContacts = new Set();
     this.warningShown = false;
-    this.isImporting = false;
     this.parsedContacts = [];
     this.currentAttachment = null;
     this.recipientAddress = null;
@@ -19400,7 +19422,7 @@ class ImportContactsModal {
     // Event listeners
     this.closeButton.addEventListener('click', () => this.handleClose());
     this.allNoneButton.addEventListener('click', () => this.toggleAllNone());
-    this.doneButton.addEventListener('click', () => this.handleDone());
+    this.doneButton.addEventListener('click', withButtonCooldown(this.doneButton, BUTTON_COOLDOWN_MS, null, () => this.handleDone()));
     this.contactsList.addEventListener('click', (e) => this.handleContactClick(e));
     this.actionButton.addEventListener('click', () => {
       if (this.recipientAddress) {
@@ -19422,7 +19444,6 @@ class ImportContactsModal {
     // Reset state
     this.selectedContacts.clear();
     this.warningShown = false;
-    this.isImporting = false;
     this.parsedContacts = [];
     this.currentAttachment = isLocalUpload ? null : attachment;
     this.recipientAddress = isLocalUpload ? null : (attachment?.senderAddress || null);
@@ -19955,11 +19976,7 @@ class ImportContactsModal {
       return;
     }
 
-    if (this.isImporting) return;
-    this.isImporting = true;
     this.doneButton.classList.add('loading');
-    this.doneButton.disabled = true;
-
     try {
       let importedCount = 0;
       let failedCount = 0;
@@ -20127,9 +20144,7 @@ class ImportContactsModal {
       logsModal.log('❌ Failed to import contacts:', err?.message || String(err));
       showToast('Failed to import contacts', 0, 'error');
     } finally {
-      this.isImporting = false;
       this.doneButton.classList.remove('loading');
-      this.doneButton.disabled = false;
     }
   }
 }
@@ -20192,8 +20207,8 @@ class CallScheduleChoiceModal {
     const onSchedule = () => this._select('schedule');
     const onCancel = () => this._select(null);
 
-    if (this.nowBtn) this.nowBtn.addEventListener('click', onNow);
-    if (this.scheduleBtn) this.scheduleBtn.addEventListener('click', onSchedule);
+    if (this.nowBtn) this.nowBtn.addEventListener('click', withButtonCooldown(this.nowBtn, BUTTON_COOLDOWN_MS, null, onNow));
+    if (this.scheduleBtn) this.scheduleBtn.addEventListener('click', withButtonCooldown(this.scheduleBtn, BUTTON_COOLDOWN_MS, null, onSchedule));
     if (this.cancelBtn) this.cancelBtn.addEventListener('click', onCancel);
     if (this.closeBtn) this.closeBtn.addEventListener('click', onCancel);
   }
@@ -20271,8 +20286,6 @@ class CallScheduleDateModal {
     this.DEFAULT_OFFSET_MINUTES = 0;
     this.maxDaysOut = 400;
     this.clockTimer = new ClockTimer('callScheduleCurrentTime');
-    this._onSubmit = this._onSubmit.bind(this);
-    this._onSubmitBtn = this._onSubmitBtn.bind(this);
     this._onCancel = this._onCancel.bind(this);
     this._onInputChange = this._onInputChange.bind(this);
   }
@@ -20290,8 +20303,11 @@ class CallScheduleDateModal {
     this.cancelBtn = document.getElementById('cancelCallScheduleDate');
     this.closeBtn = document.getElementById('closeCallScheduleDateModal');
 
-    if (this.form) this.form.addEventListener('submit', this._onSubmit);
-    if (this.submitBtn) this.submitBtn.addEventListener('click', this._onSubmitBtn);
+    const wrappedConfirm = withButtonCooldown(this.submitBtn, BUTTON_COOLDOWN_MS, null, async () => {
+      this._submitValue();
+    });
+    if (this.form) this.form.addEventListener('submit', wrappedConfirm);
+    if (this.submitBtn) this.submitBtn.addEventListener('click', wrappedConfirm);
     if (this.cancelBtn) this.cancelBtn.addEventListener('click', this._onCancel);
     if (this.closeBtn) this.closeBtn.addEventListener('click', this._onCancel);
 
@@ -20366,14 +20382,6 @@ class CallScheduleDateModal {
     this._updateConvertedTimePreview();
   }
 
-  _onSubmit(e) {
-    if (e) e.preventDefault();
-    this._submitValue();
-  }
-  _onSubmitBtn(e) {
-    if (e) e.preventDefault();
-    this._submitValue();
-  }
   _onCancel() {
     this._closeWith(null);
   }
@@ -20787,6 +20795,7 @@ class VoiceRecordingModal {
     this.recordingInterval = null;
     this.currentAudio = null;
     this.playbackStartTime = null;
+    this.voiceMessageSendStarted = false;
   }
 
   load() {
@@ -20828,9 +20837,12 @@ class VoiceRecordingModal {
     this.stopListeningButton.addEventListener('click', () => {
       this.stopListening();
     });
-    this.sendVoiceMessageButton.addEventListener('click', () => {
-      this.sendVoiceMessage();
-    });
+    this.sendVoiceMessageButton.addEventListener('click', withButtonCooldown(
+      [this.sendVoiceMessageButton, this.cancelVoiceMessageButton, this.listenVoiceMessageButton],
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this.sendVoiceMessage()
+    ));
     // Close voice recording modal when clicking outside (only in initial state)
     this.modal.addEventListener('click', (e) => {
       if (e.target === this.modal && this.canCloseModal()) {
@@ -20845,7 +20857,7 @@ class VoiceRecordingModal {
    * @returns {boolean}
    */
   canCloseModal() {
-    return this.initialControls.style.display !== 'none';
+    return this.initialControls.style.display !== 'none' || this.voiceMessageSendStarted;
   }
 
   /**
@@ -20863,6 +20875,7 @@ class VoiceRecordingModal {
    */
   close() {
     this.modal.style.display = 'none';
+    this.voiceMessageSendStarted = false;
     this.cleanup();
   }
 
@@ -20877,6 +20890,7 @@ class VoiceRecordingModal {
     this.listeningControls.style.display = 'none';
     this.recordingTimer.textContent = '00:00';
     this.recordingIndicator.classList.remove('recording');
+    this.voiceMessageSendStarted = false;
   }
 
   /**
@@ -21137,10 +21151,10 @@ class VoiceRecordingModal {
   async sendVoiceMessage() {
     if (!this.recordedBlob) return;
 
+    this.voiceMessageSendStarted = true;
+    const blobToSend = this.recordedBlob;
     const loadingToastId = showToast('Sending voice message...', 0, 'loading');
     
-    this.sendVoiceMessageButton.disabled = true;
-
     try {
       // Calculate duration
       const duration = this.getRecordingDuration();
@@ -21150,8 +21164,8 @@ class VoiceRecordingModal {
       const password = myAccount.keys.secret + myAccount.keys.pqSeed;
       const selfKey = encryptData(bin2hex(dhkey), password, true);
 
-      // Encrypt the audio file similar to attachments
-      const audioArrayBuffer = await this.recordedBlob.arrayBuffer();
+      // Encrypt the audio file similar to attachments (use blobToSend so cleanup() cannot invalidate in-flight send)
+      const audioArrayBuffer = await blobToSend.arrayBuffer();
       const audioData = new Uint8Array(audioArrayBuffer);
       
       // Encrypt the audio data
@@ -21221,9 +21235,9 @@ class VoiceRecordingModal {
     } catch (error) {
       console.error('Error sending voice message:', error);
       showToast(`Failed to send voice message: ${error.message}`, 0, 'error');
+      this.voiceMessageSendStarted = false;
     } finally {
       hideToast(loadingToastId);
-      this.sendVoiceMessageButton.disabled = false;
     }
   }
 
@@ -23639,13 +23653,19 @@ class BridgeModal {
     this.modal = document.getElementById('bridgeModal');
     this.closeButton = document.getElementById('closeBridgeModal');
     this.form = document.getElementById('bridgeForm');
+    this.submitButton = this.form.querySelector('button[type="submit"]');
     this.networkSelect = document.getElementById('bridgeNetwork');
     this.networkSelectGroup = document.querySelector('#bridgeNetwork').closest('.form-group');
     this.directionSelect = document.getElementById('bridgeDirection');
-    
+
     // Add event listeners
     this.closeButton.addEventListener('click', () => this.close());
-    this.form.addEventListener('submit', (e) => this.handleSubmit(e));
+    this.form.addEventListener('submit', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      (e) => this.handleSubmit(e)
+    ));
     this.networkSelect.addEventListener('change', () => this.updateSelectedNetwork());
     this.directionSelect.addEventListener('change', () => this.handleDirectionChange());
     
@@ -24243,7 +24263,15 @@ class LockModal {
 
     this.openButton.addEventListener('click', () => this.open());
     this.headerCloseButton.addEventListener('click', () => this.close());
-    this.lockForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.lockForm.addEventListener('submit', withButtonCooldown(
+      [this.lockButton, this.headerCloseButton],
+      BUTTON_COOLDOWN_MS,
+      () => {
+        this.headerCloseButton.disabled = false;
+        this.updateButtonState();
+      },
+      (event) => this.handleSubmit(event)
+    ));
     // dynamic button state with debounce
     this.debouncedUpdateButtonState = debounce(() => this.updateButtonState(), 100);
     this.newPasswordInput.addEventListener('input', this.debouncedUpdateButtonState);
@@ -24323,18 +24351,14 @@ class LockModal {
   }
 
   async handleSubmit(event) {
-    // disable the button
-    this.lockButton.disabled = true;
     event.preventDefault();
-    
+
     const newPassword = this.newPasswordInput.value;
     const confirmNewPassword = this.confirmNewPasswordInput.value;
     const oldPassword = this.oldPasswordInput.value;
 
     // Check if new passwords match first (for non-remove mode)
     if (newPassword !== confirmNewPassword) {
-      this.lockButton.disabled = true;
-      // Keep button disabled - passwords don't match
       showToast('Passwords do not match. Please try again.', 0, 'error');
       return;
     }
@@ -24492,7 +24516,15 @@ class UnlockModal {
     this.unlockButton = this.modal.querySelector('.btn.btn--primary');
 
     this.closeButton.addEventListener('click', () => this.close());
-    this.unlockForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.unlockForm.addEventListener('submit', withButtonCooldown(
+      [this.unlockButton, this.closeButton],
+      BUTTON_COOLDOWN_MS,
+      () => {
+        this.closeButton.disabled = false;
+        this.updateButtonState();
+      },
+      (event) => this.handleSubmit(event)
+    ));
     this.passwordInput.addEventListener('input', () => this.updateButtonState());
   }
 
@@ -24507,13 +24539,10 @@ class UnlockModal {
   }
 
   async handleSubmit(event) {
-    // disable the button
-    this.unlockButton.disabled = true;
+    event.preventDefault();
 
     // loading toast
     let waitingToastId = showToast('Checking password...', 0, 'loading');
-
-    event.preventDefault();
     const password = this.passwordInput.value;
     const key = await passwordToKey(password);
     if (!key) {
@@ -24582,7 +24611,12 @@ class LaunchModal {
     this.launchButton = this.modal.querySelector('button[type="submit"]');
     this.backupButton = this.modal.querySelector('#launchModalBackupButton');
     this.closeButton.addEventListener('click', () => this.close());
-    this.launchForm.addEventListener('submit', async (event) => await this.handleSubmit(event));
+    this.launchForm.addEventListener('submit', withButtonCooldown(
+      this.launchButton,
+      BUTTON_COOLDOWN_MS,
+      () => this.updateButtonState(),
+      async (event) => await this.handleSubmit(event)
+    ));
     this.urlInput.addEventListener('input', () => this.updateButtonState());
     this.backupButton.addEventListener('click', () => backupAccountModal.open());
 
@@ -24626,13 +24660,11 @@ class LaunchModal {
       this.showBackupReminderToast();
       return;
     }
-    
-    // Disable button and show loading state
-    this.launchButton.disabled = true;
+
     this.launchButton.textContent = 'Checking URL...';
 
     let networkJsUrl;
-    
+
     // Step 1: URL parsing
     try {
       const urlObj = new URL(url);
@@ -24640,8 +24672,6 @@ class LaunchModal {
       networkJsUrl = urlObj.origin + path + 'network.js';
     } catch (urlError) {
       showToast(`Invalid URL format: ${urlError.message}`, 0, 'error');
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
       return;
     }
 
@@ -24652,15 +24682,13 @@ class LaunchModal {
       result = await fetch(networkJsUrl,{
         cache: 'reload',
       });
-      
+
       if (!result.ok) {
         throw new Error(`HTTP ${result.status}: ${result.statusText}`);
       }
-      
+
     } catch (fetchError) {
       showToast(`Network error: ${fetchError.message}`, 0, 'error');
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
       return;
     }
 
@@ -24668,14 +24696,12 @@ class LaunchModal {
     let networkJson;
     try {
       networkJson = await result.text();
-      
+
       if (!networkJson || networkJson.length === 0) {
         throw new Error('Empty response received');
       }
     } catch (parseError) {
       showToast(`Response parsing error: ${parseError.message}`, 0, 'error');
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
       return;
     }
 
@@ -24683,15 +24709,13 @@ class LaunchModal {
     try {
       const requiredProps = ['network', 'name', 'netid', 'gateways'];
       const missingProps = requiredProps.filter(prop => !networkJson.includes(prop));
-    
+
       if (missingProps.length > 0) {
         throw new Error(`Missing required properties: ${missingProps.join(', ')}`);
       }
-      
+
     } catch (validationError) {
       showToast(`Invalid network configuration: ${validationError.message}`, 0, 'error');
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
       return;
     }
 
@@ -24701,10 +24725,6 @@ class LaunchModal {
       this.close();
     } catch (launchError) {
       showToast(`Launch error: ${launchError.message}`, 0, 'error');
-    } finally {
-      // Reset button state (this should always happen)
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
     }
   }
 
@@ -24721,6 +24741,7 @@ class LaunchModal {
   updateButtonState() {
     const url = this.urlInput.value;
     this.launchButton.disabled = url.length === 0;
+    this.launchButton.textContent = 'Launch';
   }
 }
 
@@ -26053,6 +26074,28 @@ function isFaucetAddress(address) {
   return faucetAddresses.some(faucetAddr => 
     normalizeAddress(faucetAddr) === normalizedAddress
   );
+}
+
+/**
+ * Checks whether a contact is one of the configured network bridge accounts.
+ * Bridge identities are defined by username in network.bridges.
+ * @param {Object} contact - Contact object
+ * @returns {boolean} - True if contact username matches a bridge username
+ */
+function isBridgeContact(contact) {
+  if (!contact || !Array.isArray(network.bridges) || network.bridges.length === 0) {
+    return false;
+  }
+
+  const username = normalizeUsername(contact.username || '');
+  if (!username) {
+    return false;
+  }
+
+  return network.bridges.some((bridge) => {
+    const bridgeUsername = normalizeUsername(bridge?.username || '');
+    return bridgeUsername && bridgeUsername === username;
+  });
 }
 
 function isMobile() {
