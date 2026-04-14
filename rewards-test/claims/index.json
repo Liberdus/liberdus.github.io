@@ -1,8 +1,8 @@
 {
   "rounds": [
     {
-      "epoch": 1,
-      "file": "./epoch1.claims.json"
+      "epoch": 2,
+      "file": "./round-2.claims.json"
     }
   ]
 }
