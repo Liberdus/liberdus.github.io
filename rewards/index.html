@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Liberdus Rewards</title>
+    <link rel="icon" type="image/png" href="./assets/liberdus-logo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="page-glow" aria-hidden="true"></div>
+    <div class="page-circuit page-circuit-left" aria-hidden="true"></div>
+    <div class="page-circuit page-circuit-right" aria-hidden="true"></div>
+    <div class="toast-stack" aria-live="polite" aria-atomic="true">
+      <div id="claimToast" class="toast" data-tone="info" hidden>
+        <p id="claimToastMessage" class="toast-message"></p>
+        <button id="claimToastClose" type="button" class="toast-close" aria-label="Dismiss notification">x</button>
+      </div>
+    </div>
+
+    <header id="claimHeader" class="page-header">
+      <div class="page-header-inner">
+        <div class="brand-lockup nav-brand">
+          <img class="brand-logo" src="./assets/liberdus-logo.png" alt="" aria-hidden="true">
+          <div>
+            <p class="eyebrow">Liberdus</p>
+            <p class="brand-wordmark">Rewards</p>
+          </div>
+        </div>
+
+        <div class="claim-topbar-actions">
+          <div class="wallet-menu-shell">
+            <button
+              id="connectButton"
+              type="button"
+              class="wallet-trigger"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >Connect Wallet</button>
+            <div id="walletMenu" class="wallet-popout" role="menu" hidden>
+              <p class="wallet-popout-label">Connected wallet</p>
+              <div class="wallet-popout-row">
+                <p id="walletMenuAddress" class="wallet-popout-address">-</p>
+                <button id="copyWalletAddressButton" type="button" class="ghost wallet-copy-button">Copy</button>
+              </div>
+              <div class="wallet-popout-meta">
+                <p><span>Chain ID</span><strong id="walletMenuChainId">-</strong></p>
+              </div>
+              <button id="switchNetworkButton" type="button" class="ghost wallet-disconnect-button" hidden>Switch Network</button>
+              <button id="adminPageButton" type="button" class="ghost wallet-disconnect-button" hidden>Open Admin</button>
+              <button id="disconnectButton" type="button" class="ghost wallet-disconnect-button">Disconnect</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell shell-narrow">
+      <div class="center-stage">
+        <section class="frame claim-card">
+          <section class="claim-card-block">
+            <div id="xAuthCard" class="x-auth-card">
+              <div class="x-auth-copy">
+                <div>
+                  <h2>Sign In With X</h2>
+                  <p id="xAuthHint" class="hint">Attach your X account to this claim session.</p>
+                </div>
+              </div>
+
+              <div class="x-auth-shell">
+                <div id="xAuthIdentity" class="x-auth-identity" hidden>
+                  <img id="xAuthAvatar" class="x-auth-avatar" alt="" hidden>
+                  <div class="x-auth-profile">
+                    <a
+                      id="xAuthProfileLink"
+                      class="x-auth-link"
+                      href="#"
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >@-</a>
+                  </div>
+                </div>
+
+                <p id="xAuthStatus" class="x-auth-status">Not signed in.</p>
+                <p id="xAuthLinkStatus" class="x-auth-status" hidden></p>
+
+                <div class="x-auth-actions">
+                  <button id="xAuthButton" type="button" class="secondary">Sign in with X</button>
+                  <button id="xVerifyButton" type="button" hidden>Verify Wallet And Save</button>
+                  <button id="xDisconnectButton" type="button" class="ghost" hidden>Sign out</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="claim-card-block">
+            <div class="panel-title-row">
+              <div>
+                <h2>Available Claims</h2>
+              </div>
+            </div>
+            <div id="roundList" class="round-list"></div>
+          </section>
+        </section>
+      </div>
+    </main>
+
+    <footer class="page-footer">
+      <div class="page-footer-inner">
+        <p class="page-footer-copy">&copy; Liberdus</p>
+        <div class="page-footer-links">
+          <a id="addTokenLink" class="footer-link-anchor footer-link-action" href="#" hidden>
+            <img src="./assets/metamask-fox.svg" alt="" aria-hidden="true">
+            <span>Add to wallet</span>
+          </a>
+          <a id="tokenExplorerLink" class="footer-link-anchor" href="#" target="_blank" rel="noreferrer noopener" hidden>
+            contract
+          </a>
+        </div>
+      </div>
+    </footer>
+
+    <script type="module" src="./js/pages/claim.js"></script>
+  </body>
+</html>
