@@ -30,11 +30,23 @@ import {
 import { promptForWalletSelection } from "../shared/wallet-picker.js";
 import {
   fetchStoredAirdropRounds,
-  fetchStoredClaimByEpochAndIndex,
+  fetchStoredRoundClaims,
+  fetchStoredClaimsByWallet,
   isClaimsApiConfigured,
-  persistAirdropRound,
-  requestAirdropFinalizeChallenge,
+  saveAirdropRound,
+  deploySavedAirdropRound,
+  requestAirdropSaveChallenge,
 } from "../shared/claims.js";
+import {
+  requestAdminAccessChallenge,
+  completeAdminAccess,
+  fetchAdminAccounts,
+  importAdminAccounts,
+  saveAdminAccount,
+  fetchAdminRecoverySubmissions,
+  importAdminRecoverySubmissions,
+  exportAdminRecoverySubmissions,
+} from "../shared/admin-data.js";
 import { buildClaimRound } from "../shared/merkle.js";
 
 const runtime = {
@@ -51,8 +63,13 @@ const runtime = {
   pendingOwner: null,
   currentEpoch: 0,
   epochRows: [],
-  claimSourcesByEpoch: new Map(),
-  claimSourcesByRoot: new Map(),
+  storedRounds: [],
+  storedRoundsByEpoch: new Map(),
+  storedRoundsByRoot: new Map(),
+  roundRows: [],
+  selectedRoundId: null,
+  selectedRoundClaims: [],
+  claimLookupRows: [],
   uploadedRound: null,
   builderRows: [],
   nextBuilderRowId: 1,
@@ -70,7 +87,38 @@ const runtime = {
   tokenDecimals: 18,
   tokenSymbol: "LIB",
   chainTimestamp: 0,
-  startRequiresNewUpload: false,
+  activeAdminTab: "prepare",
+  adminAccessToken: "",
+  adminAccessExpiresAt: 0,
+  adminAccessPromise: null,
+  managementSummary: {
+    accountCount: 0,
+    followerCount: 0,
+    recoveryCandidateCount: 0,
+    latestSnapshotCapturedAt: null,
+    recoverySubmissionCount: 0,
+  },
+  accountsRows: [],
+  accountsPagination: {
+    page: 1,
+    pageSize: 50,
+    total: 0,
+    totalPages: 0,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  },
+  accountsSearch: "",
+  recoverySubmissionRows: [],
+  recoveryPagination: {
+    page: 1,
+    pageSize: 50,
+    total: 0,
+    totalPages: 0,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  },
+  recoverySearch: "",
+  hasLoadedAccountsTab: false,
   isConnectingWallet: false,
   noticeTimerId: null,
 };
@@ -86,8 +134,14 @@ const els = {
   claimPageButton: document.getElementById("claimPageButton"),
   copyWalletAddressButton: document.getElementById("copyWalletAddressButton"),
   disconnectButton: document.getElementById("disconnectButton"),
+  adminTabButtons: [...document.querySelectorAll("[data-admin-tab]")],
+  adminTabPanels: [...document.querySelectorAll("[data-admin-panel]")],
   connectedAccount: document.getElementById("connectedAccount"),
   ownerAddress: document.getElementById("ownerAddress"),
+  pendingOwnerShell: document.getElementById("pendingOwnerShell"),
+  pendingOwnershipCurrentOwner: document.getElementById("pendingOwnershipCurrentOwner"),
+  pendingOwnershipPendingOwner: document.getElementById("pendingOwnershipPendingOwner"),
+  pendingAcceptOwnershipButton: document.getElementById("pendingAcceptOwnershipButton"),
   ownershipShell: document.getElementById("ownershipShell"),
   ownershipCurrentOwner: document.getElementById("ownershipCurrentOwner"),
   ownershipPendingOwner: document.getElementById("ownershipPendingOwner"),
@@ -108,8 +162,10 @@ const els = {
   airdropTokenBalance: document.getElementById("airdropTokenBalance"),
   claimsBuilderForm: document.getElementById("claimsBuilderForm"),
   builderFileNameInput: document.getElementById("builderFileNameInput"),
+  builderUniformAmountInput: document.getElementById("builderUniformAmountInput"),
   addBuilderRowButton: document.getElementById("addBuilderRowButton"),
   clearBuilderButton: document.getElementById("clearBuilderButton"),
+  loadWalletAccountsButton: document.getElementById("loadWalletAccountsButton"),
   loadBuilderButton: document.getElementById("loadBuilderButton"),
   downloadBuilderButton: document.getElementById("downloadBuilderButton"),
   builderValidationMessage: document.getElementById("builderValidationMessage"),
@@ -128,7 +184,6 @@ const els = {
   uploadedClaimCount: document.getElementById("uploadedClaimCount"),
   uploadedClaimTotal: document.getElementById("uploadedClaimTotal"),
   uploadPreviewBody: document.getElementById("uploadPreviewBody"),
-  fundUploadedButton: document.getElementById("fundUploadedButton"),
   clearUploadedButton: document.getElementById("clearUploadedButton"),
   updateDeadlineForm: document.getElementById("updateDeadlineForm"),
   updateEpochInput: document.getElementById("updateEpochInput"),
@@ -146,13 +201,53 @@ const els = {
   recoverRecipient: document.getElementById("recoverRecipient"),
   recoverAmount: document.getElementById("recoverAmount"),
   epochListBody: document.getElementById("epochListBody"),
+  roundClaimsSection: document.getElementById("roundClaimsSection"),
+  refreshRoundClaimsStatusButton: document.getElementById("refreshRoundClaimsStatusButton"),
+  selectedRoundLabel: document.getElementById("selectedRoundLabel"),
+  selectedRoundMeta: document.getElementById("selectedRoundMeta"),
+  selectedRoundClaimCount: document.getElementById("selectedRoundClaimCount"),
+  selectedRoundTotal: document.getElementById("selectedRoundTotal"),
+  roundClaimsBody: document.getElementById("roundClaimsBody"),
   epochQueryForm: document.getElementById("epochQueryForm"),
   queryEpochInput: document.getElementById("queryEpochInput"),
   epochQueryResult: document.getElementById("epochQueryResult"),
   claimStatusForm: document.getElementById("claimStatusForm"),
-  claimedEpochInput: document.getElementById("claimedEpochInput"),
-  claimedIndexInput: document.getElementById("claimedIndexInput"),
-  claimStatusResult: document.getElementById("claimStatusResult"),
+  claimLookupInput: document.getElementById("claimLookupInput"),
+  claimLookupBody: document.getElementById("claimLookupBody"),
+  managementAccountCount: document.getElementById("managementAccountCount"),
+  managementFollowerCount: document.getElementById("managementFollowerCount"),
+  managementRecoveryCandidateCount: document.getElementById("managementRecoveryCandidateCount"),
+  managementSubmissionCount: document.getElementById("managementSubmissionCount"),
+  managementLatestSnapshot: document.getElementById("managementLatestSnapshot"),
+  accountsImportForm: document.getElementById("accountsImportForm"),
+  accountsImportFileInput: document.getElementById("accountsImportFileInput"),
+  downloadAccountsTemplateButton: document.getElementById("downloadAccountsTemplateButton"),
+  singleAccountForm: document.getElementById("singleAccountForm"),
+  singleAccountUsernameInput: document.getElementById("singleAccountUsernameInput"),
+  singleAccountUserIdInput: document.getElementById("singleAccountUserIdInput"),
+  singleAccountWalletInput: document.getElementById("singleAccountWalletInput"),
+  singleAccountIsFollowerInput: document.getElementById("singleAccountIsFollowerInput"),
+  singleAccountNeedsRecoveryInput: document.getElementById("singleAccountNeedsRecoveryInput"),
+  accountsQueryForm: document.getElementById("accountsQueryForm"),
+  accountsSearchInput: document.getElementById("accountsSearchInput"),
+  accountsPageSizeSelect: document.getElementById("accountsPageSizeSelect"),
+  accountsClearSearchButton: document.getElementById("accountsClearSearchButton"),
+  accountsPaginationLabel: document.getElementById("accountsPaginationLabel"),
+  accountsPreviousPageButton: document.getElementById("accountsPreviousPageButton"),
+  accountsNextPageButton: document.getElementById("accountsNextPageButton"),
+  accountsTableBody: document.getElementById("accountsTableBody"),
+  recoveryImportForm: document.getElementById("recoveryImportForm"),
+  recoveryImportFileInput: document.getElementById("recoveryImportFileInput"),
+  exportRecoveryJsonButton: document.getElementById("exportRecoveryJsonButton"),
+  exportRecoveryCsvButton: document.getElementById("exportRecoveryCsvButton"),
+  recoveryQueryForm: document.getElementById("recoveryQueryForm"),
+  recoverySearchInput: document.getElementById("recoverySearchInput"),
+  recoveryPageSizeSelect: document.getElementById("recoveryPageSizeSelect"),
+  recoveryClearSearchButton: document.getElementById("recoveryClearSearchButton"),
+  recoveryPaginationLabel: document.getElementById("recoveryPaginationLabel"),
+  recoveryPreviousPageButton: document.getElementById("recoveryPreviousPageButton"),
+  recoveryNextPageButton: document.getElementById("recoveryNextPageButton"),
+  recoverySubmissionsBody: document.getElementById("recoverySubmissionsBody"),
   adminToast: document.getElementById("adminToast"),
   adminToastMessage: document.getElementById("adminToastMessage"),
   adminToastClose: document.getElementById("adminToastClose"),
@@ -201,6 +296,11 @@ function clearMessage() {
 const logger = { log: setMessage, clear: clearMessage };
 const reportError = createErrorReporter(logger.log, () => runtime);
 let pageInitPromise = Promise.resolve();
+const ADMIN_LINKED_WALLET_PAGE_SIZE = 200;
+const ADMIN_ACCOUNTS_TEMPLATE_CSV = [
+  "x_username,wallet_address,x_user_id,is_follower,needs_recovery,snapshot_history_json",
+  "example_user,0x0000000000000000000000000000000000000001,123456789,true,false,\"[\"\"2026-04-15T17:38:57.616Z\"\", \"\"2026-04-20T15:59:46.289Z\"\"]\"",
+].join("\n");
 
 function updateToastOffset() {
   if (!els.adminHeader) return;
@@ -233,6 +333,143 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function formatManagementDateTime(value) {
+  if (!value) return "-";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+
+  return parsed.toLocaleString();
+}
+
+function createFlagBadge(value, { positiveLabel = "Yes", negativeLabel = "No" } = {}) {
+  const label = value ? positiveLabel : negativeLabel;
+  const tone = value ? "positive" : "muted";
+  return `<span class="table-flag" data-tone="${tone}">${escapeHtml(label)}</span>`;
+}
+
+function formatPaginationLabel(pagination, singularLabel, pluralLabel) {
+  const total = Number(pagination?.total || 0);
+  if (!total) {
+    return `0 ${pluralLabel}`;
+  }
+
+  const page = Number(pagination?.page || 1);
+  const totalPages = Number(pagination?.totalPages || 1);
+  const pageSize = Number(pagination?.pageSize || total);
+  const start = ((page - 1) * pageSize) + 1;
+  const end = Math.min(start + pageSize - 1, total);
+  const itemLabel = total === 1 ? singularLabel : pluralLabel;
+  return `Showing ${start}-${end} of ${total} ${itemLabel} (page ${page}/${Math.max(totalPages, 1)})`;
+}
+
+function downloadTextFile(fileName, content, contentType) {
+  const blob = new Blob([content], { type: contentType });
+  const downloadUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = downloadUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(downloadUrl);
+}
+
+function getExplorerAddressUrl(address) {
+  const normalizedAddress = normalizeAddress(address);
+  const explorerBaseUrl = String(runtime.config.explorerBaseUrl || "").trim().replace(/\/+$/u, "");
+
+  if (!normalizedAddress || !explorerBaseUrl) {
+    return "";
+  }
+
+  return `${explorerBaseUrl}/address/${normalizedAddress}`;
+}
+
+function renderExplorerAddress(address) {
+  const normalizedAddress = normalizeAddress(address);
+  if (!normalizedAddress) {
+    return "-";
+  }
+
+  const explorerUrl = getExplorerAddressUrl(normalizedAddress);
+  const label = formatAddressShort(normalizedAddress);
+  const codeLabel = `<code title="${normalizedAddress}">${label}</code>`;
+
+  if (!explorerUrl) {
+    return codeLabel;
+  }
+
+  return `<a class="table-address-link" href="${explorerUrl}" target="_blank" rel="noreferrer noopener">${codeLabel}</a>`;
+}
+
+function resetAdminAccess() {
+  runtime.adminAccessToken = "";
+  runtime.adminAccessExpiresAt = 0;
+  runtime.adminAccessPromise = null;
+}
+
+function isAdminAccessError(error) {
+  const message = String(error?.message || "");
+  return /admin access|current contract owner/i.test(message);
+}
+
+async function ensureAdminAccess() {
+  if (!isOwner()) {
+    throw new Error("Only the current owner can access follower management.");
+  }
+
+  const tokenIsFresh = runtime.adminAccessToken
+    && Number(runtime.adminAccessExpiresAt || 0) > (Date.now() + 30_000);
+  if (tokenIsFresh) {
+    return runtime.adminAccessToken;
+  }
+
+  if (runtime.adminAccessPromise) {
+    return runtime.adminAccessPromise;
+  }
+
+  runtime.adminAccessPromise = (async () => {
+    const challenge = await requestAdminAccessChallenge(runtime.config, {
+      walletAddress: runtime.account,
+    });
+    const signature = await runtime.signer.signMessage(challenge.message);
+    const session = await completeAdminAccess(runtime.config, {
+      walletAddress: runtime.account,
+      challengeId: challenge.challengeId,
+      signature,
+    });
+
+    runtime.adminAccessToken = String(session.accessToken || "").trim();
+    runtime.adminAccessExpiresAt = Number(session.expiresAt || 0);
+    return runtime.adminAccessToken;
+  })();
+
+  try {
+    return await runtime.adminAccessPromise;
+  } finally {
+    runtime.adminAccessPromise = null;
+  }
+}
+
+async function callAdminApi(callback, { retryOnAuthFailure = true } = {}) {
+  let accessToken = await ensureAdminAccess();
+
+  try {
+    return await callback(accessToken);
+  } catch (error) {
+    if (!retryOnAuthFailure || !isAdminAccessError(error)) {
+      throw error;
+    }
+
+    resetAdminAccess();
+    accessToken = await ensureAdminAccess();
+    return callback(accessToken);
+  }
 }
 
 function createBuilderRow(overrides = {}) {
@@ -440,8 +677,10 @@ function resetClaimsBuilder({ preserveFileName = false } = {}) {
 }
 
 function applyUploadedRound(round, { clearUploadInput = false } = {}) {
-  runtime.uploadedRound = round;
-  runtime.startRequiresNewUpload = false;
+  runtime.uploadedRound = {
+    storedRoundId: round?.storedRoundId || null,
+    ...round,
+  };
   if (clearUploadInput) {
     els.uploadClaimsFileInput.value = "";
   }
@@ -469,6 +708,130 @@ function downloadClaimsBuilderJson() {
   URL.revokeObjectURL(downloadUrl);
 }
 
+async function fetchAllLinkedWalletAccounts() {
+  const accounts = [];
+  let page = 1;
+
+  while (true) {
+    const payload = await callAdminApi((accessToken) => fetchAdminAccounts(runtime.config, accessToken, {
+      page,
+      pageSize: ADMIN_LINKED_WALLET_PAGE_SIZE,
+      walletOnly: true,
+    }));
+
+    if (page === 1) {
+      applyManagementResponse(payload);
+      renderManagementSummary();
+    }
+
+    accounts.push(...(Array.isArray(payload?.accounts) ? payload.accounts : []));
+
+    if (!payload?.pagination?.hasNextPage) {
+      return {
+        accounts,
+        total: Number(payload?.pagination?.total || accounts.length),
+      };
+    }
+
+    page += 1;
+  }
+}
+
+function buildBuilderRowsFromLinkedWalletAccounts(accounts, amount) {
+  const rows = [];
+  const seenWallets = new Set();
+  let invalidCount = 0;
+  let duplicateCount = 0;
+
+  for (const account of accounts) {
+    const normalizedWallet = normalizeAddress(account?.walletAddress);
+    if (!normalizedWallet || normalizedWallet === ethers.ZeroAddress) {
+      invalidCount += 1;
+      continue;
+    }
+
+    if (seenWallets.has(normalizedWallet)) {
+      duplicateCount += 1;
+      continue;
+    }
+
+    seenWallets.add(normalizedWallet);
+    rows.push(createBuilderRow({
+      account: normalizedWallet,
+      amount,
+    }));
+  }
+
+  return {
+    rows,
+    invalidCount,
+    duplicateCount,
+  };
+}
+
+function formatLinkedWalletLoadMessage({ loadedCount, invalidCount = 0, duplicateCount = 0 }) {
+  const segments = [
+    `${loadedCount} linked ${loadedCount === 1 ? "wallet" : "wallets"} loaded`,
+  ];
+
+  if (invalidCount) {
+    segments.push(`${invalidCount} invalid skipped`);
+  }
+
+  if (duplicateCount) {
+    segments.push(`${duplicateCount} duplicate skipped`);
+  }
+
+  return `${segments.join("; ")}.`;
+}
+
+async function loadAllLinkedWalletClaimsIntoBuilder() {
+  const amount = String(els.builderUniformAmountInput?.value || "").trim();
+  if (!amount) {
+    throw new Error("Enter an amount to use for every linked wallet.");
+  }
+
+  try {
+    parseHumanAmount(amount, runtime.tokenDecimals);
+  } catch {
+    throw new Error("Enter a valid amount to use for every linked wallet.");
+  }
+
+  els.builderUniformAmountInput.value = amount;
+
+  const { accounts, total } = await fetchAllLinkedWalletAccounts();
+  if (!total) {
+    throw new Error("No accounts with saved wallets were found.");
+  }
+
+  const {
+    rows,
+    invalidCount,
+    duplicateCount,
+  } = buildBuilderRowsFromLinkedWalletAccounts(accounts, amount);
+
+  if (!rows.length) {
+    throw new Error("No valid linked wallets were found.");
+  }
+
+  runtime.builderRows = rows;
+  ensureClaimsBuilderFileName();
+  renderClaimsBuilderRows();
+
+  const artifact = buildClaimsBuilderArtifact();
+  if (!artifact) {
+    throw new Error("Unable to build claims from linked wallets.");
+  }
+
+  applyUploadedRound(artifact.round, { clearUploadInput: true });
+
+  return {
+    loadedCount: rows.length,
+    invalidCount,
+    duplicateCount,
+  };
+}
+
 function getEpochStatus(deadline) {
   const deadlineNumber = Number(deadline ?? 0);
   if (deadlineNumber === 0) return "Disabled";
@@ -492,11 +855,45 @@ function getMatchingEpochsForRoot(root) {
     .sort((left, right) => right - left);
 }
 
+function getStoredRoundsForRoot(root) {
+  if (!ethers.isHexString(root, 32)) return [];
+  return runtime.storedRoundsByRoot.get(root.toLowerCase()) || [];
+}
+
+function formatStoredRoundLabel(round) {
+  if (!round) return "-";
+  if (round.status === "draft") return "Draft";
+  if (round.epoch != null) return `Epoch ${round.epoch}`;
+  return "Saved";
+}
+
+function formatSelectedRoundLabel(round) {
+  const baseLabel = formatStoredRoundLabel(round);
+  if (!round?.merkleRoot) return baseLabel;
+  return `${baseLabel} - ${formatHexShort(round.merkleRoot)}`;
+}
+
+function scrollRoundClaimsSectionIntoView() {
+  if (!els.roundClaimsSection) return;
+
+  window.requestAnimationFrame(() => {
+    els.roundClaimsSection.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  });
+}
+
 function updateStartRootWarning() {
   if (!els.startRootWarning) return;
 
   const root = els.startRootInput.value.trim();
   const matchingEpochs = getMatchingEpochsForRoot(root);
+  const matchingStoredRounds = getStoredRoundsForRoot(root);
+  const matchingDrafts = matchingStoredRounds.filter((round) => round.status === "draft");
+  const matchingSavedRound = runtime.uploadedRound?.storedRoundId
+    ? runtime.storedRounds.find((round) => round.id === runtime.uploadedRound.storedRoundId) || null
+    : null;
   const epochLabel = matchingEpochs.length === 1
     ? `epoch ${matchingEpochs[0]}`
     : `epochs ${matchingEpochs.join(", ")}`;
@@ -504,14 +901,19 @@ function updateStartRootWarning() {
   let message = "";
   let tone = "warn";
 
-  if (runtime.startRequiresNewUpload && runtime.uploadedRound) {
-    message = "This claims file was already started successfully. Prepare a new claims file before starting another airdrop.";
-    if (matchingEpochs.length) {
-      message += ` Matching Merkle root found in ${epochLabel}.`;
-    }
+  if (matchingSavedRound) {
+    const savedLabel = matchingSavedRound.status === "draft"
+      ? "a saved draft"
+      : formatStoredRoundLabel(matchingSavedRound).toLowerCase();
+    message = `This claims file is already saved as ${savedLabel}. Deploy it from the rounds tab when you are ready.`;
     tone = "info";
+  } else if (matchingDrafts.length) {
+    const draftLabel = matchingDrafts.length === 1
+      ? "another saved draft"
+      : `${matchingDrafts.length} saved drafts`;
+    message = `Warning: this Merkle root already exists in ${draftLabel}. Saving another draft is allowed, but drafts do not reserve an epoch.`;
   } else if (matchingEpochs.length) {
-    message = `Warning: this Merkle root already exists in ${epochLabel}. Starting it again is allowed, but verify you are not re-submitting the same airdrop.`;
+    message = `Warning: this Merkle root already exists on chain in ${epochLabel}. Saving it again is allowed, but verify you are not re-submitting the same airdrop.`;
   }
 
   if (!message) {
@@ -530,13 +932,14 @@ function updateStartAirdropButtonState() {
   const hasRound = Boolean(runtime.uploadedRound);
   const hasRoot = ethers.isHexString(els.startRootInput.value.trim(), 32);
   const hasDeadline = Number.isFinite(Number(els.startDeadlineUnix.value)) && Number(els.startDeadlineUnix.value) > 0;
+  const alreadySaved = Boolean(runtime.uploadedRound?.storedRoundId);
   const canSubmit = isOwner()
     && isReadyChain()
     && isClaimsApiConfigured(runtime.config)
     && hasRound
     && hasRoot
     && hasDeadline
-    && !runtime.startRequiresNewUpload;
+    && !alreadySaved;
   els.startAirdropButton.disabled = !canSubmit;
   updateStartRootWarning();
 }
@@ -707,7 +1110,6 @@ async function validateFutureDeadlineAgainstChain(deadlineUnix, { allowZero = fa
 
 function clearUploadedRoundState() {
   runtime.uploadedRound = null;
-  runtime.startRequiresNewUpload = false;
   els.startRootInput.value = "";
   els.uploadClaimsFileInput.value = "";
   renderUploadedRound();
@@ -721,7 +1123,6 @@ function renderUploadedRound() {
     els.uploadedClaimCount.textContent = "-";
     els.uploadedClaimTotal.textContent = "-";
     els.uploadPreviewBody.innerHTML = '<tr><td colspan="3" class="empty-row">Upload or build a claims JSON file to preview it.</td></tr>';
-    els.fundUploadedButton.disabled = true;
     els.clearUploadedButton.disabled = true;
     return;
   }
@@ -738,7 +1139,6 @@ function renderUploadedRound() {
       </tr>
     `)
     .join("");
-  els.fundUploadedButton.disabled = false;
   els.clearUploadedButton.disabled = false;
 }
 
@@ -747,20 +1147,27 @@ async function loadUploadedClaimsFile(file) {
   applyUploadedRound(buildClaimRound(rawText, runtime.tokenDecimals));
 }
 
-async function refreshCatalogRounds() {
-  runtime.claimSourcesByEpoch = new Map();
-  runtime.claimSourcesByRoot = new Map();
+async function refreshStoredRounds() {
+  runtime.storedRounds = [];
+  runtime.storedRoundsByEpoch = new Map();
+  runtime.storedRoundsByRoot = new Map();
 
   if (!isClaimsApiConfigured(runtime.config)) return;
 
   const payload = await fetchStoredAirdropRounds(runtime.config);
   const rounds = Array.isArray(payload?.rounds) ? payload.rounds : [];
+  runtime.storedRounds = rounds;
 
   for (const round of rounds) {
-    const entry = { epoch: round.epoch, source: null, round, errorMessage: "" };
-    runtime.claimSourcesByEpoch.set(round.epoch, entry);
+    if (round.status === "deployed" && Number.isInteger(round.epoch)) {
+      runtime.storedRoundsByEpoch.set(Number(round.epoch), round);
+    }
+
     if (round?.merkleRoot) {
-      runtime.claimSourcesByRoot.set(round.merkleRoot.toLowerCase(), entry);
+      const rootKey = round.merkleRoot.toLowerCase();
+      const rootMatches = runtime.storedRoundsByRoot.get(rootKey) || [];
+      rootMatches.push(round);
+      runtime.storedRoundsByRoot.set(rootKey, rootMatches);
     }
   }
 }
@@ -771,28 +1178,438 @@ function formatClaimedDisplay(claimedAmount, totalAmountRaw) {
   return `${claimedText} / ${formatTokenAmount(totalAmountRaw, runtime.tokenDecimals, runtime.tokenSymbol)}`;
 }
 
-function renderEpochList() {
-  if (!runtime.epochRows.length) {
-    els.epochListBody.innerHTML = '<tr><td colspan="5" class="empty-row">No epochs started yet.</td></tr>';
+function formatRoundTotalDisplay(row) {
+  if (row.claimedAmount != null) {
+    return formatClaimedDisplay(row.claimedAmount, row.totalAmountRaw);
+  }
+
+  if (row.totalAmountRaw != null) {
+    return formatTokenAmount(row.totalAmountRaw, runtime.tokenDecimals, runtime.tokenSymbol);
+  }
+
+  return "-";
+}
+
+function doesStoredRoundMatchChainRow(storedRound, chainRow) {
+  if (!storedRound || !chainRow) return false;
+
+  return String(storedRound.merkleRoot || "").toLowerCase() === String(chainRow.root || "").toLowerCase();
+}
+
+function getRoundRowStatus(row) {
+  if (row.rowType === "draft") {
+    return { tone: "neutral", text: "Draft" };
+  }
+
+  if (row.rowType === "stored-only") {
+    return { tone: "error", text: "Missing on chain" };
+  }
+
+  return {
+    tone: getEpochStatusTone(row.deadline),
+    text: getEpochStatus(row.deadline),
+  };
+}
+
+function sortDraftRounds(left, right) {
+  return String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""));
+}
+
+function sortDeployedRounds(left, right) {
+  const leftEpoch = Number(left.epoch || 0);
+  const rightEpoch = Number(right.epoch || 0);
+  if (leftEpoch !== rightEpoch) {
+    return rightEpoch - leftEpoch;
+  }
+
+  return String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""));
+}
+
+function buildRoundRows() {
+  const rows = [];
+  const matchedStoredRoundIds = new Set();
+  const draftRounds = runtime.storedRounds
+    .filter((round) => round.status === "draft")
+    .sort(sortDraftRounds);
+
+  for (const round of draftRounds) {
+    rows.push({
+      key: `draft-${round.id}`,
+      rowType: "draft",
+      roundId: round.id,
+      label: "Draft",
+      root: round.merkleRoot,
+      deadline: Number(round.deadline || 0),
+      claimedAmount: null,
+      totalAmountRaw: BigInt(round.totalAmountRaw),
+      sourceText: "DB draft",
+      canFundTotal: true,
+      canDeploy: true,
+      canViewClaims: true,
+    });
+  }
+
+  for (const chainRow of runtime.epochRows) {
+    const storedRound = runtime.storedRoundsByEpoch.get(Number(chainRow.epoch)) || null;
+    const matchesStoredRound = doesStoredRoundMatchChainRow(storedRound, chainRow);
+    if (matchesStoredRound) {
+      matchedStoredRoundIds.add(storedRound.id);
+    }
+
+    rows.push({
+      key: matchesStoredRound ? `round-${storedRound.id}` : `chain-${chainRow.epoch}`,
+      rowType: matchesStoredRound ? "deployed" : "chain-only",
+      roundId: matchesStoredRound ? storedRound.id : null,
+      label: `Epoch ${chainRow.epoch}`,
+      root: chainRow.root,
+      deadline: Number(chainRow.deadline || 0),
+      claimedAmount: chainRow.claimedAmount,
+      totalAmountRaw: matchesStoredRound ? BigInt(storedRound.totalAmountRaw) : chainRow.totalAmountRaw,
+      sourceText: matchesStoredRound ? "DB + Chain" : "Chain only",
+      canFundTotal: matchesStoredRound,
+      canDeploy: false,
+      canViewClaims: Boolean(matchesStoredRound),
+    });
+  }
+
+  const storedOnlyRounds = runtime.storedRounds
+    .filter((round) => round.status === "deployed" && !matchedStoredRoundIds.has(round.id))
+    .sort(sortDeployedRounds);
+
+  for (const round of storedOnlyRounds) {
+    rows.push({
+      key: `stored-${round.id}`,
+      rowType: "stored-only",
+      roundId: round.id,
+      label: formatStoredRoundLabel(round),
+      root: round.merkleRoot,
+      deadline: Number(round.deadline || 0),
+      claimedAmount: null,
+      totalAmountRaw: BigInt(round.totalAmountRaw),
+      sourceText: "DB only",
+      canFundTotal: true,
+      canDeploy: false,
+      canViewClaims: true,
+    });
+  }
+
+  return rows;
+}
+
+function formatClaimState(record) {
+  if (record.claimed === true || record.entry?.claimedAt || record.entry?.claimedTxHash) {
+    return "Claimed";
+  }
+
+  if (record.claimed === false) {
+    return "Unclaimed";
+  }
+
+  if (record.round?.status === "draft") {
+    return "Draft";
+  }
+
+  return "Unknown";
+}
+
+function renderSelectedRoundClaims() {
+  if (!runtime.selectedRoundId) {
+    els.selectedRoundLabel.textContent = "None selected";
+    els.selectedRoundLabel.title = "";
+    els.selectedRoundMeta.textContent = "Choose a stored round to inspect its claim entries.";
+    els.selectedRoundClaimCount.textContent = "-";
+    els.selectedRoundTotal.textContent = "-";
+    els.roundClaimsBody.innerHTML = '<tr><td colspan="5" class="empty-row">Select a stored round to view its claims.</td></tr>';
+    els.refreshRoundClaimsStatusButton.disabled = true;
     return;
   }
 
-  els.epochListBody.innerHTML = runtime.epochRows
-    .map((row) => `
+  const selectedRound = runtime.storedRounds.find((round) => round.id === runtime.selectedRoundId) || null;
+  if (!selectedRound) {
+    runtime.selectedRoundId = null;
+    runtime.selectedRoundClaims = [];
+    renderSelectedRoundClaims();
+    return;
+  }
+
+  const claimCount = runtime.selectedRoundClaims.length;
+  els.selectedRoundLabel.textContent = formatSelectedRoundLabel(selectedRound);
+  els.selectedRoundLabel.title = selectedRound.merkleRoot || formatStoredRoundLabel(selectedRound);
+  els.selectedRoundMeta.textContent = selectedRound.status === "draft"
+    ? "Claim indexes match the contract leaf indexes. Claimed status is only available after deployment."
+    : "Claim indexes match the contract leaf indexes. Use Load Claimed Status to query the contract for this round.";
+  els.selectedRoundClaimCount.textContent = claimCount === 1 ? "1 claim" : `${claimCount} claims`;
+  els.selectedRoundTotal.textContent = formatTokenAmount(
+    BigInt(selectedRound.totalAmountRaw),
+    runtime.tokenDecimals,
+    runtime.tokenSymbol,
+  );
+  els.refreshRoundClaimsStatusButton.disabled = !(selectedRound.status === "deployed" && claimCount > 0);
+
+  if (!claimCount) {
+    els.roundClaimsBody.innerHTML = '<tr><td colspan="5" class="empty-row">No claims were found for this round.</td></tr>';
+    return;
+  }
+
+  els.roundClaimsBody.innerHTML = runtime.selectedRoundClaims
+    .map((record) => `
       <tr>
-        <td>${row.epoch}</td>
-        <td><code title="${row.root}">${formatHexShort(row.root)}</code></td>
-        <td>
-          <div class="deadline-stack">
-            <div><span>Local:</span> ${formatAdminDeadlineLocal(row.deadline)}</div>
-            <div><span>UTC:</span> ${formatAdminDeadlineUtc(row.deadline)}</div>
-          </div>
-        </td>
-        <td><span class="status-chip" data-tone="${getEpochStatusTone(row.deadline)}">${getEpochStatus(row.deadline)}</span></td>
-        <td>${formatClaimedDisplay(row.claimedAmount, row.totalAmountRaw)}</td>
+        <td>${record.entry?.index ?? "-"}</td>
+        <td>${escapeHtml(record.entry?.usernameDisplay || "-")}</td>
+        <td><code title="${record.entry?.account || ""}">${record.entry?.account ? formatAddressShort(record.entry.account) : "-"}</code></td>
+        <td>${record.entry?.amountRaw ? formatTokenAmount(BigInt(record.entry.amountRaw), runtime.tokenDecimals, runtime.tokenSymbol) : "-"}</td>
+        <td>${formatClaimState(record)}</td>
       </tr>
     `)
     .join("");
+}
+
+function renderClaimLookupResults() {
+  if (!runtime.claimLookupRows.length) {
+    els.claimLookupBody.innerHTML = '<tr><td colspan="6" class="empty-row">Run a wallet lookup to view stored claims.</td></tr>';
+    return;
+  }
+
+  els.claimLookupBody.innerHTML = runtime.claimLookupRows
+    .map((record) => {
+      const roundLabel = formatStoredRoundLabel(record.round);
+
+      return `
+        <tr>
+          <td>${escapeHtml(roundLabel)}</td>
+          <td>${record.entry?.index ?? "-"}</td>
+          <td>${escapeHtml(record.entry?.usernameDisplay || "-")}</td>
+          <td><code title="${record.entry?.account || ""}">${record.entry?.account ? formatAddressShort(record.entry.account) : "-"}</code></td>
+          <td>${record.entry?.amountRaw ? formatTokenAmount(BigInt(record.entry.amountRaw), runtime.tokenDecimals, runtime.tokenSymbol) : "-"}</td>
+          <td>${formatClaimState(record)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderManagementSummary() {
+  els.managementAccountCount.textContent = String(runtime.managementSummary.accountCount || 0);
+  els.managementFollowerCount.textContent = String(runtime.managementSummary.followerCount || 0);
+  els.managementRecoveryCandidateCount.textContent = String(runtime.managementSummary.recoveryCandidateCount || 0);
+  els.managementSubmissionCount.textContent = String(runtime.managementSummary.recoverySubmissionCount || 0);
+  els.managementLatestSnapshot.textContent = runtime.managementSummary.latestSnapshotCapturedAt
+    ? formatManagementDateTime(runtime.managementSummary.latestSnapshotCapturedAt)
+    : "-";
+}
+
+function renderAccountsPagination() {
+  els.accountsPaginationLabel.textContent = formatPaginationLabel(
+    runtime.accountsPagination,
+    "account",
+    "accounts",
+  );
+  els.accountsPreviousPageButton.disabled = !runtime.accountsPagination.hasPreviousPage;
+  els.accountsNextPageButton.disabled = !runtime.accountsPagination.hasNextPage;
+}
+
+function renderAccountsTable() {
+  renderAccountsPagination();
+
+  if (!runtime.accountsRows.length) {
+    els.accountsTableBody.innerHTML = '<tr><td colspan="8" class="empty-row">No matching accounts were found.</td></tr>';
+    return;
+  }
+
+  els.accountsTableBody.innerHTML = runtime.accountsRows
+    .map((account) => `
+      <tr>
+        <td><strong>${escapeHtml(account.username || "-")}</strong></td>
+        <td>${escapeHtml(account.xUserId || "-")}</td>
+        <td>${renderExplorerAddress(account.walletAddress)}</td>
+        <td>${escapeHtml(account.walletSource || "-")}</td>
+        <td>${createFlagBadge(account.isFollower)}</td>
+        <td>${createFlagBadge(account.needsRecovery, { positiveLabel: "Needs action", negativeLabel: "Clear" })}</td>
+        <td>
+          <div class="management-meta-stack">
+            <strong>${Number(account.snapshotsSeenCount || 0)}</strong>
+            <span>${escapeHtml(account.firstSeenFollowingAt ? `First: ${formatManagementDateTime(account.firstSeenFollowingAt)}` : "No snapshot history")}</span>
+          </div>
+        </td>
+        <td>
+          <div class="management-meta-stack">
+            <strong>${escapeHtml(account.latestSnapshotCapturedAt ? formatManagementDateTime(account.latestSnapshotCapturedAt) : "No snapshot")}</strong>
+            <span>${escapeHtml(`Updated: ${formatManagementDateTime(account.updatedAt)}`)}</span>
+          </div>
+        </td>
+      </tr>
+    `)
+    .join("");
+}
+
+function renderRecoveryPagination() {
+  els.recoveryPaginationLabel.textContent = formatPaginationLabel(
+    runtime.recoveryPagination,
+    "submission",
+    "submissions",
+  );
+  els.recoveryPreviousPageButton.disabled = !runtime.recoveryPagination.hasPreviousPage;
+  els.recoveryNextPageButton.disabled = !runtime.recoveryPagination.hasNextPage;
+}
+
+function renderRecoverySubmissionsTable() {
+  renderRecoveryPagination();
+
+  if (!runtime.recoverySubmissionRows.length) {
+    els.recoverySubmissionsBody.innerHTML = '<tr><td colspan="7" class="empty-row">No matching recovery submissions were found.</td></tr>';
+    return;
+  }
+
+  els.recoverySubmissionsBody.innerHTML = runtime.recoverySubmissionRows
+    .map((submission) => `
+      <tr>
+        <td>${escapeHtml(formatManagementDateTime(submission.submittedAt))}</td>
+        <td><strong>${escapeHtml(submission.usernameAtSubmission || "-")}</strong></td>
+        <td>${escapeHtml(submission.xUserId || "-")}</td>
+        <td>${renderExplorerAddress(submission.walletAddress)}</td>
+        <td>${createFlagBadge(submission.wasKnownFollower)}</td>
+        <td>${createFlagBadge(submission.wasRecoveryCandidate, { positiveLabel: "Needs action", negativeLabel: "Clear" })}</td>
+        <td>${escapeHtml(submission.status || "-")}</td>
+      </tr>
+    `)
+    .join("");
+}
+
+function applyManagementResponse(payload) {
+  runtime.managementSummary = payload?.summary || runtime.managementSummary;
+}
+
+async function loadAccountsPage(page = 1) {
+  const payload = await callAdminApi((accessToken) => fetchAdminAccounts(runtime.config, accessToken, {
+    page,
+    pageSize: Number(els.accountsPageSizeSelect?.value || runtime.accountsPagination.pageSize || 50),
+    search: runtime.accountsSearch,
+  }));
+
+  applyManagementResponse(payload);
+  runtime.accountsRows = Array.isArray(payload?.accounts) ? payload.accounts : [];
+  runtime.accountsPagination = payload?.pagination || runtime.accountsPagination;
+  renderManagementSummary();
+  renderAccountsTable();
+}
+
+async function loadRecoverySubmissionsPage(page = 1) {
+  const payload = await callAdminApi((accessToken) => fetchAdminRecoverySubmissions(runtime.config, accessToken, {
+    page,
+    pageSize: Number(els.recoveryPageSizeSelect?.value || runtime.recoveryPagination.pageSize || 50),
+    search: runtime.recoverySearch,
+  }));
+
+  applyManagementResponse(payload);
+  runtime.recoverySubmissionRows = Array.isArray(payload?.submissions) ? payload.submissions : [];
+  runtime.recoveryPagination = payload?.pagination || runtime.recoveryPagination;
+  renderManagementSummary();
+  renderRecoverySubmissionsTable();
+}
+
+async function refreshAccountManagementData() {
+  if (!isOwner()) {
+    runtime.managementSummary = {
+      accountCount: 0,
+      followerCount: 0,
+      recoveryCandidateCount: 0,
+      latestSnapshotCapturedAt: null,
+      recoverySubmissionCount: 0,
+    };
+    runtime.accountsRows = [];
+    runtime.recoverySubmissionRows = [];
+    runtime.hasLoadedAccountsTab = false;
+    renderManagementSummary();
+    renderAccountsTable();
+    renderRecoverySubmissionsTable();
+    return;
+  }
+
+  await Promise.all([
+    loadAccountsPage(runtime.accountsPagination.page || 1),
+    loadRecoverySubmissionsPage(runtime.recoveryPagination.page || 1),
+  ]);
+  runtime.hasLoadedAccountsTab = true;
+}
+
+async function handleAccountsTemplateDownload() {
+  downloadTextFile("accounts-template.csv", `${ADMIN_ACCOUNTS_TEMPLATE_CSV}\n`, "text/csv");
+}
+
+async function handleRecoveryExport(format) {
+  const payload = await callAdminApi((accessToken) => exportAdminRecoverySubmissions(runtime.config, accessToken, format));
+  const fileName = String(payload?.fileName || `recovery-submissions.${format === "csv" ? "csv" : "json"}`).trim();
+  const content = String(payload?.content || "");
+  const contentType = String(payload?.contentType || (format === "csv" ? "text/csv" : "application/json")).trim();
+
+  downloadTextFile(fileName, content, contentType);
+  logger.log(`Recovery submissions exported as ${fileName}.`, "success");
+}
+
+function renderEpochList() {
+  runtime.roundRows = buildRoundRows();
+
+  if (!runtime.roundRows.length) {
+    els.epochListBody.innerHTML = '<tr><td colspan="7" class="empty-row">No rounds found yet.</td></tr>';
+    return;
+  }
+
+  els.epochListBody.innerHTML = runtime.roundRows
+    .map((row) => {
+      const status = getRoundRowStatus(row);
+      return `
+        <tr>
+          <td>${escapeHtml(row.label)}</td>
+          <td><code title="${row.root}">${formatHexShort(row.root)}</code></td>
+          <td>
+            <div class="deadline-stack">
+              <div><span>Local:</span> ${formatAdminDeadlineLocal(row.deadline)}</div>
+              <div><span>UTC:</span> ${formatAdminDeadlineUtc(row.deadline)}</div>
+            </div>
+          </td>
+          <td><span class="status-chip" data-tone="${status.tone}">${status.text}</span></td>
+          <td>${formatRoundTotalDisplay(row)}</td>
+          <td>${escapeHtml(row.sourceText)}</td>
+          <td class="round-action-cell">
+            ${row.canDeploy ? `<button type="button" class="secondary table-action-button" data-round-deploy="${row.roundId}">Deploy</button>` : ""}
+            ${row.canFundTotal ? `<button type="button" class="ghost table-action-button" data-round-fund="${row.roundId}">Fund Total</button>` : ""}
+            ${row.canViewClaims ? `<button type="button" class="ghost table-action-button" data-round-claims="${row.roundId}">View Claims</button>` : ""}
+            ${!row.canDeploy && !row.canFundTotal && !row.canViewClaims ? '<span class="hint">No DB record</span>' : ""}
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  els.epochListBody.querySelectorAll("[data-round-deploy]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await deployStoredRound(Number(button.getAttribute("data-round-deploy")));
+      } catch (error) {
+        reportError(error, "Deploy saved round");
+      }
+    });
+  });
+
+  els.epochListBody.querySelectorAll("[data-round-fund]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await fundStoredRoundTotal(Number(button.getAttribute("data-round-fund")));
+      } catch (error) {
+        reportError(error, "Fund round total");
+      }
+    });
+  });
+
+  els.epochListBody.querySelectorAll("[data-round-claims]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await loadRoundClaims(Number(button.getAttribute("data-round-claims")), { scrollIntoView: true });
+      } catch (error) {
+        reportError(error, "Load round claims");
+      }
+    });
+  });
 }
 
 function applyOwnershipSection() {
@@ -832,17 +1649,28 @@ function applyOwnershipSection() {
   }
 }
 
+function applyPendingOwnerSection() {
+  if (!els.pendingOwnerShell) return;
+
+  const normalizedPendingOwner = normalizeAddress(runtime.pendingOwner);
+  const hasPendingOwner = Boolean(normalizedPendingOwner && normalizedPendingOwner !== ethers.ZeroAddress);
+  const canAccept = Boolean(runtime.provider && runtime.account && isReadyChain() && isPendingOwner());
+
+  els.pendingOwnerShell.hidden = !canAccept;
+  els.pendingOwnershipCurrentOwner.textContent = runtime.owner || "-";
+  els.pendingOwnershipPendingOwner.textContent = hasPendingOwner ? normalizedPendingOwner : "No pending owner";
+  els.pendingAcceptOwnershipButton.disabled = !canAccept;
+}
+
 async function refreshEpochRows() {
   runtime.epochRows = [];
 
   if (!runtime.provider || runtime.currentEpoch <= 0) {
-    renderEpochList();
     return;
   }
 
   const { airdrop } = getContracts({ config: runtime.config, provider: runtime.provider });
   if (!airdrop) {
-    renderEpochList();
     return;
   }
 
@@ -850,10 +1678,7 @@ async function refreshEpochRows() {
   runtime.epochRows = await Promise.all(
     epochIds.map(async (epoch) => {
       const [root, deadline, claimedAmount] = await airdrop.epochInfo(BigInt(epoch));
-      const localSource = runtime.claimSourcesByEpoch.get(epoch)
-        || runtime.claimSourcesByRoot.get(root.toLowerCase())
-        || null;
-      const localRound = localSource?.round;
+      const localRound = runtime.storedRoundsByEpoch.get(epoch) || null;
       const totalAmountRaw = localRound && localRound.merkleRoot.toLowerCase() === root.toLowerCase()
         ? BigInt(localRound.totalAmountRaw)
         : null;
@@ -867,8 +1692,30 @@ async function refreshEpochRows() {
       };
     }),
   );
+}
 
-  renderEpochList();
+function syncAdminTabs() {
+  const activeTab = runtime.activeAdminTab || "prepare";
+
+  els.adminTabButtons.forEach((button) => {
+    const isActive = button.getAttribute("data-admin-tab") === activeTab;
+    button.setAttribute("aria-selected", isActive ? "true" : "false");
+    button.classList.toggle("is-active", isActive);
+  });
+
+  els.adminTabPanels.forEach((panel) => {
+    panel.hidden = panel.getAttribute("data-admin-panel") !== activeTab;
+  });
+}
+
+function setAdminTab(tabId) {
+  runtime.activeAdminTab = tabId;
+  syncAdminTabs();
+  if (tabId === "accounts" && isOwner()) {
+    void refreshAccountManagementData().catch((error) => {
+      reportError(error, "Load follower management");
+    });
+  }
 }
 
 function applyOwnerGate() {
@@ -876,49 +1723,66 @@ function applyOwnerGate() {
   els.connectedAccount.textContent = runtime.account || "No wallet connected";
 
   if (!runtime.provider) {
-    els.accountRole.textContent = "Wallet missing";
-    els.adminGateMessage.textContent = "Install a compatible browser wallet to manage the airdrop.";
-    els.switchNetworkGateButton.hidden = true;
-    els.adminShell.hidden = true;
-    return;
+      resetAdminAccess();
+      els.accountRole.textContent = "Wallet missing";
+      els.adminGateMessage.textContent = "Install a compatible browser wallet to manage the airdrop.";
+      els.switchNetworkGateButton.hidden = true;
+      els.adminShell.hidden = true;
+      els.pendingOwnerShell.hidden = true;
+      return;
   }
 
   if (!runtime.account) {
-    els.accountRole.textContent = "Disconnected";
-    els.adminGateMessage.textContent = "Connect the owner wallet to view admin controls.";
-    els.switchNetworkGateButton.hidden = true;
-    els.adminShell.hidden = true;
-    return;
+      resetAdminAccess();
+      els.accountRole.textContent = "Disconnected";
+      els.adminGateMessage.textContent = "Connect the owner or pending owner wallet to view admin controls.";
+      els.switchNetworkGateButton.hidden = true;
+      els.adminShell.hidden = true;
+      els.pendingOwnerShell.hidden = true;
+      return;
   }
 
   if (!isReadyChain()) {
-    els.accountRole.textContent = "Wrong network";
-    els.adminGateMessage.textContent = "Switch the connected wallet to the configured network to manage the airdrop.";
-    els.switchNetworkGateButton.hidden = false;
-    els.adminShell.hidden = true;
-    return;
+      resetAdminAccess();
+      els.accountRole.textContent = "Wrong network";
+      els.adminGateMessage.textContent = "Switch the connected wallet to the configured network to manage the airdrop.";
+      els.switchNetworkGateButton.hidden = false;
+      els.adminShell.hidden = true;
+      els.pendingOwnerShell.hidden = true;
+      return;
   }
 
   if (!runtime.owner) {
-    els.accountRole.textContent = "Connected wallet";
-    els.adminGateMessage.textContent = "Owner address is not available yet. Check the contract config.";
-    els.switchNetworkGateButton.hidden = true;
-    els.adminShell.hidden = true;
-    return;
+      resetAdminAccess();
+      els.accountRole.textContent = "Connected wallet";
+      els.adminGateMessage.textContent = "Owner address is not available yet. Check the contract config.";
+      els.switchNetworkGateButton.hidden = true;
+      els.adminShell.hidden = true;
+      els.pendingOwnerShell.hidden = true;
+      return;
+  }
+
+  if (!hasOwnershipAccess()) {
+      resetAdminAccess();
+      els.accountRole.textContent = "Connected wallet";
+      els.adminGateMessage.textContent = "This page only unlocks for the current owner or pending owner address.";
+      els.switchNetworkGateButton.hidden = true;
+      els.adminShell.hidden = true;
+      els.pendingOwnerShell.hidden = true;
+      return;
   }
 
   if (!isOwner()) {
-    els.accountRole.textContent = "Connected wallet";
-    els.adminGateMessage.textContent = "This page only unlocks for the current owner address.";
-    els.switchNetworkGateButton.hidden = true;
-    els.adminShell.hidden = true;
-    return;
+    resetAdminAccess();
   }
 
-  els.accountRole.textContent = "Owner connected";
-  els.adminGateMessage.textContent = "Owner wallet detected. Admin controls are unlocked.";
+  els.accountRole.textContent = isOwner() ? "Owner connected" : "Pending owner connected";
+  els.adminGateMessage.textContent = isOwner()
+    ? "Owner wallet detected. Admin controls are unlocked."
+    : "Pending owner wallet detected. Accept ownership below to unlock the full admin workspace.";
   els.switchNetworkGateButton.hidden = true;
-  els.adminShell.hidden = false;
+  els.adminShell.hidden = !isOwner();
+  els.pendingOwnerShell.hidden = !isPendingOwner();
   updateStartAirdropButtonState();
 }
 
@@ -970,14 +1834,19 @@ async function refreshPage() {
     runtime.currentEpoch = 0;
   }
 
-  await refreshCatalogRounds().catch(() => {
-    runtime.claimSourcesByEpoch = new Map();
+  await refreshStoredRounds().catch(() => {
+    runtime.storedRounds = [];
+    runtime.storedRoundsByEpoch = new Map();
+    runtime.storedRoundsByRoot = new Map();
   });
 
   await refreshEpochRows().catch(() => {
     runtime.epochRows = [];
-    renderEpochList();
   });
+
+  renderEpochList();
+  renderSelectedRoundClaims();
+  syncAdminTabs();
 
   if (!runtime.builderRows.length) {
     resetClaimsBuilder();
@@ -989,14 +1858,34 @@ async function refreshPage() {
   renderUploadedRound();
   applyOwnerGate();
   applyOwnershipSection();
+  applyPendingOwnerSection();
   updateStartAirdropButtonState();
+
+  if (runtime.activeAdminTab === "accounts" && isOwner()) {
+    await refreshAccountManagementData();
+  }
 }
 
-async function fundUploadedRound() {
-  if (!runtime.uploadedRound) {
-    throw new Error("Prepare a claims JSON file first.");
-  }
+async function acceptOwnershipTransaction() {
+  const { airdrop } = getContracts({
+    config: runtime.config,
+    provider: runtime.provider,
+    signer: runtime.signer,
+    withSigner: true,
+  });
+  if (!airdrop) throw new Error("Airdrop address is not configured.");
+  if (!isPendingOwner()) throw new Error("Only the pending owner can accept ownership.");
 
+  await sendTransaction("Accept ownership", () => airdrop.acceptOwnership(), {
+    log: logger.log,
+    afterSuccess: async () => {
+      await refreshPage();
+    },
+    formatError: (error, label) => formatUiError(error, label, runtime),
+  });
+}
+
+async function fundAirdropAmountRaw(amountRaw, label = "Fund airdrop") {
   const { token, airdropAddress } = getContracts({
     config: runtime.config,
     provider: runtime.provider,
@@ -1008,8 +1897,7 @@ async function fundUploadedRound() {
     throw new Error("Token and airdrop addresses must be configured.");
   }
 
-  const amountRaw = BigInt(runtime.uploadedRound.totalAmountRaw);
-  await sendTransaction("Fund airdrop", () => token.transfer(airdropAddress, amountRaw), {
+  await sendTransaction(label, () => token.transfer(airdropAddress, amountRaw), {
     log: logger.log,
     afterSuccess: async () => {
       await refreshPage();
@@ -1018,7 +1906,68 @@ async function fundUploadedRound() {
   });
 }
 
-async function startAirdropAndPersistRound() {
+async function fundStoredRoundTotal(roundId) {
+  const storedRound = runtime.storedRounds.find((round) => round.id === roundId) || null;
+  if (!storedRound) {
+    throw new Error("The selected stored round could not be found.");
+  }
+
+  await fundAirdropAmountRaw(BigInt(storedRound.totalAmountRaw));
+}
+
+async function loadClaimStatuses(records) {
+  if (!Array.isArray(records) || !records.length || !runtime.provider) {
+    return records || [];
+  }
+
+  const { airdrop } = getContracts({ config: runtime.config, provider: runtime.provider });
+  if (!airdrop) {
+    return records;
+  }
+
+  return Promise.all(
+    records.map(async (record) => {
+      if (record?.round?.status !== "deployed" || record?.round?.epoch == null || !record?.entry?.index) {
+        return { ...record, claimed: null };
+      }
+
+      try {
+        const claimed = await airdrop.isClaimed(BigInt(record.round.epoch), BigInt(record.entry.index));
+        return { ...record, claimed };
+      } catch {
+        return { ...record, claimed: null };
+      }
+    }),
+  );
+}
+
+async function loadRoundClaims(roundId, { scrollIntoView = false } = {}) {
+  if (!isClaimsApiConfigured(runtime.config)) {
+    throw new Error("Backend API URL is not configured.");
+  }
+
+  const payload = await fetchStoredRoundClaims(runtime.config, roundId);
+  runtime.selectedRoundId = Number(roundId);
+  runtime.selectedRoundClaims = Array.isArray(payload?.claims)
+    ? payload.claims.map((record) => ({
+      ...record,
+      claimed: record?.entry?.claimedAt || record?.entry?.claimedTxHash ? true : null,
+    }))
+    : [];
+  setAdminTab("rounds");
+  renderSelectedRoundClaims();
+  if (scrollIntoView) {
+    scrollRoundClaimsSectionIntoView();
+  }
+}
+
+async function refreshSelectedRoundClaimStatuses() {
+  if (!runtime.selectedRoundClaims.length) return;
+  runtime.selectedRoundClaims = await loadClaimStatuses(runtime.selectedRoundClaims);
+  renderSelectedRoundClaims();
+}
+
+async function saveDraftRoundToBackend() {
   if (!runtime.uploadedRound) {
     throw new Error("Prepare a claims JSON file first.");
   }
@@ -1026,6 +1975,60 @@ async function startAirdropAndPersistRound() {
   if (!isClaimsApiConfigured(runtime.config)) {
     throw new Error("Backend API URL is not configured.");
   }
+
+  const root = els.startRootInput.value.trim();
+  if (!ethers.isHexString(root, 32)) {
+    throw new Error("Merkle root must be a bytes32 hex string.");
+  }
+
+  const deadlineUnix = Number(els.startDeadlineUnix.value);
+  await validateFutureDeadlineAgainstChain(deadlineUnix);
+
+  const saveChallenge = await requestAirdropSaveChallenge(runtime.config, {
+    walletAddress: runtime.account,
+    merkleRoot: runtime.uploadedRound.root,
+    deadline: deadlineUnix,
+  });
+  const saveSignature = await runtime.signer.signMessage(saveChallenge.message);
+  const persisted = await saveAirdropRound(runtime.config, {
+    deadline: deadlineUnix,
+    walletAddress: runtime.account,
+    challengeId: saveChallenge.challengeId,
+    signature: saveSignature,
+    decimals: runtime.tokenDecimals,
+    claims: runtime.uploadedRound.claims.map((claim) => ({
+      index: claim.index,
+      account: claim.account,
+      amountRaw: claim.amountRaw,
+    })),
+  });
+
+  if (persisted?.round?.id) {
+    applyUploadedRound({
+      ...runtime.uploadedRound,
+      storedRoundId: persisted.round.id,
+    });
+    await refreshPage();
+    await loadRoundClaims(persisted.round.id);
+    logger.log("Draft saved to the backend.", "success");
+  }
+}
+
+async function deployStoredRound(roundId) {
+  const selectedRound = runtime.storedRounds.find((round) => round.id === roundId) || null;
+  if (!selectedRound) {
+    throw new Error("The selected saved round could not be found.");
+  }
+
+  if (selectedRound.status !== "draft") {
+    throw new Error("Only saved draft rounds can be deployed.");
+  }
+
+  if (!isClaimsApiConfigured(runtime.config)) {
+    throw new Error("Backend API URL is not configured.");
+  }
+
+  await validateFutureDeadlineAgainstChain(Number(selectedRound.deadline));
 
   const { airdrop } = getContracts({
     config: runtime.config,
@@ -1038,54 +2041,23 @@ async function startAirdropAndPersistRound() {
     throw new Error("Airdrop address is not configured.");
   }
 
-  const root = els.startRootInput.value.trim();
-  if (!ethers.isHexString(root, 32)) {
-    throw new Error("Merkle root must be a bytes32 hex string.");
+  const tx = await airdrop.startNewAirdrop(selectedRound.merkleRoot, Number(selectedRound.deadline));
+  logger.log(`Deploy saved round: submitted ${tx.hash}`);
+  const receipt = await tx.wait();
+  logger.log(`Deploy saved round: confirmed in block ${receipt.blockNumber}`, "success");
+
+  const persisted = await deploySavedAirdropRound(runtime.config, roundId, {
+    txHash: tx.hash,
+  });
+
+  await refreshPage();
+  if (persisted?.round?.id) {
+    runtime.selectedRoundId = persisted.round.id;
+    await loadRoundClaims(persisted.round.id);
   }
 
-  const deadlineUnix = Number(els.startDeadlineUnix.value);
-  await validateFutureDeadlineAgainstChain(deadlineUnix);
-
-  const tx = await airdrop.startNewAirdrop(root, deadlineUnix);
-  logger.log(`Start airdrop: submitted ${tx.hash}`);
-  const receipt = await tx.wait();
-  logger.log(`Start airdrop: confirmed in block ${receipt.blockNumber}`, "success");
-
-  try {
-    const finalizeChallenge = await requestAirdropFinalizeChallenge(runtime.config, {
-      walletAddress: runtime.account,
-      txHash: tx.hash,
-      merkleRoot: runtime.uploadedRound.root,
-    });
-    const finalizeSignature = await runtime.signer.signMessage(finalizeChallenge.message);
-
-    const persisted = await persistAirdropRound(runtime.config, {
-      txHash: tx.hash,
-      walletAddress: runtime.account,
-      challengeId: finalizeChallenge.challengeId,
-      signature: finalizeSignature,
-      decimals: runtime.tokenDecimals,
-      claims: runtime.uploadedRound.claims.map((claim) => ({
-        index: claim.index,
-        account: claim.account,
-        amountRaw: claim.amountRaw,
-      })),
-    });
-
-    runtime.startRequiresNewUpload = true;
-    await refreshPage();
-    updateStartAirdropButtonState();
-
-    if (persisted?.round?.epoch) {
-      logger.log(`Round ${persisted.round.epoch} saved to the backend.`, "success");
-    }
-  } catch (error) {
-    runtime.startRequiresNewUpload = true;
-    await refreshPage().catch(() => {});
-    updateStartAirdropButtonState();
-    throw new Error(
-      `Airdrop was started on chain, but saving the round to the backend failed. ${error?.message || String(error)}`,
-    );
+  if (persisted?.round?.epoch != null) {
+    logger.log(`Draft deployed as epoch ${persisted.round.epoch}.`, "success");
   }
 }
 
@@ -1113,6 +2085,14 @@ async function updateEpochDeadline(newDeadline) {
 }
 
 function bindEvents() {
+  els.adminTabButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextTab = button.getAttribute("data-admin-tab");
+      if (!nextTab) return;
+      setAdminTab(nextTab);
+    });
+  });
+
   els.connectButton.addEventListener("click", async () => {
     if (runtime.account) {
       toggleWalletMenu();
@@ -1188,6 +2168,15 @@ function bindEvents() {
     }
   });
 
+  els.refreshRoundClaimsStatusButton?.addEventListener("click", async () => {
+    try {
+      await refreshSelectedRoundClaimStatuses();
+      logger.log("Claimed status refreshed.", "success");
+    } catch (error) {
+      reportError(error, "Refresh claimed status");
+    }
+  });
+
   els.claimPageButton?.addEventListener("click", () => {
     window.location.href = "./index.html";
   });
@@ -1242,6 +2231,22 @@ function bindEvents() {
     logger.log("Claims builder cleared.");
   });
 
+  els.loadWalletAccountsButton?.addEventListener("click", async () => {
+    const originalLabel = els.loadWalletAccountsButton.textContent;
+    els.loadWalletAccountsButton.disabled = true;
+    els.loadWalletAccountsButton.textContent = "Loading...";
+
+    try {
+      const result = await loadAllLinkedWalletClaimsIntoBuilder();
+      logger.log(formatLinkedWalletLoadMessage(result), "success");
+    } catch (error) {
+      reportError(error, "Use all linked wallets");
+    } finally {
+      els.loadWalletAccountsButton.disabled = false;
+      els.loadWalletAccountsButton.textContent = originalLabel;
+    }
+  });
+
   els.loadBuilderButton?.addEventListener("click", async () => {
     try {
       const artifact = buildClaimsBuilderArtifact();
@@ -1285,14 +2290,6 @@ function bindEvents() {
     logger.log("Prepared claims cleared.");
   });
 
-  els.fundUploadedButton.addEventListener("click", async () => {
-    try {
-      await fundUploadedRound();
-    } catch (error) {
-      reportError(error, "Fund airdrop");
-    }
-  });
-
   els.startDeadlineInput.addEventListener("input", () => {
     syncDeadlineFromLocal(els.startDeadlineInput, els.startDeadlineUtcInput, els.startDeadlineUnix);
     updateStartAirdropButtonState();
@@ -1317,22 +2314,8 @@ function bindEvents() {
   els.fundAirdropForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      const { token, airdropAddress } = getContracts({
-        config: runtime.config,
-        provider: runtime.provider,
-        signer: runtime.signer,
-        withSigner: true,
-      });
-      if (!token || !airdropAddress) throw new Error("Token and airdrop addresses must be configured.");
-
       const amountRaw = parseHumanAmount(els.fundAirdropAmount.value, runtime.tokenDecimals);
-      await sendTransaction("Fund airdrop", () => token.transfer(airdropAddress, amountRaw), {
-        log: logger.log,
-        afterSuccess: async () => {
-          await refreshPage();
-        },
-        formatError: (error, label) => formatUiError(error, label, runtime),
-      });
+      await fundAirdropAmountRaw(amountRaw);
     } catch (error) {
       reportError(error, "Fund airdrop");
     }
@@ -1341,9 +2324,9 @@ function bindEvents() {
   els.startAirdropForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      await startAirdropAndPersistRound();
+      await saveDraftRoundToBackend();
     } catch (error) {
-      reportError(error, "Start airdrop");
+      reportError(error, "Save airdrop draft");
     }
   });
 
@@ -1395,22 +2378,15 @@ function bindEvents() {
   els.acceptOwnershipForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      const { airdrop } = getContracts({
-        config: runtime.config,
-        provider: runtime.provider,
-        signer: runtime.signer,
-        withSigner: true,
-      });
-      if (!airdrop) throw new Error("Airdrop address is not configured.");
-      if (!isPendingOwner()) throw new Error("Only the pending owner can accept ownership.");
+      await acceptOwnershipTransaction();
+    } catch (error) {
+      reportError(error, "Accept ownership");
+    }
+  });
 
-      await sendTransaction("Accept ownership", () => airdrop.acceptOwnership(), {
-        log: logger.log,
-        afterSuccess: async () => {
-          await refreshPage();
-        },
-        formatError: (error, label) => formatUiError(error, label, runtime),
-      });
+  els.pendingAcceptOwnershipButton?.addEventListener("click", async () => {
+    try {
+      await acceptOwnershipTransaction();
     } catch (error) {
       reportError(error, "Accept ownership");
     }
@@ -1475,7 +2451,7 @@ function bindEvents() {
 
       const epoch = readRequiredEpoch(els.queryEpochInput, "Epoch query");
       const [root, deadline, claimedAmount] = await airdrop.epochInfo(epoch);
-      const localRound = runtime.claimSourcesByEpoch.get(Number(epoch))?.round;
+      const localRound = runtime.storedRoundsByEpoch.get(Number(epoch)) || null;
       const totalAmountRaw = localRound && localRound.merkleRoot.toLowerCase() === root.toLowerCase()
         ? localRound.totalAmountRaw
         : null;
@@ -1503,30 +2479,236 @@ function bindEvents() {
   els.claimStatusForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      const { airdrop } = getContracts({ config: runtime.config, provider: runtime.provider });
-      if (!airdrop) throw new Error("Airdrop address is not configured.");
+      if (!isClaimsApiConfigured(runtime.config)) {
+        throw new Error("Backend API URL is not configured.");
+      }
 
-      const epoch = readRequiredEpoch(els.claimedEpochInput, "Claim status epoch");
-      const index = parseRequiredBigInt(els.claimedIndexInput.value, "Claim status index");
-      if (index < 0n) throw new Error("Claim status index must be zero or greater.");
+      const rawQuery = String(els.claimLookupInput.value || "").trim();
+      if (!rawQuery) {
+        throw new Error("Enter a wallet address.");
+      }
 
-      const claimed = await airdrop.isClaimed(epoch, index);
-      const localClaim = isClaimsApiConfigured(runtime.config)
-        ? await fetchStoredClaimByEpochAndIndex(runtime.config, epoch.toString(), index.toString()).catch(() => null)
-        : null;
-      els.claimStatusResult.textContent = JSON.stringify(
-        {
-          epoch: epoch.toString(),
-          index: index.toString(),
-          account: localClaim?.entry?.account || null,
-          amountRaw: localClaim?.entry?.amountRaw || null,
-          claimed,
-        },
-        null,
-        2,
+      const payload = await fetchStoredClaimsByWallet(runtime.config, rawQuery);
+      const rows = Array.isArray(payload?.claims) ? payload.claims : [];
+
+      runtime.claimLookupRows = await loadClaimStatuses(
+        rows.map((record) => ({
+          ...record,
+          claimed: record?.entry?.claimedAt || record?.entry?.claimedTxHash ? true : null,
+        })),
       );
+      renderClaimLookupResults();
     } catch (error) {
-      reportError(error, "Read claim status");
+      runtime.claimLookupRows = [];
+      renderClaimLookupResults();
+      reportError(error, "Lookup claims");
+    }
+  });
+
+  els.accountsImportForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    try {
+      const file = els.accountsImportFileInput?.files?.[0];
+      if (!file) {
+        throw new Error("Choose a combined accounts CSV file.");
+      }
+
+      const content = await file.text();
+      await callAdminApi((accessToken) => importAdminAccounts(runtime.config, accessToken, {
+        fileName: file.name,
+        content,
+      }));
+
+      els.accountsImportFileInput.value = "";
+      runtime.accountsPagination.page = 1;
+      await loadAccountsPage(1);
+      logger.log(`Accounts imported from ${file.name}.`, "success");
+    } catch (error) {
+      reportError(error, "Import accounts");
+    }
+  });
+
+  els.downloadAccountsTemplateButton?.addEventListener("click", async () => {
+    try {
+      await handleAccountsTemplateDownload();
+      logger.log("Accounts CSV template downloaded.", "success");
+    } catch (error) {
+      reportError(error, "Download accounts template");
+    }
+  });
+
+  els.singleAccountForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    try {
+      const payload = await callAdminApi((accessToken) => saveAdminAccount(runtime.config, accessToken, {
+        username: els.singleAccountUsernameInput?.value,
+        xUserId: els.singleAccountUserIdInput?.value,
+        walletAddress: els.singleAccountWalletInput?.value,
+        isFollower: Boolean(els.singleAccountIsFollowerInput?.checked),
+        needsRecovery: Boolean(els.singleAccountNeedsRecoveryInput?.checked),
+      }));
+
+      applyManagementResponse(payload);
+      els.singleAccountUsernameInput.value = "";
+      els.singleAccountUserIdInput.value = "";
+      els.singleAccountWalletInput.value = "";
+      els.singleAccountIsFollowerInput.checked = false;
+      els.singleAccountNeedsRecoveryInput.checked = false;
+
+      await loadAccountsPage(runtime.accountsPagination.page || 1);
+      logger.log("Account saved.", "success");
+    } catch (error) {
+      reportError(error, "Save account");
+    }
+  });
+
+  els.accountsQueryForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    try {
+      runtime.accountsSearch = String(els.accountsSearchInput?.value || "").trim();
+      runtime.accountsPagination.page = 1;
+      await loadAccountsPage(1);
+      logger.log("Account filter applied.", "success");
+    } catch (error) {
+      reportError(error, "Filter accounts");
+    }
+  });
+
+  els.accountsClearSearchButton?.addEventListener("click", async () => {
+    try {
+      els.accountsSearchInput.value = "";
+      runtime.accountsSearch = "";
+      runtime.accountsPagination.page = 1;
+      await loadAccountsPage(1);
+      logger.log("Account filter cleared.", "success");
+    } catch (error) {
+      reportError(error, "Clear account filter");
+    }
+  });
+
+  els.accountsPageSizeSelect?.addEventListener("change", async () => {
+    try {
+      runtime.accountsPagination.page = 1;
+      await loadAccountsPage(1);
+    } catch (error) {
+      reportError(error, "Change accounts page size");
+    }
+  });
+
+  els.accountsPreviousPageButton?.addEventListener("click", async () => {
+    try {
+      if (!runtime.accountsPagination.hasPreviousPage) return;
+      await loadAccountsPage((runtime.accountsPagination.page || 1) - 1);
+    } catch (error) {
+      reportError(error, "Load previous accounts page");
+    }
+  });
+
+  els.accountsNextPageButton?.addEventListener("click", async () => {
+    try {
+      if (!runtime.accountsPagination.hasNextPage) return;
+      await loadAccountsPage((runtime.accountsPagination.page || 1) + 1);
+    } catch (error) {
+      reportError(error, "Load next accounts page");
+    }
+  });
+
+  els.recoveryImportForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    try {
+      const file = els.recoveryImportFileInput?.files?.[0];
+      if (!file) {
+        throw new Error("Choose a recovery submissions JSON file.");
+      }
+
+      const content = await file.text();
+      await callAdminApi((accessToken) => importAdminRecoverySubmissions(runtime.config, accessToken, {
+        fileName: file.name,
+        content,
+      }));
+
+      els.recoveryImportFileInput.value = "";
+      runtime.accountsPagination.page = 1;
+      runtime.recoveryPagination.page = 1;
+      await Promise.all([
+        loadAccountsPage(1),
+        loadRecoverySubmissionsPage(1),
+      ]);
+      logger.log(`Recovery submissions imported from ${file.name}.`, "success");
+    } catch (error) {
+      reportError(error, "Import recovery submissions");
+    }
+  });
+
+  els.exportRecoveryJsonButton?.addEventListener("click", async () => {
+    try {
+      await handleRecoveryExport("json");
+    } catch (error) {
+      reportError(error, "Export recovery submissions JSON");
+    }
+  });
+
+  els.exportRecoveryCsvButton?.addEventListener("click", async () => {
+    try {
+      await handleRecoveryExport("csv");
+    } catch (error) {
+      reportError(error, "Export recovery submissions CSV");
+    }
+  });
+
+  els.recoveryQueryForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    try {
+      runtime.recoverySearch = String(els.recoverySearchInput?.value || "").trim();
+      runtime.recoveryPagination.page = 1;
+      await loadRecoverySubmissionsPage(1);
+      logger.log("Recovery submission filter applied.", "success");
+    } catch (error) {
+      reportError(error, "Filter recovery submissions");
+    }
+  });
+
+  els.recoveryClearSearchButton?.addEventListener("click", async () => {
+    try {
+      els.recoverySearchInput.value = "";
+      runtime.recoverySearch = "";
+      runtime.recoveryPagination.page = 1;
+      await loadRecoverySubmissionsPage(1);
+      logger.log("Recovery submission filter cleared.", "success");
+    } catch (error) {
+      reportError(error, "Clear recovery submission filter");
+    }
+  });
+
+  els.recoveryPageSizeSelect?.addEventListener("change", async () => {
+    try {
+      runtime.recoveryPagination.page = 1;
+      await loadRecoverySubmissionsPage(1);
+    } catch (error) {
+      reportError(error, "Change recovery submissions page size");
+    }
+  });
+
+  els.recoveryPreviousPageButton?.addEventListener("click", async () => {
+    try {
+      if (!runtime.recoveryPagination.hasPreviousPage) return;
+      await loadRecoverySubmissionsPage((runtime.recoveryPagination.page || 1) - 1);
+    } catch (error) {
+      reportError(error, "Load previous recovery submissions page");
+    }
+  });
+
+  els.recoveryNextPageButton?.addEventListener("click", async () => {
+    try {
+      if (!runtime.recoveryPagination.hasNextPage) return;
+      await loadRecoverySubmissionsPage((runtime.recoveryPagination.page || 1) + 1);
+    } catch (error) {
+      reportError(error, "Load next recovery submissions page");
     }
   });
 
@@ -1558,6 +2740,12 @@ function bindEvents() {
 async function init() {
   bindEvents();
   updateToastOffset();
+  renderManagementSummary();
+  renderAccountsTable();
+  renderRecoverySubmissionsTable();
+  renderSelectedRoundClaims();
+  renderClaimLookupResults();
+  syncAdminTabs();
 
   pageInitPromise = (async () => {
     updateToastOffset();
