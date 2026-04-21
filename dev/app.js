@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'x'
+const version = 'y'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -38,6 +38,7 @@ async function checkVersion() {
       'app.js',
       'dao.repo.js',
       'dao.mock-data.js',
+      'data/emoji-picker-data.js',
       'lib.js',
       'network.js',
       'crypto.js',
@@ -135,6 +136,8 @@ import {
   EthNum,
 } from './lib.js';
 
+import { CHAT_REACTION_SHEET_CATEGORIES } from './data/emoji-picker-data.js';
+
 const weiDigits = 18;
 const wei = 10n ** BigInt(weiDigits);
 //network.monitor.url = "http://test.liberdus.com:3000"    // URL of the monitor server
@@ -167,6 +170,11 @@ const NETWORK_ACCOUNT_ID = '0'.repeat(64);
 const MAX_TOLL = 1_000_000; // 1M limit
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000; // 15 minute limit for editing messages
+const MESSAGE_DELETED_STATE_LOCAL = 1;
+const MESSAGE_DELETED_STATE_ALL = 2;
+const DELETED_MESSAGE_LOCAL_TEXT = 'Deleted on this device';
+const DELETED_MESSAGE_FOR_ALL_TEXT = 'Deleted for all';
+const DELETED_MESSAGE_BY_SENDER_TEXT = 'Deleted by sender';
 
 // Migration for attachment encryption keys.
 // Set this numeric timestamp (YYYYMMDDHHMM) to force re-running the
@@ -174,6 +182,103 @@ const EDIT_WINDOW_MS = 15 * 60 * 1000; // 15 minute limit for editing messages
 // Use YYYYMMDDHHMM (year, month, day, hour, minute) so migrations
 // can be re-run multiple times per day by bumping this value.
 const MIGRATION_ATTACHMENT_KEYS_TO_ENC_KEY_TS = 202602010000;
+const MIGRATION_DELETE_STATES_TS = 202603160000;
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+function getDeletedState(recordOrValue) {
+  const rawDeleted =
+    recordOrValue && typeof recordOrValue === 'object' && !Array.isArray(recordOrValue)
+      ? recordOrValue.deleted
+      : recordOrValue;
+  const deletedNum = Number(rawDeleted);
+  return Number.isFinite(deletedNum) && deletedNum > 0 ? deletedNum : 0;
+}
+
+function isDeleted(recordOrValue) {
+  return getDeletedState(recordOrValue) > 0;
+}
+
+function isDeletedForMeOnly(recordOrValue) {
+  return getDeletedState(recordOrValue) === MESSAGE_DELETED_STATE_LOCAL;
+}
+
+function isDeletedForAll(recordOrValue) {
+  return getDeletedState(recordOrValue) === MESSAGE_DELETED_STATE_ALL;
+}
+
+function getDeletedRecordIsMine(record) {
+  if (typeof record?.my === 'boolean') {
+    return record.my;
+  }
+  if (typeof record?.sign === 'number') {
+    return record.sign < 0;
+  }
+  return undefined;
+}
+
+function inferDeletedStateFromLegacyText(text) {
+  const normalized = typeof text === 'string' ? text.trim().toLowerCase() : '';
+  if (normalized === DELETED_MESSAGE_FOR_ALL_TEXT.toLowerCase()) {
+    return MESSAGE_DELETED_STATE_ALL;
+  }
+  if (normalized === DELETED_MESSAGE_BY_SENDER_TEXT.toLowerCase()) {
+    return MESSAGE_DELETED_STATE_ALL;
+  }
+  if (normalized === DELETED_MESSAGE_LOCAL_TEXT.toLowerCase()) {
+    return MESSAGE_DELETED_STATE_LOCAL;
+  }
+  return MESSAGE_DELETED_STATE_LOCAL;
+}
+
+function getDeletedTextForState(deletedState, isMine, preferredText) {
+  const normalized = typeof preferredText === 'string' ? preferredText.trim().toLowerCase() : '';
+
+  if (deletedState === MESSAGE_DELETED_STATE_ALL) {
+    if (normalized === DELETED_MESSAGE_BY_SENDER_TEXT.toLowerCase()) {
+      return DELETED_MESSAGE_BY_SENDER_TEXT;
+    }
+    if (normalized === DELETED_MESSAGE_FOR_ALL_TEXT.toLowerCase()) {
+      return DELETED_MESSAGE_FOR_ALL_TEXT;
+    }
+    if (isMine === false) {
+      return DELETED_MESSAGE_BY_SENDER_TEXT;
+    }
+    return DELETED_MESSAGE_FOR_ALL_TEXT;
+  }
+
+  return DELETED_MESSAGE_LOCAL_TEXT;
+}
+
+function getDeletedPlaceholderText(record) {
+  const preferredText =
+    (typeof record?.message === 'string' && record.message.trim())
+      ? record.message
+      : record?.memo;
+  return getDeletedTextForState(getDeletedState(record), getDeletedRecordIsMine(record), preferredText);
+}
+
+function updateDeletedWalletHistoryEntry(txid, deletedState, memoText) {
+  if (!txid || !Array.isArray(myData?.wallet?.history)) return false;
+
+  const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === txid);
+  if (txIndex === -1) return false;
+
+  const historyEntry = myData.wallet.history[txIndex];
+  Object.assign(historyEntry, {
+    deleted: deletedState,
+    memo: memoText
+  });
+  delete historyEntry.amount;
+  delete historyEntry.symbol;
+  delete historyEntry.payment;
+  delete historyEntry.sign;
+  delete historyEntry.address;
+  return true;
+}
 
 let parameters = {
   current: {
@@ -454,6 +559,96 @@ async function migrateAttachmentKeysToEncKey(data) {
 }
 
 /**
+ * One-time migration: split legacy deleted state into local-only (1) and for-all (2)
+ * @param {Object} data
+ * @returns {boolean} True if migration flag was applied
+ */
+function migrateDeletedMessageStates(data) {
+  if (!data?.account) return false;
+
+  const migrations =
+    data.account.migrations && typeof data.account.migrations === 'object'
+      ? data.account.migrations
+      : null;
+
+  const appliedTsRaw = migrations?.deleteStates;
+  let appliedTs = 0;
+  if (typeof appliedTsRaw === 'number') {
+    appliedTs = appliedTsRaw;
+  } else if (appliedTsRaw === true) {
+    appliedTs = 0;
+  }
+
+  if (appliedTs >= MIGRATION_DELETE_STATES_TS) {
+    return false;
+  }
+
+  const deletedMessagesByTxid = new Map();
+
+  if (data.contacts && typeof data.contacts === 'object') {
+    for (const contact of Object.values(data.contacts)) {
+      if (!contact || typeof contact !== 'object' || !Array.isArray(contact.messages)) continue;
+
+      for (const message of contact.messages) {
+        if (!message || typeof message !== 'object') continue;
+        const deletedState = getDeletedState(message);
+        if (deletedState <= 0) continue;
+        if (deletedState === MESSAGE_DELETED_STATE_ALL) continue;
+
+        const legacyText =
+          (typeof message.message === 'string' && message.message.trim())
+            ? message.message
+            : message.memo;
+        message.deleted = inferDeletedStateFromLegacyText(legacyText);
+
+        const canonicalDeleteText = getDeletedTextForState(
+          message.deleted,
+          getDeletedRecordIsMine(message),
+          legacyText
+        );
+        message.message = canonicalDeleteText;
+        if (typeof message.memo === 'string') {
+          message.memo = canonicalDeleteText;
+        }
+        if (message.txid) {
+          deletedMessagesByTxid.set(message.txid, {
+            deleted: message.deleted,
+            text: canonicalDeleteText
+          });
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(data.wallet?.history)) {
+    for (const tx of data.wallet.history) {
+      if (!tx || typeof tx !== 'object') continue;
+      const deletedState = getDeletedState(tx);
+      if (deletedState <= 0) continue;
+      if (deletedState === MESSAGE_DELETED_STATE_ALL) continue;
+
+      const linkedMessage = tx.txid ? deletedMessagesByTxid.get(tx.txid) : null;
+      if (linkedMessage) {
+        tx.deleted = linkedMessage.deleted;
+        tx.memo = linkedMessage.text;
+        continue;
+      }
+
+      const legacyText =
+        (typeof tx.memo === 'string' && tx.memo.trim())
+          ? tx.memo
+          : tx.message;
+      tx.deleted = inferDeletedStateFromLegacyText(legacyText);
+      tx.memo = getDeletedTextForState(tx.deleted, getDeletedRecordIsMine(tx), legacyText);
+    }
+  }
+
+  data.account.migrations = migrations && typeof migrations === 'object' ? migrations : {};
+  data.account.migrations.deleteStates = MIGRATION_DELETE_STATES_TS;
+  return true;
+}
+
+/**
  * Checks if the current account is private
  * @returns {boolean} True if the account is private, false otherwise
  */
@@ -671,6 +866,12 @@ function handleBeforeUnload(e) {
   reactNativeApp.handleNativeAppSubscribe();
   if (menuModal.isSignoutExit){
     return;
+  }
+  // Check if backup is in progress
+  if (backupAccountModal.isUploading) {
+    e.preventDefault();
+    e.returnValue = 'A backup is currently being uploaded to Google Drive. Leaving the page will interrupt the backup. Are you sure you want to leave?';
+    return e.returnValue;
   }
   if (myData){
     e.preventDefault();
@@ -1353,8 +1554,8 @@ class ChatsScreen {
       // In chat list don't show people that are blocked
       if (Number(contact?.friend) === 0) continue;
 
-      const latestActivity = contact.messages && contact.messages.length > 0 ? contact.messages[0] : null;
-      // If there's no latest activity (no messages), skip this chat item
+      const latestActivity = getLatestChatMessageActivity(contact) || contact.messages[0];
+      // If there's no latest activity (no messages at all), skip this chat item
       if (!latestActivity) continue;
 
       chatItems.push({ chat, contact, latestActivity });
@@ -1372,13 +1573,18 @@ class ChatsScreen {
 
     chatItems.forEach(({ chat, contact, latestActivity }, index) => {
       const avatarHtml = avatarHtmlList[index];
-      const latestItemTimestamp = latestActivity.timestamp;
       const contactName = getContactDisplayName(contact);
+      const reactionPreview = getLatestChatReactionActivity(contact);
+      const isShowingReactionPreview = !!reactionPreview && reactionPreview.timestamp > latestActivity.timestamp;
+      const latestItemTimestamp = isShowingReactionPreview ? reactionPreview.timestamp : latestActivity.timestamp;
+      const unreadCount = getContactTotalUnread(contact);
 
       let previewHTML = '';
-      // Check if the latest activity is a payment/transfer message
-      if (latestActivity.deleted === 1) {
-        previewHTML = `<span><i>${latestActivity.message}</i></span>`;
+      if (isShowingReactionPreview) {
+        const reactionActor = reactionPreview.my ? 'You' : contactName;
+        const reactionTarget = reactionPreview.target;
+        const reactionText = `${reactionActor} reacted ${reactionPreview.emoji} to "${reactionTarget}"`;
+        previewHTML = truncateMessage(escapeHtml(reactionText), 50);
       } else if (typeof latestActivity.amount === 'bigint') {
         // Latest item is a payment/transfer
         const amountStr = parseFloat(big2str(latestActivity.amount, 18)).toFixed(6);
@@ -1422,7 +1628,7 @@ class ChatsScreen {
       // Determine what to show in the preview
 
       let displayPreview = previewHTML;
-      let displayPrefix = latestActivity.my ? '< ' : '> ';
+      let displayPrefix = isShowingReactionPreview ? '' : (latestActivity.my ? '< ' : '> ');
       let hasDraftAttachment = false;
 
       // Check for draft attachments
@@ -1465,7 +1671,7 @@ class ChatsScreen {
                   <div class="chat-time">${timeDisplay}</div>
               </div>
               <div class="chat-message">
-                ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : ((contact.draft || contact.draftReplyTxid || hasDraftAttachment) ? `<span class="chat-draft" title="Draft"></span>` : '')}
+                ${unreadCount ? `<span class="chat-unread">${unreadCount}</span>` : ((contact.draft || contact.draftReplyTxid || hasDraftAttachment) ? `<span class="chat-draft" title="Draft"></span>` : '')}
                 ${displayPrefix}${displayPreview}
               </div>
           </div>
@@ -1999,6 +2205,12 @@ class MenuModal {
   }
   
   async handleSignOut() {
+    // Check if backup is in progress
+    if (backupAccountModal.isUploading) {
+      showToast('Please wait for the backup to complete before signing out.', 0, 'warning');
+      return;
+    }
+    
     logsModal.log(`Signout ${myAccount.username}`)
     this.isSignoutExit = true;
 
@@ -3000,6 +3212,7 @@ function createNewContact(addr, username, friendStatus = 1, tolledDepositToastSh
     c.username = normalizeUsername(username);
   }
   c.messages = [];
+  c.reactions = [];
   c.timestamp = 0;
   c.unread = 0;
   c.hasAvatar = false;
@@ -3654,6 +3867,11 @@ class SignInModal {
 
     // One-time migration: extract attachment encryption keys to encKey field
     if (await migrateAttachmentKeysToEncKey(myData)) {
+      saveState();
+    }
+
+    // One-time migration: split deleted state into local-only vs for-all
+    if (migrateDeletedMessageStates(myData)) {
       saveState();
     }
 
@@ -4837,7 +5055,7 @@ class HistoryModal {
         const statusAttr = tx?.status ? `data-status="${tx.status}"` : '';
         
         // Check if transaction was deleted
-        if (tx?.deleted > 0) {
+        if (isDeleted(tx)) {
           return `
             <div class="transaction-item deleted-transaction" ${txidAttr} ${statusAttr}>
               <div class="transaction-info">
@@ -4847,7 +5065,7 @@ class HistoryModal {
                 </div>
                 <div class="transaction-amount">-- --</div>
               </div>
-              <div class="transaction-memo">${tx.memo || "Deleted on this device"}</div>
+              <div class="transaction-memo">${escapeHtml(getDeletedPlaceholderText(tx))}</div>
             </div>
           `;
         }
@@ -5150,7 +5368,7 @@ class CallsModal {
       for (const msg of messages) {
         if (msg?.type !== 'call') continue;
         // Skip deleted messages
-        if (msg?.deleted === 1) continue;
+        if (isDeleted(msg)) continue;
         // Skip messages that failed to send
         if (msg?.status === 'failed') continue;
         const callTime = Number(msg.callTime);
@@ -5621,6 +5839,559 @@ async function ensureContactKeys(address) {
   }
 }
 
+/**
+ * @typedef {{ sender: string, reactId: string, action: 'remove', timestamp: number, reactionTxId?: string } | { sender: string, reactId: string, action: 'set', emoji: string, timestamp: number, reactionTxId?: string }} ReactionUpdate
+ */
+
+/**
+ * @typedef {{ targetTxid: string, previousReactionTxId: string | null }} PendingReactionSet
+ */
+
+/**
+ * Returns the newest effective reaction for a specific sender and target message.
+ * The raw reaction array may contain older fallback entries behind the newest one.
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @param {string} sender
+ * @returns {Object|null}
+ */
+function getEffectiveReactionForSenderTarget(contact, targetTxid, sender) {
+  const reactions = Array.isArray(contact.reactions) ? contact.reactions : [];
+  const normalizedSender = normalizeAddress(sender);
+
+  for (const reaction of reactions) {
+    if (reaction.targetTxid === targetTxid && normalizeAddress(reaction.sender) === normalizedSender) {
+      return reaction;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Returns the effective reactions for a specific target message.
+ * Older duplicate entries for the same sender are hidden fallback state.
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @returns {Array<Object>}
+ */
+function getContactReactionsForTarget(contact, targetTxid) {
+  const reactions = Array.isArray(contact.reactions) ? contact.reactions : [];
+  const seen = new Set();
+  const effectiveReactions = [];
+
+  for (const reaction of reactions) {
+    if (reaction.targetTxid !== targetTxid) {
+      continue;
+    }
+
+    const senderKey = normalizeAddress(reaction.sender);
+    if (seen.has(senderKey)) {
+      continue;
+    }
+
+    seen.add(senderKey);
+    effectiveReactions.push(reaction);
+  }
+
+  return effectiveReactions;
+}
+
+/**
+ * Removes every raw reaction entry for a given sender and target.
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @param {string} sender
+ * @returns {boolean}
+ */
+function purgeReactionStackForSenderTarget(contact, targetTxid, sender) {
+  if (!Array.isArray(contact.reactions)) {
+    return false;
+  }
+
+  const normalizedSender = normalizeAddress(sender);
+  const initialLength = contact.reactions.length;
+  contact.reactions = contact.reactions.filter((reaction) => {
+    return !(reaction.targetTxid === targetTxid && normalizeAddress(reaction.sender) === normalizedSender);
+  });
+  return contact.reactions.length !== initialLength;
+}
+
+/**
+ * Removes a raw reaction entry by the txid of the reaction-control transaction that created it.
+ * @param {Object} contact
+ * @param {string} reactionTxId
+ * @returns {boolean}
+ */
+function removeReactionByReactionTxId(contact, reactionTxId) {
+  if (!Array.isArray(contact.reactions) || !reactionTxId) {
+    return false;
+  }
+
+  const index = contact.reactions.findIndex((reaction) => reaction.reactionTxId === reactionTxId);
+  if (index === -1) {
+    return false;
+  }
+
+  contact.reactions.splice(index, 1);
+  return true;
+}
+
+/**
+ * Removes all active reactions that target a specific message.
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @returns {boolean}
+ */
+function purgeContactReactionsForTarget(contact, targetTxid) {
+  if (!Array.isArray(contact.reactions)) {
+    return false;
+  }
+
+  const initialLength = contact.reactions.length;
+  contact.reactions = contact.reactions.filter((reaction) => reaction.targetTxid !== targetTxid);
+  return contact.reactions.length !== initialLength;
+}
+
+/**
+ * Applies an optimistic outgoing reaction set while keeping the prior reaction as fallback.
+ * @param {Object} contact
+ * @param {Extract<ReactionUpdate, { action: 'set' }>} reaction
+ * @returns {{ didApply: false } | { didApply: true, previousReactionTxId: string | null }}
+ */
+function applyOptimisticReactionSet(contact, reaction) {
+  const targetMessage = contact.messages.find((message) => message.txid === reaction.reactId);
+  if (!targetMessage || isDeleted(targetMessage)) {
+    console.warn('Reaction target not found locally', reaction);
+    return { didApply: false };
+  }
+
+  if (!Array.isArray(contact.reactions)) {
+    contact.reactions = [];
+  }
+
+  const sender = normalizeAddress(reaction.sender);
+  const previousReaction = getEffectiveReactionForSenderTarget(contact, reaction.reactId, sender);
+  const emoji = reaction.emoji.trim();
+
+  if (reaction.reactionTxId && contact.reactions.some((entry) => entry.reactionTxId === reaction.reactionTxId)) {
+    return { didApply: false };
+  }
+
+  if (previousReaction && previousReaction.emoji === emoji) {
+    return { didApply: false };
+  }
+
+  const previousReactionTxId = previousReaction ? previousReaction.reactionTxId : null;
+  assert(previousReaction === null || previousReactionTxId, 'Previous reaction txid is required');
+
+  insertSorted(contact.reactions, {
+    sender,
+    targetTxid: reaction.reactId,
+    emoji,
+    timestamp: reaction.timestamp,
+    reactionTxId: reaction.reactionTxId
+  }, 'timestamp');
+  return { didApply: true, previousReactionTxId };
+}
+
+/**
+ * Applies a reaction control message to the contact-level active reaction state.
+ * @param {Object} contact
+ * @param {ReactionUpdate} reaction
+ * @returns {boolean}
+ */
+function applyIncomingReaction(contact, reaction) {
+  const targetMessage = contact.messages.find((message) => message.txid === reaction.reactId);
+  if (!targetMessage || isDeleted(targetMessage)) {
+    console.warn('Reaction target not found locally', reaction);
+    return false;
+  }
+
+  if (!Array.isArray(contact.reactions)) {
+    if (reaction.action === 'remove') {
+      return false;
+    }
+    contact.reactions = [];
+  }
+
+  const sender = normalizeAddress(reaction.sender);
+  const currentReaction = getEffectiveReactionForSenderTarget(contact, reaction.reactId, sender);
+
+  switch (reaction.action) {
+    case 'remove':
+      return purgeReactionStackForSenderTarget(contact, reaction.reactId, sender);
+
+    case 'set': {
+      const emoji = reaction.emoji.trim();
+      // don't allow duplicate reactions
+      if (reaction.reactionTxId && contact.reactions.some((entry) => entry.reactionTxId === reaction.reactionTxId)) {
+        return false;
+      }
+      if (currentReaction && currentReaction.emoji === emoji) {
+        return false;
+      }
+      purgeReactionStackForSenderTarget(contact, reaction.reactId, sender);
+
+      insertSorted(contact.reactions, {
+        sender,
+        targetTxid: reaction.reactId,
+        emoji,
+        timestamp: reaction.timestamp,
+        reactionTxId: reaction.reactionTxId
+      }, 'timestamp');
+      return true;
+    }
+
+    default:
+      throw new Error(`Unknown reaction action: ${reaction.action}`);
+  }
+}
+
+/**
+ * Builds the quoted target text shown in the chat-list reaction preview.
+ * @param {Object} message
+ * @returns {string}
+ */
+function getReactionTargetPreviewText(message) {
+  if (isDeleted(message)) {
+    return getDeletedPlaceholderText(message);
+  }
+
+  if (message.type === 'call') {
+    return 'call';
+  }
+
+  const messageText = typeof message.message === 'string' ? message.message.trim() : '';
+  if (messageText) {
+    return messageText;
+  }
+
+  if (typeof message.amount === 'bigint') {
+    return 'payment';
+  }
+
+  if (message.type === 'vm') {
+    return 'voice message';
+  }
+
+  if (message.xattach) {
+    return 'attachment';
+  }
+
+  return '[message]';
+}
+
+/**
+ * Returns the newest valid reaction activity for chat-list preview purposes.
+ * @param {Object} contact
+ * @returns {{my: boolean, emoji: string, target: string, timestamp: number}|null}
+ */
+function getLatestChatReactionActivity(contact) {
+  const currentUserAddress = normalizeAddress(myAccount.keys.address);
+  const reactions = Array.isArray(contact.reactions) ? contact.reactions : [];
+  const seen = new Set();
+  for (const reaction of reactions) {
+    const reactionKey = `${reaction.targetTxid}:${normalizeAddress(reaction.sender)}`;
+    if (seen.has(reactionKey)) {
+      continue;
+    }
+    seen.add(reactionKey);
+
+    const targetMessage = contact.messages.find((message) => message.txid === reaction.targetTxid);
+    if (!targetMessage || isDeleted(targetMessage)) {
+      continue;
+    }
+
+    return {
+      my: reaction.sender === currentUserAddress,
+      emoji: reaction.emoji,
+      target: getReactionTargetPreviewText(targetMessage),
+      timestamp: reaction.timestamp
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Returns the newest non-deleted message for chat-list activity purposes.
+ * @param {Object} contact
+ * @returns {Object|null}
+ */
+function getLatestChatMessageActivity(contact) {
+  const messages = Array.isArray(contact.messages) ? contact.messages : [];
+
+  for (const message of messages) {
+    if (!isDeleted(message)) {
+      return message;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Recomputes the chat-list timestamp from the current message and reaction state.
+ * @param {string} chatAddress
+ * @param {Object} contact
+ * @returns {void}
+ */
+function syncChatLatestActivityTimestamp(chatAddress, contact) {
+  const latestMessage = getLatestChatMessageActivity(contact);
+  if (!latestMessage) return;
+
+  const latestReaction = getLatestChatReactionActivity(contact);
+
+  const existingChatIndex = myData.chats.findIndex((chat) => chat.address === chatAddress);
+  const chat = existingChatIndex === -1
+    ? { address: chatAddress, timestamp: latestMessage.timestamp }
+    : myData.chats.splice(existingChatIndex, 1)[0];
+
+  if (!latestReaction || latestReaction.timestamp <= latestMessage.timestamp) {
+    chat.timestamp = latestMessage.timestamp;
+    insertSorted(myData.chats, chat, 'timestamp');
+    return;
+  }
+
+  chat.timestamp = latestReaction.timestamp;
+  insertSorted(myData.chats, chat, 'timestamp');
+}
+
+/**
+ * Refreshes chat list and visible reaction chips after local reaction state changes.
+ * @param {string} contactAddress
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @returns {void}
+ */
+function syncReactionUiState(contactAddress, contact, targetTxid) {
+  syncChatLatestActivityTimestamp(contactAddress, contact);
+  if (chatsScreen.isActive()) {
+    chatsScreen.updateChatList();
+  }
+
+  if (chatModal.isActive() && chatModal.address === contactAddress) {
+    chatModal.syncRenderedReactionTargets([targetTxid]);
+  }
+}
+
+/**
+ * Returns whether a specific message already has a pending optimistic edit in flight.
+ * @param {string} contactAddress
+ * @param {string} targetTxid
+ * @returns {boolean}
+ */
+function hasPendingEditForTarget(contactAddress, targetTxid) {
+  if (!contactAddress || !targetTxid) {
+    return false;
+  }
+
+  return myData.pending.some((pendingTx) =>
+    pendingTx.type === 'message' &&
+    pendingTx.to === contactAddress &&
+    pendingTx.editPending &&
+    pendingTx.editPending.targetTxid === targetTxid
+  );
+}
+
+/**
+ * Restores local state captured before an optimistic message edit.
+ * @param {string} pendingTxid
+ * @param {string} contactAddress
+ * @param {{
+ *   targetTxid: string,
+ *   previousMessage: { message: string, edited?: number, edited_timestamp?: number },
+ *   previousHistory:
+ *     | { kind: 'none' }
+ *     | { kind: 'payment', memo?: string, edited?: number, edited_timestamp?: number },
+ * }} editPending
+ * @returns {void}
+ */
+function restorePendingMessageEdit(pendingTxid, contactAddress, editPending) {
+  const {
+    targetTxid,
+    previousMessage,
+    previousHistory,
+  } = editPending;
+  const contact = myData.contacts[contactAddress];
+  assert(contact, `Missing contact for pending edit: ${contactAddress}`);
+
+  const message = contact.messages.find((item) => item.txid === targetTxid);
+  assert(message, `Missing message for pending edit: ${targetTxid}`);
+
+  message.message = previousMessage.message;
+  if (typeof previousMessage.edited !== 'undefined') {
+    message.edited = previousMessage.edited;
+  } else {
+    delete message.edited;
+  }
+  if (typeof previousMessage.edited_timestamp !== 'undefined') {
+    message.edited_timestamp = previousMessage.edited_timestamp;
+  } else {
+    delete message.edited_timestamp;
+  }
+
+  const existingChatIndex = myData.chats.findIndex((chat) => chat.address === contactAddress);
+  if (existingChatIndex !== -1 && myData.chats[existingChatIndex].txid === pendingTxid) {
+    myData.chats.splice(existingChatIndex, 1);
+  }
+  syncChatLatestActivityTimestamp(contactAddress, contact);
+
+  switch (previousHistory.kind) {
+    case 'none':
+      return;
+    case 'payment': {
+      const historyIndex = myData.wallet.history.findIndex((item) => item.txid === targetTxid);
+      assert(historyIndex !== -1, `Missing wallet history for pending edit: ${targetTxid}`);
+
+      if (typeof previousHistory.memo !== 'undefined') {
+        myData.wallet.history[historyIndex].memo = previousHistory.memo;
+      } else {
+        delete myData.wallet.history[historyIndex].memo;
+      }
+      if (typeof previousHistory.edited !== 'undefined') {
+        myData.wallet.history[historyIndex].edited = previousHistory.edited;
+      } else {
+        delete myData.wallet.history[historyIndex].edited;
+      }
+      if (typeof previousHistory.edited_timestamp !== 'undefined') {
+        myData.wallet.history[historyIndex].edited_timestamp = previousHistory.edited_timestamp;
+      } else {
+        delete myData.wallet.history[historyIndex].edited_timestamp;
+      }
+      return;
+    }
+    default:
+      assert(false, `Unknown pending edit history kind: ${previousHistory.kind}`);
+  }
+}
+
+/**
+ * Reverts a pending optimistic message edit that stored rollback metadata.
+ * @param {Object} pendingTxInfo
+ * @returns {void}
+ */
+function reconcilePendingMessageEdit(pendingTxInfo) {
+  const { editPending } = pendingTxInfo;
+  assert(editPending, `Missing pending message edit metadata for ${pendingTxInfo.txid}`);
+  restorePendingMessageEdit(pendingTxInfo.txid, pendingTxInfo.to, editPending);
+
+  if (historyModal.isActive()) {
+    historyModal.refresh();
+  }
+  if (chatsScreen.isActive()) {
+    chatsScreen.updateChatList();
+  }
+  if (chatModal.isActive() && chatModal.address === pendingTxInfo.to) {
+    chatModal.appendChatModal();
+  }
+}
+
+/**
+ * Creates or updates the provisional pending entry used to persist optimistic edit rollback data
+ * before `/inject` confirms the transaction was accepted for receipt tracking.
+ * @param {string} txid
+ * @param {string} contactAddress
+ * @param {Object} editPending
+ * @returns {void}
+ */
+function trackPendingMessageEditBeforeInject(txid, contactAddress, editPending) {
+  if (!myData.pending) {
+    myData.pending = [];
+  }
+
+  const pendingTxInfo = myData.pending.find((pendingTx) => pendingTx.txid === txid);
+  if (pendingTxInfo) {
+    pendingTxInfo.to = normalizeAddress(contactAddress);
+    pendingTxInfo.editPending = editPending;
+    return;
+  }
+
+  myData.pending.push({
+    txid,
+    type: 'message',
+    submittedts: getCorrectedTimestamp(),
+    checkedts: 0,
+    to: normalizeAddress(contactAddress),
+    editPending,
+  });
+}
+
+/**
+ * Finalizes or reverts a pending optimistic reaction set that stored fallback metadata.
+ * @param {Object} pendingTxInfo
+ * @param {'success' | 'failure'} result
+ * @returns {boolean}
+ */
+function reconcilePendingReactionSet(pendingTxInfo, result) {
+  if (!pendingTxInfo.reactionPending) {
+    return false;
+  }
+
+  /** @type {PendingReactionSet} */
+  const { reactionPending } = pendingTxInfo;
+
+  const contact = myData.contacts[pendingTxInfo.to];
+  assert(contact, `Missing contact for pending reaction: ${pendingTxInfo.to}`);
+
+  switch (result) {
+    case 'success': {
+      if (!reactionPending.previousReactionTxId) {
+        return false;
+      }
+
+      const didChange = removeReactionByReactionTxId(contact, reactionPending.previousReactionTxId);
+      if (didChange) {
+        syncReactionUiState(pendingTxInfo.to, contact, reactionPending.targetTxid);
+      }
+      return didChange;
+    }
+
+    case 'failure': {
+      const didChange = removeReactionByReactionTxId(contact, pendingTxInfo.txid);
+      if (didChange) {
+        syncReactionUiState(pendingTxInfo.to, contact, reactionPending.targetTxid);
+      }
+      return didChange;
+    }
+
+    default:
+      throw new Error(`Unknown pending reaction result: ${result}`);
+  }
+}
+
+/**
+ * Returns the unread total used by the chat list and tab notification bubble.
+ * @param {Object|null} contact
+ * @returns {number}
+ */
+function getContactTotalUnread(contact) {
+  return Math.max(0, (contact?.unread || 0) + (contact?.reactionUnread || 0));
+}
+
+/**
+ * Syncs the footer chat tab notification bubble with combined message + reaction unread state.
+ * @returns {void}
+ */
+function syncChatTabNotificationBubble() {
+  if (!footer?.chatButton) return;
+
+  if (typeof chatsScreen !== 'undefined' && chatsScreen.isActive()) {
+    footer.chatButton.classList.remove('has-notification');
+    return;
+  }
+
+  const hasUnreadChats = Object.values(myData?.contacts || {}).some((contact) => {
+    if (!contact?.address || isFaucetAddress(contact.address)) {
+      return false;
+    }
+    return getContactTotalUnread(contact) > 0;
+  });
+
+  footer.chatButton.classList.toggle('has-notification', hasUnreadChats);
+}
+
 // Actually payments also appear in the chats, so we can add these to
 async function processChats(chats, keys) {
   let newTimestamp = 0;
@@ -5644,11 +6415,17 @@ async function processChats(chats, keys) {
         contact.username = 'Liberdus Faucet';
       }
       //            contact.address = from        // not needed since createNewContact does this
+      const initialReactionUnread = contact.reactionUnread || 0;
+      let nextReactionUnread = initialReactionUnread;
       let added = 0;
       let hasNewTransfer = false;
       let mine = false;
       // Count of edits (from the other party) applied while user not viewing this chat
       let editIncrements = 0;
+      const pendingReactionControls = [];
+      let didApplyPendingReaction = false;
+      let didChangeReactionPreview = false;
+      const touchedReactionTargetTxids = new Set();
 
       // This check determines if we're currently chatting with the sender
       // We ONLY want to avoid notifications if we're actively viewing this exact chat
@@ -5683,6 +6460,9 @@ async function processChats(chats, keys) {
           // Set sent_timestamp - use tx.timestamp if useTxTimestamp is true, otherwise use payload.sent_timestamp or tx.timestamp
           if (useTxTimestamp || !payload.sent_timestamp) {
             payload.sent_timestamp = tx.timestamp;
+          }
+          if (mine && (typeof contact.latestOutboundMessageTimestamp !== 'number' || tx.timestamp > contact.latestOutboundMessageTimestamp)) {
+            contact.latestOutboundMessageTimestamp = tx.timestamp;
           }
           if (mine){
             // console.warn('my message tx', tx)
@@ -5727,6 +6507,15 @@ async function processChats(chats, keys) {
                   if (!messageToDelete) {
                     continue; // ignore delete control messages for missing txid
                   }
+                  const unreadIncomingMessageCount = Math.max(0, contact.unread || 0);
+                  // check if the message is unread and not in the active chat and not a payment
+                  const wasUnreadIncomingMessage = unreadIncomingMessageCount > 0
+                    && !messageToDelete.my
+                    && !inActiveChatWithSender
+                    && contact.messages
+                      .filter((message) => !message.my && !isDeleted(message) && typeof message.amount !== 'bigint')
+                      .slice(0, unreadIncomingMessageCount)
+                      .some((message) => message.txid === messageToDelete.txid);
                   let didDeleteMessage = false;
                   
                   // Only allow deletion if the sender of this delete tx is the same who sent the original message
@@ -5739,8 +6528,11 @@ async function processChats(chats, keys) {
                     chatModal.purgeThumbnail(messageToDelete.xattach);
 
                     // Mark the message as deleted
-                    messageToDelete.deleted = 1;
-                    messageToDelete.message = "Deleted by sender";
+                    messageToDelete.deleted = MESSAGE_DELETED_STATE_ALL;
+                    messageToDelete.message = DELETED_MESSAGE_BY_SENDER_TEXT;
+                    if (typeof messageToDelete.memo === 'string') {
+                      messageToDelete.memo = DELETED_MESSAGE_BY_SENDER_TEXT;
+                    }
                     didDeleteMessage = true;
                     // Remove attachments so we don't keep references around
                     delete messageToDelete.xattach;
@@ -5748,29 +6540,25 @@ async function processChats(chats, keys) {
                     // Remove payment-specific fields if present
                     if (messageToDelete.amount) {
                       if (messageToDelete.payment) delete messageToDelete.payment;
-                      if (messageToDelete.memo) messageToDelete.memo = "Deleted by sender";
                       if (messageToDelete.amount) delete messageToDelete.amount;
                       if (messageToDelete.symbol) delete messageToDelete.symbol;
-                      
-                      // Update corresponding transaction in wallet history
-                      const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
-                      if (txIndex !== -1) {
-                        Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted by sender' });
-                        delete myData.wallet.history[txIndex].amount;
-                        delete myData.wallet.history[txIndex].symbol;
-                        delete myData.wallet.history[txIndex].payment;
-                        delete myData.wallet.history[txIndex].sign;
-                        delete myData.wallet.history[txIndex].address;
-                      }
                     }
+                    updateDeletedWalletHistoryEntry(
+                      messageToDelete.txid,
+                      MESSAGE_DELETED_STATE_ALL,
+                      DELETED_MESSAGE_BY_SENDER_TEXT
+                    );
                   } else if (messageToDelete.my && normalizeAddress(keys.address) === normalizeAddress(tx.from)) {
                     // This is our own message, and we're deleting it - valid
                     // Purge cached thumbnails for image attachments, if any
                     chatModal.purgeThumbnail(messageToDelete.xattach);
 
                     // Mark the message as deleted
-                    messageToDelete.deleted = 1;
-                    messageToDelete.message = "Deleted for all";
+                    messageToDelete.deleted = MESSAGE_DELETED_STATE_ALL;
+                    messageToDelete.message = DELETED_MESSAGE_FOR_ALL_TEXT;
+                    if (typeof messageToDelete.memo === 'string') {
+                      messageToDelete.memo = DELETED_MESSAGE_FOR_ALL_TEXT;
+                    }
                     didDeleteMessage = true;
                     // Remove attachments so we don't keep references around
                     delete messageToDelete.xattach;
@@ -5778,25 +6566,30 @@ async function processChats(chats, keys) {
                     // Remove payment-specific fields if present - same logic as above
                     if (messageToDelete.amount) {
                       if (messageToDelete.payment) delete messageToDelete.payment;
-                      if (messageToDelete.memo) messageToDelete.memo = "Deleted for all";
                       if (messageToDelete.amount) delete messageToDelete.amount;
                       if (messageToDelete.symbol) delete messageToDelete.symbol;
-                      
-                      // Update corresponding transaction in wallet history
-                      const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
-                      if (txIndex !== -1) {
-                        Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted for all' });
-                        delete myData.wallet.history[txIndex].amount;
-                        delete myData.wallet.history[txIndex].symbol;
-                        delete myData.wallet.history[txIndex].payment;
-                        delete myData.wallet.history[txIndex].sign;
-                        delete myData.wallet.history[txIndex].address;
-                      }
                     }
+                    updateDeletedWalletHistoryEntry(
+                      messageToDelete.txid,
+                      MESSAGE_DELETED_STATE_ALL,
+                      DELETED_MESSAGE_FOR_ALL_TEXT
+                    );
                   }
 
                   if (reactNativeApp.isReactNativeWebView && messageToDelete.type === 'call' && Number(messageToDelete.callTime) > 0) {
                     reactNativeApp.sendCancelScheduledCall(contact?.username, Number(messageToDelete.callTime));
+                  }
+                  if (didDeleteMessage) {
+                    const hadIncomingEffectiveReaction = !!getEffectiveReactionForSenderTarget(contact, messageToDelete.txid, from);
+                    purgeContactReactionsForTarget(contact, messageToDelete.txid);
+                    syncChatLatestActivityTimestamp(from, contact);
+                    didChangeReactionPreview = true;
+                    if (wasUnreadIncomingMessage) {
+                      contact.unread = Math.max(0, unreadIncomingMessageCount - 1);
+                    }
+                    if (!inActiveChatWithSender && hadIncomingEffectiveReaction) {
+                      nextReactionUnread = Math.max(0, nextReactionUnread - 1);
+                    }
                   }
                   if (didDeleteMessage && messageToDelete.type === 'call' && shouldRefreshUpcomingCallsUiForCallTime(messageToDelete.callTime)) {
                     needsUpcomingCallsUiRefresh = true;
@@ -5812,7 +6605,7 @@ async function processChats(chats, keys) {
                   const newText = parsedMessage.text;
                   if (txidToEdit && typeof newText === 'string') {
                     const messageToEdit = contact.messages.find(msg => msg.txid === txidToEdit);
-                    if (messageToEdit && !messageToEdit.deleted) {
+                    if (messageToEdit && !isDeleted(messageToEdit)) {
                       // Allow editing only if original sender matches editor and it's their own message OR
                       // we receive someone else's edit for their own message
                       const originalSender = normalizeAddress(tx.from);
@@ -5832,6 +6625,7 @@ async function processChats(chats, keys) {
                         messageToEdit.message = newText;
                         messageToEdit.edited = 1;
                         messageToEdit.edited_timestamp = tx.timestamp;
+                        syncChatLatestActivityTimestamp(from, contact);
                         // Also update wallet history entry memo if present
                         if (myData?.wallet?.history && Array.isArray(myData.wallet.history)) {
                           const hIdx = myData.wallet.history.findIndex((h) => h.txid === txidToEdit);
@@ -5881,6 +6675,59 @@ async function processChats(chats, keys) {
                     payload.replyOwnerIsMine = parsedMessage.replyOwnerIsMine;
                   }
                 } else if (parsedMessage.type === 'message') {
+                  const hasReactionFields =
+                    typeof parsedMessage.reactId !== 'undefined' ||
+                    typeof parsedMessage.reactAction !== 'undefined' ||
+                    typeof parsedMessage.reactMessage !== 'undefined';
+                  if (hasReactionFields) {
+                    const reactId = typeof parsedMessage.reactId === 'string'
+                      ? parsedMessage.reactId.trim()
+                      : '';
+                    if (!reactId) {
+                      console.error('Reaction message is missing reactId');
+                      continue;
+                    }
+
+                    const sender = normalizeAddress(tx.from);
+                    const reactAction = typeof parsedMessage.reactAction === 'string'
+                      ? parsedMessage.reactAction.trim()
+                      : '';
+                    if (reactAction === 'set') {
+                      const emoji = typeof parsedMessage.reactMessage === 'string'
+                        ? parsedMessage.reactMessage.trim()
+                        : '';
+                      if (!emoji) {
+                        console.error('Reaction set is missing emoji');
+                        continue;
+                      }
+
+                      pendingReactionControls.push({
+                        sender,
+                        reactId,
+                        action: 'set',
+                        emoji,
+                        timestamp: Number(payload.sent_timestamp),
+                        reactionTxId: txidHex,
+                        order: Number(i)
+                      });
+                      continue; // reaction control messages update target state instead of adding a chat bubble
+                    }
+
+                    if (reactAction === 'remove') {
+                      pendingReactionControls.push({
+                        sender,
+                        reactId,
+                        action: 'remove',
+                        timestamp: Number(payload.sent_timestamp),
+                        reactionTxId: txidHex,
+                        order: Number(i)
+                      });
+                      continue; // reaction control messages update target state instead of adding a chat bubble
+                    }
+
+                    console.error('Unknown reaction action', reactAction);
+                    continue;
+                  }
                   // Regular message format processing
                   payload.message = parsedMessage.message;
                   if (parsedMessage.replyId) {
@@ -6159,6 +7006,32 @@ async function processChats(chats, keys) {
           }
         }
       }
+
+      if (pendingReactionControls.length > 0) {
+        pendingReactionControls.sort((left, right) => {
+          return left.timestamp - right.timestamp || left.order - right.order;
+        });
+
+        for (const pendingReaction of pendingReactionControls) {
+          if (applyIncomingReaction(contact, pendingReaction)) {
+            didApplyPendingReaction = true;
+            syncChatLatestActivityTimestamp(from, contact);
+            didChangeReactionPreview = true;
+            touchedReactionTargetTxids.add(pendingReaction.reactId);
+            if (pendingReaction.sender === from && (!inActiveChatWithSender || document.visibilityState === 'hidden')) {
+              playChatSound();
+            }
+            if (pendingReaction.sender === from && !inActiveChatWithSender) {
+              if (pendingReaction.action === 'set') {
+                nextReactionUnread += 1;
+              } else {
+                nextReactionUnread = Math.max(0, nextReactionUnread - 1);
+              }
+            }
+          }
+        }
+      }
+
       if (hasNewTransfer){ hasAnyTransfer = true; }
       // If messages were added to contact.messages, update myData.chats
       if (added > 0) {
@@ -6176,16 +7049,18 @@ async function processChats(chats, keys) {
         // Add sender to the top of the chats tab
         // Remove existing chat for this contact if it exists
         const existingChatIndex = myData.chats.findIndex((chat) => chat.address === from);
-        if (existingChatIndex !== -1) {
-          myData.chats.splice(existingChatIndex, 1);
-        }
+        const existingChat = existingChatIndex === -1
+          ? null
+          : myData.chats.splice(existingChatIndex, 1)[0];
         // Get the most recent message (index 0 because it's sorted descending)
         const latestMessage = contact.messages[0];
-        // Create chat object with only guaranteed fields
-        const chatUpdate = {
-          address: from,
-          timestamp: latestMessage.timestamp,
-        };
+        const latestReaction = getLatestChatReactionActivity(contact);
+        const chatUpdate = existingChat || { address: from };
+        if (!latestReaction || latestReaction.timestamp <= latestMessage.timestamp) {
+          chatUpdate.timestamp = latestMessage.timestamp;
+        } else {
+          chatUpdate.timestamp = latestReaction.timestamp;
+        }
         // Find insertion point to maintain timestamp order (newest first)
         const insertIndex = myData.chats.findIndex((chat) => chat.timestamp < chatUpdate.timestamp);
         if (insertIndex === -1) {
@@ -6202,6 +7077,27 @@ async function processChats(chats, keys) {
         if (!inActiveChatWithSender && !chatsScreen.isActive() && !isFaucetAddress(from)) {
           footer.chatButton.classList.add('has-notification');
         }
+      }
+
+      if (didApplyPendingReaction && added === 0 && inActiveChatWithSender) {
+        chatModal.syncRenderedReactionTargets([...touchedReactionTargetTxids]);
+      }
+
+      if (!inActiveChatWithSender && nextReactionUnread !== initialReactionUnread) {
+        contact.reactionUnread = nextReactionUnread;
+        if (nextReactionUnread > initialReactionUnread) {
+          if (!chatsScreen.isActive() && !isFaucetAddress(from)) {
+            footer.chatButton.classList.add('has-notification');
+          }
+        } else if (!chatsScreen.isActive()) {
+          syncChatTabNotificationBubble();
+        }
+        // Refresh list if user is currently viewing chat list so unread counts update
+        if (chatsScreen.isActive()) {
+          chatsScreen.updateChatList();
+        }
+      } else if (didChangeReactionPreview && chatsScreen.isActive() && !inActiveChatWithSender) {
+        chatsScreen.updateChatList();
       }
 
       // Show transfer notification even if no messages were added
@@ -6625,7 +7521,7 @@ async function injectTx(tx, txid) {
       if (tx.type === 'register') {
         pendingTxData.username = tx.alias;
         pendingTxData.address = tx.from; // User's address (longAddress form)
-      } else if (tx.type === 'update_toll_required') {
+      } else if (tx.type === 'update_toll_required' || tx.type === 'reclaim_toll') {
         pendingTxData.to = normalizeAddress(tx.to);
       } else if (tx.type === 'read') {
         pendingTxData.oldContactTimestamp = tx.oldContactTimestamp;
@@ -6634,7 +7530,15 @@ async function injectTx(tx, txid) {
       } else if (tx.type === 'deposit_stake' || tx.type === 'withdraw_stake') {
         pendingTxData.to = tx.nominee; // Store 64-character address as-is for stake transactions
       }
-      myData.pending.push(pendingTxData);
+      const existingPendingIndex = myData.pending.findIndex((pendingTx) => pendingTx.txid === txid);
+      if (existingPendingIndex === -1) {
+        myData.pending.push(pendingTxData);
+      } else {
+        myData.pending[existingPendingIndex] = {
+          ...myData.pending[existingPendingIndex],
+          ...pendingTxData
+        };
+      }
 
       if (tx.type !== 'register') {
         // After submitting a transaction, warn if user is low on LIB.
@@ -6768,7 +7672,7 @@ class SearchMessagesModal {
       contact.messages.forEach((message) => {
         if (!message.message) return; // some messages like calls have no message field
         // Skip deleted messages and call messages
-        if (message.deleted > 0) return;
+        if (isDeleted(message)) return;
         if (message.type === 'call') return;
         if (message.message.toLowerCase().includes(searchLower)) {
           // Highlight matching text
@@ -9225,6 +10129,7 @@ class BackupAccountModal {
     this.GOOGLE_TOKEN_STORAGE_KEY = 'google_drive_token';
     this.GDRIVE_BACKUP_TS_KEY = 'googleDriveBackupTimestamp';
     this.GDRIVE_REMINDER_TS_KEY = 'googleDriveReminderTimestamp';
+    this.isUploading = false; // Track upload state
   }
 
   load() {
@@ -9275,6 +10180,12 @@ class BackupAccountModal {
   }
 
   close() {
+    // Check if upload is in progress
+    if (this.isUploading) {
+      showToast('Please wait for the backup to complete before closing.', 0, 'warning');
+      return;
+    }
+    
     // called when the modal needs to be closed
     this.modal.classList.remove('active');
     // Clear passwords for security
@@ -9970,13 +10881,33 @@ class BackupAccountModal {
       }
     }
 
+    // Shared loading toast ID for both upload attempts
+    let loadingToastId = null;
+
+    // Helper to show loading toast
+    const showLoadingToast = () => {
+      loadingToastId = showToast('Uploading backup to Google Drive... Please stay on this page. Closing or signing out may interrupt the backup.', 0, 'loading');
+    };
+
+    // Helper to hide loading toast
+    const hideLoadingToast = () => {
+      if (loadingToastId !== null) {
+        hideToast(loadingToastId);
+        loadingToastId = null;
+      }
+    };
+
+    // Track whether to close modal after cleanup
+    let shouldClose = false;
+
     // Now upload with the token
     try {
-      showToast('Uploading backup to Google Drive...', 3000, 'info');
+      this.isUploading = true;
+      showLoadingToast();
       await this.uploadToGoogleDrive(data, filename, tokenData);
       showToast('Backup uploaded to Google Drive successfully!', 5000, 'success');
       this.setGDriveBackupTs();
-      this.close();
+      shouldClose = true;
     } catch (error) {
       console.error('Google Drive upload failed:', error);
       // Token might be invalid, clear it and retry auth
@@ -9986,11 +10917,12 @@ class BackupAccountModal {
         // Retry with fresh authentication
         try {
           tokenData = await this.startGoogleDriveAuth();
-          showToast('Uploading backup to Google Drive...', 3000, 'info');
+          this.isUploading = true;
+          showLoadingToast();
           await this.uploadToGoogleDrive(data, filename, tokenData);
           showToast('Backup uploaded to Google Drive successfully!', 5000, 'success');
           this.setGDriveBackupTs();
-          this.close();
+          shouldClose = true;
         } catch (retryError) {
           console.error('Retry failed:', retryError);
           showToast(retryError.message || 'Upload failed.', 0, 'error');
@@ -9999,6 +10931,12 @@ class BackupAccountModal {
       } else {
         showToast('Failed to upload to Google Drive: ' + error.message, 5000, 'error');
         this.updateButtonState();
+      }
+    } finally {
+      hideLoadingToast();
+      this.isUploading = false;
+      if (shouldClose) {
+        this.close();
       }
     }
   }
@@ -12649,6 +13587,23 @@ class StakeValidatorModal {
 }
 const stakeValidatorModal = new StakeValidatorModal();
 
+const CHAT_REACTION_SHEET_CATEGORY_MAP = new Map(
+  CHAT_REACTION_SHEET_CATEGORIES.map((category) => [category.key, category])
+);
+const CHAT_REACTION_SHEET_DEFAULT_CATEGORY = CHAT_REACTION_SHEET_CATEGORIES[0].key;
+const CHAT_REACTION_SHEET_CLOSE_DRAG_PX = 120;
+const CHAT_REACTION_SHEET_TAB_ICONS = {
+  smileys: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></svg>',
+  people: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></svg>',
+  nature: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg>',
+  food: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 0 0 9-9H3a9 9 0 0 0 9 9Z"/><path d="M7 21h10"/><path d="M19.5 12 22 6"/><path d="M16.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.73 1.62"/><path d="M11.25 3c.27.1.8.53.74 1.36-.05.83-.93 1.2-.98 2.02-.06.78.33 1.24.72 1.62"/><path d="M6.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.74 1.62"/></svg>',
+  activity: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="10" y1="11" y2="11"/><line x1="8" x2="8" y1="9" y2="13"/><line x1="15" x2="15.01" y1="12" y2="12"/><line x1="18" x2="18.01" y1="10" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/></svg>',
+  travel: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/></svg>',
+  objects: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>',
+  symbols: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/></svg>',
+  flags: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528"/></svg>'
+};
+
 class ChatModal {
   constructor() {
     this.newestReceivedMessage = null;
@@ -12688,6 +13643,17 @@ class ChatModal {
     this.attachmentLoadingToastsByContact = new Map();
     // Prevent multiple fee-failure warnings when close triggers read + reclaim checks.
     this.closeFeeFailureToastShown = false;
+
+    // Expanded emoji picker state
+    this.reactionSheetTargetMessage = null;
+    this.reactionSheetActiveCategory = CHAT_REACTION_SHEET_DEFAULT_CATEGORY;
+    this.reactionSheetDragStartY = 0;
+    this.reactionSheetDragOffset = 0;
+    this.reactionSheetPointerId = null;
+    
+    // Drag and drop state
+    this.dragCounter = 0;
+    this.dropOverlay = null;
   }
 
   /**
@@ -12757,11 +13723,243 @@ class ChatModal {
   }
 
   /**
+   * Extract image files from clipboard items
+   * @param {DataTransferItemList} items - Clipboard items
+   * @returns {File[]} Array of image files
+   */
+  getImageFilesFromClipboard(items) {
+    const imageFiles = [];
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          imageFiles.push(file);
+        }
+      }
+    }
+    return imageFiles;
+  }
+
+  /**
+   * Process multiple image files for attachment
+   * @param {File[]} files - Array of image files to process
+   * @returns {Promise<void>}
+   */
+  async processIncomingAttachmentFiles(files) {
+    // Short-circuit if in edit mode - edit flow is text-only
+    if (this.isEditingMessage()) {
+      return;
+    }
+
+    for (const file of files) {
+      if (this.fileAttachments.length >= 5) {
+        showToast('You can only attach up to 5 files.', 0, 'error');
+        break;
+      }
+      // Create synthetic event for handleFileAttachment
+      const syntheticEvent = { target: { files: [file], value: '' } };
+      try {
+        await this.handleFileAttachment(syntheticEvent);
+      } catch (error) {
+        console.error('Failed to process attachment:', file.name, error);
+        // Continue processing remaining files even if one fails
+      }
+    }
+  }
+
+  /**
+   * Handle paste event on message input
+   * @param {ClipboardEvent} e - Paste event
+   * @returns {Promise<void>}
+   */
+  async handleMessageInputPaste(e) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    // Find image items in clipboard
+    const imageFiles = this.getImageFilesFromClipboard(items);
+
+    // If images found, process them
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      await this.processIncomingAttachmentFiles(imageFiles);
+    }
+  }
+
+  /**
+   * Create drop overlay element
+   * @returns {HTMLElement} The drop overlay element
+   */
+  createDropOverlay() {
+    // Use the HTML-defined overlay instead of creating dynamically
+    this.dropOverlay = document.getElementById('dropOverlay');
+    return this.dropOverlay;
+  }
+
+  /**
+   * Returns the active reaction sheet category config.
+   * @param {string} categoryKey
+   * @returns {{key: string, label: string, emojis: string[]}}
+   */
+  getReactionSheetCategory(categoryKey) {
+    const category = CHAT_REACTION_SHEET_CATEGORY_MAP.get(categoryKey);
+    assert(category, `Unknown reaction sheet category: ${categoryKey}`);
+    return category;
+  }
+
+  /**
+   * Finds which reaction sheet category contains the provided emoji.
+   * @param {string} emoji
+   * @returns {string}
+   */
+  getReactionSheetCategoryKeyForEmoji(emoji) {
+    if (!emoji) return '';
+
+    const category = CHAT_REACTION_SHEET_CATEGORIES.find((entry) => entry.emojis.includes(emoji));
+    return category?.key || '';
+  }
+
+  /**
+   * Renders the reaction sheet tab strip.
+   * @returns {void}
+   */
+  renderReactionSheetTabs() {
+    this.reactionSheetTabs.innerHTML = CHAT_REACTION_SHEET_CATEGORIES.map((category) => {
+      const isActive = category.key === this.reactionSheetActiveCategory;
+      const icon = CHAT_REACTION_SHEET_TAB_ICONS[category.key];
+      assert(icon, `Missing reaction sheet tab icon: ${category.key}`);
+      return `
+        <button
+          class="chat-reaction-sheet-tab${isActive ? ' active' : ''}"
+          type="button"
+          data-category-key="${category.key}"
+          aria-pressed="${isActive ? 'true' : 'false'}"
+          aria-label="${category.label}"
+        >
+          <span class="chat-reaction-sheet-tab-icon" aria-hidden="true">${icon}</span>
+        </button>
+      `;
+    }).join('');
+  }
+
+  /**
+   * Sets the active tab and redraws the emoji grid for that category.
+   * @param {string} categoryKey
+   * @returns {void}
+   */
+  setReactionSheetCategory(categoryKey) {
+    const category = this.getReactionSheetCategory(categoryKey);
+    this.reactionSheetActiveCategory = category.key;
+    this.renderReactionSheetTabs();
+
+    this.reactionSheetGrid.innerHTML = category.emojis.map((emoji) => `
+      <button class="chat-reaction-sheet-button message-context-reaction-button" type="button" data-emoji="${emoji}" aria-label="React with ${emoji}">${emoji}</button>
+    `).join('');
+    this.reactionSheetGrid.scrollTop = 0;
+    this.syncReactionPickerActiveState(this.reactionSheetGrid, this.reactionSheetTargetMessage);
+    if (this.reactionSheetOverlay.classList.contains('active')) {
+      requestAnimationFrame(() => this.updateReactionSheetViewport());
+    }
+  }
+
+  /**
+   * Show the drop overlay
+   * @returns {void}
+   */
+  showDropOverlay() {
+    if (!this.dropOverlay) this.createDropOverlay();
+    if (this.dropOverlay) {
+      this.dropOverlay.style.display = 'flex';
+    }
+  }
+
+  /**
+   * Hide the drop overlay
+   * @returns {void}
+   */
+  hideDropOverlay() {
+    if (this.dropOverlay) {
+      this.dropOverlay.style.display = 'none';
+    }
+  }
+
+  /**
+   * Handle drag enter event for attachments
+   * @param {DragEvent} e - Drag event
+   * @returns {void}
+   */
+  handleAttachmentDragEnter(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (this.isEditingMessage()) {
+      this.dragCounter = 0;
+      this.hideDropOverlay();
+      return;
+    }
+    this.dragCounter++;
+    if (e.dataTransfer.types.includes('Files')) {
+      this.showDropOverlay();
+    }
+  }
+
+  /**
+   * Handle drag over event for attachments
+   * @param {DragEvent} e - Drag event
+   * @returns {void}
+   */
+  handleAttachmentDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (this.isEditingMessage()) {
+      return;
+    }
+  }
+
+  /**
+   * Handle drag leave event for attachments
+   * @param {DragEvent} e - Drag event
+   * @returns {void}
+   */
+  handleAttachmentDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (this.isEditingMessage()) {
+      this.dragCounter = 0;
+      this.hideDropOverlay();
+      return;
+    }
+    this.dragCounter--;
+    if (this.dragCounter === 0) {
+      this.hideDropOverlay();
+    }
+  }
+
+  /**
+   * Handle drop event for attachments
+   * @param {DragEvent} e - Drop event
+   * @returns {Promise<void>}
+   */
+  async handleAttachmentDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.dragCounter = 0;
+    this.hideDropOverlay();
+    if (this.isEditingMessage()) return;
+
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    // Process all files (no type restriction - app handles all supported types)
+    await this.processIncomingAttachmentFiles(Array.from(files));
+  }
+
+  /**
    * Loads the chat modal event listeners
    * @returns {void}
    */
   load() {
     this.modal = document.getElementById('chatModal');
+    assert(this.modal, 'chatModal element is required');
     this.closeButton = document.getElementById('closeChatModal');
     this.messagesList = document.querySelector('.messages-list');
     this.sendButton = document.getElementById('handleSendMessage');
@@ -12787,6 +13985,14 @@ class ChatModal {
     this.chatFileInput = document.getElementById('chatFileInput');
     this.chatPhotoLibraryInput = document.getElementById('chatPhotoLibraryInput');
     this.chatFilesInput = document.getElementById('chatFilesInput');
+    this.reactionSheetOverlay = document.getElementById('chatReactionSheetOverlay');
+    this.reactionSheet = document.getElementById('chatReactionSheet');
+    this.reactionSheetDragRegion = document.getElementById('chatReactionSheetDragRegion');
+    this.reactionSheetTabs = document.getElementById('chatReactionSheetTabs');
+    this.reactionSheetGrid = document.getElementById('chatReactionSheetGrid');
+    this.closeReactionSheetButton = document.getElementById('closeChatReactionSheet');
+    this.renderReactionSheetTabs();
+    this.setReactionSheetCategory(this.reactionSheetActiveCategory);
     
     // Camera capture modal elements
     this.cameraCaptureOverlay = document.getElementById('cameraCaptureOverlay');
@@ -12805,8 +14011,10 @@ class ChatModal {
 
     // Initialize context menu
     this.contextMenu = document.getElementById('messageContextMenu');
+    this.contextMenuReactions = document.getElementById('messageContextReactions');
     // Initialize image attachment context menu
     this.imageAttachmentContextMenu = document.getElementById('imageAttachmentContextMenu');
+    this.imageAttachmentContextMenuReactions = this.imageAttachmentContextMenu?.querySelector('.message-context-reactions') || null;
     // Initialize attachment options context menu
     this.attachmentOptionsContextMenu = document.getElementById('attachmentOptionsContextMenu');
     // Cache attachment options context menu option elements
@@ -12836,6 +14044,13 @@ class ChatModal {
     
     // Add context menu option listeners
     this.contextMenu.addEventListener('click', (e) => {
+      const reactionButton = e.target.closest('.message-context-reaction-button');
+      if (reactionButton) {
+        e.preventDefault();
+        e.stopPropagation();
+        void this.handleReactionPickerClick(reactionButton);
+        return;
+      }
       if (e.target.closest('.context-menu-option')) {
         const action = e.target.closest('.context-menu-option').dataset.action;
         this.handleContextMenuAction(action);
@@ -12844,6 +14059,13 @@ class ChatModal {
     // Add image attachment context menu option listeners
     if (this.imageAttachmentContextMenu) {
       this.imageAttachmentContextMenu.addEventListener('click', (e) => {
+        const reactionButton = e.target.closest('.message-context-reaction-button');
+        if (reactionButton) {
+          e.preventDefault();
+          e.stopPropagation();
+          void this.handleImageAttachmentReactionPickerClick(reactionButton);
+          return;
+        }
         const option = e.target.closest('.context-menu-option');
         if (!option) return;
         const action = option.dataset.action;
@@ -12859,6 +14081,32 @@ class ChatModal {
         this.handleAttachmentOptionsContextMenuAction(action);
       });
     }
+    this.reactionSheetOverlay.addEventListener('click', (e) => {
+      if (e.target === this.reactionSheetOverlay) {
+        this.closeReactionSheet();
+      }
+    });
+    this.closeReactionSheetButton.addEventListener('click', () => this.closeReactionSheet());
+    this.reactionSheetDragRegion.addEventListener('pointerdown', this.handleReactionSheetDragStart.bind(this));
+    this.reactionSheetDragRegion.addEventListener('pointermove', this.handleReactionSheetDragMove.bind(this));
+    this.reactionSheetDragRegion.addEventListener('pointerup', this.handleReactionSheetDragEnd.bind(this));
+    this.reactionSheetDragRegion.addEventListener('pointercancel', this.handleReactionSheetDragEnd.bind(this));
+    this.reactionSheetDragRegion.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    this.reactionSheetTabs.addEventListener('click', (e) => {
+      const tabButton = e.target.closest('.chat-reaction-sheet-tab');
+      if (!tabButton) return;
+      const { categoryKey } = tabButton.dataset;
+      assert(categoryKey, 'Reaction sheet tab categoryKey is required');
+      this.setReactionSheetCategory(categoryKey);
+    });
+    this.reactionSheetGrid.addEventListener('click', (e) => {
+      const reactionButton = e.target.closest('.chat-reaction-sheet-button');
+      if (!reactionButton) return;
+      void this.handleExpandedReactionPickerClick(reactionButton);
+    });
     
     // Close context menu when clicking outside
     document.addEventListener('click', (e) => {
@@ -12925,6 +14173,10 @@ class ChatModal {
         this.isKeyboardVisible = false;
         /* console.log('⌨️ Keyboard detected as closed (viewport height difference:', heightDifference, 'px)'); */
         this.unlockBackgroundScroll();
+      }
+
+      if (this.reactionSheetOverlay.classList.contains('active')) {
+        requestAnimationFrame(() => this.updateReactionSheetViewport());
       }
     });
 
@@ -13008,6 +14260,19 @@ class ChatModal {
       this.chatFilesInput.addEventListener('change', (e) => {
         this.handleFileAttachment(e);
       });
+    }
+
+    // Paste image from clipboard (PC and mobile)
+    if (this.messageInput) {
+      this.messageInput.addEventListener('paste', (e) => this.handleMessageInputPaste(e));
+    }
+
+    // Drag and drop image support (PC only) - attach to modal for broader drop area
+    if (this.modal) {
+      this.modal.addEventListener('dragenter', (e) => this.handleAttachmentDragEnter(e));
+      this.modal.addEventListener('dragover', (e) => this.handleAttachmentDragOver(e));
+      this.modal.addEventListener('dragleave', (e) => this.handleAttachmentDragLeave(e));
+      this.modal.addEventListener('drop', (e) => this.handleAttachmentDrop(e));
     }
 
     // Voice recording event listeners
@@ -13238,6 +14503,8 @@ class ChatModal {
    * @returns {Promise<void>}
    */
   async open(address, skipAutoScroll = false) {
+    this.closeReactionSheet();
+
     // Set active chat address early so async refreshes target the correct chat.
     this.address = address;
 
@@ -13320,10 +14587,13 @@ class ChatModal {
     this.modal.classList.add('active');
 
     // Clear unread count
-    if (contact.unread > 0) {
-      myData.state.unread = Math.max(0, (myData.state.unread || 0) - contact.unread);
+    const totalUnread = getContactTotalUnread(contact);
+    if (totalUnread > 0) {
+      myData.state.unread = Math.max(0, (myData.state.unread || 0) - totalUnread);
       contact.unread = 0;
+      contact.reactionUnread = 0;
       chatsScreen.updateChatList();
+      syncChatTabNotificationBubble();
     }
 
     this.clearNotificationsIfAllRead();
@@ -13332,6 +14602,7 @@ class ChatModal {
     this.maybeShowTolledDepositToast(address);
 
     this.appendChatModal(false, skipAutoScroll); // Call appendChatModal to render messages, ensure highlight=false
+    void this.maybePromptReclaimToll(address);
   }
 
   /**
@@ -13420,6 +14691,7 @@ class ChatModal {
    * @returns {void}
    */
   close() {
+    this.closeReactionSheet();
     const closingAddress = this.address;
     this.hideAttachmentLoadingToastsForContact(closingAddress);
 
@@ -13434,7 +14706,6 @@ class ChatModal {
         this.sendReadTransaction(this.address);
       }
       
-      this.sendReclaimTollTransaction(this.address);
     } else {
       console.warn('Offline: toll not processed');
     }
@@ -13486,7 +14757,7 @@ class ChatModal {
       return;
     }
 
-    const allRead = Object.values(myData.contacts).every((c) => c.unread === 0);
+    const allRead = Object.values(myData.contacts).every((c) => getContactTotalUnread(c) === 0);
     const currentAddress = myAccount?.keys?.address;
     
     if (allRead) {
@@ -13542,37 +14813,148 @@ class ChatModal {
   }
 
   /**
-   * Send a reclaim toll if the newest sent message is older than 7 days and the contact has a value not 0 in payOnReplay or payOnRead
-   * @param {string} contactAddress - The address of the contact
+   * @typedef {{ kind: 'eligible' } | { kind: 'offline' } | { kind: 'pending' } | { kind: 'empty' } | { kind: 'unavailable' } | { kind: 'too_soon', retryAfterTimestamp: number }} ReclaimStatus
+   */
+
+  /**
+   * Returns the reclaim status for the contact.
+   * @param {string} contactAddress
+   * @returns {Promise<ReclaimStatus>}
+   */
+  async getReclaimStatus(contactAddress) {
+    if (!myData.pending) {
+      myData.pending = [];
+    }
+
+    if (!isOnline) {
+      return { kind: 'offline' };
+    }
+
+    if (myData.pending.some((pendingTx) => pendingTx.type === 'reclaim_toll' && pendingTx.to === contactAddress)) {
+      return { kind: 'pending' };
+    }
+
+    await getNetworkParams();
+    assert(parameters.current.tollTimeout, 'Missing toll timeout');
+
+    const contact = myData.contacts[contactAddress];
+    assert(contact, `Missing contact for reclaim status: ${contactAddress}`);
+    const latestOutboundMessageTimestamp =
+      typeof contact.latestOutboundMessageTimestamp === 'number'
+        ? contact.latestOutboundMessageTimestamp
+        : contact.messages.find((item) => item.my)?.timestamp;
+
+    const currentTime = getCorrectedTimestamp();
+    const networkTollTimeoutInMs = parameters.current.tollTimeout;
+    if (typeof latestOutboundMessageTimestamp !== 'number') {
+      return { kind: 'empty' };
+    }
+    const timeSinceLatestOutboundMessage = currentTime - latestOutboundMessageTimestamp;
+    if (timeSinceLatestOutboundMessage < networkTollTimeoutInMs) {
+      return { kind: 'too_soon', retryAfterTimestamp: latestOutboundMessageTimestamp + networkTollTimeoutInMs };
+    }
+
+    const sortedAddresses = [longAddress(myData.account.keys.address), longAddress(contactAddress)].sort();
+    const receiverIndex = sortedAddresses.indexOf(longAddress(contactAddress));
+    const chatId = hashBytes(sortedAddresses.join(''));
+    const chatIdAccount = await queryNetwork(`/messages/${chatId}/toll`);
+    if (!chatIdAccount) {
+      return { kind: 'unavailable' };
+    }
+    if (!chatIdAccount.toll) {
+      return { kind: 'empty' };
+    }
+
+    const payOnReply = chatIdAccount.toll.payOnReply[receiverIndex];
+    const payOnRead = chatIdAccount.toll.payOnRead[receiverIndex];
+    if (payOnReply === 0n && payOnRead === 0n) {
+      return { kind: 'empty' };
+    }
+
+    return { kind: 'eligible' };
+  }
+
+  /**
+   * Prompts the user to reclaim toll when opening an eligible chat.
+   * @param {string} contactAddress
    * @returns {Promise<void>}
    */
-  async sendReclaimTollTransaction(contactAddress) {
-    await getNetworkParams();
-    const currentTime = getCorrectedTimestamp();
-    const networkTollTimeoutInMs = parameters.current.tollTimeout; 
-    const timeSinceNewestSentMessage = currentTime - this.newestSentMessage?.timestamp;
-    if (!this.newestSentMessage || timeSinceNewestSentMessage < networkTollTimeoutInMs) {
-      // console.log(
-      //   `[sendReclaimTollTransaction] timeSinceNewestSentMessage ${timeSinceNewestSentMessage}ms is less than networkTollTimeoutInMs ${networkTollTimeoutInMs}ms, skipping reclaim toll transaction`
-      // );
+  async maybePromptReclaimToll(contactAddress) {
+    if (!this.isActive() || this.address !== contactAddress || !isOnline) {
       return;
     }
-    const canReclaimToll = await this.canSenderReclaimToll(contactAddress);
-    if (!canReclaimToll) {
-      // console.log(
-      //   `[sendReclaimTollTransaction] does not have a value not 0 in payOnReplay or payOnRead, skipping reclaim toll transaction`
-      // );
+
+    const status = await this.getReclaimStatus(contactAddress);
+    if (!this.isActive() || this.address !== contactAddress) {
       return;
     }
+    if (status.kind !== 'eligible') {
+      return;
+    }
+    // wait for the next frame to ensure the modal is fully rendered
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(resolve);
+      });
+    });
+    if (!this.isActive() || this.address !== contactAddress) {
+      return;
+    }
+
+    const contact = myData.contacts[contactAddress];
+    assert(contact, `Missing contact for reclaim prompt: ${contactAddress}`);
+    const confirmed = window.confirm(`Reclaim toll from ${getContactDisplayName(contact)}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    await this.submitReclaimToll(contactAddress);
+  }
+
+  /**
+   * Submits reclaim toll after explicit user confirmation.
+   * @param {string} contactAddress
+   * @returns {Promise<void>}
+   */
+  async submitReclaimToll(contactAddress) {
+    if (!this.isActive() || this.address !== contactAddress) {
+      return;
+    }
+
+    const status = await this.getReclaimStatus(contactAddress);
+    if (status.kind !== 'eligible') {
+      switch (status.kind) {
+        case 'offline':
+          showToast('You are offline. Reconnect before reclaiming toll.', 3000, 'error');
+          return;
+        case 'pending':
+          showToast('A reclaim toll transaction is already pending for this chat.', 3000, 'warning');
+          return;
+        case 'empty':
+          showToast('No reclaimable toll is available for this chat.', 3000, 'info');
+          return;
+        case 'unavailable':
+          showToast('Could not check reclaimable toll right now. Please try again later.', 3000, 'error');
+          return;
+        case 'too_soon':
+          showToast(
+            `Toll cannot be reclaimed yet. Try again after ${this.formatLocalDateTime(status.retryAfterTimestamp)}.`,
+            3000,
+            'info'
+          );
+          return;
+        default:
+          assert(false, `Unknown reclaim status: ${status.kind}`);
+      }
+    }
+
     const feeBalanceStatus = await getFeeBalanceStatus();
     if (!feeBalanceStatus.success) {
-      this.closeFeeFailureToastShown = showCloseFeeFailureWarningOnce(
-        feeBalanceStatus.reason,
-        'claim_fee',
-        this.closeFeeFailureToastShown
-      );
+      showFeeBalanceFailureToast(feeBalanceStatus.reason);
       return;
     }
+
+    showToast('Submitting reclaim toll...', 3000, 'info');
 
     const tx = {
       type: 'reclaim_toll',
@@ -13584,35 +14966,13 @@ class ChatModal {
     };
     const txid = await signObj(tx, myAccount.keys);
     const response = await injectTx(tx, txid);
-    if (!response || !response.result || !response.result.success) {
-      console.warn('reclaim toll transaction failed to send', response);
+    if (response?.result?.success) {
+      return;
     }
-  }
-
-  /**
-   * return true if when we query chatID account , then check payOnReplay and payOnRead for index of the receiver has a value not 0
-   * @param {string} contactAddress - The address of the contact
-   * @returns {Promise<boolean>} - True if the contact has a value not 0 in payOnReplay or payOnRead, false otherwise
-   */
-  async canSenderReclaimToll(contactAddress) {
-    // keep track receiver index during the sort
-    const sortedAddresses = [longAddress(myData.account.keys.address), longAddress(contactAddress)].sort();
-    const receiverIndex = sortedAddresses.indexOf(longAddress(contactAddress));
-    const chatId = hashBytes(sortedAddresses.join(''));
-    const chatIdAccount = await queryNetwork(`/messages/${chatId}/toll`);
-    if (!chatIdAccount || !chatIdAccount.toll) {
-      console.warn('chatIdAccount not found', chatIdAccount);
-      return false;
+    if (!response) {
+      showToast('Could not submit reclaim toll. Please try again later.', 3000, 'error');
+      return;
     }
-    const payOnReply = chatIdAccount.toll.payOnReply[receiverIndex]; // bigint
-    const payOnRead = chatIdAccount.toll.payOnRead[receiverIndex]; // bigint
-    if (payOnReply !== 0n) {
-      return true;
-    }
-    if (payOnRead !== 0n) {
-      return true;
-    }
-    return false;
   }
 
   /**
@@ -13682,10 +15042,11 @@ class ChatModal {
 
     // Declare edit-related state outside try so catch can access
     let isEdit = false;
-    let originalMsg = null;
-    let originalMsgState = null;
+    let editMessage = null;
     let editInput = null;
     let editTargetTxId = '';
+    let currentAddress = '';
+    let chatIndex = -1;
 
     try {
       this.messageInput.focus(); // Add focus back to keep keyboard open
@@ -13712,8 +15073,9 @@ class ChatModal {
                 modalTitle.textContent === (contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`)
             )?.address;
             */
-      const currentAddress = this.address;
+      currentAddress = this.address;
       if (!currentAddress) return;
+      const contact = chatsData.contacts[currentAddress];
 
       // Check if trying to message self
       if (currentAddress === myAccount.address) {
@@ -13727,26 +15089,16 @@ class ChatModal {
         return;
       }
 
-      // Ensure recipient's keys are available
-      const keysOk = await ensureContactKeys(currentAddress);
-      let recipientPubKey = myData.contacts[currentAddress]?.public;
-      let pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
-      if (!keysOk || !recipientPubKey || !pqRecPubKey) {
-        console.warn(`no public/PQ key found for recipient ${currentAddress}`);
-        return;
+      let chatCryptoContext;
+      try {
+        chatCryptoContext = await this.prepareEncryptedChatContext(currentAddress, keys);
+      } catch (error) {
+        if (error?.code === 'CHAT_CRYPTO_PREPARATION') {
+          console.warn(error.message);
+          return;
+        }
+        throw error;
       }
-
-      /*
-      // Generate shared secret using ECDH and take first 32 bytes
-      let dhkey = ecSharedKey(keys.secret, recipientPubKey);
-      const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey);
-      const combined = new Uint8Array(dhkey.length + sharedSecret.length);
-      combined.set(dhkey);
-      combined.set(sharedSecret, dhkey.length);
-      dhkey = deriveDhKey(combined);
-      */
-      const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey)
-      const selfKey = encryptData(bin2hex(dhkey), keys.secret+keys.pqSeed, true)  // used to decrypt our own message
 
       // Determine if this is an edit of an existing message
       editInput = document.getElementById('editOfTxId');
@@ -13757,15 +15109,15 @@ class ChatModal {
       if (editTargetTxId) {
         // Validate we still can edit
         const contactMsgs = myData.contacts[currentAddress].messages;
-        originalMsg = contactMsgs.find(m => m.txid === editTargetTxId);
-        if (!originalMsg) {
+        editMessage = contactMsgs.find((item) => item.txid === editTargetTxId);
+        if (!editMessage) {
           // Original disappeared; fallback to normal send
           console.warn('Edit target message not found locally; sending as new message');
-        } else if (!originalMsg.my) {
+        } else if (!editMessage.my) {
           console.warn('Attempt to edit a message not owned by user');
-        } else if (originalMsg.deleted) {
+        } else if (isDeleted(editMessage)) {
           console.warn('Attempt to edit a deleted message');
-        } else if ((Date.now() - Number(originalMsg.timestamp || 0)) > EDIT_WINDOW_MS) {
+        } else if ((Date.now() - Number(editMessage.timestamp || 0)) > EDIT_WINDOW_MS) {
           showToast('Edit window expired', 3000, 'info');
         } else {
           isEdit = true;
@@ -13803,48 +15155,6 @@ class ChatModal {
         messageObj.attachments = this.fileAttachments;
       }
 
-      // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
-      // Encrypt the JSON message using shared secret
-      const encMessage = encryptChacha(dhkey, stringify(messageObj));
-
-      // Create message payload
-      const payload = {
-        message: encMessage,
-        encrypted: true,
-        encryptionMethod: 'xchacha20poly1305',
-        pqEncSharedKey: bin2base64(cipherText),
-        selfKey: selfKey,
-        sent_timestamp: getCorrectedTimestamp()
-      };
-
-      // Always include username, but only include other info if recipient is a friend
-      const contact = myData.contacts[currentAddress];
-      // Create basic sender info with just username
-      const senderInfo = {
-        username: myAccount.username,
-      };
-
-      // Add additional info only if recipient is a connection
-      if (contact && contact?.friend && contact?.friend >= 2) {
-        // Add more personal details for connections
-        senderInfo.name = myData.account.name;
-        senderInfo.linkedin = myData.account.linkedin;
-        senderInfo.x = myData.account.x;
-        // Add avatar info if available
-        if (myData.account.avatarId && myData.account.avatarKey) {
-          senderInfo.avatarId = myData.account.avatarId;
-          senderInfo.avatarKey = myData.account.avatarKey;
-        }
-        // Add timezone if available
-        const tz = getLocalTimeZone();
-        if (tz) {
-          senderInfo.timezone = tz;
-        }
-      }
-
-      // Always encrypt and send senderInfo (which will contain at least the username)
-      payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
-
       // can create a function to query the account and get the receivers toll they've set
       // TODO: will need to query network and receiver account where we validate
       // TODO: decided to query everytime we do chatModal.open and save as global variable. We don't need to clear it but we can clear it when closing the modal but should get reset when opening the modal again anyway
@@ -13853,9 +15163,22 @@ class ChatModal {
           ? 0n
           : getEffectiveTollLibWei(this.toll)
 
-      const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
-      await signObj(chatMessageObj, keys);
-      const txid = getTxid(chatMessageObj)
+      let payload, chatMessageObj, txid;
+      try {
+        ({ payload, chatMessageObj, txid } = await this.buildEncryptedStructuredChatTx(
+          currentAddress,
+          messageObj,
+          tollInLib,
+          keys,
+          chatCryptoContext
+        ));
+      } catch (error) {
+        if (error?.code === 'CHAT_CRYPTO_PREPARATION') {
+          console.warn(error.message);
+          return;
+        }
+        throw error;
+      }
 
       // if there a hidden txid input, get the value to be used to delete that txid from relevant data stores
       const retryTxId = this.retryOfTxId.value;
@@ -13869,33 +15192,42 @@ class ChatModal {
       let newMessage;
       if (isEdit) {
         // Optimistic update of original message (record original so we can revert on failure)
-        const contactMsgs = chatsData.contacts[currentAddress].messages;
-        originalMsg = contactMsgs.find(m => m.txid === editTargetTxId);
-        if (originalMsg) {
-          originalMsgState = {
-            message: originalMsg.message,
-            edited: originalMsg.edited,
-            edited_timestamp: originalMsg.edited_timestamp
-          };
-          originalMsg.message = message;
-          originalMsg.edited = 1;
-          originalMsg.edited_timestamp = payload.sent_timestamp;
-          // Also update wallet history memo if this was a payment we sent
-          if (myData?.wallet?.history && Array.isArray(myData.wallet.history)) {
-            const hIdx = myData.wallet.history.findIndex((h) => h.txid === editTargetTxId);
-            if (hIdx !== -1) {
-              // Preserve prior state for potential revert
-              if (!originalMsgState.history) originalMsgState.history = {};
-              originalMsgState.history.memo = myData.wallet.history[hIdx].memo;
-              originalMsgState.history.edited = myData.wallet.history[hIdx].edited;
-              originalMsgState.history.edited_timestamp = myData.wallet.history[hIdx].edited_timestamp;
-              myData.wallet.history[hIdx].memo = message;
-              myData.wallet.history[hIdx].edited = 1;
-              myData.wallet.history[hIdx].edited_timestamp = payload.sent_timestamp;
-            }
-          }
-          this.appendChatModal();
+        assert(editMessage, `Missing edit message for ${editTargetTxId}`);
+        chatIndex = chatsData.chats.findIndex((chat) => chat.address === currentAddress);
+        assert(chatIndex !== -1, `Missing chat list entry for pending edit: ${currentAddress}`);
+
+        const previousHistoryIndex = myData.wallet.history.findIndex((item) => item.txid === editTargetTxId);
+        const previousHistory = previousHistoryIndex === -1
+          ? { kind: 'none' }
+          : {
+              kind: 'payment',
+              memo: myData.wallet.history[previousHistoryIndex].memo,
+              edited: myData.wallet.history[previousHistoryIndex].edited,
+              edited_timestamp: myData.wallet.history[previousHistoryIndex].edited_timestamp
+            };
+        const editPending = {
+          targetTxid: editTargetTxId,
+          previousMessage: {
+            message: editMessage.message,
+            edited: editMessage.edited,
+            edited_timestamp: editMessage.edited_timestamp
+          },
+          previousHistory
+        };
+
+        trackPendingMessageEditBeforeInject(txid, currentAddress, editPending);
+        editMessage.message = message;
+        editMessage.edited = 1;
+        editMessage.edited_timestamp = payload.sent_timestamp;
+
+        if (previousHistory.kind === 'payment') {
+          myData.wallet.history[previousHistoryIndex].memo = message;
+          myData.wallet.history[previousHistoryIndex].edited = 1;
+          myData.wallet.history[previousHistoryIndex].edited_timestamp = payload.sent_timestamp;
         }
+
+        this.appendChatModal();
+        saveState();
         // Clear edit marker only after capturing state and hide cancel button
         editInput.value = '';
         this.cancelEditButton.style.display = 'none';
@@ -13936,9 +15268,11 @@ class ChatModal {
       };
 
       // Remove existing chat for this contact if it exists. Not handling in removeFailedTx anymore.
-      const existingChatIndex = chatsData.chats.findIndex((chat) => chat.address === currentAddress);
-      if (existingChatIndex !== -1) {
-        chatsData.chats.splice(existingChatIndex, 1);
+      if (!isEdit) {
+        chatIndex = chatsData.chats.findIndex((chat) => chat.address === currentAddress);
+      }
+      if (chatIndex !== -1) {
+        chatsData.chats.splice(chatIndex, 1);
       }
 
       insertSorted(chatsData.chats, chatUpdate, 'timestamp');
@@ -13997,21 +15331,12 @@ class ChatModal {
           updateTransactionStatus(txid, currentAddress, 'failed', 'message');
           this.appendChatModal();
         } else {
+          const pendingTxInfo = myData.pending.find((pendingTx) => pendingTx.txid === txid);
+          myData.pending = myData.pending.filter((pendingTx) => pendingTx.txid !== txid);
           showToast('Edit failed to send', 0, 'error');
-          // Revert optimistic edit
-          if (originalMsg && originalMsgState) {
-            originalMsg.message = originalMsgState.message;
-            if (originalMsgState.edited) {
-              originalMsg.edited = originalMsgState.edited;
-              originalMsg.edited_timestamp = originalMsgState.edited_timestamp;
-            } else {
-              delete originalMsg.edited;
-              delete originalMsg.edited_timestamp;
-            }
-            // Revert wallet history memo if we changed it optimistically
-            this.revertWalletHistoryEdit(editTargetTxId, originalMsgState.history);
-            this.appendChatModal();
-          }
+          assert(pendingTxInfo?.editPending, `Missing pending edit snapshot for ${editTargetTxId}`);
+          restorePendingMessageEdit(txid, currentAddress, pendingTxInfo.editPending);
+          this.appendChatModal();
           // Restore edit UI state to allow user to retry or cancel
           editInput.value = editTargetTxId;
           this.cancelEditButton.style.display = '';
@@ -14036,18 +15361,13 @@ class ChatModal {
       console.error('Message error:', error);
       showToast('Failed to send message. Please try again.', 0, 'error');
       // Revert optimistic edit on exception
-      if (isEdit && originalMsg && originalMsgState) {
-        originalMsg.message = originalMsgState.message;
-        if (originalMsgState.edited) {
-          originalMsg.edited = originalMsgState.edited;
-          originalMsg.edited_timestamp = originalMsgState.edited_timestamp;
-        } else {
-          delete originalMsg.edited;
-          delete originalMsg.edited_timestamp;
+      if (isEdit && editTargetTxId) {
+        const pendingTxInfo = myData.pending.find((pendingTx) => pendingTx.txid === txid);
+        myData.pending = myData.pending.filter((pendingTx) => pendingTx.txid !== txid);
+        if (pendingTxInfo?.editPending) {
+          restorePendingMessageEdit(txid, currentAddress, pendingTxInfo.editPending);
+          this.appendChatModal();
         }
-        // Revert wallet history memo if we changed it optimistically
-        this.revertWalletHistoryEdit(editTargetTxId, originalMsgState.history);
-        this.appendChatModal();
       }
     } finally {
       // Cooldown and re-enable handled by withButtonCooldown wrapper
@@ -14083,38 +15403,6 @@ class ChatModal {
   }
 
   /**
-   * Revert wallet history memo/edited fields for a given txid using the provided originalHistory snapshot
-   * @param {string} txid - Transaction id to locate in myData.wallet.history
-   * @param {{memo?: string, edited?: number, edited_timestamp?: number}} originalHistory - Original values to restore
-   */
-  revertWalletHistoryEdit(txid, originalHistory) {
-    try {
-      if (!originalHistory) return; // nothing captured, nothing to revert
-      if (!(myData?.wallet?.history) || !Array.isArray(myData.wallet.history)) return;
-      const hIdx = myData.wallet.history.findIndex((h) => h.txid === txid);
-      if (hIdx === -1) return;
-
-      if (typeof originalHistory.memo !== 'undefined') {
-        myData.wallet.history[hIdx].memo = originalHistory.memo;
-      } else {
-        delete myData.wallet.history[hIdx].memo;
-      }
-      if (typeof originalHistory.edited !== 'undefined') {
-        myData.wallet.history[hIdx].edited = originalHistory.edited;
-      } else {
-        delete myData.wallet.history[hIdx].edited;
-      }
-      if (typeof originalHistory.edited_timestamp !== 'undefined') {
-        myData.wallet.history[hIdx].edited_timestamp = originalHistory.edited_timestamp;
-      } else {
-        delete myData.wallet.history[hIdx].edited_timestamp;
-      }
-    } catch (e) {
-      console.error('Failed to revert wallet history edit', e);
-    }
-  }
-
-  /**
    * Create a chat message object
    * @param {string} to - The address of the recipient
    * @param {string} payload - The payload of the message
@@ -14139,6 +15427,115 @@ class ChatModal {
       networkId: network.netid,
     };
     return tx;
+  }
+
+  /**
+   * Build sender info for an encrypted chat message.
+   * Always includes username; adds profile details only for established connections.
+   * @param {Object} contact
+   * @returns {Object}
+   */
+  buildChatSenderInfo(contact) {
+    // Create basic sender info with just username
+    const senderInfo = {
+      username: myAccount.username,
+    };
+
+    if (contact?.friend >= 2) {
+      // Add more personal details for connections
+      senderInfo.name = myData.account.name;
+      senderInfo.linkedin = myData.account.linkedin;
+      senderInfo.x = myData.account.x;
+      // Add avatar info if available
+      if (myData.account.avatarId && myData.account.avatarKey) {
+        senderInfo.avatarId = myData.account.avatarId;
+        senderInfo.avatarKey = myData.account.avatarKey;
+      }
+      // Add timezone if available
+      const tz = getLocalTimeZone();
+      if (tz) {
+        senderInfo.timezone = tz;
+      }
+    }
+
+    return senderInfo;
+  }
+
+  /**
+   * Resolve recipient contact and derive the shared chat crypto context.
+   * @param {string} to
+   * @param {Object} keys
+   * @returns {Promise<{contact: Object, dhkey: Uint8Array, cipherText: Uint8Array}>}
+   */
+  async prepareEncryptedChatContext(to, keys) {
+    const contact = myData.contacts[to];
+    if (!contact) {
+      const error = new Error(`Contact not found for ${to}`);
+      error.code = 'CHAT_CRYPTO_PREPARATION';
+      throw error;
+    }
+
+    const keysOk = await ensureContactKeys(to);
+    const recipientPubKey = contact.public;
+    const pqRecPubKey = contact.pqPublic;
+    if (!keysOk || !recipientPubKey || !pqRecPubKey) {
+      const error = new Error(`No public/PQ key found for recipient ${to}`);
+      error.code = 'CHAT_CRYPTO_PREPARATION';
+      throw error;
+    }
+
+    /*
+    // Generate shared secret using ECDH and take first 32 bytes
+    let dhkey = ecSharedKey(keys.secret, recipientPubKey);
+    const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey);
+    const combined = new Uint8Array(dhkey.length + sharedSecret.length);
+    combined.set(dhkey);
+    combined.set(sharedSecret, dhkey.length);
+    dhkey = deriveDhKey(combined);
+    */
+    const { dhkey, cipherText } = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey);
+
+    return { contact, dhkey, cipherText };
+  }
+
+  /**
+   * Build, encrypt, and sign a structured chat message transaction.
+   * Shared by composer sends and quick reaction sends.
+   * @param {string} to
+   * @param {Object} messageObj
+   * @param {bigint} tollInLib
+   * @param {Object} keys
+   * @param {{contact: Object, dhkey: Uint8Array, cipherText: Uint8Array}|null} cryptoContext
+   * @returns {Promise<{payload: Object, chatMessageObj: Object, txid: string}>}
+   */
+  async buildEncryptedStructuredChatTx(to, messageObj, tollInLib, keys, cryptoContext = null) {
+    const context = cryptoContext || await this.prepareEncryptedChatContext(to, keys);
+    const { contact, dhkey, cipherText } = context;
+
+    // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
+    // Encrypt the JSON message using shared secret
+    const payload = {
+      message: encryptChacha(dhkey, stringify(messageObj)),
+      encrypted: true,
+      encryptionMethod: 'xchacha20poly1305',
+      pqEncSharedKey: bin2base64(cipherText),
+      // used to decrypt our own message
+      selfKey: encryptData(bin2hex(dhkey), keys.secret + keys.pqSeed, true),
+      sent_timestamp: getCorrectedTimestamp()
+    };
+
+    // Always include username, but only include other info if recipient is a friend
+    // Always encrypt and send senderInfo (which will contain at least the username)
+    payload.senderInfo = encryptChacha(dhkey, stringify(this.buildChatSenderInfo(contact)));
+
+    const chatMessageObj = await this.createChatMessage(to, payload, tollInLib, keys);
+    await signObj(chatMessageObj, keys);
+
+    return {
+      payload,
+      chatMessageObj,
+      txid: getTxid(chatMessageObj)
+    };
   }
 
   /**
@@ -14204,7 +15601,7 @@ class ChatModal {
         // --- Render Payment Transaction ---
         const directionText = item.my ? '-' : '+';
         const messageClass = item.my ? 'sent' : 'received';
-    const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !item.deleted;
+    const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !isDeleted(item);
     messageHTML = `
           <div class="message ${messageClass} payment-info" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
             <div class="payment-header">
@@ -14223,7 +15620,7 @@ class ChatModal {
         let replyHTML = '';
         
         // Check if message was deleted
-        if (item?.deleted > 0) {
+        if (isDeleted(item)) {
           // Render deleted message with special styling
           messageHTML = `
                     <div class="message ${messageClass} deleted-message" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
@@ -14364,7 +15761,7 @@ class ChatModal {
           }
           
           const callTimeAttribute = item.type === 'call' && item.callTime ? `data-call-time="${item.callTime}"` : '';
-      const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !item.deleted;
+      const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !isDeleted(item);
       messageHTML = `
             <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute} ${callTimeAttribute}>
               ${replyHTML}
@@ -14381,6 +15778,8 @@ class ChatModal {
       this.messagesList.insertAdjacentHTML('beforeend', messageHTML);
       // The newest received element will be found after the loop completes
     }
+
+    this.syncAllRenderedReactionChips();
 
     // --- 4.5. Load thumbnails for image attachments (async, non-blocking) ---
     this.loadThumbnailsForAttachments();
@@ -14758,24 +16157,27 @@ class ChatModal {
       }
     };
     
-    try {
-      this.isEncrypting = true;
-      this.sendButton.disabled = true; // Disable send button during encryption
-      this.addAttachmentButton.disabled = true;
-      loadingToastId = showToast(
-        `Attaching "${file.name}" to ${uploadContactName}...`,
-        0,
-        'loading',
-        false,
-        { dedupe: false }
-      );
-      this.trackAttachmentLoadingToast(uploadContactAddress, loadingToastId);
-      
-      // Generate random encryption key for this attachment
-      const encKey = generateRandomBytes(32);
+    // Return a Promise that resolves when the worker completes
+    // This ensures processIncomingAttachmentFiles can properly await each upload
+    return new Promise((resolve, reject) => {
+      try {
+        this.isEncrypting = true;
+        this.sendButton.disabled = true; // Disable send button during encryption
+        this.addAttachmentButton.disabled = true;
+        loadingToastId = showToast(
+          `Attaching "${file.name}" to ${uploadContactName}...`,
+          0,
+          'loading',
+          false,
+          { dedupe: false }
+        );
+        this.trackAttachmentLoadingToast(uploadContactAddress, loadingToastId);
+        
+        // Generate random encryption key for this attachment
+        const encKey = generateRandomBytes(32);
 
-      const worker = new Worker('encryption.worker.js', { type: 'module' });
-      worker.onmessage = async (e) => {
+        const worker = new Worker('encryption.worker.js', { type: 'module' });
+        worker.onmessage = async (e) => {
         this.isEncrypting = false;
         if (e.data.error) {
           clearLoadingToast();
@@ -14877,6 +16279,7 @@ class ChatModal {
               );
             }
             refreshChatsScreenIfActive();
+            resolve(); // Successfully completed upload
           } catch (fetchError) {
             // Handle fetch errors (including AbortError) inside the worker callback
             if (fetchError.name === 'AbortError') {
@@ -14897,6 +16300,7 @@ class ChatModal {
             this.isEncrypting = false;
 
             this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
+            reject(fetchError); // Upload failed
           }
         }
         worker.terminate();
@@ -14918,6 +16322,7 @@ class ChatModal {
 
             this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
         worker.terminate();
+        reject(err); // Worker error
       };
       
       // read the file and send it to the worker for encryption
@@ -14948,9 +16353,11 @@ class ChatModal {
       this.isEncrypting = false;
 
       this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
+      reject(error); // Outer error
     } finally {
       event.target.value = ''; // Reset the file input value
     }
+    }); // End of Promise wrapper
   }
 
   /**
@@ -15586,7 +16993,14 @@ class ChatModal {
     const messageEl = e.target.closest('.message');
     if (!messageEl) return;
 
-    if (messageEl.classList.contains('deleted-message')) return;
+    const messageRecord = this.getMessageRecordFromElement(messageEl);
+    if (messageEl.classList.contains('deleted-message')) {
+      const allowDeletedLocalMenu =
+        isDeletedForMeOnly(messageRecord) && this.canDeleteMessageForAll(messageEl, messageRecord);
+      if (!allowDeletedLocalMenu) return;
+      this.showMessageContextMenu(e, messageEl);
+      return;
+    }
 
     if (messageEl.dataset.status === 'failed') {
       const isPayment = messageEl.classList.contains('payment-info');
@@ -15617,11 +17031,17 @@ class ChatModal {
     this.closeAllContextMenus();
     
     this.currentContextMessage = messageEl;
+    const messageRecord = this.getMessageRecordFromElement(messageEl);
+    const isDeletedLocalOnly =
+      messageEl.classList.contains('deleted-message') && isDeletedForMeOnly(messageRecord);
     
+    const deleteOption = this.contextMenu.querySelector('[data-action="delete"]');
+    if (deleteOption) deleteOption.style.display = 'flex';
+
     // Show/hide "Delete for all" option based on whether the message is from the current user
     const deleteForAllOption = this.contextMenu.querySelector('[data-action="delete-for-all"]');
+    const canDeleteForAll = this.canDeleteMessageForAll(messageEl, messageRecord);
     if (deleteForAllOption) {
-      const canDeleteForAll = this.canDeleteMessageForAll(messageEl);
       deleteForAllOption.style.display = canDeleteForAll ? 'flex' : 'none';
     }
 
@@ -15636,6 +17056,32 @@ class ChatModal {
     const editOption = this.contextMenu.querySelector('[data-action="edit"]');
     const saveOption = this.contextMenu.querySelector('[data-action="save"]');
     const isFailedPayment = messageEl.dataset.status === 'failed' && messageEl.classList.contains('payment-info');
+    const canShowReactionRow = !isDeletedLocalOnly && !isFailedPayment;
+
+    if (this.contextMenuReactions) {
+      this.contextMenuReactions.style.display = canShowReactionRow ? 'flex' : 'none';
+      this.syncReactionPickerActiveState(this.contextMenuReactions, canShowReactionRow ? messageEl : null);
+    }
+
+    if (isDeletedLocalOnly) {
+      if (!canDeleteForAll) {
+        this.currentContextMessage = null;
+        return;
+      }
+      if (saveOption) saveOption.style.display = 'none';
+      if (replyOption) replyOption.style.display = 'none';
+      if (copyOption) copyOption.style.display = 'none';
+      if (editOption) editOption.style.display = 'none';
+      if (joinOption) joinOption.style.display = 'none';
+      if (inviteOption) inviteOption.style.display = 'none';
+      if (editResendOption) editResendOption.style.display = 'none';
+      if (deleteOption) deleteOption.style.display = 'none';
+
+      this.positionContextMenu(this.contextMenu, messageEl);
+      this.contextMenu.style.display = 'block';
+      return;
+    }
+
     // Show save option only for voice messages
     if (saveOption) saveOption.style.display = isVoice ? 'flex' : 'none';
     // For failed payment messages, hide copy and delete-for-all regardless of sender
@@ -15707,11 +17153,18 @@ class ChatModal {
 
     const rect = messageEl.getBoundingClientRect();
     const container = messageEl.closest('.messages-container');
+    const visualViewport = window.visualViewport;
+    const viewportRect = {
+      left: visualViewport?.offsetLeft ?? 0,
+      top: visualViewport?.offsetTop ?? 0,
+      right: (visualViewport?.offsetLeft ?? 0) + (visualViewport?.width ?? window.innerWidth),
+      bottom: (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? window.innerHeight)
+    };
     const containerRect = container?.getBoundingClientRect() || {
-      left: 0,
-      top: 0,
-      right: window.innerWidth,
-      bottom: window.innerHeight
+      left: viewportRect.left,
+      top: viewportRect.top,
+      right: viewportRect.right,
+      bottom: viewportRect.bottom
     };
 
     const margin = 10;
@@ -15726,8 +17179,8 @@ class ChatModal {
     }
 
     let menuRect = menu.getBoundingClientRect();
-    let menuWidth = menuRect.width || 200;
-    let menuHeight = menuRect.height || 100;
+    let menuWidth = menu.offsetWidth || menuRect.width || 200;
+    let menuHeight = menu.offsetHeight || menuRect.height || 100;
 
     // Keep long menus usable in small viewports by making them internally scrollable.
     const availableHeight = Math.max(80, containerRect.bottom - containerRect.top - margin * 2);
@@ -15735,22 +17188,22 @@ class ChatModal {
       menu.style.maxHeight = `${Math.floor(availableHeight)}px`;
       menu.style.overflowY = 'auto';
       menuRect = menu.getBoundingClientRect();
-      menuWidth = menuRect.width || menuWidth;
-      menuHeight = menuRect.height || availableHeight;
+      menuWidth = menu.offsetWidth || menuRect.width || menuWidth;
+      menuHeight = menu.offsetHeight || menuRect.height || availableHeight;
     } else {
       menu.style.maxHeight = '';
       menu.style.overflowY = '';
     }
 
     // Center horizontally, then clamp to container bounds.
-    const minLeft = containerRect.left + margin;
-    const maxLeft = containerRect.right - menuWidth - margin;
+    const minLeft = Math.max(containerRect.left, viewportRect.left) + margin;
+    const maxLeft = Math.min(containerRect.right, viewportRect.right) - menuWidth - margin;
     let left = rect.left + rect.width / 2 - menuWidth / 2;
     left = maxLeft < minLeft ? minLeft : Math.max(minLeft, Math.min(maxLeft, left));
 
     // Prefer below, otherwise above; finally clamp to bounds.
-    const minTop = containerRect.top + margin;
-    const maxTop = containerRect.bottom - menuHeight - margin;
+    const minTop = Math.max(containerRect.top, viewportRect.top) + margin;
+    const maxTop = Math.min(containerRect.bottom, viewportRect.bottom) - menuHeight - margin;
     const belowTop = rect.bottom + margin;
     const aboveTop = rect.top - menuHeight - margin;
     let top;
@@ -15780,6 +17233,8 @@ class ChatModal {
   closeContextMenu() {
     if (!this.contextMenu) return;
     this.contextMenu.style.display = 'none';
+    if (this.contextMenuReactions) this.contextMenuReactions.style.display = '';
+    this.syncReactionPickerActiveState(this.contextMenuReactions, null);
     this.currentContextMessage = null;
   }
 
@@ -15788,6 +17243,282 @@ class ChatModal {
     this.closeImageAttachmentContextMenu();
     this.closeAttachmentOptionsContextMenu();
     this.closeHeaderContextMenu();
+    this.closeReactionSheet();
+  }
+
+  /**
+   * Reserves vertical space for the reaction sheet while it is open.
+   * @returns {void}
+   */
+  updateReactionSheetViewport() {
+    const isOpen = this.reactionSheetOverlay.classList.contains('active');
+    if (!isOpen) {
+      this.modal.style.setProperty('--chat-reaction-sheet-space', '0px');
+      return;
+    }
+
+    const sheetHeight = Math.ceil(this.reactionSheet.getBoundingClientRect().height);
+    this.modal.style.setProperty('--chat-reaction-sheet-space', `${sheetHeight + 12}px`);
+  }
+
+  /**
+   * Resets the reaction sheet drag state and transform offset.
+   * @returns {void}
+   */
+  resetReactionSheetDragState() {
+    this.reactionSheetDragStartY = 0;
+    this.reactionSheetDragOffset = 0;
+    this.reactionSheetPointerId = null;
+    this.reactionSheet.classList.remove('dragging');
+    this.reactionSheet.style.removeProperty('--chat-reaction-sheet-drag-offset');
+  }
+
+  /**
+   * Begins dragging the reaction sheet downward from its handle.
+   * @param {PointerEvent} event
+   * @returns {void}
+   */
+  handleReactionSheetDragStart(event) {
+    if (!this.reactionSheetOverlay.classList.contains('active')) return;
+    if (event.button !== undefined && event.button !== 0) return;
+    if (event.target?.closest?.('.chat-reaction-sheet-close')) return;
+
+    event.stopPropagation();
+    this.reactionSheetDragStartY = event.clientY;
+    this.reactionSheetDragOffset = 0;
+    this.reactionSheetPointerId = event.pointerId;
+    this.reactionSheet.classList.add('dragging');
+    this.reactionSheetDragRegion.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
+  /**
+   * Updates the reaction sheet drag offset as the pointer moves.
+   * @param {PointerEvent} event
+   * @returns {void}
+   */
+  handleReactionSheetDragMove(event) {
+    if (event.pointerId !== this.reactionSheetPointerId) return;
+
+    event.stopPropagation();
+    const offset = Math.max(0, event.clientY - this.reactionSheetDragStartY);
+    this.reactionSheetDragOffset = offset;
+    this.reactionSheet.style.setProperty('--chat-reaction-sheet-drag-offset', `${offset}px`);
+    event.preventDefault();
+  }
+
+  /**
+   * Ends a reaction sheet drag and either closes or snaps the sheet back open.
+   * @param {PointerEvent} event
+   * @returns {void}
+   */
+  handleReactionSheetDragEnd(event) {
+    if (event.pointerId !== this.reactionSheetPointerId) return;
+
+    event.stopPropagation();
+    this.reactionSheetDragRegion.releasePointerCapture(event.pointerId);
+    const shouldClose = this.reactionSheetDragOffset >= CHAT_REACTION_SHEET_CLOSE_DRAG_PX;
+
+    this.resetReactionSheetDragState();
+    if (shouldClose) {
+      this.closeReactionSheet();
+      return;
+    }
+  }
+
+  openReactionSheet(messageEl) {
+    assert(messageEl, 'Reaction sheet target message is required');
+    this.resetReactionSheetDragState();
+    this.reactionSheetTargetMessage = messageEl;
+    const currentReaction = this.getCurrentUserReactionForMessage(messageEl);
+    const categoryKey = this.getReactionSheetCategoryKeyForEmoji(currentReaction) || CHAT_REACTION_SHEET_DEFAULT_CATEGORY;
+    this.setReactionSheetCategory(categoryKey);
+    this.reactionSheetOverlay.classList.add('active');
+    this.reactionSheetOverlay.setAttribute('aria-hidden', 'false');
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => this.updateReactionSheetViewport());
+    });
+  }
+
+  closeReactionSheet() {
+    this.resetReactionSheetDragState();
+    if (this.reactionSheetOverlay.contains(document.activeElement)) {
+      this.closeButton.focus({ preventScroll: true });
+    }
+    this.reactionSheetOverlay.classList.remove('active');
+    this.reactionSheetOverlay.setAttribute('aria-hidden', 'true');
+    this.syncReactionPickerActiveState(this.reactionSheetGrid, null);
+    this.updateReactionSheetViewport();
+    this.reactionSheetTargetMessage = null;
+  }
+
+  /**
+   * Resolves the backing message record for a rendered message element.
+   * @param {HTMLElement} messageEl
+   * @returns {Object|null}
+   */
+  getMessageRecordFromElement(messageEl) {
+    if (!messageEl) return null;
+
+    const { txid, messageTimestamp: timestamp } = messageEl.dataset || {};
+    const contact = myData.contacts[this.address];
+    if (!contact?.messages?.length) return null;
+
+    const messageIndex = contact.messages.findIndex((msg) =>
+      msg && (msg.txid === txid || msg.timestamp == timestamp)
+    );
+    return messageIndex === -1 ? null : contact.messages[messageIndex];
+  }
+
+  /**
+   * Returns the current user's stored reaction emoji for a rendered message.
+   * @param {HTMLElement | null} messageEl
+   * @returns {string}
+   */
+  getCurrentUserReactionForMessage(messageEl) {
+    if (!messageEl) return '';
+
+    const currentUserAddress = normalizeAddress(myAccount.keys.address);
+    const targetTxid = messageEl.dataset.txid;
+    const contact = myData.contacts[this.address];
+    const reaction = getEffectiveReactionForSenderTarget(contact, targetTxid, currentUserAddress);
+    return reaction ? reaction.emoji : '';
+  }
+
+  /**
+   * Builds reaction chip markup for a specific target message.
+   * @param {Array<Object>} reactionsForTarget
+   * @returns {string}
+   */
+  buildReactionChipsHTML(reactionsForTarget) {
+    if (reactionsForTarget.length === 0) {
+      return '';
+    }
+
+    const currentUserAddress = normalizeAddress(myAccount.keys.address);
+    const contactAddress = normalizeAddress(this.address);
+    const contactChips = [];
+    const myChips = [];
+    const otherChips = [];
+
+    for (const reaction of reactionsForTarget) {
+      const sender = reaction.sender;
+      const emoji = reaction.emoji;
+
+      const chipClass = sender === currentUserAddress ? 'message-reaction-chip my-reaction' : 'message-reaction-chip';
+      const chipHtml = `<span class="${chipClass}">${escapeHtml(emoji)}</span>`;
+      if (sender === contactAddress) {
+        contactChips.push(chipHtml);
+      } else if (sender === currentUserAddress) {
+        myChips.push(chipHtml);
+      } else {
+        otherChips.push(chipHtml);
+      }
+    }
+
+    const chips = [...contactChips, ...myChips, ...otherChips];
+    if (chips.length === 0) return '';
+
+    return `
+      <div class="message-reactions" aria-label="Reactions">
+        ${chips.join('')}
+      </div>
+    `;
+  }
+
+  /**
+   * Syncs the rendered reaction chip container for one message element.
+   * @param {HTMLElement | null} messageEl
+   * @param {Array<Object>} reactionsForTarget
+   * @returns {void}
+   */
+  syncReactionChipsForMessage(messageEl, reactionsForTarget) {
+    if (!messageEl) return;
+
+    const existingContainer = messageEl.querySelector('.message-reactions');
+    if (existingContainer) {
+      existingContainer.remove();
+    }
+
+    const reactionHtml = this.buildReactionChipsHTML(reactionsForTarget);
+    if (!reactionHtml) return;
+
+    messageEl.insertAdjacentHTML('beforeend', reactionHtml);
+  }
+
+  /**
+   * Syncs reaction chips for every rendered message in the open chat.
+   * @returns {void}
+   */
+  syncAllRenderedReactionChips() {
+    if (!this.messagesList || !this.address) return;
+
+    const contact = myData.contacts[this.address];
+    if (!contact) return;
+
+    const reactionsByTargetTxid = new Map();
+    const reactions = Array.isArray(contact.reactions) ? contact.reactions : [];
+    const seen = new Set();
+    for (const reaction of reactions) {
+      const reactionKey = `${reaction.targetTxid}:${normalizeAddress(reaction.sender)}`;
+      if (seen.has(reactionKey)) {
+        continue;
+      }
+      seen.add(reactionKey);
+
+      const current = reactionsByTargetTxid.get(reaction.targetTxid) || [];
+      current.push(reaction);
+      reactionsByTargetTxid.set(reaction.targetTxid, current);
+    }
+
+    const messageEls = this.messagesList.querySelectorAll('.message[data-txid]');
+    messageEls.forEach((messageEl) => {
+      const targetTxid = messageEl.dataset.txid;
+      this.syncReactionChipsForMessage(messageEl, reactionsByTargetTxid.get(targetTxid) || []);
+    });
+  }
+
+  /**
+   * Syncs reaction chips for the provided rendered target messages.
+   * @param {Array<string>} targetTxids
+   * @returns {void}
+   */
+  syncRenderedReactionTargets(targetTxids) {
+    if (!this.messagesList || !this.address || targetTxids.length === 0) {
+      return;
+    }
+
+    const contact = myData.contacts[this.address];
+    if (!contact) return;
+
+    const uniqueTargetTxids = [...new Set(targetTxids)];
+    uniqueTargetTxids.forEach((targetTxid) => {
+      const messageEl = this.messagesList.querySelector(`.message[data-txid="${CSS.escape(targetTxid)}"]`);
+      if (!messageEl) return;
+      this.syncReactionChipsForMessage(messageEl, getContactReactionsForTarget(contact, targetTxid));
+    });
+  }
+
+  /**
+   * Applies active-state styling to the quick reaction tray based on stored reaction state.
+   * @param {HTMLElement | null} reactionTray
+   * @param {HTMLElement | null} messageEl
+   */
+  syncReactionPickerActiveState(reactionTray, messageEl) {
+    if (!reactionTray) return;
+
+    const activeEmoji = this.getCurrentUserReactionForMessage(messageEl);
+    const reactionButtons = reactionTray.querySelectorAll('.message-context-reaction-button');
+    reactionButtons.forEach((button) => {
+      const isMorePickerTrigger = button.dataset.reactionPickerTrigger === 'true';
+      const buttonEmoji = isMorePickerTrigger
+        ? ''
+        : (button.dataset.emoji || button.textContent || '').trim();
+      const isActive = !isMorePickerTrigger && !!activeEmoji && buttonEmoji === activeEmoji;
+
+      button.classList.toggle('active', isActive);
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
   }
 
   /**
@@ -15865,11 +17596,21 @@ class ChatModal {
    * Returns whether "Delete for all" should be available for a given message element.
    * Mirrors the gating used in the message context menu.
    * @param {HTMLElement} messageEl
+   * @param {Object|null} messageRecord
    * @returns {boolean}
    */
-  canDeleteMessageForAll(messageEl) {
+  canDeleteMessageForAll(messageEl, messageRecord = null) {
     const isMine = !!messageEl?.classList?.contains('sent');
-    return isMine && myData.contacts[this.address]?.tollRequiredToSend == 0;
+    if (!isMine || myData.contacts[this.address]?.tollRequiredToSend != 0) {
+      return false;
+    }
+
+    const message = messageRecord || this.getMessageRecordFromElement(messageEl);
+    if (message && isDeletedForAll(message)) {
+      return false;
+    }
+
+    return true;
   }
 
   /**
@@ -15910,6 +17651,7 @@ class ChatModal {
   closeImageAttachmentContextMenu() {
     if (!this.imageAttachmentContextMenu) return;
     this.imageAttachmentContextMenu.style.display = 'none';
+    this.syncReactionPickerActiveState(this.imageAttachmentContextMenuReactions, null);
     this.currentImageAttachmentRow = null;
   }
 
@@ -16416,6 +18158,8 @@ class ChatModal {
       importContactsOpt.style.display = isVcf ? '' : 'none';
     }
 
+    this.syncReactionPickerActiveState(this.imageAttachmentContextMenuReactions, messageEl);
+
     this.positionContextMenu(this.imageAttachmentContextMenu, attachmentRow);
     this.imageAttachmentContextMenu.style.display = 'block';
   }
@@ -16592,6 +18336,233 @@ class ChatModal {
   }
 
   /**
+   * Handles quick reaction row clicks for the main message context menu.
+   * @param {HTMLElement} reactionButton
+   */
+  async handleReactionPickerClick(reactionButton) {
+    const messageEl = this.currentContextMessage;
+    await this.handleReactionPickerSelection(reactionButton, messageEl, () => this.closeContextMenu());
+  }
+
+  /**
+   * Handles quick reaction row clicks for the image attachment context menu.
+   * @param {HTMLElement} reactionButton
+   */
+  async handleImageAttachmentReactionPickerClick(reactionButton) {
+    const row = this.currentImageAttachmentRow;
+    const { messageEl } = row ? this.getAttachmentContextFromRow(row) : { messageEl: null };
+    await this.handleReactionPickerSelection(reactionButton, messageEl, () => this.closeImageAttachmentContextMenu());
+  }
+
+  /**
+   * Handles expanded emoji sheet clicks.
+   * @param {HTMLElement} reactionButton
+   */
+  async handleExpandedReactionPickerClick(reactionButton) {
+    const messageEl = this.reactionSheetTargetMessage;
+    if (!reactionButton || !messageEl) return;
+
+    const selectedReaction = (reactionButton.dataset.emoji || reactionButton.textContent || '').trim();
+    if (!selectedReaction) return;
+
+    await this.submitReactionSelection(messageEl, selectedReaction, () => this.closeReactionSheet());
+  }
+
+  /**
+   * Resolves a quick reaction picker press into a target txid and a minimal send flow.
+   * @param {HTMLElement} reactionButton
+   * @param {HTMLElement | null} messageEl
+   * @param {Function} closeMenu
+   */
+  async handleReactionPickerSelection(reactionButton, messageEl, closeMenu) {
+    if (!reactionButton) return;
+    if (!messageEl) return;
+
+    if (reactionButton.dataset.reactionPickerTrigger === 'true') {
+      closeMenu();
+      this.openReactionSheet(messageEl);
+      return;
+    }
+
+    const selectedReaction = (reactionButton.dataset.emoji || reactionButton.textContent || '').trim();
+    await this.submitReactionSelection(messageEl, selectedReaction, closeMenu);
+  }
+
+  /**
+   * Resolves a chosen emoji into either a set or remove reaction action.
+   * @param {HTMLElement | null} messageEl
+   * @param {string} selectedReaction
+   * @param {Function} closeUi
+   * @returns {Promise<void>}
+   */
+  async submitReactionSelection(messageEl, selectedReaction, closeUi) {
+    if (!messageEl || !selectedReaction) return;
+    assert(typeof closeUi === 'function', 'Reaction close callback is required');
+
+    const txid = messageEl.dataset.txid;
+    assert(txid, 'Reaction target txid is required');
+    const currentReaction = this.getCurrentUserReactionForMessage(messageEl);
+
+    const isRemovingCurrentReaction = !!currentReaction && selectedReaction === currentReaction;
+    if (isRemovingCurrentReaction) {
+      const confirmed = confirm('Remove your reaction?');
+      if (!confirmed) {
+        return;
+      }
+
+      closeUi();
+      await this.sendReactionMessage({
+        reactId: txid,
+        reactAction: 'remove'
+      });
+      return;
+    }
+
+    closeUi();
+    await this.sendReactionMessage({
+      reactId: txid,
+      reactMessage: selectedReaction,
+      reactAction: 'set'
+    });
+  }
+
+  /**
+   * Sends a reaction control message.
+   * @param {{reactId: string, reactAction: 'remove', reactMessage?: string} | {reactId: string, reactAction: 'set', reactMessage: string}} reaction
+   * @returns {Promise<boolean>}
+   */
+  async sendReactionMessage(reaction) {
+    assert(reaction.reactId, 'Reaction target txid is required');
+    if (reaction.reactAction === 'set') {
+      assert(reaction.reactMessage, 'Reaction emoji is required for set');
+    }
+
+    if (!isOnline) {
+      console.warn('Reaction send skipped while offline', reaction);
+      return false;
+    }
+
+    const currentAddress = this.address;
+    if (!currentAddress || currentAddress === myAccount.address) {
+      return false;
+    }
+
+    const contact = myData.contacts[currentAddress];
+    if (!contact) {
+      return false;
+    }
+
+    if (contact.tollRequiredToSend == 2) {
+      console.warn('Reaction send skipped because sender is blocked by recipient');
+      return false;
+    }
+
+    const tollInLib = contact.tollRequiredToSend == 0 ? 0n : getEffectiveTollLibWei(this.toll);
+    const sufficientBalance = await validateBalance(tollInLib);
+    if (!sufficientBalance) {
+      console.warn('Reaction send skipped due to insufficient balance', reaction);
+      return false;
+    }
+
+    const keys = myAccount.keys;
+    if (!keys) {
+      console.warn('Reaction send skipped: sender keys missing');
+      return false;
+    }
+
+    let payload;
+    let chatMessageObj;
+    let txid;
+    try {
+      payload = {
+        type: 'message',
+        reactId: reaction.reactId,
+        reactAction: reaction.reactAction
+      };
+      switch (reaction.reactAction) {
+        case 'set':
+          payload.reactMessage = reaction.reactMessage;
+          break;
+        case 'remove':
+          break;
+        default:
+          throw new Error(`Unknown reaction action: ${reaction.reactAction}`);
+      }
+
+      ({ payload, chatMessageObj, txid } = await this.buildEncryptedStructuredChatTx(
+        currentAddress,
+        payload,
+        tollInLib,
+        keys
+      ));
+    } catch (error) {
+      console.warn('Reaction send skipped: failed to build encrypted chat tx', error);
+      return false;
+    }
+
+    console.log('Sending reaction message', {
+      txid,
+      reactId: reaction.reactId,
+      reactMessage: reaction.reactMessage,
+      reactAction: reaction.reactAction
+    });
+
+    let reactionPendingState = null;
+    if (reaction.reactAction === 'set') {
+      const sender = normalizeAddress(keys.address);
+      assert(payload.sent_timestamp, 'Reaction sent_timestamp is required');
+      const localReaction = {
+        sender,
+        reactId: reaction.reactId,
+        action: 'set',
+        emoji: reaction.reactMessage,
+        timestamp: payload.sent_timestamp,
+        reactionTxId: txid
+      };
+      const optimisticApply = applyOptimisticReactionSet(contact, localReaction);
+      if (optimisticApply.didApply) {
+        reactionPendingState = {
+          targetTxid: reaction.reactId,
+          previousReactionTxId: optimisticApply.previousReactionTxId
+        };
+        syncReactionUiState(currentAddress, contact, reaction.reactId);
+      } else {
+        console.warn('Reaction sent but local optimistic apply was skipped', localReaction);
+      }
+    }
+
+    const response = await injectTx(chatMessageObj, txid);
+    if (!response?.result?.success) {
+      console.error('reaction message failed to send', response);
+      if (reactionPendingState) {
+        const didRevert = reconcilePendingReactionSet({
+          txid,
+          to: currentAddress,
+          reactionPending: reactionPendingState
+        }, 'failure');
+        if (didRevert) {
+          showToast('Reaction failed to send and was reverted', 0, 'error');
+        }
+        saveState();
+      }
+      return false;
+    }
+
+    if (reactionPendingState) {
+      const pendingTxInfo = myData.pending.find((pendingTx) => pendingTx.txid === txid);
+      assert(pendingTxInfo, `Pending reaction metadata missing for ${txid}`);
+      pendingTxInfo.reactionPending = reactionPendingState;
+      saveState();
+    }
+
+    if (reaction.reactAction === 'remove') {
+      showToast('Reaction remove request sent', 5000, 'loading');
+    }
+
+    return true;
+  }
+
+  /**
    * Initiates editing of a message: fills input with existing text and stores txid
    * @param {HTMLElement} messageEl
    */
@@ -16601,6 +18572,9 @@ class ChatModal {
       const txid = messageEl.dataset.txid;
       const timestamp = parseInt(messageEl.dataset.messageTimestamp || '0', 10);
       if (!txid) return;
+      if (hasPendingEditForTarget(this.address, txid)) {
+        return showToast('This message already has a pending edit.', 3000, 'info');
+      }
       // Enforce edit window in case UI got out of sync
       if (timestamp && (Date.now() - timestamp) > EDIT_WINDOW_MS) {
         return showToast('Edit window expired', 3000, 'info');
@@ -16909,7 +18883,7 @@ class ChatModal {
       const message = contact.messages[messageIndex];
       const shouldRefreshCallsUi = message.type === 'call' && shouldRefreshUpcomingCallsUiForCallTime(message.callTime);
       
-      if (message.deleted) {
+      if (isDeleted(message)) {
         return showToast('Message already deleted', 2000, 'info');
       }
       
@@ -16923,30 +18897,28 @@ class ChatModal {
 
       // Mark as deleted and clear payment info if present
       Object.assign(message, {
-        deleted: 1,
-        message: "Deleted on this device"
+        deleted: MESSAGE_DELETED_STATE_LOCAL,
+        message: DELETED_MESSAGE_LOCAL_TEXT
       });
       // Remove payment-specific fields if present
       if (message?.amount) {
         if (message.payment) delete message.payment;
-        if (message.memo) message.memo = "Deleted on this device";
+        if (message.memo) message.memo = DELETED_MESSAGE_LOCAL_TEXT;
         if (message.amount) delete message.amount;
         if (message.symbol) delete message.symbol;
-        
+
         // Update corresponding transaction in wallet history
-        const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === message.txid);
-        if (txIndex !== -1) {
-          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted on this device' });
-          delete myData.wallet.history[txIndex].amount;
-          delete myData.wallet.history[txIndex].symbol;
-          delete myData.wallet.history[txIndex].payment;
-          delete myData.wallet.history[txIndex].sign;
-          delete myData.wallet.history[txIndex].address;
-        }
+        updateDeletedWalletHistoryEntry(
+          message.txid,
+          MESSAGE_DELETED_STATE_LOCAL,
+          DELETED_MESSAGE_LOCAL_TEXT
+        );
       }
       // Remove cached thumbnails for image attachments, then remove attachments
       this.purgeThumbnail(message.xattach);
       delete message.xattach;
+      purgeContactReactionsForTarget(contact, message.txid);
+      syncChatLatestActivityTimestamp(this.address, contact);
       
       this.appendChatModal();
       if (shouldRefreshCallsUi) {
@@ -16986,8 +18958,8 @@ class ChatModal {
       
       const message = contact.messages[messageIndex];
       
-      if (message.deleted) {
-        return showToast('Message already deleted', 2000, 'info');
+      if (isDeletedForAll(message)) {
+        return showToast('Message already deleted for everyone', 2000, 'info');
       }
 
       // Check if the message was sent by the current user
@@ -18066,7 +20038,7 @@ class CallInviteModal {
     if (!comparableCallUrl) return false;
     return (contact?.messages || []).some((message) => {
       if (!message || message.type !== 'call') return false;
-      if (message.deleted === 1 || message.status === 'failed') return false;
+      if (isDeleted(message) || message.status === 'failed') return false;
       return this.getComparableCallUrl(message.message) === comparableCallUrl;
     });
   }
@@ -20073,6 +22045,7 @@ class ImportContactsModal {
           address: networkAddress,
           username: validation.username,
           messages: [],
+          reactions: [],
           timestamp: 0,
           unread: 0,
           hasAvatar: false,
@@ -21405,12 +23378,8 @@ class NewChatModal {
 
     this.hideRecipientError();
 
-    // Check if input is an Ethereum address
-    if (input.startsWith('0x')) {
-      if (!isValidEthereumAddress(input)) {
-        this.showRecipientError('Invalid Ethereum address format');
-        return;
-      }
+    // Treat as an address only when the full input is a valid Ethereum address.
+    if (isValidEthereumAddress(input)) {
       // Input is valid Ethereum address, normalize it
       recipientAddress = normalizeAddress(input);
     } else {
@@ -22233,16 +24202,28 @@ class SendAssetFormModal {
    */
   async handleSendToAddressInput(e) {
     this.submitButton.disabled = true;
+    const rawInput = e.target.value.trim();
+
+    // Cancel any queued lookup before handling a new recipient value.
+    if (this.sendAssetFormModalCheckTimeout) {
+      clearTimeout(this.sendAssetFormModalCheckTimeout);
+      this.sendAssetFormModalCheckTimeout = null;
+    }
+
+    if (isValidEthereumAddress(rawInput)) {
+      this.clearFormInfo();
+      this.foundAddressObject.address = null;
+      this.usernameAvailable.textContent = 'address not supported';
+      this.usernameAvailable.style.color = '#dc3545';
+      this.usernameAvailable.style.display = 'inline';
+      await this.refreshSendButtonDisabledState();
+      return;
+    }
 
     // Check availability on input changes
     const username = normalizeUsername(e.target.value);
     e.target.value = username;
     const usernameAvailable = this.usernameAvailable;
-
-    // Clear previous timeout
-    if (this.sendAssetFormModalCheckTimeout) {
-      clearTimeout(this.sendAssetFormModalCheckTimeout);
-    }
 
     this.clearFormInfo();
     this.foundAddressObject.address = null;
@@ -22942,7 +24923,12 @@ class SendAssetConfirmModal {
    */
   async handleSendAsset(event) {
     event.preventDefault();
-    const username = normalizeUsername(sendAssetFormModal.usernameInput.value);
+    const rawInput = sendAssetFormModal.usernameInput.value.trim();
+    if (isValidEthereumAddress(rawInput)) {
+      showToast('Address not supported; enter username instead.', 0, 'error');
+      return;
+    }
+    const username = normalizeUsername(rawInput);
 
     if (username == myAccount.username) {
       showToast('You cannot send assets to yourself', 0, 'error');
@@ -22969,11 +24955,7 @@ class SendAssetConfirmModal {
       return;
     }
 
-    // Validate username - must be username; address not supported
-    if (username.startsWith('0x')) {
-      showToast('Address not supported; enter username instead.', 0, 'error');
-      return;
-    }
+    // Validate normalized username input
     if (username.length < 3) {
       showToast('Username too short', 0, 'error');
       return;
@@ -25527,6 +27509,14 @@ async function checkPendingTransactions() {
       //console.log(`DEBUG: txid ${txid} res: ${JSON.stringify(res)}`);
       if (submittedts < thirtySecondsAgo && (res.transaction === null || Object.keys(res.transaction).length === 0)) {
         console.error(`DEBUG: txid ${txid} timed out, removing completely`);
+        const didRevert = reconcilePendingReactionSet(pendingTxInfo, 'failure');
+        if (didRevert) {
+          showToast('Reaction timed out and was reverted', 0, 'error');
+        }
+        if (pendingTxInfo.editPending) {
+          reconcilePendingMessageEdit(pendingTxInfo);
+          showToast('Edit timed out and was reverted', 0, 'error');
+        }
         // remove the pending tx from the pending array
         myData.pending.splice(i, 1);
         continue;
@@ -25535,6 +27525,7 @@ async function checkPendingTransactions() {
       if (res?.transaction?.success === true) {
         // comment out to test the pending txs removal logic
         myData.pending.splice(i, 1);
+        reconcilePendingReactionSet(pendingTxInfo, 'success');
 
         if (type === 'register') {
           pendingPromiseService.resolve(txid, {
@@ -25594,7 +27585,15 @@ async function checkPendingTransactions() {
           pendingPromiseService.reject(txid, new Error(userFailureReason));
         } else {
           // Show toast notification with the failure reason
-          if (type === 'withdraw_stake') {
+          if (pendingTxInfo.reactionPending) {
+            const didRevert = reconcilePendingReactionSet(pendingTxInfo, 'failure');
+            showToast(didRevert
+              ? `Reaction failed and was reverted: ${userFailureReason}`
+              : userFailureReason, 0, 'error');
+          } else if (pendingTxInfo.editPending) {
+            reconcilePendingMessageEdit(pendingTxInfo);
+            showToast(`Edit failed and was reverted: ${userFailureReason}`, 0, 'error');
+          } else if (type === 'withdraw_stake') {
             showToast(`Unstake failed: ${userFailureReason}`, 0, 'error');
           } else if (type === 'deposit_stake') {
             showToast(`Stake failed: ${userFailureReason}`, 0, 'error');
@@ -25646,9 +27645,11 @@ async function checkPendingTransactions() {
             showToast(userFailureReason, 0, 'error');
           }
 
-          const toAddress = pendingTxInfo.to;
-          updateTransactionStatus(txid, toAddress, 'failed', type);
-          chatModal.refreshCurrentView(txid);
+          if (!pendingTxInfo.reactionPending && !pendingTxInfo.editPending) {
+            const toAddress = pendingTxInfo.to;
+            updateTransactionStatus(txid, toAddress, 'failed', type);
+            chatModal.refreshCurrentView(txid);
+          }
         }
         // Remove from pending array
         myData.pending.splice(i, 1);
