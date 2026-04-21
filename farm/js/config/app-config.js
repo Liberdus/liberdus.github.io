@@ -45,12 +45,44 @@ window.CONFIG = {
                                   /* '0x74b00fe491Ab0CDf5291af69bD8c4ECD5FBbE8Ca' */
 
             }
+        },
+        BSC_MAINNET: {
+            CHAIN_ID: 56,
+            NAME: 'BNB Smart Chain',
+            RPC_URL: 'https://bsc-dataseed.bnbchain.org',
+            FALLBACK_RPCS: [
+                'https://bsc-dataseed.nariox.org',
+                'https://bsc-dataseed.defibit.io',
+                'https://bsc-dataseed.ninicoin.io'
+            ],
+            BLOCK_EXPLORER: 'https://bscscan.com',
+            NATIVE_CURRENCY: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+            CONTRACTS: {
+                STAKING_CONTRACT: '0x89E662CB5d784582DB631e2Cbc81bB6643BB2EF4'
+            }
+        },
+        BSC_TESTNET: {
+            CHAIN_ID: 97,
+            NAME: 'BNB Smart Chain Testnet',
+            RPC_URL: 'https://data-seed-prebsc-1-s1.bnbchain.org:8545',
+            FALLBACK_RPCS: [
+                'https://bsc-testnet-dataseed.bnbchain.org',
+                'https://bsc-testnet.bnbchain.org',
+                'https://bsc-prebsc-dataseed.bnbchain.org'
+            ],
+            BLOCK_EXPLORER: 'https://testnet.bscscan.com',
+            NATIVE_CURRENCY: { name: 'Test BNB', symbol: 'tBNB', decimals: 18 },
+            CONTRACTS: {
+                STAKING_CONTRACT: '0x24F28129B65E9AeDdAfE3f1Fc67ab82DDCF30dF9'
+            }
         }
     },
 
     // Multicall2 addresses (canonical deployment for batch loading optimization)
     MULTICALL2: {
         1: '0x5BA1e12693Dc8F9c48aAD8770482f4739bEeD696',      // Ethereum Mainnet
+        56: '0xcA11bde05977b3631167028862bE2a173976CA11',     // BNB Smart Chain
+        97: '0xcA11bde05977b3631167028862bE2a173976CA11',     // BNB Smart Chain Testnet
         137: '0x275617327c958bD06b5D6b871E7f491D76113dd8',    // Polygon Mainnet
         80002: '0xcA11bde05977b3631167028862bE2a173976CA11',  // Polygon Amoy Testnet
         31337: '0xcA11bde05977b3631167028862bE2a173976CA11'   // Local Hardhat
@@ -121,17 +153,31 @@ window.CONFIG = {
         ],
         // Base URLs for each platform (address will be inserted where {address} appears)
         BASE_URLS: {
-            'Uniswap V2': 'https://app.uniswap.org/explore/pools/polygon/{address}',
-            'SushiSwap': 'https://www.sushi.com/analytics/pools/polygon/{address}',
-            'Curve Finance': 'https://curve.fi/polygon/pools/{address}',
-            'Balancer': 'https://app.balancer.fi/#/polygon/pool/{address}',
-            'PancakeSwap': 'https://pancakeswap.finance/pools/{address}'
+            'Uniswap V2': {
+                AMOY: 'https://app.uniswap.org/explore/pools/polygon/{address}',
+                POLYGON_MAINNET: 'https://app.uniswap.org/explore/pools/polygon/{address}'
+            },
+            'SushiSwap': {
+                AMOY: 'https://www.sushi.com/analytics/pools/polygon/{address}',
+                POLYGON_MAINNET: 'https://www.sushi.com/analytics/pools/polygon/{address}'
+            },
+            'Curve Finance': {
+                AMOY: 'https://curve.fi/polygon/pools/{address}',
+                POLYGON_MAINNET: 'https://curve.fi/polygon/pools/{address}'
+            },
+            'Balancer': {
+                AMOY: 'https://app.balancer.fi/#/polygon/pool/{address}',
+                POLYGON_MAINNET: 'https://app.balancer.fi/#/polygon/pool/{address}'
+            },
+            'PancakeSwap': {
+                default: 'https://pancakeswap.finance/pools/{address}'
+            }
         },
     },
 
     // Development Configuration
     DEV: {
-        DEBUG: false
+        DEBUG: true
     },
 
     // Default Values for Contract Stats

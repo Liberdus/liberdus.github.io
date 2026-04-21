@@ -79,6 +79,28 @@ window.Formatter = {
     },
 
     /**
+     * Resolve a platform URL template for the currently selected network.
+     * Supports either legacy string values or per-network maps in CONFIG.
+     * @param {string} platform - The platform name from the contract
+     * @returns {string} URL template or empty string when not configured
+     */
+    getPlatformBaseUrl(platform) {
+        const platformsConfig = window.CONFIG?.PLATFORMS;
+        const platformConfig = platform && platformsConfig?.BASE_URLS?.[platform];
+
+        if (!platformConfig) {
+            return '';
+        }
+
+        if (typeof platformConfig === 'string') {
+            return platformConfig;
+        }
+
+        const selectedNetwork = window.networkSelector?.getSelectedNetworkKey?.();
+        return platformConfig[selectedNetwork] || platformConfig.default || '';
+    },
+
+    /**
      * Format pair name for display with platform-specific link
      * Uses the platform from contract data to link to the correct DEX
      * @param {string} pairName - The pair name from the contract
@@ -89,12 +111,13 @@ window.Formatter = {
     formatPairName(pairName, lpTokenAddress = '', platform = '') {
         if (!pairName) return `<span class="pair-name-link-text">Not provided</span>`;
 
-        const platformsConfig = window.CONFIG?.PLATFORMS;
-        const baseUrl = platform && platformsConfig?.BASE_URLS?.[platform];
+        const baseUrl = this.getPlatformBaseUrl(platform);
         
         // Only return a link if we have a valid platform URL configured
         if (!baseUrl) {
-            window.notificationManager.error(`Platform ${platform} not configured for pair ${pairName}`);
+            if (platform) {
+                console.warn(`Platform ${platform} is not configured for ${window.networkSelector?.getCurrentNetworkName?.() || 'the selected network'}`);
+            }
             return `<span class="pair-name-link-text">${pairName}</span>`;
         }
 
@@ -116,4 +139,3 @@ window.Formatter = {
         `;
     },
 };
-

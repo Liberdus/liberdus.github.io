@@ -140,6 +140,15 @@ class ContractManager {
             // Seed staking address from configuration so we can build the contract instance next
             this.loadStakingAddressFromConfig();
 
+            if (!this.hasConfiguredStakingContract()) {
+                const networkName = window.networkSelector?.getCurrentNetworkName?.() || 'the selected network';
+                console.warn(`No staking contract configured for ${networkName}; continuing in read-only empty state`);
+                this.stakingContract = null;
+                this.rewardTokenContract = null;
+                this.lpTokenContracts.clear();
+                return;
+            }
+
             // Initialize contract instances (read-only)
             await this.initializeContractsReadOnly();
 
@@ -308,6 +317,17 @@ class ContractManager {
 
             // Seed staking address from configuration before building the contract instance
             this.loadStakingAddressFromConfig();
+
+            if (!this.hasConfiguredStakingContract()) {
+                const networkName = window.networkSelector?.getCurrentNetworkName?.() || 'the selected network';
+                console.warn(`No staking contract configured for ${networkName}; continuing without contract instances`);
+                this.stakingContract = null;
+                this.rewardTokenContract = null;
+                this.lpTokenContracts.clear();
+                this.isInitialized = true;
+                this._notifyReadyCallbacks();
+                return true;
+            }
 
             // Initialize contract instances
             await this.initializeContracts();
@@ -824,6 +844,11 @@ class ContractManager {
         }
     }
 
+    hasConfiguredStakingContract() {
+        const stakingAddress = this.contractAddresses.get('STAKING') || window.networkSelector?.getStakingContractAddress();
+        return !!(stakingAddress && this.isValidContractAddress(stakingAddress));
+    }
+
     /**
      * Update LP contract addresses from contract-provided pairs list.
      */
@@ -1328,7 +1353,7 @@ class ContractManager {
         // Signer is optional (null in read-only mode)
         const ready = !!(this.isInitialized &&
                         this.provider &&
-                        (this.stakingContract || this.rewardTokenContract));
+                        ((this.stakingContract || this.rewardTokenContract) || !this.hasConfiguredStakingContract()));
 
         return ready;
     }
@@ -1350,6 +1375,20 @@ class ContractManager {
             this.stakingContract = null;
             this.rewardTokenContract = null;
             this.lpTokenContracts.clear();
+            this.provider = null;
+            this.signer = null;
+            this.transactionProvider = null;
+            this.contractAddresses.clear();
+            this.fallbackProviders = [];
+            this.fallbackProvidersInitialized = false;
+            this.cachedNetwork = null;
+            this.cachedPairs = null;
+            this.cachedBasicData = null;
+            this.cachedBasicDataTimestamp = 0;
+            this.disabledFeatures.clear();
+            if (this.rpcProviderCache?.clear) this.rpcProviderCache.clear();
+            if (this.lpStaticMetaCache?.clear) this.lpStaticMetaCache.clear();
+            if (this.tokenDecimalsCache?.clear) this.tokenDecimalsCache.clear();
 
             // Reset MulticallService
             if (this.multicallService) {
@@ -1363,6 +1402,11 @@ class ContractManager {
                 // Reset provider rotation for new network
                 this.currentProviderIndex = 0;
             }
+
+            // Reinitialize against the selected network even when no contracts are configured yet.
+            // initializeReadOnly() now handles the empty-contract case without throwing.
+            await this.initializeReadOnly();
+            return true;
 
             // Check if the new network has valid contract addresses
             const contractAddress = window.networkSelector?.getStakingContractAddress();
@@ -2944,7 +2988,8 @@ class ContractManager {
 
             // Verify signer is actually available
             if (!this.signer) {
-                throw new Error('No signer available. Please connect MetaMask and ensure you are on Polygon Amoy network.');
+                const networkName = window.networkSelector?.getCurrentNetworkName?.() || 'the selected network';
+                throw new Error(`No signer available. Please connect MetaMask and ensure you are on ${networkName}.`);
             }
 
             const result = await this.executeTransactionOnce(async () => {
