@@ -27,6 +27,8 @@
     // Multicall2 addresses (canonical deployment across networks)
     const MULTICALL2_ADDRESSES = {
         1: '0x5BA1e12693Dc8F9c48aAD8770482f4739bEeD696',      // Ethereum Mainnet
+        56: '0xcA11bde05977b3631167028862bE2a173976CA11',     // BNB Smart Chain
+        97: '0xcA11bde05977b3631167028862bE2a173976CA11',     // BNB Smart Chain Testnet
         137: '0x275617327c958bD06b5D6b871E7f491D76113dd8',    // Polygon Mainnet
         80002: '0xcA11bde05977b3631167028862bE2a173976CA11',  // Polygon Amoy Testnet
         31337: '0xcA11bde05977b3631167028862bE2a173976CA11'   // Local Hardhat (if deployed)
@@ -320,4 +322,3 @@
     console.log('✅ MulticallService loaded');
 
 })(typeof window !== 'undefined' ? window : global);
-

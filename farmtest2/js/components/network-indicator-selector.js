@@ -15,12 +15,24 @@ class NetworkSelector {
         this.isInitialized = false;
         this.eventListeners = new Map(); // Store event listeners for cleanup
         this._networkSwitching = false; // Track network switching state
-        this.defaultNetwork = 'AMOY';
+        this.defaultNetwork = 'BSC_MAINNET';
+        this.selectableNetworks = ['BSC_MAINNET', 'BSC_TESTNET'];
+    }
+
+    getSelectableNetworkEntries() {
+        const networks = window.CONFIG?.NETWORKS || {};
+        return this.selectableNetworks
+            .map((networkKey) => [networkKey, networks[networkKey]])
+            .filter(([, network]) => !!network);
+    }
+
+    isSelectableNetworkKey(networkKey) {
+        return this.getSelectableNetworkEntries().some(([key]) => key === networkKey);
     }
 
     getSelectedNetworkKey() {
-        const selectedNetworkKey = localStorage.getItem('liberdus-selected-network')
-        if (!selectedNetworkKey) {
+        const selectedNetworkKey = localStorage.getItem('liberdus-selected-network');
+        if (!selectedNetworkKey || !this.isSelectableNetworkKey(selectedNetworkKey)) {
             localStorage.setItem('liberdus-selected-network', this.defaultNetwork);
             return this.defaultNetwork;
         }
@@ -101,7 +113,7 @@ class NetworkSelector {
      * Get the HTML for the network selector dropdown
      */
     getSelectorHTML() {
-        const networks = Object.entries(window.CONFIG.NETWORKS);
+        const networks = this.getSelectableNetworkEntries();
         const selectedNetwork = this.getSelectedNetworkKey();
         
         return `

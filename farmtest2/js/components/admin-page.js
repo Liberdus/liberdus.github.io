@@ -286,12 +286,20 @@ class AdminPage {
         `;
     }
 
+    renderUnauthorizedNetworkOptions() {
+        const selectedNetwork = window.networkSelector?.getSelectedNetworkKey?.() || '';
+        const networks = window.networkSelector?.getSelectableNetworkEntries?.() || [];
+
+        return networks.map(([key, network]) => `
+            <option value="${key}" ${selectedNetwork === key ? 'selected' : ''}>${network.NAME}</option>
+        `).join('');
+    }
 
     showUnauthorizedAccess() {
         const container = document.getElementById('admin-content') || document.body;
         const currentNetwork = window.networkSelector?.getCurrentNetworkName();
         const currentChainId = window.networkSelector?.getCurrentChainId();
-        const currentContract = window.networkSelector?.getStakingContractAddress();
+        const currentContract = window.networkSelector?.getStakingContractAddress() || 'Not deployed yet';
         
         container.innerHTML = `
             <div class="admin-unauthorized">
@@ -320,8 +328,7 @@ class AdminPage {
                         <p>Or try switching to a network where you have admin permissions:</p>
                         <div class="network-selector-container">
                             <select id="unauthorized-network-select" class="network-select">
-                                <option value="AMOY" ${(window.networkSelector.getSelectedNetworkKey() || '') === 'AMOY' ? 'selected' : ''}>Amoy Testnet</option>
-                                <option value="POLYGON_MAINNET" ${(window.networkSelector.getSelectedNetworkKey() || '') === 'POLYGON_MAINNET' ? 'selected' : ''}>Polygon Mainnet</option>
+                                ${this.renderUnauthorizedNetworkOptions()}
                             </select>
                         </div>
                     </div>
@@ -1124,11 +1131,14 @@ class AdminPage {
         }
 
         statusContainer.className = `transaction-status ${statusClass}`;
+        const txUrl = hash
+            ? window.networkManager?.getTransactionUrl(hash, window.networkSelector?.getCurrentChainId?.())
+            : '';
         statusContainer.innerHTML = `
             <div class="status-content">
                 <span class="status-icon">${icon}</span>
                 <span class="status-message">${message}</span>
-                ${hash ? `<a href="https://amoy.polygonscan.com/tx/${hash}" target="_blank" class="tx-link">View Transaction</a>` : ''}
+                ${txUrl ? `<a href="${txUrl}" target="_blank" class="tx-link">View Transaction</a>` : ''}
                 ${error ? `<div class="error-details">${error}</div>` : ''}
             </div>
             <button class="close-status" onclick="this.parentNode.style.display='none'">×</button>

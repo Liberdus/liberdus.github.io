@@ -330,6 +330,13 @@ class HomePage {
         // Generate table rows - either data rows or "no data" row
         let tbodyContent = '';
         if (displayPairs.length === 0) {
+            const networkName = window.networkSelector?.getCurrentNetworkName?.() || 'this network';
+            const hasConfiguredContract = !!window.networkSelector?.getStakingContractAddress?.()?.trim();
+            const emptyStateTitle = hasConfiguredContract ? 'No Staking Pairs Available' : 'Staking Not Deployed Yet';
+            const emptyStateMessage = hasConfiguredContract
+                ? 'There are currently no staking pairs configured in the contract. Please check back later.'
+                : `Liberdus LP Staking is not deployed on ${networkName} yet. Please check back after the contract is deployed.`;
+
             // Show "no data" row when there are no pairs to display (after filtering)
             tbodyContent = `
                 <tr>
@@ -337,9 +344,9 @@ class HomePage {
                         <div style="display: flex; flex-direction: column; align-items: center; gap: 16px;">
                             <span class="material-icons" style="font-size: 48px; color: var(--text-secondary); opacity: 0.5;">inbox</span>
                             <div>
-                                <p style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0; color: var(--text-primary);">No Staking Pairs Available</p>
+                                <p style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0; color: var(--text-primary);">${emptyStateTitle}</p>
                                 <p style="font-size: 14px; margin: 0; color: var(--text-secondary);">
-                                    There are currently no staking pairs configured in the contract. Please check back later.
+                                    ${emptyStateMessage}
                                 </p>
                             </div>
                             <button class="btn btn-primary" id="retry-load" type="button" style="margin-top: 8px;">
