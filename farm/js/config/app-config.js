@@ -155,7 +155,8 @@ window.CONFIG = {
         BASE_URLS: {
             'Uniswap V2': {
                 AMOY: 'https://app.uniswap.org/explore/pools/polygon/{address}',
-                POLYGON_MAINNET: 'https://app.uniswap.org/explore/pools/polygon/{address}'
+                POLYGON_MAINNET: 'https://app.uniswap.org/explore/pools/polygon/{address}',
+                BSC_MAINNET: 'https://app.uniswap.org/explore/pools/bnb/{address}'
             },
             'SushiSwap': {
                 AMOY: 'https://www.sushi.com/analytics/pools/polygon/{address}',

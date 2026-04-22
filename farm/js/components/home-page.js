@@ -440,13 +440,18 @@ class HomePage {
         const userShares = pair.userShares || '0.00';
         const userEarnings = pair.userEarnings || '0.00';
         
-        const pairNameHtml = window.Formatter?.formatPairName(pair.name, pair.address, pair.platform) || pair.name;
-        const platformHtml = pair.platform ? `<div style="font-size: 12px; color: var(--text-secondary);">${pair.platform}</div>` : '';
+        const pairNameHtml = window.Formatter.formatPairName(pair.name, pair.address, pair.platform);
+        const platform = pair.platform;
+        const lpTokenAddress = pair.lpToken || pair.address;
+        const platformUrl = window.Formatter.getPlatformUrl(platform, lpTokenAddress);
+        const platformHtml = platformUrl
+            ? `<a href="${platformUrl}" target="_blank" rel="noopener noreferrer" class="platform-link" title="View pool on ${platform}" style="font-size: 12px; color: var(--text-secondary); display: inline-block;">${platform}</a>`
+            : `<span style="font-size: 12px; color: var(--text-secondary);">${platform}</span>`;
         
         return `
             <tr class="pair-row" data-pair-id="${pair.id}" style="cursor: pointer;">
                 <td>
-                    <div style="display: flex; flex-direction: column;">
+                    <div class="pair-link-stack">
                         ${pairNameHtml}
                         ${platformHtml}
                     </div>
@@ -460,7 +465,7 @@ class HomePage {
                     </span>
                 </td>
                 <td>
-                    <span style="font-weight: 600;">${this.formatNumber(pair.tvl || 0)}</span>
+                    <span style="font-weight: 600;">${this.formatTvlDisplay(pair)}</span>
                 </td>
                 <td>
                     <button class="btn btn-primary btn-small btn-share"
@@ -888,6 +893,8 @@ class HomePage {
                             platform: pairInfo.platform || '',
                             apr: pairInfo.apr || '0.00',
                             tvl: pairInfo.tvl || 0,
+                            tvlUsd: null,
+                            tvlCalculated: false,
                             userShares: '0.00', // Will be updated if wallet connected
                             userEarnings: '0.00', // Will be updated if wallet connected
                             totalStaked: pairInfo.totalStaked || '0',
@@ -915,7 +922,12 @@ class HomePage {
                     console.log('⚡ Calculating TVL and APR for all pairs...');
                     await this.calculateTVLAndAPR();
                     console.log('🎨 Re-rendering after TVL/APR calculation...');
-                    console.log('📊 Pairs data after calculation:', this.pairs.map(p => ({ name: p.name, tvl: p.tvl, apr: p.apr })));
+                    console.log('📊 Pairs data after calculation:', this.pairs.map(p => ({
+                        name: p.name,
+                        tvlLp: p.tvl,
+                        tvlUsd: p.tvlUsd,
+                        apr: p.apr
+                    })));
                     this.render(); // Re-render with TVL and APR data
                 }
 
@@ -1013,8 +1025,8 @@ class HomePage {
 
     /**
      * Calculate TVL and APR for all pairs using on-chain LP composition.
-     * TVL remains in LP token units, while APR now leverages the LIB-per-LP
-     * ratio derived from Uniswap V2 reserve data instead of external pricing.
+     * Raw LP totals remain available for share math, while the TVL column
+     * uses USD pricing for the underlying tokens when a price feed exists.
      */
     async calculateTVLAndAPR() {
         if (this.pairs.length === 0) {
@@ -1040,6 +1052,27 @@ class HomePage {
             const totalWeight = Number(this.totalWeight) || 1;
 
             const breakdowns = await window.contractManager.getLPStakeBreakdowns(this.pairs);
+            const tokenAddresses = new Set();
+
+            breakdowns.forEach((breakdown) => {
+                const token0Address = breakdown?.token0?.address?.toLowerCase?.();
+                const token1Address = breakdown?.token1?.address?.toLowerCase?.();
+
+                if (token0Address) {
+                    tokenAddresses.add(token0Address);
+                }
+
+                if (token1Address) {
+                    tokenAddresses.add(token1Address);
+                }
+            });
+
+            const tokenPricesUsd = new Map();
+            await Promise.all(Array.from(tokenAddresses).map(async (address) => {
+                const priceUsd = await window.rewardsCalculator.fetchTokenPriceByAddress(address);
+                tokenPricesUsd.set(address, priceUsd);
+            }));
+
             const calculations = this.pairs.map(async (pair, index) => {
                 try {
                     console.log(`🔍 Calculating TVL/APR for ${pair.name}...`);
@@ -1049,87 +1082,69 @@ class HomePage {
                     const breakdown = resolvedAddress ? breakdowns.get(resolvedAddress) : null;
                     if (!breakdown) {
                         console.warn(`⚠️ LP breakdown not available for ${pair.name}, skipping`);
+                        this.pairs[index].tvlUsd = null;
+                        this.pairs[index].tvlCalculated = true;
                         return;
                     }
-                    const lpDecimals = Number(breakdown?.lpToken?.decimals) || 18;
-                    const stakedBn = ethers.BigNumber.from(breakdown?.lpToken?.stakedBalance?.raw || '0');
-                    const tvlInTokens = Number(ethers.utils.formatUnits(stakedBn, lpDecimals)) || 0;
-
-                    const poolWeight = Number(pair.weight) || 1;
-
                     const token0 = breakdown?.token0;
                     const token1 = breakdown?.token1;
                     const token0Addr = token0?.address?.toLowerCase?.();
                     const token1Addr = token1?.address?.toLowerCase?.();
-
-                    let libToken = null;
-                    if (rewardTokenAddressLower && token0Addr === rewardTokenAddressLower) {
-                        libToken = token0;
-                    } else if (rewardTokenAddressLower && token1Addr === rewardTokenAddressLower) {
-                        libToken = token1;
-                    }
-
-                    if (!libToken) {
-                        console.warn(`⚠️ LIB token not found for ${pair.name}, skipping APR calculation`);
-                        return;
-                    }
-
-                    const libStaked = Number(libToken?.staked?.formatted) || 0;
-                    const libReserve = Number(libToken?.reserve?.formatted) || 0;
-
-                    const otherToken = libToken === token0 ? token1 : token0;
-                    const otherStaked = Number(otherToken?.staked?.formatted) || 0;
-                    const otherReserve = Number(otherToken?.reserve?.formatted) || 0;
-
-                    // Convert the counter token stake to a LIB-equivalent amount using the reserve ratio
-                    let otherTokenLibEquivalent = 0;
-                    if (otherStaked > 0 && otherReserve > 0 && libReserve > 0) {
-                        const otherToLibRate = libReserve / otherReserve;
-                        otherTokenLibEquivalent = otherStaked * otherToLibRate;
-                    }
-
-                    const totalStakeValueInLib = libStaked + otherTokenLibEquivalent;
-                    const stakeValuePerLpInLib = tvlInTokens > 0 ? totalStakeValueInLib / tvlInTokens : 0;
-
-                    if (stakeValuePerLpInLib <= 0) {
-                        console.warn(`⚠️ Invalid LIB-equivalent value per LP for ${pair.name}, skipping APR calculation`);
-                        return;
-                    }
-
-                    const apr = window.rewardsCalculator.calcAPR(
+                    const token0PriceUsd = token0Addr ? (tokenPricesUsd.get(token0Addr) || 0) : 0;
+                    const token1PriceUsd = token1Addr ? (tokenPricesUsd.get(token1Addr) || 0) : 0;
+                    const parsedPoolWeight = Number(pair.weight);
+                    const poolWeight = Number.isFinite(parsedPoolWeight) ? parsedPoolWeight : 1;
+                    const metrics = window.rewardsCalculator.buildPoolMetrics({
+                        breakdown,
+                        rewardTokenAddress,
                         hourlyRate,
-                        tvlInTokens,
-                        stakeValuePerLpInLib,
                         poolWeight,
-                        totalWeight
-                    );
+                        totalWeight,
+                        token0PriceUsd,
+                        token1PriceUsd
+                    });
+                    const tvlInTokens = metrics.tvlLpTokens;
+                    const tvlUsd = metrics.tvlUsd;
 
-                    const tvl = tvlInTokens;
+                    if (!metrics.isSupportedPair) {
+                        console.warn(`⚠️ Reward token not found in ${pair.name}, APR remains 0`);
+                    }
+
+                    if (metrics.rewardTokenPerLp <= 0) {
+                        console.warn(`⚠️ Invalid reward-token value per LP for ${pair.name}, APR remains 0`);
+                    }
 
                     console.log(`  📊 TVL (LP tokens): ${tvlInTokens}`);
-                    console.log(`  💧 LIB-equivalent value per LP token: ${stakeValuePerLpInLib}`);
-                    console.log(`  💠 LIB tokens in stake: ${libStaked}`);
-                    console.log(`  🔁 Counter-token LIB equivalent: ${otherTokenLibEquivalent}`);
-                    console.log(`  📈 Calculated APR: ${apr.toFixed(1)}%`);
+                    console.log(`  💵 TVL (USD): ${tvlUsd === null ? 'N/A' : tvlUsd}`);
+                    console.log(`  💧 Reward-token value per LP token: ${metrics.rewardTokenPerLp}`);
+                    console.log(`  💠 Reward tokens in stake: ${metrics.rewardTokenStaked}`);
+                    console.log(`  🔁 Counter-token reward equivalent: ${metrics.counterTokenRewardEquivalent}`);
+                    console.log(`  📈 Calculated APR: ${metrics.apr.toFixed(1)}%`);
 
                     // Update pair data to match React structure
                     console.log(`🔧 Updating pair ${index} (${pair.name}):`);
-                    console.log(`  Before: tvl=${this.pairs[index].tvl}, apr=${this.pairs[index].apr}`);
+                    console.log(`  Before: tvl=${this.pairs[index].tvl}, tvlUsd=${this.pairs[index].tvlUsd}, apr=${this.pairs[index].apr}`);
 
-                    this.pairs[index].tvl = tvl;  // Token count, not USD
-                    this.pairs[index].apr = apr.toFixed(1);  // React uses .toFixed(1)
+                    this.pairs[index].tvl = tvlInTokens;  // Raw LP token count for share math
+                    this.pairs[index].tvlUsd = tvlUsd;
+                    this.pairs[index].tvlCalculated = true;
+                    this.pairs[index].apr = metrics.apr.toFixed(1);  // React uses .toFixed(1)
                     this.pairs[index].totalStaked = tvlInTokens.toFixed(6);
-                    this.pairs[index].libPerLp = stakeValuePerLpInLib;
-                    this.pairs[index].libTokensStaked = libStaked;
-                    this.pairs[index].counterTokenStaked = otherStaked;
-                    this.pairs[index].counterTokenLibEquivalent = otherTokenLibEquivalent;
-                    this.pairs[index].totalStakeValueInLib = totalStakeValueInLib;
+                    this.pairs[index].libPerLp = metrics.rewardTokenPerLp;
+                    this.pairs[index].libTokensStaked = metrics.rewardTokenStaked;
+                    this.pairs[index].counterTokenStaked = metrics.counterTokenStaked;
+                    this.pairs[index].counterTokenLibEquivalent = metrics.counterTokenRewardEquivalent;
+                    this.pairs[index].totalStakeValueInLib = metrics.totalStakeValueInRewardToken;
 
-                    console.log(`  After: tvl=${this.pairs[index].tvl}, apr=${this.pairs[index].apr}`);
-                    console.log(`✅ ${pair.name}: TVL=${tvl.toFixed(2)} LP, APR=${apr.toFixed(1)}%`);
+                    console.log(`  After: tvl=${this.pairs[index].tvl}, tvlUsd=${this.pairs[index].tvlUsd}, apr=${this.pairs[index].apr}`);
+                    console.log(`✅ ${pair.name}: TVL=${tvlInTokens.toFixed(2)} LP (${tvlUsd === null ? 'N/A' : window.Formatter?.formatCurrency(tvlUsd) || `$${tvlUsd.toFixed(2)}`}), APR=${metrics.apr.toFixed(1)}%`);
 
                 } catch (error) {
                     console.error(`❌ Failed to calculate TVL/APR for ${pair.name}:`, error);
+                    if (this.pairs[index]) {
+                        this.pairs[index].tvlUsd = null;
+                        this.pairs[index].tvlCalculated = true;
+                    }
                     window.notificationManager?.error(`Failed to calculate TVL/APR for ${pair.name}`);
                     // Keep default values (0)
                 }
@@ -1197,6 +1212,18 @@ class HomePage {
             return (num / 1000).toFixed(2) + 'K';
         }
         return num.toFixed(2);
+    }
+
+    formatTvlDisplay(pair) {
+        if (!pair?.tvlCalculated) {
+            return '...';
+        }
+
+        if (pair.tvlUsd === null || pair.tvlUsd === undefined) {
+            return 'N/A';
+        }
+
+        return window.Formatter?.formatCompactCurrency(pair.tvlUsd) || `$${this.formatNumber(pair.tvlUsd)}`;
     }
 
 

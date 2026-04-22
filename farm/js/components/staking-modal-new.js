@@ -823,10 +823,25 @@ class StakingModalNew {
         const pairInfoElement = document.getElementById('modal-pair-info');
         if (!pairInfoElement || !this.currentPair) return;
 
+        const platform = this.currentPair.platform;
+        const lpTokenAddress = this.currentPair.lpToken || this.currentPair.address;
+        const platformUrl = window.Formatter.getPlatformUrl(platform, lpTokenAddress);
+
+        if (platformUrl) {
+            pairInfoElement.innerHTML = `
+                <a href="${platformUrl}" target="_blank" rel="noopener noreferrer" class="modal-pair-link" title="View pool on ${platform}">
+                    <span class="material-icons modal-pair-link-icon" style="font-size: 16px;">swap_horiz</span>
+                    <span class="modal-pair-link-text">${this.currentPair.name}</span>
+                    <span class="chip chip-primary modal-pair-link-chip">${platform}</span>
+                </a>
+            `;
+            return;
+        }
+
         pairInfoElement.innerHTML = `
             <span class="material-icons" style="font-size: 16px;">swap_horiz</span>
-            ${this.currentPair.name || 'Unknown Pair'}
-            <span class="chip chip-primary" style="margin-left: 8px;">${this.currentPair.platform}</span>
+            ${this.currentPair.name}
+            <span class="chip chip-primary" style="margin-left: 8px;">${platform}</span>
         `;
     }
 
