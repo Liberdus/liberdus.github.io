@@ -131,7 +131,16 @@
     <footer class="footer">
         <div class="container-lg">
             <div class="footer-content">
-                <span class="footer-text">© 2024 Liberdus LP Stake. All rights reserved.</span>
+                <span class="footer-text">&copy; <a href="https://liberdus.com" target="_blank" rel="noopener noreferrer" class="footer-brand-link">Liberdus</a> <span id="footer-year">2026</span></span>
+                <div class="footer-actions">
+                    <a id="add-token-link" href="#" class="footer-link-anchor footer-link-action" hidden>
+                        <img src="assets/metamask-fox.svg" alt="" class="footer-link-icon" aria-hidden="true">
+                        <span>Add to MetaMask</span>
+                    </a>
+                    <a id="staking-contract-link" href="#" target="_blank" rel="noopener noreferrer" class="footer-link-anchor" hidden>
+                        Contract
+                    </a>
+                </div>
                 <div class="social-links">
                     <a href="https://github.com/Liberdus/lib-lp-staking-frontend" target="_blank" rel="noopener" class="social-link" title="Visit our GitHub">
                         <span class="material-icons">code</span>
@@ -158,6 +167,11 @@
     <script>
     // Display version in header
     document.addEventListener('DOMContentLoaded', function() {
+        const footerYearElement = document.getElementById('footer-year');
+        if (footerYearElement) {
+            footerYearElement.textContent = String(new Date().getFullYear());
+        }
+
         if (window.getCurrentVersion) {
             window.getCurrentVersion().then(function(version) {
                 const versionElement = document.getElementById('app-version');

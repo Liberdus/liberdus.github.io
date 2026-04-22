@@ -34,6 +34,7 @@ class HomePage {
 
         console.log('🏠 Initializing HomePage component...');
         this.render();
+        this.updateFooter();
         this.attachEventListeners();
         this.setupContractManagerListeners();
         this.setupWalletChangeDetection();
@@ -52,6 +53,7 @@ class HomePage {
         // Listen for contract manager ready event
         document.addEventListener('contractManagerReady', () => {
             console.log('🏠 HomePage: ContractManager is ready, loading data...');
+            this.updateFooter();
             this.loadData().catch(() => {});
             // Auto-refresh disabled - manual refresh only
         });
@@ -62,6 +64,7 @@ class HomePage {
             this.error = `Loading failed: ${event.detail.error}`;
             this.loading = false;
             this.render();
+            this.updateFooter();
         });
 
         // Listen for wallet disconnection
@@ -72,6 +75,7 @@ class HomePage {
             this.loading = true;
             this.error = null;
             this.render();
+            this.updateFooter();
         });
     }
 
@@ -83,6 +87,7 @@ class HomePage {
         document.addEventListener('walletConnected', (event) => {
             console.log('🏠 HomePage: Wallet connected, refreshing data...');
             window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
+            this.updateFooter();
             this.refreshDataAfterWalletChange();
             this.checkAdminAccess();
         });
@@ -90,6 +95,7 @@ class HomePage {
         document.addEventListener('walletDisconnected', () => {
             console.log('🏠 HomePage: Wallet disconnected, refreshing data...');
             window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
+            this.updateFooter();
             this.refreshDataAfterWalletChange();
             this.hideAdminButton();
         });
@@ -98,6 +104,7 @@ class HomePage {
         if (window.ethereum) {
             window.ethereum.on('accountsChanged', (accounts) => {
                 console.log('🏠 HomePage: Accounts changed:', accounts);
+                this.updateFooter();
                 this.refreshDataAfterWalletChange();
                 this.checkAdminAccess();
             });
@@ -107,12 +114,14 @@ class HomePage {
                 console.log('🏠 HomePage: Chain changed:', chainId);
                 // Only update the network indicator to re-check permissions
                 window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
+                this.updateFooter();
             });
 
             // Re-check permissions when page regains focus (in case permissions were removed in another tab)
             window.addEventListener('focus', () => {
                 console.log('🏠 HomePage: Page focused, re-checking permissions...');
                 window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
+                this.updateFooter();
             });
         }
     }
@@ -126,6 +135,7 @@ class HomePage {
         this.loading = true;
         this.pairs = [];
         this.error = null;
+        this.updateFooter();
         this.render(); // Show skeleton immediately
         
         // Schedule new refresh after 500ms (waits for rapid events + network transition to settle)
@@ -145,6 +155,7 @@ class HomePage {
     async loadDataWhenReady() {
         if (window.contractManager && window.contractManager.isReady()) {
             console.log('🏠 HomePage: ContractManager already ready, loading data immediately...');
+            this.updateFooter();
             await this.loadData().catch(() => {});
             this.checkAdminAccess();
             // Auto-refresh disabled - manual refresh only
@@ -153,6 +164,7 @@ class HomePage {
             this.loading = true;
             this.error = null;
             this.render();
+            this.updateFooter();
         }
     }
 
@@ -485,6 +497,20 @@ class HomePage {
             refreshBtn.addEventListener('click', () => this.handleRefreshClick());
         }
 
+        const addTokenLink = document.getElementById('add-token-link');
+        if (addTokenLink) {
+            addTokenLink.addEventListener('click', async (event) => {
+                event.preventDefault();
+
+                try {
+                    await this.addRewardTokenToMetaMask();
+                } catch (error) {
+                    console.error('❌ Failed to add reward token to MetaMask:', error);
+                    window.notificationManager?.error(error.message || 'Failed to add token to MetaMask.');
+                }
+            });
+        }
+
         // Delegate event listeners for dynamic content (buttons in table rows)
         document.addEventListener('click', (e) => {
             // Handle row click (open modal on default tab)
@@ -535,6 +561,156 @@ class HomePage {
             }
 
         });
+    }
+
+    isMetaMaskWalletSelected() {
+        const provider = window.ethereum;
+        const walletType = String(window.walletManager?.getWalletType?.() || window.walletManager?.walletType || '').toLowerCase();
+
+        if (
+            provider?.isPhantom ||
+            provider?.isBraveWallet ||
+            provider?.isCoinbaseWallet ||
+            provider?.isRabby
+        ) {
+            return false;
+        }
+
+        if (walletType && walletType !== 'metamask') {
+            return false;
+        }
+
+        return Boolean(provider?.isMetaMask || walletType === 'metamask');
+    }
+
+    getRewardTokenAddress() {
+        const contractAddresses = window.contractManager?.contractAddresses;
+        if (!(contractAddresses instanceof Map)) {
+            return null;
+        }
+
+        return contractAddresses.get('REWARD_TOKEN') || null;
+    }
+
+    getStakingContractAddress() {
+        const contractAddresses = window.contractManager?.contractAddresses;
+        if (contractAddresses instanceof Map) {
+            const stakingAddress = contractAddresses.get('STAKING');
+            if (stakingAddress) {
+                return stakingAddress;
+            }
+        }
+
+        return window.networkSelector?.getStakingContractAddress?.() || null;
+    }
+
+    getExplorerBaseUrl() {
+        const networkConfig = window.networkSelector?.getCurrentNetworkConfig?.();
+        return String(networkConfig?.BLOCK_EXPLORER || '').trim().replace(/\/+$/, '');
+    }
+
+    async addRewardTokenToMetaMask() {
+        const injected = window.ethereum;
+        if (!injected?.request) {
+            throw new Error('MetaMask was not detected in this browser.');
+        }
+
+        const isOnRequiredNetwork = window.networkManager?.isOnRequiredNetwork() || false;
+        if (!isOnRequiredNetwork) {
+            const networkName = window.networkSelector?.getCurrentNetworkName() || 'the selected';
+            throw new Error(`Please switch to ${networkName} before adding LIB to MetaMask.`);
+        }
+
+        const rewardTokenAddress = this.getRewardTokenAddress();
+        if (!rewardTokenAddress) {
+            throw new Error('Reward token address is not available yet.');
+        }
+
+        let symbol = 'LIB';
+        let decimals = 18;
+        const rewardTokenContract = window.contractManager?.rewardTokenContract;
+
+        if (rewardTokenContract) {
+            try {
+                const [resolvedSymbol, resolvedDecimals] = await Promise.all([
+                    rewardTokenContract.symbol().catch(() => symbol),
+                    rewardTokenContract.decimals().catch(() => decimals)
+                ]);
+
+                if (resolvedSymbol) {
+                    symbol = resolvedSymbol;
+                }
+
+                if (resolvedDecimals != null && Number.isFinite(Number(resolvedDecimals))) {
+                    decimals = Number(resolvedDecimals);
+                }
+            } catch (error) {
+                console.warn('⚠️ Falling back to default token metadata for MetaMask import:', error);
+            }
+        }
+
+        const wasAdded = await injected.request({
+            method: 'wallet_watchAsset',
+            params: {
+                type: 'ERC20',
+                options: {
+                    address: rewardTokenAddress,
+                    symbol,
+                    decimals
+                }
+            }
+        });
+
+        if (wasAdded) {
+            window.notificationManager?.success(`${symbol} added to MetaMask.`);
+            return;
+        }
+
+        window.notificationManager?.info('Token import was closed.');
+    }
+
+    updateFooter() {
+        const footerYear = document.getElementById('footer-year');
+        if (footerYear) {
+            footerYear.textContent = String(new Date().getFullYear());
+        }
+
+        const addTokenLink = document.getElementById('add-token-link');
+        const stakingContractLink = document.getElementById('staking-contract-link');
+
+        if (addTokenLink) {
+            const canAddToken = this.isWalletConnected() && (window.networkManager?.isOnRequiredNetwork() || false);
+            const showAddTokenLink = Boolean(
+                this.getRewardTokenAddress() &&
+                canAddToken &&
+                this.isMetaMaskWalletSelected()
+            );
+
+            addTokenLink.hidden = !showAddTokenLink;
+            if (showAddTokenLink) {
+                addTokenLink.href = '#';
+            } else {
+                addTokenLink.removeAttribute('href');
+            }
+        }
+
+        if (stakingContractLink) {
+            const explorerBaseUrl = this.getExplorerBaseUrl();
+            const stakingContractAddress = this.getStakingContractAddress();
+            const showContractLink = Boolean(explorerBaseUrl && stakingContractAddress);
+
+            stakingContractLink.hidden = !showContractLink;
+            if (showContractLink) {
+                const networkName = window.networkSelector?.getCurrentNetworkName?.() || 'current';
+                stakingContractLink.href = `${explorerBaseUrl}/address/${stakingContractAddress}`;
+                stakingContractLink.title = `View the ${networkName} staking contract in the explorer`;
+                stakingContractLink.setAttribute('aria-label', `View the ${networkName} staking contract in the explorer`);
+            } else {
+                stakingContractLink.removeAttribute('href');
+                stakingContractLink.removeAttribute('title');
+                stakingContractLink.removeAttribute('aria-label');
+            }
+        }
     }
 
     /**
@@ -605,6 +781,8 @@ class HomePage {
             this.loading = false;
             this.render();
             throw error;
+        } finally {
+            this.updateFooter();
         }
     }
 
@@ -1084,6 +1262,7 @@ class HomePage {
 
             // Update network indicator
             window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
+            this.updateFooter();
         });
 
     }
