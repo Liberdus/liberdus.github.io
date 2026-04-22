@@ -22,7 +22,7 @@
 #
 # WHAT IT DOES:
 # - Copies all files from lib-lp-staking-frontend/* to liberdus.github.io/farm/
-# - Excludes README.md and legacy folder
+# - Excludes README.md, legacy, and local test tooling files/folders
 # - Replaces existing files in the farm folder
 # - Preserves directory structure
 # - Removes files that no longer exist in the source (syncs the folders)
@@ -80,7 +80,7 @@ echo "Current version: $current_version"
 # Using rsync for better control with exclusions
 if command -v rsync &> /dev/null; then
     # Use rsync for efficient copying with exclusions
-    # Exclude README.md, legacy folder, and hidden files like .git
+    # Exclude README.md, legacy, and local test tooling files/folders
     rsync -av --delete \
         --exclude='README.md' \
         --exclude='README' \
@@ -89,6 +89,10 @@ if command -v rsync &> /dev/null; then
         --exclude='.git/' \
         --exclude='.git' \
         --exclude='.gitignore' \
+        --exclude='/.github/' \
+        --exclude='/tests/' \
+        --exclude='/package.json' \
+        --exclude='/package-lock.json' \
         "$SOURCE_DIR/" "$TARGET_DIR/"
 else
     # Fallback to cp if rsync is not available
@@ -105,11 +109,18 @@ else
     cp -r "$SOURCE_DIR"/* "$temp_dir/" 2>/dev/null || true
     
     # Remove excluded items
-    rm -f "$temp_dir/README.md" "$temp_dir/README" 2>/dev/null || true
-    rm -rf "$temp_dir/legacy" 2>/dev/null || true
+    rm -f "$temp_dir/README.md" "$temp_dir/README" "$temp_dir/package.json" "$temp_dir/package-lock.json" 2>/dev/null || true
+    rm -rf "$temp_dir/legacy" "$temp_dir/tests" "$temp_dir/.github" 2>/dev/null || true
     
-    # Remove all files and directories in target (except .git if it exists and version.html)
-    find "$TARGET_DIR" -mindepth 1 -maxdepth 1 ! -name '.git' ! -name 'version.html' -exec rm -rf {} +
+    # Remove all files and directories in target except versioning and local test tooling
+    find "$TARGET_DIR" -mindepth 1 -maxdepth 1 \
+        ! -name '.git' \
+        ! -name 'version.html' \
+        ! -name '.github' \
+        ! -name 'tests' \
+        ! -name 'package.json' \
+        ! -name 'package-lock.json' \
+        -exec rm -rf {} +
     
     # Copy all files from temp to target
     cp -r "$temp_dir"/* "$TARGET_DIR/" 2>/dev/null || true
@@ -166,6 +177,5 @@ else
     echo "Error: Copy operation failed"
     exit 1
 fi
-
 
 
