@@ -73,6 +73,34 @@
     font-size: 14px;
 }
 
+.modal-pair-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    width: fit-content;
+    color: var(--text-secondary);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.modal-pair-link:hover {
+    color: var(--text-secondary);
+    text-decoration: none;
+}
+
+.modal-pair-link:hover .modal-pair-link-text {
+    text-decoration: underline;
+}
+
+.modal-pair-link:hover .modal-pair-link-chip {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+.modal-pair-link-chip {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
 /* Modal Tabs */
 .modal-tabs {
     display: flex;

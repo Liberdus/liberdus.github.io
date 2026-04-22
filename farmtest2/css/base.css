@@ -654,6 +654,36 @@ ol {
 
 .pair-name-link:hover { opacity: 0.8; }
 
+.pair-link-stack {
+    display: flex;
+    flex-direction: column;
+    width: fit-content;
+}
+
+.pair-link-stack:hover .pair-name-link,
+.pair-link-stack:hover .platform-link {
+    opacity: 0.8;
+}
+
+.pair-link-stack:hover .pair-name-link-text,
+.pair-link-stack:hover .platform-link {
+    text-decoration: underline;
+}
+
+.pair-link-stack:hover .pair-name-link-icon {
+    transform: translateX(1px) translateY(-1px);
+}
+
+.platform-link {
+    cursor: pointer;
+    transition: opacity 0.2s ease, text-decoration-color 0.2s ease;
+}
+
+.platform-link:hover {
+    opacity: 0.8;
+    text-decoration: underline;
+}
+
 .pair-name-link-text {
     font-weight: 700;
     color: var(--text-primary);

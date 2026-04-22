@@ -229,6 +229,57 @@ body {
     letter-spacing: 0.5px;
 }
 
+.footer-brand-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.footer-brand-link:hover {
+    color: var(--primary-main);
+}
+
+.footer-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--spacing-2);
+}
+
+.footer-link-anchor {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border: 1px solid var(--divider);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-weight: 600;
+    transition: border-color 0.2s, color 0.2s, transform 0.2s, background-color 0.2s;
+}
+
+.footer-link-anchor:hover {
+    color: var(--primary-main);
+    border-color: color-mix(in srgb, var(--primary-main) 35%, var(--divider));
+    background: color-mix(in srgb, var(--primary-main) 8%, transparent);
+    transform: translateY(-1px);
+}
+
+.footer-link-anchor[hidden] {
+    display: none !important;
+}
+
+.footer-link-action {
+    color: var(--text-primary);
+}
+
+.footer-link-icon {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+}
+
 .social-links {
     display: flex;
     gap: var(--spacing-2);
@@ -283,6 +334,10 @@ body {
     .footer-content {
         flex-direction: column;
         text-align: center;
+    }
+
+    .footer-actions {
+        width: 100%;
     }
 
     .main-content {
