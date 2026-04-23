@@ -20,7 +20,11 @@
             this.isInitialized = false;
             this.priceCache = new Map();
             this.priceCacheTtlMs = 5 * 60 * 1000;
-            this.dexScreenerBaseUrl = 'https://api.dexscreener.com/latest/dex/tokens';
+            this.tokenPriceProviderNames = [
+                'GeckoTerminalPriceProvider',
+                'DexScreenerPriceProvider'
+            ];
+            this.tokenPriceProviders = null;
         }
 
         async initialize(contractManagerOrOptions) {
@@ -83,8 +87,34 @@
             return Number.isFinite(parsed) ? parsed : 0;
         }
 
-        getCachedTokenPrice(address) {
-            const cachedEntry = this.priceCache.get(address);
+        getCurrentPricingChainContext() {
+            const chainId = Number(globalThis?.window?.networkSelector?.getCurrentChainId?.());
+
+            return {
+                chainId: Number.isFinite(chainId) && chainId > 0 ? chainId : null
+            };
+        }
+
+        getTokenPriceProviders() {
+            if (this.tokenPriceProviders) {
+                return this.tokenPriceProviders;
+            }
+
+            this.tokenPriceProviders = this.tokenPriceProviderNames
+                .map((providerName) => globalThis?.window?.[providerName])
+                .filter((ProviderClass) => typeof ProviderClass === 'function')
+                .map((ProviderClass) => new ProviderClass());
+
+            return this.tokenPriceProviders;
+        }
+
+        getPriceCacheKey(address, chainId = null) {
+            return `${chainId || 'any'}:${address}`;
+        }
+
+        getCachedTokenPrice(address, chainId = null) {
+            const cacheKey = this.getPriceCacheKey(address, chainId);
+            const cachedEntry = this.priceCache.get(cacheKey);
             if (!cachedEntry) {
                 return null;
             }
@@ -93,50 +123,49 @@
             return cacheAgeMs < this.priceCacheTtlMs ? cachedEntry.price : null;
         }
 
-        setCachedTokenPrice(address, price) {
+        setCachedTokenPrice(address, chainId, price) {
             if (price <= 0) {
                 return;
             }
 
-            this.priceCache.set(address, {
+            const cacheKey = this.getPriceCacheKey(address, chainId);
+            this.priceCache.set(cacheKey, {
                 price,
                 timestamp: Date.now()
             });
         }
 
-        parseDexScreenerPriceUsd(data) {
-            return Number.parseFloat(data?.pairs?.[0]?.priceUsd || '0') || 0;
-        }
-
-        async requestTokenPriceByAddress(address) {
-            const response = await fetch(`${this.dexScreenerBaseUrl}/${address}`);
-            if (!response.ok) {
-                throw new Error(`DexScreener price request failed: ${response.status}`);
-            }
-
-            const data = await response.json();
-            return this.parseDexScreenerPriceUsd(data);
-        }
-
         async fetchTokenPriceByAddress(address) {
             const normalizedAddress = this.normalizeAddress(address);
+            const chainContext = this.getCurrentPricingChainContext();
+
             if (!normalizedAddress || typeof fetch !== 'function') {
                 return 0;
             }
 
-            const cachedPrice = this.getCachedTokenPrice(normalizedAddress);
+            const cachedPrice = this.getCachedTokenPrice(normalizedAddress, chainContext.chainId);
             if (cachedPrice !== null) {
                 return cachedPrice;
             }
 
-            try {
-                const price = await this.requestTokenPriceByAddress(normalizedAddress);
-                this.setCachedTokenPrice(normalizedAddress, price);
-                return price;
-            } catch (error) {
-                console.warn(`Failed to fetch token price for ${normalizedAddress}:`, error?.message || error);
-                return 0;
+            let lastError = null;
+            for (const provider of this.getTokenPriceProviders()) {
+                try {
+                    const price = await provider.fetchTokenPrice(normalizedAddress, chainContext);
+                    if (price > 0) {
+                        this.setCachedTokenPrice(normalizedAddress, chainContext.chainId, price);
+                        return price;
+                    }
+                } catch (error) {
+                    lastError = error;
+                }
             }
+
+            if (lastError) {
+                console.warn(`Failed to fetch token price for ${normalizedAddress}:`, lastError?.message || lastError);
+            }
+
+            return 0;
         }
 
         buildPoolMetrics({

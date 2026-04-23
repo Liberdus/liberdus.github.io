@@ -119,6 +119,8 @@ class MasterInitializer {
 
         // Only load rewards calculator on homepage
         if (!this.isAdminPage) {
+            walletScripts.push('js/utils/pricing/gecko-terminal-price-provider.js');
+            walletScripts.push('js/utils/pricing/dex-screener-price-provider.js');
             walletScripts.push('js/utils/rewards-calculator.js');
         } else {
             console.log('⏭️ Skipping homepage utilities (admin mode)');

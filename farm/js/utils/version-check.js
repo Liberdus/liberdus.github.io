@@ -165,6 +165,8 @@
             // JavaScript - Utils (only existing files)
             `${basePath}js/utils/admin-test.js`,
             `${basePath}js/utils/formatter.js`,
+            `${basePath}js/utils/pricing/gecko-terminal-price-provider.js`,
+            `${basePath}js/utils/pricing/dex-screener-price-provider.js`,
             `${basePath}js/utils/rewards-calculator.js`,
             `${basePath}js/utils/rpc-test.js`,
             `${basePath}js/utils/ses-safe-handler.js`,
@@ -199,4 +201,3 @@
     checkVersion(getCriticalFiles());
 
 })(window);
-
