@@ -141,6 +141,44 @@ window.CONFIG = {
         REWARD_PRECISION: 18 // Token precision for rewards
     },
 
+    // KyberSwap Zap as a Service configuration
+    KYBER_ZAP: {
+        BASE_URL: 'https://zap-api.kyberswap.com',
+        CLIENT_ID: 'liberdus-lp-staking',
+        SOURCE: 'liberdus-lp-staking',
+        NATIVE_TOKEN_ADDRESS: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE',
+        DEFAULT_SLIPPAGE_BPS: 50,
+        DEFAULT_DEADLINE_MINUTES: 20,
+        NETWORKS: {
+            BSC_MAINNET: {
+                CHAIN: 'bsc',
+                DEX: 'DEX_UNISWAPV2',
+                DEX_CANDIDATES: [
+                    'DEX_UNISWAPV2',
+                    'DEX_PANCAKESWAPV2',
+                    'DEX_PANCAKESWAPV3',
+                    'DEX_THENAFUSION'
+                ],
+                FACTORY_DEX_IDS: {
+                    '0x8909dc15e40173ff4699343b6eb8132c65e18ec6': 'DEX_UNISWAPV2',
+                    '0xca143ce32fe78f1f7019d7d551a6402fc5350c73': 'DEX_PANCAKESWAPV2'
+                },
+                PLATFORM_DEX_IDS: {
+                    'Uniswap V2': 'DEX_UNISWAPV2',
+                    'PancakeSwap': 'DEX_PANCAKESWAPV2',
+                    'PancakeSwap V2': 'DEX_PANCAKESWAPV2',
+                    'PancakeSwap V3': 'DEX_PANCAKESWAPV3',
+                    'Thena Fusion': 'DEX_THENAFUSION'
+                },
+                INPUT_TOKENS: [
+                    { symbol: 'BNB', name: 'BNB', address: 'native', decimals: 18 },
+                    { symbol: 'USDT', name: 'Tether USD', address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
+                    { symbol: 'LIB', name: 'Liberdus', address: 'pool-token', decimals: null }
+                ]
+            }
+        }
+    },
+
     // Platform Configuration
     PLATFORMS: {
         // Available platforms for dropdown (matches contract values)
@@ -149,7 +187,10 @@ window.CONFIG = {
             'SushiSwap',
             'Curve Finance',
             'Balancer',
-            'PancakeSwap'
+            'PancakeSwap',
+            'PancakeSwap V2',
+            'PancakeSwap V3',
+            'Thena Fusion'
         ],
         // Base URLs for each platform (address will be inserted where {address} appears)
         BASE_URLS: {
