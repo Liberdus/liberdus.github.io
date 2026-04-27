@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -1583,7 +1583,9 @@ class ChatsScreen {
       if (isShowingReactionPreview) {
         const reactionActor = reactionPreview.my ? 'You' : contactName;
         const reactionTarget = reactionPreview.target;
-        const reactionText = `${reactionActor} reacted ${reactionPreview.emoji} to "${reactionTarget}"`;
+        const reactionText = reactionPreview.emoji
+          ? `${reactionActor} reacted ${reactionPreview.emoji} to "${reactionTarget}"`
+          : `${reactionActor} removed a reaction from "${reactionTarget}"`;
         previewHTML = truncateMessage(escapeHtml(reactionText), 50);
       } else if (typeof latestActivity.amount === 'bigint') {
         // Latest item is a payment/transfer
@@ -5840,22 +5842,65 @@ async function ensureContactKeys(address) {
 }
 
 /**
- * @typedef {{ sender: string, reactId: string, action: 'remove', timestamp: number, reactionTxId?: string } | { sender: string, reactId: string, action: 'set', emoji: string, timestamp: number, reactionTxId?: string }} ReactionUpdate
+ * @typedef {{ sender: string, reactId: string, action: 'remove', timestamp: number, reactionTxId?: string, targetReactionTxId?: string } | { sender: string, reactId: string, action: 'set', emoji: string, timestamp: number, reactionTxId?: string }} ReactionUpdate
  */
 
 /**
- * @typedef {{ targetTxid: string, previousReactionTxId: string | null }} PendingReactionSet
+ * @typedef {{
+ *   sender: string,
+ *   targetTxid: string,
+ *   emoji: string,
+ *   timestamp: number,
+ *   reactionTxId?: string
+ * }} ReactionSnapshot
+ */
+
+/**
+ * @typedef {{
+ *   targetTxid: string,
+ *   localOrder: number,
+ *   status: 'pending' | 'success' | 'failure',
+ *   baseReaction: ReactionSnapshot | null
+ * } & ({
+ *   kind: 'set',
+ *   visibleResult: ReactionSnapshot
+ * } | {
+ *   kind: 'remove',
+ *   visibleResult: ReactionSnapshot & { emoji: '' }
+ * })} PendingReactionMutation
  */
 
 /**
  * Returns the newest effective reaction for a specific sender and target message.
- * The raw reaction array may contain older fallback entries behind the newest one.
  * @param {Object} contact
  * @param {string} targetTxid
  * @param {string} sender
  * @returns {Object|null}
  */
 function getEffectiveReactionForSenderTarget(contact, targetTxid, sender) {
+  const reactions = Array.isArray(contact.reactions) ? contact.reactions : [];
+  const normalizedSender = normalizeAddress(sender);
+
+  for (const reaction of reactions) {
+    if (!reaction.emoji) {
+      continue;
+    }
+    if (reaction.targetTxid === targetTxid && normalizeAddress(reaction.sender) === normalizedSender) {
+      return reaction;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Returns the newest reaction state, including empty-emoji removal markers.
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @param {string} sender
+ * @returns {Object|null}
+ */
+function getLatestReactionStateForSenderTarget(contact, targetTxid, sender) {
   const reactions = Array.isArray(contact.reactions) ? contact.reactions : [];
   const normalizedSender = normalizeAddress(sender);
 
@@ -5870,7 +5915,6 @@ function getEffectiveReactionForSenderTarget(contact, targetTxid, sender) {
 
 /**
  * Returns the effective reactions for a specific target message.
- * Older duplicate entries for the same sender are hidden fallback state.
  * @param {Object} contact
  * @param {string} targetTxid
  * @returns {Array<Object>}
@@ -5881,6 +5925,9 @@ function getContactReactionsForTarget(contact, targetTxid) {
   const effectiveReactions = [];
 
   for (const reaction of reactions) {
+    if (!reaction.emoji) {
+      continue;
+    }
     if (reaction.targetTxid !== targetTxid) {
       continue;
     }
@@ -5938,6 +5985,191 @@ function removeReactionByReactionTxId(contact, reactionTxId) {
 }
 
 /**
+ * Records a reaction removal as chat-list activity without creating a visible chip.
+ * @param {Object} contact
+ * @param {Extract<ReactionUpdate, { action: 'remove' }>} reaction
+ * @returns {void}
+ */
+function recordReactionRemovalActivity(contact, reaction) {
+  insertSorted(contact.reactions, {
+    sender: normalizeAddress(reaction.sender),
+    targetTxid: reaction.reactId,
+    emoji: '',
+    timestamp: reaction.timestamp,
+    reactionTxId: reaction.reactionTxId
+  }, 'timestamp');
+}
+
+/**
+ * Returns a normalized copy of a reaction snapshot or null.
+ * @param {ReactionSnapshot | null} reaction
+ * @returns {ReactionSnapshot | null}
+ */
+function copyReactionSnapshot(reaction) {
+  if (!reaction) {
+    return null;
+  }
+
+  return {
+    sender: normalizeAddress(reaction.sender),
+    targetTxid: reaction.targetTxid,
+    emoji: reaction.emoji,
+    timestamp: Number(reaction.timestamp),
+    reactionTxId: reaction.reactionTxId
+  };
+}
+
+/**
+ * Returns whether two reaction snapshots describe the same visible reaction.
+ * @param {ReactionSnapshot | null} left
+ * @param {ReactionSnapshot | null} right
+ * @returns {boolean}
+ */
+function areReactionSnapshotsEqual(left, right) {
+  if (!left && !right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+
+  return normalizeAddress(left.sender) === normalizeAddress(right.sender) &&
+    left.targetTxid === right.targetTxid &&
+    left.emoji === right.emoji &&
+    Number(left.timestamp) === Number(right.timestamp) &&
+    left.reactionTxId === right.reactionTxId;
+}
+
+/**
+ * Replaces the visible reaction for one sender+target pair with the provided snapshot.
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @param {string} sender
+ * @param {ReactionSnapshot | null} reaction
+ * @returns {void}
+ */
+function setVisibleReaction(contact, targetTxid, sender, reaction) {
+  contact.reactions ??= [];
+  purgeReactionStackForSenderTarget(contact, targetTxid, sender);
+
+  if (!reaction) {
+    return;
+  }
+
+  insertSorted(contact.reactions, {
+    sender: normalizeAddress(reaction.sender),
+    targetTxid: reaction.targetTxid,
+    emoji: reaction.emoji,
+    timestamp: Number(reaction.timestamp),
+    reactionTxId: reaction.reactionTxId
+  }, 'timestamp');
+}
+
+/**
+ * Returns the pending reaction chain entries for one contact+target pair.
+ * @param {string} contactAddress
+ * @param {string} targetTxid
+ * @returns {Array<Object>}
+ */
+function getPendingReactionChainEntries(contactAddress, targetTxid) {
+  assert(contactAddress, 'Reaction contact address is required');
+  assert(targetTxid, 'Reaction target txid is required');
+  myData.pending ??= [];
+  const normalizedContactAddress = normalizeAddress(contactAddress);
+  return myData.pending
+    .filter((pendingTx) =>
+      pendingTx.type === 'message' &&
+      pendingTx.to === normalizedContactAddress &&
+      pendingTx.reactionPending &&
+      pendingTx.reactionPending.targetTxid === targetTxid
+    )
+    .sort((left, right) => left.reactionPending.localOrder - right.reactionPending.localOrder);
+}
+
+/**
+ * Computes the visible reaction for a pending reaction chain by replaying successful/pending
+ * mutations in client order on top of the chain base reaction.
+ * @param {Array<Object>} chainEntries
+ * @returns {ReactionSnapshot | null}
+ */
+function replayPendingReactionChain(chainEntries) {
+  if (chainEntries.length === 0) {
+    return null;
+  }
+
+  let effectiveReaction = copyReactionSnapshot(chainEntries[0].reactionPending.baseReaction);
+  for (const entry of chainEntries) {
+    switch (entry.reactionPending.status) {
+      case 'failure':
+        continue;
+      case 'pending':
+      case 'success':
+        effectiveReaction = copyReactionSnapshot(entry.reactionPending.visibleResult);
+        continue;
+      default:
+        assert(false, `Unknown pending reaction status: ${entry.reactionPending.status}`);
+    }
+  }
+
+  return effectiveReaction;
+}
+
+/**
+ * Materializes the current visible reaction state for one pending reaction chain.
+ * @param {string} contactAddress
+ * @param {string} targetTxid
+ * @returns {{ didChange: boolean, hasPending: boolean }}
+ */
+function syncPendingReactionChainState(contactAddress, targetTxid) {
+  const currentUserAddress = normalizeAddress(myAccount.keys.address);
+  const contact = myData.contacts[contactAddress];
+  assert(contact, `Missing contact for pending reaction chain: ${contactAddress}`);
+
+  const chainEntries = getPendingReactionChainEntries(contactAddress, targetTxid);
+  if (chainEntries.length === 0) {
+    return { didChange: false, hasPending: false };
+  }
+
+  const previousVisibleReaction = copyReactionSnapshot(
+    getEffectiveReactionForSenderTarget(contact, targetTxid, currentUserAddress)
+  );
+  const nextVisibleReaction = replayPendingReactionChain(chainEntries);
+  const didChange = !areReactionSnapshotsEqual(previousVisibleReaction, nextVisibleReaction);
+
+  setVisibleReaction(contact, targetTxid, currentUserAddress, nextVisibleReaction);
+  if (didChange) {
+    syncReactionUiState(contactAddress, contact, targetTxid);
+  }
+
+  return {
+    didChange,
+    hasPending: chainEntries.some((entry) => entry.reactionPending.status === 'pending')
+  };
+}
+
+/**
+ * Removes all retained pending reaction chain entries for one contact+target pair.
+ * @param {string} contactAddress
+ * @param {string} targetTxid
+ * @returns {void}
+ */
+function cleanupResolvedReactionChain(contactAddress, targetTxid) {
+  assert(contactAddress, 'Reaction contact address is required');
+  assert(targetTxid, 'Reaction target txid is required');
+  myData.pending ??= [];
+  const normalizedContactAddress = normalizeAddress(contactAddress);
+  myData.pending = myData.pending.filter((pendingTx) => {
+    return !(
+      pendingTx.type === 'message' &&
+      pendingTx.to === normalizedContactAddress &&
+      pendingTx.reactionPending &&
+      pendingTx.reactionPending.targetTxid === targetTxid &&
+      pendingTx.reactionPending.status !== 'pending'
+    );
+  });
+}
+
+/**
  * Removes all active reactions that target a specific message.
  * @param {Object} contact
  * @param {string} targetTxid
@@ -5951,48 +6183,6 @@ function purgeContactReactionsForTarget(contact, targetTxid) {
   const initialLength = contact.reactions.length;
   contact.reactions = contact.reactions.filter((reaction) => reaction.targetTxid !== targetTxid);
   return contact.reactions.length !== initialLength;
-}
-
-/**
- * Applies an optimistic outgoing reaction set while keeping the prior reaction as fallback.
- * @param {Object} contact
- * @param {Extract<ReactionUpdate, { action: 'set' }>} reaction
- * @returns {{ didApply: false } | { didApply: true, previousReactionTxId: string | null }}
- */
-function applyOptimisticReactionSet(contact, reaction) {
-  const targetMessage = contact.messages.find((message) => message.txid === reaction.reactId);
-  if (!targetMessage || isDeleted(targetMessage)) {
-    console.warn('Reaction target not found locally', reaction);
-    return { didApply: false };
-  }
-
-  if (!Array.isArray(contact.reactions)) {
-    contact.reactions = [];
-  }
-
-  const sender = normalizeAddress(reaction.sender);
-  const previousReaction = getEffectiveReactionForSenderTarget(contact, reaction.reactId, sender);
-  const emoji = reaction.emoji.trim();
-
-  if (reaction.reactionTxId && contact.reactions.some((entry) => entry.reactionTxId === reaction.reactionTxId)) {
-    return { didApply: false };
-  }
-
-  if (previousReaction && previousReaction.emoji === emoji) {
-    return { didApply: false };
-  }
-
-  const previousReactionTxId = previousReaction ? previousReaction.reactionTxId : null;
-  assert(previousReaction === null || previousReactionTxId, 'Previous reaction txid is required');
-
-  insertSorted(contact.reactions, {
-    sender,
-    targetTxid: reaction.reactId,
-    emoji,
-    timestamp: reaction.timestamp,
-    reactionTxId: reaction.reactionTxId
-  }, 'timestamp');
-  return { didApply: true, previousReactionTxId };
 }
 
 /**
@@ -6016,16 +6206,42 @@ function applyIncomingReaction(contact, reaction) {
   }
 
   const sender = normalizeAddress(reaction.sender);
-  const currentReaction = getEffectiveReactionForSenderTarget(contact, reaction.reactId, sender);
+  const latestReactionState = getLatestReactionStateForSenderTarget(contact, reaction.reactId, sender);
+  const isIncomingOlderThanCurrent = !!latestReactionState && latestReactionState.timestamp > reaction.timestamp;
 
   switch (reaction.action) {
-    case 'remove':
-      return purgeReactionStackForSenderTarget(contact, reaction.reactId, sender);
+    case 'remove': {
+      if (reaction.targetReactionTxId) {
+        const targetReaction = contact.reactions.find((entry) => {
+          return entry.targetTxid === reaction.reactId &&
+            normalizeAddress(entry.sender) === sender &&
+            entry.reactionTxId === reaction.targetReactionTxId;
+        });
+        if (!targetReaction) {
+          return false;
+        }
+        removeReactionByReactionTxId(contact, targetReaction.reactionTxId);
+        recordReactionRemovalActivity(contact, reaction);
+        return true;
+      }
+      if (isIncomingOlderThanCurrent) {
+        return false;
+      }
+      if (!purgeReactionStackForSenderTarget(contact, reaction.reactId, sender)) {
+        return false;
+      }
+      recordReactionRemovalActivity(contact, reaction);
+      return true;
+    }
 
     case 'set': {
       const emoji = reaction.emoji.trim();
+      const currentReaction = getEffectiveReactionForSenderTarget(contact, reaction.reactId, sender);
       // don't allow duplicate reactions
       if (reaction.reactionTxId && contact.reactions.some((entry) => entry.reactionTxId === reaction.reactionTxId)) {
+        return false;
+      }
+      if (isIncomingOlderThanCurrent) {
         return false;
       }
       if (currentReaction && currentReaction.emoji === emoji) {
@@ -6319,46 +6535,57 @@ function trackPendingMessageEditBeforeInject(txid, contactAddress, editPending) 
 }
 
 /**
- * Finalizes or reverts a pending optimistic reaction set that stored fallback metadata.
+ * Creates or updates the provisional pending entry used to persist optimistic reaction chain metadata
+ * before `/inject` confirms the transaction was accepted for receipt tracking.
+ * @param {string} txid
+ * @param {string} contactAddress
+ * @param {PendingReactionMutation} reactionPending
+ * @returns {void}
+ */
+function trackPendingReactionBeforeInject(txid, contactAddress, reactionPending) {
+  assert(txid, 'Pending reaction txid is required');
+  assert(contactAddress, 'Pending reaction contact address is required');
+  myData.pending ??= [];
+
+  assert(
+    !myData.pending.some((pendingTx) => pendingTx.txid === txid),
+    `Duplicate pending reaction txid: ${txid}`
+  );
+
+  myData.pending.push({
+    txid,
+    type: 'message',
+    submittedts: getCorrectedTimestamp(),
+    checkedts: 0,
+    to: normalizeAddress(contactAddress),
+    reactionPending,
+  });
+}
+
+/**
+ * Applies a success/failure result to one pending reaction chain entry and recomputes
+ * the materialized visible reaction for that target.
  * @param {Object} pendingTxInfo
  * @param {'success' | 'failure'} result
- * @returns {boolean}
+ * @returns {{ didChange: boolean, hasPending: boolean, targetTxid: string }}
  */
-function reconcilePendingReactionSet(pendingTxInfo, result) {
-  if (!pendingTxInfo.reactionPending) {
-    return false;
-  }
-
-  /** @type {PendingReactionSet} */
-  const { reactionPending } = pendingTxInfo;
-
-  const contact = myData.contacts[pendingTxInfo.to];
-  assert(contact, `Missing contact for pending reaction: ${pendingTxInfo.to}`);
-
+function settlePendingReaction(pendingTxInfo, result) {
+  assert(pendingTxInfo.reactionPending, `Missing pending reaction metadata for ${pendingTxInfo.txid}`);
   switch (result) {
-    case 'success': {
-      if (!reactionPending.previousReactionTxId) {
-        return false;
-      }
-
-      const didChange = removeReactionByReactionTxId(contact, reactionPending.previousReactionTxId);
-      if (didChange) {
-        syncReactionUiState(pendingTxInfo.to, contact, reactionPending.targetTxid);
-      }
-      return didChange;
-    }
-
-    case 'failure': {
-      const didChange = removeReactionByReactionTxId(contact, pendingTxInfo.txid);
-      if (didChange) {
-        syncReactionUiState(pendingTxInfo.to, contact, reactionPending.targetTxid);
-      }
-      return didChange;
-    }
-
+    case 'success':
+    case 'failure':
+      break;
     default:
-      throw new Error(`Unknown pending reaction result: ${result}`);
+      assert(false, `Unknown pending reaction result: ${result}`);
   }
+
+  /** @type {PendingReactionMutation} */
+  const { reactionPending } = pendingTxInfo;
+  reactionPending.status = result;
+  return {
+    ...syncPendingReactionChainState(pendingTxInfo.to, reactionPending.targetTxid),
+    targetTxid: reactionPending.targetTxid
+  };
 }
 
 /**
@@ -6399,6 +6626,7 @@ async function processChats(chats, keys) {
   const messageQueryTimestamp = Math.max(0, timestamp+1);
   let hasAnyTransfer = false;
   let needsUpcomingCallsUiRefresh = false;
+  const currentUserAddress = normalizeAddress(keys.address);
 
   for (let sender in chats) {
     // Fetch messages using the adjusted timestamp
@@ -6714,12 +6942,16 @@ async function processChats(chats, keys) {
                     }
 
                     if (reactAction === 'remove') {
+                      const targetReactionTxId = typeof parsedMessage.targetReactionTxId === 'string'
+                        ? parsedMessage.targetReactionTxId.trim()
+                        : '';
                       pendingReactionControls.push({
                         sender,
                         reactId,
                         action: 'remove',
                         timestamp: Number(payload.sent_timestamp),
                         reactionTxId: txidHex,
+                        targetReactionTxId: targetReactionTxId || undefined,
                         order: Number(i)
                       });
                       continue; // reaction control messages update target state instead of adding a chat bubble
@@ -7013,6 +7245,12 @@ async function processChats(chats, keys) {
         });
 
         for (const pendingReaction of pendingReactionControls) {
+          if (
+            pendingReaction.sender === currentUserAddress &&
+            getPendingReactionChainEntries(from, pendingReaction.reactId).length > 0
+          ) {
+            continue;
+          }
           if (applyIncomingReaction(contact, pendingReaction)) {
             didApplyPendingReaction = true;
             syncChatLatestActivityTimestamp(from, contact);
@@ -14041,7 +14279,10 @@ class ChatModal {
       }
       return true;
     });
-    
+    // Close all context menus when messages container scrolls
+    this.messagesContainer.addEventListener('scroll', () => {
+      this.closeAllContextMenus();
+    }, { passive: true });
     // Add context menu option listeners
     this.contextMenu.addEventListener('click', (e) => {
       const reactionButton = e.target.closest('.message-context-reaction-button');
@@ -17060,6 +17301,10 @@ class ChatModal {
 
     if (this.contextMenuReactions) {
       this.contextMenuReactions.style.display = canShowReactionRow ? 'flex' : 'none';
+      this.syncContextReactionTrayDisplay(
+        this.contextMenuReactions,
+        canShowReactionRow ? messageEl : null
+      );
       this.syncReactionPickerActiveState(this.contextMenuReactions, canShowReactionRow ? messageEl : null);
     }
 
@@ -17244,6 +17489,7 @@ class ChatModal {
     this.closeAttachmentOptionsContextMenu();
     this.closeHeaderContextMenu();
     this.closeReactionSheet();
+    failedMessageMenu.hide();
   }
 
   /**
@@ -17386,6 +17632,41 @@ class ChatModal {
   }
 
   /**
+   * Ensures context-menu reaction trays surface the active reaction even when it
+   * was chosen from the expanded picker.
+   * @param {HTMLElement} reactionTray
+   * @param {HTMLElement | null} messageEl
+   * @returns {void}
+   */
+  syncContextReactionTrayDisplay(reactionTray, messageEl) {
+    const reactionButtons = [...reactionTray.querySelectorAll('.message-context-reaction-button')]
+      .filter((button) => button.dataset.reactionPickerTrigger !== 'true');
+    assert(reactionButtons.length > 0, 'Reaction tray requires quick reaction buttons');
+
+    for (const button of reactionButtons) {
+      const { defaultEmoji, defaultAriaLabel } = button.dataset;
+      assert(defaultEmoji, 'Reaction button emoji is required');
+      assert(defaultAriaLabel, 'Reaction button aria-label is required');
+      button.dataset.emoji = defaultEmoji;
+      button.textContent = defaultEmoji;
+      button.setAttribute('aria-label', defaultAriaLabel);
+    }
+
+    const activeEmoji = this.getCurrentUserReactionForMessage(messageEl);
+
+    if (!activeEmoji) return;
+
+    for (const button of reactionButtons) {
+      if (button.dataset.defaultEmoji === activeEmoji) return;
+    }
+
+    const customReactionButton = reactionButtons[reactionButtons.length - 1];
+    customReactionButton.dataset.emoji = activeEmoji;
+    customReactionButton.textContent = activeEmoji;
+    customReactionButton.setAttribute('aria-label', `React with ${activeEmoji}`);
+  }
+
+  /**
    * Builds reaction chip markup for a specific target message.
    * @param {Array<Object>} reactionsForTarget
    * @returns {string}
@@ -17460,6 +17741,9 @@ class ChatModal {
     const reactions = Array.isArray(contact.reactions) ? contact.reactions : [];
     const seen = new Set();
     for (const reaction of reactions) {
+      if (!reaction.emoji) {
+        continue;
+      }
       const reactionKey = `${reaction.targetTxid}:${normalizeAddress(reaction.sender)}`;
       if (seen.has(reactionKey)) {
         continue;
@@ -18158,6 +18442,11 @@ class ChatModal {
       importContactsOpt.style.display = isVcf ? '' : 'none';
     }
 
+    assert(this.imageAttachmentContextMenuReactions, 'Image attachment reaction tray is required');
+    this.syncContextReactionTrayDisplay(
+      this.imageAttachmentContextMenuReactions,
+      messageEl
+    );
     this.syncReactionPickerActiveState(this.imageAttachmentContextMenuReactions, messageEl);
 
     this.positionContextMenu(this.imageAttachmentContextMenu, attachmentRow);
@@ -18399,21 +18688,35 @@ class ChatModal {
     if (!messageEl || !selectedReaction) return;
     assert(typeof closeUi === 'function', 'Reaction close callback is required');
 
+    const contact = myData.contacts[this.address];
+    const required = contact?.tollRequiredToSend;
+    if (required === 2) {
+      showToast('You are blocked by this user', 0, 'error');
+      return;
+    }
+    if (required !== undefined && required !== 0) {
+      const username = contact.username || `${this.address.slice(0, 8)}...${this.address.slice(-6)}`;
+      showToast(
+        `You can only send reactions to people who have added you as a connection. Ask ${username} to add you as a connection`,
+        0,
+        'info'
+      );
+      return;
+    }
+
     const txid = messageEl.dataset.txid;
     assert(txid, 'Reaction target txid is required');
-    const currentReaction = this.getCurrentUserReactionForMessage(messageEl);
+    const currentUserAddress = normalizeAddress(myAccount.keys.address);
+    const currentReaction = getEffectiveReactionForSenderTarget(contact, txid, currentUserAddress);
 
-    const isRemovingCurrentReaction = !!currentReaction && selectedReaction === currentReaction;
+    const isRemovingCurrentReaction = !!currentReaction && selectedReaction === currentReaction.emoji;
     if (isRemovingCurrentReaction) {
-      const confirmed = confirm('Remove your reaction?');
-      if (!confirmed) {
-        return;
-      }
-
+      assert(currentReaction.reactionTxId, 'Reaction txid is required for remove');
       closeUi();
       await this.sendReactionMessage({
         reactId: txid,
-        reactAction: 'remove'
+        reactAction: 'remove',
+        targetReactionTxId: currentReaction.reactionTxId
       });
       return;
     }
@@ -18428,15 +18731,11 @@ class ChatModal {
 
   /**
    * Sends a reaction control message.
-   * @param {{reactId: string, reactAction: 'remove', reactMessage?: string} | {reactId: string, reactAction: 'set', reactMessage: string}} reaction
+   * @param {{reactId: string, reactAction: 'remove', targetReactionTxId: string} | {reactId: string, reactAction: 'set', reactMessage: string}} reaction
    * @returns {Promise<boolean>}
    */
   async sendReactionMessage(reaction) {
     assert(reaction.reactId, 'Reaction target txid is required');
-    if (reaction.reactAction === 'set') {
-      assert(reaction.reactMessage, 'Reaction emoji is required for set');
-    }
-
     if (!isOnline) {
       console.warn('Reaction send skipped while offline', reaction);
       return false;
@@ -18470,25 +18769,27 @@ class ChatModal {
       return false;
     }
 
-    let payload;
+    let payload = {
+      type: 'message',
+      reactId: reaction.reactId,
+      reactAction: reaction.reactAction
+    };
+    switch (reaction.reactAction) {
+      case 'set':
+        assert(reaction.reactMessage, 'Reaction emoji is required for set');
+        payload.reactMessage = reaction.reactMessage;
+        break;
+      case 'remove':
+        assert(reaction.targetReactionTxId, 'Target reaction txid is required for remove');
+        payload.targetReactionTxId = reaction.targetReactionTxId;
+        break;
+      default:
+        throw new Error(`Unknown reaction action: ${reaction.reactAction}`);
+    }
+
     let chatMessageObj;
     let txid;
     try {
-      payload = {
-        type: 'message',
-        reactId: reaction.reactId,
-        reactAction: reaction.reactAction
-      };
-      switch (reaction.reactAction) {
-        case 'set':
-          payload.reactMessage = reaction.reactMessage;
-          break;
-        case 'remove':
-          break;
-        default:
-          throw new Error(`Unknown reaction action: ${reaction.reactAction}`);
-      }
-
       ({ payload, chatMessageObj, txid } = await this.buildEncryptedStructuredChatTx(
         currentAddress,
         payload,
@@ -18507,57 +18808,92 @@ class ChatModal {
       reactAction: reaction.reactAction
     });
 
-    let reactionPendingState = null;
-    if (reaction.reactAction === 'set') {
-      const sender = normalizeAddress(keys.address);
-      assert(payload.sent_timestamp, 'Reaction sent_timestamp is required');
-      const localReaction = {
-        sender,
-        reactId: reaction.reactId,
-        action: 'set',
-        emoji: reaction.reactMessage,
-        timestamp: payload.sent_timestamp,
-        reactionTxId: txid
-      };
-      const optimisticApply = applyOptimisticReactionSet(contact, localReaction);
-      if (optimisticApply.didApply) {
-        reactionPendingState = {
-          targetTxid: reaction.reactId,
-          previousReactionTxId: optimisticApply.previousReactionTxId
-        };
-        syncReactionUiState(currentAddress, contact, reaction.reactId);
-      } else {
-        console.warn('Reaction sent but local optimistic apply was skipped', localReaction);
-      }
+    const targetMessage = contact.messages.find((message) => message.txid === reaction.reactId);
+    if (!targetMessage || isDeleted(targetMessage)) {
+      console.warn('Reaction send skipped: local target message missing', reaction);
+      return false;
     }
+
+    const sender = normalizeAddress(keys.address);
+    assert(payload.sent_timestamp, 'Reaction sent_timestamp is required');
+    const chainEntries = getPendingReactionChainEntries(currentAddress, reaction.reactId);
+    const activeChainEntries = chainEntries.some((entry) => entry.reactionPending.status === 'pending')
+      ? chainEntries
+      : [];
+    const currentReaction = getLatestReactionStateForSenderTarget(contact, reaction.reactId, sender);
+    const baseReaction = copyReactionSnapshot(
+      activeChainEntries.length > 0
+        ? activeChainEntries[0].reactionPending.baseReaction
+        : currentReaction
+    );
+    const localOrder = activeChainEntries.reduce((maxOrder, entry) => {
+      return Math.max(maxOrder, entry.reactionPending.localOrder);
+    }, 0) + 1;
+
+    /** @type {PendingReactionMutation} */
+    let reactionPendingState;
+    switch (reaction.reactAction) {
+      case 'set':
+        reactionPendingState = {
+          kind: 'set',
+          targetTxid: reaction.reactId,
+          localOrder,
+          status: 'pending',
+          baseReaction,
+          visibleResult: {
+            sender,
+            targetTxid: reaction.reactId,
+            emoji: reaction.reactMessage.trim(),
+            timestamp: payload.sent_timestamp,
+            reactionTxId: txid
+          }
+        };
+        break;
+      case 'remove':
+        reactionPendingState = {
+          kind: 'remove',
+          targetTxid: reaction.reactId,
+          localOrder,
+          status: 'pending',
+          baseReaction,
+          visibleResult: {
+            sender,
+            targetTxid: reaction.reactId,
+            emoji: '',
+            timestamp: payload.sent_timestamp,
+            reactionTxId: txid
+          }
+        };
+        break;
+      default:
+        assert(false, `Unknown reaction action: ${reaction.reactAction}`);
+    }
+
+    trackPendingReactionBeforeInject(txid, currentAddress, reactionPendingState);
+    syncPendingReactionChainState(currentAddress, reaction.reactId);
 
     const response = await injectTx(chatMessageObj, txid);
     if (!response?.result?.success) {
       console.error('reaction message failed to send', response);
-      if (reactionPendingState) {
-        const didRevert = reconcilePendingReactionSet({
-          txid,
-          to: currentAddress,
-          reactionPending: reactionPendingState
-        }, 'failure');
-        if (didRevert) {
-          showToast('Reaction failed to send and was reverted', 0, 'error');
-        }
-        saveState();
+      const pendingTxInfo = myData.pending.find((pendingTx) => pendingTx.txid === txid);
+      assert(pendingTxInfo, `Pending reaction metadata missing for ${txid}`);
+
+      const outcome = settlePendingReaction(pendingTxInfo, 'failure');
+      if (!outcome.hasPending) {
+        cleanupResolvedReactionChain(currentAddress, outcome.targetTxid);
       }
+      if (outcome.didChange) {
+        showToast('Reaction failed to send and was reverted', 0, 'error');
+      }
+      saveState();
       return false;
     }
 
-    if (reactionPendingState) {
-      const pendingTxInfo = myData.pending.find((pendingTx) => pendingTx.txid === txid);
-      assert(pendingTxInfo, `Pending reaction metadata missing for ${txid}`);
-      pendingTxInfo.reactionPending = reactionPendingState;
-      saveState();
-    }
-
-    if (reaction.reactAction === 'remove') {
-      showToast('Reaction remove request sent', 5000, 'loading');
-    }
+    assert(
+      myData.pending.some((pendingTx) => pendingTx.txid === txid),
+      `Pending reaction metadata missing for ${txid}`
+    );
+    saveState();
 
     return true;
   }
@@ -27481,13 +27817,23 @@ async function checkPendingTransactions() {
   }
 
   // initialize the pending array if it is not already initialized
-  if (!myData.pending) {
-    myData.pending = [];
-  }
-
+  myData.pending ??= [];
   if (myData.pending.length === 0) return; // No pending transactions to check
 
   const startingPendingCount = myData.pending.length;
+  let didMutatePendingState = false;
+  const resolvedReactionChains = [];
+  const settleAndQueueReactionCleanup = (pendingTxInfo, result) => {
+    const outcome = settlePendingReaction(pendingTxInfo, result);
+    didMutatePendingState = true;
+    if (!outcome.hasPending) {
+      resolvedReactionChains.push({
+        contactAddress: pendingTxInfo.to,
+        targetTxid: outcome.targetTxid
+      });
+    }
+    return outcome;
+  };
 
   const now = getCorrectedTimestamp();
   const eightSecondsAgo = now - 8000;
@@ -27497,6 +27843,10 @@ async function checkPendingTransactions() {
   for (let i = myData.pending.length - 1; i >= 0; i--) {
     const pendingTxInfo = myData.pending[i];
     const { txid, type, submittedts } = pendingTxInfo;
+    const reactionPending = pendingTxInfo.reactionPending;
+    if (reactionPending && reactionPending.status !== 'pending') {
+      continue;
+    }
 
     if (submittedts < eightSecondsAgo) {
 
@@ -27509,9 +27859,12 @@ async function checkPendingTransactions() {
       //console.log(`DEBUG: txid ${txid} res: ${JSON.stringify(res)}`);
       if (submittedts < thirtySecondsAgo && (res.transaction === null || Object.keys(res.transaction).length === 0)) {
         console.error(`DEBUG: txid ${txid} timed out, removing completely`);
-        const didRevert = reconcilePendingReactionSet(pendingTxInfo, 'failure');
-        if (didRevert) {
-          showToast('Reaction timed out and was reverted', 0, 'error');
+        if (reactionPending) {
+          const outcome = settleAndQueueReactionCleanup(pendingTxInfo, 'failure');
+          if (outcome.didChange) {
+            showToast('Reaction timed out and was reverted', 0, 'error');
+          }
+          continue;
         }
         if (pendingTxInfo.editPending) {
           reconcilePendingMessageEdit(pendingTxInfo);
@@ -27519,13 +27872,18 @@ async function checkPendingTransactions() {
         }
         // remove the pending tx from the pending array
         myData.pending.splice(i, 1);
+        didMutatePendingState = true;
         continue;
       }
 
       if (res?.transaction?.success === true) {
-        // comment out to test the pending txs removal logic
-        myData.pending.splice(i, 1);
-        reconcilePendingReactionSet(pendingTxInfo, 'success');
+        if (reactionPending) {
+          settleAndQueueReactionCleanup(pendingTxInfo, 'success');
+        } else {
+          // comment out to test the pending txs removal logic
+          myData.pending.splice(i, 1);
+          didMutatePendingState = true;
+        }
 
         if (type === 'register') {
           pendingPromiseService.resolve(txid, {
@@ -27585,11 +27943,13 @@ async function checkPendingTransactions() {
           pendingPromiseService.reject(txid, new Error(userFailureReason));
         } else {
           // Show toast notification with the failure reason
-          if (pendingTxInfo.reactionPending) {
-            const didRevert = reconcilePendingReactionSet(pendingTxInfo, 'failure');
-            showToast(didRevert
-              ? `Reaction failed and was reverted: ${userFailureReason}`
-              : userFailureReason, 0, 'error');
+          if (reactionPending) {
+            const outcome = settleAndQueueReactionCleanup(pendingTxInfo, 'failure');
+            if (outcome.didChange) {
+              showToast(`Reaction failed and was reverted: ${userFailureReason}`, 0, 'error');
+            } else if (!outcome.hasPending) {
+              showToast(userFailureReason, 0, 'error');
+            }
           } else if (pendingTxInfo.editPending) {
             reconcilePendingMessageEdit(pendingTxInfo);
             showToast(`Edit failed and was reverted: ${userFailureReason}`, 0, 'error');
@@ -27645,14 +28005,17 @@ async function checkPendingTransactions() {
             showToast(userFailureReason, 0, 'error');
           }
 
-          if (!pendingTxInfo.reactionPending && !pendingTxInfo.editPending) {
+          if (!reactionPending && !pendingTxInfo.editPending) {
             const toAddress = pendingTxInfo.to;
             updateTransactionStatus(txid, toAddress, 'failed', type);
             chatModal.refreshCurrentView(txid);
           }
         }
-        // Remove from pending array
-        myData.pending.splice(i, 1);
+        if (!reactionPending) {
+          // Remove from pending array
+          myData.pending.splice(i, 1);
+          didMutatePendingState = true;
+        }
 
         // refresh the validator modal if this is a withdraw_stake/deposit_stake and validator modal is open
         if (type === 'withdraw_stake' || type === 'deposit_stake') {
@@ -27670,13 +28033,17 @@ async function checkPendingTransactions() {
       }
     }
   }
+
+  for (const chain of resolvedReactionChains) {
+    cleanupResolvedReactionChain(chain.contactAddress, chain.targetTxid);
+  }
   // if createAccountModal is open, skip balance change
   if (!createAccountModal.isActive()) {
     walletScreen.updateWalletBalances();
   }
 
   // save state if pending transactions were processed
-  if (startingPendingCount !== myData.pending.length) {
+  if (startingPendingCount !== myData.pending.length || didMutatePendingState) {
     saveState();
   }
 }
