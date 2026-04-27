@@ -78,6 +78,47 @@
             return (annualRewards / (tvlLpTokens * libPerLp)) * 100;
         }
 
+        calcProjectedAPR({
+            hourlyRate = 0,
+            currentTvlLpTokens = 0,
+            addedLpTokens = 0,
+            libPerLp = 0,
+            poolWeight = 1,
+            totalWeight = 1,
+            fallbackApr = 0
+        }) {
+            const currentApr = this.parseAmount(fallbackApr);
+            const currentTvl = this.parseAmount(currentTvlLpTokens);
+            const addedTvl = this.parseAmount(addedLpTokens);
+
+            if (addedTvl <= 0) {
+                return currentApr;
+            }
+
+            const projectedTvl = currentTvl + addedTvl;
+            if (projectedTvl <= 0) {
+                return currentApr;
+            }
+
+            const projectedApr = this.calcAPR(
+                this.parseAmount(hourlyRate),
+                projectedTvl,
+                this.parseAmount(libPerLp),
+                this.parseAmount(poolWeight),
+                this.parseAmount(totalWeight)
+            );
+
+            if (projectedApr > 0) {
+                return projectedApr;
+            }
+
+            if (currentApr > 0 && currentTvl > 0) {
+                return currentApr * (currentTvl / projectedTvl);
+            }
+
+            return currentApr;
+        }
+
         normalizeAddress(address) {
             return typeof address === 'string' ? address.toLowerCase() : null;
         }

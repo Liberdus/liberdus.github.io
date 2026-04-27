@@ -141,6 +141,57 @@ window.CONFIG = {
         REWARD_PRECISION: 18 // Token precision for rewards
     },
 
+    // KyberSwap Zap as a Service configuration
+    KYBER_ZAP: {
+        BASE_URL: 'https://zap-api.kyberswap.com',
+        CLIENT_ID: 'liberdus-lp-staking',
+        SOURCE: 'liberdus-lp-staking',
+        GECKO_TERMINAL_BASE_URL: 'https://api.geckoterminal.com/api/v2',
+        NATIVE_TOKEN_ADDRESS: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE',
+        DEFAULT_SLIPPAGE_BPS: 50,
+        HIGH_SLIPPAGE_BPS: 300,
+        HIGH_PRICE_IMPACT_PERCENT: 5,
+        QUOTE_RATE_LIMIT_MAX_REQUESTS: 8,
+        RATE_LIMIT_WINDOW_MS: 10000,
+        DEFAULT_DEADLINE_MINUTES: 20,
+        NETWORKS: {
+            BSC_MAINNET: {
+                CHAIN: 'bsc',
+                DEX: 'DEX_UNISWAPV2',
+                ROUTER_ADDRESS: '0x0e97C887b61cCd952a53578B04763E7134429e05',
+                WRAPPED_NATIVE_TOKEN_ADDRESS: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
+                DEX_CANDIDATES: [
+                    'DEX_UNISWAPV2',
+                    'DEX_PANCAKESWAPV2',
+                    'DEX_PANCAKESWAPV3',
+                    'DEX_THENAFUSION'
+                ],
+                FACTORY_DEX_IDS: {
+                    '0x8909dc15e40173ff4699343b6eb8132c65e18ec6': 'DEX_UNISWAPV2',
+                    '0xca143ce32fe78f1f7019d7d551a6402fc5350c73': 'DEX_PANCAKESWAPV2'
+                },
+                PLATFORM_DEX_IDS: {
+                    'Uniswap V2': 'DEX_UNISWAPV2',
+                    'PancakeSwap': 'DEX_PANCAKESWAPV2',
+                    'PancakeSwap V2': 'DEX_PANCAKESWAPV2',
+                    'PancakeSwap V3': 'DEX_PANCAKESWAPV3',
+                    'Thena Fusion': 'DEX_THENAFUSION'
+                },
+                INPUT_TOKENS: [
+                    { symbol: 'BNB', name: 'BNB', address: 'native', decimals: 18 },
+                    { symbol: 'WBNB', name: 'Wrapped BNB', address: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', decimals: 18 },
+                    { symbol: 'USDT', name: 'Tether USD', address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
+                    { symbol: 'USDC', name: 'USD Coin', address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', decimals: 18 },
+                    { symbol: 'DAI', name: 'Dai Token', address: '0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3', decimals: 18 },
+                    { symbol: 'WBTC', name: 'Wrapped BTC', address: '0x0555E30da8f98308EdB960aa94C0Db47230d2B9c', decimals: 8 },
+                    { symbol: 'CAKE', name: 'PancakeSwap Token', address: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82', decimals: 18 },
+                    { symbol: 'ETH', name: 'Binance-Peg Ethereum Token', address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', decimals: 18 },
+                    { symbol: 'LIB', name: 'Liberdus', address: 'pool-token', decimals: null }
+                ]
+            }
+        }
+    },
+
     // Platform Configuration
     PLATFORMS: {
         // Available platforms for dropdown (matches contract values)
@@ -149,7 +200,10 @@ window.CONFIG = {
             'SushiSwap',
             'Curve Finance',
             'Balancer',
-            'PancakeSwap'
+            'PancakeSwap',
+            'PancakeSwap V2',
+            'PancakeSwap V3',
+            'Thena Fusion'
         ],
         // Base URLs for each platform (address will be inserted where {address} appears)
         BASE_URLS: {
