@@ -10,6 +10,14 @@ const flagFromCode = (code) => {
 
 const regionFlags = (codes) => emojiWords(codes).map(flagFromCode);
 
+export const CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY = 'recent';
+
+export const CHAT_REACTION_SHEET_DEFAULT_COMMON_EMOJIS = emojiWords(`
+👍 ❤️ 😂 😮 🙏 👏 🎉 ✅ 💯 🔥
+👎 😢 🤔 😍 😡 🥳 ✨ 🚀 🙌 🤝
+👀 😎 🤩 🫶 💪 🤯 😭 🙂 😁 🤣
+`);
+
 const countryFlagCodes = `
 AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ
 CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO
@@ -22,10 +30,15 @@ TV TW TZ UA UG US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW
 
 export const CHAT_REACTION_SHEET_CATEGORIES = [
   {
+    key: CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY,
+    label: 'Recent',
+    emojis: CHAT_REACTION_SHEET_DEFAULT_COMMON_EMOJIS
+  },
+  {
     key: 'smileys',
     label: 'Smileys',
     emojis: emojiWords(`
-😀 😃 😄 😁 😆 😅 😂 🤣 🥲 ☺️ 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋 😛 😝 😜 🤪 🤨 🧐 🤓 😎 🥸 🤩 🥳 🙂
+😀 😃 😄 😁 😆 😅 😂 🤣 🥲 ☺️ 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋 😛 😝 😜 🤪 🤨 🧐 🤓 😎 🥸 🤩 🥳
 😏 😒 🙂‍↔️ 🙂‍↕️ 😞 😔 😟 😕 🙁 ☹️ 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🤗 🫣 🤔 🫡 🤭 🤫 🤥 😶 🫥 😐 🫤 😑 😬 🙄 😯 😦 😧 😮 😲 🥱 😴 🤤 😪 😵 😵‍💫 🫨 🤐 🥴 🤢 🤮 🤧 😷 🤒 🤕 🤑 🤠 😈 👿 👹 👺 💀 ☠️ 👻 👽 👾 🤖 🎃 😺 😸 😹 😻 😼 😽 🙀 😿 😾 💩
 `)
   },
@@ -63,7 +76,7 @@ export const CHAT_REACTION_SHEET_CATEGORIES = [
 🎯 🎳 🎮 🕹️ 🎰 🎲 🧩 ♟️ 🎨 🧵 🪡 🧶 🪢
 🎤 🎧 🎼 🎹 🥁 🪘 🎷 🎺 🪗 🎸 🪕 🎻
 🎪 🎭 🩰 🎬 📷 📸
-🎟️ 🎫 🏆 🏅 🥇 🥈 🥉 ⚾ 🎖️
+🎟️ 🎫 🏆 🏅 🥇 🥈 🥉 🎖️
 `)
   },
   {
@@ -87,7 +100,7 @@ export const CHAT_REACTION_SHEET_CATEGORIES = [
 ✉️ 📧 📨 📩 📤 📥 📦 📫 📪 📬 📭 📮 🗳️ ✏️ ✒️ 🖋️ 🖊️ 🖌️ 🖍️ 📝 📁 📂 🗂️ 📅 📆 🗒️ 🗓️ 📇 📈 📉 📊 📋 📌 📍 📎 🖇️ 📏 📐 ✂️ 🗃️ 🗄️ 🗑️ 🔒 🔓 🔏 🔐 🔑 🗝️
 🔨 🪓 ⛏️ ⚒️ 🛠️ 🗡️ ⚔️ 💣 🪃 🏹 🛡️ 🪚 🔧 🪛 🔩 ⚙️ 🗜️ ⚖️ 🦯 🔗 ⛓️ 🪝 🧰 🧲 🪜
 ⚗️ 🧪 🧫 🧬 🔬 🔭 📡 💉 🩸 💊 🩹 🩼 🩺 🚪 🛏️ 🛋️ 🪑 🚽 🪠 🚿 🛁 🪤 🪒 🧴 🧷 🧹 🧺 🧻 🪣 🧼 🫧 🪥 🧽 🧯 🛒
-🚬 ⚰️ 🪦 ⚱️ 🧿 🪬 🗿 🪪 🏧 🚮 🚰 ♿ 🚹 🚺 🚻 🚼 🚾 🛂 🛃 🛄 🛅 ⚠️ 🚸 ⛔ 🚫 🚳 🚭 🚯 🚱 🚷 📵 🔞 ☢️ ☣️ ⬆️ ↗️ ➡️ ↘️ ⬇️ ↙️ ⬅️ ↖️ ↕️ ↔️ ↩️ ↪️ ⤴️ ⤵️ 🔃 🔄
+🚬 ⚰️ 🪦 ⚱️ 🪬 🗿 🪪 🏧 🚮 🚰 ♿ 🚹 🚺 🚻 🚼 🚾 🛂 🛃 🛄 🛅 ⚠️ 🚸 ⛔ 🚫 🚳 🚭 🚯 🚱 🚷 📵 🔞 ☢️ ☣️ ⬆️ ↗️ ➡️ ↘️ ⬇️ ↙️ ⬅️ ↖️ ↕️ ↔️ ↩️ ↪️ ⤴️ ⤵️ 🔃 🔄
 `)
   },
   {
@@ -96,15 +109,15 @@ export const CHAT_REACTION_SHEET_CATEGORIES = [
     emojis: emojiWords(`
 ❤️ 🩷 🧡 💛 💚 💙 🩵 💜 🤎 🖤 🩶 🤍 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💟 ♥️ ♦️ ♣️ ♠️
 💯 💢 💥 💫 💦 💨 🕳️ 💣 💬 👁️‍🗨️ 🗨️ 🗯️ 💭 💤
-💮 ♨️ 💈 🛑 🅰️ 🅱️ 🆎 🅾️ 🆑 🆘 ❌ ⭕ 🛟 ⛔ 📛 🚫 💯
+💮 ♨️ 💈 🛑 🅰️ 🅱️ 🆎 🅾️ 🆑 🆘 ❌ ⭕ 🛟 ⛔ 📛 🚫
 🔴 🟠 🟡 🟢 🔵 🟣 ⚫ ⚪ 🟤 🔺 🔻 🔸 🔹 🔶 🔷 🔳 🔲
 ♈ ♉ ♊ ♋ ♌ ♍ ♎ ♏ ♐ ♑ ♒ ♓ ⛎
 ▶️ ⏸️ ⏯️ ⏹️ ⏺️ ⏭️ ⏮️ ⏩ ⏪ ⏫ ⏬ ◀️ 🔼 🔽
 ➕ ➖ ➗ ✖️ 🟰 ™️ ©️ ®️ 〰️ ➰ ➿ ✔️ ☑️ ✅ ❇️ ✳️ ✴️ ❎ 🌐
 #️⃣ *️⃣ 0️⃣ 1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 6️⃣ 7️⃣ 8️⃣ 9️⃣ 🔟
 🔠 🔡 🔢 🔣 🔤 🅿️ 🆚 🆗 🆕 🆙 🆒 🆓 ℹ️ 🈁 🈂️ 🈷️ 🈶 🈯 🉐 🈹 🈚 🈲 🉑 🈸 🈴 🈳 ㊗️ ㊙️ 🈺 🈵
-🔀 🔁 🔂 ▶️ ⏩ ⏭️ ⏯️ ◀️ ⏪ ⏮️ 🔼 ⏫ 🔽 ⏬
-☢️ ☣️ 📴 📳 🈶 🈚 🈸 🈺 🈵
+🔀 🔁 🔂
+☢️ ☣️ 📴 📳
 ✨ ⭐ 🌟 ⚡ 🔥 🎵 🎶 ➡️ ⬅️ ⬆️ ⬇️ ↗️ ↘️ ↙️ ↖️ ↕️ ↔️ ♾️
 🏳️‍🌈 🏳️‍⚧️ 🏴‍☠️
 `)
