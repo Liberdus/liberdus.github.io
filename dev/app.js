@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'b'
+const version = 'c'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -13880,7 +13880,6 @@ const CHAT_REACTION_SHEET_PROMOTION_RATIO = 0.5;
 const CHAT_REACTION_SHEET_CLOSE_DRAG_PX = 120;
 const CHAT_INITIAL_RENDER_COUNT = 100;
 const CHAT_OLDER_RENDER_BATCH_SIZE = 200;
-const CHAT_SCROLL_EXPAND_DELAY_MS = 220;
 const CHAT_REACTION_SHEET_TAB_ICONS = {
   recent: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v6h6"/><path d="M12 7v5l3 2"/></svg>',
   smileys: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></svg>',
@@ -13945,11 +13944,7 @@ class ChatModal {
     this.dragCounter = 0;
     this.dropOverlay = null;
 
-    this.chatRenderedOldestIndex = null;
-    this.chatScrollExpandTimer = null;
-    this.chatRenderSequence = 0;
-    this.chatTouchStartY = null;
-    this.chatHistoryLoadingToastId = null;
+    this.chatRenderedOldestIndex = CHAT_INITIAL_RENDER_COUNT - 1;
   }
 
   /**
@@ -14459,11 +14454,6 @@ class ChatModal {
     });
     // Close all context menus when messages container scrolls
     this.messagesContainer.addEventListener('scroll', () => this.handleMessagesContainerScroll(), { passive: true });
-    this.messagesContainer.addEventListener('scrollend', () => this.handleMessagesContainerScrollEnd(), { passive: true });
-    this.messagesContainer.addEventListener('touchstart', (e) => this.handleMessagesTouchStart(e), { passive: true });
-    this.messagesContainer.addEventListener('touchmove', (e) => this.handleMessagesTouchMove(e), { passive: false });
-    this.messagesContainer.addEventListener('touchend', () => this.handleMessagesTouchEnd(), { passive: true });
-    this.messagesContainer.addEventListener('touchcancel', () => this.handleMessagesTouchEnd(), { passive: true });
     // Add context menu option listeners
     this.contextMenu.addEventListener('click', (e) => {
       const reactionButton = e.target.closest('.message-context-reaction-button');
@@ -14898,167 +14888,18 @@ class ChatModal {
   }
 
   resetChatRenderWindow() {
-    this.clearPendingChatScrollExpand();
-    this.stopChatTopBoundaryScrollHold();
-    this.chatRenderedOldestIndex = null;
-    this.chatTouchStartY = null;
-  }
-
-  getChatRenderRange(messages) {
-    assert(Array.isArray(messages), 'Chat messages are required');
-    const totalMessages = messages.length;
-    if (totalMessages === 0) {
-      return { newestIndex: 0, oldestIndex: -1 };
-    }
-
-    const oldestIndex = Number.isInteger(this.chatRenderedOldestIndex)
-      ? Math.min(this.chatRenderedOldestIndex, totalMessages - 1)
-      : Math.min(totalMessages - 1, CHAT_INITIAL_RENDER_COUNT - 1);
-    this.chatRenderedOldestIndex = oldestIndex;
-    return {
-      newestIndex: 0,
-      oldestIndex
-    };
-  }
-
-  getChatScrollSnapshot() {
-    const container = this.messagesContainer;
-    assert(container, 'Messages container is required');
-    const maxScrollTop = container.scrollHeight - container.clientHeight;
-    const scrollTop = Math.round(container.scrollTop);
-    return {
-      scrollTop,
-      distanceFromBottom: Math.round(Math.max(0, maxScrollTop - container.scrollTop)),
-      clientHeight: Math.round(container.clientHeight),
-      distanceToRenderedTop: Math.max(0, scrollTop)
-    };
-  }
-
-  showChatHistoryLoadingToast() {
-    if (this.chatHistoryLoadingToastId) return;
-    this.chatHistoryLoadingToastId = showToast('Loading messages', 0, 'loading', false, { dedupe: false });
-  }
-
-  hideChatHistoryLoadingToast() {
-    if (!this.chatHistoryLoadingToastId) return;
-    hideToast(this.chatHistoryLoadingToastId);
-    this.chatHistoryLoadingToastId = null;
-  }
-
-  startChatTopBoundaryScrollHold() {
-    this.showChatHistoryLoadingToast();
-    this.clampChatTopBoundaryScrollHold();
-  }
-
-  stopChatTopBoundaryScrollHold() {
-    this.hideChatHistoryLoadingToast();
-  }
-
-  clampChatTopBoundaryScrollHold() {
-    if (!this.chatHistoryLoadingToastId) return false;
-    const container = this.messagesContainer;
-    assert(container, 'Messages container is required');
-    if (container.scrollTop >= 0) return false;
-    container.scrollTop = 0;
-    return true;
-  }
-
-  shouldBlockChatTopBoundaryTouchMove(event) {
-    if (!this.chatHistoryLoadingToastId) return false;
-    assert(this.messagesContainer, 'Messages container is required');
-    const touch = event.touches[0];
-    assert(touch, 'Touch point is required');
-    assert(typeof this.chatTouchStartY === 'number', 'Touch start y is required');
-    if (Math.round(touch.clientY) <= this.chatTouchStartY) return false;
-
-    const snapshot = this.getChatScrollSnapshot();
-    return snapshot.distanceToRenderedTop <= this.getChatRenderedBoundaryThreshold(snapshot);
-  }
-
-  handleMessagesTouchStart(event) {
-    const touch = event.touches[0];
-    assert(touch, 'Touch point is required');
-    this.chatTouchStartY = Math.round(touch.clientY);
-  }
-
-  handleMessagesTouchMove(event) {
-    if (!this.shouldBlockChatTopBoundaryTouchMove(event)) return;
-
-    this.clampChatTopBoundaryScrollHold();
-    if (event.cancelable) {
-      event.preventDefault();
-    }
-    event.stopPropagation();
-  }
-
-  handleMessagesTouchEnd() {
-    this.chatTouchStartY = null;
-    if (this.chatScrollExpandTimer) {
-      this.schedulePendingChatScrollExpand();
-    }
-  }
-
-  clearPendingChatScrollExpand() {
-    if (this.chatScrollExpandTimer) {
-      clearTimeout(this.chatScrollExpandTimer);
-      this.chatScrollExpandTimer = null;
-    }
-  }
-
-  schedulePendingChatScrollExpand() {
-    if (this.chatScrollExpandTimer) {
-      clearTimeout(this.chatScrollExpandTimer);
-    }
-    this.chatScrollExpandTimer = setTimeout(() => {
-      this.chatScrollExpandTimer = null;
-      this.flushPendingChatScrollExpand();
-    }, CHAT_SCROLL_EXPAND_DELAY_MS);
-  }
-
-  handleMessagesContainerScrollEnd() {
-    if (this.chatScrollExpandTimer) {
-      this.flushPendingChatScrollExpand();
-    }
-  }
-
-  flushPendingChatScrollExpand() {
-    this.clearPendingChatScrollExpand();
-    if (!this.isActive()) return;
-    if (this.chatTouchStartY !== null) {
-      this.schedulePendingChatScrollExpand();
-      return;
-    }
-
-    const scrollSnapshot = this.getChatScrollSnapshot();
-    if (scrollSnapshot.distanceToRenderedTop > this.getChatRenderedTopLoadAheadThreshold(scrollSnapshot)) {
-      this.stopChatTopBoundaryScrollHold();
-      return;
-    }
-
-    if (scrollSnapshot.distanceToRenderedTop <= this.getChatRenderedBoundaryThreshold(scrollSnapshot)) {
-      this.startChatTopBoundaryScrollHold();
-    }
-    const expanded = this.expandChatRenderWindow();
-    if (!expanded) {
-      this.stopChatTopBoundaryScrollHold();
-    }
+    this.chatRenderedOldestIndex = CHAT_INITIAL_RENDER_COUNT - 1;
   }
 
   expandChatRenderWindow() {
-    if (!this.address) return false;
-    assert(this.messagesContainer, 'Messages container is required');
-    assert(this.messagesList, 'Messages list is required');
-
     const contact = myData.contacts[this.address];
-    const messages = contact?.messages;
-    assert(Array.isArray(messages), `Missing messages for chat: ${this.address}`);
+    const messages = contact.messages;
+    const container = this.messagesContainer;
+    const list = this.messagesList;
 
-    const currentOldestIndex = Number.isInteger(this.chatRenderedOldestIndex)
-      ? this.chatRenderedOldestIndex
-      : Math.min(messages.length - 1, CHAT_INITIAL_RENDER_COUNT - 1);
+    const currentOldestIndex = Math.min(this.chatRenderedOldestIndex, messages.length - 1);
     if (currentOldestIndex >= messages.length - 1) {
-      this.stopChatTopBoundaryScrollHold();
-      return false;
+      return;
     }
 
     const nextOldestIndex = Math.min(
@@ -15066,8 +14907,8 @@ class ChatModal {
       currentOldestIndex + CHAT_OLDER_RENDER_BATCH_SIZE
     );
 
-    const oldScrollTop = this.getChatScrollSnapshot().scrollTop;
-    const oldScrollHeight = this.messagesContainer.scrollHeight;
+    const oldScrollTop = Math.round(container.scrollTop);
+    const oldScrollHeight = container.scrollHeight;
     const range = this.buildChatMessageRangeHTML(
       messages,
       contact,
@@ -15076,57 +14917,34 @@ class ChatModal {
     );
 
     this.chatRenderedOldestIndex = nextOldestIndex;
-    this.messagesList.insertAdjacentHTML('afterbegin', range.html);
+    list.insertAdjacentHTML('afterbegin', range.html);
     const prependedThumbnailRows = range.renderedTxids.flatMap((txid) => {
-      const messageEl = this.messagesList.querySelector(`.message[data-txid="${CSS.escape(txid)}"]`);
-      return messageEl
-        ? [...messageEl.querySelectorAll('[data-image-attachment="true"], [data-video-attachment="true"]')]
-        : [];
+      const messageEl = list.querySelector(`.message[data-txid="${CSS.escape(txid)}"]`);
+      assert(messageEl, `Rendered message missing for ${txid}`);
+      return [...messageEl.querySelectorAll('[data-image-attachment="true"], [data-video-attachment="true"]')];
     });
 
     this.syncRenderedReactionTargets(range.renderedTxids);
 
-    const insertedHeight = this.messagesContainer.scrollHeight - oldScrollHeight;
-    this.messagesContainer.scrollTop = oldScrollTop + insertedHeight;
-    this.loadPrependedThumbnails(prependedThumbnailRows);
-    this.stopChatTopBoundaryScrollHold();
-    return true;
+    const insertedHeight = container.scrollHeight - oldScrollHeight;
+    container.scrollTop = oldScrollTop + insertedHeight;
+    this.loadThumbnailsKeepingScrollAnchored(prependedThumbnailRows);
   }
 
   handleMessagesContainerScroll() {
     this.closeAllContextMenus();
     if (!this.isActive()) return;
-    const scrollSnapshot = this.getChatScrollSnapshot();
-    const contact = myData.contacts[this.address];
-    const messages = contact?.messages;
-    assert(Array.isArray(messages), `Missing messages for chat: ${this.address}`);
-    const totalMessages = messages.length;
-    const renderedOldestIndex = Number.isInteger(this.chatRenderedOldestIndex)
-      ? this.chatRenderedOldestIndex
-      : CHAT_INITIAL_RENDER_COUNT - 1;
-    const remainingOlder = Math.max(0, totalMessages - 1 - renderedOldestIndex);
-    if (remainingOlder === 0) {
-      this.clearPendingChatScrollExpand();
-      this.stopChatTopBoundaryScrollHold();
+    const container = this.messagesContainer;
+    const messages = myData.contacts[this.address].messages;
+    const renderedOldestIndex = this.chatRenderedOldestIndex;
+    if (renderedOldestIndex >= messages.length - 1) {
       return;
     }
 
-    const isNearRenderedTop = scrollSnapshot.distanceToRenderedTop <= this.getChatRenderedTopLoadAheadThreshold(scrollSnapshot);
-    const renderedBoundaryThreshold = this.getChatRenderedBoundaryThreshold(scrollSnapshot);
-    if (isNearRenderedTop) {
-      if (scrollSnapshot.distanceToRenderedTop <= renderedBoundaryThreshold) {
-        this.startChatTopBoundaryScrollHold();
-      }
-      this.schedulePendingChatScrollExpand();
+    const loadAheadPx = Math.max(420, Math.min(900, container.clientHeight * 1.25));
+    if (container.scrollTop <= loadAheadPx) {
+      this.expandChatRenderWindow();
     }
-  }
-
-  getChatRenderedTopLoadAheadThreshold(scrollSnapshot) {
-    return Math.max(420, Math.min(900, scrollSnapshot.clientHeight * 1.25));
-  }
-
-  getChatRenderedBoundaryThreshold(scrollSnapshot) {
-    return Math.max(32, Math.min(180, scrollSnapshot.clientHeight * 0.2));
   }
 
   /**
@@ -16192,19 +16010,25 @@ class ChatModal {
     };
   }
 
-  renderChatMessageHTML(item, index, { contact, messagesByTxid, lastReadTs }) {
+  renderChatMessageHTML(item, { contact, lastReadTs }) {
     const timeString = formatTime(item.timestamp);
+    // Use a consistent timestamp attribute for potential future use (e.g., message jumping)
     const timestampAttribute = `data-message-timestamp="${item.timestamp}"`;
-    const txidAttribute = item?.txid ? `data-txid="${item.txid}"` : '';
-    const statusAttribute = item?.status ? `data-status="${item.status}"` : '';
+    // Add txid attribute if available
+    const txidAttribute = item.txid ? `data-txid="${item.txid}"` : '';
+    const statusAttribute = item.status ? `data-status="${item.status}"` : '';
 
+    // Check if it's a payment based on the presence of the amount property (BigInt)
     if (typeof item.amount === 'bigint') {
+      // Assuming LIB (18 decimals) for now. TODO: Handle different asset decimals if needed.
+      // Format amount correctly using big2str
       const amountStr = big2str(item.amount, 18);
       const amountNum = parseFloat(amountStr);
       const amountDisplay = `${amountNum.toFixed(6)} ${item.symbol || 'LIB'}`;
       const directionText = item.my ? '-' : '+';
       const messageClass = item.my ? 'sent' : 'received';
       const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !isDeleted(item);
+      // --- Render Payment Transaction ---
       return `
           <div class="message ${messageClass} payment-info" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
             <div class="payment-header">
@@ -16217,8 +16041,11 @@ class ChatModal {
         `;
     }
 
+    // --- Render Chat Message ---
     const messageClass = item.my ? 'sent' : 'received';
+    // Check if message was deleted
     if (isDeleted(item)) {
+      // Render deleted message with special styling
       return `
                     <div class="message ${messageClass} deleted-message" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
                         <div class="message-content deleted-content">${item.message}</div>
@@ -16230,10 +16057,16 @@ class ChatModal {
     const messageType = item.type || 'message';
 
     let replyHTML = '';
+    // --- Render Reply Quote if present ---
     if (item.replyId) {
       const replyText = escapeHtml(item.replyMessage || 'View original message');
+      // Determine owner label: "You" if the referenced message is ours, else contact name
       const ownerIsMineHint = item.replyOwnerIsMine;
-      const targetMsg = messagesByTxid.get(item.replyId);
+      const targetMsg = contact.messages.find((message) => message.txid === item.replyId);
+      // Use both item.my and replyOwnerIsMine to determine from current viewer's perspective
+      // item.my: true if reply is from current user (viewer's perspective)
+      // replyOwnerIsMine: true if original message was from sender's perspective
+      // If they match (both true or both false), original message is from current user's perspective
       const isOwnerMine = typeof ownerIsMineHint === 'undefined'
         ? !!(targetMsg && targetMsg.my)
         : item.my === (ownerIsMineHint === true || ownerIsMineHint === '1');
@@ -16249,6 +16082,7 @@ class ChatModal {
               `;
     }
 
+    // --- Render Attachments if present ---
     let attachmentsHTML = '';
     if (item.xattach && Array.isArray(item.xattach) && item.xattach.length > 0) {
       attachmentsHTML = item.xattach.map(att => {
@@ -16267,7 +16101,6 @@ class ChatModal {
                   data-p-url="${att.pUrl || ''}"
                   data-name="${encodeURIComponent(fileName)}"
                   data-type="${att.type || ''}"
-                  data-msg-idx="${index}"
                   ${isImage ? 'data-image-attachment="true"' : ''}
                   ${isVideo ? 'data-video-attachment="true"' : ''}
                 >
@@ -16286,6 +16119,7 @@ class ChatModal {
       }).join('');
     }
 
+    // --- Render message text (if any) ---
     let messageTextHTML = '';
     switch (messageType) {
       case 'message':
@@ -16295,11 +16129,13 @@ class ChatModal {
         break;
       case 'call': {
         if (!item.message || !item.message.trim()) break;
+        // Determine call timing and whether join should be allowed
         const callTimeMs = Number(item.callTime || 0);
         const callStart = callTimeMs > 0 ? callTimeMs : Number(item.timestamp || item.sent_timestamp || 0);
         const isExpired = this.isCallExpired(callStart);
 
         if (isExpired) {
+          // Over 2 hours since call time: show as plain text without join button
           const theirName = getContactDisplayName(contact);
           const label = item.my ? `You called ${escapeHtml(theirName)}` : `${escapeHtml(theirName)} called you`;
           messageTextHTML = `
@@ -16307,7 +16143,10 @@ class ChatModal {
                     <div class="call-message-text"><i>${label}</i></div>
                   </div>`;
         } else {
+          // Build scheduled label if in the future
           const scheduleHTML = this.buildCallScheduleHTML(callTimeMs);
+          // Render call message with a left circular phone icon (clickable) and plain text to the right
+          // TODO - remove the href and instead have it call a function which will open the URL and at the time of opening it adds the callUrlParam and username
           messageTextHTML = `
                   <div class="call-message">
                     <a href='${item.message}${callUrlParams}"${myAccount.username}"' target="_blank" rel="noopener noreferrer" class="call-message-phone-button" aria-label="Join Video Call">
@@ -16322,9 +16161,11 @@ class ChatModal {
         break;
       }
       case 'vm': {
+        // Check for voice message
         const duration = this.formatDuration(item.duration);
+        // Use audio encryption keys for playback, fall back to message encryption keys if not available
         messageTextHTML = `
-              <div class="voice-message" data-url="${item.url || ''}" data-name="voice-message" data-type="audio/webm" data-msg-idx="${index}" data-duration="${item.duration || 0}">
+              <div class="voice-message" data-url="${item.url || ''}" data-name="voice-message" data-type="audio/webm" data-duration="${item.duration || 0}">
                 <div class="voice-message-controls">
                   <div class="voice-message-top-row">
                     <button class="voice-message-play-button" aria-label="Play voice message">
@@ -16360,20 +16201,16 @@ class ChatModal {
   }
 
   buildChatMessageRangeHTML(messages, contact, oldestIndex, newestIndex) {
-    const messagesByTxid = new Map();
-    messages.forEach((message) => {
-      if (message?.txid) {
-        messagesByTxid.set(message.txid, message);
-      }
-    });
+    // Last time user previously had this chat open (used to mark newly edited messages)
     const lastReadTs = contact.lastChatOpenTs || 0;
     const renderedMessages = [];
     const renderedTxids = [];
 
+    // Iterate backwards through messages (oldest to newest for rendering order)
+    // messages are already sorted descending (newest first) in myData
     for (let i = oldestIndex; i >= newestIndex; i--) {
       const item = messages[i];
-      if (!item) continue;
-      renderedMessages.push(this.renderChatMessageHTML(item, i, { contact, messagesByTxid, lastReadTs }));
+      renderedMessages.push(this.renderChatMessageHTML(item, { contact, lastReadTs }));
       if (item.txid) renderedTxids.push(item.txid);
     }
 
@@ -16383,6 +16220,19 @@ class ChatModal {
       html,
       renderedTxids
     };
+  }
+
+  getOldestRenderedMessageIndex(messages) {
+    const oldestRendered = this.messagesList.firstElementChild;
+    if (!oldestRendered) return -1;
+
+    const { txid, messageTimestamp } = oldestRendered.dataset;
+    assert(txid || messageTimestamp, 'Rendered message must have an identity');
+
+    return messages.findIndex((message) =>
+      (txid && message.txid === txid) ||
+      (messageTimestamp && message.timestamp == messageTimestamp)
+    );
   }
 
   /**
@@ -16406,8 +16256,6 @@ class ChatModal {
 
     if (!this.modal) return;
     if (!this.messagesList) return;
-    assert(this.messagesContainer, 'Messages container is required');
-    const renderSequence = ++this.chatRenderSequence;
 
     // --- 1. Identify the actual newest received message data item ---
     // Since messages are sorted descending (newest first), the first item with my: false is the newest received.
@@ -16415,12 +16263,22 @@ class ChatModal {
     this.newestReceivedMessage = newestReceivedItem;
     this.newestSentMessage = messages.find((item) => item.my);
 
-    const renderRange = this.getChatRenderRange(messages);
+    let oldestIndex = -1;
+    if (messages.length > 0) {
+      const requestedOldestIndex = this.chatRenderedOldestIndex;
+      const preservedOldestIndex = this.getOldestRenderedMessageIndex(messages);
+      oldestIndex = Math.min(
+        Math.max(0, requestedOldestIndex, preservedOldestIndex),
+        messages.length - 1
+      );
+      this.chatRenderedOldestIndex = oldestIndex;
+    }
+
     const range = this.buildChatMessageRangeHTML(
       messages,
       contact,
-      renderRange.oldestIndex,
-      renderRange.newestIndex
+      oldestIndex,
+      0
     );
 
     // Replace the list once to avoid one DOM mutation per message.
@@ -16429,23 +16287,18 @@ class ChatModal {
 
     // --- 4.5. Load thumbnails for image attachments (async, non-blocking) ---
     if (shouldKeepBottomAnchored) {
-      this.loadThumbnailsForAttachmentsKeepingBottomAnchored();
+      const thumbnailRows = this.messagesList.querySelectorAll(
+        '[data-image-attachment="true"], [data-video-attachment="true"]'
+      );
+      this.loadThumbnailsKeepingScrollAnchored(thumbnailRows);
     } else {
       this.loadThumbnailsForAttachments();
     }
 
     const renderedAddress = currentAddress;
-    const scheduleAfterPaint = typeof requestAnimationFrame === 'function'
-      ? requestAnimationFrame
-      : (callback) => setTimeout(callback, 0);
-    scheduleAfterPaint(() => {
-      scheduleAfterPaint(() => {
-        if (
-          !this.isActive() ||
-          this.address !== renderedAddress ||
-          !this.messagesList ||
-          renderSequence !== this.chatRenderSequence
-        ) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!this.isActive() || this.address !== renderedAddress) {
           return;
         }
         if (shouldKeepBottomAnchored) {
@@ -16462,7 +16315,7 @@ class ChatModal {
       return;
     }
 
-    if (shouldKeepBottomAnchored && !highlightNewMessage) {
+    if (shouldKeepBottomAnchored) {
       return;
     }
 
@@ -16515,10 +16368,7 @@ class ChatModal {
         // No received messages found, not highlighting, or highlightNewMessage is false,
         // just scroll to the bottom if the container exists.
         if (messageContainer) {
-          const isNearBottom = messageContainer.scrollHeight - messageContainer.scrollTop - messageContainer.clientHeight <= 120;
-          if (!shouldKeepBottomAnchored || isNearBottom) {
-            messageContainer.scrollTop = messageContainer.scrollHeight;
-          }
+          messageContainer.scrollTop = messageContainer.scrollHeight;
         }
       }
     }, 300); // <<< Delay of 300 milliseconds for rendering
@@ -17275,9 +17125,9 @@ class ChatModal {
    * Update an attachment row with a thumbnail image
    * @param {HTMLElement} attachmentRow - The attachment row element
    * @param {Blob} thumbnailBlob - The thumbnail blob to display
-   * @returns {boolean} True if update was successful, false otherwise
+   * @returns {Promise<boolean>} True if update was successful, false otherwise
    */
-  updateThumbnailInPlace(attachmentRow, thumbnailBlob) {
+  async updateThumbnailInPlace(attachmentRow, thumbnailBlob) {
     if (!attachmentRow || !attachmentRow.parentNode || !thumbnailBlob) {
       return false;
     }
@@ -17291,10 +17141,34 @@ class ChatModal {
       if (oldThumbnailUrl) {
         URL.revokeObjectURL(oldThumbnailUrl);
       }
-      
+
+      const thumbnailImage = new Image();
+      thumbnailImage.alt = 'Thumbnail';
+      thumbnailImage.className = 'attachment-thumbnail';
+      thumbnailImage.src = thumbnailUrl;
+
+      try {
+        if (typeof thumbnailImage.decode === 'function') {
+          await thumbnailImage.decode();
+        } else if (!thumbnailImage.complete) {
+          await new Promise((resolve, reject) => {
+            thumbnailImage.onload = resolve;
+            thumbnailImage.onerror = reject;
+          });
+        }
+      } catch (error) {
+        URL.revokeObjectURL(thumbnailUrl);
+        throw error;
+      }
+
+      if (!attachmentRow.isConnected || !iconContainer.isConnected) {
+        URL.revokeObjectURL(thumbnailUrl);
+        return false;
+      }
+
       // Replace icon with thumbnail image
-      iconContainer.innerHTML = `<img src="${thumbnailUrl}" alt="Thumbnail" class="attachment-thumbnail">`;
-      
+      iconContainer.replaceChildren(thumbnailImage);
+
       // Store blob URL for cleanup
       attachmentRow.dataset.thumbnailUrl = thumbnailUrl;
       return true;
@@ -17340,33 +17214,11 @@ class ChatModal {
   }
 
   /**
-   * Load visible thumbnails while keeping the newest messages anchored.
+   * Load thumbnails without letting row height changes move the viewport.
+   * @param {Iterable<HTMLElement>} attachmentRows
    * @returns {void}
    */
-  async loadThumbnailsForAttachmentsKeepingBottomAnchored() {
-    const thumbnailRows = this.messagesList.querySelectorAll(
-      '[data-image-attachment="true"], [data-video-attachment="true"]'
-    );
-    assert(this.messagesContainer, 'Messages container is required');
-
-    for (const attachmentRow of thumbnailRows) {
-      const oldScrollHeight = this.messagesContainer.scrollHeight;
-      const didUpdate = await this.loadThumbnailForAttachment(attachmentRow);
-      const heightDelta = this.messagesContainer.scrollHeight - oldScrollHeight;
-      if (didUpdate && heightDelta !== 0) {
-        this.messagesContainer.scrollTop = Math.max(0, this.messagesContainer.scrollTop + heightDelta);
-      }
-    }
-  }
-
-  /**
-   * Load thumbnails for prepended rows without moving the user's viewport.
-   * @param {HTMLElement[]} attachmentRows
-   * @returns {void}
-   */
-  async loadPrependedThumbnails(attachmentRows) {
-    assert(this.messagesContainer, 'Messages container is required');
-
+  async loadThumbnailsKeepingScrollAnchored(attachmentRows) {
     for (const attachmentRow of attachmentRows) {
       const oldScrollHeight = this.messagesContainer.scrollHeight;
       const didUpdate = await this.loadThumbnailForAttachment(attachmentRow);
@@ -17574,7 +17426,7 @@ class ChatModal {
             if (attachmentRow) {
               const thumbnailBlob = await thumbnailCache.get(attachmentUrl);
               if (thumbnailBlob) {
-                this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
+                await this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
               }
             }
           })
@@ -18111,6 +17963,15 @@ class ChatModal {
     return messageIndex === -1 ? null : contact.messages[messageIndex];
   }
 
+  getMessageRecordFromRenderedChild(element) {
+    const messageEl = element.closest('.message');
+    assert(messageEl, 'Rendered child must be inside a message');
+
+    const messageRecord = this.getMessageRecordFromElement(messageEl);
+    assert(messageRecord, 'Rendered message must have a backing record');
+    return messageRecord;
+  }
+
   /**
    * Returns the current user's stored reaction emoji for a rendered message.
    * @param {HTMLElement | null} messageEl
@@ -18413,17 +18274,23 @@ class ChatModal {
   /**
    * Resolve common attachment context fields from an attachment row.
    * @param {HTMLElement} attachmentRow
-   * @returns {{ attachmentRow: HTMLElement, messageEl: HTMLElement | null, idx: number, item: any, url: string }}
+   * @returns {{ attachmentRow: HTMLElement, messageEl: HTMLElement, item: any, url: string }}
    */
   getAttachmentContextFromRow(attachmentRow) {
-    const idx = Number(attachmentRow?.dataset?.msgIdx);
-    const item = Number.isFinite(idx) ? myData.contacts[this.address]?.messages?.[idx] : null;
+    const messageEl = attachmentRow.closest('.message');
+    assert(messageEl, 'Attachment row must be inside a message');
+
+    const item = this.getMessageRecordFromElement(messageEl);
+    assert(item, 'Attachment message must have a backing record');
+
+    const url = attachmentRow.dataset.url;
+    assert(url, 'Attachment row must include a url');
+
     return {
       attachmentRow,
-      messageEl: attachmentRow?.closest?.('.message') || null,
-      idx,
+      messageEl,
       item,
-      url: attachmentRow?.dataset?.url || ''
+      url
     };
   }
 
@@ -18894,7 +18761,7 @@ class ChatModal {
     // Show copy only if parent message has actual message text
     const copyOption = this.imageAttachmentContextMenu.querySelector('[data-action="copy"]');
     if (copyOption) {
-      const text = messageEl?.querySelector?.('.message-content')?.textContent?.trim() || '';
+      const text = messageEl.querySelector('.message-content')?.textContent?.trim() || '';
       copyOption.style.display = text ? 'flex' : 'none';
     }
 
@@ -18914,7 +18781,7 @@ class ChatModal {
     let hasThumb = true;
     if (hasThumbnailSupport) {
       hasThumb = false;
-      if (url && url !== '#') {
+      if (url !== '#') {
         try {
           const thumb = await thumbnailCache.get(url);
           hasThumb = !!thumb;
@@ -18964,19 +18831,19 @@ class ChatModal {
         void this.saveImageAttachment(row);
         break;
       case 'share':
-        if (messageEl) shareAttachmentModal.open(messageEl);
+        shareAttachmentModal.open(messageEl);
         break;
       case 'reply':
-        if (messageEl) this.startReplyToMessage(messageEl);
+        this.startReplyToMessage(messageEl);
         break;
       case 'copy':
-        if (messageEl) void this.copyMessageContent(messageEl);
+        void this.copyMessageContent(messageEl);
         break;
       case 'delete':
-        if (messageEl) this.deleteMessage(messageEl);
+        this.deleteMessage(messageEl);
         break;
       case 'delete-for-all':
-        if (messageEl) void this.deleteMessageForAll(messageEl);
+        void this.deleteMessageForAll(messageEl);
         break;
     }
 
@@ -18991,22 +18858,14 @@ class ChatModal {
     const url = attachmentRow.dataset.url;
     const name = attachmentRow.dataset.name ? decodeURIComponent(attachmentRow.dataset.name) : 'contacts.vcf';
     const type = attachmentRow.dataset.type || 'text/vcard';
-    const msgIdx = attachmentRow.dataset.msgIdx;
 
     // Get encryption keys from the message
-    const contact = myData.contacts[this.address];
-    const message = contact?.messages?.[msgIdx];
-    if (!message?.xattach) {
-      showToast('Could not find attachment data', 0, 'error');
-      return;
-    }
+    const message = this.getMessageRecordFromRenderedChild(attachmentRow);
+    assert(message.xattach, 'VCF attachment message must include attachment data');
 
     // Find the attachment in xattach array
     const attachment = message.xattach.find(att => att.url === url);
-    if (!attachment) {
-      showToast('Could not find attachment data', 0, 'error');
-      return;
-    }
+    assert(attachment, 'Rendered VCF attachment must exist in message data');
 
     // Open the import contacts modal with the full attachment object so
     // fields like `encKey` (new flow) are preserved for backwards compatibility.
@@ -19028,7 +18887,7 @@ class ChatModal {
     let loadingToastId;
     try {
       const { item, url } = this.getAttachmentContextFromRow(attachmentRow);
-      if (!item || !url || url === '#') return;
+      if (url === '#') return;
       
       // Get pUrl from data attributes
       const pUrl = attachmentRow.dataset.pUrl;
@@ -19044,7 +18903,7 @@ class ChatModal {
       
       // Cache and display thumbnail
       await thumbnailCache.save(url, thumbnailBlob, 'image/jpeg');
-      this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
+      await this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
       
       hideToast(loadingToastId);
     } catch (err) {
@@ -19061,7 +18920,6 @@ class ChatModal {
   async saveImageAttachment(attachmentRow) {
     // Reuse normal attachment download flow (decrypt + download)
     const { item } = this.getAttachmentContextFromRow(attachmentRow);
-    if (!item) return;
 
     // Concurent download prevention
     if (this.attachmentDownloadInProgress) return;
@@ -19134,7 +18992,8 @@ class ChatModal {
    */
   async handleImageAttachmentReactionPickerClick(reactionButton) {
     const row = this.currentImageAttachmentRow;
-    const { messageEl } = row ? this.getAttachmentContextFromRow(row) : { messageEl: null };
+    assert(row, 'Image attachment reaction requires an active attachment row');
+    const { messageEl } = this.getAttachmentContextFromRow(row);
     await this.handleReactionPickerSelection(reactionButton, messageEl, () => this.closeImageAttachmentContextMenu());
   }
 
@@ -19616,15 +19475,13 @@ class ChatModal {
   scrollToMessage(txid) {
     if (!txid || !this.messagesList) return;
     let target = this.messagesList.querySelector(`[data-txid="${CSS.escape(txid)}"]`);
-    if (!target && this.address) {
+    if (!target) {
+      assert(this.address, 'Cannot scroll to a message without an active chat');
       const contact = myData.contacts[this.address];
-      const messages = contact?.messages;
-      const targetIndex = Array.isArray(messages)
-        ? messages.findIndex((message) => message?.txid === txid)
-        : -1;
+      const targetIndex = contact.messages.findIndex((message) => message.txid === txid);
       if (targetIndex !== -1) {
         this.chatRenderedOldestIndex = Math.max(
-          Number.isInteger(this.chatRenderedOldestIndex) ? this.chatRenderedOldestIndex : 0,
+          this.chatRenderedOldestIndex,
           targetIndex
         );
         this.appendChatModal(false, true);
@@ -20595,7 +20452,6 @@ class ChatModal {
     }
 
     const voiceUrl = voiceMessageElement.dataset.url;
-    const msgIdx = voiceMessageElement.dataset.msgIdx;
 
     if (!voiceUrl) {
       showToast('Voice message URL not found', 0, 'error');
@@ -20604,10 +20460,7 @@ class ChatModal {
 
     try {
       // Check if it's our own message or received message
-      const message = myData.contacts[this.address].messages[msgIdx];
-      if (!message) {
-        throw new Error('Message not found');
-      }
+      const message = this.getMessageRecordFromRenderedChild(voiceMessageElement);
       const isMyMessage = message.my;
       
       // Get keys from message item (voice messages use audio-specific keys with fallback)
@@ -21505,24 +21358,14 @@ class ShareAttachmentModal {
     const url = attachmentRow.dataset.url;
     const name = attachmentRow.dataset.name;
     const type = attachmentRow.dataset.type;
-    const msgIdx = attachmentRow.dataset.msgIdx;
 
     if (!url) return null;
 
     // Get the actual message data from myData to access encryption keys
-    const contactAddress = chatModal.address;
-    const contact = myData.contacts[contactAddress];
-    
-    if (!contact || !contact.messages || !msgIdx) {
-      console.error('Cannot find message data for attachment');
-      return null;
-    }
+    const messageData = chatModal.getMessageRecordFromElement(messageEl);
+    assert(messageData, 'Shared attachment must have a backing message record');
 
-    const messageData = contact.messages[parseInt(msgIdx)];
-    if (!messageData || !messageData.xattach || !messageData.xattach[0]) {
-      console.error('Cannot find attachment in message data');
-      return null;
-    }
+    assert(messageData.xattach && messageData.xattach[0], 'Shared attachment message must include attachment data');
 
     const attachmentData = messageData.xattach[0];
 
