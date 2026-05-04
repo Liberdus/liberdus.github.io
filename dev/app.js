@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'c'
+const version = 'e'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -13924,6 +13924,7 @@ class ChatModal {
     // Track whether we've locked background/modal scroll
     this.scrollLocked = false;
     this._touchMoveBlocker = null; // blocks touch outside messages container
+    this.messagesContainerTouchY = null;
 
     // Track which voice message element is playing
     this.playingVoiceMessageElement = null;
@@ -14454,6 +14455,8 @@ class ChatModal {
     });
     // Close all context menus when messages container scrolls
     this.messagesContainer.addEventListener('scroll', () => this.handleMessagesContainerScroll(), { passive: true });
+    this.messagesContainer.addEventListener('touchstart', (e) => this.handleMessagesContainerTouchStart(e), { passive: true });
+    this.messagesContainer.addEventListener('touchmove', (e) => this.handleMessagesContainerTouchMove(e), { passive: false });
     // Add context menu option listeners
     this.contextMenu.addEventListener('click', (e) => {
       const reactionButton = e.target.closest('.message-context-reaction-button');
@@ -14944,6 +14947,28 @@ class ChatModal {
     const loadAheadPx = Math.max(420, Math.min(900, container.clientHeight * 1.25));
     if (container.scrollTop <= loadAheadPx) {
       this.expandChatRenderWindow();
+    }
+  }
+
+  handleMessagesContainerTouchStart(e) {
+    this.messagesContainerTouchY = e.touches?.[0]?.clientY ?? null;
+  }
+
+  handleMessagesContainerTouchMove(e) {
+    const container = this.messagesContainer;
+    const nextY = e.touches?.[0]?.clientY;
+    if (!container || !Number.isFinite(nextY) || !Number.isFinite(this.messagesContainerTouchY)) return;
+
+    const deltaY = nextY - this.messagesContainerTouchY;
+    this.messagesContainerTouchY = nextY;
+    if (deltaY === 0) return;
+
+    const isScrollable = container.scrollHeight > container.clientHeight + 1;
+    const atTop = container.scrollTop <= 0;
+    const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
+
+    if (!isScrollable || (deltaY > 0 && atTop) || (deltaY < 0 && atBottom)) {
+      e.preventDefault();
     }
   }
 
@@ -16229,9 +16254,12 @@ class ChatModal {
     const { txid, messageTimestamp } = oldestRendered.dataset;
     assert(txid || messageTimestamp, 'Rendered message must have an identity');
 
+    if (txid) {
+      return messages.findIndex((message) => message?.txid === txid);
+    }
+
     return messages.findIndex((message) =>
-      (txid && message.txid === txid) ||
-      (messageTimestamp && message.timestamp == messageTimestamp)
+      messageTimestamp && message?.timestamp == messageTimestamp
     );
   }
 
@@ -17957,8 +17985,12 @@ class ChatModal {
     const contact = myData.contacts[this.address];
     if (!contact?.messages?.length) return null;
 
+    if (txid) {
+      return contact.messages.find((msg) => msg?.txid === txid) || null;
+    }
+
     const messageIndex = contact.messages.findIndex((msg) =>
-      msg && (msg.txid === txid || msg.timestamp == timestamp)
+      timestamp && msg?.timestamp == timestamp
     );
     return messageIndex === -1 ? null : contact.messages[messageIndex];
   }
@@ -20624,8 +20656,7 @@ class ChatModal {
    */
   async saveVoiceMessage(messageEl) {
     const voiceEl = messageEl.querySelector('.voice-message');
-    const msgIdx = voiceEl?.dataset?.msgIdx;
-    const item = msgIdx !== undefined ? myData.contacts[this.address]?.messages?.[msgIdx] : null;
+    const item = this.getMessageRecordFromElement(messageEl);
     
     if (!voiceEl || !item || item.type !== 'vm') {
       showToast('Voice message not found', 2000, 'error');
