@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'z'
+const version = 'a'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -136,13 +136,18 @@ import {
   EthNum,
 } from './lib.js';
 
-import { CHAT_REACTION_SHEET_CATEGORIES } from './data/emoji-picker-data.js';
+import {
+  CHAT_REACTION_SHEET_CATEGORIES,
+  CHAT_REACTION_SHEET_DEFAULT_COMMON_EMOJIS,
+  CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY,
+} from './data/emoji-picker-data.js';
 
 const weiDigits = 18;
 const wei = 10n ** BigInt(weiDigits);
 //network.monitor.url = "http://test.liberdus.com:3000"    // URL of the monitor server
 //network.explorer.url = "http://test.liberdus.com:6001"   // URL of the chain explorer
 const MAX_MEMO_BYTES = 1000; // 1000 bytes for memos
+const MENU_NAVIGATION_LOCK_MS = 400;
 const MAX_CHAT_MESSAGE_BYTES = 1000; // 1000 bytes for chat messages
 const BRIDGE_USERNAME = 'liberdusbridge';
 const TRANSACTION_TIMESTAMP_OFFSET_MS = 500; // Transaction offset to allow for slow connections
@@ -386,7 +391,7 @@ function newDataRecord(myAccount) {
           img: 'images/lib.png',
           chainid: 2220,
           contract: '041e48a5b11c29fdbd92498eb05573c52728398c',
-          price: 1.0,
+          price: null,
           balance: 0n,
           networth: 0.0,
           addresses: [
@@ -654,6 +659,25 @@ function migrateDeletedMessageStates(data) {
  */
 function isPrivateAccount() {
   return myAccount?.private === true || myData?.account?.private === true;
+}
+
+/**
+ * Lock rapid menu clicks to prevent multiple clicks from triggering multiple actions
+ * @param {Element} menuList - The menu list element
+ */
+function lockRapidMenuClicks(menuList) {
+  let locked = false;
+  menuList.addEventListener('click', (event) => {
+    if (!event.target.closest('.menu-item')) return;
+    if (locked) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+
+    locked = true;
+    setTimeout(() => { locked = false; }, MENU_NAVIGATION_LOCK_MS);
+  }, true);
 }
 
 // Load saved account data and update chat list on page load
@@ -1167,6 +1191,7 @@ class WelcomeMenuModal {
 
   load() {
     this.modal = document.getElementById('welcomeMenuModal');
+    lockRapidMenuClicks(this.modal.querySelector('.menu-list'));
     this.closeButton = document.getElementById('closeWelcomeMenu');
     this.closeButton.addEventListener('click', () => this.close());
 
@@ -1577,15 +1602,15 @@ class ChatsScreen {
       const reactionPreview = getLatestChatReactionActivity(contact);
       const isShowingReactionPreview = !!reactionPreview && reactionPreview.timestamp > latestActivity.timestamp;
       const latestItemTimestamp = isShowingReactionPreview ? reactionPreview.timestamp : latestActivity.timestamp;
-      const unreadCount = getContactTotalUnread(contact);
+      const unreadCount = contact.unread;
 
       let previewHTML = '';
       if (isShowingReactionPreview) {
-        const reactionActor = reactionPreview.my ? 'You' : contactName;
         const reactionTarget = reactionPreview.target;
+        const reactionActor = reactionPreview.my ? 'You ' : '';
         const reactionText = reactionPreview.emoji
-          ? `${reactionActor} reacted ${reactionPreview.emoji} to "${reactionTarget}"`
-          : `${reactionActor} removed a reaction from "${reactionTarget}"`;
+          ? `${reactionActor}reacted ${reactionPreview.emoji} to "${reactionTarget}"`
+          : `${reactionActor}removed a reaction from "${reactionTarget}"`;
         previewHTML = truncateMessage(escapeHtml(reactionText), 50);
       } else if (typeof latestActivity.amount === 'bigint') {
         // Latest item is a payment/transfer
@@ -1630,7 +1655,8 @@ class ChatsScreen {
       // Determine what to show in the preview
 
       let displayPreview = previewHTML;
-      let displayPrefix = isShowingReactionPreview ? '' : (latestActivity.my ? '< ' : '> ');
+      const isOutgoingPreview = isShowingReactionPreview ? reactionPreview.my : latestActivity.my;
+      let displayPrefix = isOutgoingPreview ? '< ' : '> ';
       let hasDraftAttachment = false;
 
       // Check for draft attachments
@@ -1964,7 +1990,9 @@ class WalletScreen {
     }
 
     // Update total networth
-    this.totalBalance.textContent = (walletData.networth || 0).toFixed(2);
+    const walletUsdValue = calculateWalletUsdValue(walletData.assets);
+    walletData.networth = walletUsdValue ?? 0.0;
+    this.totalBalance.textContent = walletUsdValue === null ? 'N/A' : walletUsdValue.toFixed(2);
 
     if (!Array.isArray(walletData.assets) || walletData.assets.length === 0) {
       this.assetsList.querySelector('.empty-state').style.display = 'block';
@@ -1973,14 +2001,18 @@ class WalletScreen {
 
     this.assetsList.innerHTML = walletData.assets
       .map((asset) => {
+        const assetUsdPrice = getAssetUsdPrice(asset);
+        const assetNetworth = calculateAssetUsdValue(asset);
+        const assetPriceText = assetUsdPrice === null ? 'N/A' : `$${assetUsdPrice.toFixed(6)} / ${asset.symbol}`;
+        const assetNetworthText = assetNetworth === null ? 'N/A' : `$${assetNetworth.toFixed(6)}`;
         return `
               <div class="asset-item">
                   <div class="asset-logo"><img src="./media/liberdus_logo_50.png" class="asset-logo"></div>
                   <div class="asset-info">
                       <div class="asset-name">${asset.name}</div>
-                      <div class="asset-symbol">$${asset.price} / ${asset.symbol}</div>
+                      <div class="asset-symbol">${assetPriceText}</div>
                   </div>
-                  <div class="asset-balance">${(Number(asset.balance) / Number(wei)).toFixed(6)}<br><span class="asset-symbol">$${asset.networth.toFixed(6)}</span></div>
+                  <div class="asset-balance">${(Number(asset.balance) / Number(wei)).toFixed(6)}<br><span class="asset-symbol">${assetNetworthText}</span></div>
               </div>
           `;
       })
@@ -1992,11 +2024,14 @@ class WalletScreen {
     if (!myAccount || !myData || !myData.wallet || !myData.wallet.assets) {
       console.error('No wallet data available');
       return;
-    } else if (!isOnline) {
+    }
+
+    await updateAssetPricesIfNeeded();
+    if (!isOnline) {
       console.warn('Not online. Not updating wallet balances');
       return;
     }
-    await updateAssetPricesIfNeeded();
+
     const now = getCorrectedTimestamp();
     if (!myData.wallet.timestamp) {
       myData.wallet.timestamp = 0;
@@ -2025,14 +2060,13 @@ class WalletScreen {
             // Update address balance
             addr.balance = data.balance;
           }
-          // Add to asset total (convert to USD using asset price)
           assetTotalBalance += addr.balance;
         } catch (error) {
           console.error(`Error fetching balance for address ${addr.address}:`, error);
         }
       }
       asset.balance = assetTotalBalance;
-      asset.networth = (asset.price * Number(assetTotalBalance)) / Number(wei);
+      asset.networth = calculateAssetUsdValue(asset) ?? 0.0;
 
       // Add this asset's total to wallet total
       totalWalletNetworth += asset.networth;
@@ -2128,6 +2162,7 @@ class MenuModal {
 
   load() {
     this.modal = document.getElementById('menuModal');
+    lockRapidMenuClicks(this.modal.querySelector('.menu-list'));
     this.closeButton = document.getElementById('closeMenu');
     this.closeButton.addEventListener('click', () => this.close());
     this.validatorButton = document.getElementById('openValidator');
@@ -2900,6 +2935,7 @@ class SettingsModal {
 
   load() {
     this.modal = document.getElementById('settingsModal');
+    lockRapidMenuClicks(this.modal.querySelector('.menu-list'));
     this.closeButton = document.getElementById('closeSettings');
     this.closeButton.addEventListener('click', () => this.close());
     
@@ -4708,7 +4744,7 @@ class FriendModal {
    * Update the friend button based on the contact's friend status
    * @param {Object} contact - The contact object
    * @param {string} buttonId - The ID of the button to update
-   * @returns {void}
+   * @returns {Promise<void>}
    */
   updateFriendButton(contact, buttonId) {
     const button = document.getElementById(buttonId);
@@ -5235,7 +5271,7 @@ class ClockTimer {
 
   /**
    * Starts the ticking clock timer
-   * @returns {void}
+   * @returns {Promise<void>}
    */
   start() {
     // Clear any existing timer
@@ -5671,40 +5707,92 @@ class GroupCallParticipantsModal {
 
 const groupCallParticipantsModal = new GroupCallParticipantsModal();
 
+function isLibAsset(asset) {
+  return asset?.id === 'liberdus' || asset?.symbol === 'LIB';
+}
+
+function getLibUsdPriceFromParameters() {
+  const price = getStabilityFactor();
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
+function syncLibUsdPriceToWalletAssets(price) {
+  if (!Array.isArray(myData?.wallet?.assets)) {
+    return;
+  }
+
+  for (const asset of myData.wallet.assets) {
+    if (isLibAsset(asset)) {
+      asset.price = price;
+    }
+  }
+
+  if (price !== null) {
+    myData.wallet.priceTimestamp = getCorrectedTimestamp();
+  }
+}
+
+async function getLibUsdPrice(options = {}) {
+  const { forceRefresh = false } = options;
+  await getNetworkParams(forceRefresh);
+
+  const price = getLibUsdPriceFromParameters();
+  syncLibUsdPriceToWalletAssets(price);
+
+  if (price === null) {
+    console.warn('LIB/USD price unavailable: missing or invalid stability factor.');
+  }
+
+  return price;
+}
+
+function getAssetUsdPrice(asset) {
+  if (isLibAsset(asset)) {
+    return getLibUsdPriceFromParameters();
+  }
+
+  const price = Number(asset?.price);
+  return Number.isFinite(price) && price >= 0 ? price : null;
+}
+
+function calculateAssetUsdValue(asset) {
+  const price = getAssetUsdPrice(asset);
+  if (price === null) {
+    return null;
+  }
+
+  const balance = Number(asset?.balance ?? 0n);
+  if (!Number.isFinite(balance)) {
+    return null;
+  }
+
+  return (price * balance) / Number(wei);
+}
+
+function calculateWalletUsdValue(assets) {
+  if (!Array.isArray(assets)) {
+    return 0.0;
+  }
+
+  let total = 0.0;
+  for (const asset of assets) {
+    const assetValue = calculateAssetUsdValue(asset);
+    if (assetValue === null) {
+      return null;
+    }
+    total += assetValue;
+  }
+
+  return total;
+}
+
 async function updateAssetPricesIfNeeded() {
   if (!myData || !myData.wallet || !myData.wallet.assets) {
     console.error('No wallet data available to update asset prices');
     return;
   }
 
-  const now = getCorrectedTimestamp();
-  const priceUpdateInterval = 10 * 60 * 1000; // 10 minutes in milliseconds
-
-  if (now - myData.wallet.priceTimestamp < priceUpdateInterval) {
-    return;
-  }
-
-  for (let i = 0; i < myData.wallet.assets.length; i++) {
-    const asset = myData.wallet.assets[i];
-    const contractAddress = '0x' + asset.contract;
-    const apiUrl = `https://api.dexscreener.com/latest/dex/search?q=${contractAddress}`;
-    try {
-      const response = await fetch(apiUrl);
-      if (!response.ok) {
-        console.error(`API request failed for ${asset.symbol} with status ${response.status}`);
-        continue; // Skip to the next asset
-      }
-      const data = await response.json();
-      if (data.pairs && data.pairs.length > 0 && data.pairs[0].priceUsd) {
-        asset.price = parseFloat(data.pairs[0].priceUsd);
-        myData.wallet.priceTimestamp = now;
-      } else {
-        console.warn(`No price data found for ${asset.symbol} from API`);
-      }
-    } catch (error) {
-      console.error(`Failed to update price for ${asset.symbol}`, error);
-    }
-  }
+  await getLibUsdPrice();
 }
 
 async function queryNetwork(url, abortSignal = null) {
@@ -6589,16 +6677,7 @@ function settlePendingReaction(pendingTxInfo, result) {
 }
 
 /**
- * Returns the unread total used by the chat list and tab notification bubble.
- * @param {Object|null} contact
- * @returns {number}
- */
-function getContactTotalUnread(contact) {
-  return Math.max(0, (contact?.unread || 0) + (contact?.reactionUnread || 0));
-}
-
-/**
- * Syncs the footer chat tab notification bubble with combined message + reaction unread state.
+ * Syncs the footer chat tab notification bubble with unread message state.
  * @returns {void}
  */
 function syncChatTabNotificationBubble() {
@@ -6613,7 +6692,7 @@ function syncChatTabNotificationBubble() {
     if (!contact?.address || isFaucetAddress(contact.address)) {
       return false;
     }
-    return getContactTotalUnread(contact) > 0;
+    return contact.unread > 0;
   });
 
   footer.chatButton.classList.toggle('has-notification', hasUnreadChats);
@@ -6643,8 +6722,6 @@ async function processChats(chats, keys) {
         contact.username = 'Liberdus Faucet';
       }
       //            contact.address = from        // not needed since createNewContact does this
-      const initialReactionUnread = contact.reactionUnread || 0;
-      let nextReactionUnread = initialReactionUnread;
       let added = 0;
       let hasNewTransfer = false;
       let mine = false;
@@ -6808,15 +6885,11 @@ async function processChats(chats, keys) {
                     reactNativeApp.sendCancelScheduledCall(contact?.username, Number(messageToDelete.callTime));
                   }
                   if (didDeleteMessage) {
-                    const hadIncomingEffectiveReaction = !!getEffectiveReactionForSenderTarget(contact, messageToDelete.txid, from);
                     purgeContactReactionsForTarget(contact, messageToDelete.txid);
                     syncChatLatestActivityTimestamp(from, contact);
                     didChangeReactionPreview = true;
                     if (wasUnreadIncomingMessage) {
                       contact.unread = Math.max(0, unreadIncomingMessageCount - 1);
-                    }
-                    if (!inActiveChatWithSender && hadIncomingEffectiveReaction) {
-                      nextReactionUnread = Math.max(0, nextReactionUnread - 1);
                     }
                   }
                   if (didDeleteMessage && messageToDelete.type === 'call' && shouldRefreshUpcomingCallsUiForCallTime(messageToDelete.callTime)) {
@@ -7259,13 +7332,6 @@ async function processChats(chats, keys) {
             if (pendingReaction.sender === from && (!inActiveChatWithSender || document.visibilityState === 'hidden')) {
               playChatSound();
             }
-            if (pendingReaction.sender === from && !inActiveChatWithSender) {
-              if (pendingReaction.action === 'set') {
-                nextReactionUnread += 1;
-              } else {
-                nextReactionUnread = Math.max(0, nextReactionUnread - 1);
-              }
-            }
           }
         }
       }
@@ -7321,20 +7387,7 @@ async function processChats(chats, keys) {
         chatModal.syncRenderedReactionTargets([...touchedReactionTargetTxids]);
       }
 
-      if (!inActiveChatWithSender && nextReactionUnread !== initialReactionUnread) {
-        contact.reactionUnread = nextReactionUnread;
-        if (nextReactionUnread > initialReactionUnread) {
-          if (!chatsScreen.isActive() && !isFaucetAddress(from)) {
-            footer.chatButton.classList.add('has-notification');
-          }
-        } else if (!chatsScreen.isActive()) {
-          syncChatTabNotificationBubble();
-        }
-        // Refresh list if user is currently viewing chat list so unread counts update
-        if (chatsScreen.isActive()) {
-          chatsScreen.updateChatList();
-        }
-      } else if (didChangeReactionPreview && chatsScreen.isActive() && !inActiveChatWithSender) {
+      if (didChangeReactionPreview && chatsScreen.isActive() && !inActiveChatWithSender) {
         chatsScreen.updateChatList();
       }
 
@@ -7650,6 +7703,38 @@ function getUserFacingTxFailureReason(reason, feeMismatchStatus = null) {
 }
 
 /**
+ * Returns true when the transaction failure reason indicates a recipient toll state failure.
+ * @param {string} reason
+ * @returns {boolean}
+ */
+function isRecipientTollStateFailure(reason) {
+  assert(typeof reason === 'string', 'Transaction failure reason must be a string');
+  return /required toll|blocked by the receiver|chat is blocked/i.test(reason);
+}
+
+/**
+ * Extracts the actionable one-line recipient toll/block reason from a pre-crack message.
+ * @param {string} reason
+ * @param {Object} contact
+ * @returns {string}
+ */
+function getRecipientTollPrecrackFailureReason(reason, contact) {
+  assert(typeof reason === 'string', 'Pre-crack failure reason must be a string');
+  assert(contact, 'Contact is required for reaction pre-crack failure copy');
+
+  if (reason.includes('Chat is blocked by the receiver.')) {
+    return 'You are blocked by this user';
+  }
+
+  if (/less than required toll/i.test(reason)) {
+    const username = getContactDisplayName(contact);
+    return `You can only send reactions to people who have added you as a connection. Ask ${username} to add you as a connection`;
+  }
+
+  return '';
+}
+
+/**
  * Attempts to refresh network params when a tx fails due to fee mismatch.
  * @param {string} reason
  * @returns {Promise<{detected: boolean, refreshed: boolean}>}
@@ -7691,14 +7776,7 @@ async function injectTx(tx, txid) {
       const libAsset = myData.wallet.assets.find((asset) => asset?.symbol === 'LIB');
       if (!libAsset) return;
 
-      let usd = Number(libAsset.networth);
-      if (!Number.isFinite(usd)) {
-        // Fallback: estimate from cached balance + price.
-        const balance = libAsset.balance ?? 0n;
-        const price = Number(libAsset.price);
-        if (!Number.isFinite(price) || typeof wei === 'undefined') return;
-        usd = (price * Number(balance)) / Number(wei);
-      }
+      const usd = calculateAssetUsdValue(libAsset);
 
       if (Number.isFinite(usd) && usd < LOW_LIB_USD_THRESHOLD) {
         showToast(
@@ -7795,6 +7873,12 @@ async function injectTx(tx, txid) {
         console.error('Timestamp out of range, updating timestamp');
         timeDifference()
         toastMessage += ' (Please try again)';
+      }
+      if (
+        isRecipientTollStateFailure(failureReason)
+        && myData.pending.some((pendingTx) => pendingTx.txid === txid && pendingTx.reactionPending)
+      ) {
+        return data;
       }
       showToast(toastMessage, 0, feeMismatchStatus.detected ? 'warning' : 'error');
     }
@@ -9987,43 +10071,6 @@ function getTransactionTimestamp() {
 }
 
 // Validator Modals
-
-// fetching market price by invoking `updateAssetPricesIfNeeded` and extracting from myData.assetPrices
-async function getMarketPrice() {
-  try {
-    // Ensure asset prices are potentially updated by the central function
-    await updateAssetPricesIfNeeded();
-
-    // Check if wallet data and assets exist after the update attempt
-    if (!myData?.wallet?.assets) {
-      console.warn('getMarketPrice: Wallet assets not available in myData.');
-      return null;
-    }
-
-    // Find the LIB asset in the myData structure
-    const libAsset = myData.wallet.assets.find((asset) => asset.id === 'liberdus');
-
-    if (libAsset) {
-      // Check if the price exists and is a valid number on the found asset
-      if (typeof libAsset.price === 'number' && !isNaN(libAsset.price)) {
-        // console.log(`getMarketPrice: Retrieved LIB price from myData: ${libAsset.price}`); // Optional: For debugging
-        return libAsset.price;
-      } else {
-        // Price might be missing if the initial fetch failed or hasn't happened yet
-        console.warn(
-          `getMarketPrice: LIB asset found in myData, but its price is missing or invalid (value: ${libAsset.price}).`
-        );
-        return null;
-      }
-    } else {
-      console.warn('getMarketPrice: LIB asset not found in myData.wallet.assets.');
-      return null;
-    }
-  } catch (error) {
-    console.error('getMarketPrice: Error occurred while trying to get price from myData:', error);
-    return null; // Return null on any unexpected error during the process
-  }
-}
 
 class RemoveAccountModal {
   constructor() {}
@@ -12989,7 +13036,7 @@ class ValidatorStakingModal {
 
       const stakeRequiredUsd = EthNum.toWei(parameters.current?.stakeRequiredUsdStr); // BigInt object
 
-      const marketPrice = await getMarketPrice(); // number or null
+      const libUsdPrice = await getLibUsdPrice(); // number or null
       const stabilityFactor = getStabilityFactor(); // number
 
 
@@ -13010,35 +13057,33 @@ class ValidatorStakingModal {
       }
 
       let userStakedUsd = null; // number or null
-      // TODO: Calculate User Staked Amount (USD) using market price - Use stability factor if available?
-      // For now, using market price as implemented previously.
-      if (userStakedBaseUnits != null && typeof userStakedBaseUnits === 'bigint' && marketPrice != null) {
+      if (userStakedBaseUnits != null && typeof userStakedBaseUnits === 'bigint' && libUsdPrice != null) {
         // Check it's a BigInt
         try {
           // userStakedBaseUnits is already a BigInt object
           const userStakedLib = Number(userStakedBaseUnits) / 1e18;
-          userStakedUsd = userStakedLib * marketPrice;
+          userStakedUsd = userStakedLib * libUsdPrice;
         } catch (e) {
           console.error('Error calculating userStakedUsd:', e, {
             userStakedBaseUnits,
-            marketPrice,
+            libUsdPrice,
           });
         }
       }
 
-      let marketStakeUsdBaseUnits = null; // BigInt object or null
-      // Calculate Min Stake at Market (USD) using BigInt and market price
-      if (stakeAmountLibBaseUnits !== null && marketPrice != null) {
+      let stabilityStakeUsdBaseUnits = null; // BigInt object or null
+      // Calculate min stake USD using the network stability factor price
+      if (stakeAmountLibBaseUnits !== null && libUsdPrice != null) {
         // stakeAmountLibBaseUnits is BigInt object here
         try {
           const stakeAmountLib = Number(stakeAmountLibBaseUnits) / 1e18;
-          const marketStakeUsd = stakeAmountLib * marketPrice;
+          const stabilityStakeUsd = stakeAmountLib * libUsdPrice;
           // Approximate back to base units (assuming 18 decimals for USD base units)
-          marketStakeUsdBaseUnits = BigInt(Math.round(marketStakeUsd * 1e18));
+          stabilityStakeUsdBaseUnits = BigInt(Math.round(stabilityStakeUsd * 1e18));
         } catch (e) {
-          console.error('Error calculating marketStakeUsdBaseUnits:', e, {
+          console.error('Error calculating stabilityStakeUsdBaseUnits:', e, {
             stakeAmountLibBaseUnits,
-            marketPrice,
+            libUsdPrice,
           });
         }
       }
@@ -13054,16 +13099,16 @@ class ValidatorStakingModal {
       const displayNetworkStakeLib =
         stakeAmountLibBaseUnits !== null ? big2str(stakeAmountLibBaseUnits, 18).slice(0, 7) : 'N/A';
       const displayStabilityFactor = stabilityFactor ? stabilityFactor.toFixed(6) : 'N/A';
-      const displayMarketPrice = marketPrice ? '$' + marketPrice.toFixed(6) : 'N/A';
-      // marketStakeUsdBaseUnits is a BigInt object or null. Pass its string representation.
-      const displayMarketStakeUsd =
-        marketStakeUsdBaseUnits !== null ? '$' + big2str(marketStakeUsdBaseUnits, 18).slice(0, 6) : 'N/A';
+      const displayLibUsdPrice = libUsdPrice ? '$' + libUsdPrice.toFixed(6) : 'N/A';
+      // stabilityStakeUsdBaseUnits is a BigInt object or null. Pass its string representation.
+      const displayStabilityStakeUsd =
+        stabilityStakeUsdBaseUnits !== null ? '$' + big2str(stabilityStakeUsdBaseUnits, 18).slice(0, 6) : 'N/A';
 
       this.networkStakeUsdValue.textContent = displayNetworkStakeUsd;
       this.networkStakeLibValue.textContent = displayNetworkStakeLib;
       this.stabilityFactorValue.textContent = displayStabilityFactor;
-      this.marketPriceValue.textContent = displayMarketPrice;
-      this.marketStakeUsdValue.textContent = displayMarketStakeUsd;
+      this.marketPriceValue.textContent = displayLibUsdPrice;
+      this.marketStakeUsdValue.textContent = displayStabilityStakeUsd;
 
       if (!nominee) {
         // Case: No Nominee - Hide the stake info section completely and show earn message
@@ -13828,9 +13873,13 @@ const stakeValidatorModal = new StakeValidatorModal();
 const CHAT_REACTION_SHEET_CATEGORY_MAP = new Map(
   CHAT_REACTION_SHEET_CATEGORIES.map((category) => [category.key, category])
 );
-const CHAT_REACTION_SHEET_DEFAULT_CATEGORY = CHAT_REACTION_SHEET_CATEGORIES[0].key;
+const CHAT_REACTION_SHEET_DEFAULT_CATEGORY = CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY;
+const CHAT_REACTION_SHEET_RECENT_ACCOUNT_KEY = 'recentReactionEmojis';
+const CHAT_REACTION_SHEET_RECENT_LIMIT = CHAT_REACTION_SHEET_DEFAULT_COMMON_EMOJIS.length;
+const CHAT_REACTION_SHEET_PROMOTION_RATIO = 0.5;
 const CHAT_REACTION_SHEET_CLOSE_DRAG_PX = 120;
 const CHAT_REACTION_SHEET_TAB_ICONS = {
+  recent: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v6h6"/><path d="M12 7v5l3 2"/></svg>',
   smileys: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></svg>',
   people: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></svg>',
   nature: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg>',
@@ -14034,6 +14083,118 @@ class ChatModal {
     return this.dropOverlay;
   }
 
+  normalizeRecentReactionEmojiList(emojis) {
+    if (!Array.isArray(emojis)) {
+      return [];
+    }
+
+    const normalizedEmojis = [];
+    const seen = new Set();
+    for (const entry of emojis) {
+      const emoji = typeof entry === 'string' ? entry.trim() : '';
+      if (!emoji || seen.has(emoji)) {
+        continue;
+      }
+      seen.add(emoji);
+      normalizedEmojis.push(emoji);
+    }
+
+    return normalizedEmojis;
+  }
+
+  getRecentReactionSheetEmojis() {
+    const rankedEmojis = [];
+    const seen = new Set();
+    const addEmoji = (emoji) => {
+      if (!emoji || seen.has(emoji)) {
+        return;
+      }
+      seen.add(emoji);
+      rankedEmojis.push(emoji);
+    };
+
+    this.normalizeRecentReactionEmojiList(
+      myData?.account?.[CHAT_REACTION_SHEET_RECENT_ACCOUNT_KEY]
+    ).forEach(addEmoji);
+    CHAT_REACTION_SHEET_DEFAULT_COMMON_EMOJIS.forEach(addEmoji);
+
+    return rankedEmojis.slice(0, CHAT_REACTION_SHEET_RECENT_LIMIT);
+  }
+
+  promoteRecentReactionEmoji(recentEmojis, selectedEmoji) {
+    const emoji = typeof selectedEmoji === 'string' ? selectedEmoji.trim() : '';
+    if (!emoji) {
+      return this.normalizeRecentReactionEmojiList(recentEmojis).slice(0, CHAT_REACTION_SHEET_RECENT_LIMIT);
+    }
+
+    const currentEmojis = this.normalizeRecentReactionEmojiList(recentEmojis).slice(
+      0,
+      CHAT_REACTION_SHEET_RECENT_LIMIT
+    );
+    const currentIndex = currentEmojis.indexOf(emoji);
+    const remainingEmojis = currentEmojis.filter((entry) => entry !== emoji);
+    const targetIndex = currentIndex === -1
+      ? CHAT_REACTION_SHEET_RECENT_LIMIT - 1
+      : Math.max(
+          0,
+          currentIndex - Math.max(1, Math.ceil((currentIndex + 1) * CHAT_REACTION_SHEET_PROMOTION_RATIO))
+        );
+
+    remainingEmojis.splice(targetIndex, 0, emoji);
+    return remainingEmojis.slice(0, CHAT_REACTION_SHEET_RECENT_LIMIT);
+  }
+
+  recordRecentReactionEmoji(emoji) {
+    const selectedEmoji = typeof emoji === 'string' ? emoji.trim() : '';
+    if (!selectedEmoji || !myData?.account) {
+      return;
+    }
+
+    myData.account[CHAT_REACTION_SHEET_RECENT_ACCOUNT_KEY] = this.promoteRecentReactionEmoji(
+      this.getRecentReactionSheetEmojis(),
+      selectedEmoji
+    );
+    saveState();
+  }
+
+  hasRecentReactionEmojiOverrides() {
+    return !!myData?.account && Object.prototype.hasOwnProperty.call(
+      myData.account,
+      CHAT_REACTION_SHEET_RECENT_ACCOUNT_KEY
+    );
+  }
+
+  updateReactionSheetResetButtonVisibility() {
+    if (!this.resetReactionSheetRecentButton) {
+      return;
+    }
+
+    this.resetReactionSheetRecentButton.hidden = (
+      this.reactionSheetActiveCategory !== CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY
+    );
+  }
+
+  handleResetRecentReactionEmojis() {
+    if (!myData?.account) {
+      return;
+    }
+
+    if (!this.hasRecentReactionEmojiOverrides()) {
+      showToast('Recent emojis are already reset', 2000, 'info');
+      return;
+    }
+
+    const confirmed = confirm('Reset recent emojis to the default set?');
+    if (!confirmed) {
+      return;
+    }
+
+    delete myData.account[CHAT_REACTION_SHEET_RECENT_ACCOUNT_KEY];
+    saveState();
+    this.setReactionSheetCategory(CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY);
+    showToast('Recent emojis reset', 2000, 'success');
+  }
+
   /**
    * Returns the active reaction sheet category config.
    * @param {string} categoryKey
@@ -14042,6 +14203,9 @@ class ChatModal {
   getReactionSheetCategory(categoryKey) {
     const category = CHAT_REACTION_SHEET_CATEGORY_MAP.get(categoryKey);
     assert(category, `Unknown reaction sheet category: ${categoryKey}`);
+    if (category.key === CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY) {
+      return { ...category, emojis: this.getRecentReactionSheetEmojis() };
+    }
     return category;
   }
 
@@ -14053,7 +14217,10 @@ class ChatModal {
   getReactionSheetCategoryKeyForEmoji(emoji) {
     if (!emoji) return '';
 
-    const category = CHAT_REACTION_SHEET_CATEGORIES.find((entry) => entry.emojis.includes(emoji));
+    const category = CHAT_REACTION_SHEET_CATEGORIES.find((entry) => (
+      entry.key !== CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY &&
+      entry.emojis.includes(emoji)
+    ));
     return category?.key || '';
   }
 
@@ -14089,6 +14256,7 @@ class ChatModal {
     const category = this.getReactionSheetCategory(categoryKey);
     this.reactionSheetActiveCategory = category.key;
     this.renderReactionSheetTabs();
+    this.updateReactionSheetResetButtonVisibility();
 
     this.reactionSheetGrid.innerHTML = category.emojis.map((emoji) => `
       <button class="chat-reaction-sheet-button message-context-reaction-button" type="button" data-emoji="${emoji}" aria-label="React with ${emoji}">${emoji}</button>
@@ -14228,6 +14396,7 @@ class ChatModal {
     this.reactionSheetDragRegion = document.getElementById('chatReactionSheetDragRegion');
     this.reactionSheetTabs = document.getElementById('chatReactionSheetTabs');
     this.reactionSheetGrid = document.getElementById('chatReactionSheetGrid');
+    this.resetReactionSheetRecentButton = document.getElementById('resetChatReactionSheetRecent');
     this.closeReactionSheetButton = document.getElementById('closeChatReactionSheet');
     this.renderReactionSheetTabs();
     this.setReactionSheetCategory(this.reactionSheetActiveCategory);
@@ -14328,6 +14497,7 @@ class ChatModal {
       }
     });
     this.closeReactionSheetButton.addEventListener('click', () => this.closeReactionSheet());
+    this.resetReactionSheetRecentButton.addEventListener('click', () => this.handleResetRecentReactionEmojis());
     this.reactionSheetDragRegion.addEventListener('pointerdown', this.handleReactionSheetDragStart.bind(this));
     this.reactionSheetDragRegion.addEventListener('pointermove', this.handleReactionSheetDragMove.bind(this));
     this.reactionSheetDragRegion.addEventListener('pointerup', this.handleReactionSheetDragEnd.bind(this));
@@ -14828,11 +14998,10 @@ class ChatModal {
     this.modal.classList.add('active');
 
     // Clear unread count
-    const totalUnread = getContactTotalUnread(contact);
+    const totalUnread = contact.unread;
     if (totalUnread > 0) {
       myData.state.unread = Math.max(0, (myData.state.unread || 0) - totalUnread);
       contact.unread = 0;
-      contact.reactionUnread = 0;
       chatsScreen.updateChatList();
       syncChatTabNotificationBubble();
     }
@@ -14998,7 +15167,7 @@ class ChatModal {
       return;
     }
 
-    const allRead = Object.values(myData.contacts).every((c) => getContactTotalUnread(c) === 0);
+    const allRead = Object.values(myData.contacts).every((contact) => contact.unread === 0);
     const currentAddress = myAccount?.keys?.address;
     
     if (allRead) {
@@ -15550,11 +15719,9 @@ class ChatModal {
 
       if (!response || !response.result || !response.result.success) {
         console.error('message failed to send', response);
-        const str = response.result.reason;
-        const regex = /toll/i;
-  
-        if (str.match(regex)) {
-          await this.reopen();
+        const reason = response?.result?.reason;
+        if (reason && isRecipientTollStateFailure(reason)) {
+          await this.refreshRecipientTollState(currentAddress);
         }
         //let userMessage = 'Message failed to send. Please try again.';
         //const reason = response.result?.reason || '';
@@ -17520,6 +17687,17 @@ class ChatModal {
   }
 
   /**
+   * Resets all scrollable reaction sheet regions to their initial position.
+   * @returns {void}
+   */
+  resetReactionSheetScrollState() {
+    this.reactionSheetTabs.scrollTop = 0;
+    this.reactionSheetTabs.scrollLeft = 0;
+    this.reactionSheetGrid.scrollTop = 0;
+    this.reactionSheetGrid.scrollLeft = 0;
+  }
+
+  /**
    * Begins dragging the reaction sheet downward from its handle.
    * @param {PointerEvent} event
    * @returns {void}
@@ -17527,7 +17705,7 @@ class ChatModal {
   handleReactionSheetDragStart(event) {
     if (!this.reactionSheetOverlay.classList.contains('active')) return;
     if (event.button !== undefined && event.button !== 0) return;
-    if (event.target?.closest?.('.chat-reaction-sheet-close')) return;
+    if (event.target?.closest?.('.chat-reaction-sheet-close, .chat-reaction-sheet-reset')) return;
 
     event.stopPropagation();
     this.reactionSheetDragStartY = event.clientY;
@@ -17576,12 +17754,11 @@ class ChatModal {
     assert(messageEl, 'Reaction sheet target message is required');
     this.resetReactionSheetDragState();
     this.reactionSheetTargetMessage = messageEl;
-    const currentReaction = this.getCurrentUserReactionForMessage(messageEl);
-    const categoryKey = this.getReactionSheetCategoryKeyForEmoji(currentReaction) || CHAT_REACTION_SHEET_DEFAULT_CATEGORY;
-    this.setReactionSheetCategory(categoryKey);
+    this.setReactionSheetCategory(CHAT_REACTION_SHEET_DEFAULT_CATEGORY);
     this.reactionSheetOverlay.classList.add('active');
     this.reactionSheetOverlay.setAttribute('aria-hidden', 'false');
     requestAnimationFrame(() => {
+      this.resetReactionSheetScrollState();
       requestAnimationFrame(() => this.updateReactionSheetViewport());
     });
   }
@@ -17885,7 +18062,7 @@ class ChatModal {
    */
   canDeleteMessageForAll(messageEl, messageRecord = null) {
     const isMine = !!messageEl?.classList?.contains('sent');
-    if (!isMine || myData.contacts[this.address]?.tollRequiredToSend != 0) {
+    if (!isMine || !this.canSendWithZeroToll()) {
       return false;
     }
 
@@ -18658,6 +18835,25 @@ class ChatModal {
   }
 
   /**
+   * Returns whether the active chat can send actions with no payable toll.
+   * @returns {boolean}
+   */
+  canSendWithZeroToll() {
+    const contact = myData.contacts[this.address];
+
+    switch (contact.tollRequiredToSend) {
+      case 0:
+        return true;
+      case 1:
+        return getEffectiveTollLibWei(this.toll) === 0n;
+      case 2:
+        return false;
+      default:
+        assert(false, `Unknown tollRequiredToSend: ${contact.tollRequiredToSend}`);
+    }
+  }
+
+  /**
    * Resolves a quick reaction picker press into a target txid and a minimal send flow.
    * @param {HTMLElement} reactionButton
    * @param {HTMLElement | null} messageEl
@@ -18694,7 +18890,7 @@ class ChatModal {
       showToast('You are blocked by this user', 0, 'error');
       return;
     }
-    if (required !== undefined && required !== 0) {
+    if (!this.canSendWithZeroToll()) {
       const username = contact.username || `${this.address.slice(0, 8)}...${this.address.slice(-6)}`;
       showToast(
         `You can only send reactions to people who have added you as a connection. Ask ${username} to add you as a connection`,
@@ -18722,6 +18918,7 @@ class ChatModal {
     }
 
     closeUi();
+    this.recordRecentReactionEmoji(selectedReaction);
     await this.sendReactionMessage({
       reactId: txid,
       reactMessage: selectedReaction,
@@ -18751,14 +18948,20 @@ class ChatModal {
       return false;
     }
 
-    if (contact.tollRequiredToSend == 2) {
+    if (!this.canSendWithZeroToll()) {
+      if (contact.tollRequiredToSend !== 2) {
+        console.warn('Reaction send skipped because recipient requires a nonzero toll');
+        return false;
+      }
       console.warn('Reaction send skipped because sender is blocked by recipient');
       return false;
     }
 
-    const tollInLib = contact.tollRequiredToSend == 0 ? 0n : getEffectiveTollLibWei(this.toll);
+    const tollInLib = 0n;
     const sufficientBalance = await validateBalance(tollInLib);
     if (!sufficientBalance) {
+      const feeInLIB = big2str(getTransactionFeeWei(), 18).slice(0, -16);
+      showToast(`Insufficient balance for fee of ${feeInLIB} LIB. Go to the wallet to add more LIB.`, 0, 'error');
       console.warn('Reaction send skipped due to insufficient balance', reaction);
       return false;
     }
@@ -18882,8 +19085,17 @@ class ChatModal {
       if (!outcome.hasPending) {
         cleanupResolvedReactionChain(currentAddress, outcome.targetTxid);
       }
+      const reason = response?.result?.reason || '';
       if (outcome.didChange) {
-        showToast('Reaction failed to send and was reverted', 0, 'error');
+        const precrackReason = getRecipientTollPrecrackFailureReason(reason, contact);
+        if (precrackReason) {
+          showToast(precrackReason, 0, 'error');
+        } else {
+          showToast('Reaction failed to send and was reverted', 0, 'error');
+        }
+      }
+      if (reason && isRecipientTollStateFailure(reason)) {
+        await this.refreshRecipientTollState(currentAddress);
       }
       saveState();
       return false;
@@ -19486,7 +19698,7 @@ class ChatModal {
   /**
    * updateTollRequired queries contact object and updates the tollRequiredByMe and tollRequiredByOther fields
    * @param {string} address - the address of the contact
-   * @returns {void}
+   * @returns {Promise<void>}
    */
   async updateTollRequired(address) {
     const myAddr = longAddress(myAccount.keys.address);
@@ -19539,7 +19751,7 @@ class ChatModal {
    * Invoked when opening chatModal. In the background, it will query the contact's toll field from the network.
    * If the queried toll value is different from the toll field in localStorage, it will update the toll field in localStorage and update the UI element that displays the toll field value.
    * @param {string} address - the address of the contact
-   * @returns {void}
+   * @returns {Promise<void>}
    */
   async updateTollValue(address) {
     // query the contact's toll field from the network
@@ -19563,6 +19775,32 @@ class ChatModal {
     } else {
       return;
     }
+  }
+
+  /**
+   * Refreshes the toll state for the given address
+   * @param {string} address - The address of the contact to refresh the toll state for
+   * @returns {Promise<void>}
+   */
+  async refreshRecipientTollState(address) {
+    assert(address, 'Recipient address is required to refresh toll state');
+    const contact = myData.contacts[address];
+    assert(contact, `Contact is required to refresh toll state: ${address}`);
+
+    await this.updateTollValue(address);
+    await this.updateTollRequired(address);
+
+    if (!this.isActive() || this.address !== address) {
+      saveState();
+      return;
+    }
+
+    this.blockedByRecipient = Number(contact.tollRequiredToSend) === 2;
+    this.updateTollAmountUI(address);
+    this.addAttachmentButton.disabled = this.isEncrypting || this.isEditingMessage() || this.blockedByRecipient;
+    this.voiceRecordButton.disabled = this.blockedByRecipient || !isOnline;
+
+    saveState();
   }
 
   /**
@@ -19599,10 +19837,9 @@ class ChatModal {
     try {
       // Synchronous eligibility based on cached value fetched on ChatModal open
       const contact = myData.contacts[this.address] || {};
-      const required = contact.tollRequiredToSend;
-      if (required !== 0) {
+      if (!this.canSendWithZeroToll()) {
         const username = contact.username || `${this.address.slice(0, 8)}...${this.address.slice(-6)}`;
-        if (required === 2) {
+        if (contact.tollRequiredToSend === 2) {
           showToast('You are blocked by this user', 0, 'error');
         } else {
           showToast(
@@ -19965,8 +20202,8 @@ class ChatModal {
         console.error('voice message failed to send', response);
 
         const reason = response?.result?.reason || '';
-        if (/toll/i.test(reason)) {
-          await this.reopen();
+        if (reason && isRecipientTollStateFailure(reason)) {
+          await this.refreshRecipientTollState(this.address);
         }
 
         newMessage.status = 'failed';
@@ -25467,7 +25704,7 @@ class SendAssetConfirmModal {
           // Update local balance after successful transaction
           fromAddress.balance -= amount;
           walletData.balance = walletData.assets.reduce((total, asset) =>
-              total + asset.addresses.reduce((sum, addr) => sum + bigxnum2num(addr.balance, asset.price), 0), 0);
+              total + asset.addresses.reduce((sum, addr) => sum + (bigxnum2num(addr.balance, getAssetUsdPrice(asset)) || 0), 0), 0);
           // Update wallet view and close modal
           updateWalletView();
   */
@@ -26810,6 +27047,8 @@ class LockModal {
     this.oldPasswordInput.value = '';
     this.newPasswordInput.value = '';
     this.confirmNewPasswordInput.value = '';
+    this.passwordWarning.textContent = '';
+    this.passwordWarning.style.display = 'none';
   }
 }
 const lockModal = new LockModal();
@@ -29638,7 +29877,7 @@ async function downloadAndDecryptAvatar(url, key) {
 }
 
 function getStabilityFactor() {
-  return parseFloat(parameters.current.stabilityFactorStr);
+  return parseFloat(parameters?.current?.stabilityFactorStr);
 }
 
 function getNetworkMinTollLibWei() {
