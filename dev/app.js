@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'f'
+const version = 'g'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -27780,13 +27780,16 @@ class ReactNativeApp {
 
     try {
       const rect = input.getBoundingClientRect();
-      const viewportBottom = window.visualViewport
-        ? window.visualViewport.offsetTop + window.visualViewport.height
-        : window.innerHeight;
-
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const keyboardHeightPx = Number(keyboardHeight) || 0;
+      const viewportResizePx = Math.max(0, initialViewportHeight - viewportHeight);
+      const viewportAlreadyResized = keyboardHeightPx > 0 && viewportResizePx > keyboardHeightPx * 0.5;
+      const keyboardTop = viewportHeight - keyboardHeightPx;
       const inputBottom = rect.bottom;
-      const manualBottomInset = Math.max(0, Math.ceil(inputBottom - viewportBottom));
-      const needsManualHandling = manualBottomInset > 0;
+      const manualBottomInset = viewportAlreadyResized
+        ? 0
+        : Math.max(0, Math.ceil(inputBottom - keyboardTop));
+      const needsManualHandling = manualBottomInset > 24;
 
       this.postMessage({
         type: 'KEYBOARD_DETECTION',
