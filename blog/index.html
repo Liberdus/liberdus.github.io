@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Liberdus Blog</title>
+<meta name="description" content="Essays, dispatches, and announcements from the Liberdus team.">
+<link rel="stylesheet" href="styles.css">
+<!-- marked.js for markdown rendering, js-yaml for parsing meta.yaml -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+</head>
+<body>
+
+<!-- ===== Masthead ===== -->
+<header class="masthead">
+  <div class="masthead-inner">
+    <a href="/" class="masthead-brand" aria-label="Liberdus home">
+      <img src="https://liberdus.com/site/img/logo.png" alt="Liberdus" class="masthead-brand-img"
+           onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'masthead-brand-fallback',textContent:'Liberdus'}))">
+    </a>
+    <a href="./" class="masthead-logo">Liberdus Blog</a>
+    <nav class="masthead-nav">
+      <a href="/">Home</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ===== Hero ===== -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-eyebrow rise rise-1">The Liberdus Blog</div>
+<!--
+    <h3 class="hero-title rise rise-2">
+      Notes from the <em>protocol</em>.
+    </h3>
+-->
+    <p class="hero-sub rise rise-3">
+      Announcements, news and writings from the Liberdus team and community — published when there is something worth saying.
+    </p>
+  </div>
+</section>
+
+<!-- ===== Articles List ===== -->
+<section class="posts">
+  <div class="posts-inner">
+    <div class="posts-list" id="postsList">
+      <!-- Populated from meta.yaml -->
+      <div class="loading">Loading entries…</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Footer ===== -->
+<footer class="site-footer">
+  <div class="footer-inner">
+
+    <div class="footer-cta">
+      <span class="footer-eyebrow">Community</span>
+      <h3 class="footer-headline">Join our <em>journey</em>.</h3>
+      <p class="footer-lede">Be part of building the future of decentralized communication.</p>
+    </div>
+
+    <div class="footer-socials">
+      <a href="https://discord.gg/2cpJzFnwCR" class="footer-social" target="_blank" rel="noopener" aria-label="Discord">
+        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/discord.svg" alt="" aria-hidden="true">
+        <span>Discord</span>
+      </a>
+      <a href="https://x.com/liberdus" class="footer-social" target="_blank" rel="noopener" aria-label="X (Twitter)">
+        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/x.svg" alt="" aria-hidden="true">
+        <span>X</span>
+      </a>
+      <a href="https://liberdus.substack.com" class="footer-social" target="_blank" rel="noopener" aria-label="Substack">
+        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/substack.svg" alt="" aria-hidden="true">
+        <span>Substack</span>
+      </a>
+      <a href="https://www.youtube.com/@Liberdus" class="footer-social" target="_blank" rel="noopener" aria-label="YouTube">
+        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/youtube.svg" alt="" aria-hidden="true">
+        <span>YouTube</span>
+      </a>
+      <a href="https://t.me/LiberdusOfficial" class="footer-social" target="_blank" rel="noopener" aria-label="Telegram">
+        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/telegram.svg" alt="" aria-hidden="true">
+        <span>Telegram</span>
+      </a>
+      <a href="https://linkedin.com/company/Liberdus" class="footer-social" target="_blank" rel="noopener" aria-label="LinkedIn">
+        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/linkedin.svg" alt="" aria-hidden="true">
+        <span>LinkedIn</span>
+      </a>
+      <a href="https://github.com/Liberdus" class="footer-social" target="_blank" rel="noopener" aria-label="GitHub">
+        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/github.svg" alt="" aria-hidden="true">
+        <span>GitHub</span>
+      </a>
+    </div>
+
+    <div class="footer-pillars">
+      <div><span class="pillar-num">100%</span><span class="pillar-label">E2E Encrypted</span></div>
+      <div><span class="pillar-num">100%</span><span class="pillar-label">Decentralized</span></div>
+      <div><span class="pillar-num">100%</span><span class="pillar-label">Open Source</span></div>
+    </div>
+
+    <div class="footer-bottom">
+      <span>© 2026 Liberdus. All rights reserved.</span>
+      <span class="footer-bottom-links">
+        <a href="/">Home</a>
+        <a href="/tokenomics/">Tokenomics</a>
+        <a href="https://liberdus.com/Liberdus-Litepaper.pdf" target="_blank" rel="noopener">Litepaper</a>
+      </span>
+    </div>
+
+  </div>
+</footer>
+
+<!-- ===== Modal (Article Reader) ===== -->
+<div class="modal" id="articleModal" aria-hidden="true" role="dialog" aria-labelledby="modalTitle">
+  <div class="modal-backdrop" data-close></div>
+
+  <div class="modal-shell" role="document">
+    <button class="modal-close" id="modalClose" aria-label="Close article">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <line x1="5" y1="5" x2="19" y2="19"/>
+        <line x1="19" y1="5" x2="5" y2="19"/>
+      </svg>
+    </button>
+
+    <div class="modal-progress"><div class="modal-progress-bar" id="modalProgress"></div></div>
+
+    <div class="modal-scroll" id="modalScroll">
+      <article class="article" id="modalArticle">
+        <!-- Populated dynamically -->
+      </article>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
