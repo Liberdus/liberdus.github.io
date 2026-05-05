@@ -1,0 +1,36 @@
+# Liberdus Blog — Article Metadata
+# ----------------------------------
+# Each entry corresponds to a numbered folder (/blog/1, /blog/2, ...).
+# Add new articles by appending an entry and creating the matching folder
+# with article.md and thumb.png inside.
+
+articles:
+  - id: 3
+    title: "Liberdus Expands to BNB Chain: Improving Access, Liquidity and User Experience"
+    intro: "Liberdus has expanded from Polygon to BNB Chain, marking an important step in improving accessibility, user experience, and liquidity for the Liberdus ecosystem."
+    date: "2026-04-14"
+    author: "Liberdus Staff"
+    tags:
+      - announcement
+      - bnb-chain
+      - ecosystem
+
+  - id: 2
+    title: "A Quiet Year of Building: What's Next for the Liberdus Protocol"
+    intro: "Twelve months of careful, deliberate work — and a roadmap for the year ahead. Here's where we've been, and where the protocol is heading."
+    date: "2026-03-02"
+    author: "Margot Reyes"
+    tags:
+      - roadmap
+      - protocol
+      - retrospective
+
+  - id: 1
+    title: "Why We Chose the Slow Path"
+    intro: "On building infrastructure that lasts — and the unfashionable virtues of patience, restraint, and shipping fewer things better."
+    date: "2026-01-18"
+    author: "Henrik Sallé"
+    tags:
+      - philosophy
+      - craft
+      - founders-note
