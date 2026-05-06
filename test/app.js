@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'
+const version = 'r'
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -38,6 +38,7 @@ async function checkVersion() {
       'app.js',
       'dao.repo.js',
       'dao.mock-data.js',
+      'data/emoji-picker-data.js',
       'lib.js',
       'network.js',
       'crypto.js',
@@ -127,16 +128,26 @@ import {
   linkifyUrls,
   escapeHtml,
   debounce,
+  withButtonCooldown,
+  BUTTON_COOLDOWN_MS,
+  FAUCET_COOLDOWN_MS,
   truncateMessage,
   normalizeUnsignedFloat,
   EthNum,
 } from './lib.js';
+
+import {
+  CHAT_REACTION_SHEET_CATEGORIES,
+  CHAT_REACTION_SHEET_DEFAULT_COMMON_EMOJIS,
+  CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY,
+} from './data/emoji-picker-data.js';
 
 const weiDigits = 18;
 const wei = 10n ** BigInt(weiDigits);
 //network.monitor.url = "http://test.liberdus.com:3000"    // URL of the monitor server
 //network.explorer.url = "http://test.liberdus.com:6001"   // URL of the chain explorer
 const MAX_MEMO_BYTES = 1000; // 1000 bytes for memos
+const MENU_NAVIGATION_LOCK_MS = 400;
 const MAX_CHAT_MESSAGE_BYTES = 1000; // 1000 bytes for chat messages
 const BRIDGE_USERNAME = 'liberdusbridge';
 const TRANSACTION_TIMESTAMP_OFFSET_MS = 500; // Transaction offset to allow for slow connections
@@ -164,6 +175,11 @@ const NETWORK_ACCOUNT_ID = '0'.repeat(64);
 const MAX_TOLL = 1_000_000; // 1M limit
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000; // 15 minute limit for editing messages
+const MESSAGE_DELETED_STATE_LOCAL = 1;
+const MESSAGE_DELETED_STATE_ALL = 2;
+const DELETED_MESSAGE_LOCAL_TEXT = 'Deleted on this device';
+const DELETED_MESSAGE_FOR_ALL_TEXT = 'Deleted for all';
+const DELETED_MESSAGE_BY_SENDER_TEXT = 'Deleted by sender';
 
 // Migration for attachment encryption keys.
 // Set this numeric timestamp (YYYYMMDDHHMM) to force re-running the
@@ -171,10 +187,109 @@ const EDIT_WINDOW_MS = 15 * 60 * 1000; // 15 minute limit for editing messages
 // Use YYYYMMDDHHMM (year, month, day, hour, minute) so migrations
 // can be re-run multiple times per day by bumping this value.
 const MIGRATION_ATTACHMENT_KEYS_TO_ENC_KEY_TS = 202602010000;
+const MIGRATION_DELETE_STATES_TS = 202603160000;
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+function getDeletedState(recordOrValue) {
+  const rawDeleted =
+    recordOrValue && typeof recordOrValue === 'object' && !Array.isArray(recordOrValue)
+      ? recordOrValue.deleted
+      : recordOrValue;
+  const deletedNum = Number(rawDeleted);
+  return Number.isFinite(deletedNum) && deletedNum > 0 ? deletedNum : 0;
+}
+
+function isDeleted(recordOrValue) {
+  return getDeletedState(recordOrValue) > 0;
+}
+
+function isDeletedForMeOnly(recordOrValue) {
+  return getDeletedState(recordOrValue) === MESSAGE_DELETED_STATE_LOCAL;
+}
+
+function isDeletedForAll(recordOrValue) {
+  return getDeletedState(recordOrValue) === MESSAGE_DELETED_STATE_ALL;
+}
+
+function getDeletedRecordIsMine(record) {
+  if (typeof record?.my === 'boolean') {
+    return record.my;
+  }
+  if (typeof record?.sign === 'number') {
+    return record.sign < 0;
+  }
+  return undefined;
+}
+
+function inferDeletedStateFromLegacyText(text) {
+  const normalized = typeof text === 'string' ? text.trim().toLowerCase() : '';
+  if (normalized === DELETED_MESSAGE_FOR_ALL_TEXT.toLowerCase()) {
+    return MESSAGE_DELETED_STATE_ALL;
+  }
+  if (normalized === DELETED_MESSAGE_BY_SENDER_TEXT.toLowerCase()) {
+    return MESSAGE_DELETED_STATE_ALL;
+  }
+  if (normalized === DELETED_MESSAGE_LOCAL_TEXT.toLowerCase()) {
+    return MESSAGE_DELETED_STATE_LOCAL;
+  }
+  return MESSAGE_DELETED_STATE_LOCAL;
+}
+
+function getDeletedTextForState(deletedState, isMine, preferredText) {
+  const normalized = typeof preferredText === 'string' ? preferredText.trim().toLowerCase() : '';
+
+  if (deletedState === MESSAGE_DELETED_STATE_ALL) {
+    if (normalized === DELETED_MESSAGE_BY_SENDER_TEXT.toLowerCase()) {
+      return DELETED_MESSAGE_BY_SENDER_TEXT;
+    }
+    if (normalized === DELETED_MESSAGE_FOR_ALL_TEXT.toLowerCase()) {
+      return DELETED_MESSAGE_FOR_ALL_TEXT;
+    }
+    if (isMine === false) {
+      return DELETED_MESSAGE_BY_SENDER_TEXT;
+    }
+    return DELETED_MESSAGE_FOR_ALL_TEXT;
+  }
+
+  return DELETED_MESSAGE_LOCAL_TEXT;
+}
+
+function getDeletedPlaceholderText(record) {
+  const preferredText =
+    (typeof record?.message === 'string' && record.message.trim())
+      ? record.message
+      : record?.memo;
+  return getDeletedTextForState(getDeletedState(record), getDeletedRecordIsMine(record), preferredText);
+}
+
+function updateDeletedWalletHistoryEntry(txid, deletedState, memoText) {
+  if (!txid || !Array.isArray(myData?.wallet?.history)) return false;
+
+  const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === txid);
+  if (txIndex === -1) return false;
+
+  const historyEntry = myData.wallet.history[txIndex];
+  Object.assign(historyEntry, {
+    deleted: deletedState,
+    memo: memoText
+  });
+  delete historyEntry.amount;
+  delete historyEntry.symbol;
+  delete historyEntry.payment;
+  delete historyEntry.sign;
+  delete historyEntry.address;
+  return true;
+}
 
 let parameters = {
   current: {
     transactionFee: 1n * wei,
+    transactionFeeUsdStr: '',
+    stabilityFactorStr: '',
   },
 };
 
@@ -276,7 +391,7 @@ function newDataRecord(myAccount) {
           img: 'images/lib.png',
           chainid: 2220,
           contract: '041e48a5b11c29fdbd92498eb05573c52728398c',
-          price: 1.0,
+          price: null,
           balance: 0n,
           networth: 0.0,
           addresses: [
@@ -449,11 +564,120 @@ async function migrateAttachmentKeysToEncKey(data) {
 }
 
 /**
+ * One-time migration: split legacy deleted state into local-only (1) and for-all (2)
+ * @param {Object} data
+ * @returns {boolean} True if migration flag was applied
+ */
+function migrateDeletedMessageStates(data) {
+  if (!data?.account) return false;
+
+  const migrations =
+    data.account.migrations && typeof data.account.migrations === 'object'
+      ? data.account.migrations
+      : null;
+
+  const appliedTsRaw = migrations?.deleteStates;
+  let appliedTs = 0;
+  if (typeof appliedTsRaw === 'number') {
+    appliedTs = appliedTsRaw;
+  } else if (appliedTsRaw === true) {
+    appliedTs = 0;
+  }
+
+  if (appliedTs >= MIGRATION_DELETE_STATES_TS) {
+    return false;
+  }
+
+  const deletedMessagesByTxid = new Map();
+
+  if (data.contacts && typeof data.contacts === 'object') {
+    for (const contact of Object.values(data.contacts)) {
+      if (!contact || typeof contact !== 'object' || !Array.isArray(contact.messages)) continue;
+
+      for (const message of contact.messages) {
+        if (!message || typeof message !== 'object') continue;
+        const deletedState = getDeletedState(message);
+        if (deletedState <= 0) continue;
+        if (deletedState === MESSAGE_DELETED_STATE_ALL) continue;
+
+        const legacyText =
+          (typeof message.message === 'string' && message.message.trim())
+            ? message.message
+            : message.memo;
+        message.deleted = inferDeletedStateFromLegacyText(legacyText);
+
+        const canonicalDeleteText = getDeletedTextForState(
+          message.deleted,
+          getDeletedRecordIsMine(message),
+          legacyText
+        );
+        message.message = canonicalDeleteText;
+        if (typeof message.memo === 'string') {
+          message.memo = canonicalDeleteText;
+        }
+        if (message.txid) {
+          deletedMessagesByTxid.set(message.txid, {
+            deleted: message.deleted,
+            text: canonicalDeleteText
+          });
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(data.wallet?.history)) {
+    for (const tx of data.wallet.history) {
+      if (!tx || typeof tx !== 'object') continue;
+      const deletedState = getDeletedState(tx);
+      if (deletedState <= 0) continue;
+      if (deletedState === MESSAGE_DELETED_STATE_ALL) continue;
+
+      const linkedMessage = tx.txid ? deletedMessagesByTxid.get(tx.txid) : null;
+      if (linkedMessage) {
+        tx.deleted = linkedMessage.deleted;
+        tx.memo = linkedMessage.text;
+        continue;
+      }
+
+      const legacyText =
+        (typeof tx.memo === 'string' && tx.memo.trim())
+          ? tx.memo
+          : tx.message;
+      tx.deleted = inferDeletedStateFromLegacyText(legacyText);
+      tx.memo = getDeletedTextForState(tx.deleted, getDeletedRecordIsMine(tx), legacyText);
+    }
+  }
+
+  data.account.migrations = migrations && typeof migrations === 'object' ? migrations : {};
+  data.account.migrations.deleteStates = MIGRATION_DELETE_STATES_TS;
+  return true;
+}
+
+/**
  * Checks if the current account is private
  * @returns {boolean} True if the account is private, false otherwise
  */
 function isPrivateAccount() {
   return myAccount?.private === true || myData?.account?.private === true;
+}
+
+/**
+ * Lock rapid menu clicks to prevent multiple clicks from triggering multiple actions
+ * @param {Element} menuList - The menu list element
+ */
+function lockRapidMenuClicks(menuList) {
+  let locked = false;
+  menuList.addEventListener('click', (event) => {
+    if (!event.target.closest('.menu-item')) return;
+    if (locked) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+
+    locked = true;
+    setTimeout(() => { locked = false; }, MENU_NAVIGATION_LOCK_MS);
+  }, true);
 }
 
 // Load saved account data and update chat list on page load
@@ -666,6 +890,12 @@ function handleBeforeUnload(e) {
   reactNativeApp.handleNativeAppSubscribe();
   if (menuModal.isSignoutExit){
     return;
+  }
+  // Check if backup is in progress
+  if (backupAccountModal.isUploading) {
+    e.preventDefault();
+    e.returnValue = 'A backup is currently being uploaded to Google Drive. Leaving the page will interrupt the backup. Are you sure you want to leave?';
+    return e.returnValue;
   }
   if (myData){
     e.preventDefault();
@@ -961,6 +1191,7 @@ class WelcomeMenuModal {
 
   load() {
     this.modal = document.getElementById('welcomeMenuModal');
+    lockRapidMenuClicks(this.modal.querySelector('.menu-list'));
     this.closeButton = document.getElementById('closeWelcomeMenu');
     this.closeButton.addEventListener('click', () => this.close());
 
@@ -1348,8 +1579,8 @@ class ChatsScreen {
       // In chat list don't show people that are blocked
       if (Number(contact?.friend) === 0) continue;
 
-      const latestActivity = contact.messages && contact.messages.length > 0 ? contact.messages[0] : null;
-      // If there's no latest activity (no messages), skip this chat item
+      const latestActivity = getLatestChatMessageActivity(contact) || contact.messages[0];
+      // If there's no latest activity (no messages at all), skip this chat item
       if (!latestActivity) continue;
 
       chatItems.push({ chat, contact, latestActivity });
@@ -1367,13 +1598,20 @@ class ChatsScreen {
 
     chatItems.forEach(({ chat, contact, latestActivity }, index) => {
       const avatarHtml = avatarHtmlList[index];
-      const latestItemTimestamp = latestActivity.timestamp;
       const contactName = getContactDisplayName(contact);
+      const reactionPreview = getLatestChatReactionActivity(contact);
+      const isShowingReactionPreview = !!reactionPreview && reactionPreview.timestamp > latestActivity.timestamp;
+      const latestItemTimestamp = isShowingReactionPreview ? reactionPreview.timestamp : latestActivity.timestamp;
+      const unreadCount = contact.unread;
 
       let previewHTML = '';
-      // Check if the latest activity is a payment/transfer message
-      if (latestActivity.deleted === 1) {
-        previewHTML = `<span><i>${latestActivity.message}</i></span>`;
+      if (isShowingReactionPreview) {
+        const reactionTarget = reactionPreview.target;
+        const reactionActor = reactionPreview.my ? 'You ' : '';
+        const reactionText = reactionPreview.emoji
+          ? `${reactionActor}reacted ${reactionPreview.emoji} to "${reactionTarget}"`
+          : `${reactionActor}removed a reaction from "${reactionTarget}"`;
+        previewHTML = truncateMessage(escapeHtml(reactionText), 50);
       } else if (typeof latestActivity.amount === 'bigint') {
         // Latest item is a payment/transfer
         const amountStr = parseFloat(big2str(latestActivity.amount, 18)).toFixed(6);
@@ -1417,7 +1655,8 @@ class ChatsScreen {
       // Determine what to show in the preview
 
       let displayPreview = previewHTML;
-      let displayPrefix = latestActivity.my ? '< ' : '> ';
+      const isOutgoingPreview = isShowingReactionPreview ? reactionPreview.my : latestActivity.my;
+      let displayPrefix = isOutgoingPreview ? '< ' : '> ';
       let hasDraftAttachment = false;
 
       // Check for draft attachments
@@ -1460,7 +1699,7 @@ class ChatsScreen {
                   <div class="chat-time">${timeDisplay}</div>
               </div>
               <div class="chat-message">
-                ${contact.unread ? `<span class="chat-unread">${contact.unread}</span>` : ((contact.draft || contact.draftReplyTxid || hasDraftAttachment) ? `<span class="chat-draft" title="Draft"></span>` : '')}
+                ${unreadCount ? `<span class="chat-unread">${unreadCount}</span>` : ((contact.draft || contact.draftReplyTxid || hasDraftAttachment) ? `<span class="chat-draft" title="Draft"></span>` : '')}
                 ${displayPrefix}${displayPreview}
               </div>
           </div>
@@ -1667,7 +1906,7 @@ class WalletScreen {
     });
 
     // Faucet/Bridge button handler
-    this.openFaucetBridgeButton.addEventListener('click', async () => {
+    const handleOpenFaucetBridge = async () => {
       if (this.isMainnet()) {
         // Mainnet: open bridge modal
         bridgeModal.open();
@@ -1675,14 +1914,19 @@ class WalletScreen {
         // Not mainnet: request from faucet API
         await this.requestFromFaucet();
       }
-    });
+    };
+    this.openFaucetBridgeButton.addEventListener('click', withButtonCooldown(
+      this.openFaucetBridgeButton,
+      FAUCET_COOLDOWN_MS,
+      null,
+      handleOpenFaucetBridge
+    ));
 
     // Add refresh balance button handler
-    this.refreshBalanceButton.addEventListener('click', async () => {
-      
+    const handleRefreshBalance = async () => {
       // Add active class for animation
       this.refreshBalanceButton.classList.add('active');
-      
+
       // Remove active class after animation completes
       setTimeout(() => {
         this.refreshBalanceButton.classList.remove('active');
@@ -1691,7 +1935,13 @@ class WalletScreen {
       }, 300);
 
       this.updateWalletView();
-    });
+    };
+    this.refreshBalanceButton.addEventListener('click', withButtonCooldown(
+      this.refreshBalanceButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      handleRefreshBalance
+    ));
   }
 
   open() {
@@ -1740,7 +1990,9 @@ class WalletScreen {
     }
 
     // Update total networth
-    this.totalBalance.textContent = (walletData.networth || 0).toFixed(2);
+    const walletUsdValue = calculateWalletUsdValue(walletData.assets);
+    walletData.networth = walletUsdValue ?? 0.0;
+    this.totalBalance.textContent = walletUsdValue === null ? 'N/A' : walletUsdValue.toFixed(2);
 
     if (!Array.isArray(walletData.assets) || walletData.assets.length === 0) {
       this.assetsList.querySelector('.empty-state').style.display = 'block';
@@ -1749,14 +2001,18 @@ class WalletScreen {
 
     this.assetsList.innerHTML = walletData.assets
       .map((asset) => {
+        const assetUsdPrice = getAssetUsdPrice(asset);
+        const assetNetworth = calculateAssetUsdValue(asset);
+        const assetPriceText = assetUsdPrice === null ? 'N/A' : `$${assetUsdPrice.toFixed(6)} / ${asset.symbol}`;
+        const assetNetworthText = assetNetworth === null ? 'N/A' : `$${assetNetworth.toFixed(6)}`;
         return `
               <div class="asset-item">
                   <div class="asset-logo"><img src="./media/liberdus_logo_50.png" class="asset-logo"></div>
                   <div class="asset-info">
                       <div class="asset-name">${asset.name}</div>
-                      <div class="asset-symbol">$${asset.price} / ${asset.symbol}</div>
+                      <div class="asset-symbol">${assetPriceText}</div>
                   </div>
-                  <div class="asset-balance">${(Number(asset.balance) / Number(wei)).toFixed(6)}<br><span class="asset-symbol">$${asset.networth.toFixed(6)}</span></div>
+                  <div class="asset-balance">${(Number(asset.balance) / Number(wei)).toFixed(6)}<br><span class="asset-symbol">${assetNetworthText}</span></div>
               </div>
           `;
       })
@@ -1768,11 +2024,14 @@ class WalletScreen {
     if (!myAccount || !myData || !myData.wallet || !myData.wallet.assets) {
       console.error('No wallet data available');
       return;
-    } else if (!isOnline) {
+    }
+
+    await updateAssetPricesIfNeeded();
+    if (!isOnline) {
       console.warn('Not online. Not updating wallet balances');
       return;
     }
-    await updateAssetPricesIfNeeded();
+
     const now = getCorrectedTimestamp();
     if (!myData.wallet.timestamp) {
       myData.wallet.timestamp = 0;
@@ -1801,14 +2060,13 @@ class WalletScreen {
             // Update address balance
             addr.balance = data.balance;
           }
-          // Add to asset total (convert to USD using asset price)
           assetTotalBalance += addr.balance;
         } catch (error) {
           console.error(`Error fetching balance for address ${addr.address}:`, error);
         }
       }
       asset.balance = assetTotalBalance;
-      asset.networth = (asset.price * Number(assetTotalBalance)) / Number(wei);
+      asset.networth = calculateAssetUsdValue(asset) ?? 0.0;
 
       // Add this asset's total to wallet total
       totalWalletNetworth += asset.networth;
@@ -1829,16 +2087,6 @@ class WalletScreen {
    * @returns {Promise<void>}
    */
   async requestFromFaucet() {
-    // Disable button immediately to prevent spam clicking
-    if (this.openFaucetBridgeButton.disabled) {
-      return;
-    }
-    this.openFaucetBridgeButton.disabled = true;
-    // Re-enable button after 5 seconds
-    setTimeout(() => {
-      this.openFaucetBridgeButton.disabled = false;
-    }, 5000);
-
     if (this.isFaucetRequestInProgress) {
       return;
     }
@@ -1914,6 +2162,7 @@ class MenuModal {
 
   load() {
     this.modal = document.getElementById('menuModal');
+    lockRapidMenuClicks(this.modal.querySelector('.menu-list'));
     this.closeButton = document.getElementById('closeMenu');
     this.closeButton.addEventListener('click', () => this.close());
     this.validatorButton = document.getElementById('openValidator');
@@ -1934,17 +2183,16 @@ class MenuModal {
     this.aboutButton = document.getElementById('openAbout');
     this.aboutButton.addEventListener('click', () => aboutModal.open());
     this.signOutButton = document.getElementById('handleSignOut');
-    this.signOutButton.addEventListener('click', async () => await this.handleSignOut());
+    this.signOutHeaderButton = document.getElementById('signOutMenuHeader');
+    const menuWrappedSignOut = withButtonCooldown([this.signOutButton, this.signOutHeaderButton], BUTTON_COOLDOWN_MS, null, async () => await this.handleSignOut());
+    this.signOutButton.addEventListener('click', menuWrappedSignOut);
+    this.signOutHeaderButton.addEventListener('click', menuWrappedSignOut);
     this.bridgeButton = document.getElementById('openBridge');
     this.bridgeButton.addEventListener('click', () => bridgeModal.open());
     this.logsButton = document.getElementById('openLogs');
     this.logsButton.addEventListener('click', () => logsModal.open());
     this.farmButton = document.getElementById('openFarm');
     this.farmButton.addEventListener('click', () => farmModal.open());
-    
-    // Header sign out button
-    this.signOutHeaderButton = document.getElementById('signOutMenuHeader');
-    this.signOutHeaderButton.addEventListener('click', async () => await this.handleSignOut());
     
     
     // Show launch button if ReactNativeWebView is available
@@ -1994,6 +2242,12 @@ class MenuModal {
   }
   
   async handleSignOut() {
+    // Check if backup is in progress
+    if (backupAccountModal.isUploading) {
+      showToast('Please wait for the backup to complete before signing out.', 0, 'warning');
+      return;
+    }
+    
     logsModal.log(`Signout ${myAccount.username}`)
     this.isSignoutExit = true;
 
@@ -2360,14 +2614,18 @@ class AddProposalModal {
     this.summaryInput = document.getElementById('addProposalSummary');
     this.typeFieldsContainer = document.getElementById('addProposalTypeFields');
 
+    this.submitButton = this.form?.querySelector('button[type="submit"]');
+
     if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
     if (this.cancelButton) this.cancelButton.addEventListener('click', () => this.close());
 
-    if (this.form) {
-      this.form.addEventListener('submit', (e) => {
-        e.preventDefault();
-        this.handleCreate();
-      });
+    if (this.form && this.submitButton) {
+      this.form.addEventListener('submit', withButtonCooldown(
+        this.submitButton,
+        BUTTON_COOLDOWN_MS,
+        null,
+        () => this.handleCreate()
+      ));
     }
 
     if (this.typeSelect) {
@@ -2677,6 +2935,7 @@ class SettingsModal {
 
   load() {
     this.modal = document.getElementById('settingsModal');
+    lockRapidMenuClicks(this.modal.querySelector('.menu-list'));
     this.closeButton = document.getElementById('closeSettings');
     this.closeButton.addEventListener('click', () => this.close());
     
@@ -2705,11 +2964,10 @@ class SettingsModal {
     this.secretButton.addEventListener('click', () => secretModal.open());
     
     this.signOutButton = document.getElementById('handleSignOutSettings');
-    this.signOutButton.addEventListener('click', async () => await menuModal.handleSignOut());
-    
-    // Header sign out button
     this.signOutHeaderButton = document.getElementById('signOutSettingsHeader');
-    this.signOutHeaderButton.addEventListener('click', async () => await menuModal.handleSignOut());
+    const settingsWrappedSignOut = withButtonCooldown([this.signOutButton, this.signOutHeaderButton], BUTTON_COOLDOWN_MS, null, async () => await menuModal.handleSignOut());
+    this.signOutButton.addEventListener('click', settingsWrappedSignOut);
+    this.signOutHeaderButton.addEventListener('click', settingsWrappedSignOut);
   }
 
   enableSignOutButtonWithDelay() {
@@ -2762,7 +3020,7 @@ class ManageContactsModal {
     this.closeButton.addEventListener('click', () => this.close());
     this.fileInput.addEventListener('change', (e) => this.handleFileSelected(e));
     this.clearFileBtn.addEventListener('click', () => this.clearFile());
-    this.importBtn.addEventListener('click', () => this.handleImport());
+    this.importBtn.addEventListener('click', withButtonCooldown(this.importBtn, BUTTON_COOLDOWN_MS, null, () => this.handleImport()));
   }
 
   /**
@@ -2992,6 +3250,7 @@ function createNewContact(addr, username, friendStatus = 1, tolledDepositToastSh
     c.username = normalizeUsername(username);
   }
   c.messages = [];
+  c.reactions = [];
   c.timestamp = 0;
   c.unread = 0;
   c.hasAvatar = false;
@@ -3181,7 +3440,7 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
   const asset = myData.wallet.assets[assetIndex];
   
   // Check if transaction fee is available from network parameters
-  if (!parameters.current || !parameters.current.transactionFeeUsdStr) {
+  if (!parameters.current || !parameters.current.transactionFeeUsdStr || !parameters.current.stabilityFactorStr) {
     console.error('Transaction fee not available from network parameters');
     if (balanceWarning) {
       balanceWarning.textContent = 'Network error: Cannot determine transaction fee';
@@ -3214,6 +3473,108 @@ async function validateBalance(amount, assetIndex = 0, balanceWarning = null) {
   return !hasInsufficientBalance;
 }
 
+const FEE_FAILURE_REASON_INSUFFICIENT_BALANCE = 'insufficient_balance';
+const FEE_FAILURE_REASON_NETWORK_ERROR = 'network_error';
+const FEE_FAILURE_REASON_WALLET_UNAVAILABLE = 'wallet_unavailable';
+const FEE_FAILURE_REASON_CHECK_FAILED = 'fee_check_failed';
+
+/**
+ * Check whether the wallet can cover a fee-only transaction.
+ * @returns {Promise<{success: boolean, reason: ('insufficient_balance'|'network_error'|'wallet_unavailable'|null)}>}
+ */
+async function getFeeBalanceStatus() {
+  await getNetworkParams();
+
+  if (!parameters.current || !parameters.current.transactionFeeUsdStr || !parameters.current.stabilityFactorStr) {
+    console.error('Transaction fee not available from network parameters');
+    return { success: false, reason: FEE_FAILURE_REASON_NETWORK_ERROR };
+  }
+
+  const asset =
+    (myData?.wallet?.assets || []).find((walletAsset) => walletAsset?.symbol === 'LIB') ||
+    myData?.wallet?.assets?.[0];
+  if (!asset || asset.balance == null) {
+    console.error('Wallet asset unavailable while checking fee balance');
+    return { success: false, reason: FEE_FAILURE_REASON_WALLET_UNAVAILABLE };
+  }
+
+  const feeInWei = getTransactionFeeWei();
+  const hasSufficientBalance = BigInt(asset.balance) >= feeInWei;
+  if (!hasSufficientBalance) {
+    return { success: false, reason: FEE_FAILURE_REASON_INSUFFICIENT_BALANCE };
+  }
+
+  return { success: true, reason: null };
+}
+
+/**
+ * Resolve fee-failure toast content by reason and UI context.
+ * @param {'insufficient_balance'|'network_error'|'wallet_unavailable'|null} reason
+ * @param {'default'|'claim_fee'|'send_read'} context
+ * @returns {{message: string, type: 'error'|'warning'}}
+ */
+function getFeeFailureToastConfig(reason, context = 'default') {
+  const isClaim = context === 'claim_fee';
+  const isSendRead = context === 'send_read';
+
+  if (reason === FEE_FAILURE_REASON_INSUFFICIENT_BALANCE) {
+    if (isClaim) {
+      return { message: 'Cannot claim fee: insufficient LIB balance for network fee.', type: 'warning' };
+    }
+    if (isSendRead) {
+      return { message: 'Cannot send read transaction: insufficient LIB balance for network fee.', type: 'warning' };
+    }
+    return { message: 'Insufficient balance for fee. Go to the wallet to add more LIB.', type: 'error' };
+  }
+
+  if (reason === FEE_FAILURE_REASON_WALLET_UNAVAILABLE) {
+    if (isClaim) {
+      return { message: 'Cannot claim fee because wallet balance data is unavailable.', type: 'warning' };
+    }
+    if (isSendRead) {
+      return { message: 'Cannot send read transaction because wallet balance data is unavailable right now.', type: 'warning' };
+    }
+    return { message: 'Wallet balance is unavailable right now. Please reopen the wallet and try again.', type: 'error' };
+  }
+
+  if (isClaim) {
+    return { message: 'Cannot claim fee due to a network fee lookup error.', type: 'warning' };
+  }
+  if (isSendRead) {
+    return { message: 'Cannot send read transaction right now due to a network fee lookup error.', type: 'warning' };
+  }
+  return { message: 'Network error: cannot determine transaction fee. Please try again.', type: 'error' };
+}
+
+/**
+ * Show a standard fee-balance failure toast.
+ * @param {'insufficient_balance'|'network_error'|'wallet_unavailable'|null} reason
+ * @returns {void}
+ */
+function showFeeBalanceFailureToast(reason) {
+  const { message, type } = getFeeFailureToastConfig(reason, 'default');
+  showToast(message, 0, type);
+}
+
+/**
+ * Show a close-flow fee warning toast once per close action.
+ * @param {'insufficient_balance'|'network_error'|'wallet_unavailable'|null} reason
+ * @param {'claim_fee'|'send_read'} action
+ * @param {boolean} alreadyShown
+ * @returns {boolean}
+ */
+function showCloseFeeFailureWarningOnce(reason, action, alreadyShown = false) {
+  if (alreadyShown) {
+    return true;
+  }
+
+  const context = action === 'claim_fee' ? 'claim_fee' : 'send_read';
+  const { message, type } = getFeeFailureToastConfig(reason, context);
+  showToast(message, 0, type);
+
+  return true;
+}
+
 // Sign In Modal Management
 class SignInModal {
   constructor() {
@@ -3229,14 +3590,28 @@ class SignInModal {
     this.signInModalLastItem = document.getElementById('signInModalLastItem');
     this.backButton = document.getElementById('closeSignInModal');
 
-    // Sign in form submission
-    document.getElementById('signInForm').addEventListener('submit', (event) => this.handleSignIn(event));
-    
+    // Sign in form submission (2s cooldown; both buttons disabled; revalidate restores state)
+    const signInRevalidate = () => {
+      this.removeButton.disabled = false;
+      if (this.isActive()) this.handleUsernameChange();
+    };
+    document.getElementById('signInForm').addEventListener('submit', withButtonCooldown(
+      [this.submitButton, this.removeButton],
+      BUTTON_COOLDOWN_MS,
+      signInRevalidate,
+      (event) => this.handleSignIn(event)
+    ));
+
     // Username selection change
     this.usernameSelect.addEventListener('change', () => this.handleUsernameChange());
-    
-    // Remove account button
-    this.removeButton.addEventListener('click', () => this.handleRemoveAccount());
+
+    // Remove account button (2s cooldown; both buttons disabled)
+    this.removeButton.addEventListener('click', withButtonCooldown(
+      [this.removeButton, this.submitButton],
+      BUTTON_COOLDOWN_MS,
+      signInRevalidate,
+      () => this.handleRemoveAccount()
+    ));
 
     // Back button
     this.backButton.addEventListener('click', () => this.close());
@@ -3533,6 +3908,11 @@ class SignInModal {
       saveState();
     }
 
+    // One-time migration: split deleted state into local-only vs for-all
+    if (migrateDeletedMessageStates(myData)) {
+      saveState();
+    }
+
     // Clear notification address for this account when signing in
     // Notification storage is only for accounts the user is NOT signed in to
     if (reactNativeApp.isReactNativeWebView && myAccount?.keys?.address) {
@@ -3558,6 +3938,14 @@ class SignInModal {
 
     reactNativeApp.handleNativeAppUnsubscribe();
     reactNativeApp.sendNavigationBarVisibility(false);
+
+    // Refresh wallet balance on sign-in so fee-dependent flows (e.g. Toll modal) have fresh data.
+    try {
+      myData.wallet.timestamp = 0;
+      await walletScreen.updateWalletBalances();
+    } catch (error) {
+      console.error('Failed to refresh wallet balances after sign-in:', error);
+    }
 
     // Close modal and proceed to app
     this.close();
@@ -4129,7 +4517,12 @@ class FriendModal {
     this.submitButton = document.getElementById('friendSubmitButton');
 
     // Friend modal form submission
-    this.friendForm.addEventListener('submit', (event) => this.handleFriendSubmit(event));
+    this.friendForm.addEventListener('submit', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      () => this.updateSubmitButtonState(),
+      (event) => this.handleFriendSubmit(event)
+    ));
 
     // Enable/disable submit button based on selection changes
     this.friendForm.addEventListener('change', (e) => {
@@ -4198,10 +4591,9 @@ class FriendModal {
     this.initialFriendStatus = contact.friend;
     this.warningShown = false;
 
-    // Initialize submit button state
-    this.updateSubmitButtonState();
-
     this.modal.classList.add('active');
+    // Initialize submit button state after modal is active so updateSubmitButtonState()'s isActive() guard passes
+    this.updateSubmitButtonState();
   }
 
   /**
@@ -4224,6 +4616,12 @@ class FriendModal {
   }
 
   async postUpdateTollRequired(address, friend) {
+    const feeBalanceStatus = await getFeeBalanceStatus();
+    if (!feeBalanceStatus.success) {
+      showFeeBalanceFailureToast(feeBalanceStatus.reason);
+      return { result: { success: false, reason: feeBalanceStatus.reason || FEE_FAILURE_REASON_CHECK_FAILED }, toastAlreadyShown: true };
+    }
+
     // 0 = blocked, 1 = Other, 2 = Connection
     // required = 1 if toll required, 0 if not and 2 to block other party
     const requiredNum = friend === 2 ? 0 : friend === 1 ? 1 : friend === 0 ? 2 : 1;
@@ -4242,6 +4640,15 @@ class FriendModal {
     };
     const txid = await signObj(tx, myAccount.keys);
     const res = await injectTx(tx, txid);
+    if (res?.result?.success !== true) {
+      // injectTx surfaces API/network failures when it can. Add fallback for silent null responses.
+      const reason = res?.result?.reason || 'inject_failed';
+      const injectToastShown = !!res;
+      if (!injectToastShown) {
+        showToast('Failed to update friend status. Please try again.', 0, 'error');
+      }
+      return { result: { success: false, reason }, toastAlreadyShown: true };
+    }
     return res;
   }
 
@@ -4253,13 +4660,11 @@ class FriendModal {
    */
   async handleFriendSubmit(event) {
     event.preventDefault();
-    this.submitButton.disabled = true;
     const contact = myData.contacts[this.currentContactAddress];
     const selectedStatus = this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value;
     const prevFriendStatus = Number(contact?.friend);
 
     if (selectedStatus == null || Number(selectedStatus) === contact.friend) {
-      this.submitButton.disabled = true;
       console.log('No change in friend status or no status selected.');
       return;
     }
@@ -4274,7 +4679,10 @@ class FriendModal {
           console.log(
             `[handleFriendSubmit] update_toll_required transaction failed: ${res?.result?.reason}. Did not update contact status.`
           );
-          showToast('Failed to update friend status. Please try again.', 0, 'error');
+          const toastAlreadyShown = res?.toastAlreadyShown === true;
+          if (!toastAlreadyShown) {
+            showToast('Failed to update friend status. Please try again.', 0, 'error');
+          }
           return;
         }
       } catch (error) {
@@ -4325,7 +4733,6 @@ class FriendModal {
 
     // Close the friend modal (skip warning since form was submitted)
     this.close(true);
-    this.submitButton.disabled = false;
   }
 
   // setAddress fuction that sets a global variable that can be used to set the currentContactAddress
@@ -4337,7 +4744,7 @@ class FriendModal {
    * Update the friend button based on the contact's friend status
    * @param {Object} contact - The contact object
    * @param {string} buttonId - The ID of the button to update
-   * @returns {void}
+   * @returns {Promise<void>}
    */
   updateFriendButton(contact, buttonId) {
     const button = document.getElementById(buttonId);
@@ -4382,6 +4789,7 @@ class FriendModal {
 
   // Update the submit button's enabled state based on current and selected status
   updateSubmitButtonState() {
+    if (!this.isActive()) return;
     const contact = myData?.contacts?.[this.currentContactAddress];
     // return early if contact is not found or offline
     if (!contact || !isOnline) {
@@ -4685,7 +5093,7 @@ class HistoryModal {
         const statusAttr = tx?.status ? `data-status="${tx.status}"` : '';
         
         // Check if transaction was deleted
-        if (tx?.deleted > 0) {
+        if (isDeleted(tx)) {
           return `
             <div class="transaction-item deleted-transaction" ${txidAttr} ${statusAttr}>
               <div class="transaction-info">
@@ -4695,7 +5103,7 @@ class HistoryModal {
                 </div>
                 <div class="transaction-amount">-- --</div>
               </div>
-              <div class="transaction-memo">${tx.memo || "Deleted on this device"}</div>
+              <div class="transaction-memo">${escapeHtml(getDeletedPlaceholderText(tx))}</div>
             </div>
           `;
         }
@@ -4863,7 +5271,7 @@ class ClockTimer {
 
   /**
    * Starts the ticking clock timer
-   * @returns {void}
+   * @returns {Promise<void>}
    */
   start() {
     // Clear any existing timer
@@ -4998,7 +5406,7 @@ class CallsModal {
       for (const msg of messages) {
         if (msg?.type !== 'call') continue;
         // Skip deleted messages
-        if (msg?.deleted === 1) continue;
+        if (isDeleted(msg)) continue;
         // Skip messages that failed to send
         if (msg?.status === 'failed') continue;
         const callTime = Number(msg.callTime);
@@ -5214,6 +5622,28 @@ class CallsModal {
 
 const callsModal = new CallsModal();
 
+/**
+ * Recomputes scheduled calls and updates the global header calls icon state.
+ * @returns {void}
+ */
+function refreshUpcomingCallsUi() {
+  callsModal.refreshCalls();
+  header.updateCallsIcon();
+}
+
+/**
+ * Returns whether deleting a scheduled call could affect the header calls icon state.
+ * Mirrors CallsModal refresh eligibility: valid positive callTime within last 2 hours or in the future.
+ * @param {number|string} callTime - Scheduled call timestamp in ms since epoch.
+ * @returns {boolean}
+ */
+function shouldRefreshUpcomingCallsUiForCallTime(callTime) {
+  const callTimeNum = Number(callTime);
+  if (!Number.isFinite(callTimeNum) || callTimeNum <= 0) return false;
+  const twoHoursMs = 2 * 60 * 60 * 1000;
+  return callTimeNum >= (getCorrectedTimestamp() - twoHoursMs);
+}
+
 class GroupCallParticipantsModal {
   constructor() {}
 
@@ -5277,40 +5707,92 @@ class GroupCallParticipantsModal {
 
 const groupCallParticipantsModal = new GroupCallParticipantsModal();
 
+function isLibAsset(asset) {
+  return asset?.id === 'liberdus' || asset?.symbol === 'LIB';
+}
+
+function getLibUsdPriceFromParameters() {
+  const price = getStabilityFactor();
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
+function syncLibUsdPriceToWalletAssets(price) {
+  if (!Array.isArray(myData?.wallet?.assets)) {
+    return;
+  }
+
+  for (const asset of myData.wallet.assets) {
+    if (isLibAsset(asset)) {
+      asset.price = price;
+    }
+  }
+
+  if (price !== null) {
+    myData.wallet.priceTimestamp = getCorrectedTimestamp();
+  }
+}
+
+async function getLibUsdPrice(options = {}) {
+  const { forceRefresh = false } = options;
+  await getNetworkParams(forceRefresh);
+
+  const price = getLibUsdPriceFromParameters();
+  syncLibUsdPriceToWalletAssets(price);
+
+  if (price === null) {
+    console.warn('LIB/USD price unavailable: missing or invalid stability factor.');
+  }
+
+  return price;
+}
+
+function getAssetUsdPrice(asset) {
+  if (isLibAsset(asset)) {
+    return getLibUsdPriceFromParameters();
+  }
+
+  const price = Number(asset?.price);
+  return Number.isFinite(price) && price >= 0 ? price : null;
+}
+
+function calculateAssetUsdValue(asset) {
+  const price = getAssetUsdPrice(asset);
+  if (price === null) {
+    return null;
+  }
+
+  const balance = Number(asset?.balance ?? 0n);
+  if (!Number.isFinite(balance)) {
+    return null;
+  }
+
+  return (price * balance) / Number(wei);
+}
+
+function calculateWalletUsdValue(assets) {
+  if (!Array.isArray(assets)) {
+    return 0.0;
+  }
+
+  let total = 0.0;
+  for (const asset of assets) {
+    const assetValue = calculateAssetUsdValue(asset);
+    if (assetValue === null) {
+      return null;
+    }
+    total += assetValue;
+  }
+
+  return total;
+}
+
 async function updateAssetPricesIfNeeded() {
   if (!myData || !myData.wallet || !myData.wallet.assets) {
     console.error('No wallet data available to update asset prices');
     return;
   }
 
-  const now = getCorrectedTimestamp();
-  const priceUpdateInterval = 10 * 60 * 1000; // 10 minutes in milliseconds
-
-  if (now - myData.wallet.priceTimestamp < priceUpdateInterval) {
-    return;
-  }
-
-  for (let i = 0; i < myData.wallet.assets.length; i++) {
-    const asset = myData.wallet.assets[i];
-    const contractAddress = '0x' + asset.contract;
-    const apiUrl = `https://api.dexscreener.com/latest/dex/search?q=${contractAddress}`;
-    try {
-      const response = await fetch(apiUrl);
-      if (!response.ok) {
-        console.error(`API request failed for ${asset.symbol} with status ${response.status}`);
-        continue; // Skip to the next asset
-      }
-      const data = await response.json();
-      if (data.pairs && data.pairs.length > 0 && data.pairs[0].priceUsd) {
-        asset.price = parseFloat(data.pairs[0].priceUsd);
-        myData.wallet.priceTimestamp = now;
-      } else {
-        console.warn(`No price data found for ${asset.symbol} from API`);
-      }
-    } catch (error) {
-      console.error(`Failed to update price for ${asset.symbol}`, error);
-    }
-  }
+  await getLibUsdPrice();
 }
 
 async function queryNetwork(url, abortSignal = null) {
@@ -5447,12 +5929,820 @@ async function ensureContactKeys(address) {
   }
 }
 
+/**
+ * @typedef {{ sender: string, reactId: string, action: 'remove', timestamp: number, reactionTxId?: string, targetReactionTxId?: string } | { sender: string, reactId: string, action: 'set', emoji: string, timestamp: number, reactionTxId?: string }} ReactionUpdate
+ */
+
+/**
+ * @typedef {{
+ *   sender: string,
+ *   targetTxid: string,
+ *   emoji: string,
+ *   timestamp: number,
+ *   reactionTxId?: string
+ * }} ReactionSnapshot
+ */
+
+/**
+ * @typedef {{
+ *   targetTxid: string,
+ *   localOrder: number,
+ *   status: 'pending' | 'success' | 'failure',
+ *   baseReaction: ReactionSnapshot | null
+ * } & ({
+ *   kind: 'set',
+ *   visibleResult: ReactionSnapshot
+ * } | {
+ *   kind: 'remove',
+ *   visibleResult: ReactionSnapshot & { emoji: '' }
+ * })} PendingReactionMutation
+ */
+
+/**
+ * Returns the newest effective reaction for a specific sender and target message.
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @param {string} sender
+ * @returns {Object|null}
+ */
+function getEffectiveReactionForSenderTarget(contact, targetTxid, sender) {
+  const reactions = Array.isArray(contact.reactions) ? contact.reactions : [];
+  const normalizedSender = normalizeAddress(sender);
+
+  for (const reaction of reactions) {
+    if (!reaction.emoji) {
+      continue;
+    }
+    if (reaction.targetTxid === targetTxid && normalizeAddress(reaction.sender) === normalizedSender) {
+      return reaction;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Returns the newest reaction state, including empty-emoji removal markers.
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @param {string} sender
+ * @returns {Object|null}
+ */
+function getLatestReactionStateForSenderTarget(contact, targetTxid, sender) {
+  const reactions = Array.isArray(contact.reactions) ? contact.reactions : [];
+  const normalizedSender = normalizeAddress(sender);
+
+  for (const reaction of reactions) {
+    if (reaction.targetTxid === targetTxid && normalizeAddress(reaction.sender) === normalizedSender) {
+      return reaction;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Returns the effective reactions for a specific target message.
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @returns {Array<Object>}
+ */
+function getContactReactionsForTarget(contact, targetTxid) {
+  const reactions = Array.isArray(contact.reactions) ? contact.reactions : [];
+  const seen = new Set();
+  const effectiveReactions = [];
+
+  for (const reaction of reactions) {
+    if (!reaction.emoji) {
+      continue;
+    }
+    if (reaction.targetTxid !== targetTxid) {
+      continue;
+    }
+
+    const senderKey = normalizeAddress(reaction.sender);
+    if (seen.has(senderKey)) {
+      continue;
+    }
+
+    seen.add(senderKey);
+    effectiveReactions.push(reaction);
+  }
+
+  return effectiveReactions;
+}
+
+/**
+ * Removes every raw reaction entry for a given sender and target.
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @param {string} sender
+ * @returns {boolean}
+ */
+function purgeReactionStackForSenderTarget(contact, targetTxid, sender) {
+  if (!Array.isArray(contact.reactions)) {
+    return false;
+  }
+
+  const normalizedSender = normalizeAddress(sender);
+  const initialLength = contact.reactions.length;
+  contact.reactions = contact.reactions.filter((reaction) => {
+    return !(reaction.targetTxid === targetTxid && normalizeAddress(reaction.sender) === normalizedSender);
+  });
+  return contact.reactions.length !== initialLength;
+}
+
+/**
+ * Removes a raw reaction entry by the txid of the reaction-control transaction that created it.
+ * @param {Object} contact
+ * @param {string} reactionTxId
+ * @returns {boolean}
+ */
+function removeReactionByReactionTxId(contact, reactionTxId) {
+  if (!Array.isArray(contact.reactions) || !reactionTxId) {
+    return false;
+  }
+
+  const index = contact.reactions.findIndex((reaction) => reaction.reactionTxId === reactionTxId);
+  if (index === -1) {
+    return false;
+  }
+
+  contact.reactions.splice(index, 1);
+  return true;
+}
+
+/**
+ * Records a reaction removal as chat-list activity without creating a visible chip.
+ * @param {Object} contact
+ * @param {Extract<ReactionUpdate, { action: 'remove' }>} reaction
+ * @returns {void}
+ */
+function recordReactionRemovalActivity(contact, reaction) {
+  insertSorted(contact.reactions, {
+    sender: normalizeAddress(reaction.sender),
+    targetTxid: reaction.reactId,
+    emoji: '',
+    timestamp: reaction.timestamp,
+    reactionTxId: reaction.reactionTxId
+  }, 'timestamp');
+}
+
+/**
+ * Returns a normalized copy of a reaction snapshot or null.
+ * @param {ReactionSnapshot | null} reaction
+ * @returns {ReactionSnapshot | null}
+ */
+function copyReactionSnapshot(reaction) {
+  if (!reaction) {
+    return null;
+  }
+
+  return {
+    sender: normalizeAddress(reaction.sender),
+    targetTxid: reaction.targetTxid,
+    emoji: reaction.emoji,
+    timestamp: Number(reaction.timestamp),
+    reactionTxId: reaction.reactionTxId
+  };
+}
+
+/**
+ * Returns whether two reaction snapshots describe the same visible reaction.
+ * @param {ReactionSnapshot | null} left
+ * @param {ReactionSnapshot | null} right
+ * @returns {boolean}
+ */
+function areReactionSnapshotsEqual(left, right) {
+  if (!left && !right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+
+  return normalizeAddress(left.sender) === normalizeAddress(right.sender) &&
+    left.targetTxid === right.targetTxid &&
+    left.emoji === right.emoji &&
+    Number(left.timestamp) === Number(right.timestamp) &&
+    left.reactionTxId === right.reactionTxId;
+}
+
+/**
+ * Replaces the visible reaction for one sender+target pair with the provided snapshot.
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @param {string} sender
+ * @param {ReactionSnapshot | null} reaction
+ * @returns {void}
+ */
+function setVisibleReaction(contact, targetTxid, sender, reaction) {
+  contact.reactions ??= [];
+  purgeReactionStackForSenderTarget(contact, targetTxid, sender);
+
+  if (!reaction) {
+    return;
+  }
+
+  insertSorted(contact.reactions, {
+    sender: normalizeAddress(reaction.sender),
+    targetTxid: reaction.targetTxid,
+    emoji: reaction.emoji,
+    timestamp: Number(reaction.timestamp),
+    reactionTxId: reaction.reactionTxId
+  }, 'timestamp');
+}
+
+/**
+ * Returns the pending reaction chain entries for one contact+target pair.
+ * @param {string} contactAddress
+ * @param {string} targetTxid
+ * @returns {Array<Object>}
+ */
+function getPendingReactionChainEntries(contactAddress, targetTxid) {
+  assert(contactAddress, 'Reaction contact address is required');
+  assert(targetTxid, 'Reaction target txid is required');
+  myData.pending ??= [];
+  const normalizedContactAddress = normalizeAddress(contactAddress);
+  return myData.pending
+    .filter((pendingTx) =>
+      pendingTx.type === 'message' &&
+      pendingTx.to === normalizedContactAddress &&
+      pendingTx.reactionPending &&
+      pendingTx.reactionPending.targetTxid === targetTxid
+    )
+    .sort((left, right) => left.reactionPending.localOrder - right.reactionPending.localOrder);
+}
+
+/**
+ * Computes the visible reaction for a pending reaction chain by replaying successful/pending
+ * mutations in client order on top of the chain base reaction.
+ * @param {Array<Object>} chainEntries
+ * @returns {ReactionSnapshot | null}
+ */
+function replayPendingReactionChain(chainEntries) {
+  if (chainEntries.length === 0) {
+    return null;
+  }
+
+  let effectiveReaction = copyReactionSnapshot(chainEntries[0].reactionPending.baseReaction);
+  for (const entry of chainEntries) {
+    switch (entry.reactionPending.status) {
+      case 'failure':
+        continue;
+      case 'pending':
+      case 'success':
+        effectiveReaction = copyReactionSnapshot(entry.reactionPending.visibleResult);
+        continue;
+      default:
+        assert(false, `Unknown pending reaction status: ${entry.reactionPending.status}`);
+    }
+  }
+
+  return effectiveReaction;
+}
+
+/**
+ * Materializes the current visible reaction state for one pending reaction chain.
+ * @param {string} contactAddress
+ * @param {string} targetTxid
+ * @returns {{ didChange: boolean, hasPending: boolean }}
+ */
+function syncPendingReactionChainState(contactAddress, targetTxid) {
+  const currentUserAddress = normalizeAddress(myAccount.keys.address);
+  const contact = myData.contacts[contactAddress];
+  assert(contact, `Missing contact for pending reaction chain: ${contactAddress}`);
+
+  const chainEntries = getPendingReactionChainEntries(contactAddress, targetTxid);
+  if (chainEntries.length === 0) {
+    return { didChange: false, hasPending: false };
+  }
+
+  const previousVisibleReaction = copyReactionSnapshot(
+    getEffectiveReactionForSenderTarget(contact, targetTxid, currentUserAddress)
+  );
+  const nextVisibleReaction = replayPendingReactionChain(chainEntries);
+  const didChange = !areReactionSnapshotsEqual(previousVisibleReaction, nextVisibleReaction);
+
+  setVisibleReaction(contact, targetTxid, currentUserAddress, nextVisibleReaction);
+  if (didChange) {
+    syncReactionUiState(contactAddress, contact, targetTxid);
+  }
+
+  return {
+    didChange,
+    hasPending: chainEntries.some((entry) => entry.reactionPending.status === 'pending')
+  };
+}
+
+/**
+ * Removes all retained pending reaction chain entries for one contact+target pair.
+ * @param {string} contactAddress
+ * @param {string} targetTxid
+ * @returns {void}
+ */
+function cleanupResolvedReactionChain(contactAddress, targetTxid) {
+  assert(contactAddress, 'Reaction contact address is required');
+  assert(targetTxid, 'Reaction target txid is required');
+  myData.pending ??= [];
+  const normalizedContactAddress = normalizeAddress(contactAddress);
+  myData.pending = myData.pending.filter((pendingTx) => {
+    return !(
+      pendingTx.type === 'message' &&
+      pendingTx.to === normalizedContactAddress &&
+      pendingTx.reactionPending &&
+      pendingTx.reactionPending.targetTxid === targetTxid &&
+      pendingTx.reactionPending.status !== 'pending'
+    );
+  });
+}
+
+/**
+ * Removes all active reactions that target a specific message.
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @returns {boolean}
+ */
+function purgeContactReactionsForTarget(contact, targetTxid) {
+  if (!Array.isArray(contact.reactions)) {
+    return false;
+  }
+
+  const initialLength = contact.reactions.length;
+  contact.reactions = contact.reactions.filter((reaction) => reaction.targetTxid !== targetTxid);
+  return contact.reactions.length !== initialLength;
+}
+
+/**
+ * Removes pending reaction transactions that would rematerialize chips for a deleted message.
+ * @param {string} contactAddress
+ * @param {string} targetTxid
+ */
+function purgePendingReactionsForTarget(contactAddress, targetTxid) {
+  if (!Array.isArray(myData?.pending) || !contactAddress || !targetTxid) {
+    return;
+  }
+
+  const normalizedContactAddress = normalizeAddress(contactAddress);
+  myData.pending = myData.pending.filter((pendingTx) => {
+    const isTargetReaction =
+      pendingTx.type === 'message' &&
+      pendingTx.to === normalizedContactAddress &&
+      pendingTx.reactionPending &&
+      pendingTx.reactionPending.targetTxid === targetTxid;
+    if (!isTargetReaction) {
+      return true;
+    }
+    return pendingTx.reactionInjectPending === true;
+  });
+}
+
+/**
+ * Applies a reaction control message to the contact-level active reaction state.
+ * @param {Object} contact
+ * @param {ReactionUpdate} reaction
+ * @returns {boolean}
+ */
+function applyIncomingReaction(contact, reaction) {
+  const targetMessage = contact.messages.find((message) => message.txid === reaction.reactId);
+  if (!targetMessage || isDeleted(targetMessage)) {
+    console.warn('Reaction target not found locally', reaction);
+    return false;
+  }
+
+  if (!Array.isArray(contact.reactions)) {
+    if (reaction.action === 'remove') {
+      return false;
+    }
+    contact.reactions = [];
+  }
+
+  const sender = normalizeAddress(reaction.sender);
+  const latestReactionState = getLatestReactionStateForSenderTarget(contact, reaction.reactId, sender);
+  const isIncomingOlderThanCurrent = !!latestReactionState && latestReactionState.timestamp > reaction.timestamp;
+
+  switch (reaction.action) {
+    case 'remove': {
+      if (reaction.targetReactionTxId) {
+        const targetReaction = contact.reactions.find((entry) => {
+          return entry.targetTxid === reaction.reactId &&
+            normalizeAddress(entry.sender) === sender &&
+            entry.reactionTxId === reaction.targetReactionTxId;
+        });
+        if (!targetReaction) {
+          return false;
+        }
+        removeReactionByReactionTxId(contact, targetReaction.reactionTxId);
+        recordReactionRemovalActivity(contact, reaction);
+        return true;
+      }
+      if (isIncomingOlderThanCurrent) {
+        return false;
+      }
+      if (!purgeReactionStackForSenderTarget(contact, reaction.reactId, sender)) {
+        return false;
+      }
+      recordReactionRemovalActivity(contact, reaction);
+      return true;
+    }
+
+    case 'set': {
+      const emoji = reaction.emoji.trim();
+      const currentReaction = getEffectiveReactionForSenderTarget(contact, reaction.reactId, sender);
+      // don't allow duplicate reactions
+      if (reaction.reactionTxId && contact.reactions.some((entry) => entry.reactionTxId === reaction.reactionTxId)) {
+        return false;
+      }
+      if (isIncomingOlderThanCurrent) {
+        return false;
+      }
+      if (currentReaction && currentReaction.emoji === emoji) {
+        return false;
+      }
+      purgeReactionStackForSenderTarget(contact, reaction.reactId, sender);
+
+      insertSorted(contact.reactions, {
+        sender,
+        targetTxid: reaction.reactId,
+        emoji,
+        timestamp: reaction.timestamp,
+        reactionTxId: reaction.reactionTxId
+      }, 'timestamp');
+      return true;
+    }
+
+    default:
+      throw new Error(`Unknown reaction action: ${reaction.action}`);
+  }
+}
+
+/**
+ * Builds the quoted target text shown in the chat-list reaction preview.
+ * @param {Object} message
+ * @returns {string}
+ */
+function getReactionTargetPreviewText(message) {
+  if (isDeleted(message)) {
+    return getDeletedPlaceholderText(message);
+  }
+
+  if (message.type === 'call') {
+    return 'call';
+  }
+
+  const messageText = typeof message.message === 'string' ? message.message.trim() : '';
+  if (messageText) {
+    return messageText;
+  }
+
+  if (typeof message.amount === 'bigint') {
+    return 'payment';
+  }
+
+  if (message.type === 'vm') {
+    return 'voice message';
+  }
+
+  if (message.xattach) {
+    return 'attachment';
+  }
+
+  return '[message]';
+}
+
+/**
+ * Returns the newest valid reaction activity for chat-list preview purposes.
+ * @param {Object} contact
+ * @returns {{my: boolean, emoji: string, target: string, timestamp: number}|null}
+ */
+function getLatestChatReactionActivity(contact) {
+  const currentUserAddress = normalizeAddress(myAccount.keys.address);
+  const reactions = Array.isArray(contact.reactions) ? contact.reactions : [];
+  const seen = new Set();
+  for (const reaction of reactions) {
+    const reactionKey = `${reaction.targetTxid}:${normalizeAddress(reaction.sender)}`;
+    if (seen.has(reactionKey)) {
+      continue;
+    }
+    seen.add(reactionKey);
+
+    const targetMessage = contact.messages.find((message) => message.txid === reaction.targetTxid);
+    if (!targetMessage || isDeleted(targetMessage)) {
+      continue;
+    }
+
+    return {
+      my: reaction.sender === currentUserAddress,
+      emoji: reaction.emoji,
+      target: getReactionTargetPreviewText(targetMessage),
+      timestamp: reaction.timestamp
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Returns the newest non-deleted message for chat-list activity purposes.
+ * @param {Object} contact
+ * @returns {Object|null}
+ */
+function getLatestChatMessageActivity(contact) {
+  const messages = Array.isArray(contact.messages) ? contact.messages : [];
+
+  for (const message of messages) {
+    if (!isDeleted(message)) {
+      return message;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Recomputes the chat-list timestamp from the current message and reaction state.
+ * @param {string} chatAddress
+ * @param {Object} contact
+ * @returns {void}
+ */
+function syncChatLatestActivityTimestamp(chatAddress, contact) {
+  const latestMessage = getLatestChatMessageActivity(contact);
+  if (!latestMessage) return;
+
+  const latestReaction = getLatestChatReactionActivity(contact);
+
+  const existingChatIndex = myData.chats.findIndex((chat) => chat.address === chatAddress);
+  const chat = existingChatIndex === -1
+    ? { address: chatAddress, timestamp: latestMessage.timestamp }
+    : myData.chats.splice(existingChatIndex, 1)[0];
+
+  if (!latestReaction || latestReaction.timestamp <= latestMessage.timestamp) {
+    chat.timestamp = latestMessage.timestamp;
+    insertSorted(myData.chats, chat, 'timestamp');
+    return;
+  }
+
+  chat.timestamp = latestReaction.timestamp;
+  insertSorted(myData.chats, chat, 'timestamp');
+}
+
+/**
+ * Refreshes chat list and visible reaction chips after local reaction state changes.
+ * @param {string} contactAddress
+ * @param {Object} contact
+ * @param {string} targetTxid
+ * @returns {void}
+ */
+function syncReactionUiState(contactAddress, contact, targetTxid) {
+  syncChatLatestActivityTimestamp(contactAddress, contact);
+  if (chatsScreen.isActive()) {
+    chatsScreen.updateChatList();
+  }
+
+  if (chatModal.isActive() && chatModal.address === contactAddress) {
+    chatModal.syncRenderedReactionTargets([targetTxid]);
+  }
+}
+
+/**
+ * Returns whether a specific message already has a pending optimistic edit in flight.
+ * @param {string} contactAddress
+ * @param {string} targetTxid
+ * @returns {boolean}
+ */
+function hasPendingEditForTarget(contactAddress, targetTxid) {
+  if (!contactAddress || !targetTxid) {
+    return false;
+  }
+
+  return myData.pending.some((pendingTx) =>
+    pendingTx.type === 'message' &&
+    pendingTx.to === contactAddress &&
+    pendingTx.editPending &&
+    pendingTx.editPending.targetTxid === targetTxid
+  );
+}
+
+/**
+ * Restores local state captured before an optimistic message edit.
+ * @param {string} pendingTxid
+ * @param {string} contactAddress
+ * @param {{
+ *   targetTxid: string,
+ *   previousMessage: { message: string, edited?: number, edited_timestamp?: number },
+ *   previousHistory:
+ *     | { kind: 'none' }
+ *     | { kind: 'payment', memo?: string, edited?: number, edited_timestamp?: number },
+ * }} editPending
+ * @returns {void}
+ */
+function restorePendingMessageEdit(pendingTxid, contactAddress, editPending) {
+  const {
+    targetTxid,
+    previousMessage,
+    previousHistory,
+  } = editPending;
+  const contact = myData.contacts[contactAddress];
+  assert(contact, `Missing contact for pending edit: ${contactAddress}`);
+
+  const message = contact.messages.find((item) => item.txid === targetTxid);
+  assert(message, `Missing message for pending edit: ${targetTxid}`);
+
+  message.message = previousMessage.message;
+  if (typeof previousMessage.edited !== 'undefined') {
+    message.edited = previousMessage.edited;
+  } else {
+    delete message.edited;
+  }
+  if (typeof previousMessage.edited_timestamp !== 'undefined') {
+    message.edited_timestamp = previousMessage.edited_timestamp;
+  } else {
+    delete message.edited_timestamp;
+  }
+
+  const existingChatIndex = myData.chats.findIndex((chat) => chat.address === contactAddress);
+  if (existingChatIndex !== -1 && myData.chats[existingChatIndex].txid === pendingTxid) {
+    myData.chats.splice(existingChatIndex, 1);
+  }
+  syncChatLatestActivityTimestamp(contactAddress, contact);
+
+  switch (previousHistory.kind) {
+    case 'none':
+      return;
+    case 'payment': {
+      const historyIndex = myData.wallet.history.findIndex((item) => item.txid === targetTxid);
+      assert(historyIndex !== -1, `Missing wallet history for pending edit: ${targetTxid}`);
+
+      if (typeof previousHistory.memo !== 'undefined') {
+        myData.wallet.history[historyIndex].memo = previousHistory.memo;
+      } else {
+        delete myData.wallet.history[historyIndex].memo;
+      }
+      if (typeof previousHistory.edited !== 'undefined') {
+        myData.wallet.history[historyIndex].edited = previousHistory.edited;
+      } else {
+        delete myData.wallet.history[historyIndex].edited;
+      }
+      if (typeof previousHistory.edited_timestamp !== 'undefined') {
+        myData.wallet.history[historyIndex].edited_timestamp = previousHistory.edited_timestamp;
+      } else {
+        delete myData.wallet.history[historyIndex].edited_timestamp;
+      }
+      return;
+    }
+    default:
+      assert(false, `Unknown pending edit history kind: ${previousHistory.kind}`);
+  }
+}
+
+/**
+ * Reverts a pending optimistic message edit that stored rollback metadata.
+ * @param {Object} pendingTxInfo
+ * @returns {void}
+ */
+function reconcilePendingMessageEdit(pendingTxInfo) {
+  const { editPending } = pendingTxInfo;
+  assert(editPending, `Missing pending message edit metadata for ${pendingTxInfo.txid}`);
+  restorePendingMessageEdit(pendingTxInfo.txid, pendingTxInfo.to, editPending);
+
+  if (historyModal.isActive()) {
+    historyModal.refresh();
+  }
+  if (chatsScreen.isActive()) {
+    chatsScreen.updateChatList();
+  }
+  if (chatModal.isActive() && chatModal.address === pendingTxInfo.to) {
+    chatModal.appendChatModal();
+  }
+}
+
+/**
+ * Creates or updates the provisional pending entry used to persist optimistic edit rollback data
+ * before `/inject` confirms the transaction was accepted for receipt tracking.
+ * @param {string} txid
+ * @param {string} contactAddress
+ * @param {Object} editPending
+ * @returns {void}
+ */
+function trackPendingMessageEditBeforeInject(txid, contactAddress, editPending) {
+  if (!myData.pending) {
+    myData.pending = [];
+  }
+
+  const pendingTxInfo = myData.pending.find((pendingTx) => pendingTx.txid === txid);
+  if (pendingTxInfo) {
+    pendingTxInfo.to = normalizeAddress(contactAddress);
+    pendingTxInfo.editPending = editPending;
+    return;
+  }
+
+  myData.pending.push({
+    txid,
+    type: 'message',
+    submittedts: getCorrectedTimestamp(),
+    checkedts: 0,
+    to: normalizeAddress(contactAddress),
+    editPending,
+  });
+}
+
+/**
+ * Creates or updates the provisional pending entry used to persist optimistic reaction chain metadata
+ * before `/inject` confirms the transaction was accepted for receipt tracking.
+ * @param {string} txid
+ * @param {string} contactAddress
+ * @param {PendingReactionMutation} reactionPending
+ * @returns {void}
+ */
+function trackPendingReactionBeforeInject(txid, contactAddress, reactionPending) {
+  assert(txid, 'Pending reaction txid is required');
+  assert(contactAddress, 'Pending reaction contact address is required');
+  myData.pending ??= [];
+
+  assert(
+    !myData.pending.some((pendingTx) => pendingTx.txid === txid),
+    `Duplicate pending reaction txid: ${txid}`
+  );
+
+  myData.pending.push({
+    txid,
+    type: 'message',
+    submittedts: getCorrectedTimestamp(),
+    checkedts: 0,
+    to: normalizeAddress(contactAddress),
+    reactionInjectPending: true,
+    reactionPending,
+  });
+}
+
+/**
+ * Marks pending reaction metadata as safe for deletion after `/inject` returns.
+ * @param {string} txid
+ * @returns {Object}
+ */
+function finishPendingReactionInject(txid) {
+  const pendingTxInfo = myData.pending.find((pendingTx) => pendingTx.txid === txid);
+  assert(pendingTxInfo, `Pending reaction metadata missing for ${txid}`);
+  pendingTxInfo.reactionInjectPending = false;
+  return pendingTxInfo;
+}
+
+/**
+ * Applies a success/failure result to one pending reaction chain entry and recomputes
+ * the materialized visible reaction for that target.
+ * @param {Object} pendingTxInfo
+ * @param {'success' | 'failure'} result
+ * @returns {{ didChange: boolean, hasPending: boolean, targetTxid: string }}
+ */
+function settlePendingReaction(pendingTxInfo, result) {
+  assert(pendingTxInfo.reactionPending, `Missing pending reaction metadata for ${pendingTxInfo.txid}`);
+  switch (result) {
+    case 'success':
+    case 'failure':
+      break;
+    default:
+      assert(false, `Unknown pending reaction result: ${result}`);
+  }
+
+  /** @type {PendingReactionMutation} */
+  const { reactionPending } = pendingTxInfo;
+  reactionPending.status = result;
+  return {
+    ...syncPendingReactionChainState(pendingTxInfo.to, reactionPending.targetTxid),
+    targetTxid: reactionPending.targetTxid
+  };
+}
+
+/**
+ * Syncs the footer chat tab notification bubble with unread message state.
+ * @returns {void}
+ */
+function syncChatTabNotificationBubble() {
+  if (!footer?.chatButton) return;
+
+  if (typeof chatsScreen !== 'undefined' && chatsScreen.isActive()) {
+    footer.chatButton.classList.remove('has-notification');
+    return;
+  }
+
+  const hasUnreadChats = Object.values(myData?.contacts || {}).some((contact) => {
+    if (!contact?.address || isFaucetAddress(contact.address)) {
+      return false;
+    }
+    return contact.unread > 0;
+  });
+
+  footer.chatButton.classList.toggle('has-notification', hasUnreadChats);
+}
+
 // Actually payments also appear in the chats, so we can add these to
 async function processChats(chats, keys) {
   let newTimestamp = 0;
   const timestamp = myAccount.chatTimestamp || 0;
   const messageQueryTimestamp = Math.max(0, timestamp+1);
   let hasAnyTransfer = false;
+  let needsUpcomingCallsUiRefresh = false;
+  const currentUserAddress = normalizeAddress(keys.address);
 
   for (let sender in chats) {
     // Fetch messages using the adjusted timestamp
@@ -5474,6 +6764,10 @@ async function processChats(chats, keys) {
       let mine = false;
       // Count of edits (from the other party) applied while user not viewing this chat
       let editIncrements = 0;
+      const pendingReactionControls = [];
+      let didApplyPendingReaction = false;
+      let didChangeReactionPreview = false;
+      const touchedReactionTargetTxids = new Set();
 
       // This check determines if we're currently chatting with the sender
       // We ONLY want to avoid notifications if we're actively viewing this exact chat
@@ -5508,6 +6802,9 @@ async function processChats(chats, keys) {
           // Set sent_timestamp - use tx.timestamp if useTxTimestamp is true, otherwise use payload.sent_timestamp or tx.timestamp
           if (useTxTimestamp || !payload.sent_timestamp) {
             payload.sent_timestamp = tx.timestamp;
+          }
+          if (mine && (typeof contact.latestOutboundMessageTimestamp !== 'number' || tx.timestamp > contact.latestOutboundMessageTimestamp)) {
+            contact.latestOutboundMessageTimestamp = tx.timestamp;
           }
           if (mine){
             // console.warn('my message tx', tx)
@@ -5552,6 +6849,16 @@ async function processChats(chats, keys) {
                   if (!messageToDelete) {
                     continue; // ignore delete control messages for missing txid
                   }
+                  const unreadIncomingMessageCount = Math.max(0, contact.unread || 0);
+                  // check if the message is unread and not in the active chat and not a payment
+                  const wasUnreadIncomingMessage = unreadIncomingMessageCount > 0
+                    && !messageToDelete.my
+                    && !inActiveChatWithSender
+                    && contact.messages
+                      .filter((message) => !message.my && !isDeleted(message) && typeof message.amount !== 'bigint')
+                      .slice(0, unreadIncomingMessageCount)
+                      .some((message) => message.txid === messageToDelete.txid);
+                  let didDeleteMessage = false;
                   
                   // Only allow deletion if the sender of this delete tx is the same who sent the original message
                   // (normalize addresses for comparison)
@@ -5563,62 +6870,68 @@ async function processChats(chats, keys) {
                     chatModal.purgeThumbnail(messageToDelete.xattach);
 
                     // Mark the message as deleted
-                    messageToDelete.deleted = 1;
-                    messageToDelete.message = "Deleted by sender";
+                    messageToDelete.deleted = MESSAGE_DELETED_STATE_ALL;
+                    messageToDelete.message = DELETED_MESSAGE_BY_SENDER_TEXT;
+                    if (typeof messageToDelete.memo === 'string') {
+                      messageToDelete.memo = DELETED_MESSAGE_BY_SENDER_TEXT;
+                    }
+                    didDeleteMessage = true;
                     // Remove attachments so we don't keep references around
                     delete messageToDelete.xattach;
                     
                     // Remove payment-specific fields if present
                     if (messageToDelete.amount) {
                       if (messageToDelete.payment) delete messageToDelete.payment;
-                      if (messageToDelete.memo) messageToDelete.memo = "Deleted by sender";
                       if (messageToDelete.amount) delete messageToDelete.amount;
                       if (messageToDelete.symbol) delete messageToDelete.symbol;
-                      
-                      // Update corresponding transaction in wallet history
-                      const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
-                      if (txIndex !== -1) {
-                        Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted by sender' });
-                        delete myData.wallet.history[txIndex].amount;
-                        delete myData.wallet.history[txIndex].symbol;
-                        delete myData.wallet.history[txIndex].payment;
-                        delete myData.wallet.history[txIndex].sign;
-                        delete myData.wallet.history[txIndex].address;
-                      }
                     }
+                    updateDeletedWalletHistoryEntry(
+                      messageToDelete.txid,
+                      MESSAGE_DELETED_STATE_ALL,
+                      DELETED_MESSAGE_BY_SENDER_TEXT
+                    );
                   } else if (messageToDelete.my && normalizeAddress(keys.address) === normalizeAddress(tx.from)) {
                     // This is our own message, and we're deleting it - valid
                     // Purge cached thumbnails for image attachments, if any
                     chatModal.purgeThumbnail(messageToDelete.xattach);
 
                     // Mark the message as deleted
-                    messageToDelete.deleted = 1;
-                    messageToDelete.message = "Deleted for all";
+                    messageToDelete.deleted = MESSAGE_DELETED_STATE_ALL;
+                    messageToDelete.message = DELETED_MESSAGE_FOR_ALL_TEXT;
+                    if (typeof messageToDelete.memo === 'string') {
+                      messageToDelete.memo = DELETED_MESSAGE_FOR_ALL_TEXT;
+                    }
+                    didDeleteMessage = true;
                     // Remove attachments so we don't keep references around
                     delete messageToDelete.xattach;
                     
                     // Remove payment-specific fields if present - same logic as above
                     if (messageToDelete.amount) {
                       if (messageToDelete.payment) delete messageToDelete.payment;
-                      if (messageToDelete.memo) messageToDelete.memo = "Deleted for all";
                       if (messageToDelete.amount) delete messageToDelete.amount;
                       if (messageToDelete.symbol) delete messageToDelete.symbol;
-                      
-                      // Update corresponding transaction in wallet history
-                      const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === messageToDelete.txid);
-                      if (txIndex !== -1) {
-                        Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted for all' });
-                        delete myData.wallet.history[txIndex].amount;
-                        delete myData.wallet.history[txIndex].symbol;
-                        delete myData.wallet.history[txIndex].payment;
-                        delete myData.wallet.history[txIndex].sign;
-                        delete myData.wallet.history[txIndex].address;
-                      }
                     }
+                    updateDeletedWalletHistoryEntry(
+                      messageToDelete.txid,
+                      MESSAGE_DELETED_STATE_ALL,
+                      DELETED_MESSAGE_FOR_ALL_TEXT
+                    );
                   }
 
                   if (reactNativeApp.isReactNativeWebView && messageToDelete.type === 'call' && Number(messageToDelete.callTime) > 0) {
                     reactNativeApp.sendCancelScheduledCall(contact?.username, Number(messageToDelete.callTime));
+                  }
+                  if (didDeleteMessage) {
+                    purgeContactReactionsForTarget(contact, messageToDelete.txid);
+                    purgePendingReactionsForTarget(from, messageToDelete.txid);
+                    syncChatLatestActivityTimestamp(from, contact);
+                    didChangeReactionPreview = true;
+                    if (wasUnreadIncomingMessage) {
+                      contact.unread = Math.max(0, unreadIncomingMessageCount - 1);
+                    }
+                  }
+                  if (didDeleteMessage && messageToDelete.type === 'call' && shouldRefreshUpcomingCallsUiForCallTime(messageToDelete.callTime)) {
+                    needsUpcomingCallsUiRefresh = true;
                   }
                   
                   if (chatModal.isActive() && chatModal.address === from) {
@@ -5631,7 +6944,7 @@ async function processChats(chats, keys) {
                   const newText = parsedMessage.text;
                   if (txidToEdit && typeof newText === 'string') {
                     const messageToEdit = contact.messages.find(msg => msg.txid === txidToEdit);
-                    if (messageToEdit && !messageToEdit.deleted) {
+                    if (messageToEdit && !isDeleted(messageToEdit)) {
                       // Allow editing only if original sender matches editor and it's their own message OR
                       // we receive someone else's edit for their own message
                       const originalSender = normalizeAddress(tx.from);
@@ -5651,6 +6964,7 @@ async function processChats(chats, keys) {
                         messageToEdit.message = newText;
                         messageToEdit.edited = 1;
                         messageToEdit.edited_timestamp = tx.timestamp;
+                        syncChatLatestActivityTimestamp(from, contact);
                         // Also update wallet history entry memo if present
                         if (myData?.wallet?.history && Array.isArray(myData.wallet.history)) {
                           const hIdx = myData.wallet.history.findIndex((h) => h.txid === txidToEdit);
@@ -5700,6 +7014,63 @@ async function processChats(chats, keys) {
                     payload.replyOwnerIsMine = parsedMessage.replyOwnerIsMine;
                   }
                 } else if (parsedMessage.type === 'message') {
+                  const hasReactionFields =
+                    typeof parsedMessage.reactId !== 'undefined' ||
+                    typeof parsedMessage.reactAction !== 'undefined' ||
+                    typeof parsedMessage.reactMessage !== 'undefined';
+                  if (hasReactionFields) {
+                    const reactId = typeof parsedMessage.reactId === 'string'
+                      ? parsedMessage.reactId.trim()
+                      : '';
+                    if (!reactId) {
+                      console.error('Reaction message is missing reactId');
+                      continue;
+                    }
+
+                    const sender = normalizeAddress(tx.from);
+                    const reactAction = typeof parsedMessage.reactAction === 'string'
+                      ? parsedMessage.reactAction.trim()
+                      : '';
+                    if (reactAction === 'set') {
+                      const emoji = typeof parsedMessage.reactMessage === 'string'
+                        ? parsedMessage.reactMessage.trim()
+                        : '';
+                      if (!emoji) {
+                        console.error('Reaction set is missing emoji');
+                        continue;
+                      }
+
+                      pendingReactionControls.push({
+                        sender,
+                        reactId,
+                        action: 'set',
+                        emoji,
+                        timestamp: Number(payload.sent_timestamp),
+                        reactionTxId: txidHex,
+                        order: Number(i)
+                      });
+                      continue; // reaction control messages update target state instead of adding a chat bubble
+                    }
+
+                    if (reactAction === 'remove') {
+                      const targetReactionTxId = typeof parsedMessage.targetReactionTxId === 'string'
+                        ? parsedMessage.targetReactionTxId.trim()
+                        : '';
+                      pendingReactionControls.push({
+                        sender,
+                        reactId,
+                        action: 'remove',
+                        timestamp: Number(payload.sent_timestamp),
+                        reactionTxId: txidHex,
+                        targetReactionTxId: targetReactionTxId || undefined,
+                        order: Number(i)
+                      });
+                      continue; // reaction control messages update target state instead of adding a chat bubble
+                    }
+
+                    console.error('Unknown reaction action', reactAction);
+                    continue;
+                  }
                   // Regular message format processing
                   payload.message = parsedMessage.message;
                   if (parsedMessage.replyId) {
@@ -5824,6 +7195,9 @@ async function processChats(chats, keys) {
           }
           
           insertSorted(contact.messages, payload, 'timestamp');
+          if (payload.type === 'call' && shouldRefreshUpcomingCallsUiForCallTime(payload.callTime)) {
+            needsUpcomingCallsUiRefresh = true;
+          }
           // if we are not in the chatModal of who sent it, playChatSound or if device visibility is hidden play sound
           if (!inActiveChatWithSender || document.visibilityState === 'hidden') {
             playChatSound();
@@ -5975,6 +7349,31 @@ async function processChats(chats, keys) {
           }
         }
       }
+
+      if (pendingReactionControls.length > 0) {
+        pendingReactionControls.sort((left, right) => {
+          return left.timestamp - right.timestamp || left.order - right.order;
+        });
+
+        for (const pendingReaction of pendingReactionControls) {
+          if (
+            pendingReaction.sender === currentUserAddress &&
+            getPendingReactionChainEntries(from, pendingReaction.reactId).length > 0
+          ) {
+            continue;
+          }
+          if (applyIncomingReaction(contact, pendingReaction)) {
+            didApplyPendingReaction = true;
+            syncChatLatestActivityTimestamp(from, contact);
+            didChangeReactionPreview = true;
+            touchedReactionTargetTxids.add(pendingReaction.reactId);
+            if (pendingReaction.sender === from && (!inActiveChatWithSender || document.visibilityState === 'hidden')) {
+              playChatSound();
+            }
+          }
+        }
+      }
+
       if (hasNewTransfer){ hasAnyTransfer = true; }
       // If messages were added to contact.messages, update myData.chats
       if (added > 0) {
@@ -5992,16 +7391,18 @@ async function processChats(chats, keys) {
         // Add sender to the top of the chats tab
         // Remove existing chat for this contact if it exists
         const existingChatIndex = myData.chats.findIndex((chat) => chat.address === from);
-        if (existingChatIndex !== -1) {
-          myData.chats.splice(existingChatIndex, 1);
-        }
+        const existingChat = existingChatIndex === -1
+          ? null
+          : myData.chats.splice(existingChatIndex, 1)[0];
         // Get the most recent message (index 0 because it's sorted descending)
         const latestMessage = contact.messages[0];
-        // Create chat object with only guaranteed fields
-        const chatUpdate = {
-          address: from,
-          timestamp: latestMessage.timestamp,
-        };
+        const latestReaction = getLatestChatReactionActivity(contact);
+        const chatUpdate = existingChat || { address: from };
+        if (!latestReaction || latestReaction.timestamp <= latestMessage.timestamp) {
+          chatUpdate.timestamp = latestMessage.timestamp;
+        } else {
+          chatUpdate.timestamp = latestReaction.timestamp;
+        }
         // Find insertion point to maintain timestamp order (newest first)
         const insertIndex = myData.chats.findIndex((chat) => chat.timestamp < chatUpdate.timestamp);
         if (insertIndex === -1) {
@@ -6018,6 +7419,14 @@ async function processChats(chats, keys) {
         if (!inActiveChatWithSender && !chatsScreen.isActive() && !isFaucetAddress(from)) {
           footer.chatButton.classList.add('has-notification');
         }
+      }
+
+      if (didApplyPendingReaction && added === 0 && inActiveChatWithSender) {
+        chatModal.syncRenderedReactionTargets([...touchedReactionTargetTxids]);
+      }
+
+      if (didChangeReactionPreview && chatsScreen.isActive() && !inActiveChatWithSender) {
+        chatsScreen.updateChatList();
       }
 
       // Show transfer notification even if no messages were added
@@ -6059,6 +7468,10 @@ async function processChats(chats, keys) {
     if (historyModal.isActive()) historyModal.refresh();
     // Update wallet view if it's active
     if (walletScreen.isActive()) walletScreen.updateWalletView();
+  }
+
+  if (needsUpcomingCallsUiRefresh) {
+    refreshUpcomingCallsUi();
   }
 
   // Update the global timestamp AFTER processing all senders
@@ -6186,7 +7599,7 @@ async function postAssetTransfer(to, amount, memo, keys) {
     // memo: stringify(memo),
     xmemo: memo,
     timestamp: getTransactionTimestamp(),
-    fee: getTransactionFeeWei(), // This is not used by the backend
+    fee: getTransactionFeeWei(),
     networkId: network.netid,
   };
 
@@ -6197,6 +7610,8 @@ async function postAssetTransfer(to, amount, memo, keys) {
 
 // TODO - backend - when account is being registered, ensure that loserCase(alias)=alias and hash(alias)==aliasHash
 async function postRegisterAlias(alias, keys, isPrivate = false) {
+  // no need for sufficient balance check due to `register` transaction
+
   const aliasBytes = utf82bin(alias);
   const aliasHash = hashBytes(aliasBytes);
   const { publicKey } = generatePQKeys(keys.pqSeed);
@@ -6215,6 +7630,164 @@ async function postRegisterAlias(alias, keys, isPrivate = false) {
   const txid = await signObj(tx, keys);
   const res = await injectTx(tx, txid);
   return res;
+}
+
+const TX_FEE_TOO_LOW_REGEX = /insufficient funds for transaction fee/i;
+const TX_FEE_RETRY_MESSAGE = 'Please retry your transaction.';
+const TX_FEE_REFRESH_FAILED_MESSAGE = 'Transaction fee changed on the network. Please try again in a moment.';
+const TX_ACCOUNT_INSUFFICIENT_FUNDS_REGEX = /from account does not have sufficient funds/i;
+const TX_NETWORK_FEE_GREATER_THAN_PROVIDED_REGEX = /network transaction fee.*greater than the transaction fee provided/i;
+const TX_REASON_TRANSACTION_FEE_WEI_REGEX = /transaction fee(?:\s*:\s*|\s*\(\s*)(\d+)/i;
+
+/**
+ * Returns true when the backend reason explicitly indicates transaction-fee insufficiency.
+ * @param {string} reason
+ * @returns {boolean}
+ */
+function isTxFeeTooLowFailure(reason) {
+  return typeof reason === 'string' && TX_FEE_TOO_LOW_REGEX.test(reason);
+}
+
+/**
+ * Returns true when the backend reason indicates generic account insufficient funds.
+ * @param {string} reason
+ * @returns {boolean}
+ */
+function isTxAccountInsufficientFundsFailure(reason) {
+  return typeof reason === 'string' && TX_ACCOUNT_INSUFFICIENT_FUNDS_REGEX.test(reason);
+}
+
+/**
+ * Returns true when the backend reason indicates cached tx fee is lower than network fee.
+ * @param {string} reason
+ * @returns {boolean}
+ */
+function isTxNetworkFeeGreaterThanProvidedFailure(reason) {
+  return typeof reason === 'string' && TX_NETWORK_FEE_GREATER_THAN_PROVIDED_REGEX.test(reason);
+}
+
+/**
+ * Extract backend-reported transaction fee (wei) from a failure reason string.
+ * @param {string} reason
+ * @returns {bigint|null}
+ */
+function getBackendTransactionFeeWeiFromReason(reason) {
+  if (typeof reason !== 'string') {
+    return null;
+  }
+  const match = reason.match(TX_REASON_TRANSACTION_FEE_WEI_REGEX);
+  if (!match?.[1]) {
+    return null;
+  }
+  try {
+    return BigInt(match[1]);
+  } catch (_error) {
+    return null;
+  }
+}
+
+/**
+ * Detects whether a tx failure likely came from stale fee params (fee mismatch).
+ * A mismatch is assumed when backend-reported fee is greater than cached fee.
+ * @param {string} reason
+ * @returns {boolean}
+ */
+function isTxFeeMismatchFailure(reason) {
+  const potentialFeeReason =
+    isTxFeeTooLowFailure(reason) ||
+    isTxAccountInsufficientFundsFailure(reason) ||
+    isTxNetworkFeeGreaterThanProvidedFailure(reason);
+  if (!potentialFeeReason) {
+    return false;
+  }
+
+  const backendFeeWei = getBackendTransactionFeeWeiFromReason(reason);
+  if (backendFeeWei == null) {
+    // Backends may omit the fee amount; keep behavior for explicit fee mismatch reasons.
+    return isTxFeeTooLowFailure(reason) || isTxNetworkFeeGreaterThanProvidedFailure(reason);
+  }
+
+  const cachedFeeWei = getTransactionFeeWei({ allowNull: true });
+  if (cachedFeeWei == null) {
+    return true;
+  }
+
+  return backendFeeWei > cachedFeeWei;
+}
+
+function getInsufficientFundsFailureMessage(reason) {
+  if (typeof reason !== 'string') {
+    return 'Insufficient balance for fee. Go to the wallet to add more LIB.';
+  }
+
+  const tollMatch = reason.match(/toll\s*\(\s*([0-9]+)\s*\)/i);
+  if (!tollMatch) {
+    return 'Insufficient balance for fee. Go to the wallet to add more LIB.';
+  }
+
+  return tollMatch[1] === '0'
+    ? 'Insufficient balance for fee. Go to the wallet to add more LIB.'
+    : 'Insufficient balance for fee and toll. Go to the wallet to add more LIB.';
+}
+
+function getUserFacingTxFailureReason(reason, feeMismatchStatus = null) {
+  if (feeMismatchStatus?.detected) {
+    return feeMismatchStatus.refreshed ? TX_FEE_RETRY_MESSAGE : TX_FEE_REFRESH_FAILED_MESSAGE;
+  }
+  if (isTxAccountInsufficientFundsFailure(reason)) {
+    return getInsufficientFundsFailureMessage(reason);
+  }
+  return typeof reason === 'string' && reason.length > 0 ? reason : 'Transaction failed';
+}
+
+/**
+ * Returns true when the transaction failure reason indicates a recipient toll state failure.
+ * @param {string} reason
+ * @returns {boolean}
+ */
+function isRecipientTollStateFailure(reason) {
+  assert(typeof reason === 'string', 'Transaction failure reason must be a string');
+  return /required toll|blocked by the receiver|chat is blocked/i.test(reason);
+}
+
+/**
+ * Extracts the actionable one-line recipient toll/block reason from a pre-crack message.
+ * @param {string} reason
+ * @param {Object} contact
+ * @returns {string}
+ */
+function getRecipientTollPrecrackFailureReason(reason, contact) {
+  assert(typeof reason === 'string', 'Pre-crack failure reason must be a string');
+  assert(contact, 'Contact is required for reaction pre-crack failure copy');
+
+  if (reason.includes('Chat is blocked by the receiver.')) {
+    return 'You are blocked by this user';
+  }
+
+  if (/less than required toll/i.test(reason)) {
+    const username = getContactDisplayName(contact);
+    return `You can only send reactions to people who have added you as a connection. Ask ${username} to add you as a connection`;
+  }
+
+  return '';
+}
+
+/**
+ * Attempts to refresh network params when a tx fails due to fee mismatch.
+ * @param {string} reason
+ * @returns {Promise<{detected: boolean, refreshed: boolean}>}
+ */
+async function refreshNetworkParamsOnTxFeeMismatch(reason) {
+  if (!isTxFeeMismatchFailure(reason)) {
+    return { detected: false, refreshed: false };
+  }
+  try {
+    const refreshed = await getNetworkParams(true);
+    return { detected: true, refreshed: refreshed === true };
+  } catch (error) {
+    console.warn('Failed to refresh network params after fee mismatch:', error);
+    return { detected: true, refreshed: false };
+  }
 }
 
 /**
@@ -6241,14 +7814,7 @@ async function injectTx(tx, txid) {
       const libAsset = myData.wallet.assets.find((asset) => asset?.symbol === 'LIB');
       if (!libAsset) return;
 
-      let usd = Number(libAsset.networth);
-      if (!Number.isFinite(usd)) {
-        // Fallback: estimate from cached balance + price.
-        const balance = libAsset.balance ?? 0n;
-        const price = Number(libAsset.price);
-        if (!Number.isFinite(price) || typeof wei === 'undefined') return;
-        usd = (price * Number(balance)) / Number(wei);
-      }
+      const usd = calculateAssetUsdValue(libAsset);
 
       if (Number.isFinite(usd) && usd < LOW_LIB_USD_THRESHOLD) {
         showToast(
@@ -6284,7 +7850,22 @@ async function injectTx(tx, txid) {
     const data = await response.json();
     data.txid = txid;
 
-    if (data?.result?.success) {
+    // Support both response shapes:
+    // - { result: { success, reason } }
+    // - { success, reason }
+    const normalizedSuccess = data?.result?.success ?? data?.success;
+    const normalizedReason = data?.result?.reason || data?.reason || '';
+    if (!data.result || typeof data.result !== 'object') {
+      data.result = {};
+    }
+    if (typeof data.result.success === 'undefined' && typeof normalizedSuccess !== 'undefined') {
+      data.result.success = normalizedSuccess;
+    }
+    if (!data.result.reason && normalizedReason) {
+      data.result.reason = normalizedReason;
+    }
+
+    if (normalizedSuccess === true) {
       const pendingTxData = {
         txid: txid,
         type: tx.type,
@@ -6294,7 +7875,7 @@ async function injectTx(tx, txid) {
       if (tx.type === 'register') {
         pendingTxData.username = tx.alias;
         pendingTxData.address = tx.from; // User's address (longAddress form)
-      } else if (tx.type === 'update_toll_required') {
+      } else if (tx.type === 'update_toll_required' || tx.type === 'reclaim_toll') {
         pendingTxData.to = normalizeAddress(tx.to);
       } else if (tx.type === 'read') {
         pendingTxData.oldContactTimestamp = tx.oldContactTimestamp;
@@ -6303,21 +7884,41 @@ async function injectTx(tx, txid) {
       } else if (tx.type === 'deposit_stake' || tx.type === 'withdraw_stake') {
         pendingTxData.to = tx.nominee; // Store 64-character address as-is for stake transactions
       }
-      myData.pending.push(pendingTxData);
+      const existingPendingIndex = myData.pending.findIndex((pendingTx) => pendingTx.txid === txid);
+      if (existingPendingIndex === -1) {
+        myData.pending.push(pendingTxData);
+      } else {
+        myData.pending[existingPendingIndex] = {
+          ...myData.pending[existingPendingIndex],
+          ...pendingTxData
+        };
+      }
 
       if (tx.type !== 'register') {
         // After submitting a transaction, warn if user is low on LIB.
         maybeShowLowLibToast();
       }
     } else {
-      let toastMessage = 'Error injecting transaction: ' + data?.result?.reason;
-      console.error('Error injecting transaction:', data?.result?.reason);
-      if (data?.result?.reason?.includes('timestamp out of range')) {
+      const failureReason = normalizedReason;
+      const feeMismatchStatus = await refreshNetworkParamsOnTxFeeMismatch(failureReason);
+      const userFailureReason = getUserFacingTxFailureReason(failureReason, feeMismatchStatus);
+      let toastMessage = userFailureReason === failureReason
+        ? 'Error injecting transaction: ' + failureReason
+        : userFailureReason;
+      console.error('Error injecting transaction:', failureReason);
+      logsModal.log('Error injecting transaction:', failureReason);
+      if (!feeMismatchStatus.detected && failureReason?.includes('timestamp out of range')) {
         console.error('Timestamp out of range, updating timestamp');
         timeDifference()
         toastMessage += ' (Please try again)';
       }
-      showToast(toastMessage, 0, 'error');
+      if (
+        isRecipientTollStateFailure(failureReason)
+        && myData.pending.some((pendingTx) => pendingTx.txid === txid && pendingTx.reactionPending)
+      ) {
+        return data;
+      }
+      showToast(toastMessage, 0, feeMismatchStatus.detected ? 'warning' : 'error');
     }
     return data;
   } catch (error) {
@@ -6328,7 +7929,12 @@ async function injectTx(tx, txid) {
       showToast('Error injecting transaction: ' + error, 0, 'error');
     }
     console.error('Error injecting transaction:', error);
-    return null;
+    const errorReason = typeof error === 'string' ? error : (error?.message || String(error) || 'inject_failed');
+    return {
+      result: { success: false, reason: errorReason },
+      txid,
+      toastAlreadyShown: true,
+    };
   } finally {
     setTimeout(() => {
       saveState();
@@ -6426,7 +8032,7 @@ class SearchMessagesModal {
       contact.messages.forEach((message) => {
         if (!message.message) return; // some messages like calls have no message field
         // Skip deleted messages and call messages
-        if (message.deleted > 0) return;
+        if (isDeleted(message)) return;
         if (message.type === 'call') return;
         if (message.message.toLowerCase().includes(searchLower)) {
           // Highlight matching text
@@ -6935,7 +8541,12 @@ class AvatarEditModal {
     this.backButton.addEventListener('click', () => this.close());
     this.uploadButton.addEventListener('click', () => this.handleUploadButton());
     this.deleteButton.addEventListener('click', () => this.handleDelete());
-    this.saveActionButton.addEventListener('click', () => this.handleSave());
+    this.saveActionButton.addEventListener('click', withButtonCooldown(
+      this.saveActionButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this.handleSave()
+    ));
     this.cancelButton.addEventListener('click', () => this.handleCancel());
     this.fileInput.addEventListener('change', (e) => this.handleFileSelected(e));
 
@@ -7189,7 +8800,7 @@ class AvatarEditModal {
     if (this.avatarOptionUploaded) this.avatarOptionUploaded.onclick = () => selectOption('mine', this.avatarOptionUploaded);
     if (this.avatarOptionIdenticon) this.avatarOptionIdenticon.onclick = () => selectOption('identicon', this.avatarOptionIdenticon);
 
-    useBtn.onclick = async () => {
+    useBtn.onclick = withButtonCooldown(useBtn, BUTTON_COOLDOWN_MS, null, async () => {
       if (!this._avatarEditSelected || !address) return;
       if (this.isOwnAvatar) {
         // Own-avatar options are not shown; do not persist an account-level preference.
@@ -7227,7 +8838,7 @@ class AvatarEditModal {
       }
       // Close modal
       this.close();
-    };
+    });
 
     // wire close button to hide our controls when closed
     const closeBtn = document.getElementById('closeAvatarEditModal');
@@ -8239,6 +9850,14 @@ function revalidateButtonStates() {
   if (typeof sendAssetFormModal !== 'undefined' && sendAssetFormModal.isActive()) {
     sendAssetFormModal.refreshSendButtonDisabledState();
   }
+
+  // re-validate chat modal buttons
+  if (typeof chatModal !== 'undefined' && chatModal.isActive() && chatModal.address) {
+    chatModal.revalidateSendButtonState();
+    if (chatModal.voiceRecordButton) {
+      chatModal.voiceRecordButton.disabled = chatModal.blockedByRecipient || !isOnline;
+    }
+  }
 }
 
 // Prevent form submissions when offline
@@ -8491,43 +10110,6 @@ function getTransactionTimestamp() {
 
 // Validator Modals
 
-// fetching market price by invoking `updateAssetPricesIfNeeded` and extracting from myData.assetPrices
-async function getMarketPrice() {
-  try {
-    // Ensure asset prices are potentially updated by the central function
-    await updateAssetPricesIfNeeded();
-
-    // Check if wallet data and assets exist after the update attempt
-    if (!myData?.wallet?.assets) {
-      console.warn('getMarketPrice: Wallet assets not available in myData.');
-      return null;
-    }
-
-    // Find the LIB asset in the myData structure
-    const libAsset = myData.wallet.assets.find((asset) => asset.id === 'liberdus');
-
-    if (libAsset) {
-      // Check if the price exists and is a valid number on the found asset
-      if (typeof libAsset.price === 'number' && !isNaN(libAsset.price)) {
-        // console.log(`getMarketPrice: Retrieved LIB price from myData: ${libAsset.price}`); // Optional: For debugging
-        return libAsset.price;
-      } else {
-        // Price might be missing if the initial fetch failed or hasn't happened yet
-        console.warn(
-          `getMarketPrice: LIB asset found in myData, but its price is missing or invalid (value: ${libAsset.price}).`
-        );
-        return null;
-      }
-    } else {
-      console.warn('getMarketPrice: LIB asset not found in myData.wallet.assets.');
-      return null;
-    }
-  } catch (error) {
-    console.error('getMarketPrice: Error occurred while trying to get price from myData:', error);
-    return null; // Return null on any unexpected error during the process
-  }
-}
-
 class RemoveAccountModal {
   constructor() {}
 
@@ -8627,8 +10209,18 @@ class RemoveAccountsModal {
     this.submitButton = document.getElementById('submitRemoveAccounts');
     this.removeAllButton = document.getElementById('removeAllAccountsButton');
     this.closeButton.addEventListener('click', () => this.close());
-    this.submitButton.addEventListener('click', () => this.handleSubmit());
-    this.removeAllButton.addEventListener('click', () => this.handleRemoveAllAccounts());
+    this.submitButton.addEventListener('click', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this.handleSubmit()
+    ));
+    this.removeAllButton.addEventListener('click', withButtonCooldown(
+      this.removeAllButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this.handleRemoveAllAccounts()
+    ));
   }
 
   open() {
@@ -8860,6 +10452,7 @@ class BackupAccountModal {
     this.GOOGLE_TOKEN_STORAGE_KEY = 'google_drive_token';
     this.GDRIVE_BACKUP_TS_KEY = 'googleDriveBackupTimestamp';
     this.GDRIVE_REMINDER_TS_KEY = 'googleDriveReminderTimestamp';
+    this.isUploading = false; // Track upload state
   }
 
   load() {
@@ -8876,9 +10469,12 @@ class BackupAccountModal {
     this.storageLocationSelect = document.getElementById('backupStorageLocation');
     
     document.getElementById('closeBackupForm').addEventListener('click', () => this.close());
-    document.getElementById('backupForm').addEventListener('submit', (event) => {
-      this.handleSubmit(event);
-    });
+    document.getElementById('backupForm').addEventListener('submit', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      () => this.updateButtonState(),
+      (event) => this.handleSubmit(event)
+    ));
 
     this.passwordInput.addEventListener('input', () => this.updateButtonState());
     this.passwordConfirmInput.addEventListener('input', () => this.updateButtonState());
@@ -8907,6 +10503,12 @@ class BackupAccountModal {
   }
 
   close() {
+    // Check if upload is in progress
+    if (this.isUploading) {
+      showToast('Please wait for the backup to complete before closing.', 0, 'warning');
+      return;
+    }
+    
     // called when the modal needs to be closed
     this.modal.classList.remove('active');
     // Clear passwords for security
@@ -9401,7 +11003,6 @@ class BackupAccountModal {
     const password = this.passwordInput.value || '';
     const confirmPassword = this.passwordConfirmInput.value || '';
     if (password.length > 0 && confirmPassword !== password) {
-      this.updateButtonState();
       return;
     }
 
@@ -9422,9 +11023,6 @@ class BackupAccountModal {
    * @param {boolean} toGoogleDrive - Whether to upload to Google Drive
    */
   async handleSubmitOne(toGoogleDrive = false) {
-    // Disable button to prevent multiple submissions
-    this.submitButton.disabled = true;
-
     saveState();
 
     const password = this.passwordInput.value;
@@ -9508,8 +11106,6 @@ class BackupAccountModal {
     } catch (error) {
       console.error('Backup failed:', error);
       showToast('Failed to create backup. Please try again.', 0, 'error');
-      // Re-enable button so user can try again
-      this.updateButtonState();
     }
   }
 
@@ -9518,10 +11114,6 @@ class BackupAccountModal {
    * @param {boolean} toGoogleDrive - Whether to upload to Google Drive
    */
   async handleSubmitAll(toGoogleDrive = false) {
-
-    // Disable button to prevent multiple submissions
-    this.submitButton.disabled = true;
-
     const password = this.passwordInput.value;
     const myLocalStore = this.copyLocalStorageToObject();
 
@@ -9588,8 +11180,6 @@ class BackupAccountModal {
     } catch (error) {
       console.error('Backup failed:', error);
       showToast('Failed to create backup. Please try again.', 0, 'error');
-      // Re-enable button so user can try again
-      this.updateButtonState();
     }
   }
 
@@ -9614,13 +11204,33 @@ class BackupAccountModal {
       }
     }
 
+    // Shared loading toast ID for both upload attempts
+    let loadingToastId = null;
+
+    // Helper to show loading toast
+    const showLoadingToast = () => {
+      loadingToastId = showToast('Uploading backup to Google Drive... Please stay on this page. Closing or signing out may interrupt the backup.', 0, 'loading');
+    };
+
+    // Helper to hide loading toast
+    const hideLoadingToast = () => {
+      if (loadingToastId !== null) {
+        hideToast(loadingToastId);
+        loadingToastId = null;
+      }
+    };
+
+    // Track whether to close modal after cleanup
+    let shouldClose = false;
+
     // Now upload with the token
     try {
-      showToast('Uploading backup to Google Drive...', 3000, 'info');
+      this.isUploading = true;
+      showLoadingToast();
       await this.uploadToGoogleDrive(data, filename, tokenData);
       showToast('Backup uploaded to Google Drive successfully!', 5000, 'success');
       this.setGDriveBackupTs();
-      this.close();
+      shouldClose = true;
     } catch (error) {
       console.error('Google Drive upload failed:', error);
       // Token might be invalid, clear it and retry auth
@@ -9630,11 +11240,12 @@ class BackupAccountModal {
         // Retry with fresh authentication
         try {
           tokenData = await this.startGoogleDriveAuth();
-          showToast('Uploading backup to Google Drive...', 3000, 'info');
+          this.isUploading = true;
+          showLoadingToast();
           await this.uploadToGoogleDrive(data, filename, tokenData);
           showToast('Backup uploaded to Google Drive successfully!', 5000, 'success');
           this.setGDriveBackupTs();
-          this.close();
+          shouldClose = true;
         } catch (retryError) {
           console.error('Retry failed:', retryError);
           showToast(retryError.message || 'Upload failed.', 0, 'error');
@@ -9643,6 +11254,12 @@ class BackupAccountModal {
       } else {
         showToast('Failed to upload to Google Drive: ' + error.message, 5000, 'error');
         this.updateButtonState();
+      }
+    } finally {
+      hideLoadingToast();
+      this.isUploading = false;
+      if (shouldClose) {
+        this.close();
       }
     }
   }
@@ -9757,7 +11374,12 @@ class RestoreAccountModal {
     this.pickerEmpty = document.getElementById('googleDrivePickerEmpty');
 
     this.closeImportForm.addEventListener('click', () => this.close());
-    this.importForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.importForm.addEventListener('submit', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      () => this.updateButtonState(),
+      (event) => this.handleSubmit(event)
+    ));
 
     // Add new event listeners for developer options
     this.developerOptionsToggle.addEventListener('change', () => this.toggleDeveloperOptions());
@@ -10481,7 +12103,12 @@ class TollModal {
     this.tollForm = document.getElementById('tollForm');
     this.tollCurrencySymbol = document.getElementById('tollCurrencySymbol');
 
-    this.tollForm.addEventListener('submit', (event) => this.saveAndPostNewToll(event));
+    this.tollForm.addEventListener('submit', withButtonCooldown(
+      this.saveButton,
+      BUTTON_COOLDOWN_MS,
+      () => {}, // No-op: not null, so the wrapper does not re-enable the button; it stays disabled until the modal is opened again.
+      (event) => this.saveAndPostNewToll(event)
+    ));
     this.closeButton.addEventListener('click', () => this.close());
     this.newTollAmountInputElement.addEventListener('input', () => this.newTollAmountInputElement.value = normalizeUnsignedFloat(this.newTollAmountInputElement.value));
     this.newTollAmountInputElement.addEventListener('input', () => this.updateSaveButtonState());
@@ -10535,9 +12162,6 @@ class TollModal {
   async saveAndPostNewToll(event) {
     event.preventDefault();
     let newTollValue = parseFloat(this.newTollAmountInputElement.value);
-
-    // disable submit button
-    this.saveButton.disabled = true;
 
     if (isNaN(newTollValue) || newTollValue < 0) {
       showToast('Invalid toll amount entered.', 0, 'error');
@@ -10668,6 +12292,12 @@ class TollModal {
    * @returns {Promise<Object>} - The response from the network
    */
   async postToll(toll, tollUnit) {
+    const feeBalanceStatus = await getFeeBalanceStatus();
+    if (!feeBalanceStatus.success) {
+      showFeeBalanceFailureToast(feeBalanceStatus.reason);
+      return { result: { success: false, reason: feeBalanceStatus.reason || FEE_FAILURE_REASON_CHECK_FAILED } };
+    }
+
     const tollTx = {
       from: longAddress(myAccount.keys.address),
       toll: toll,
@@ -10784,7 +12414,15 @@ class InviteModal {
     this.resetInviteButton = document.getElementById('resetInviteMessage');
 
     this.closeButton.addEventListener('click', () => this.close());
-    this.inviteForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.inviteForm.addEventListener('submit', withButtonCooldown(
+      [this.submitButton, this.resetInviteButton],
+      BUTTON_COOLDOWN_MS,
+      () => {
+        this.validateInputs();
+        this.resetInviteButton.disabled = false;
+      },
+      (event) => this.handleSubmit(event)
+    ));
 
     // input listener for editable message
     this.inviteMessageInput.addEventListener('input', () => this.validateInputs());
@@ -10843,18 +12481,9 @@ class InviteModal {
       saveState();
     }
 
-    // 2-second cooldown on Share button
-    this.submitButton.disabled = true;
-    this.resetInviteButton.disabled = true;
-    setTimeout(() => {
-      this.validateInputs();
-      this.resetInviteButton.disabled = false;
-    }, 2000);
-
     try {
       await this.shareLiberdusInvite(message);
     } catch (err) {
-      // shareLiberdusInvite will show its own errors; rely on cooldown to re-enable
       showToast('Could not share invitation. Try copying manually.', 0, 'error');
     }
   }
@@ -10986,7 +12615,12 @@ class UpdateWarningModal {
     // Set up event listeners
     this.closeButton.addEventListener('click', () => this.close());
     this.backupFirstBtn.addEventListener('click', () => backupAccountModal.open());
-    this.proceedToStoreBtn.addEventListener('click', () => this.proceedToStore());
+    this.proceedToStoreBtn.addEventListener('click', withButtonCooldown(
+      this.proceedToStoreBtn,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this.proceedToStore()
+    ));
 
     // Event delegation for dynamically created update toast button
     document.addEventListener('click', (event) => {
@@ -11036,12 +12670,18 @@ class HelpModal {
     this.joinDiscordButton = document.getElementById('joinDiscord');
 
     this.closeButton.addEventListener('click', () => this.close());
-    this.submitFeedbackButton.addEventListener('click', () => {
-      window.open('https://github.com/liberdus/web-client-v2/issues', '_blank');
-    });
-    this.joinDiscordButton.addEventListener('click', () => {
-      window.open('https://discord.gg/2cpJzFnwCR', '_blank');
-    });
+    this.submitFeedbackButton.addEventListener('click', withButtonCooldown(
+      this.submitFeedbackButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => { window.open('https://github.com/liberdus/web-client-v2/issues', '_blank'); }
+    ));
+    this.joinDiscordButton.addEventListener('click', withButtonCooldown(
+      this.joinDiscordButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => { window.open('https://discord.gg/2cpJzFnwCR', '_blank'); }
+    ));
   }
 
   open() {
@@ -11170,8 +12810,16 @@ class MyProfileModal {
     this.submitButton = document.querySelector('#accountForm .btn.btn--primary');
 
     this.closeButton.addEventListener('click', () => this.close());
-    this.accountForm.addEventListener('submit', (event) => this.handleSubmit(event));
-    
+    this.accountForm.addEventListener('submit', withButtonCooldown(
+      [this.closeButton, this.submitButton],
+      BUTTON_COOLDOWN_MS,
+      () => {
+        this.close();
+        this.closeButton.disabled = false;
+        this.submitButton.disabled = false;
+      },
+      (event) => this.handleSubmit(event)
+    ));
 
     // Add input event listeners for validation
     this.name.addEventListener('input', (e) => this.handleNameInput(e));
@@ -11280,22 +12928,11 @@ class MyProfileModal {
     myData.account = { ...myData.account, ...formData };
 
     showToast('Profile updated successfully', 2000, 'success');
-    // disable the close button and submit button
-    this.closeButton.disabled = true;
-    this.submitButton.disabled = true;
 
     // if myInfo modal is open update the info
     if (myInfoModal && myInfoModal.isActive()) {
       myInfoModal.updateMyInfo();
     }
-
-    // Hide success message after 2 seconds
-    setTimeout(() => {
-      this.close();
-      // enable the close button and submit button
-      this.closeButton.disabled = false;
-      this.submitButton.disabled = false;
-    }, 2000);
   }
 }
 const myProfileModal = new MyProfileModal();
@@ -11348,7 +12985,12 @@ class ValidatorStakingModal {
     this.stakeForm = document.getElementById('stakeForm');
 
 
-    this.unstakeButton.addEventListener('click', () => this.handleUnstake());
+    this.unstakeButton.addEventListener('click', withButtonCooldown(
+      [this.unstakeButton, this.backButton, this.stakeButton],
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this.handleUnstake()
+    ));
     this.backButton.addEventListener('click', () => this.close());
     
     // Set up the learn more button click handler
@@ -11432,7 +13074,7 @@ class ValidatorStakingModal {
 
       const stakeRequiredUsd = EthNum.toWei(parameters.current?.stakeRequiredUsdStr); // BigInt object
 
-      const marketPrice = await getMarketPrice(); // number or null
+      const libUsdPrice = await getLibUsdPrice(); // number or null
       const stabilityFactor = getStabilityFactor(); // number
 
 
@@ -11453,35 +13095,33 @@ class ValidatorStakingModal {
       }
 
       let userStakedUsd = null; // number or null
-      // TODO: Calculate User Staked Amount (USD) using market price - Use stability factor if available?
-      // For now, using market price as implemented previously.
-      if (userStakedBaseUnits != null && typeof userStakedBaseUnits === 'bigint' && marketPrice != null) {
+      if (userStakedBaseUnits != null && typeof userStakedBaseUnits === 'bigint' && libUsdPrice != null) {
         // Check it's a BigInt
         try {
           // userStakedBaseUnits is already a BigInt object
           const userStakedLib = Number(userStakedBaseUnits) / 1e18;
-          userStakedUsd = userStakedLib * marketPrice;
+          userStakedUsd = userStakedLib * libUsdPrice;
         } catch (e) {
           console.error('Error calculating userStakedUsd:', e, {
             userStakedBaseUnits,
-            marketPrice,
+            libUsdPrice,
           });
         }
       }
 
-      let marketStakeUsdBaseUnits = null; // BigInt object or null
-      // Calculate Min Stake at Market (USD) using BigInt and market price
-      if (stakeAmountLibBaseUnits !== null && marketPrice != null) {
+      let stabilityStakeUsdBaseUnits = null; // BigInt object or null
+      // Calculate min stake USD using the network stability factor price
+      if (stakeAmountLibBaseUnits !== null && libUsdPrice != null) {
         // stakeAmountLibBaseUnits is BigInt object here
         try {
           const stakeAmountLib = Number(stakeAmountLibBaseUnits) / 1e18;
-          const marketStakeUsd = stakeAmountLib * marketPrice;
+          const stabilityStakeUsd = stakeAmountLib * libUsdPrice;
           // Approximate back to base units (assuming 18 decimals for USD base units)
-          marketStakeUsdBaseUnits = BigInt(Math.round(marketStakeUsd * 1e18));
+          stabilityStakeUsdBaseUnits = BigInt(Math.round(stabilityStakeUsd * 1e18));
         } catch (e) {
-          console.error('Error calculating marketStakeUsdBaseUnits:', e, {
+          console.error('Error calculating stabilityStakeUsdBaseUnits:', e, {
             stakeAmountLibBaseUnits,
-            marketPrice,
+            libUsdPrice,
           });
         }
       }
@@ -11497,16 +13137,16 @@ class ValidatorStakingModal {
       const displayNetworkStakeLib =
         stakeAmountLibBaseUnits !== null ? big2str(stakeAmountLibBaseUnits, 18).slice(0, 7) : 'N/A';
       const displayStabilityFactor = stabilityFactor ? stabilityFactor.toFixed(6) : 'N/A';
-      const displayMarketPrice = marketPrice ? '$' + marketPrice.toFixed(6) : 'N/A';
-      // marketStakeUsdBaseUnits is a BigInt object or null. Pass its string representation.
-      const displayMarketStakeUsd =
-        marketStakeUsdBaseUnits !== null ? '$' + big2str(marketStakeUsdBaseUnits, 18).slice(0, 6) : 'N/A';
+      const displayLibUsdPrice = libUsdPrice ? '$' + libUsdPrice.toFixed(6) : 'N/A';
+      // stabilityStakeUsdBaseUnits is a BigInt object or null. Pass its string representation.
+      const displayStabilityStakeUsd =
+        stabilityStakeUsdBaseUnits !== null ? '$' + big2str(stabilityStakeUsdBaseUnits, 18).slice(0, 6) : 'N/A';
 
       this.networkStakeUsdValue.textContent = displayNetworkStakeUsd;
       this.networkStakeLibValue.textContent = displayNetworkStakeLib;
       this.stabilityFactorValue.textContent = displayStabilityFactor;
-      this.marketPriceValue.textContent = displayMarketPrice;
-      this.marketStakeUsdValue.textContent = displayMarketStakeUsd;
+      this.marketPriceValue.textContent = displayLibUsdPrice;
+      this.marketStakeUsdValue.textContent = displayStabilityStakeUsd;
 
       if (!nominee) {
         // Case: No Nominee - Hide the stake info section completely and show earn message
@@ -11648,10 +13288,10 @@ class ValidatorStakingModal {
       return;
     }
 
-    // If the button is disabled for any reason, show the current reason and exit
-    if (this.unstakeButton.disabled) {
-      const message = this.unstakeButton.title || this.unstakeLockInfoElement?.textContent || 'Unstake unavailable.';
-      if (message) showToast(message, 0, 'error');
+    // If there is a pending stake/unstake tx, do not proceed (same condition that disables the button in the UI)
+    const currentPendingTx = myData.pending?.find((tx) => tx.type === 'deposit_stake' || tx.type === 'withdraw_stake');
+    if (currentPendingTx) {
+      showToast('A stake or unstake transaction is already pending.', 0, 'error');
       return;
     }
 
@@ -11680,11 +13320,6 @@ class ValidatorStakingModal {
   }
 
   async submitUnstakeTransaction(nodeAddress) {
-    // disable the unstake button, back button, and submitStake button
-    this.unstakeButton.disabled = true;
-    this.backButton.disabled = true;
-    this.stakeButton.disabled = true;
-
     try {
       const response = await this.postUnstake(nodeAddress);
       if (response && response.result && response.result.success) {
@@ -11708,14 +13343,16 @@ class ValidatorStakingModal {
       console.error('Error submitting unstake transaction:', error);
       // Provide a user-friendly error message
       showToast('Unstake transaction failed. Network or server error.', 0, 'error');
-    } finally {
-      this.unstakeButton.disabled = false;
-      this.backButton.disabled = false;
-      this.stakeButton.disabled = false;
     }
   }
 
   async postUnstake(nodeAddress) {
+    const feeBalanceStatus = await getFeeBalanceStatus();
+    if (!feeBalanceStatus.success) {
+      showFeeBalanceFailureToast(feeBalanceStatus.reason);
+      return { result: { success: false, reason: feeBalanceStatus.reason || FEE_FAILURE_REASON_CHECK_FAILED } };
+    }
+
     // TODO: need to query network for the correct nominator address
     const unstakeTx = {
       type: 'withdraw_stake',
@@ -11922,7 +13559,6 @@ class StakeValidatorModal {
     this.stakedAmount = 0n;
     this.lastValidationTimestamp = 0;
     this.hasNominee = false;
-    this.isFaucetRequestInProgress = false;
   }
 
   load() {
@@ -11944,18 +13580,32 @@ class StakeValidatorModal {
     this.faucetButton = document.getElementById('faucetButton');
 
     // Setup event listeners
-    this.form.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.form.addEventListener('submit', withButtonCooldown(
+      [this.submitButton, this.backButton],
+      BUTTON_COOLDOWN_MS,
+      null,
+      (event) => this.handleSubmit(event)
+    ));
     this.backButton.addEventListener('click', () => this.close());
 
     this.debouncedValidateStakeInputs = debounce(() => this.validateStakeInputs(), 300);
 
+    this.nodeAddressInput.addEventListener('input', () => { this.submitButton.disabled = true; });
     this.nodeAddressInput.addEventListener('input', this.debouncedValidateStakeInputs);
-    this.amountInput.addEventListener('input', () => this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value));
+    this.amountInput.addEventListener('input', () => {
+      this.submitButton.disabled = true;
+      this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value);
+    });
     this.amountInput.addEventListener('input', this.debouncedValidateStakeInputs);
     this.scanStakeQRButton.addEventListener('click', () => scanQRModal.open());
     this.uploadStakeQRButton.addEventListener('click', () => this.stakeQRFileInput.click());
     this.stakeQRFileInput.addEventListener('change', (event) => sendAssetFormModal.handleQRFileSelect(event, this));
-    this.faucetButton.addEventListener('click', () => this.requestFromFaucet());
+    this.faucetButton.addEventListener('click', withButtonCooldown(
+      this.faucetButton,
+      FAUCET_COOLDOWN_MS,
+      null,
+      () => this.requestFromFaucet()
+    ));
 
     // Add listener for opening the modal
     document.getElementById('openStakeModal').addEventListener('click', () => this.open());
@@ -11981,7 +13631,6 @@ class StakeValidatorModal {
     
     // Reset faucet button state
     this.faucetButton.disabled = true;
-    this.isFaucetRequestInProgress = false;
 
     // Set minimum stake amount
     const minStakeAmount = this.form.dataset.minStake || '0';
@@ -12001,7 +13650,6 @@ class StakeValidatorModal {
 
   async handleSubmit(event) {
     event.preventDefault();
-    this.submitButton.disabled = true;
 
     const nodeAddress = this.nodeAddressInput.value.trim();
     const amountStr = this.amountInput.value.trim();
@@ -12009,7 +13657,6 @@ class StakeValidatorModal {
     // Basic Validation
     if (!nodeAddress || !amountStr) {
       showToast('Please fill in all fields.', 0, 'error');
-      this.submitButton.disabled = false;
       return;
     }
 
@@ -12018,13 +13665,10 @@ class StakeValidatorModal {
       amount_in_wei = bigxnum2big(wei, amountStr);
     } catch (error) {
       showToast('Invalid amount entered.', 0, 'error');
-      this.submitButton.disabled = false;
       return;
     }
 
     try {
-      this.backButton.disabled = true;
-
       const response = await this.postStake(nodeAddress, amount_in_wei, myAccount.keys);
 
       if (response && response.result && response.result.success) {
@@ -12049,9 +13693,6 @@ class StakeValidatorModal {
     } catch (error) {
       console.error('Stake transaction error:', error);
       showToast('Stake transaction failed. See console for details.', 0, 'error');
-    } finally {
-      this.submitButton.disabled = false;
-      this.backButton.disabled = false;
     }
   }
 
@@ -12227,15 +13868,8 @@ class StakeValidatorModal {
    * @returns {Promise<void>}
    */
   async requestFromFaucet() {
-    if (this.isFaucetRequestInProgress) {
-      return;
-    }
-
     const toastId = showToast('Requesting from faucet...', 0, 'loading');
     try {
-      this.isFaucetRequestInProgress = true;
-      this.faucetButton.disabled = true;
-      
       const payload = {
         username: myAccount.username,
         userAddress: longAddress(myAccount.keys.address),
@@ -12269,11 +13903,34 @@ class StakeValidatorModal {
       showToast(`Faucet request failed: ${error.message || 'Unknown error'}`, 0, 'error');
     } finally {
       hideToast(toastId);
-      this.isFaucetRequestInProgress = false;
     }
   }
 }
 const stakeValidatorModal = new StakeValidatorModal();
+
+const CHAT_REACTION_SHEET_CATEGORY_MAP = new Map(
+  CHAT_REACTION_SHEET_CATEGORIES.map((category) => [category.key, category])
+);
+const CHAT_REACTION_SHEET_DEFAULT_CATEGORY = CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY;
+const CHAT_REACTION_SHEET_RECENT_ACCOUNT_KEY = 'recentReactionEmojis';
+const CHAT_REACTION_SHEET_RECENT_LIMIT = CHAT_REACTION_SHEET_DEFAULT_COMMON_EMOJIS.length;
+const CHAT_REACTION_SHEET_PROMOTION_RATIO = 0.5;
+const CHAT_REACTION_SHEET_CLOSE_DRAG_PX = 120;
+const CHAT_INITIAL_RENDER_COUNT = 100;
+const CHAT_OLDER_RENDER_BATCH_SIZE = 200;
+const CHAT_THUMBNAIL_ATTACHMENT_SELECTOR = '[data-image-attachment="true"], [data-video-attachment="true"]';
+const CHAT_REACTION_SHEET_TAB_ICONS = {
+  recent: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v6h6"/><path d="M12 7v5l3 2"/></svg>',
+  smileys: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></svg>',
+  people: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></svg>',
+  nature: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg>',
+  food: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 0 0 9-9H3a9 9 0 0 0 9 9Z"/><path d="M7 21h10"/><path d="M19.5 12 22 6"/><path d="M16.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.73 1.62"/><path d="M11.25 3c.27.1.8.53.74 1.36-.05.83-.93 1.2-.98 2.02-.06.78.33 1.24.72 1.62"/><path d="M6.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.74 1.62"/></svg>',
+  activity: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="10" y1="11" y2="11"/><line x1="8" x2="8" y1="9" y2="13"/><line x1="15" x2="15.01" y1="12" y2="12"/><line x1="18" x2="18.01" y1="10" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/></svg>',
+  travel: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/></svg>',
+  objects: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>',
+  symbols: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/></svg>',
+  flags: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528"/></svg>'
+};
 
 class ChatModal {
   constructor() {
@@ -12283,7 +13940,6 @@ class ChatModal {
 
     // used by updateTollValue and updateTollRequired
     this.toll = null;
-    this.tollUnit = null;
     this.address = null;
 
     // True when the active chat recipient has blocked me (tollRequiredToSend === 2)
@@ -12307,12 +13963,28 @@ class ChatModal {
     // Track whether we've locked background/modal scroll
     this.scrollLocked = false;
     this._touchMoveBlocker = null; // blocks touch outside messages container
+    this.messagesContainerTouchY = null;
 
     // Track which voice message element is playing
     this.playingVoiceMessageElement = null;
 
     // Track active attachment loading toasts by contact so closing a chat can hide only its loading toasts.
     this.attachmentLoadingToastsByContact = new Map();
+    // Prevent multiple fee-failure warnings when close triggers read + reclaim checks.
+    this.closeFeeFailureToastShown = false;
+
+    // Expanded emoji picker state
+    this.reactionSheetTargetMessage = null;
+    this.reactionSheetActiveCategory = CHAT_REACTION_SHEET_DEFAULT_CATEGORY;
+    this.reactionSheetDragStartY = 0;
+    this.reactionSheetDragOffset = 0;
+    this.reactionSheetPointerId = null;
+    
+    // Drag and drop state
+    this.dragCounter = 0;
+    this.dropOverlay = null;
+
+    this.chatRenderedOldestIndex = CHAT_INITIAL_RENDER_COUNT - 1;
   }
 
   /**
@@ -12382,11 +14054,362 @@ class ChatModal {
   }
 
   /**
+   * Extract image files from clipboard items
+   * @param {DataTransferItemList} items - Clipboard items
+   * @returns {File[]} Array of image files
+   */
+  getImageFilesFromClipboard(items) {
+    const imageFiles = [];
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          imageFiles.push(file);
+        }
+      }
+    }
+    return imageFiles;
+  }
+
+  /**
+   * Process multiple image files for attachment
+   * @param {File[]} files - Array of image files to process
+   * @returns {Promise<void>}
+   */
+  async processIncomingAttachmentFiles(files) {
+    // Short-circuit if in edit mode - edit flow is text-only
+    if (this.isEditingMessage()) {
+      return;
+    }
+
+    for (const file of files) {
+      if (this.fileAttachments.length >= 5) {
+        showToast('You can only attach up to 5 files.', 0, 'error');
+        break;
+      }
+      // Create synthetic event for handleFileAttachment
+      const syntheticEvent = { target: { files: [file], value: '' } };
+      try {
+        await this.handleFileAttachment(syntheticEvent);
+      } catch (error) {
+        console.error('Failed to process attachment:', file.name, error);
+        // Continue processing remaining files even if one fails
+      }
+    }
+  }
+
+  /**
+   * Handle paste event on message input
+   * @param {ClipboardEvent} e - Paste event
+   * @returns {Promise<void>}
+   */
+  async handleMessageInputPaste(e) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    // Find image items in clipboard
+    const imageFiles = this.getImageFilesFromClipboard(items);
+
+    // If images found, process them
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      await this.processIncomingAttachmentFiles(imageFiles);
+    }
+  }
+
+  /**
+   * Create drop overlay element
+   * @returns {HTMLElement} The drop overlay element
+   */
+  createDropOverlay() {
+    // Use the HTML-defined overlay instead of creating dynamically
+    this.dropOverlay = document.getElementById('dropOverlay');
+    return this.dropOverlay;
+  }
+
+  normalizeRecentReactionEmojiList(emojis) {
+    if (!Array.isArray(emojis)) {
+      return [];
+    }
+
+    const normalizedEmojis = [];
+    const seen = new Set();
+    for (const entry of emojis) {
+      const emoji = typeof entry === 'string' ? entry.trim() : '';
+      if (!emoji || seen.has(emoji)) {
+        continue;
+      }
+      seen.add(emoji);
+      normalizedEmojis.push(emoji);
+    }
+
+    return normalizedEmojis;
+  }
+
+  getRecentReactionSheetEmojis() {
+    const rankedEmojis = [];
+    const seen = new Set();
+    const addEmoji = (emoji) => {
+      if (!emoji || seen.has(emoji)) {
+        return;
+      }
+      seen.add(emoji);
+      rankedEmojis.push(emoji);
+    };
+
+    this.normalizeRecentReactionEmojiList(
+      myData?.account?.[CHAT_REACTION_SHEET_RECENT_ACCOUNT_KEY]
+    ).forEach(addEmoji);
+    CHAT_REACTION_SHEET_DEFAULT_COMMON_EMOJIS.forEach(addEmoji);
+
+    return rankedEmojis.slice(0, CHAT_REACTION_SHEET_RECENT_LIMIT);
+  }
+
+  promoteRecentReactionEmoji(recentEmojis, selectedEmoji) {
+    const emoji = typeof selectedEmoji === 'string' ? selectedEmoji.trim() : '';
+    if (!emoji) {
+      return this.normalizeRecentReactionEmojiList(recentEmojis).slice(0, CHAT_REACTION_SHEET_RECENT_LIMIT);
+    }
+
+    const currentEmojis = this.normalizeRecentReactionEmojiList(recentEmojis).slice(
+      0,
+      CHAT_REACTION_SHEET_RECENT_LIMIT
+    );
+    const currentIndex = currentEmojis.indexOf(emoji);
+    const remainingEmojis = currentEmojis.filter((entry) => entry !== emoji);
+    const targetIndex = currentIndex === -1
+      ? CHAT_REACTION_SHEET_RECENT_LIMIT - 1
+      : Math.max(
+          0,
+          currentIndex - Math.max(1, Math.ceil((currentIndex + 1) * CHAT_REACTION_SHEET_PROMOTION_RATIO))
+        );
+
+    remainingEmojis.splice(targetIndex, 0, emoji);
+    return remainingEmojis.slice(0, CHAT_REACTION_SHEET_RECENT_LIMIT);
+  }
+
+  recordRecentReactionEmoji(emoji) {
+    const selectedEmoji = typeof emoji === 'string' ? emoji.trim() : '';
+    if (!selectedEmoji || !myData?.account) {
+      return;
+    }
+
+    myData.account[CHAT_REACTION_SHEET_RECENT_ACCOUNT_KEY] = this.promoteRecentReactionEmoji(
+      this.getRecentReactionSheetEmojis(),
+      selectedEmoji
+    );
+    saveState();
+  }
+
+  hasRecentReactionEmojiOverrides() {
+    return !!myData?.account && Object.prototype.hasOwnProperty.call(
+      myData.account,
+      CHAT_REACTION_SHEET_RECENT_ACCOUNT_KEY
+    );
+  }
+
+  updateReactionSheetResetButtonVisibility() {
+    if (!this.resetReactionSheetRecentButton) {
+      return;
+    }
+
+    this.resetReactionSheetRecentButton.hidden = (
+      this.reactionSheetActiveCategory !== CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY
+    );
+  }
+
+  handleResetRecentReactionEmojis() {
+    if (!myData?.account) {
+      return;
+    }
+
+    if (!this.hasRecentReactionEmojiOverrides()) {
+      showToast('Recent emojis are already reset', 2000, 'info');
+      return;
+    }
+
+    const confirmed = confirm('Reset recent emojis to the default set?');
+    if (!confirmed) {
+      return;
+    }
+
+    delete myData.account[CHAT_REACTION_SHEET_RECENT_ACCOUNT_KEY];
+    saveState();
+    this.setReactionSheetCategory(CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY);
+    showToast('Recent emojis reset', 2000, 'success');
+  }
+
+  /**
+   * Returns the active reaction sheet category config.
+   * @param {string} categoryKey
+   * @returns {{key: string, label: string, emojis: string[]}}
+   */
+  getReactionSheetCategory(categoryKey) {
+    const category = CHAT_REACTION_SHEET_CATEGORY_MAP.get(categoryKey);
+    assert(category, `Unknown reaction sheet category: ${categoryKey}`);
+    if (category.key === CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY) {
+      return { ...category, emojis: this.getRecentReactionSheetEmojis() };
+    }
+    return category;
+  }
+
+  /**
+   * Finds which reaction sheet category contains the provided emoji.
+   * @param {string} emoji
+   * @returns {string}
+   */
+  getReactionSheetCategoryKeyForEmoji(emoji) {
+    if (!emoji) return '';
+
+    const category = CHAT_REACTION_SHEET_CATEGORIES.find((entry) => (
+      entry.key !== CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY &&
+      entry.emojis.includes(emoji)
+    ));
+    return category?.key || '';
+  }
+
+  /**
+   * Renders the reaction sheet tab strip.
+   * @returns {void}
+   */
+  renderReactionSheetTabs() {
+    this.reactionSheetTabs.innerHTML = CHAT_REACTION_SHEET_CATEGORIES.map((category) => {
+      const isActive = category.key === this.reactionSheetActiveCategory;
+      const icon = CHAT_REACTION_SHEET_TAB_ICONS[category.key];
+      assert(icon, `Missing reaction sheet tab icon: ${category.key}`);
+      return `
+        <button
+          class="chat-reaction-sheet-tab${isActive ? ' active' : ''}"
+          type="button"
+          data-category-key="${category.key}"
+          aria-pressed="${isActive ? 'true' : 'false'}"
+          aria-label="${category.label}"
+        >
+          <span class="chat-reaction-sheet-tab-icon" aria-hidden="true">${icon}</span>
+        </button>
+      `;
+    }).join('');
+  }
+
+  /**
+   * Sets the active tab and redraws the emoji grid for that category.
+   * @param {string} categoryKey
+   * @returns {void}
+   */
+  setReactionSheetCategory(categoryKey) {
+    const category = this.getReactionSheetCategory(categoryKey);
+    this.reactionSheetActiveCategory = category.key;
+    this.renderReactionSheetTabs();
+    this.updateReactionSheetResetButtonVisibility();
+
+    this.reactionSheetGrid.innerHTML = category.emojis.map((emoji) => `
+      <button class="chat-reaction-sheet-button message-context-reaction-button" type="button" data-emoji="${emoji}" aria-label="React with ${emoji}">${emoji}</button>
+    `).join('');
+    this.reactionSheetGrid.scrollTop = 0;
+    this.syncReactionPickerActiveState(this.reactionSheetGrid, this.reactionSheetTargetMessage);
+    if (this.reactionSheetOverlay.classList.contains('active')) {
+      requestAnimationFrame(() => this.updateReactionSheetViewport());
+    }
+  }
+
+  /**
+   * Show the drop overlay
+   * @returns {void}
+   */
+  showDropOverlay() {
+    if (!this.dropOverlay) this.createDropOverlay();
+    if (this.dropOverlay) {
+      this.dropOverlay.style.display = 'flex';
+    }
+  }
+
+  /**
+   * Hide the drop overlay
+   * @returns {void}
+   */
+  hideDropOverlay() {
+    if (this.dropOverlay) {
+      this.dropOverlay.style.display = 'none';
+    }
+  }
+
+  /**
+   * Handle drag enter event for attachments
+   * @param {DragEvent} e - Drag event
+   * @returns {void}
+   */
+  handleAttachmentDragEnter(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (this.isEditingMessage()) {
+      this.dragCounter = 0;
+      this.hideDropOverlay();
+      return;
+    }
+    this.dragCounter++;
+    if (e.dataTransfer.types.includes('Files')) {
+      this.showDropOverlay();
+    }
+  }
+
+  /**
+   * Handle drag over event for attachments
+   * @param {DragEvent} e - Drag event
+   * @returns {void}
+   */
+  handleAttachmentDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (this.isEditingMessage()) {
+      return;
+    }
+  }
+
+  /**
+   * Handle drag leave event for attachments
+   * @param {DragEvent} e - Drag event
+   * @returns {void}
+   */
+  handleAttachmentDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (this.isEditingMessage()) {
+      this.dragCounter = 0;
+      this.hideDropOverlay();
+      return;
+    }
+    this.dragCounter--;
+    if (this.dragCounter === 0) {
+      this.hideDropOverlay();
+    }
+  }
+
+  /**
+   * Handle drop event for attachments
+   * @param {DragEvent} e - Drop event
+   * @returns {Promise<void>}
+   */
+  async handleAttachmentDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.dragCounter = 0;
+    this.hideDropOverlay();
+    if (this.isEditingMessage()) return;
+
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    // Process all files (no type restriction - app handles all supported types)
+    await this.processIncomingAttachmentFiles(Array.from(files));
+  }
+
+  /**
    * Loads the chat modal event listeners
    * @returns {void}
    */
   load() {
     this.modal = document.getElementById('chatModal');
+    assert(this.modal, 'chatModal element is required');
     this.closeButton = document.getElementById('closeChatModal');
     this.messagesList = document.querySelector('.messages-list');
     this.sendButton = document.getElementById('handleSendMessage');
@@ -12412,6 +14435,15 @@ class ChatModal {
     this.chatFileInput = document.getElementById('chatFileInput');
     this.chatPhotoLibraryInput = document.getElementById('chatPhotoLibraryInput');
     this.chatFilesInput = document.getElementById('chatFilesInput');
+    this.reactionSheetOverlay = document.getElementById('chatReactionSheetOverlay');
+    this.reactionSheet = document.getElementById('chatReactionSheet');
+    this.reactionSheetDragRegion = document.getElementById('chatReactionSheetDragRegion');
+    this.reactionSheetTabs = document.getElementById('chatReactionSheetTabs');
+    this.reactionSheetGrid = document.getElementById('chatReactionSheetGrid');
+    this.resetReactionSheetRecentButton = document.getElementById('resetChatReactionSheetRecent');
+    this.closeReactionSheetButton = document.getElementById('closeChatReactionSheet');
+    this.renderReactionSheetTabs();
+    this.setReactionSheetCategory(this.reactionSheetActiveCategory);
     
     // Camera capture modal elements
     this.cameraCaptureOverlay = document.getElementById('cameraCaptureOverlay');
@@ -12430,8 +14462,10 @@ class ChatModal {
 
     // Initialize context menu
     this.contextMenu = document.getElementById('messageContextMenu');
+    this.contextMenuReactions = document.getElementById('messageContextReactions');
     // Initialize image attachment context menu
     this.imageAttachmentContextMenu = document.getElementById('imageAttachmentContextMenu');
+    this.imageAttachmentContextMenuReactions = this.imageAttachmentContextMenu?.querySelector('.message-context-reactions') || null;
     // Initialize attachment options context menu
     this.attachmentOptionsContextMenu = document.getElementById('attachmentOptionsContextMenu');
     // Cache attachment options context menu option elements
@@ -12458,9 +14492,19 @@ class ChatModal {
       }
       return true;
     });
-    
+    // Close all context menus when messages container scrolls
+    this.messagesContainer.addEventListener('scroll', () => this.handleMessagesContainerScroll(), { passive: true });
+    this.messagesContainer.addEventListener('touchstart', (e) => this.handleMessagesContainerTouchStart(e), { passive: true });
+    this.messagesContainer.addEventListener('touchmove', (e) => this.handleMessagesContainerTouchMove(e), { passive: false });
     // Add context menu option listeners
     this.contextMenu.addEventListener('click', (e) => {
+      const reactionButton = e.target.closest('.message-context-reaction-button');
+      if (reactionButton) {
+        e.preventDefault();
+        e.stopPropagation();
+        void this.handleReactionPickerClick(reactionButton);
+        return;
+      }
       if (e.target.closest('.context-menu-option')) {
         const action = e.target.closest('.context-menu-option').dataset.action;
         this.handleContextMenuAction(action);
@@ -12469,6 +14513,13 @@ class ChatModal {
     // Add image attachment context menu option listeners
     if (this.imageAttachmentContextMenu) {
       this.imageAttachmentContextMenu.addEventListener('click', (e) => {
+        const reactionButton = e.target.closest('.message-context-reaction-button');
+        if (reactionButton) {
+          e.preventDefault();
+          e.stopPropagation();
+          void this.handleImageAttachmentReactionPickerClick(reactionButton);
+          return;
+        }
         const option = e.target.closest('.context-menu-option');
         if (!option) return;
         const action = option.dataset.action;
@@ -12484,6 +14535,33 @@ class ChatModal {
         this.handleAttachmentOptionsContextMenuAction(action);
       });
     }
+    this.reactionSheetOverlay.addEventListener('click', (e) => {
+      if (e.target === this.reactionSheetOverlay) {
+        this.closeReactionSheet();
+      }
+    });
+    this.closeReactionSheetButton.addEventListener('click', () => this.closeReactionSheet());
+    this.resetReactionSheetRecentButton.addEventListener('click', () => this.handleResetRecentReactionEmojis());
+    this.reactionSheetDragRegion.addEventListener('pointerdown', this.handleReactionSheetDragStart.bind(this));
+    this.reactionSheetDragRegion.addEventListener('pointermove', this.handleReactionSheetDragMove.bind(this));
+    this.reactionSheetDragRegion.addEventListener('pointerup', this.handleReactionSheetDragEnd.bind(this));
+    this.reactionSheetDragRegion.addEventListener('pointercancel', this.handleReactionSheetDragEnd.bind(this));
+    this.reactionSheetDragRegion.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    this.reactionSheetTabs.addEventListener('click', (e) => {
+      const tabButton = e.target.closest('.chat-reaction-sheet-tab');
+      if (!tabButton) return;
+      const { categoryKey } = tabButton.dataset;
+      assert(categoryKey, 'Reaction sheet tab categoryKey is required');
+      this.setReactionSheetCategory(categoryKey);
+    });
+    this.reactionSheetGrid.addEventListener('click', (e) => {
+      const reactionButton = e.target.closest('.chat-reaction-sheet-button');
+      if (!reactionButton) return;
+      void this.handleExpandedReactionPickerClick(reactionButton);
+    });
     
     // Close context menu when clicking outside
     document.addEventListener('click', (e) => {
@@ -12500,7 +14578,12 @@ class ChatModal {
         this.closeHeaderContextMenu();
       }
     });
-    this.sendButton.addEventListener('click', this.handleSendMessage.bind(this));
+    this.sendButton.addEventListener('click', withButtonCooldown(
+      this.sendButton,
+      BUTTON_COOLDOWN_MS,
+      () => this.revalidateSendButtonState(),
+      () => this.handleSendMessage()
+    ));
     this.cancelEditButton.addEventListener('click', () => this.cancelEdit());
     this.closeButton.addEventListener('click', this.close.bind(this));
     this.sendButton.addEventListener('keydown', ignoreTabKey);
@@ -12516,12 +14599,10 @@ class ChatModal {
       this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
 
       const messageText = e.target.value;
-      const messageValidation = this.validateMessageSize(messageText);
-      this.updateMessageByteCounter(messageValidation);
+      this.revalidateSendButtonState();
 
       // Save draft (text is already limited to 2000 chars by maxlength attribute)
-      this.debouncedSaveDraft(e.target.value);
-      this.toggleSendButtonVisibility();
+      this.debouncedSaveDraft(messageText);
     });
 
     // allow ctlr+enter or cmd+enter to send message
@@ -12547,6 +14628,10 @@ class ChatModal {
         this.isKeyboardVisible = false;
         /* console.log('⌨️ Keyboard detected as closed (viewport height difference:', heightDifference, 'px)'); */
         this.unlockBackgroundScroll();
+      }
+
+      if (this.reactionSheetOverlay.classList.contains('active')) {
+        requestAnimationFrame(() => this.updateReactionSheetViewport());
       }
     });
 
@@ -12632,10 +14717,23 @@ class ChatModal {
       });
     }
 
+    // Paste image from clipboard (PC and mobile)
+    if (this.messageInput) {
+      this.messageInput.addEventListener('paste', (e) => this.handleMessageInputPaste(e));
+    }
+
+    // Drag and drop image support (PC only) - attach to modal for broader drop area
+    if (this.modal) {
+      this.modal.addEventListener('dragenter', (e) => this.handleAttachmentDragEnter(e));
+      this.modal.addEventListener('dragover', (e) => this.handleAttachmentDragOver(e));
+      this.modal.addEventListener('dragleave', (e) => this.handleAttachmentDragLeave(e));
+      this.modal.addEventListener('drop', (e) => this.handleAttachmentDrop(e));
+    }
+
     // Voice recording event listeners
     if (this.voiceRecordButton) {
       this.voiceRecordButton.addEventListener('click', async () => {
-        const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
+        const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : getEffectiveTollLibWei(this.toll);
         const sufficientBalance = await validateBalance(tollInLib);
         if (!sufficientBalance) {
           const msg = `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}. Go to the wallet to add more LIB.`;
@@ -12831,6 +14929,105 @@ class ChatModal {
     return !!(editInput?.value?.trim?.());
   }
 
+  resetChatRenderWindow() {
+    this.chatRenderedOldestIndex = CHAT_INITIAL_RENDER_COUNT - 1;
+  }
+
+  expandChatRenderWindow() {
+    const contact = myData.contacts[this.address];
+    const messages = contact.messages;
+    const container = this.messagesContainer;
+    const list = this.messagesList;
+
+    const currentOldestIndex = Math.min(this.chatRenderedOldestIndex, messages.length - 1);
+    if (currentOldestIndex >= messages.length - 1) {
+      return false;
+    }
+
+    const nextOldestIndex = Math.min(
+      messages.length - 1,
+      currentOldestIndex + CHAT_OLDER_RENDER_BATCH_SIZE
+    );
+
+    const oldScrollTop = Math.round(container.scrollTop);
+    const oldScrollHeight = container.scrollHeight;
+    const range = this.buildChatMessageRangeHTML(
+      messages,
+      contact,
+      nextOldestIndex,
+      currentOldestIndex + 1
+    );
+    const oldFirstMessage = list.firstElementChild;
+
+    this.chatRenderedOldestIndex = nextOldestIndex;
+    list.insertAdjacentHTML('afterbegin', range.html);
+    const prependedThumbnailRows = [];
+    for (let messageEl = list.firstElementChild; messageEl && messageEl !== oldFirstMessage; messageEl = messageEl.nextElementSibling) {
+      prependedThumbnailRows.push(
+        ...messageEl.querySelectorAll(CHAT_THUMBNAIL_ATTACHMENT_SELECTOR)
+      );
+    }
+
+    this.syncRenderedReactionTargets(range.renderedTxids);
+
+    const insertedHeight = container.scrollHeight - oldScrollHeight;
+    container.scrollTop = oldScrollTop + insertedHeight;
+    this.loadThumbnailsKeepingScrollAnchored(prependedThumbnailRows);
+    return true;
+  }
+
+  ensureScrollableChatRenderWindow() {
+    if (!this.messagesContainer || !this.messagesList || !this.address) return;
+
+    const contact = myData.contacts[this.address];
+    const messages = contact?.messages;
+    if (!messages?.length) return;
+
+    while (
+      this.chatRenderedOldestIndex < messages.length - 1 &&
+      this.messagesContainer.scrollHeight <= this.messagesContainer.clientHeight + 1
+    ) {
+      if (!this.expandChatRenderWindow()) break;
+    }
+  }
+
+  handleMessagesContainerScroll() {
+    this.closeAllContextMenus();
+    if (!this.isActive()) return;
+    const container = this.messagesContainer;
+    const messages = myData.contacts[this.address].messages;
+    if (this.chatRenderedOldestIndex >= messages.length - 1) {
+      return;
+    }
+
+    const loadAheadPx = Math.max(420, Math.min(900, container.clientHeight * 1.25));
+    if (container.scrollTop <= loadAheadPx) {
+      this.expandChatRenderWindow();
+    }
+  }
+
+  handleMessagesContainerTouchStart(e) {
+    this.messagesContainerTouchY = e.touches?.[0]?.clientY ?? null;
+  }
+
+  handleMessagesContainerTouchMove(e) {
+    const container = this.messagesContainer;
+    const nextY = e.touches?.[0]?.clientY;
+    if (!container || !Number.isFinite(nextY) || !Number.isFinite(this.messagesContainerTouchY)) return;
+
+    const deltaY = nextY - this.messagesContainerTouchY;
+    this.messagesContainerTouchY = nextY;
+    if (deltaY === 0) return;
+
+    const isScrollable = container.scrollHeight > container.clientHeight + 1;
+    const atTop = container.scrollTop <= 0;
+    const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
+
+    if (!isScrollable || (deltaY > 0 && atTop) || (deltaY < 0 && atBottom)) {
+      e.preventDefault();
+    }
+  }
+
   /**
    * Clears all staged composer attachments.
    * @param {{ deleteFromServer?: boolean }} options
@@ -12860,6 +15057,8 @@ class ChatModal {
    * @returns {Promise<void>}
    */
   async open(address, skipAutoScroll = false) {
+    this.closeReactionSheet();
+
     // Set active chat address early so async refreshes target the correct chat.
     this.address = address;
 
@@ -12873,13 +15072,16 @@ class ChatModal {
     editInputInit.value = '';
     this.cancelEditButton.style.display = 'none';
     this.addAttachmentButton.disabled = false;
+    if (this.voiceRecordButton) this.voiceRecordButton.disabled = !isOnline;
 
     friendModal.setAddress(address);
     footer.closeNewChatButton();
     const contact = myData.contacts[address];
+    this.resetChatRenderWindow();
     // Cache whether the contact has me blocked, and disable attachments accordingly
     this.blockedByRecipient = Number(contact?.tollRequiredToSend) === 2;
     this.addAttachmentButton.disabled = this.blockedByRecipient;
+    if (this.voiceRecordButton) this.voiceRecordButton.disabled = this.blockedByRecipient || !isOnline;
     friendModal.updateFriendButton(contact, 'addFriendButtonChat');
     // Set user info
     this.modalTitle.textContent = getContactDisplayName(contact);
@@ -12940,10 +15142,12 @@ class ChatModal {
     this.modal.classList.add('active');
 
     // Clear unread count
-    if (contact.unread > 0) {
-      myData.state.unread = Math.max(0, (myData.state.unread || 0) - contact.unread);
+    const totalUnread = contact.unread;
+    if (totalUnread > 0) {
+      myData.state.unread = Math.max(0, (myData.state.unread || 0) - totalUnread);
       contact.unread = 0;
       chatsScreen.updateChatList();
+      syncChatTabNotificationBubble();
     }
 
     this.clearNotificationsIfAllRead();
@@ -12952,6 +15156,7 @@ class ChatModal {
     this.maybeShowTolledDepositToast(address);
 
     this.appendChatModal(false, skipAutoScroll); // Call appendChatModal to render messages, ensure highlight=false
+    void this.maybePromptReclaimToll(address);
   }
 
   /**
@@ -13040,6 +15245,7 @@ class ChatModal {
    * @returns {void}
    */
   close() {
+    this.closeReactionSheet();
     const closingAddress = this.address;
     this.hideAttachmentLoadingToastsForContact(closingAddress);
 
@@ -13047,12 +15253,13 @@ class ChatModal {
     this.unlockBackgroundScroll();
     if (isOnline) {
       const needsToSendReadTx = this.needsToSend();
+      // Reset close-scoped fee warning dedupe flag.
+      this.closeFeeFailureToastShown = false;
       // if newestRecevied message does not have an amount property and user has not responded, then send a read transaction
       if (needsToSendReadTx) {
         this.sendReadTransaction(this.address);
       }
       
-      this.sendReclaimTollTransaction(this.address);
     } else {
       console.warn('Offline: toll not processed');
     }
@@ -13097,6 +15304,7 @@ class ChatModal {
     }
 
     this.address = null;
+    this.resetChatRenderWindow();
   }
 
   clearNotificationsIfAllRead() {
@@ -13104,7 +15312,7 @@ class ChatModal {
       return;
     }
 
-    const allRead = Object.values(myData.contacts).every((c) => c.unread === 0);
+    const allRead = Object.values(myData.contacts).every((contact) => contact.unread === 0);
     const currentAddress = myAccount?.keys?.address;
     
     if (allRead) {
@@ -13160,28 +15368,148 @@ class ChatModal {
   }
 
   /**
-   * Send a reclaim toll if the newest sent message is older than 7 days and the contact has a value not 0 in payOnReplay or payOnRead
-   * @param {string} contactAddress - The address of the contact
+   * @typedef {{ kind: 'eligible' } | { kind: 'offline' } | { kind: 'pending' } | { kind: 'empty' } | { kind: 'unavailable' } | { kind: 'too_soon', retryAfterTimestamp: number }} ReclaimStatus
+   */
+
+  /**
+   * Returns the reclaim status for the contact.
+   * @param {string} contactAddress
+   * @returns {Promise<ReclaimStatus>}
+   */
+  async getReclaimStatus(contactAddress) {
+    if (!myData.pending) {
+      myData.pending = [];
+    }
+
+    if (!isOnline) {
+      return { kind: 'offline' };
+    }
+
+    if (myData.pending.some((pendingTx) => pendingTx.type === 'reclaim_toll' && pendingTx.to === contactAddress)) {
+      return { kind: 'pending' };
+    }
+
+    await getNetworkParams();
+    assert(parameters.current.tollTimeout, 'Missing toll timeout');
+
+    const contact = myData.contacts[contactAddress];
+    assert(contact, `Missing contact for reclaim status: ${contactAddress}`);
+    const latestOutboundMessageTimestamp =
+      typeof contact.latestOutboundMessageTimestamp === 'number'
+        ? contact.latestOutboundMessageTimestamp
+        : contact.messages.find((item) => item.my)?.timestamp;
+
+    const currentTime = getCorrectedTimestamp();
+    const networkTollTimeoutInMs = parameters.current.tollTimeout;
+    if (typeof latestOutboundMessageTimestamp !== 'number') {
+      return { kind: 'empty' };
+    }
+    const timeSinceLatestOutboundMessage = currentTime - latestOutboundMessageTimestamp;
+    if (timeSinceLatestOutboundMessage < networkTollTimeoutInMs) {
+      return { kind: 'too_soon', retryAfterTimestamp: latestOutboundMessageTimestamp + networkTollTimeoutInMs };
+    }
+
+    const sortedAddresses = [longAddress(myData.account.keys.address), longAddress(contactAddress)].sort();
+    const receiverIndex = sortedAddresses.indexOf(longAddress(contactAddress));
+    const chatId = hashBytes(sortedAddresses.join(''));
+    const chatIdAccount = await queryNetwork(`/messages/${chatId}/toll`);
+    if (!chatIdAccount) {
+      return { kind: 'unavailable' };
+    }
+    if (!chatIdAccount.toll) {
+      return { kind: 'empty' };
+    }
+
+    const payOnReply = chatIdAccount.toll.payOnReply[receiverIndex];
+    const payOnRead = chatIdAccount.toll.payOnRead[receiverIndex];
+    if (payOnReply === 0n && payOnRead === 0n) {
+      return { kind: 'empty' };
+    }
+
+    return { kind: 'eligible' };
+  }
+
+  /**
+   * Prompts the user to reclaim toll when opening an eligible chat.
+   * @param {string} contactAddress
    * @returns {Promise<void>}
    */
-  async sendReclaimTollTransaction(contactAddress) {
-    await getNetworkParams();
-    const currentTime = getCorrectedTimestamp();
-    const networkTollTimeoutInMs = parameters.current.tollTimeout; 
-    const timeSinceNewestSentMessage = currentTime - this.newestSentMessage?.timestamp;
-    if (!this.newestSentMessage || timeSinceNewestSentMessage < networkTollTimeoutInMs) {
-      // console.log(
-      //   `[sendReclaimTollTransaction] timeSinceNewestSentMessage ${timeSinceNewestSentMessage}ms is less than networkTollTimeoutInMs ${networkTollTimeoutInMs}ms, skipping reclaim toll transaction`
-      // );
+  async maybePromptReclaimToll(contactAddress) {
+    if (!this.isActive() || this.address !== contactAddress || !isOnline) {
       return;
     }
-    const canReclaimToll = await this.canSenderReclaimToll(contactAddress);
-    if (!canReclaimToll) {
-      // console.log(
-      //   `[sendReclaimTollTransaction] does not have a value not 0 in payOnReplay or payOnRead, skipping reclaim toll transaction`
-      // );
+
+    const status = await this.getReclaimStatus(contactAddress);
+    if (!this.isActive() || this.address !== contactAddress) {
       return;
     }
+    if (status.kind !== 'eligible') {
+      return;
+    }
+    // wait for the next frame to ensure the modal is fully rendered
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(resolve);
+      });
+    });
+    if (!this.isActive() || this.address !== contactAddress) {
+      return;
+    }
+
+    const contact = myData.contacts[contactAddress];
+    assert(contact, `Missing contact for reclaim prompt: ${contactAddress}`);
+    const confirmed = window.confirm(`Reclaim toll from ${getContactDisplayName(contact)}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    await this.submitReclaimToll(contactAddress);
+  }
+
+  /**
+   * Submits reclaim toll after explicit user confirmation.
+   * @param {string} contactAddress
+   * @returns {Promise<void>}
+   */
+  async submitReclaimToll(contactAddress) {
+    if (!this.isActive() || this.address !== contactAddress) {
+      return;
+    }
+
+    const status = await this.getReclaimStatus(contactAddress);
+    if (status.kind !== 'eligible') {
+      switch (status.kind) {
+        case 'offline':
+          showToast('You are offline. Reconnect before reclaiming toll.', 3000, 'error');
+          return;
+        case 'pending':
+          showToast('A reclaim toll transaction is already pending for this chat.', 3000, 'warning');
+          return;
+        case 'empty':
+          showToast('No reclaimable toll is available for this chat.', 3000, 'info');
+          return;
+        case 'unavailable':
+          showToast('Could not check reclaimable toll right now. Please try again later.', 3000, 'error');
+          return;
+        case 'too_soon':
+          showToast(
+            `Toll cannot be reclaimed yet. Try again after ${this.formatLocalDateTime(status.retryAfterTimestamp)}.`,
+            3000,
+            'info'
+          );
+          return;
+        default:
+          assert(false, `Unknown reclaim status: ${status.kind}`);
+      }
+    }
+
+    const feeBalanceStatus = await getFeeBalanceStatus();
+    if (!feeBalanceStatus.success) {
+      showFeeBalanceFailureToast(feeBalanceStatus.reason);
+      return;
+    }
+
+    showToast('Submitting reclaim toll...', 3000, 'info');
 
     const tx = {
       type: 'reclaim_toll',
@@ -13193,35 +15521,13 @@ class ChatModal {
     };
     const txid = await signObj(tx, myAccount.keys);
     const response = await injectTx(tx, txid);
-    if (!response || !response.result || !response.result.success) {
-      console.warn('reclaim toll transaction failed to send', response);
+    if (response?.result?.success) {
+      return;
     }
-  }
-
-  /**
-   * return true if when we query chatID account , then check payOnReplay and payOnRead for index of the receiver has a value not 0
-   * @param {string} contactAddress - The address of the contact
-   * @returns {Promise<boolean>} - True if the contact has a value not 0 in payOnReplay or payOnRead, false otherwise
-   */
-  async canSenderReclaimToll(contactAddress) {
-    // keep track receiver index during the sort
-    const sortedAddresses = [longAddress(myData.account.keys.address), longAddress(contactAddress)].sort();
-    const receiverIndex = sortedAddresses.indexOf(longAddress(contactAddress));
-    const chatId = hashBytes(sortedAddresses.join(''));
-    const chatIdAccount = await queryNetwork(`/messages/${chatId}/toll`);
-    if (!chatIdAccount || !chatIdAccount.toll) {
-      console.warn('chatIdAccount not found', chatIdAccount);
-      return false;
+    if (!response) {
+      showToast('Could not submit reclaim toll. Please try again later.', 3000, 'error');
+      return;
     }
-    const payOnReply = chatIdAccount.toll.payOnReply[receiverIndex]; // bigint
-    const payOnRead = chatIdAccount.toll.payOnRead[receiverIndex]; // bigint
-    if (payOnReply !== 0n) {
-      return true;
-    }
-    if (payOnRead !== 0n) {
-      return true;
-    }
-    return false;
   }
 
   /**
@@ -13231,6 +15537,15 @@ class ChatModal {
    */
   async sendReadTransaction(contactAddress) {
     const contact = myData.contacts[contactAddress];
+    const feeBalanceStatus = await getFeeBalanceStatus();
+    if (!feeBalanceStatus.success) {
+      this.closeFeeFailureToastShown = showCloseFeeFailureWarningOnce(
+        feeBalanceStatus.reason,
+        'send_read',
+        this.closeFeeFailureToastShown
+      );
+      return;
+    }
 
     const readTransaction = await this.createReadTransaction(contactAddress);
     const txid = await signObj(readTransaction, myAccount.keys);
@@ -13268,8 +15583,6 @@ class ChatModal {
    * @returns {void}
    */
   async handleSendMessage() {
-    this.sendButton.disabled = true; // Disable the button
-
     // Check if user is offline - prevent sending messages when offline
     if (!isOnline) {
       showToast('You are offline. Please check your internet connection.', 3000, 'error');
@@ -13279,32 +15592,30 @@ class ChatModal {
     // if user is blocked, don't send message, show toast
     if (myData.contacts[this.address].tollRequiredToSend == 2) {
       showToast('You are blocked by this user', 0, 'error');
-      this.sendButton.disabled = false;
       return;
     }
 
     // Declare edit-related state outside try so catch can access
     let isEdit = false;
-    let originalMsg = null;
-    let originalMsgState = null;
+    let editMessage = null;
     let editInput = null;
     let editTargetTxId = '';
+    let currentAddress = '';
+    let chatIndex = -1;
 
     try {
       this.messageInput.focus(); // Add focus back to keep keyboard open
 
       const message = this.messageInput.value.trim();
       if (!message && !this.fileAttachments?.length) {
-        this.sendButton.disabled = false;
         return;
       }
 
-      const amount = myData.contacts[this.address].tollRequiredToSend == 1 ? this.toll : 0n;
+      const amount = myData.contacts[this.address].tollRequiredToSend == 1 ? getEffectiveTollLibWei(this.toll) : 0n;
       const sufficientBalance = await validateBalance(amount);
       if (!sufficientBalance) {
         const msg = `Insufficient balance for fee${amount > 0n ? ' and toll' : ''}. Go to the wallet to add more LIB.`;
         showToast(msg, 0, 'error');
-        this.sendButton.disabled = false;
         return;
       }
 
@@ -13317,8 +15628,9 @@ class ChatModal {
                 modalTitle.textContent === (contact.name || contact.username || `${contact.address.slice(0,8)}...${contact.address.slice(-6)}`)
             )?.address;
             */
-      const currentAddress = this.address;
+      currentAddress = this.address;
       if (!currentAddress) return;
+      const contact = chatsData.contacts[currentAddress];
 
       // Check if trying to message self
       if (currentAddress === myAccount.address) {
@@ -13332,26 +15644,16 @@ class ChatModal {
         return;
       }
 
-      // Ensure recipient's keys are available
-      const keysOk = await ensureContactKeys(currentAddress);
-      let recipientPubKey = myData.contacts[currentAddress]?.public;
-      let pqRecPubKey = myData.contacts[currentAddress]?.pqPublic;
-      if (!keysOk || !recipientPubKey || !pqRecPubKey) {
-        console.warn(`no public/PQ key found for recipient ${currentAddress}`);
-        return;
+      let chatCryptoContext;
+      try {
+        chatCryptoContext = await this.prepareEncryptedChatContext(currentAddress, keys);
+      } catch (error) {
+        if (error?.code === 'CHAT_CRYPTO_PREPARATION') {
+          console.warn(error.message);
+          return;
+        }
+        throw error;
       }
-
-      /*
-      // Generate shared secret using ECDH and take first 32 bytes
-      let dhkey = ecSharedKey(keys.secret, recipientPubKey);
-      const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey);
-      const combined = new Uint8Array(dhkey.length + sharedSecret.length);
-      combined.set(dhkey);
-      combined.set(sharedSecret, dhkey.length);
-      dhkey = deriveDhKey(combined);
-      */
-      const {dhkey, cipherText} = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey)
-      const selfKey = encryptData(bin2hex(dhkey), keys.secret+keys.pqSeed, true)  // used to decrypt our own message
 
       // Determine if this is an edit of an existing message
       editInput = document.getElementById('editOfTxId');
@@ -13362,15 +15664,15 @@ class ChatModal {
       if (editTargetTxId) {
         // Validate we still can edit
         const contactMsgs = myData.contacts[currentAddress].messages;
-        originalMsg = contactMsgs.find(m => m.txid === editTargetTxId);
-        if (!originalMsg) {
+        editMessage = contactMsgs.find((item) => item.txid === editTargetTxId);
+        if (!editMessage) {
           // Original disappeared; fallback to normal send
           console.warn('Edit target message not found locally; sending as new message');
-        } else if (!originalMsg.my) {
+        } else if (!editMessage.my) {
           console.warn('Attempt to edit a message not owned by user');
-        } else if (originalMsg.deleted) {
+        } else if (isDeleted(editMessage)) {
           console.warn('Attempt to edit a deleted message');
-        } else if ((Date.now() - Number(originalMsg.timestamp || 0)) > EDIT_WINDOW_MS) {
+        } else if ((Date.now() - Number(editMessage.timestamp || 0)) > EDIT_WINDOW_MS) {
           showToast('Edit window expired', 3000, 'info');
         } else {
           isEdit = true;
@@ -13408,57 +15710,30 @@ class ChatModal {
         messageObj.attachments = this.fileAttachments;
       }
 
-      // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
-      // Encrypt the JSON message using shared secret
-      const encMessage = encryptChacha(dhkey, stringify(messageObj));
-
-      // Create message payload
-      const payload = {
-        message: encMessage,
-        encrypted: true,
-        encryptionMethod: 'xchacha20poly1305',
-        pqEncSharedKey: bin2base64(cipherText),
-        selfKey: selfKey,
-        sent_timestamp: getCorrectedTimestamp()
-      };
-
-      // Always include username, but only include other info if recipient is a friend
-      const contact = myData.contacts[currentAddress];
-      // Create basic sender info with just username
-      const senderInfo = {
-        username: myAccount.username,
-      };
-
-      // Add additional info only if recipient is a connection
-      if (contact && contact?.friend && contact?.friend >= 2) {
-        // Add more personal details for connections
-        senderInfo.name = myData.account.name;
-        senderInfo.linkedin = myData.account.linkedin;
-        senderInfo.x = myData.account.x;
-        // Add avatar info if available
-        if (myData.account.avatarId && myData.account.avatarKey) {
-          senderInfo.avatarId = myData.account.avatarId;
-          senderInfo.avatarKey = myData.account.avatarKey;
-        }
-        // Add timezone if available
-        const tz = getLocalTimeZone();
-        if (tz) {
-          senderInfo.timezone = tz;
-        }
-      }
-
-      // Always encrypt and send senderInfo (which will contain at least the username)
-      payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
-
       // can create a function to query the account and get the receivers toll they've set
       // TODO: will need to query network and receiver account where we validate
       // TODO: decided to query everytime we do chatModal.open and save as global variable. We don't need to clear it but we can clear it when closing the modal but should get reset when opening the modal again anyway
-      let tollInLib =
-        myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : this.toll
+      const tollInLib =
+        myData.contacts[currentAddress].tollRequiredToSend == 0
+          ? 0n
+          : getEffectiveTollLibWei(this.toll)
 
-      const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
-      await signObj(chatMessageObj, keys);
-      const txid = getTxid(chatMessageObj)
+      let payload, chatMessageObj, txid;
+      try {
+        ({ payload, chatMessageObj, txid } = await this.buildEncryptedStructuredChatTx(
+          currentAddress,
+          messageObj,
+          tollInLib,
+          keys,
+          chatCryptoContext
+        ));
+      } catch (error) {
+        if (error?.code === 'CHAT_CRYPTO_PREPARATION') {
+          console.warn(error.message);
+          return;
+        }
+        throw error;
+      }
 
       // if there a hidden txid input, get the value to be used to delete that txid from relevant data stores
       const retryTxId = this.retryOfTxId.value;
@@ -13472,33 +15747,42 @@ class ChatModal {
       let newMessage;
       if (isEdit) {
         // Optimistic update of original message (record original so we can revert on failure)
-        const contactMsgs = chatsData.contacts[currentAddress].messages;
-        originalMsg = contactMsgs.find(m => m.txid === editTargetTxId);
-        if (originalMsg) {
-          originalMsgState = {
-            message: originalMsg.message,
-            edited: originalMsg.edited,
-            edited_timestamp: originalMsg.edited_timestamp
-          };
-          originalMsg.message = message;
-          originalMsg.edited = 1;
-          originalMsg.edited_timestamp = payload.sent_timestamp;
-          // Also update wallet history memo if this was a payment we sent
-          if (myData?.wallet?.history && Array.isArray(myData.wallet.history)) {
-            const hIdx = myData.wallet.history.findIndex((h) => h.txid === editTargetTxId);
-            if (hIdx !== -1) {
-              // Preserve prior state for potential revert
-              if (!originalMsgState.history) originalMsgState.history = {};
-              originalMsgState.history.memo = myData.wallet.history[hIdx].memo;
-              originalMsgState.history.edited = myData.wallet.history[hIdx].edited;
-              originalMsgState.history.edited_timestamp = myData.wallet.history[hIdx].edited_timestamp;
-              myData.wallet.history[hIdx].memo = message;
-              myData.wallet.history[hIdx].edited = 1;
-              myData.wallet.history[hIdx].edited_timestamp = payload.sent_timestamp;
-            }
-          }
-          this.appendChatModal();
+        assert(editMessage, `Missing edit message for ${editTargetTxId}`);
+        chatIndex = chatsData.chats.findIndex((chat) => chat.address === currentAddress);
+        assert(chatIndex !== -1, `Missing chat list entry for pending edit: ${currentAddress}`);
+
+        const previousHistoryIndex = myData.wallet.history.findIndex((item) => item.txid === editTargetTxId);
+        const previousHistory = previousHistoryIndex === -1
+          ? { kind: 'none' }
+          : {
+              kind: 'payment',
+              memo: myData.wallet.history[previousHistoryIndex].memo,
+              edited: myData.wallet.history[previousHistoryIndex].edited,
+              edited_timestamp: myData.wallet.history[previousHistoryIndex].edited_timestamp
+            };
+        const editPending = {
+          targetTxid: editTargetTxId,
+          previousMessage: {
+            message: editMessage.message,
+            edited: editMessage.edited,
+            edited_timestamp: editMessage.edited_timestamp
+          },
+          previousHistory
+        };
+
+        trackPendingMessageEditBeforeInject(txid, currentAddress, editPending);
+        editMessage.message = message;
+        editMessage.edited = 1;
+        editMessage.edited_timestamp = payload.sent_timestamp;
+
+        if (previousHistory.kind === 'payment') {
+          myData.wallet.history[previousHistoryIndex].memo = message;
+          myData.wallet.history[previousHistoryIndex].edited = 1;
+          myData.wallet.history[previousHistoryIndex].edited_timestamp = payload.sent_timestamp;
         }
+
+        this.appendChatModal();
+        saveState();
         // Clear edit marker only after capturing state and hide cancel button
         editInput.value = '';
         this.cancelEditButton.style.display = 'none';
@@ -13539,9 +15823,11 @@ class ChatModal {
       };
 
       // Remove existing chat for this contact if it exists. Not handling in removeFailedTx anymore.
-      const existingChatIndex = chatsData.chats.findIndex((chat) => chat.address === currentAddress);
-      if (existingChatIndex !== -1) {
-        chatsData.chats.splice(existingChatIndex, 1);
+      if (!isEdit) {
+        chatIndex = chatsData.chats.findIndex((chat) => chat.address === currentAddress);
+      }
+      if (chatIndex !== -1) {
+        chatsData.chats.splice(chatIndex, 1);
       }
 
       insertSorted(chatsData.chats, chatUpdate, 'timestamp');
@@ -13562,6 +15848,8 @@ class ChatModal {
       this.clearReplyState(contact);
       // Clear attachment draft state
       this.clearAttachmentState(contact);
+      // Clear retry draft state
+      this.clearRetryState(contact);
 
       // Update the chat modal UI immediately
       if (!isEdit) this.appendChatModal(); // This should now display the 'sending' message
@@ -13576,11 +15864,9 @@ class ChatModal {
 
       if (!response || !response.result || !response.result.success) {
         console.error('message failed to send', response);
-        const str = response.result.reason;
-        const regex = /toll/i;
-  
-        if (str.match(regex)) {
-          await this.reopen();
+        const reason = response?.result?.reason;
+        if (reason && isRecipientTollStateFailure(reason)) {
+          await this.refreshRecipientTollState(currentAddress);
         }
         //let userMessage = 'Message failed to send. Please try again.';
         //const reason = response.result?.reason || '';
@@ -13598,21 +15884,12 @@ class ChatModal {
           updateTransactionStatus(txid, currentAddress, 'failed', 'message');
           this.appendChatModal();
         } else {
+          const pendingTxInfo = myData.pending.find((pendingTx) => pendingTx.txid === txid);
+          myData.pending = myData.pending.filter((pendingTx) => pendingTx.txid !== txid);
           showToast('Edit failed to send', 0, 'error');
-          // Revert optimistic edit
-          if (originalMsg && originalMsgState) {
-            originalMsg.message = originalMsgState.message;
-            if (originalMsgState.edited) {
-              originalMsg.edited = originalMsgState.edited;
-              originalMsg.edited_timestamp = originalMsgState.edited_timestamp;
-            } else {
-              delete originalMsg.edited;
-              delete originalMsg.edited_timestamp;
-            }
-            // Revert wallet history memo if we changed it optimistically
-            this.revertWalletHistoryEdit(editTargetTxId, originalMsgState.history);
-            this.appendChatModal();
-          }
+          assert(pendingTxInfo?.editPending, `Missing pending edit snapshot for ${editTargetTxId}`);
+          restorePendingMessageEdit(txid, currentAddress, pendingTxInfo.editPending);
+          this.appendChatModal();
           // Restore edit UI state to allow user to retry or cancel
           editInput.value = editTargetTxId;
           this.cancelEditButton.style.display = '';
@@ -13637,21 +15914,16 @@ class ChatModal {
       console.error('Message error:', error);
       showToast('Failed to send message. Please try again.', 0, 'error');
       // Revert optimistic edit on exception
-      if (isEdit && originalMsg && originalMsgState) {
-        originalMsg.message = originalMsgState.message;
-        if (originalMsgState.edited) {
-          originalMsg.edited = originalMsgState.edited;
-          originalMsg.edited_timestamp = originalMsgState.edited_timestamp;
-        } else {
-          delete originalMsg.edited;
-          delete originalMsg.edited_timestamp;
+      if (isEdit && editTargetTxId) {
+        const pendingTxInfo = myData.pending.find((pendingTx) => pendingTx.txid === txid);
+        myData.pending = myData.pending.filter((pendingTx) => pendingTx.txid !== txid);
+        if (pendingTxInfo?.editPending) {
+          restorePendingMessageEdit(txid, currentAddress, pendingTxInfo.editPending);
+          this.appendChatModal();
         }
-        // Revert wallet history memo if we changed it optimistically
-        this.revertWalletHistoryEdit(editTargetTxId, originalMsgState.history);
-        this.appendChatModal();
       }
     } finally {
-      this.sendButton.disabled = false; // Re-enable the button
+      // Cooldown and re-enable handled by withButtonCooldown wrapper
     }
   }
 
@@ -13684,38 +15956,6 @@ class ChatModal {
   }
 
   /**
-   * Revert wallet history memo/edited fields for a given txid using the provided originalHistory snapshot
-   * @param {string} txid - Transaction id to locate in myData.wallet.history
-   * @param {{memo?: string, edited?: number, edited_timestamp?: number}} originalHistory - Original values to restore
-   */
-  revertWalletHistoryEdit(txid, originalHistory) {
-    try {
-      if (!originalHistory) return; // nothing captured, nothing to revert
-      if (!(myData?.wallet?.history) || !Array.isArray(myData.wallet.history)) return;
-      const hIdx = myData.wallet.history.findIndex((h) => h.txid === txid);
-      if (hIdx === -1) return;
-
-      if (typeof originalHistory.memo !== 'undefined') {
-        myData.wallet.history[hIdx].memo = originalHistory.memo;
-      } else {
-        delete myData.wallet.history[hIdx].memo;
-      }
-      if (typeof originalHistory.edited !== 'undefined') {
-        myData.wallet.history[hIdx].edited = originalHistory.edited;
-      } else {
-        delete myData.wallet.history[hIdx].edited;
-      }
-      if (typeof originalHistory.edited_timestamp !== 'undefined') {
-        myData.wallet.history[hIdx].edited_timestamp = originalHistory.edited_timestamp;
-      } else {
-        delete myData.wallet.history[hIdx].edited_timestamp;
-      }
-    } catch (e) {
-      console.error('Failed to revert wallet history edit', e);
-    }
-  }
-
-  /**
    * Create a chat message object
    * @param {string} to - The address of the recipient
    * @param {string} payload - The payload of the message
@@ -13736,10 +15976,348 @@ class ChatModal {
       message: 'x',
       xmessage: payload,
       timestamp: getTransactionTimestamp(),
-      fee: getTransactionFeeWei(), // This is not used by the backend
+      fee: getTransactionFeeWei(),
       networkId: network.netid,
     };
     return tx;
+  }
+
+  /**
+   * Build sender info for an encrypted chat message.
+   * Always includes username; adds profile details only for established connections.
+   * @param {Object} contact
+   * @returns {Object}
+   */
+  buildChatSenderInfo(contact) {
+    // Create basic sender info with just username
+    const senderInfo = {
+      username: myAccount.username,
+    };
+
+    if (contact?.friend >= 2) {
+      // Add more personal details for connections
+      senderInfo.name = myData.account.name;
+      senderInfo.linkedin = myData.account.linkedin;
+      senderInfo.x = myData.account.x;
+      // Add avatar info if available
+      if (myData.account.avatarId && myData.account.avatarKey) {
+        senderInfo.avatarId = myData.account.avatarId;
+        senderInfo.avatarKey = myData.account.avatarKey;
+      }
+      // Add timezone if available
+      const tz = getLocalTimeZone();
+      if (tz) {
+        senderInfo.timezone = tz;
+      }
+    }
+
+    return senderInfo;
+  }
+
+  /**
+   * Resolve recipient contact and derive the shared chat crypto context.
+   * @param {string} to
+   * @param {Object} keys
+   * @returns {Promise<{contact: Object, dhkey: Uint8Array, cipherText: Uint8Array}>}
+   */
+  async prepareEncryptedChatContext(to, keys) {
+    const contact = myData.contacts[to];
+    if (!contact) {
+      const error = new Error(`Contact not found for ${to}`);
+      error.code = 'CHAT_CRYPTO_PREPARATION';
+      throw error;
+    }
+
+    const keysOk = await ensureContactKeys(to);
+    const recipientPubKey = contact.public;
+    const pqRecPubKey = contact.pqPublic;
+    if (!keysOk || !recipientPubKey || !pqRecPubKey) {
+      const error = new Error(`No public/PQ key found for recipient ${to}`);
+      error.code = 'CHAT_CRYPTO_PREPARATION';
+      throw error;
+    }
+
+    /*
+    // Generate shared secret using ECDH and take first 32 bytes
+    let dhkey = ecSharedKey(keys.secret, recipientPubKey);
+    const { cipherText, sharedSecret } = pqSharedKey(pqRecPubKey);
+    const combined = new Uint8Array(dhkey.length + sharedSecret.length);
+    combined.set(dhkey);
+    combined.set(sharedSecret, dhkey.length);
+    dhkey = deriveDhKey(combined);
+    */
+    const { dhkey, cipherText } = dhkeyCombined(keys.secret, recipientPubKey, pqRecPubKey);
+
+    return { contact, dhkey, cipherText };
+  }
+
+  /**
+   * Build, encrypt, and sign a structured chat message transaction.
+   * Shared by composer sends and quick reaction sends.
+   * @param {string} to
+   * @param {Object} messageObj
+   * @param {bigint} tollInLib
+   * @param {Object} keys
+   * @param {{contact: Object, dhkey: Uint8Array, cipherText: Uint8Array}|null} cryptoContext
+   * @returns {Promise<{payload: Object, chatMessageObj: Object, txid: string}>}
+   */
+  async buildEncryptedStructuredChatTx(to, messageObj, tollInLib, keys, cryptoContext = null) {
+    const context = cryptoContext || await this.prepareEncryptedChatContext(to, keys);
+    const { contact, dhkey, cipherText } = context;
+
+    // We purposely do not encrypt/decrypt using browser native crypto functions; all crypto functions must be readable
+    // Encrypt the JSON message using shared secret
+    const payload = {
+      message: encryptChacha(dhkey, stringify(messageObj)),
+      encrypted: true,
+      encryptionMethod: 'xchacha20poly1305',
+      pqEncSharedKey: bin2base64(cipherText),
+      // used to decrypt our own message
+      selfKey: encryptData(bin2hex(dhkey), keys.secret + keys.pqSeed, true),
+      sent_timestamp: getCorrectedTimestamp()
+    };
+
+    // Always include username, but only include other info if recipient is a friend
+    // Always encrypt and send senderInfo (which will contain at least the username)
+    payload.senderInfo = encryptChacha(dhkey, stringify(this.buildChatSenderInfo(contact)));
+
+    const chatMessageObj = await this.createChatMessage(to, payload, tollInLib, keys);
+    await signObj(chatMessageObj, keys);
+
+    return {
+      payload,
+      chatMessageObj,
+      txid: getTxid(chatMessageObj)
+    };
+  }
+
+  renderChatMessageHTML(item, { contact, lastReadTs }) {
+    const timeString = formatTime(item.timestamp);
+    // Use a consistent timestamp attribute for potential future use (e.g., message jumping)
+    const timestampAttribute = `data-message-timestamp="${item.timestamp}"`;
+    // Add txid attribute if available
+    const txidAttribute = item.txid ? `data-txid="${item.txid}"` : '';
+    const statusAttribute = item.status ? `data-status="${item.status}"` : '';
+
+    // Check if it's a payment based on the presence of the amount property (BigInt)
+    if (typeof item.amount === 'bigint') {
+      // Assuming LIB (18 decimals) for now. TODO: Handle different asset decimals if needed.
+      // Format amount correctly using big2str
+      const amountStr = big2str(item.amount, 18);
+      const amountNum = parseFloat(amountStr);
+      const amountDisplay = `${amountNum.toFixed(6)} ${item.symbol || 'LIB'}`;
+      const directionText = item.my ? '-' : '+';
+      const messageClass = item.my ? 'sent' : 'received';
+      const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !isDeleted(item);
+      // --- Render Payment Transaction ---
+      return `
+          <div class="message ${messageClass} payment-info" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
+            <div class="payment-header">
+              <span class="payment-direction">${directionText}</span>
+              <span class="payment-amount">${amountDisplay}</span>
+            </div>
+            ${item.message ? `<div class="payment-memo">${linkifyUrls(item.message)}</div>` : ''}
+            <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}${showEditedDot ? ' <span class="edited-new-dot" title="Edited since last read"></span>' : ''}</div>
+          </div>
+        `;
+    }
+
+    // --- Render Chat Message ---
+    const messageClass = item.my ? 'sent' : 'received';
+    // Check if message was deleted
+    if (isDeleted(item)) {
+      // Render deleted message with special styling
+      return `
+                    <div class="message ${messageClass} deleted-message" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
+                        <div class="message-content deleted-content">${item.message}</div>
+                        <div class="message-time">${timeString}</div>
+                    </div>
+                `;
+    }
+
+    const messageType = item.type || 'message';
+
+    let replyHTML = '';
+    // --- Render Reply Quote if present ---
+    if (item.replyId) {
+      const replyText = escapeHtml(item.replyMessage || 'View original message');
+      // Determine owner label: "You" if the referenced message is ours, else contact name
+      const ownerIsMineHint = item.replyOwnerIsMine;
+      const targetMsg = contact.messages.find((message) => message.txid === item.replyId);
+      // Use both item.my and replyOwnerIsMine to determine from current viewer's perspective
+      // item.my: true if reply is from current user (viewer's perspective)
+      // replyOwnerIsMine: true if original message was from sender's perspective
+      // If they match (both true or both false), original message is from current user's perspective
+      const isOwnerMine = typeof ownerIsMineHint === 'undefined'
+        ? !!(targetMsg && targetMsg.my)
+        : item.my === (ownerIsMineHint === true || ownerIsMineHint === '1');
+      const ownerText = isOwnerMine ? 'You' : (getContactDisplayName(contact) || 'Contact');
+      const ownerClass = isOwnerMine ? 'reply-owner-me' : 'reply-owner-contact';
+      const replyOwnerLabel = `<span class="reply-quote-label ${ownerClass}">${escapeHtml(ownerText)}</span>`;
+
+      replyHTML = `
+                <div class="reply-quote ${ownerClass}" data-reply-txid="${escapeHtml(item.replyId)}">
+                  ${replyOwnerLabel}
+                  <div class="reply-quote-text">${replyText}</div>
+                </div>
+              `;
+    }
+
+    // --- Render Attachments if present ---
+    let attachmentsHTML = '';
+    if (item.xattach && Array.isArray(item.xattach) && item.xattach.length > 0) {
+      attachmentsHTML = item.xattach.map(att => {
+        const fileUrl = att.url || '#';
+        const fileName = att.name || 'Attachment';
+        const fileSize = att.size ? this.formatFileSize(att.size) : '';
+        const fileType = att.type ? att.type.split('/').pop().toUpperCase() : '';
+        const isImage = att.type && att.type.startsWith('image/');
+        const isVideo = att.type && att.type.startsWith('video/');
+        const hasThumbnail = isImage || isVideo;
+        const fileTypeIcon = this.getFileTypeForIcon(att.type || '', fileName);
+        const paddingStyle = hasThumbnail ? 'padding: 5px 5px;' : 'padding: 10px 12px;';
+        return `
+                <div class="attachment-row" style="display: flex; ${hasThumbnail ? 'flex-direction: column;' : 'align-items: center;'} background: #f5f5f7; border-radius: 12px; ${paddingStyle} margin-bottom: 6px;"
+                  data-url="${fileUrl}"
+                  data-p-url="${att.pUrl || ''}"
+                  data-name="${encodeURIComponent(fileName)}"
+                  data-type="${att.type || ''}"
+                  ${isImage ? 'data-image-attachment="true"' : ''}
+                  ${isVideo ? 'data-video-attachment="true"' : ''}
+                >
+                  <div class="attachment-icon-container" style="${hasThumbnail ? 'margin-bottom: 10px; flex-direction: column;' : 'margin-right: 14px; flex-shrink: 0;'}">
+                    <div class="attachment-icon" data-file-type="${fileTypeIcon}"></div>
+                    ${hasThumbnail ? '<div class="attachment-preview-hint">Click for options</div>' : ''}
+                  </div>
+                  <div style="min-width:0;">
+                    <span class="attachment-label" style="font-weight:500;color:#222;font-size:0.7em;display:block;word-wrap:break-word;">
+                      ${fileName}
+                    </span><br>
+                    <span style="font-size: 0.93em; color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
+                  </div>
+                </div>
+              `;
+      }).join('');
+    }
+
+    // --- Render message text (if any) ---
+    let messageTextHTML = '';
+    switch (messageType) {
+      case 'message':
+        if (item.message && item.message.trim()) {
+          messageTextHTML = `<div class="message-content" style="white-space: pre-wrap; margin-top: ${attachmentsHTML ? '2px' : '0'};">${linkifyUrls(item.message)}</div>`;
+        }
+        break;
+      case 'call': {
+        if (!item.message || !item.message.trim()) break;
+        // Determine call timing and whether join should be allowed
+        const callTimeMs = Number(item.callTime || 0);
+        const callStart = callTimeMs > 0 ? callTimeMs : Number(item.timestamp || item.sent_timestamp || 0);
+        const isExpired = this.isCallExpired(callStart);
+
+        if (isExpired) {
+          // Over 2 hours since call time: show as plain text without join button
+          const theirName = getContactDisplayName(contact);
+          const label = item.my ? `You called ${escapeHtml(theirName)}` : `${escapeHtml(theirName)} called you`;
+          messageTextHTML = `
+                  <div class="call-message">
+                    <div class="call-message-text"><i>${label}</i></div>
+                  </div>`;
+        } else {
+          // Build scheduled label if in the future
+          const scheduleHTML = this.buildCallScheduleHTML(callTimeMs);
+          // Render call message with a left circular phone icon (clickable) and plain text to the right
+          // TODO - remove the href and instead have it call a function which will open the URL and at the time of opening it adds the callUrlParam and username
+          messageTextHTML = `
+                  <div class="call-message">
+                    <a href='${item.message}${callUrlParams}"${myAccount.username}"' target="_blank" rel="noopener noreferrer" class="call-message-phone-button" aria-label="Join Video Call">
+                      <span class="sr-only">Join Video Call</span>
+                    </a>
+                    <div>
+                      <div class="call-message-text">Join Video Call</div>
+                      ${scheduleHTML}
+                    </div>
+                  </div>`;
+        }
+        break;
+      }
+      case 'vm': {
+        // Check for voice message
+        const duration = this.formatDuration(item.duration);
+        // Use audio encryption keys for playback, fall back to message encryption keys if not available
+        messageTextHTML = `
+              <div class="voice-message" data-url="${item.url || ''}" data-name="voice-message" data-type="audio/webm" data-duration="${item.duration || 0}">
+                <div class="voice-message-controls">
+                  <div class="voice-message-top-row">
+                    <button class="voice-message-play-button" aria-label="Play voice message">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z"/>
+                      </svg>
+                    </button>
+                    <div class="voice-message-text">Voice message</div>
+                    <div class="voice-message-time-display">0:00 / ${duration}</div>
+                  </div>
+                  <div class="voice-message-bottom-row">
+                    <input type="range" class="voice-message-seek" min="0" max="${item.duration || 0}" value="0" step="1" aria-label="Seek voice message">
+                    <button class="voice-message-speed-button" aria-label="Toggle playback speed" data-speed="1">1x</button>
+                  </div>
+                </div>
+              </div>`;
+        break;
+      }
+      default:
+        console.warn(`Unknown chat message type: ${messageType}`);
+        if (item.message && item.message.trim()) {
+          messageTextHTML = `<div class="message-content" style="white-space: pre-wrap; margin-top: ${attachmentsHTML ? '2px' : '0'};">${linkifyUrls(item.message)}</div>`;
+        }
+    }
+
+    const callTimeAttribute = messageType === 'call' && item.callTime ? `data-call-time="${item.callTime}"` : '';
+    const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !isDeleted(item);
+    return `
+            <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute} ${callTimeAttribute}>
+              ${replyHTML}
+              ${attachmentsHTML}
+              ${messageTextHTML}
+              <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}${showEditedDot ? ' <span class="edited-new-dot" title="Edited since last read"></span>' : ''}</div>
+            </div>
+          `;
+  }
+
+  buildChatMessageRangeHTML(messages, contact, oldestIndex, newestIndex) {
+    // Last time user previously had this chat open (used to mark newly edited messages)
+    const lastReadTs = contact.lastChatOpenTs || 0;
+    const renderedMessages = [];
+    const renderedTxids = [];
+
+    // Iterate backwards through messages (oldest to newest for rendering order)
+    // messages are already sorted descending (newest first) in myData
+    for (let i = oldestIndex; i >= newestIndex; i--) {
+      const item = messages[i];
+      renderedMessages.push(this.renderChatMessageHTML(item, { contact, lastReadTs }));
+      if (item.txid) renderedTxids.push(item.txid);
+    }
+
+    return {
+      html: renderedMessages.join(''),
+      renderedTxids
+    };
+  }
+
+  getOldestRenderedMessageIndex(messages) {
+    const oldestRendered = this.messagesList.firstElementChild;
+    if (!oldestRendered) return -1;
+
+    const { txid, messageTimestamp } = oldestRendered.dataset;
+    assert(txid || messageTimestamp, 'Rendered message must have an identity');
+
+    if (txid) {
+      return messages.findIndex((message) => message?.txid === txid);
+    }
+
+    return messages.findIndex((message) =>
+      messageTimestamp && message?.timestamp == messageTimestamp
+    );
   }
 
   /**
@@ -13760,8 +16338,6 @@ class ChatModal {
       return;
     }
     const messages = contact.messages; // Already sorted descending
-    // Last time user previously had this chat open (used to mark newly edited messages)
-    const lastReadTs = contact.lastChatOpenTs || 0;
 
     if (!this.modal) return;
     if (!this.messagesList) return;
@@ -13772,228 +16348,61 @@ class ChatModal {
     this.newestReceivedMessage = newestReceivedItem;
     this.newestSentMessage = messages.find((item) => item.my);
 
-    // 2. Clear the entire list
-    this.messagesList.innerHTML = '';
-
-    // 3. Iterate backwards through messages (oldest to newest for rendering order)
-    // messages are already sorted descending (newest first) in myData
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const item = messages[i];
-      let messageHTML = '';
-      const timeString = formatTime(item.timestamp);
-      // Use a consistent timestamp attribute for potential future use (e.g., message jumping)
-      const timestampAttribute = `data-message-timestamp="${item.timestamp}"`;
-      // Add txid attribute if available
-      const txidAttribute = item?.txid ? `data-txid="${item.txid}"` : '';
-      const statusAttribute = item?.status ? `data-status="${item.status}"` : '';
-
-      // Check if it's a payment based on the presence of the amount property (BigInt)
-      if (typeof item.amount === 'bigint') {
-        // Define common payment variables
-        const itemAmount = item.amount;
-        const itemMemo = item.message; // Memo is stored in the 'message' field for transfers
-
-        // Assuming LIB (18 decimals) for now. TODO: Handle different asset decimals if needed.
-        // Format amount correctly using big2str
-        const amountStr = big2str(itemAmount, 18);
-        const amountNum = parseFloat(amountStr);
-        const amountDisplay = `${amountNum.toFixed(6)} ${item.symbol || 'LIB'}`;
-
-        // Check item.my for sent/received
-
-        //console.log(`debug item: ${JSON.stringify(item, (key, value) => typeof value === 'bigint' ? big2str(value, 18) : value)}`)
-        // --- Render Payment Transaction ---
-        const directionText = item.my ? '-' : '+';
-        const messageClass = item.my ? 'sent' : 'received';
-    const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !item.deleted;
-    messageHTML = `
-          <div class="message ${messageClass} payment-info" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
-            <div class="payment-header">
-              <span class="payment-direction">${directionText}</span>
-              <span class="payment-amount">${amountDisplay}</span>
-            </div>
-            ${itemMemo ? `<div class="payment-memo">${linkifyUrls(itemMemo)}</div>` : ''}
-            <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}${showEditedDot ? ' <span class="edited-new-dot" title="Edited since last read"></span>' : ''}</div>
-          </div>
-        `;
-      } else {
-        // --- Render Chat Message ---
-        const messageClass = item.my ? 'sent' : 'received'; // Use item.my directly
-        
-        // Initialize replyHTML at this scope so it's always defined
-        let replyHTML = '';
-        
-        // Check if message was deleted
-        if (item?.deleted > 0) {
-          // Render deleted message with special styling
-          messageHTML = `
-                    <div class="message ${messageClass} deleted-message" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
-                        <div class="message-content deleted-content">${item.message}</div>
-                        <div class="message-time">${timeString}</div>
-                    </div>
-                `;
-        } else {
-          // --- Render Reply Quote if present ---
-          if (item.replyId) {
-              const replyText = escapeHtml(item.replyMessage || 'View original message');
-              // Determine owner label: "You" if the referenced message is ours, else contact name
-              const ownerIsMineHint = item.replyOwnerIsMine;
-              const hasHint = typeof ownerIsMineHint !== 'undefined';
-              let isOwnerMine = false;
-              if (hasHint) {
-                // Use both item.my and replyOwnerIsMine to determine from current viewer's perspective
-                // item.my: true if reply is from current user (viewer's perspective)
-                // replyOwnerIsMine: true if original message was from sender's perspective
-                // If they match (both true or both false), original message is from current user's perspective
-                const isSelfReply = ownerIsMineHint === true || ownerIsMineHint === '1';
-                isOwnerMine = item.my === isSelfReply;
-              } else {
-                const targetMsg = contact.messages?.find((m) => m.txid === item.replyId);
-                isOwnerMine = !!(targetMsg && targetMsg.my);
-              }
-              const ownerText = isOwnerMine ? 'You' : (getContactDisplayName(contact) || 'Contact');
-              const ownerClass = isOwnerMine ? 'reply-owner-me' : 'reply-owner-contact';
-              const replyOwnerLabel = `<span class="reply-quote-label ${ownerClass}">${escapeHtml(ownerText)}</span>`;
-
-              replyHTML = `
-                <div class="reply-quote ${ownerClass}" data-reply-txid="${escapeHtml(item.replyId)}">
-                  ${replyOwnerLabel}
-                  <div class="reply-quote-text">${replyText}</div>
-                </div>
-              `;
-          }
-          // --- Render Attachments if present ---
-          let attachmentsHTML = '';
-          if (item.xattach && Array.isArray(item.xattach) && item.xattach.length > 0) {
-            attachmentsHTML = item.xattach.map(att => {
-              const fileUrl = att.url || '#';
-              const fileName = att.name || 'Attachment';
-              const fileSize = att.size ? this.formatFileSize(att.size) : '';
-              const fileType = att.type ? att.type.split('/').pop().toUpperCase() : '';
-              const isImage = att.type && att.type.startsWith('image/');
-              const isVideo = att.type && att.type.startsWith('video/');
-              const hasThumbnail = isImage || isVideo;
-              const fileTypeIcon = this.getFileTypeForIcon(att.type || '', fileName);
-              const paddingStyle = hasThumbnail ? 'padding: 5px 5px;' : 'padding: 10px 12px;';
-              return `
-                <div class="attachment-row" style="display: flex; ${hasThumbnail ? 'flex-direction: column;' : 'align-items: center;'} background: #f5f5f7; border-radius: 12px; ${paddingStyle} margin-bottom: 6px;"
-                  data-url="${fileUrl}"
-                  data-p-url="${att.pUrl || ''}"
-                  data-name="${encodeURIComponent(fileName)}"
-                  data-type="${att.type || ''}"
-                  data-msg-idx="${i}"
-                  ${isImage ? 'data-image-attachment="true"' : ''}
-                  ${isVideo ? 'data-video-attachment="true"' : ''}
-                >
-                  <div class="attachment-icon-container" style="${hasThumbnail ? 'margin-bottom: 10px; flex-direction: column;' : 'margin-right: 14px; flex-shrink: 0;'}">
-                    <div class="attachment-icon" data-file-type="${fileTypeIcon}"></div>
-                    ${hasThumbnail ? '<div class="attachment-preview-hint">Click for options</div>' : ''}
-                  </div>
-                  <div style="min-width:0;">
-                    <span class="attachment-label" style="font-weight:500;color:#222;font-size:0.7em;display:block;word-wrap:break-word;">
-                      ${fileName}
-                    </span><br>
-                    <span style="font-size: 0.93em; color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
-                  </div>
-                </div>
-              `;
-            }).join('');
-          }
-          
-          // --- Render message text (if any) ---
-          let messageTextHTML = '';
-          if (item.message && item.message.trim()) {
-            // Check if this is a call message
-            if (item.type === 'call') {
-              // Determine call timing and whether join should be allowed
-              const callTimeMs = Number(item.callTime || 0);
-              const callStart = callTimeMs > 0 ? callTimeMs : Number(item.timestamp || item.sent_timestamp || 0);
-              const isExpired = this.isCallExpired(callStart);
-
-              if (isExpired) {
-                // Over 2 hours since call time: show as plain text without join button
-                const theirName = getContactDisplayName(contact);
-                const label = item.my ? `You called ${escapeHtml(theirName)}` : `${escapeHtml(theirName)} called you`;
-                messageTextHTML = `
-                  <div class="call-message">
-                    <div class="call-message-text"><i>${label}</i></div>
-                  </div>`;
-              } else {
-                // Build scheduled label if in the future
-                const scheduleHTML = this.buildCallScheduleHTML(callTimeMs);
-                // Render call message with a left circular phone icon (clickable) and plain text to the right
-                // TODO - remove the href and instead have it call a function which will open the URL and at the time of opening it adds the callUrlParam and username
-                messageTextHTML = `
-                  <div class="call-message">
-                    <a href='${item.message}${callUrlParams}"${myAccount.username}"' target="_blank" rel="noopener noreferrer" class="call-message-phone-button" aria-label="Join Video Call">
-                      <span class="sr-only">Join Video Call</span>
-                    </a>
-                    <div>
-                      <div class="call-message-text">Join Video Call</div>
-                      ${scheduleHTML}
-                    </div>
-                  </div>`;
-              }
-            } else {
-              // Regular message rendering
-              messageTextHTML = `<div class="message-content" style="white-space: pre-wrap; margin-top: ${attachmentsHTML ? '2px' : '0'};">${linkifyUrls(item.message)}</div>`;
-            }
-          }
-          
-          // Check for voice message
-          if (item.type === 'vm') {
-            const duration = this.formatDuration(item.duration);
-            // Use audio encryption keys for playback, fall back to message encryption keys if not available
-            messageTextHTML = `
-              <div class="voice-message" data-url="${item.url || ''}" data-name="voice-message" data-type="audio/webm" data-msg-idx="${i}" data-duration="${item.duration || 0}">
-                <div class="voice-message-controls">
-                  <div class="voice-message-top-row">
-                    <button class="voice-message-play-button" aria-label="Play voice message">
-                      <svg viewBox="0 0 24 24">
-                        <path d="M8 5v14l11-7z"/>
-                      </svg>
-                    </button>
-                    <div class="voice-message-text">Voice message</div>
-                    <div class="voice-message-time-display">0:00 / ${duration}</div>
-                  </div>
-                  <div class="voice-message-bottom-row">
-                    <input type="range" class="voice-message-seek" min="0" max="${item.duration || 0}" value="0" step="1" aria-label="Seek voice message">
-                    <button class="voice-message-speed-button" aria-label="Toggle playback speed" data-speed="1">1x</button>
-                  </div>
-                </div>
-              </div>`;
-          }
-          
-          const callTimeAttribute = item.type === 'call' && item.callTime ? `data-call-time="${item.callTime}"` : '';
-      const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !item.deleted;
-      messageHTML = `
-            <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute} ${callTimeAttribute}>
-              ${replyHTML}
-              ${attachmentsHTML}
-              ${messageTextHTML}
-              <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}${showEditedDot ? ' <span class="edited-new-dot" title="Edited since last read"></span>' : ''}</div>
-            </div>
-          `;
-        }
-      }
-
-      // 4. Append the constructed HTML
-      // Insert at the end of the list to maintain correct chronological order
-      this.messagesList.insertAdjacentHTML('beforeend', messageHTML);
-      // The newest received element will be found after the loop completes
+    let oldestIndex = -1;
+    if (messages.length > 0) {
+      const requestedOldestIndex = this.chatRenderedOldestIndex;
+      const preservedOldestIndex = this.getOldestRenderedMessageIndex(messages);
+      oldestIndex = Math.min(
+        Math.max(0, requestedOldestIndex, preservedOldestIndex),
+        messages.length - 1
+      );
+      this.chatRenderedOldestIndex = oldestIndex;
     }
 
+    const range = this.buildChatMessageRangeHTML(
+      messages,
+      contact,
+      oldestIndex,
+      0
+    );
+
+    // Replace the list once to avoid one DOM mutation per message.
+    this.messagesList.innerHTML = range.html;
+    const shouldKeepBottomAnchored = !skipAutoScroll && !highlightNewMessage;
+
     // --- 4.5. Load thumbnails for image attachments (async, non-blocking) ---
-    this.loadThumbnailsForAttachments();
+    if (shouldKeepBottomAnchored) {
+      const thumbnailRows = this.messagesList.querySelectorAll(CHAT_THUMBNAIL_ATTACHMENT_SELECTOR);
+      this.loadThumbnailsKeepingScrollAnchored(thumbnailRows);
+    } else {
+      this.loadThumbnailsForAttachments();
+    }
+
+    const renderedAddress = currentAddress;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!this.isActive() || this.address !== renderedAddress) {
+          return;
+        }
+        if (shouldKeepBottomAnchored) {
+          this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+        }
+        if (!skipAutoScroll) {
+          this.ensureScrollableChatRenderWindow();
+        }
+        this.syncAllRenderedReactionChips();
+      });
+    });
 
     // --- 5. Find the corresponding DOM element after rendering ---
     // This happens inside the setTimeout to ensure elements are in the DOM
 
+    if (skipAutoScroll || shouldKeepBottomAnchored) {
+      return;
+    }
+
     // 6. Delayed Scrolling & Highlighting Logic (after loop)
     setTimeout(() => {
-      // Skip auto-scrolling if we're going to scroll to a specific message
-      if (skipAutoScroll) return;
-
       const messageContainer = this.messagesList.parentElement;
 
       // Find the DOM element for the actual newest received item using its timestamp
@@ -14106,6 +16515,27 @@ class ChatModal {
   }
 
   /**
+   * Saves retry state to a contact object
+   * @param {Object} contact - The contact object to save retry state to
+   */
+  saveRetryState(contact) {
+    const retryTxid = this.retryOfTxId?.value?.trim?.() || '';
+    if (retryTxid) {
+      contact.draftRetryTxid = retryTxid;
+    } else {
+      this.clearRetryState(contact);
+    }
+  }
+
+  /**
+   * Clears retry state from a contact object
+   * @param {Object} contact - The contact object to clear retry state from
+   */
+  clearRetryState(contact) {
+    delete contact.draftRetryTxid;
+  }
+
+  /**
    * Saves attachment state to a contact object
    * @param {Object} contact - The contact object to save attachment state to
    */
@@ -14140,6 +16570,9 @@ class ChatModal {
       
       // Save or clear attachment state
       this.saveAttachmentState(myData.contacts[this.address]);
+
+      // Save or clear retry state
+      this.saveRetryState(myData.contacts[this.address]);
     }
   }
 
@@ -14157,6 +16590,9 @@ class ChatModal {
     // Clear any existing attachments
     this.fileAttachments = [];
     this.showAttachmentPreview();
+
+    // Clear retry state in composer; restored below if contact has one
+    if (this.retryOfTxId) this.retryOfTxId.value = '';
 
     // Load draft if exists
     const contact = myData.contacts[address];
@@ -14188,6 +16624,11 @@ class ChatModal {
     if (contact?.draftAttachments && Array.isArray(contact.draftAttachments) && contact.draftAttachments.length > 0) {
       this.fileAttachments = JSON.parse(JSON.stringify(contact.draftAttachments));
       this.showAttachmentPreview();
+    }
+
+    // Restore retry state if it exists
+    if (contact?.draftRetryTxid && this.retryOfTxId) {
+      this.retryOfTxId.value = contact.draftRetryTxid;
     }
   }
 
@@ -14238,6 +16679,18 @@ class ChatModal {
       // Only enable if online
       if (isOnline) this.sendButton.disabled = false;
     }
+  }
+
+  /**
+   * Revalidates the send button disabled state and visibility from current message and byte limit.
+   * No-op if the chat modal is not active (e.g. when cooldown timer fires after modal was closed).
+   */
+  revalidateSendButtonState() {
+    if (!this.isActive()) return;
+    const messageText = this.messageInput?.value ?? '';
+    const messageValidation = this.validateMessageSize(messageText);
+    this.updateMessageByteCounter(messageValidation);
+    this.toggleSendButtonVisibility();
   }
 
   /**
@@ -14315,24 +16768,27 @@ class ChatModal {
       }
     };
     
-    try {
-      this.isEncrypting = true;
-      this.sendButton.disabled = true; // Disable send button during encryption
-      this.addAttachmentButton.disabled = true;
-      loadingToastId = showToast(
-        `Attaching "${file.name}" to ${uploadContactName}...`,
-        0,
-        'loading',
-        false,
-        { dedupe: false }
-      );
-      this.trackAttachmentLoadingToast(uploadContactAddress, loadingToastId);
-      
-      // Generate random encryption key for this attachment
-      const encKey = generateRandomBytes(32);
+    // Return a Promise that resolves when the worker completes
+    // This ensures processIncomingAttachmentFiles can properly await each upload
+    return new Promise((resolve, reject) => {
+      try {
+        this.isEncrypting = true;
+        this.sendButton.disabled = true; // Disable send button during encryption
+        this.addAttachmentButton.disabled = true;
+        loadingToastId = showToast(
+          `Attaching "${file.name}" to ${uploadContactName}...`,
+          0,
+          'loading',
+          false,
+          { dedupe: false }
+        );
+        this.trackAttachmentLoadingToast(uploadContactAddress, loadingToastId);
+        
+        // Generate random encryption key for this attachment
+        const encKey = generateRandomBytes(32);
 
-      const worker = new Worker('encryption.worker.js', { type: 'module' });
-      worker.onmessage = async (e) => {
+        const worker = new Worker('encryption.worker.js', { type: 'module' });
+        worker.onmessage = async (e) => {
         this.isEncrypting = false;
         if (e.data.error) {
           clearLoadingToast();
@@ -14345,8 +16801,7 @@ class ChatModal {
           );
           refreshChatsScreenIfActive();
           
-          const messageValidation = this.validateMessageSize(this.messageInput.value);
-          this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
+          this.revalidateSendButtonState();
 
           this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
         } else {
@@ -14414,9 +16869,7 @@ class ChatModal {
               }
             }
             
-            const messageValidation = this.validateMessageSize(this.messageInput.value);
-            this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
-            this.toggleSendButtonVisibility();
+            this.revalidateSendButtonState();
 
             this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
             if (activeChatMatchesUpload) {
@@ -14437,6 +16890,7 @@ class ChatModal {
               );
             }
             refreshChatsScreenIfActive();
+            resolve(); // Successfully completed upload
           } catch (fetchError) {
             // Handle fetch errors (including AbortError) inside the worker callback
             if (fetchError.name === 'AbortError') {
@@ -14453,11 +16907,11 @@ class ChatModal {
               refreshChatsScreenIfActive();
             }
             
-            const messageValidation = this.validateMessageSize(this.messageInput.value);
-            this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
+            this.revalidateSendButtonState();
             this.isEncrypting = false;
 
             this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
+            reject(fetchError); // Upload failed
           }
         }
         worker.terminate();
@@ -14475,11 +16929,11 @@ class ChatModal {
         refreshChatsScreenIfActive();
         this.isEncrypting = false;
         
-        const messageValidation = this.validateMessageSize(this.messageInput.value);
-        this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
+        this.revalidateSendButtonState();
 
             this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
         worker.terminate();
+        reject(err); // Worker error
       };
       
       // read the file and send it to the worker for encryption
@@ -14506,14 +16960,15 @@ class ChatModal {
       }
       
       // Re-enable buttons
-      const messageValidation = this.validateMessageSize(this.messageInput.value);
-      this.updateMessageByteCounter(messageValidation); // Re-enable send button if message size is valid
+      this.revalidateSendButtonState();
       this.isEncrypting = false;
 
       this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
+      reject(error); // Outer error
     } finally {
       event.target.value = ''; // Reset the file input value
     }
+    }); // End of Promise wrapper
   }
 
   /**
@@ -14752,9 +17207,9 @@ class ChatModal {
    * Update an attachment row with a thumbnail image
    * @param {HTMLElement} attachmentRow - The attachment row element
    * @param {Blob} thumbnailBlob - The thumbnail blob to display
-   * @returns {boolean} True if update was successful, false otherwise
+   * @returns {Promise<boolean>} True if update was successful, false otherwise
    */
-  updateThumbnailInPlace(attachmentRow, thumbnailBlob) {
+  async updateThumbnailInPlace(attachmentRow, thumbnailBlob) {
     if (!attachmentRow || !attachmentRow.parentNode || !thumbnailBlob) {
       return false;
     }
@@ -14768,10 +17223,34 @@ class ChatModal {
       if (oldThumbnailUrl) {
         URL.revokeObjectURL(oldThumbnailUrl);
       }
-      
+
+      const thumbnailImage = new Image();
+      thumbnailImage.alt = 'Thumbnail';
+      thumbnailImage.className = 'attachment-thumbnail';
+      thumbnailImage.src = thumbnailUrl;
+
+      try {
+        if (typeof thumbnailImage.decode === 'function') {
+          await thumbnailImage.decode();
+        } else if (!thumbnailImage.complete) {
+          await new Promise((resolve, reject) => {
+            thumbnailImage.onload = resolve;
+            thumbnailImage.onerror = reject;
+          });
+        }
+      } catch (error) {
+        URL.revokeObjectURL(thumbnailUrl);
+        throw error;
+      }
+
+      if (!attachmentRow.isConnected || !iconContainer.isConnected) {
+        URL.revokeObjectURL(thumbnailUrl);
+        return false;
+      }
+
       // Replace icon with thumbnail image
-      iconContainer.innerHTML = `<img src="${thumbnailUrl}" alt="Thumbnail" class="attachment-thumbnail">`;
-      
+      iconContainer.replaceChildren(thumbnailImage);
+
       // Store blob URL for cleanup
       attachmentRow.dataset.thumbnailUrl = thumbnailUrl;
       return true;
@@ -14783,26 +17262,49 @@ class ChatModal {
   }
 
   /**
-   * Load thumbnails for image and video attachments asynchronously
-   * Only loads from local IndexedDB cache - pUrl downloads happen on user action (Preview)
+   * Load a cached thumbnail into one attachment row.
+   * @param {HTMLElement} attachmentRow
+   * @returns {Promise<boolean>}
+   */
+  async loadThumbnailForAttachment(attachmentRow) {
+    if (!attachmentRow.isConnected) return false;
+    const url = attachmentRow.dataset.url;
+    if (!url || url === '#') return false;
+
+    try {
+      const thumbnailBlob = await thumbnailCache.get(url);
+      if (!thumbnailBlob || !attachmentRow.isConnected) return false;
+      return this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
+    } catch (error) {
+      console.warn('Failed to load thumbnail for', url, error);
+      return false;
+    }
+  }
+
+  /**
+   * Load thumbnails for visible image and video attachments.
    * @returns {void}
    */
   async loadThumbnailsForAttachments() {
-    const thumbnailAttachments = this.messagesList.querySelectorAll(
-      '[data-image-attachment="true"], [data-video-attachment="true"]'
-    );
-    
-    for (const attachmentRow of thumbnailAttachments) {
-      const url = attachmentRow.dataset.url;
-      if (!url || url === '#') continue;
+    const thumbnailRows = this.messagesList.querySelectorAll(CHAT_THUMBNAIL_ATTACHMENT_SELECTOR);
 
-      try {
-        const thumbnailBlob = await thumbnailCache.get(url);
-        if (thumbnailBlob) {
-          this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
-        }
-      } catch (error) {
-        console.warn('Failed to load thumbnail for', url, error);
+    for (const attachmentRow of thumbnailRows) {
+      await this.loadThumbnailForAttachment(attachmentRow);
+    }
+  }
+
+  /**
+   * Load thumbnails without letting row height changes move the viewport.
+   * @param {Iterable<HTMLElement>} attachmentRows
+   * @returns {void}
+   */
+  async loadThumbnailsKeepingScrollAnchored(attachmentRows) {
+    for (const attachmentRow of attachmentRows) {
+      const oldScrollHeight = this.messagesContainer.scrollHeight;
+      const didUpdate = await this.loadThumbnailForAttachment(attachmentRow);
+      const heightDelta = this.messagesContainer.scrollHeight - oldScrollHeight;
+      if (didUpdate && heightDelta !== 0) {
+        this.messagesContainer.scrollTop = Math.max(0, this.messagesContainer.scrollTop + heightDelta);
       }
     }
   }
@@ -14989,9 +17491,7 @@ class ChatModal {
       // Generate and cache thumbnail for images and videos, then update in place
       if (blob.type.startsWith('image/') || blob.type.startsWith('video/')) {
         const attachmentUrl = linkEl.dataset.url;
-        const attachmentRow = linkEl.closest('.attachment-row') || 
-          linkEl.closest('[data-image-attachment="true"]') ||
-          linkEl.closest('[data-video-attachment="true"]');
+        const attachmentRow = linkEl.closest('.attachment-row') || linkEl.closest(CHAT_THUMBNAIL_ATTACHMENT_SELECTOR);
         
         const thumbnailPromise = blob.type.startsWith('image/')
           ? thumbnailCache.generateThumbnail(blob)
@@ -15004,7 +17504,7 @@ class ChatModal {
             if (attachmentRow) {
               const thumbnailBlob = await thumbnailCache.get(attachmentUrl);
               if (thumbnailBlob) {
-                this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
+                await this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
               }
             }
           })
@@ -15118,6 +17618,18 @@ class ChatModal {
     if (attachmentRow) {
       e.preventDefault();
       e.stopPropagation();
+
+      const messageEl = attachmentRow.closest('.message');
+      if (messageEl?.dataset?.status === 'failed') {
+        const isPayment = messageEl.classList.contains('payment-info');
+        if (isPayment) {
+          this.showMessageContextMenu(e, messageEl);
+          return;
+        }
+        failedMessageMenu.open(e, messageEl);
+        return;
+      }
+
       await this.showAttachmentContextMenu(e, attachmentRow);
       return;
     }
@@ -15137,7 +17649,14 @@ class ChatModal {
     const messageEl = e.target.closest('.message');
     if (!messageEl) return;
 
-    if (messageEl.classList.contains('deleted-message')) return;
+    const messageRecord = this.getMessageRecordFromElement(messageEl);
+    if (messageEl.classList.contains('deleted-message')) {
+      const allowDeletedLocalMenu =
+        isDeletedForMeOnly(messageRecord) && this.canDeleteMessageForAll(messageEl, messageRecord);
+      if (!allowDeletedLocalMenu) return;
+      this.showMessageContextMenu(e, messageEl);
+      return;
+    }
 
     if (messageEl.dataset.status === 'failed') {
       const isPayment = messageEl.classList.contains('payment-info');
@@ -15168,11 +17687,17 @@ class ChatModal {
     this.closeAllContextMenus();
     
     this.currentContextMessage = messageEl;
+    const messageRecord = this.getMessageRecordFromElement(messageEl);
+    const isDeletedLocalOnly =
+      messageEl.classList.contains('deleted-message') && isDeletedForMeOnly(messageRecord);
     
+    const deleteOption = this.contextMenu.querySelector('[data-action="delete"]');
+    if (deleteOption) deleteOption.style.display = 'flex';
+
     // Show/hide "Delete for all" option based on whether the message is from the current user
     const deleteForAllOption = this.contextMenu.querySelector('[data-action="delete-for-all"]');
+    const canDeleteForAll = this.canDeleteMessageForAll(messageEl, messageRecord);
     if (deleteForAllOption) {
-      const canDeleteForAll = this.canDeleteMessageForAll(messageEl);
       deleteForAllOption.style.display = canDeleteForAll ? 'flex' : 'none';
     }
 
@@ -15187,6 +17712,36 @@ class ChatModal {
     const editOption = this.contextMenu.querySelector('[data-action="edit"]');
     const saveOption = this.contextMenu.querySelector('[data-action="save"]');
     const isFailedPayment = messageEl.dataset.status === 'failed' && messageEl.classList.contains('payment-info');
+    const canShowReactionRow = !isDeletedLocalOnly && !isFailedPayment;
+
+    if (this.contextMenuReactions) {
+      this.contextMenuReactions.style.display = canShowReactionRow ? 'flex' : 'none';
+      this.syncContextReactionTrayDisplay(
+        this.contextMenuReactions,
+        canShowReactionRow ? messageEl : null
+      );
+      this.syncReactionPickerActiveState(this.contextMenuReactions, canShowReactionRow ? messageEl : null);
+    }
+
+    if (isDeletedLocalOnly) {
+      if (!canDeleteForAll) {
+        this.currentContextMessage = null;
+        return;
+      }
+      if (saveOption) saveOption.style.display = 'none';
+      if (replyOption) replyOption.style.display = 'none';
+      if (copyOption) copyOption.style.display = 'none';
+      if (editOption) editOption.style.display = 'none';
+      if (joinOption) joinOption.style.display = 'none';
+      if (inviteOption) inviteOption.style.display = 'none';
+      if (editResendOption) editResendOption.style.display = 'none';
+      if (deleteOption) deleteOption.style.display = 'none';
+
+      this.positionContextMenu(this.contextMenu, messageEl);
+      this.contextMenu.style.display = 'block';
+      return;
+    }
+
     // Show save option only for voice messages
     if (saveOption) saveOption.style.display = isVoice ? 'flex' : 'none';
     // For failed payment messages, hide copy and delete-for-all regardless of sender
@@ -15207,7 +17762,7 @@ class ChatModal {
       if (inviteOption) inviteOption.style.display = isExpired ? 'none' : 'flex';
       if (editResendOption) editResendOption.style.display = 'none';
       if (editOption) editOption.style.display = 'none';
-      if (replyOption) replyOption.style.display = isFuture ? 'flex' : 'none';
+      if (replyOption) replyOption.style.display = 'flex';
     } else if (isVoice) {
       if (copyOption) copyOption.style.display = 'none';
       if (inviteOption) inviteOption.style.display = 'none';
@@ -15258,11 +17813,18 @@ class ChatModal {
 
     const rect = messageEl.getBoundingClientRect();
     const container = messageEl.closest('.messages-container');
+    const visualViewport = window.visualViewport;
+    const viewportRect = {
+      left: visualViewport?.offsetLeft ?? 0,
+      top: visualViewport?.offsetTop ?? 0,
+      right: (visualViewport?.offsetLeft ?? 0) + (visualViewport?.width ?? window.innerWidth),
+      bottom: (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? window.innerHeight)
+    };
     const containerRect = container?.getBoundingClientRect() || {
-      left: 0,
-      top: 0,
-      right: window.innerWidth,
-      bottom: window.innerHeight
+      left: viewportRect.left,
+      top: viewportRect.top,
+      right: viewportRect.right,
+      bottom: viewportRect.bottom
     };
 
     const margin = 10;
@@ -15277,8 +17839,8 @@ class ChatModal {
     }
 
     let menuRect = menu.getBoundingClientRect();
-    let menuWidth = menuRect.width || 200;
-    let menuHeight = menuRect.height || 100;
+    let menuWidth = menu.offsetWidth || menuRect.width || 200;
+    let menuHeight = menu.offsetHeight || menuRect.height || 100;
 
     // Keep long menus usable in small viewports by making them internally scrollable.
     const availableHeight = Math.max(80, containerRect.bottom - containerRect.top - margin * 2);
@@ -15286,22 +17848,22 @@ class ChatModal {
       menu.style.maxHeight = `${Math.floor(availableHeight)}px`;
       menu.style.overflowY = 'auto';
       menuRect = menu.getBoundingClientRect();
-      menuWidth = menuRect.width || menuWidth;
-      menuHeight = menuRect.height || availableHeight;
+      menuWidth = menu.offsetWidth || menuRect.width || menuWidth;
+      menuHeight = menu.offsetHeight || menuRect.height || availableHeight;
     } else {
       menu.style.maxHeight = '';
       menu.style.overflowY = '';
     }
 
     // Center horizontally, then clamp to container bounds.
-    const minLeft = containerRect.left + margin;
-    const maxLeft = containerRect.right - menuWidth - margin;
+    const minLeft = Math.max(containerRect.left, viewportRect.left) + margin;
+    const maxLeft = Math.min(containerRect.right, viewportRect.right) - menuWidth - margin;
     let left = rect.left + rect.width / 2 - menuWidth / 2;
     left = maxLeft < minLeft ? minLeft : Math.max(minLeft, Math.min(maxLeft, left));
 
     // Prefer below, otherwise above; finally clamp to bounds.
-    const minTop = containerRect.top + margin;
-    const maxTop = containerRect.bottom - menuHeight - margin;
+    const minTop = Math.max(containerRect.top, viewportRect.top) + margin;
+    const maxTop = Math.min(containerRect.bottom, viewportRect.bottom) - menuHeight - margin;
     const belowTop = rect.bottom + margin;
     const aboveTop = rect.top - menuHeight - margin;
     let top;
@@ -15331,6 +17893,8 @@ class ChatModal {
   closeContextMenu() {
     if (!this.contextMenu) return;
     this.contextMenu.style.display = 'none';
+    if (this.contextMenuReactions) this.contextMenuReactions.style.display = '';
+    this.syncReactionPickerActiveState(this.contextMenuReactions, null);
     this.currentContextMessage = null;
   }
 
@@ -15339,6 +17903,348 @@ class ChatModal {
     this.closeImageAttachmentContextMenu();
     this.closeAttachmentOptionsContextMenu();
     this.closeHeaderContextMenu();
+    this.closeReactionSheet();
+    failedMessageMenu.hide();
+  }
+
+  /**
+   * Reserves vertical space for the reaction sheet while it is open.
+   * @returns {void}
+   */
+  updateReactionSheetViewport() {
+    const isOpen = this.reactionSheetOverlay.classList.contains('active');
+    if (!isOpen) {
+      this.modal.style.setProperty('--chat-reaction-sheet-space', '0px');
+      return;
+    }
+
+    const sheetHeight = Math.ceil(this.reactionSheet.getBoundingClientRect().height);
+    this.modal.style.setProperty('--chat-reaction-sheet-space', `${sheetHeight + 12}px`);
+  }
+
+  /**
+   * Resets the reaction sheet drag state and transform offset.
+   * @returns {void}
+   */
+  resetReactionSheetDragState() {
+    this.reactionSheetDragStartY = 0;
+    this.reactionSheetDragOffset = 0;
+    this.reactionSheetPointerId = null;
+    this.reactionSheet.classList.remove('dragging');
+    this.reactionSheet.style.removeProperty('--chat-reaction-sheet-drag-offset');
+  }
+
+  /**
+   * Resets all scrollable reaction sheet regions to their initial position.
+   * @returns {void}
+   */
+  resetReactionSheetScrollState() {
+    this.reactionSheetTabs.scrollTop = 0;
+    this.reactionSheetTabs.scrollLeft = 0;
+    this.reactionSheetGrid.scrollTop = 0;
+    this.reactionSheetGrid.scrollLeft = 0;
+  }
+
+  /**
+   * Begins dragging the reaction sheet downward from its handle.
+   * @param {PointerEvent} event
+   * @returns {void}
+   */
+  handleReactionSheetDragStart(event) {
+    if (!this.reactionSheetOverlay.classList.contains('active')) return;
+    if (event.button !== undefined && event.button !== 0) return;
+    if (event.target?.closest?.('.chat-reaction-sheet-close, .chat-reaction-sheet-reset')) return;
+
+    event.stopPropagation();
+    this.reactionSheetDragStartY = event.clientY;
+    this.reactionSheetDragOffset = 0;
+    this.reactionSheetPointerId = event.pointerId;
+    this.reactionSheet.classList.add('dragging');
+    this.reactionSheetDragRegion.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
+  /**
+   * Updates the reaction sheet drag offset as the pointer moves.
+   * @param {PointerEvent} event
+   * @returns {void}
+   */
+  handleReactionSheetDragMove(event) {
+    if (event.pointerId !== this.reactionSheetPointerId) return;
+
+    event.stopPropagation();
+    const offset = Math.max(0, event.clientY - this.reactionSheetDragStartY);
+    this.reactionSheetDragOffset = offset;
+    this.reactionSheet.style.setProperty('--chat-reaction-sheet-drag-offset', `${offset}px`);
+    event.preventDefault();
+  }
+
+  /**
+   * Ends a reaction sheet drag and either closes or snaps the sheet back open.
+   * @param {PointerEvent} event
+   * @returns {void}
+   */
+  handleReactionSheetDragEnd(event) {
+    if (event.pointerId !== this.reactionSheetPointerId) return;
+
+    event.stopPropagation();
+    this.reactionSheetDragRegion.releasePointerCapture(event.pointerId);
+    const shouldClose = this.reactionSheetDragOffset >= CHAT_REACTION_SHEET_CLOSE_DRAG_PX;
+
+    this.resetReactionSheetDragState();
+    if (shouldClose) {
+      this.closeReactionSheet();
+      return;
+    }
+  }
+
+  openReactionSheet(messageEl) {
+    assert(messageEl, 'Reaction sheet target message is required');
+    this.resetReactionSheetDragState();
+    this.reactionSheetTargetMessage = messageEl;
+    this.setReactionSheetCategory(CHAT_REACTION_SHEET_DEFAULT_CATEGORY);
+    this.reactionSheetOverlay.classList.add('active');
+    this.reactionSheetOverlay.setAttribute('aria-hidden', 'false');
+    requestAnimationFrame(() => {
+      this.resetReactionSheetScrollState();
+      requestAnimationFrame(() => this.updateReactionSheetViewport());
+    });
+  }
+
+  closeReactionSheet() {
+    this.resetReactionSheetDragState();
+    if (this.reactionSheetOverlay.contains(document.activeElement)) {
+      this.closeButton.focus({ preventScroll: true });
+    }
+    this.reactionSheetOverlay.classList.remove('active');
+    this.reactionSheetOverlay.setAttribute('aria-hidden', 'true');
+    this.syncReactionPickerActiveState(this.reactionSheetGrid, null);
+    this.updateReactionSheetViewport();
+    this.reactionSheetTargetMessage = null;
+  }
+
+  /**
+   * Resolves the backing message record for a rendered message element.
+   * @param {HTMLElement} messageEl
+   * @returns {Object|null}
+   */
+  getMessageRecordFromElement(messageEl) {
+    if (!messageEl) return null;
+
+    const { txid, messageTimestamp: timestamp } = messageEl.dataset || {};
+    const contact = myData.contacts[this.address];
+    if (!contact?.messages?.length) return null;
+
+    if (txid) {
+      return contact.messages.find((msg) => msg?.txid === txid) || null;
+    }
+
+    return contact.messages.find((msg) =>
+      timestamp && msg?.timestamp == timestamp
+    ) || null;
+  }
+
+  getMessageRecordFromRenderedChild(element) {
+    const messageEl = element.closest('.message');
+    assert(messageEl, 'Rendered child must be inside a message');
+
+    const messageRecord = this.getMessageRecordFromElement(messageEl);
+    assert(messageRecord, 'Rendered message must have a backing record');
+    return messageRecord;
+  }
+
+  /**
+   * Returns the current user's stored reaction emoji for a rendered message.
+   * @param {HTMLElement | null} messageEl
+   * @returns {string}
+   */
+  getCurrentUserReactionForMessage(messageEl) {
+    if (!messageEl) return '';
+
+    const currentUserAddress = normalizeAddress(myAccount.keys.address);
+    const targetTxid = messageEl.dataset.txid;
+    const contact = myData.contacts[this.address];
+    const reaction = getEffectiveReactionForSenderTarget(contact, targetTxid, currentUserAddress);
+    return reaction ? reaction.emoji : '';
+  }
+
+  /**
+   * Ensures context-menu reaction trays surface the active reaction even when it
+   * was chosen from the expanded picker.
+   * @param {HTMLElement} reactionTray
+   * @param {HTMLElement | null} messageEl
+   * @returns {void}
+   */
+  syncContextReactionTrayDisplay(reactionTray, messageEl) {
+    const reactionButtons = [...reactionTray.querySelectorAll('.message-context-reaction-button')]
+      .filter((button) => button.dataset.reactionPickerTrigger !== 'true');
+    assert(reactionButtons.length > 0, 'Reaction tray requires quick reaction buttons');
+
+    for (const button of reactionButtons) {
+      const { defaultEmoji, defaultAriaLabel } = button.dataset;
+      assert(defaultEmoji, 'Reaction button emoji is required');
+      assert(defaultAriaLabel, 'Reaction button aria-label is required');
+      button.dataset.emoji = defaultEmoji;
+      button.textContent = defaultEmoji;
+      button.setAttribute('aria-label', defaultAriaLabel);
+    }
+
+    const activeEmoji = this.getCurrentUserReactionForMessage(messageEl);
+
+    if (!activeEmoji) return;
+
+    for (const button of reactionButtons) {
+      if (button.dataset.defaultEmoji === activeEmoji) return;
+    }
+
+    const customReactionButton = reactionButtons[reactionButtons.length - 1];
+    customReactionButton.dataset.emoji = activeEmoji;
+    customReactionButton.textContent = activeEmoji;
+    customReactionButton.setAttribute('aria-label', `React with ${activeEmoji}`);
+  }
+
+  /**
+   * Builds reaction chip markup for a specific target message.
+   * @param {Array<Object>} reactionsForTarget
+   * @returns {string}
+   */
+  buildReactionChipsHTML(reactionsForTarget) {
+    if (reactionsForTarget.length === 0) {
+      return '';
+    }
+
+    const currentUserAddress = normalizeAddress(myAccount.keys.address);
+    const contactAddress = normalizeAddress(this.address);
+    const contactChips = [];
+    const myChips = [];
+    const otherChips = [];
+
+    for (const reaction of reactionsForTarget) {
+      const sender = reaction.sender;
+      const emoji = reaction.emoji;
+
+      const chipClass = sender === currentUserAddress ? 'message-reaction-chip my-reaction' : 'message-reaction-chip';
+      const chipHtml = `<span class="${chipClass}">${escapeHtml(emoji)}</span>`;
+      if (sender === contactAddress) {
+        contactChips.push(chipHtml);
+      } else if (sender === currentUserAddress) {
+        myChips.push(chipHtml);
+      } else {
+        otherChips.push(chipHtml);
+      }
+    }
+
+    const chips = [...contactChips, ...myChips, ...otherChips];
+    if (chips.length === 0) return '';
+
+    return `
+      <div class="message-reactions" aria-label="Reactions">
+        ${chips.join('')}
+      </div>
+    `;
+  }
+
+  /**
+   * Syncs the rendered reaction chip container for one message element.
+   * @param {HTMLElement | null} messageEl
+   * @param {Array<Object>} reactionsForTarget
+   * @returns {void}
+   */
+  syncReactionChipsForMessage(messageEl, reactionsForTarget) {
+    if (!messageEl) return;
+
+    const existingContainer = messageEl.querySelector('.message-reactions');
+    if (existingContainer) {
+      existingContainer.remove();
+    }
+
+    const messageRecord = this.getMessageRecordFromElement(messageEl);
+    if (messageRecord && isDeleted(messageRecord)) {
+      return;
+    }
+
+    const reactionHtml = this.buildReactionChipsHTML(reactionsForTarget);
+    if (!reactionHtml) return;
+
+    messageEl.insertAdjacentHTML('beforeend', reactionHtml);
+  }
+
+  /**
+   * Syncs reaction chips for every rendered message in the open chat.
+   * @returns {void}
+   */
+  syncAllRenderedReactionChips() {
+    if (!this.messagesList || !this.address) return;
+
+    const contact = myData.contacts[this.address];
+    if (!contact) return;
+
+    const reactionsByTargetTxid = new Map();
+    const reactions = Array.isArray(contact.reactions) ? contact.reactions : [];
+    const seen = new Set();
+    for (const reaction of reactions) {
+      if (!reaction.emoji) {
+        continue;
+      }
+      const reactionKey = `${reaction.targetTxid}:${normalizeAddress(reaction.sender)}`;
+      if (seen.has(reactionKey)) {
+        continue;
+      }
+      seen.add(reactionKey);
+
+      const current = reactionsByTargetTxid.get(reaction.targetTxid) || [];
+      current.push(reaction);
+      reactionsByTargetTxid.set(reaction.targetTxid, current);
+    }
+
+    const messageEls = this.messagesList.querySelectorAll('.message[data-txid]');
+    messageEls.forEach((messageEl) => {
+      const targetTxid = messageEl.dataset.txid;
+      this.syncReactionChipsForMessage(messageEl, reactionsByTargetTxid.get(targetTxid) || []);
+    });
+  }
+
+  /**
+   * Syncs reaction chips for the provided rendered target messages.
+   * @param {Array<string>} targetTxids
+   * @returns {void}
+   */
+  syncRenderedReactionTargets(targetTxids) {
+    if (!this.messagesList || !this.address || targetTxids.length === 0) {
+      return;
+    }
+
+    const contact = myData.contacts[this.address];
+    if (!contact) return;
+
+    const uniqueTargetTxids = [...new Set(targetTxids)];
+    uniqueTargetTxids.forEach((targetTxid) => {
+      const messageEl = this.messagesList.querySelector(`.message[data-txid="${CSS.escape(targetTxid)}"]`);
+      if (!messageEl) return;
+      this.syncReactionChipsForMessage(messageEl, getContactReactionsForTarget(contact, targetTxid));
+    });
+  }
+
+  /**
+   * Applies active-state styling to the quick reaction tray based on stored reaction state.
+   * @param {HTMLElement | null} reactionTray
+   * @param {HTMLElement | null} messageEl
+   */
+  syncReactionPickerActiveState(reactionTray, messageEl) {
+    if (!reactionTray) return;
+
+    const activeEmoji = this.getCurrentUserReactionForMessage(messageEl);
+    const reactionButtons = reactionTray.querySelectorAll('.message-context-reaction-button');
+    reactionButtons.forEach((button) => {
+      const isMorePickerTrigger = button.dataset.reactionPickerTrigger === 'true';
+      const buttonEmoji = isMorePickerTrigger
+        ? ''
+        : (button.dataset.emoji || button.textContent || '').trim();
+      const isActive = !isMorePickerTrigger && !!activeEmoji && buttonEmoji === activeEmoji;
+
+      button.classList.toggle('active', isActive);
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
   }
 
   /**
@@ -15416,11 +18322,21 @@ class ChatModal {
    * Returns whether "Delete for all" should be available for a given message element.
    * Mirrors the gating used in the message context menu.
    * @param {HTMLElement} messageEl
+   * @param {Object|null} messageRecord
    * @returns {boolean}
    */
-  canDeleteMessageForAll(messageEl) {
+  canDeleteMessageForAll(messageEl, messageRecord = null) {
     const isMine = !!messageEl?.classList?.contains('sent');
-    return isMine && myData.contacts[this.address]?.tollRequiredToSend == 0;
+    if (!isMine || !this.canSendWithZeroToll()) {
+      return false;
+    }
+
+    const message = messageRecord || this.getMessageRecordFromElement(messageEl);
+    if (message && isDeletedForAll(message)) {
+      return false;
+    }
+
+    return true;
   }
 
   /**
@@ -15444,23 +18360,30 @@ class ChatModal {
   /**
    * Resolve common attachment context fields from an attachment row.
    * @param {HTMLElement} attachmentRow
-   * @returns {{ attachmentRow: HTMLElement, messageEl: HTMLElement | null, idx: number, item: any, url: string }}
+   * @returns {{ attachmentRow: HTMLElement, messageEl: HTMLElement, item: any, url: string }}
    */
   getAttachmentContextFromRow(attachmentRow) {
-    const idx = Number(attachmentRow?.dataset?.msgIdx);
-    const item = Number.isFinite(idx) ? myData.contacts[this.address]?.messages?.[idx] : null;
+    const messageEl = attachmentRow.closest('.message');
+    assert(messageEl, 'Attachment row must be inside a message');
+
+    const item = this.getMessageRecordFromElement(messageEl);
+    assert(item, 'Attachment message must have a backing record');
+
+    const url = attachmentRow.dataset.url;
+    assert(url, 'Attachment row must include a url');
+
     return {
       attachmentRow,
-      messageEl: attachmentRow?.closest?.('.message') || null,
-      idx,
+      messageEl,
       item,
-      url: attachmentRow?.dataset?.url || ''
+      url
     };
   }
 
   closeImageAttachmentContextMenu() {
     if (!this.imageAttachmentContextMenu) return;
     this.imageAttachmentContextMenu.style.display = 'none';
+    this.syncReactionPickerActiveState(this.imageAttachmentContextMenuReactions, null);
     this.currentImageAttachmentRow = null;
   }
 
@@ -15924,7 +18847,7 @@ class ChatModal {
     // Show copy only if parent message has actual message text
     const copyOption = this.imageAttachmentContextMenu.querySelector('[data-action="copy"]');
     if (copyOption) {
-      const text = messageEl?.querySelector?.('.message-content')?.textContent?.trim() || '';
+      const text = messageEl.querySelector('.message-content')?.textContent?.trim() || '';
       copyOption.style.display = text ? 'flex' : 'none';
     }
 
@@ -15944,7 +18867,7 @@ class ChatModal {
     let hasThumb = true;
     if (hasThumbnailSupport) {
       hasThumb = false;
-      if (url && url !== '#') {
+      if (url !== '#') {
         try {
           const thumb = await thumbnailCache.get(url);
           hasThumb = !!thumb;
@@ -15967,6 +18890,13 @@ class ChatModal {
       importContactsOpt.style.display = isVcf ? '' : 'none';
     }
 
+    assert(this.imageAttachmentContextMenuReactions, 'Image attachment reaction tray is required');
+    this.syncContextReactionTrayDisplay(
+      this.imageAttachmentContextMenuReactions,
+      messageEl
+    );
+    this.syncReactionPickerActiveState(this.imageAttachmentContextMenuReactions, messageEl);
+
     this.positionContextMenu(this.imageAttachmentContextMenu, attachmentRow);
     this.imageAttachmentContextMenu.style.display = 'block';
   }
@@ -15987,19 +18917,19 @@ class ChatModal {
         void this.saveImageAttachment(row);
         break;
       case 'share':
-        if (messageEl) shareAttachmentModal.open(messageEl);
+        shareAttachmentModal.open(messageEl);
         break;
       case 'reply':
-        if (messageEl) this.startReplyToMessage(messageEl);
+        this.startReplyToMessage(messageEl);
         break;
       case 'copy':
-        if (messageEl) void this.copyMessageContent(messageEl);
+        void this.copyMessageContent(messageEl);
         break;
       case 'delete':
-        if (messageEl) this.deleteMessage(messageEl);
+        this.deleteMessage(messageEl);
         break;
       case 'delete-for-all':
-        if (messageEl) void this.deleteMessageForAll(messageEl);
+        void this.deleteMessageForAll(messageEl);
         break;
     }
 
@@ -16014,20 +18944,20 @@ class ChatModal {
     const url = attachmentRow.dataset.url;
     const name = attachmentRow.dataset.name ? decodeURIComponent(attachmentRow.dataset.name) : 'contacts.vcf';
     const type = attachmentRow.dataset.type || 'text/vcard';
-    const msgIdx = attachmentRow.dataset.msgIdx;
 
     // Get encryption keys from the message
-    const contact = myData.contacts[this.address];
-    const message = contact?.messages?.[msgIdx];
-    if (!message?.xattach) {
-      showToast('Could not find attachment data', 0, 'error');
+    const message = this.getMessageRecordFromRenderedChild(attachmentRow);
+    if (!Array.isArray(message.xattach)) {
+      console.warn('VCF attachment message missing attachment data');
+      showToast('Import contacts is not available for this attachment', 2000, 'error');
       return;
     }
 
     // Find the attachment in xattach array
     const attachment = message.xattach.find(att => att.url === url);
     if (!attachment) {
-      showToast('Could not find attachment data', 0, 'error');
+      console.warn('Rendered VCF attachment missing from message data');
+      showToast('Import contacts is not available for this attachment', 2000, 'error');
       return;
     }
 
@@ -16051,7 +18981,7 @@ class ChatModal {
     let loadingToastId;
     try {
       const { item, url } = this.getAttachmentContextFromRow(attachmentRow);
-      if (!item || !url || url === '#') return;
+      if (url === '#') return;
       
       // Get pUrl from data attributes
       const pUrl = attachmentRow.dataset.pUrl;
@@ -16067,7 +18997,7 @@ class ChatModal {
       
       // Cache and display thumbnail
       await thumbnailCache.save(url, thumbnailBlob, 'image/jpeg');
-      this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
+      await this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
       
       hideToast(loadingToastId);
     } catch (err) {
@@ -16084,7 +19014,6 @@ class ChatModal {
   async saveImageAttachment(attachmentRow) {
     // Reuse normal attachment download flow (decrypt + download)
     const { item } = this.getAttachmentContextFromRow(attachmentRow);
-    if (!item) return;
 
     // Concurent download prevention
     if (this.attachmentDownloadInProgress) return;
@@ -16143,6 +19072,318 @@ class ChatModal {
   }
 
   /**
+   * Handles quick reaction row clicks for the main message context menu.
+   * @param {HTMLElement} reactionButton
+   */
+  async handleReactionPickerClick(reactionButton) {
+    const messageEl = this.currentContextMessage;
+    await this.handleReactionPickerSelection(reactionButton, messageEl, () => this.closeContextMenu());
+  }
+
+  /**
+   * Handles quick reaction row clicks for the image attachment context menu.
+   * @param {HTMLElement} reactionButton
+   */
+  async handleImageAttachmentReactionPickerClick(reactionButton) {
+    const row = this.currentImageAttachmentRow;
+    assert(row, 'Image attachment reaction requires an active attachment row');
+    const { messageEl } = this.getAttachmentContextFromRow(row);
+    await this.handleReactionPickerSelection(reactionButton, messageEl, () => this.closeImageAttachmentContextMenu());
+  }
+
+  /**
+   * Handles expanded emoji sheet clicks.
+   * @param {HTMLElement} reactionButton
+   */
+  async handleExpandedReactionPickerClick(reactionButton) {
+    const messageEl = this.reactionSheetTargetMessage;
+    if (!reactionButton || !messageEl) return;
+
+    const selectedReaction = (reactionButton.dataset.emoji || reactionButton.textContent || '').trim();
+    if (!selectedReaction) return;
+
+    await this.submitReactionSelection(messageEl, selectedReaction, () => this.closeReactionSheet());
+  }
+
+  /**
+   * Returns whether the active chat can send actions with no payable toll.
+   * @returns {boolean}
+   */
+  canSendWithZeroToll() {
+    const contact = myData.contacts[this.address];
+
+    switch (contact.tollRequiredToSend) {
+      case 0:
+        return true;
+      case 1:
+        return getEffectiveTollLibWei(this.toll) === 0n;
+      case 2:
+        return false;
+      default:
+        assert(false, `Unknown tollRequiredToSend: ${contact.tollRequiredToSend}`);
+    }
+  }
+
+  /**
+   * Resolves a quick reaction picker press into a target txid and a minimal send flow.
+   * @param {HTMLElement} reactionButton
+   * @param {HTMLElement | null} messageEl
+   * @param {Function} closeMenu
+   */
+  async handleReactionPickerSelection(reactionButton, messageEl, closeMenu) {
+    if (!reactionButton) return;
+    if (!messageEl) return;
+
+    if (reactionButton.dataset.reactionPickerTrigger === 'true') {
+      closeMenu();
+      this.openReactionSheet(messageEl);
+      return;
+    }
+
+    const selectedReaction = (reactionButton.dataset.emoji || reactionButton.textContent || '').trim();
+    await this.submitReactionSelection(messageEl, selectedReaction, closeMenu);
+  }
+
+  /**
+   * Resolves a chosen emoji into either a set or remove reaction action.
+   * @param {HTMLElement | null} messageEl
+   * @param {string} selectedReaction
+   * @param {Function} closeUi
+   * @returns {Promise<void>}
+   */
+  async submitReactionSelection(messageEl, selectedReaction, closeUi) {
+    if (!messageEl || !selectedReaction) return;
+    assert(typeof closeUi === 'function', 'Reaction close callback is required');
+
+    const contact = myData.contacts[this.address];
+    const required = contact?.tollRequiredToSend;
+    if (required === 2) {
+      showToast('You are blocked by this user', 0, 'error');
+      return;
+    }
+    if (!this.canSendWithZeroToll()) {
+      const username = contact.username || `${this.address.slice(0, 8)}...${this.address.slice(-6)}`;
+      showToast(
+        `You can only send reactions to people who have added you as a connection. Ask ${username} to add you as a connection`,
+        0,
+        'info'
+      );
+      return;
+    }
+
+    const txid = messageEl.dataset.txid;
+    assert(txid, 'Reaction target txid is required');
+    const currentUserAddress = normalizeAddress(myAccount.keys.address);
+    const currentReaction = getEffectiveReactionForSenderTarget(contact, txid, currentUserAddress);
+
+    const isRemovingCurrentReaction = !!currentReaction && selectedReaction === currentReaction.emoji;
+    if (isRemovingCurrentReaction) {
+      assert(currentReaction.reactionTxId, 'Reaction txid is required for remove');
+      closeUi();
+      await this.sendReactionMessage({
+        reactId: txid,
+        reactAction: 'remove',
+        targetReactionTxId: currentReaction.reactionTxId
+      });
+      return;
+    }
+
+    closeUi();
+    this.recordRecentReactionEmoji(selectedReaction);
+    await this.sendReactionMessage({
+      reactId: txid,
+      reactMessage: selectedReaction,
+      reactAction: 'set'
+    });
+  }
+
+  /**
+   * Sends a reaction control message.
+   * @param {{reactId: string, reactAction: 'remove', targetReactionTxId: string} | {reactId: string, reactAction: 'set', reactMessage: string}} reaction
+   * @returns {Promise<boolean>}
+   */
+  async sendReactionMessage(reaction) {
+    assert(reaction.reactId, 'Reaction target txid is required');
+    if (!isOnline) {
+      console.warn('Reaction send skipped while offline', reaction);
+      return false;
+    }
+
+    const currentAddress = this.address;
+    if (!currentAddress || currentAddress === myAccount.address) {
+      return false;
+    }
+
+    const contact = myData.contacts[currentAddress];
+    if (!contact) {
+      return false;
+    }
+
+    if (!this.canSendWithZeroToll()) {
+      if (contact.tollRequiredToSend !== 2) {
+        console.warn('Reaction send skipped because recipient requires a nonzero toll');
+        return false;
+      }
+      console.warn('Reaction send skipped because sender is blocked by recipient');
+      return false;
+    }
+
+    const tollInLib = 0n;
+    const sufficientBalance = await validateBalance(tollInLib);
+    if (!sufficientBalance) {
+      const feeInLIB = big2str(getTransactionFeeWei(), 18).slice(0, -16);
+      showToast(`Insufficient balance for fee of ${feeInLIB} LIB. Go to the wallet to add more LIB.`, 0, 'error');
+      console.warn('Reaction send skipped due to insufficient balance', reaction);
+      return false;
+    }
+
+    const keys = myAccount.keys;
+    if (!keys) {
+      console.warn('Reaction send skipped: sender keys missing');
+      return false;
+    }
+
+    let payload = {
+      type: 'message',
+      reactId: reaction.reactId,
+      reactAction: reaction.reactAction
+    };
+    switch (reaction.reactAction) {
+      case 'set':
+        assert(reaction.reactMessage, 'Reaction emoji is required for set');
+        payload.reactMessage = reaction.reactMessage;
+        break;
+      case 'remove':
+        assert(reaction.targetReactionTxId, 'Target reaction txid is required for remove');
+        payload.targetReactionTxId = reaction.targetReactionTxId;
+        break;
+      default:
+        throw new Error(`Unknown reaction action: ${reaction.reactAction}`);
+    }
+
+    let chatMessageObj;
+    let txid;
+    try {
+      ({ payload, chatMessageObj, txid } = await this.buildEncryptedStructuredChatTx(
+        currentAddress,
+        payload,
+        tollInLib,
+        keys
+      ));
+    } catch (error) {
+      console.warn('Reaction send skipped: failed to build encrypted chat tx', error);
+      return false;
+    }
+
+    console.log('Sending reaction message', {
+      txid,
+      reactId: reaction.reactId,
+      reactMessage: reaction.reactMessage,
+      reactAction: reaction.reactAction
+    });
+
+    const targetMessage = contact.messages.find((message) => message.txid === reaction.reactId);
+    if (!targetMessage || isDeleted(targetMessage)) {
+      console.warn('Reaction send skipped: local target message missing', reaction);
+      return false;
+    }
+
+    const sender = normalizeAddress(keys.address);
+    assert(payload.sent_timestamp, 'Reaction sent_timestamp is required');
+    const chainEntries = getPendingReactionChainEntries(currentAddress, reaction.reactId);
+    const activeChainEntries = chainEntries.some((entry) => entry.reactionPending.status === 'pending')
+      ? chainEntries
+      : [];
+    const currentReaction = getLatestReactionStateForSenderTarget(contact, reaction.reactId, sender);
+    const baseReaction = copyReactionSnapshot(
+      activeChainEntries.length > 0
+        ? activeChainEntries[0].reactionPending.baseReaction
+        : currentReaction
+    );
+    const localOrder = activeChainEntries.reduce((maxOrder, entry) => {
+      return Math.max(maxOrder, entry.reactionPending.localOrder);
+    }, 0) + 1;
+
+    /** @type {PendingReactionMutation} */
+    let reactionPendingState;
+    switch (reaction.reactAction) {
+      case 'set':
+        reactionPendingState = {
+          kind: 'set',
+          targetTxid: reaction.reactId,
+          localOrder,
+          status: 'pending',
+          baseReaction,
+          visibleResult: {
+            sender,
+            targetTxid: reaction.reactId,
+            emoji: reaction.reactMessage.trim(),
+            timestamp: payload.sent_timestamp,
+            reactionTxId: txid
+          }
+        };
+        break;
+      case 'remove':
+        reactionPendingState = {
+          kind: 'remove',
+          targetTxid: reaction.reactId,
+          localOrder,
+          status: 'pending',
+          baseReaction,
+          visibleResult: {
+            sender,
+            targetTxid: reaction.reactId,
+            emoji: '',
+            timestamp: payload.sent_timestamp,
+            reactionTxId: txid
+          }
+        };
+        break;
+      default:
+        assert(false, `Unknown reaction action: ${reaction.reactAction}`);
+    }
+
+    trackPendingReactionBeforeInject(txid, currentAddress, reactionPendingState);
+    syncPendingReactionChainState(currentAddress, reaction.reactId);
+
+    const response = await injectTx(chatMessageObj, txid);
+    if (!response?.result?.success) {
+      console.error('reaction message failed to send', response);
+      const pendingTxInfo = finishPendingReactionInject(txid);
+
+      const outcome = settlePendingReaction(pendingTxInfo, 'failure');
+      if (!outcome.hasPending) {
+        cleanupResolvedReactionChain(currentAddress, outcome.targetTxid);
+      }
+      if (isDeleted(targetMessage)) {
+        purgePendingReactionsForTarget(currentAddress, reaction.reactId);
+      }
+      const reason = response?.result?.reason || '';
+      if (outcome.didChange) {
+        const precrackReason = getRecipientTollPrecrackFailureReason(reason, contact);
+        if (precrackReason) {
+          showToast(precrackReason, 0, 'error');
+        } else {
+          showToast('Reaction failed to send and was reverted', 0, 'error');
+        }
+      }
+      if (reason && isRecipientTollStateFailure(reason)) {
+        await this.refreshRecipientTollState(currentAddress);
+      }
+      saveState();
+      return false;
+    }
+
+    finishPendingReactionInject(txid);
+    if (isDeleted(targetMessage)) {
+      purgePendingReactionsForTarget(currentAddress, reaction.reactId);
+    }
+    saveState();
+
+    return true;
+  }
+
+  /**
    * Initiates editing of a message: fills input with existing text and stores txid
    * @param {HTMLElement} messageEl
    */
@@ -16152,6 +19393,9 @@ class ChatModal {
       const txid = messageEl.dataset.txid;
       const timestamp = parseInt(messageEl.dataset.messageTimestamp || '0', 10);
       if (!txid) return;
+      if (hasPendingEditForTarget(this.address, txid)) {
+        return showToast('This message already has a pending edit.', 3000, 'info');
+      }
       // Enforce edit window in case UI got out of sync
       if (timestamp && (Date.now() - timestamp) > EDIT_WINDOW_MS) {
         return showToast('Edit window expired', 3000, 'info');
@@ -16326,7 +19570,20 @@ class ChatModal {
    */
   scrollToMessage(txid) {
     if (!txid || !this.messagesList) return;
-    const target = this.messagesList.querySelector(`[data-txid="${txid}"]`);
+    let target = this.messagesList.querySelector(`[data-txid="${CSS.escape(txid)}"]`);
+    if (!target) {
+      assert(this.address, 'Cannot scroll to a message without an active chat');
+      const contact = myData.contacts[this.address];
+      const targetIndex = contact.messages.findIndex((message) => message.txid === txid);
+      if (targetIndex !== -1) {
+        this.chatRenderedOldestIndex = Math.max(
+          this.chatRenderedOldestIndex,
+          targetIndex
+        );
+        this.appendChatModal(false, true);
+        target = this.messagesList.querySelector(`[data-txid="${CSS.escape(txid)}"]`);
+      }
+    }
     if (!target) {
       showToast('Message not found', 2000, 'info');
       return;
@@ -16458,8 +19715,9 @@ class ChatModal {
       if (messageIndex === -1) return;
       
       const message = contact.messages[messageIndex];
+      const shouldRefreshCallsUi = message.type === 'call' && shouldRefreshUpcomingCallsUiForCallTime(message.callTime);
       
-      if (message.deleted) {
+      if (isDeleted(message)) {
         return showToast('Message already deleted', 2000, 'info');
       }
       
@@ -16473,32 +19731,34 @@ class ChatModal {
 
       // Mark as deleted and clear payment info if present
       Object.assign(message, {
-        deleted: 1,
-        message: "Deleted on this device"
+        deleted: MESSAGE_DELETED_STATE_LOCAL,
+        message: DELETED_MESSAGE_LOCAL_TEXT
       });
       // Remove payment-specific fields if present
       if (message?.amount) {
         if (message.payment) delete message.payment;
-        if (message.memo) message.memo = "Deleted on this device";
+        if (message.memo) message.memo = DELETED_MESSAGE_LOCAL_TEXT;
         if (message.amount) delete message.amount;
         if (message.symbol) delete message.symbol;
-        
+
         // Update corresponding transaction in wallet history
-        const txIndex = myData.wallet.history.findIndex((tx) => tx.txid === message.txid);
-        if (txIndex !== -1) {
-          Object.assign(myData.wallet.history[txIndex], { deleted: 1, memo: 'Deleted on this device' });
-          delete myData.wallet.history[txIndex].amount;
-          delete myData.wallet.history[txIndex].symbol;
-          delete myData.wallet.history[txIndex].payment;
-          delete myData.wallet.history[txIndex].sign;
-          delete myData.wallet.history[txIndex].address;
-        }
+        updateDeletedWalletHistoryEntry(
+          message.txid,
+          MESSAGE_DELETED_STATE_LOCAL,
+          DELETED_MESSAGE_LOCAL_TEXT
+        );
       }
       // Remove cached thumbnails for image attachments, then remove attachments
       this.purgeThumbnail(message.xattach);
       delete message.xattach;
+      purgeContactReactionsForTarget(contact, message.txid);
+      purgePendingReactionsForTarget(this.address, message.txid);
+      syncChatLatestActivityTimestamp(this.address, contact);
       
       this.appendChatModal();
+      if (shouldRefreshCallsUi) {
+        refreshUpcomingCallsUi();
+      }
       showToast('Message deleted', 2000, 'success');
       setTimeout(() => {
         const selector = `[data-message-timestamp="${timestamp}"]`;
@@ -16533,8 +19793,8 @@ class ChatModal {
       
       const message = contact.messages[messageIndex];
       
-      if (message.deleted) {
-        return showToast('Message already deleted', 2000, 'info');
+      if (isDeletedForAll(message)) {
+        return showToast('Message already deleted for everyone', 2000, 'info');
       }
 
       // Check if the message was sent by the current user
@@ -16549,7 +19809,7 @@ class ChatModal {
         return;
       }
 
-      const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
+      const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : getEffectiveTollLibWei(this.toll);
 
       const sufficientBalance = await validateBalance(tollInLib);
       if (!sufficientBalance) {
@@ -16683,7 +19943,6 @@ class ChatModal {
       tollLabel.textContent = 'Toll:';
       tollValue.textContent = 'offline';
       this.toll = 0n;
-      this.tollUnit = 'LIB';
       return;
     }
 
@@ -16692,14 +19951,16 @@ class ChatModal {
       contact.toll,
       contact.tollUnit
     );
+    const effectiveTollLibWei = getEffectiveTollLibWei(libWei);
+    const { text: effectiveUsdString } = this.formatTollDisplay(effectiveTollLibWei, 'LIB');
 
     let display;
     if (contact.tollRequiredToSend == 1) {
       // Toll is required - show as "Toll cost:" with amount in red
       tollLabel.textContent = 'Toll cost:';
-      display = usdString;
-      // if the value of toll is 0, use toll-free class instead
-      if(contact.toll == 0n) {  
+      display = effectiveUsdString;
+      // if the effective toll is 0, use toll-free class instead
+      if (effectiveTollLibWei == 0n) {
         tollValue.classList.add('toll-free');
       } else {
         tollValue.classList.add('toll-cost');
@@ -16717,15 +19978,14 @@ class ChatModal {
     }
     tollValue.textContent = display;
 
-    // Store the toll in LIB format for message creation (chat messages expect LIB wei)
+    // Store the toll in LIB for message creation (chat messages expect LIB wei)
     this.toll = typeof libWei === 'bigint' ? libWei : 0n;
-    this.tollUnit = contact.tollUnit || 'LIB';
   }
 
   /**
    * updateTollRequired queries contact object and updates the tollRequiredByMe and tollRequiredByOther fields
    * @param {string} address - the address of the contact
-   * @returns {void}
+   * @returns {Promise<void>}
    */
   async updateTollRequired(address) {
     const myAddr = longAddress(myAccount.keys.address);
@@ -16761,6 +20021,10 @@ class ChatModal {
       if (this.isActive() && this.address === address) {
         this.updateTollAmountUI(address);
         this.addAttachmentButton.disabled = this.isEncrypting || this.isEditingMessage() || this.blockedByRecipient;
+        // Ensure voice recorder reflects updated blocked/connectivity state as well
+        if (this.voiceRecordButton) {
+          this.voiceRecordButton.disabled = this.blockedByRecipient || !isOnline;
+        }
       }
 
       // console.log(`localContact.tollRequiredToSend: ${localContact.tollRequiredToSend}`);
@@ -16774,7 +20038,7 @@ class ChatModal {
    * Invoked when opening chatModal. In the background, it will query the contact's toll field from the network.
    * If the queried toll value is different from the toll field in localStorage, it will update the toll field in localStorage and update the UI element that displays the toll field value.
    * @param {string} address - the address of the contact
-   * @returns {void}
+   * @returns {Promise<void>}
    */
   async updateTollValue(address) {
     // query the contact's toll field from the network
@@ -16798,6 +20062,32 @@ class ChatModal {
     } else {
       return;
     }
+  }
+
+  /**
+   * Refreshes the toll state for the given address
+   * @param {string} address - The address of the contact to refresh the toll state for
+   * @returns {Promise<void>}
+   */
+  async refreshRecipientTollState(address) {
+    assert(address, 'Recipient address is required to refresh toll state');
+    const contact = myData.contacts[address];
+    assert(contact, `Contact is required to refresh toll state: ${address}`);
+
+    await this.updateTollValue(address);
+    await this.updateTollRequired(address);
+
+    if (!this.isActive() || this.address !== address) {
+      saveState();
+      return;
+    }
+
+    this.blockedByRecipient = Number(contact.tollRequiredToSend) === 2;
+    this.updateTollAmountUI(address);
+    this.addAttachmentButton.disabled = this.isEncrypting || this.isEditingMessage() || this.blockedByRecipient;
+    this.voiceRecordButton.disabled = this.blockedByRecipient || !isOnline;
+
+    saveState();
   }
 
   /**
@@ -16834,10 +20124,9 @@ class ChatModal {
     try {
       // Synchronous eligibility based on cached value fetched on ChatModal open
       const contact = myData.contacts[this.address] || {};
-      const required = contact.tollRequiredToSend;
-      if (required !== 0) {
+      if (!this.canSendWithZeroToll()) {
         const username = contact.username || `${this.address.slice(0, 8)}...${this.address.slice(-6)}`;
-        if (required === 2) {
+        if (contact.tollRequiredToSend === 2) {
           showToast('You are blocked by this user', 0, 'error');
         } else {
           showToast(
@@ -16849,9 +20138,9 @@ class ChatModal {
         return;
       }
 
-      const sufficientBalance = await validateBalance(0n);
-      if (!sufficientBalance) {
-        showToast('Insufficient balance for fee. Go to the wallet to add more LIB.', 0, 'error');
+      const feeBalanceStatus = await getFeeBalanceStatus();
+      if (!feeBalanceStatus.success) {
+        showFeeBalanceFailureToast(feeBalanceStatus.reason);
         return;
       }
 
@@ -16979,7 +20268,7 @@ class ChatModal {
       payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
 
       // Create and send the call message transaction
-      const tollInLib = myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : this.toll;
+      const tollInLib = myData.contacts[currentAddress].tollRequiredToSend == 0 ? 0n : getEffectiveTollLibWei(this.toll);
       const chatMessageObj = await this.createChatMessage(currentAddress, payload, tollInLib, keys);
       // if there's a callobj.calltime is present and is 0 set callType to true to make recipient phone ring
       if (callObj?.callTime === 0) {
@@ -17028,6 +20317,10 @@ class ChatModal {
         return false;
       }
 
+      if (shouldRefreshUpcomingCallsUiForCallTime(normalizedCallTime)) {
+        refreshUpcomingCallsUi();
+      }
+
       return true;
       
     } catch (error) {
@@ -17059,6 +20352,14 @@ class ChatModal {
    * @returns {Promise<void>}
    */
   async sendVoiceMessageTx(voiceMessageUrl, duration, audioPqEncSharedKey, audioSelfKey, replyInfo = null) {
+    const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : getEffectiveTollLibWei(this.toll);
+    const sufficientBalance = await validateBalance(tollInLib);
+    if (!sufficientBalance) {
+      throw new Error(
+        `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}. Go to the wallet to add more LIB.`
+      );
+    }
+
     // Create voice message object
     const messageObj = {
       type: 'vm',
@@ -17121,9 +20422,6 @@ class ChatModal {
     }
 
     payload.senderInfo = encryptChacha(dhkey, stringify(senderInfo));
-
-    // Calculate toll
-    const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : this.toll;
 
     // Create and send transaction
     const chatMessageObj = await this.createChatMessage(this.address, payload, tollInLib, myAccount.keys);
@@ -17191,8 +20489,8 @@ class ChatModal {
         console.error('voice message failed to send', response);
 
         const reason = response?.result?.reason || '';
-        if (/toll/i.test(reason)) {
-          await this.reopen();
+        if (reason && isRecipientTollStateFailure(reason)) {
+          await this.refreshRecipientTollState(this.address);
         }
 
         newMessage.status = 'failed';
@@ -17251,7 +20549,6 @@ class ChatModal {
     }
 
     const voiceUrl = voiceMessageElement.dataset.url;
-    const msgIdx = voiceMessageElement.dataset.msgIdx;
 
     if (!voiceUrl) {
       showToast('Voice message URL not found', 0, 'error');
@@ -17260,10 +20557,7 @@ class ChatModal {
 
     try {
       // Check if it's our own message or received message
-      const message = myData.contacts[this.address].messages[msgIdx];
-      if (!message) {
-        throw new Error('Message not found');
-      }
+      const message = this.getMessageRecordFromRenderedChild(voiceMessageElement);
       const isMyMessage = message.my;
       
       // Get keys from message item (voice messages use audio-specific keys with fallback)
@@ -17427,8 +20721,7 @@ class ChatModal {
    */
   async saveVoiceMessage(messageEl) {
     const voiceEl = messageEl.querySelector('.voice-message');
-    const msgIdx = voiceEl?.dataset?.msgIdx;
-    const item = msgIdx !== undefined ? myData.contacts[this.address]?.messages?.[msgIdx] : null;
+    const item = this.getMessageRecordFromElement(messageEl);
     
     if (!voiceEl || !item || item.type !== 'vm') {
       showToast('Voice message not found', 2000, 'error');
@@ -17547,7 +20840,12 @@ class CallInviteModal {
 
     this.contactsList.addEventListener('change', this.updateCounter.bind(this));
     this.contactsList.addEventListener('click', this.handleContactClick.bind(this));
-    this.inviteSendButton.addEventListener('click', this.sendInvites.bind(this));
+    this.inviteSendButton.addEventListener('click', withButtonCooldown(
+      [this.inviteSendButton, this.cancelButton],
+      BUTTON_COOLDOWN_MS,
+      null,
+      (e) => this.sendInvites(e)
+    ));
     this.cancelButton.addEventListener('click', () => {
       this.close();
     });
@@ -17595,7 +20893,7 @@ class CallInviteModal {
     if (!comparableCallUrl) return false;
     return (contact?.messages || []).some((message) => {
       if (!message || message.type !== 'call') return false;
-      if (message.deleted === 1 || message.status === 'failed') return false;
+      if (isDeleted(message) || message.status === 'failed') return false;
       return this.getComparableCallUrl(message.message) === comparableCallUrl;
     });
   }
@@ -17770,10 +21068,15 @@ class CallInviteModal {
     const msgCallLink = anchorHref.split('#')[0];
     if (!msgCallLink) return showToast('Call link not found', 2000, 'error');
     let msgCallTime = Number(this.messageEl.getAttribute('data-call-time')) || 0;
-    this.inviteSendButton.disabled = true;
     this.inviteSendButton.textContent = 'Sending...';
 
     try {
+      let availableBalanceWei = getLibBalanceWei();
+      const feeInWei = getTransactionFeeWei({ allowNull: true });
+      if (feeInWei === null) {
+        showToast('Network error: Cannot determine transaction fee', 0, 'error');
+        return;
+      }
       const successMessages = [];
       const failureGroups = new Map();
       const addFailure = (reason, name) => {
@@ -17836,6 +21139,14 @@ class CallInviteModal {
           continue;
         }
 
+        const totalRequired = toll + feeInWei;
+        if (availableBalanceWei < totalRequired) {
+          addFailure('insufficientBalance', contact.username || addr);
+          continue;
+        }
+        // Reserve balance locally to prevent over-attempting within this batch.
+        availableBalanceWei -= totalRequired;
+
         const messageObj = await chatModal.createChatMessage(addr, messagePayload, toll, keys);
         // set callType to true if callTime is within 5 minutes of now or after callTime
         if (payload?.callTime <= getCorrectedTimestamp() + 5 * 60 * 1000) {
@@ -17879,6 +21190,8 @@ class CallInviteModal {
         const response = await injectTx(messageObj, txid);
 
         if (!response || !response.result || !response.result.success) {
+          // Refund local reservation when tx broadcast/injection fails.
+          availableBalanceWei += totalRequired;
           console.error('call message failed to send', response);
           updateTransactionStatus(txid, addr, 'failed', 'message');
           if (chatModal.isActive() && chatModal.address === addr) {
@@ -17937,6 +21250,12 @@ class CallInviteModal {
                 sublist: nameList
               });
               break;
+            case 'insufficientBalance':
+              failureItems.push({
+                text: 'Insufficient LIB balance to invite:',
+                sublist: nameList
+              });
+              break;
           }
         }
         const failureHtml = [
@@ -17959,7 +21278,6 @@ class CallInviteModal {
       console.error('Invite send error', err);
       showToast('Failed to send invites', 0, 'error');
     } finally {
-      this.inviteSendButton.disabled = false;
       this.inviteSendButton.textContent = 'Invite';
       this.close();
     }
@@ -17989,7 +21307,12 @@ class ShareAttachmentModal {
 
     this.contactsList.addEventListener('change', this.updateCounter.bind(this));
     this.contactsList.addEventListener('click', this.handleContactClick.bind(this));
-    this.sendButton.addEventListener('click', this.sendAttachments.bind(this));
+    this.sendButton.addEventListener('click', withButtonCooldown(
+      [this.sendButton, this.cancelButton],
+      BUTTON_COOLDOWN_MS,
+      null,
+      (e) => this.sendAttachments(e)
+    ));
     this.cancelButton.addEventListener('click', () => {
       this.close();
     });
@@ -18017,7 +21340,7 @@ class ShareAttachmentModal {
     const currentChatAddress = chatModal.address;
     const allContacts = Object.values(myData.contacts || {})
       .filter(c => c.address !== myAccount.address && c.address !== currentChatAddress)
-      .filter(c => !isFaucetAddress(c.address))
+      .filter(c => !isFaucetAddress(c.address) && !isBridgeContact(c))
       .map(c => {
         const displayName = getContactDisplayName(c);
         return {
@@ -18131,24 +21454,14 @@ class ShareAttachmentModal {
     const url = attachmentRow.dataset.url;
     const name = attachmentRow.dataset.name;
     const type = attachmentRow.dataset.type;
-    const msgIdx = attachmentRow.dataset.msgIdx;
 
     if (!url) return null;
 
     // Get the actual message data from myData to access encryption keys
-    const contactAddress = chatModal.address;
-    const contact = myData.contacts[contactAddress];
-    
-    if (!contact || !contact.messages || !msgIdx) {
-      console.error('Cannot find message data for attachment');
-      return null;
-    }
+    const messageData = chatModal.getMessageRecordFromElement(messageEl);
+    assert(messageData, 'Shared attachment must have a backing message record');
 
-    const messageData = contact.messages[parseInt(msgIdx)];
-    if (!messageData || !messageData.xattach || !messageData.xattach[0]) {
-      console.error('Cannot find attachment in message data');
-      return null;
-    }
+    assert(messageData.xattach && messageData.xattach[0], 'Shared attachment message must include attachment data');
 
     const attachmentData = messageData.xattach[0];
 
@@ -18170,16 +21483,30 @@ class ShareAttachmentModal {
       showToast('No attachment data found', 2000, 'error');
       return;
     }
-
-    this.sendButton.disabled = true;
     this.sendButton.textContent = 'Sending...';
 
     try {
+      let availableBalanceWei = getLibBalanceWei();
+      const feeInWei = getTransactionFeeWei({ allowNull: true });
+      if (feeInWei === null) {
+        showToast('Network error: Cannot determine transaction fee', 0, 'error');
+        return;
+      }
       const keys = myAccount.keys;
       if (!keys) {
         showToast('Keys not found', 0, 'error');
         return;
       }
+      const successMessages = [];
+      const failureGroups = new Map();
+      const addFailure = (reason, name) => {
+        if (!failureGroups.has(reason)) {
+          failureGroups.set(reason, new Set());
+        }
+        if (name) {
+          failureGroups.get(reason).add(name);
+        }
+      };
 
       // Get the file's encryption key (migration ensures all attachments have encKey)
       const encKey = this.attachmentData.encKey;
@@ -18190,9 +21517,10 @@ class ShareAttachmentModal {
 
       for (const addr of addresses) {
         const contact = myData.contacts[addr];
+        const contactName = contact?.username || addr;
         const ok = await ensureContactKeys(addr);
         if (!ok) {
-          showToast(`Skipping ${contact?.username || addr} (cannot get public key)`, 2000, 'warning');
+          addFailure('noPublicKey', contactName);
           continue;
         }
 
@@ -18221,9 +21549,9 @@ class ShareAttachmentModal {
 
         const encMessage = encryptChacha(recipientDhkey, stringify(messageObj));
         
-        // For ourselves: re-encrypt encKey with our password for local storage
+        // For ourselves: store message encryption key (recipientDhkey) for local decryption
         const password = keys.secret + keys.pqSeed;
-        const selfKey = encryptData(bin2hex(base642bin(encKey)), password, true);
+        const selfKey = encryptData(bin2hex(recipientDhkey), password, true);
 
         const messagePayload = {
           message: encMessage,
@@ -18242,15 +21570,21 @@ class ShareAttachmentModal {
         const tollRequiredToSend = chatIdAccount?.toll?.required?.[toIndex] ?? 1;
 
         if (tollRequiredToSend === 2) {
-          showToast(`You cannot share with ${contact?.username || addr} (you are blocked)`, 0, 'warning');
+          addFailure('blocked', contactName);
           continue;
         }
         
         // Calculate toll amount: 0 for connections, recipient's required toll for others
-        let tollInLib = tollRequiredToSend === 0 ? 0n : (contact.toll || 0n);
-        
-        // Add network fee to the toll amount
-        tollInLib = tollInLib + getTransactionFeeWei();
+        let tollInLib = tollRequiredToSend === 0 ? 0n : getEffectiveTollLibWei(normalizeTollToLibWei(contact.toll || 0n, contact.tollUnit || 'LIB'));
+
+        const totalRequired = tollInLib + feeInWei;
+        if (availableBalanceWei < totalRequired) {
+          addFailure('insufficientBalance', contactName);
+          continue;
+        }
+        // Reserve balance locally to prevent over-attempting within this batch.
+        availableBalanceWei -= totalRequired;
+
         // if (tollRequiredToSend === 1) {
         //   const username = (contact?.username) || `${addr.slice(0, 8)}...${addr.slice(-6)}`;
         //   showToast(`You can only share with people who have added you as a connection. Ask ${username} to add you as a connection`, 0, 'info');
@@ -18302,22 +21636,86 @@ class ShareAttachmentModal {
         const response = await injectTx(chatMessageObj, txid);
 
         if (!response || !response.result || !response.result.success) {
+          // Refund local reservation when tx broadcast/injection fails.
+          availableBalanceWei += totalRequired;
           console.error('attachment share message failed to send', response);
           updateTransactionStatus(txid, addr, 'failed', 'message');
           if (chatModal.isActive() && chatModal.address === addr) {
             chatModal.appendChatModal();
           }
-          showToast(`Failed to share with ${contact?.username || addr}`, 3000, 'error');
+          addFailure('sendFailed', contactName);
         } else {
-          showToast(`Attachment shared with ${contact?.username || addr}`, 3000, 'success');
+          successMessages.push(`Attachment shared with ${contactName}`);
         }
+      }
+
+      if (successMessages.length > 0) {
+        const successNames = successMessages.map((message) => {
+          const match = message.match(/^Attachment shared with (.+)$/);
+          return match ? match[1] : message;
+        });
+        const successHtml = [
+          '<div class="toast-list-content">',
+          '<div class="toast-list-title">Attachment(s) shared with:</div>',
+          '<ul class="toast-list">',
+          ...successNames.map((name) => `<li><strong>${escapeHtml(name)}</strong></li>`),
+          '</ul>',
+          '</div>'
+        ].join('');
+        showToast(successHtml, 3000, 'success', true);
+      }
+
+      if (failureGroups.size > 0) {
+        const failureItems = [];
+        for (const [reason, names] of failureGroups.entries()) {
+          const nameList = Array.from(names);
+          switch (reason) {
+            case 'noPublicKey':
+              failureItems.push({
+                text: 'Cannot get public key for:',
+                sublist: nameList
+              });
+              break;
+            case 'blocked':
+              failureItems.push({
+                text: 'You cannot share with these contacts (you are blocked):',
+                sublist: nameList
+              });
+              break;
+            case 'insufficientBalance':
+              failureItems.push({
+                text: 'Insufficient LIB balance to share with:',
+                sublist: nameList
+              });
+              break;
+            case 'sendFailed':
+              failureItems.push({
+                text: 'Attachment share failed for:',
+                sublist: nameList
+              });
+              break;
+          }
+        }
+        const failureHtml = [
+          '<div class="toast-list-content">',
+          '<div class="toast-list-title">Attachment not shared:</div>',
+          '<ul class="toast-list">',
+          ...failureItems.map((item) => {
+            const sublist = Array.isArray(item.sublist) && item.sublist.length > 0
+              ? `<ul class="toast-sublist">${item.sublist.map((name) => `<li><strong>${escapeHtml(name)}</strong></li>`).join('')}</ul>`
+              : '';
+            return `<li>${item.text}${sublist}</li>`;
+          }),
+          '</ul>',
+          '</div>'
+        ].join('');
+        showToast(failureHtml, 0, 'warning', true);
       }
 
     } catch (err) {
       console.error('Share send error', err);
       showToast('Failed to share attachment', 0, 'error');
     } finally {
-      this.sendButton.disabled = false;
       this.sendButton.textContent = 'Share';
       this.close();
     }
@@ -18334,7 +21732,6 @@ class ShareContactsModal {
   constructor() {
     this.selectedContacts = new Set();
     this.warningShown = false;
-    this.isUploading = false;
     this.recipientAddress = null;
   }
 
@@ -18350,7 +21747,7 @@ class ShareContactsModal {
     // Event listeners
     this.closeButton.addEventListener('click', () => this.handleClose());
     this.allNoneButton.addEventListener('click', () => this.toggleAllNone());
-    this.doneButton.addEventListener('click', () => this.handleDone());
+    this.doneButton.addEventListener('click', withButtonCooldown(this.doneButton, BUTTON_COOLDOWN_MS, null, () => this.handleDone()));
     this.contactsList.addEventListener('click', (e) => this.handleContactClick(e));
     this.actionButton.addEventListener('click', () => {
       if (this.recipientAddress) {
@@ -18369,7 +21766,6 @@ class ShareContactsModal {
     // Reset state
     this.selectedContacts.clear();
     this.warningShown = false;
-    this.isUploading = false;
     this.recipientAddress = recipientAddress;
     this.doneButton.classList.remove('loading');
     this.doneButton.disabled = true;
@@ -18449,8 +21845,8 @@ class ShareContactsModal {
       : null;
     
     const filteredContacts = currentChatAddress
-      ? allContacts.filter(c => !isFaucetAddress(c.address) && normalizeAddress(c.address) !== currentChatAddress)
-      : allContacts.filter(c => !isFaucetAddress(c.address));
+      ? allContacts.filter(c => !isFaucetAddress(c.address) && !isBridgeContact(c) && normalizeAddress(c.address) !== currentChatAddress)
+      : allContacts.filter(c => !isFaucetAddress(c.address) && !isBridgeContact(c));
     
     const sortByShareDisplayName = (a, b) =>
       this.getContactDisplayNameForShare(a)
@@ -18775,11 +22171,7 @@ class ShareContactsModal {
       return;
     }
 
-    if (this.isUploading) return;
-    this.isUploading = true;
     this.doneButton.classList.add('loading');
-    this.doneButton.disabled = true;
-
     try {
       // Generate VCF content
       const vcfContent = await this.generateVcfContent();
@@ -18814,9 +22206,7 @@ class ShareContactsModal {
       console.error('Failed to generate/upload VCF:', err);
       showToast('Failed to share contacts', 0, 'error');
     } finally {
-      this.isUploading = false;
       this.doneButton.classList.remove('loading');
-      this.doneButton.disabled = false;
     }
   }
 }
@@ -18831,7 +22221,6 @@ class ImportContactsModal {
   constructor() {
     this.selectedContacts = new Set();
     this.warningShown = false;
-    this.isImporting = false;
     this.parsedContacts = [];
     this.currentAttachment = null;
     this.recipientAddress = null;
@@ -18850,7 +22239,7 @@ class ImportContactsModal {
     // Event listeners
     this.closeButton.addEventListener('click', () => this.handleClose());
     this.allNoneButton.addEventListener('click', () => this.toggleAllNone());
-    this.doneButton.addEventListener('click', () => this.handleDone());
+    this.doneButton.addEventListener('click', withButtonCooldown(this.doneButton, BUTTON_COOLDOWN_MS, null, () => this.handleDone()));
     this.contactsList.addEventListener('click', (e) => this.handleContactClick(e));
     this.actionButton.addEventListener('click', () => {
       if (this.recipientAddress) {
@@ -18872,7 +22261,6 @@ class ImportContactsModal {
     // Reset state
     this.selectedContacts.clear();
     this.warningShown = false;
-    this.isImporting = false;
     this.parsedContacts = [];
     this.currentAttachment = isLocalUpload ? null : attachment;
     this.recipientAddress = isLocalUpload ? null : (attachment?.senderAddress || null);
@@ -19188,11 +22576,17 @@ class ImportContactsModal {
       if (existingContact) {
         const updateEligibility = this.getExistingContactUpdateEligibility(existingContact, contact);
         if (updateEligibility.canUpdate) updatableExistingCount++;
+        const updateParts = [];
+        if (updateEligibility.canUpdateAvatar) updateParts.push('photo');
+        if (updateEligibility.canUpdateName) updateParts.push('name');
+        const updateSummary = updateParts.length > 0 ? `import ${updateParts.join(' & ')}` : '';
+
         existingContacts.push({
           ...contact,
           address: normalizedAddr,
           isExisting: true,
           canUpdateExisting: updateEligibility.canUpdate,
+          updateSummary,
         });
       } else {
         newContacts.push({ ...contact, address: normalizedAddr, isExisting: false });
@@ -19248,6 +22642,9 @@ class ImportContactsModal {
       const usernameSubtitle = (contact.name && contact.username)
         ? `<div class="share-contact-username">${escapeHtml(contact.username)}</div>`
         : '';
+      const updateSummaryHtml = (contact.isExisting && contact.canUpdateExisting && contact.updateSummary)
+        ? `<div class="share-contact-update-summary">${escapeHtml(contact.updateSummary)}</div>`
+        : '';
 
       row.innerHTML = `
         <div class="share-contact-avatar">${avatarHtml}</div>
@@ -19257,7 +22654,7 @@ class ImportContactsModal {
         </div>
         ${(contact.isExisting && !contact.canUpdateExisting)
           ? '<span class="existing-label">Already added</span>' 
-          : '<input type="checkbox" class="share-contact-checkbox" />'}
+          : `<div class="share-contact-action"><input type="checkbox" class="share-contact-checkbox" />${updateSummaryHtml}</div>`}
       `;
 
       this.contactsList.appendChild(row);
@@ -19396,11 +22793,7 @@ class ImportContactsModal {
       return;
     }
 
-    if (this.isImporting) return;
-    this.isImporting = true;
     this.doneButton.classList.add('loading');
-    this.doneButton.disabled = true;
-
     try {
       let importedCount = 0;
       let failedCount = 0;
@@ -19497,6 +22890,7 @@ class ImportContactsModal {
           address: networkAddress,
           username: validation.username,
           messages: [],
+          reactions: [],
           timestamp: 0,
           unread: 0,
           hasAvatar: false,
@@ -19568,9 +22962,7 @@ class ImportContactsModal {
       logsModal.log('❌ Failed to import contacts:', err?.message || String(err));
       showToast('Failed to import contacts', 0, 'error');
     } finally {
-      this.isImporting = false;
       this.doneButton.classList.remove('loading');
-      this.doneButton.disabled = false;
     }
   }
 }
@@ -19633,8 +23025,8 @@ class CallScheduleChoiceModal {
     const onSchedule = () => this._select('schedule');
     const onCancel = () => this._select(null);
 
-    if (this.nowBtn) this.nowBtn.addEventListener('click', onNow);
-    if (this.scheduleBtn) this.scheduleBtn.addEventListener('click', onSchedule);
+    if (this.nowBtn) this.nowBtn.addEventListener('click', withButtonCooldown(this.nowBtn, BUTTON_COOLDOWN_MS, null, onNow));
+    if (this.scheduleBtn) this.scheduleBtn.addEventListener('click', withButtonCooldown(this.scheduleBtn, BUTTON_COOLDOWN_MS, null, onSchedule));
     if (this.cancelBtn) this.cancelBtn.addEventListener('click', onCancel);
     if (this.closeBtn) this.closeBtn.addEventListener('click', onCancel);
   }
@@ -19712,8 +23104,6 @@ class CallScheduleDateModal {
     this.DEFAULT_OFFSET_MINUTES = 0;
     this.maxDaysOut = 400;
     this.clockTimer = new ClockTimer('callScheduleCurrentTime');
-    this._onSubmit = this._onSubmit.bind(this);
-    this._onSubmitBtn = this._onSubmitBtn.bind(this);
     this._onCancel = this._onCancel.bind(this);
     this._onInputChange = this._onInputChange.bind(this);
   }
@@ -19731,8 +23121,11 @@ class CallScheduleDateModal {
     this.cancelBtn = document.getElementById('cancelCallScheduleDate');
     this.closeBtn = document.getElementById('closeCallScheduleDateModal');
 
-    if (this.form) this.form.addEventListener('submit', this._onSubmit);
-    if (this.submitBtn) this.submitBtn.addEventListener('click', this._onSubmitBtn);
+    const wrappedConfirm = withButtonCooldown(this.submitBtn, BUTTON_COOLDOWN_MS, null, async () => {
+      this._submitValue();
+    });
+    if (this.form) this.form.addEventListener('submit', wrappedConfirm);
+    if (this.submitBtn) this.submitBtn.addEventListener('click', wrappedConfirm);
     if (this.cancelBtn) this.cancelBtn.addEventListener('click', this._onCancel);
     if (this.closeBtn) this.closeBtn.addEventListener('click', this._onCancel);
 
@@ -19807,14 +23200,6 @@ class CallScheduleDateModal {
     this._updateConvertedTimePreview();
   }
 
-  _onSubmit(e) {
-    if (e) e.preventDefault();
-    this._submitValue();
-  }
-  _onSubmitBtn(e) {
-    if (e) e.preventDefault();
-    this._submitValue();
-  }
   _onCancel() {
     this._closeWith(null);
   }
@@ -20081,6 +23466,10 @@ class FailedMessageMenu {
   handleFailedMessageRetry(messageEl) {
     const txid = messageEl.dataset.txid;
     const voiceEl = messageEl.querySelector('.voice-message');
+    const contact = myData?.contacts?.[chatModal.address];
+    const message = (txid && contact && Array.isArray(contact.messages))
+      ? contact.messages.find(msg => msg.txid === txid)
+      : null;
 
     // Voice message retry: resend the same voice message (no re-upload)
     if (voiceEl) {
@@ -20093,19 +23482,15 @@ class FailedMessageMenu {
       }
 
       // Get message item to retrieve encryption keys
-      const contact = myData.contacts[chatModal.address];
       if (!contact || !Array.isArray(contact.messages)) {
         console.error('Error preparing voice message retry: Contact/messages not found.');
         return;
       }
-      const messageIndex = contact.messages.findIndex(msg => msg.txid === txid);
       
-      if (messageIndex < 0) {
+      if (!message) {
         console.error('Error preparing voice message retry: Message not found.');
         return;
       }
-
-      const message = contact.messages[messageIndex];
       const pqEncSharedKey = message.audioPqEncSharedKey || message.pqEncSharedKey;
       const selfKey = message.audioSelfKey || message.selfKey;
 
@@ -20121,19 +23506,56 @@ class FailedMessageMenu {
           .sendVoiceMessageTx(voiceUrl, duration, pqEncSharedKeyBin, selfKey)
           .catch((err) => {
             console.error('Voice message retry failed:', err);
-            showToast('Failed to retry voice message', 0, 'error');
+            showToast(err?.message || 'Failed to retry voice message', 0, 'error');
           });
       } catch (err) {
         console.error('Voice message retry failed:', err);
-        showToast('Failed to retry voice message', 0, 'error');
+        showToast(err?.message || 'Failed to retry voice message', 0, 'error');
       }
       return;
     }
 
-    // Text message retry: prefill input and store txid so next send removes failed tx
-    const messageContent = messageEl.querySelector('.message-content')?.textContent;
-    if (chatModal.messageInput && chatModal.retryOfTxId && messageContent && txid) {
-      chatModal.messageInput.value = messageContent;
+    // Message/attachment retry: prefill text and restore attachments so next send removes failed tx
+    const messageContent = typeof message?.message === 'string' ? message.message : '';
+    const messageAttachments = Array.isArray(message?.xattach) ? message.xattach : [];
+    const hasRetryableContent = !!txid && (
+      messageAttachments.length > 0
+      || (typeof messageContent === 'string' && messageContent.trim().length > 0)
+    );
+
+    if (chatModal.messageInput && chatModal.retryOfTxId && hasRetryableContent) {
+      // Replace current staged attachments with failed message attachments (if any)
+      // Delete only unsent uploads that are NOT part of the currently staged failed message.
+      // This avoids deleting server files still referenced by failed-message retries.
+      const previousRetryTxId = chatModal.retryOfTxId?.value?.trim?.() || '';
+      let safeUrlsFromPreviousFailedMessage = new Set();
+      if (previousRetryTxId && contact && Array.isArray(contact.messages)) {
+        const previousRetryMessage = contact.messages.find((msg) => msg.txid === previousRetryTxId);
+        const previousRetryAttachments = Array.isArray(previousRetryMessage?.xattach) ? previousRetryMessage.xattach : [];
+        safeUrlsFromPreviousFailedMessage = new Set(
+          previousRetryAttachments.flatMap((att) => [att?.url, att?.pUrl]).filter(Boolean)
+        );
+      }
+
+      const composerAttachments = Array.isArray(chatModal.fileAttachments) ? chatModal.fileAttachments : [];
+      const attachmentsToDeleteFromServer = composerAttachments.filter((att) => {
+        const url = att?.url;
+        const pUrl = att?.pUrl;
+        if (!url && !pUrl) return false;
+        return !(safeUrlsFromPreviousFailedMessage.has(url) || safeUrlsFromPreviousFailedMessage.has(pUrl));
+      });
+
+      chatModal.cancelAllOperations();
+      chatModal.clearComposerAttachments({ deleteFromServer: false });
+      if (attachmentsToDeleteFromServer.length > 0) {
+        chatModal.deleteAttachmentsFromServer(attachmentsToDeleteFromServer);
+      }
+      chatModal.fileAttachments = messageAttachments.length > 0
+        ? JSON.parse(JSON.stringify(messageAttachments))
+        : [];
+      chatModal.showAttachmentPreview();
+
+      chatModal.messageInput.value = messageContent || '';
       chatModal.retryOfTxId.value = txid;
       
       // Trigger input event to ensure all listeners fire (byte counter, draft save, etc.)
@@ -20151,7 +23573,7 @@ class FailedMessageMenu {
       return;
     }
 
-    console.error('Error preparing message retry: Necessary elements or data missing.');
+    console.error('Error preparing message retry: No message text or attachments found.');
   }
 
   /**
@@ -20191,6 +23613,7 @@ class VoiceRecordingModal {
     this.recordingInterval = null;
     this.currentAudio = null;
     this.playbackStartTime = null;
+    this.voiceMessageSendStarted = false;
   }
 
   load() {
@@ -20232,9 +23655,12 @@ class VoiceRecordingModal {
     this.stopListeningButton.addEventListener('click', () => {
       this.stopListening();
     });
-    this.sendVoiceMessageButton.addEventListener('click', () => {
-      this.sendVoiceMessage();
-    });
+    this.sendVoiceMessageButton.addEventListener('click', withButtonCooldown(
+      [this.sendVoiceMessageButton, this.cancelVoiceMessageButton, this.listenVoiceMessageButton],
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this.sendVoiceMessage()
+    ));
     // Close voice recording modal when clicking outside (only in initial state)
     this.modal.addEventListener('click', (e) => {
       if (e.target === this.modal && this.canCloseModal()) {
@@ -20249,7 +23675,7 @@ class VoiceRecordingModal {
    * @returns {boolean}
    */
   canCloseModal() {
-    return this.initialControls.style.display !== 'none';
+    return this.initialControls.style.display !== 'none' || this.voiceMessageSendStarted;
   }
 
   /**
@@ -20267,6 +23693,7 @@ class VoiceRecordingModal {
    */
   close() {
     this.modal.style.display = 'none';
+    this.voiceMessageSendStarted = false;
     this.cleanup();
   }
 
@@ -20281,6 +23708,7 @@ class VoiceRecordingModal {
     this.listeningControls.style.display = 'none';
     this.recordingTimer.textContent = '00:00';
     this.recordingIndicator.classList.remove('recording');
+    this.voiceMessageSendStarted = false;
   }
 
   /**
@@ -20541,10 +23969,10 @@ class VoiceRecordingModal {
   async sendVoiceMessage() {
     if (!this.recordedBlob) return;
 
+    this.voiceMessageSendStarted = true;
+    const blobToSend = this.recordedBlob;
     const loadingToastId = showToast('Sending voice message...', 0, 'loading');
     
-    this.sendVoiceMessageButton.disabled = true;
-
     try {
       // Calculate duration
       const duration = this.getRecordingDuration();
@@ -20554,8 +23982,8 @@ class VoiceRecordingModal {
       const password = myAccount.keys.secret + myAccount.keys.pqSeed;
       const selfKey = encryptData(bin2hex(dhkey), password, true);
 
-      // Encrypt the audio file similar to attachments
-      const audioArrayBuffer = await this.recordedBlob.arrayBuffer();
+      // Encrypt the audio file similar to attachments (use blobToSend so cleanup() cannot invalidate in-flight send)
+      const audioArrayBuffer = await blobToSend.arrayBuffer();
       const audioData = new Uint8Array(audioArrayBuffer);
       
       // Encrypt the audio data
@@ -20625,9 +24053,9 @@ class VoiceRecordingModal {
     } catch (error) {
       console.error('Error sending voice message:', error);
       showToast(`Failed to send voice message: ${error.message}`, 0, 'error');
+      this.voiceMessageSendStarted = false;
     } finally {
       hideToast(loadingToastId);
-      this.sendVoiceMessageButton.disabled = false;
     }
   }
 
@@ -20716,7 +24144,21 @@ class NewChatModal {
     this.submitButton = document.querySelector('#newChatForm button[type="submit"]');
 
     this.closeNewChatModalButton.addEventListener('click', this.closeNewChatModal.bind(this));
-    this.newChatForm.addEventListener('submit', this.handleNewChat.bind(this));
+    this.newChatForm.addEventListener('submit', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      () => {
+        if (!this.isActive()) return;
+        // Re-run username validation so submit button disabled state is refreshed from current recipient.
+        this.recipientInput.dispatchEvent(new Event('input', { bubbles: true }));
+      },
+      (event) => this.handleNewChat(event)
+    ));
+    // Disable submit and clear status immediately so there is no 300ms window where the button stays enabled after input change
+    this.recipientInput.addEventListener('input', () => {
+      this.submitButton.disabled = true;
+      this.usernameAvailable.style.display = 'none';
+    });
     this.recipientInput.addEventListener('input', debounce(this.handleUsernameInput.bind(this), 300));
 
     this.scanButton = document.getElementById('newChatScanQRButton');
@@ -20763,6 +24205,10 @@ class NewChatModal {
     }
   }
 
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
+  }
+
   /**
    * Invoked when the user submits the new chat form
    * It will check if the username is valid, available, or not available
@@ -20777,12 +24223,8 @@ class NewChatModal {
 
     this.hideRecipientError();
 
-    // Check if input is an Ethereum address
-    if (input.startsWith('0x')) {
-      if (!isValidEthereumAddress(input)) {
-        this.showRecipientError('Invalid Ethereum address format');
-        return;
-      }
+    // Treat as an address only when the full input is a valid Ethereum address.
+    if (isValidEthereumAddress(input)) {
       // Input is valid Ethereum address, normalize it
       recipientAddress = normalizeAddress(input);
     } else {
@@ -21049,7 +24491,20 @@ class CreateAccountModal {
     this.privateAccountTemplate = document.getElementById('privateAccountHelpMessageTemplate');
 
     // Setup event listeners
-    this.form.addEventListener('submit', (e) => this.handleSubmit(e));
+    this.form.addEventListener('submit', withButtonCooldown(
+      [
+        this.submitButton,
+        this.migrateAccountsButton,
+        this.toggleButton,
+        this.usernameInput,
+        this.privateKeyInput,
+        this.backButton,
+        this.privateAccountCheckbox
+      ],
+      BUTTON_COOLDOWN_MS,
+      null,
+      (e) => this.handleSubmit(e)
+    ));
     this.usernameInput.addEventListener('input', (e) => this.handleUsernameInput(e));
     this.toggleButton.addEventListener('change', () => this.handleTogglePrivateKeyInput());
     this.toggleMoreOptions.addEventListener('change', () => this.handleToggleMoreOptions());
@@ -21242,17 +24697,6 @@ class CreateAccountModal {
   }
 
   async handleSubmit(event) {
-    // Disable submit button
-    this.submitButton.disabled = true;
-    // disable migrate accounts button
-    this.migrateAccountsButton.disabled = true;
-    // Disable input fields, back button, and toggle button
-    this.toggleButton.disabled = true;
-    this.usernameInput.disabled = true;
-    this.privateKeyInput.disabled = true;
-    this.backButton.disabled = true;
-    this.privateAccountCheckbox.disabled = true;
-
     event.preventDefault();
     
     // Validate username at submit time after normalization
@@ -21263,7 +24707,6 @@ class CreateAccountModal {
       this.usernameAvailable.textContent = 'too short';
       this.usernameAvailable.style.color = '#dc3545';
       this.usernameAvailable.style.display = 'inline';
-      this.reEnableControls();
       return;
     }
     
@@ -21290,8 +24733,6 @@ class CreateAccountModal {
         this.privateKeyError.textContent = validation.message;
         this.privateKeyError.style.color = '#dc3545';
         this.privateKeyError.style.display = 'inline';
-        // Re-enable controls on validation failure
-        this.reEnableControls();
         return;
       }
 
@@ -21326,8 +24767,6 @@ class CreateAccountModal {
           this.privateKeyError.textContent = 'An account already exists for this private key.';
           this.privateKeyError.style.color = '#dc3545';
           this.privateKeyError.style.display = 'inline';
-          // Re-enable controls when account already exists
-          this.reEnableControls();
           return; // Stop the account creation process
         } else {
           this.privateKeyError.style.display = 'none';
@@ -21337,8 +24776,6 @@ class CreateAccountModal {
         this.privateKeyError.textContent = 'Network error checking key. Please try again.';
         this.privateKeyError.style.color = '#dc3545';
         this.privateKeyError.style.display = 'inline';
-        // Re-enable controls on network error
-        this.reEnableControls();
         return; // Stop process on error
       }
     }
@@ -21374,7 +24811,6 @@ class CreateAccountModal {
       }
       res = await postRegisterAlias(username, myAccount.keys, myAccount.private || false);
     } catch (error) {
-      this.reEnableControls();
       if (waitingToastId) hideToast(waitingToastId);
       showToast(`Failed to fetch network parameters, try again later.`, 0, 'error');
       console.error('Failed to fetch network parameters, using defaults:', error);
@@ -21401,7 +24837,6 @@ class CreateAccountModal {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         if (waitingToastId) hideToast(waitingToastId);
 //        showToast('Account created successfully!', 3000, 'success');
-        this.reEnableControls();
         this.close();
         welcomeScreen.close();
         // TODO: may not need to get set since gets set in `getChats`. Need to check signin flow.
@@ -21410,6 +24845,15 @@ class CreateAccountModal {
         existingAccounts.netids[netid].usernames[username] = { address: myAccount.keys.address };
         localStorage.setItem('accounts', stringify(existingAccounts));
         saveState();
+
+        // Refresh wallet balance immediately after account creation for fee-dependent screens.
+        try {
+          myData.wallet.timestamp = 0;
+          await walletScreen.updateWalletBalances();
+        } catch (error) {
+          console.error('Failed to refresh wallet balances after account creation:', error);
+        }
+
         // handleNativeAppSubscription();
 
         signInModal.open(username);
@@ -21417,7 +24861,6 @@ class CreateAccountModal {
         if (waitingToastId) hideToast(waitingToastId);
         console.error(`DEBUG: handleCreateAccount error`, JSON.stringify(error, null, 2));
         showToast(`account creation failed: ${error}`, 0, 'error');
-        this.reEnableControls();
 
         // Clear interval
         if (checkPendingTransactionsIntervalId) {
@@ -21447,19 +24890,8 @@ class CreateAccountModal {
       clearMyData();
 
       // no toast here since injectTx will show it
-      this.reEnableControls();
       return;
     }
-  }
-
-  reEnableControls() {
-    this.submitButton.disabled = false;
-    this.toggleButton.disabled = false;
-    this.usernameInput.disabled = false;
-    this.privateKeyInput.disabled = false;
-    this.backButton.disabled = false;
-    this.migrateAccountsButton.disabled = false;
-    this.privateAccountCheckbox.disabled = false;
   }
 }
 // Initialize the create account modal
@@ -21509,7 +24941,12 @@ class SendAssetFormModal {
 
     // TODO add comment about which send form this is for chat or assets
     this.closeSendAssetFormModalButton.addEventListener('click', this.close.bind(this));
-    this.sendForm.addEventListener('submit', this.handleSendFormSubmit.bind(this));
+    this.sendForm.addEventListener('submit', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      (e) => this.handleSendFormSubmit(e)
+    ));
     // TODO: need to add check that it's not a back/delete key
     this.usernameInput.addEventListener('input', async (e) => {
       this.handleSendToAddressInput(e);
@@ -21610,16 +25047,28 @@ class SendAssetFormModal {
    */
   async handleSendToAddressInput(e) {
     this.submitButton.disabled = true;
+    const rawInput = e.target.value.trim();
+
+    // Cancel any queued lookup before handling a new recipient value.
+    if (this.sendAssetFormModalCheckTimeout) {
+      clearTimeout(this.sendAssetFormModalCheckTimeout);
+      this.sendAssetFormModalCheckTimeout = null;
+    }
+
+    if (isValidEthereumAddress(rawInput)) {
+      this.clearFormInfo();
+      this.foundAddressObject.address = null;
+      this.usernameAvailable.textContent = 'address not supported';
+      this.usernameAvailable.style.color = '#dc3545';
+      this.usernameAvailable.style.display = 'inline';
+      await this.refreshSendButtonDisabledState();
+      return;
+    }
 
     // Check availability on input changes
     const username = normalizeUsername(e.target.value);
     e.target.value = username;
     const usernameAvailable = this.usernameAvailable;
-
-    // Clear previous timeout
-    if (this.sendAssetFormModalCheckTimeout) {
-      clearTimeout(this.sendAssetFormModalCheckTimeout);
-    }
 
     this.clearFormInfo();
     this.foundAddressObject.address = null;
@@ -21737,14 +25186,12 @@ class SendAssetFormModal {
    */
   updateMemoTollUI() {
     this.tollMemoSpan.style.color = 'black';
-    let toll = this.tollInfo.toll || 0n;
-    const tollUnit = this.tollInfo.tollUnit || 'LIB';
-    const decimals = 18;
+    const toll = this.tollInfo.toll || 0n;
     const factor = getStabilityFactor();
-    const mainValue = parseFloat(big2str(toll, decimals));
-    const usd = tollUnit === 'USD' ? mainValue : (mainValue * factor);
-    const lib = factor > 0 ? (usd / factor) : NaN;
-    const usdString = lib ? `${usd.toFixed(6)} USD (≈ ${lib.toFixed(6)} LIB)` : `${usd.toFixed(6)} USD`;
+    const tollInLibWei = normalizeTollToLibWei(toll, this.tollInfo.tollUnit);
+    const effectiveTollLibWei = getEffectiveTollLibWei(tollInLibWei);
+    const effectiveTollUsd = parseFloat(big2str(effectiveTollLibWei, 18)) * factor;
+    const usdString = `${effectiveTollUsd.toFixed(6)} USD (≈ ${parseFloat(big2str(effectiveTollLibWei, 18)).toFixed(6)} LIB)`;
     let display;
     if (this.tollInfo.required == 1) {
       display = `${usdString}`;
@@ -22007,12 +25454,8 @@ class SendAssetFormModal {
     // check if user is required to pay a toll
     if (this.tollInfo.required == 1) {
       if (this.memoInput.value.trim() != '') {
-        const factor = getStabilityFactor();
         let amountInLIB = amount;
-        let tollInLIB = this.tollInfo.toll;
-        if (this.tollInfo.tollUnit !== 'LIB') {
-          tollInLIB = bigxnum2big(this.tollInfo.toll, (1.0 / factor).toString());
-        }
+        const tollInLIB = getEffectiveTollLibWei(normalizeTollToLibWei(this.tollInfo.toll, this.tollInfo.tollUnit));
         if (tollInLIB > amountInLIB) {
           this.balanceWarning.textContent = 'less than toll for memo';
           this.balanceWarning.style.display = 'inline';
@@ -22280,7 +25723,6 @@ const sendAssetFormModal = new SendAssetFormModal();
 
 class SendAssetConfirmModal {
   constructor() {
-    this.timestamp = getCorrectedTimestamp();
   }
 
   load() {
@@ -22297,7 +25739,12 @@ class SendAssetConfirmModal {
 
     // Add event listeners for send asset confirmation modal
     this.closeButton.addEventListener('click', this.close.bind(this));
-    this.confirmSendButton.addEventListener('click', this.handleSendAsset.bind(this));
+    this.confirmSendButton.addEventListener('click', withButtonCooldown(
+      [this.confirmSendButton, this.cancelButton],
+      BUTTON_COOLDOWN_MS,
+      () => { this.cancelButton.disabled = false; },
+      (e) => this.handleSendAsset(e)
+    ));
     this.cancelButton.addEventListener('click', this.close.bind(this));
   }
 
@@ -22321,25 +25768,18 @@ class SendAssetConfirmModal {
    */
   async handleSendAsset(event) {
     event.preventDefault();
-    const confirmButton = this.confirmSendButton;
-    const cancelButton = this.cancelButton;
-    const username = normalizeUsername(sendAssetFormModal.usernameInput.value);
+    const rawInput = sendAssetFormModal.usernameInput.value.trim();
+    if (isValidEthereumAddress(rawInput)) {
+      showToast('Address not supported; enter username instead.', 0, 'error');
+      return;
+    }
+    const username = normalizeUsername(rawInput);
 
-    // if it's your own username disable the send button
     if (username == myAccount.username) {
-      confirmButton.disabled = true;
       showToast('You cannot send assets to yourself', 0, 'error');
       return;
     }
 
-    if (getCorrectedTimestamp() - this.timestamp < 2000 || confirmButton.disabled) {
-      return;
-    }
-
-    confirmButton.disabled = true;
-    cancelButton.disabled = true;
-
-    this.timestamp = getCorrectedTimestamp();
     const wallet = myData.wallet;
     const assetIndex = sendAssetFormModal.assetSelectDropdown.value; // TODO include the asset id and symbol in the tx
     const amount = bigxnum2big(wei, sendAssetFormModal.amountInput.value);
@@ -22357,19 +25797,12 @@ class SendAssetConfirmModal {
       const feeStr = big2str(txFeeInLIB, 18).slice(0, -16);
       const balanceStr = big2str(balance, 18).slice(0, -16);
       showToast(`Insufficient balance: ${amountStr} + ${feeStr} (fee) > ${balanceStr} LIB. Go to the wallet to add more LIB`, 0, 'error');
-      cancelButton.disabled = false;
       return;
     }
 
-    // Validate username - must be username; address not supported
-    if (username.startsWith('0x')) {
-      showToast('Address not supported; enter username instead.', 0, 'error');
-      cancelButton.disabled = false;
-      return;
-    }
+    // Validate normalized username input
     if (username.length < 3) {
       showToast('Username too short', 0, 'error');
-      cancelButton.disabled = false;
       return;
     }
     try {
@@ -22384,14 +25817,12 @@ class SendAssetConfirmModal {
       const data = await queryNetwork(`/address/${usernameHash}`);
       if (!data || !data.address) {
         showToast('Username not found', 0, 'error');
-        cancelButton.disabled = false;
         return;
       }
       toAddress = normalizeAddress(data.address);
     } catch (error) {
       console.error('Error looking up username:', error);
       showToast('Error looking up username', 0, 'error');
-      cancelButton.disabled = false;
       return;
     }
 
@@ -22545,7 +25976,7 @@ class SendAssetConfirmModal {
           // Update local balance after successful transaction
           fromAddress.balance -= amount;
           walletData.balance = walletData.assets.reduce((total, asset) =>
-              total + asset.addresses.reduce((sum, addr) => sum + bigxnum2num(addr.balance, asset.price), 0), 0);
+              total + asset.addresses.reduce((sum, addr) => sum + (bigxnum2num(addr.balance, getAssetUsdPrice(asset)) || 0), 0), 0);
           // Update wallet view and close modal
           updateWalletView();
   */
@@ -22606,7 +26037,6 @@ class SendAssetConfirmModal {
     } catch (error) {
       console.error('Transaction error:', error);
       //showToast('Transaction failed. Please try again.', 0, 'error');
-      cancelButton.disabled = false;
     }
   }
 }
@@ -23050,13 +26480,19 @@ class BridgeModal {
     this.modal = document.getElementById('bridgeModal');
     this.closeButton = document.getElementById('closeBridgeModal');
     this.form = document.getElementById('bridgeForm');
+    this.submitButton = this.form.querySelector('button[type="submit"]');
     this.networkSelect = document.getElementById('bridgeNetwork');
     this.networkSelectGroup = document.querySelector('#bridgeNetwork').closest('.form-group');
     this.directionSelect = document.getElementById('bridgeDirection');
-    
+
     // Add event listeners
     this.closeButton.addEventListener('click', () => this.close());
-    this.form.addEventListener('submit', (e) => this.handleSubmit(e));
+    this.form.addEventListener('submit', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      (e) => this.handleSubmit(e)
+    ));
     this.networkSelect.addEventListener('change', () => this.updateSelectedNetwork());
     this.directionSelect.addEventListener('change', () => this.handleDirectionChange());
     
@@ -23178,12 +26614,17 @@ class MigrateAccountsModal {
     this.submitButton = document.getElementById('submitMigrateAccounts');
 
     this.closeButton.addEventListener('click', () => this.close());
-    this.submitButton.addEventListener('click', (event) => this.handleSubmit(event));
+    this.submitButton.addEventListener('click', withButtonCooldown(
+      [this.submitButton, this.closeButton],
+      BUTTON_COOLDOWN_MS,
+      () => {
+        this.refreshSubmitButtonFromCheckboxes();
+        this.closeButton.disabled = false;
+      },
+      (event) => this.handleSubmit(event)
+    ));
 
-    // if no check boxes are checked, disable the submit button
-    this.accountList.addEventListener('change', () => {
-      this.submitButton.disabled = this.accountList.querySelectorAll('input[type="checkbox"]:checked').length === 0;
-    });
+    this.accountList.addEventListener('change', () => this.refreshSubmitButtonFromCheckboxes());
   }
 
   async open() {
@@ -23227,6 +26668,7 @@ class MigrateAccountsModal {
     // Check for inconsistencies and render them
     const inconsistencies = await this.checkAccountsInconsistency();
     this.renderInconsistencies(inconsistencies);
+    this.refreshSubmitButtonFromCheckboxes();
   }
 
   /**
@@ -23363,9 +26805,6 @@ class MigrateAccountsModal {
   async handleSubmit(event) {
     event.preventDefault();
 
-    this.submitButton.disabled = true;
-    this.closeButton.disabled = true;
-      
     const selectedAccounts = this.accountList.querySelectorAll('input[type="checkbox"]:checked');
   
     const results = {}
@@ -23426,9 +26865,7 @@ class MigrateAccountsModal {
         hideToast(loadingToastId);
       }
     }
-    this.populateAccounts();
-    this.submitButton.disabled = false;
-    this.closeButton.disabled = false;
+    await this.populateAccounts();
   }
   
   /**
@@ -23493,10 +26930,14 @@ class MigrateAccountsModal {
     localStorage.setItem('accounts', stringify(accountsObj));
   }
 
+  refreshSubmitButtonFromCheckboxes() {
+    this.submitButton.disabled = this.accountList.querySelectorAll('input[type="checkbox"]:checked').length === 0;
+  }
+
   clearForm() {
     const checkboxes = this.accountList.querySelectorAll('input[type="checkbox"]');
     checkboxes.forEach(checkbox => checkbox.checked = false);
-    this.submitButton.disabled = true;
+    this.refreshSubmitButtonFromCheckboxes();
   }
   
   /**
@@ -23649,7 +27090,15 @@ class LockModal {
 
     this.openButton.addEventListener('click', () => this.open());
     this.headerCloseButton.addEventListener('click', () => this.close());
-    this.lockForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.lockForm.addEventListener('submit', withButtonCooldown(
+      [this.lockButton, this.headerCloseButton],
+      BUTTON_COOLDOWN_MS,
+      () => {
+        this.headerCloseButton.disabled = false;
+        this.updateButtonState();
+      },
+      (event) => this.handleSubmit(event)
+    ));
     // dynamic button state with debounce
     this.debouncedUpdateButtonState = debounce(() => this.updateButtonState(), 100);
     this.newPasswordInput.addEventListener('input', this.debouncedUpdateButtonState);
@@ -23729,18 +27178,14 @@ class LockModal {
   }
 
   async handleSubmit(event) {
-    // disable the button
-    this.lockButton.disabled = true;
     event.preventDefault();
-    
+
     const newPassword = this.newPasswordInput.value;
     const confirmNewPassword = this.confirmNewPasswordInput.value;
     const oldPassword = this.oldPasswordInput.value;
 
     // Check if new passwords match first (for non-remove mode)
     if (newPassword !== confirmNewPassword) {
-      this.lockButton.disabled = true;
-      // Keep button disabled - passwords don't match
       showToast('Passwords do not match. Please try again.', 0, 'error');
       return;
     }
@@ -23874,6 +27319,8 @@ class LockModal {
     this.oldPasswordInput.value = '';
     this.newPasswordInput.value = '';
     this.confirmNewPasswordInput.value = '';
+    this.passwordWarning.textContent = '';
+    this.passwordWarning.style.display = 'none';
   }
 }
 const lockModal = new LockModal();
@@ -23898,7 +27345,15 @@ class UnlockModal {
     this.unlockButton = this.modal.querySelector('.btn.btn--primary');
 
     this.closeButton.addEventListener('click', () => this.close());
-    this.unlockForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.unlockForm.addEventListener('submit', withButtonCooldown(
+      [this.unlockButton, this.closeButton],
+      BUTTON_COOLDOWN_MS,
+      () => {
+        this.closeButton.disabled = false;
+        this.updateButtonState();
+      },
+      (event) => this.handleSubmit(event)
+    ));
     this.passwordInput.addEventListener('input', () => this.updateButtonState());
   }
 
@@ -23913,13 +27368,10 @@ class UnlockModal {
   }
 
   async handleSubmit(event) {
-    // disable the button
-    this.unlockButton.disabled = true;
+    event.preventDefault();
 
     // loading toast
     let waitingToastId = showToast('Checking password...', 0, 'loading');
-
-    event.preventDefault();
     const password = this.passwordInput.value;
     const key = await passwordToKey(password);
     if (!key) {
@@ -23988,7 +27440,12 @@ class LaunchModal {
     this.launchButton = this.modal.querySelector('button[type="submit"]');
     this.backupButton = this.modal.querySelector('#launchModalBackupButton');
     this.closeButton.addEventListener('click', () => this.close());
-    this.launchForm.addEventListener('submit', async (event) => await this.handleSubmit(event));
+    this.launchForm.addEventListener('submit', withButtonCooldown(
+      this.launchButton,
+      BUTTON_COOLDOWN_MS,
+      () => this.updateButtonState(),
+      async (event) => await this.handleSubmit(event)
+    ));
     this.urlInput.addEventListener('input', () => this.updateButtonState());
     this.backupButton.addEventListener('click', () => backupAccountModal.open());
 
@@ -24032,13 +27489,11 @@ class LaunchModal {
       this.showBackupReminderToast();
       return;
     }
-    
-    // Disable button and show loading state
-    this.launchButton.disabled = true;
+
     this.launchButton.textContent = 'Checking URL...';
 
     let networkJsUrl;
-    
+
     // Step 1: URL parsing
     try {
       const urlObj = new URL(url);
@@ -24046,8 +27501,6 @@ class LaunchModal {
       networkJsUrl = urlObj.origin + path + 'network.js';
     } catch (urlError) {
       showToast(`Invalid URL format: ${urlError.message}`, 0, 'error');
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
       return;
     }
 
@@ -24058,15 +27511,13 @@ class LaunchModal {
       result = await fetch(networkJsUrl,{
         cache: 'reload',
       });
-      
+
       if (!result.ok) {
         throw new Error(`HTTP ${result.status}: ${result.statusText}`);
       }
-      
+
     } catch (fetchError) {
       showToast(`Network error: ${fetchError.message}`, 0, 'error');
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
       return;
     }
 
@@ -24074,14 +27525,12 @@ class LaunchModal {
     let networkJson;
     try {
       networkJson = await result.text();
-      
+
       if (!networkJson || networkJson.length === 0) {
         throw new Error('Empty response received');
       }
     } catch (parseError) {
       showToast(`Response parsing error: ${parseError.message}`, 0, 'error');
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
       return;
     }
 
@@ -24089,15 +27538,13 @@ class LaunchModal {
     try {
       const requiredProps = ['network', 'name', 'netid', 'gateways'];
       const missingProps = requiredProps.filter(prop => !networkJson.includes(prop));
-    
+
       if (missingProps.length > 0) {
         throw new Error(`Missing required properties: ${missingProps.join(', ')}`);
       }
-      
+
     } catch (validationError) {
       showToast(`Invalid network configuration: ${validationError.message}`, 0, 'error');
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
       return;
     }
 
@@ -24107,10 +27554,6 @@ class LaunchModal {
       this.close();
     } catch (launchError) {
       showToast(`Launch error: ${launchError.message}`, 0, 'error');
-    } finally {
-      // Reset button state (this should always happen)
-      this.launchButton.disabled = false;
-      this.launchButton.textContent = 'Launch';
     }
   }
 
@@ -24127,6 +27570,7 @@ class LaunchModal {
   updateButtonState() {
     const url = this.urlInput.value;
     this.launchButton.disabled = url.length === 0;
+    this.launchButton.textContent = 'Launch';
   }
 }
 
@@ -24884,13 +28328,23 @@ async function checkPendingTransactions() {
   }
 
   // initialize the pending array if it is not already initialized
-  if (!myData.pending) {
-    myData.pending = [];
-  }
-
+  myData.pending ??= [];
   if (myData.pending.length === 0) return; // No pending transactions to check
 
   const startingPendingCount = myData.pending.length;
+  let didMutatePendingState = false;
+  const resolvedReactionChains = [];
+  const settleAndQueueReactionCleanup = (pendingTxInfo, result) => {
+    const outcome = settlePendingReaction(pendingTxInfo, result);
+    didMutatePendingState = true;
+    if (!outcome.hasPending) {
+      resolvedReactionChains.push({
+        contactAddress: pendingTxInfo.to,
+        targetTxid: outcome.targetTxid
+      });
+    }
+    return outcome;
+  };
 
   const now = getCorrectedTimestamp();
   const eightSecondsAgo = now - 8000;
@@ -24900,6 +28354,10 @@ async function checkPendingTransactions() {
   for (let i = myData.pending.length - 1; i >= 0; i--) {
     const pendingTxInfo = myData.pending[i];
     const { txid, type, submittedts } = pendingTxInfo;
+    const reactionPending = pendingTxInfo.reactionPending;
+    if (reactionPending && reactionPending.status !== 'pending') {
+      continue;
+    }
 
     if (submittedts < eightSecondsAgo) {
 
@@ -24912,14 +28370,31 @@ async function checkPendingTransactions() {
       //console.log(`DEBUG: txid ${txid} res: ${JSON.stringify(res)}`);
       if (submittedts < thirtySecondsAgo && (res.transaction === null || Object.keys(res.transaction).length === 0)) {
         console.error(`DEBUG: txid ${txid} timed out, removing completely`);
+        if (reactionPending) {
+          const outcome = settleAndQueueReactionCleanup(pendingTxInfo, 'failure');
+          if (outcome.didChange) {
+            showToast('Reaction timed out and was reverted', 0, 'error');
+          }
+          continue;
+        }
+        if (pendingTxInfo.editPending) {
+          reconcilePendingMessageEdit(pendingTxInfo);
+          showToast('Edit timed out and was reverted', 0, 'error');
+        }
         // remove the pending tx from the pending array
         myData.pending.splice(i, 1);
+        didMutatePendingState = true;
         continue;
       }
 
       if (res?.transaction?.success === true) {
-        // comment out to test the pending txs removal logic
-        myData.pending.splice(i, 1);
+        if (reactionPending) {
+          settleAndQueueReactionCleanup(pendingTxInfo, 'success');
+        } else {
+          // comment out to test the pending txs removal logic
+          myData.pending.splice(i, 1);
+          didMutatePendingState = true;
+        }
 
         if (type === 'register') {
           pendingPromiseService.resolve(txid, {
@@ -24971,16 +28446,28 @@ async function checkPendingTransactions() {
         console.log(`DEBUG: txid ${txid} failed, removing completely`);
         // Check for failure reason in the transaction receipt
         const failureReason = res?.transaction?.reason || 'Transaction failed';
+        const feeMismatchStatus = await refreshNetworkParamsOnTxFeeMismatch(failureReason);
+        const userFailureReason = getUserFacingTxFailureReason(failureReason, feeMismatchStatus);
         console.log(`DEBUG: failure reason: ${failureReason}`);
 
         if (type === 'register') {
-          pendingPromiseService.reject(txid, new Error(failureReason));
+          pendingPromiseService.reject(txid, new Error(userFailureReason));
         } else {
           // Show toast notification with the failure reason
-          if (type === 'withdraw_stake') {
-            showToast(`Unstake failed: ${failureReason}`, 0, 'error');
+          if (reactionPending) {
+            const outcome = settleAndQueueReactionCleanup(pendingTxInfo, 'failure');
+            if (outcome.didChange) {
+              showToast(`Reaction failed and was reverted: ${userFailureReason}`, 0, 'error');
+            } else if (!outcome.hasPending) {
+              showToast(userFailureReason, 0, 'error');
+            }
+          } else if (pendingTxInfo.editPending) {
+            reconcilePendingMessageEdit(pendingTxInfo);
+            showToast(`Edit failed and was reverted: ${userFailureReason}`, 0, 'error');
+          } else if (type === 'withdraw_stake') {
+            showToast(`Unstake failed: ${userFailureReason}`, 0, 'error');
           } else if (type === 'deposit_stake') {
-            showToast(`Stake failed: ${failureReason}`, 0, 'error');
+            showToast(`Stake failed: ${userFailureReason}`, 0, 'error');
           } else if (type === 'message') {
             if (chatModal.isActive()) {
               await chatModal.reopen();
@@ -24992,7 +28479,7 @@ async function checkPendingTransactions() {
           }
           else if (type === 'toll') {
             showToast(
-              `Toll submission failed! Reverting to old toll: ${tollModal.oldToll}. Failure reason: ${failureReason}. `,
+              `Toll submission failed! Reverting to old toll: ${tollModal.oldToll}. Failure reason: ${userFailureReason}. `,
               0,
               'error'
             );
@@ -25005,7 +28492,7 @@ async function checkPendingTransactions() {
               tollModal.tollAmountUSD = tollModal.oldToll;
             }
           } else if (type === 'update_toll_required') {
-            showToast(`Update contact status failed: ${failureReason}. Reverting contact to old status.`, 0, 'error');
+            showToast(`Update contact status failed: ${userFailureReason}. Reverting contact to old status.`, 0, 'error');
             const currentFriendStatus = Number(myData.contacts?.[pendingTxInfo.to]?.friend);
             const previousFriendStatus = Number(myData.contacts?.[pendingTxInfo.to]?.friendOld);
             // revert the local myData.contacts[toAddress].friend to the old value
@@ -25017,24 +28504,29 @@ async function checkPendingTransactions() {
               await chatsScreen.updateChatList();
             }
           } else if (type === 'read') {
-            showToast(`Read transaction failed: ${failureReason}`, 0, 'error');
+            showToast(`Read transaction failed: ${userFailureReason}`, 0, 'error');
             // revert the local myData.contacts[toAddress].timestamp to the old value
             myData.contacts[pendingTxInfo.to].timestamp = pendingTxInfo.oldContactTimestamp;
           } else if (type === 'reclaim_toll') {
             if (failureReason !== 'user is trying to reclaim toll but the toll pool is empty') {
-              showToast(`Reclaim toll failed: ${failureReason}`, 0, 'error');
+              showToast(`Reclaim toll failed: ${userFailureReason}`, 0, 'error');
             }
           } else {
             // for messages, transfer etc.
-            showToast(failureReason, 0, 'error');
+            showToast(userFailureReason, 0, 'error');
           }
 
-          const toAddress = pendingTxInfo.to;
-          updateTransactionStatus(txid, toAddress, 'failed', type);
-          chatModal.refreshCurrentView(txid);
+          if (!reactionPending && !pendingTxInfo.editPending) {
+            const toAddress = pendingTxInfo.to;
+            updateTransactionStatus(txid, toAddress, 'failed', type);
+            chatModal.refreshCurrentView(txid);
+          }
         }
-        // Remove from pending array
-        myData.pending.splice(i, 1);
+        if (!reactionPending) {
+          // Remove from pending array
+          myData.pending.splice(i, 1);
+          didMutatePendingState = true;
+        }
 
         // refresh the validator modal if this is a withdraw_stake/deposit_stake and validator modal is open
         if (type === 'withdraw_stake' || type === 'deposit_stake') {
@@ -25052,13 +28544,17 @@ async function checkPendingTransactions() {
       }
     }
   }
+
+  for (const chain of resolvedReactionChains) {
+    cleanupResolvedReactionChain(chain.contactAddress, chain.targetTxid);
+  }
   // if createAccountModal is open, skip balance change
   if (!createAccountModal.isActive()) {
     walletScreen.updateWalletBalances();
   }
 
   // save state if pending transactions were processed
-  if (startingPendingCount !== myData.pending.length) {
+  if (startingPendingCount !== myData.pending.length || didMutatePendingState) {
     saveState();
   }
 }
@@ -25143,14 +28639,15 @@ function ignoreShiftTabKey(e) {
 
 /**
  * Fetches and caches network account data if it's stale or not yet fetched.
- * @returns {Promise<void>} - Resolves when the network account data is updated or not needed
+ * @param {boolean} forceRefresh - If true, bypass staleness interval and fetch immediately.
+ * @returns {Promise<boolean>} - True when params are usable (fresh/cache/fetched), false otherwise
  */
-async function getNetworkParams() {
+async function getNetworkParams(forceRefresh = false) {
   const now = getCorrectedTimestamp();
 
   // Check if data is fresh; (this.networkAccountTimeStamp || 0) handles initial undefined state
-  if (now - (getNetworkParams.timestamp || 0) < NETWORK_ACCOUNT_UPDATE_INTERVAL_MS) {
-    return;
+  if (!forceRefresh && now - (getNetworkParams.timestamp || 0) < NETWORK_ACCOUNT_UPDATE_INTERVAL_MS) {
+    return true;
   }
 
   // If offline, try to use cached parameters
@@ -25159,13 +28656,13 @@ async function getNetworkParams() {
     if (cachedParams) {
       try {
         parameters = parse(cachedParams);
-        return;
+        return true;
       } catch (e) {
         console.warn('Failed to parse cached network parameters:', e);
       }
     }
     console.warn('No cached network parameters available (offline)');
-    return;
+    return false;
   }
 
   console.log(`getNetworkParams: Data for account ${NETWORK_ACCOUNT_ID} is stale or missing. Attempting to fetch...`);
@@ -25189,14 +28686,16 @@ async function getNetworkParams() {
         console.log(parameters)
         // show toast notification with the error message
         showToast(`Network ID mismatch. Check network configuration in network.js.`, 0, 'error');
+        return false;
       }
-      return;
+      return true;
     } else {
       isOnline = false;
       updateUIForConnectivity();
       console.warn(
         `getNetworkParams: Received null or undefined data from queryNetwork for account ${NETWORK_ACCOUNT_ID}. Cached data (if any) will remain unchanged.`
       );
+      return false;
     }
   } catch (error) {
     isOnline = false;
@@ -25206,6 +28705,7 @@ async function getNetworkParams() {
       error
     );
     // Optional: Clear data or reset timestamp to force retry on next call
+    return false;
   }
 }
 getNetworkParams.timestamp = 0;
@@ -25453,6 +28953,28 @@ function isFaucetAddress(address) {
   return faucetAddresses.some(faucetAddr => 
     normalizeAddress(faucetAddr) === normalizedAddress
   );
+}
+
+/**
+ * Checks whether a contact is one of the configured network bridge accounts.
+ * Bridge identities are defined by username in network.bridges.
+ * @param {Object} contact - Contact object
+ * @returns {boolean} - True if contact username matches a bridge username
+ */
+function isBridgeContact(contact) {
+  if (!contact || !Array.isArray(network.bridges) || network.bridges.length === 0) {
+    return false;
+  }
+
+  const username = normalizeUsername(contact.username || '');
+  if (!username) {
+    return false;
+  }
+
+  return network.bridges.some((bridge) => {
+    const bridgeUsername = normalizeUsername(bridge?.username || '');
+    return bridgeUsername && bridgeUsername === username;
+  });
 }
 
 function isMobile() {
@@ -26627,12 +30149,63 @@ async function downloadAndDecryptAvatar(url, key) {
 }
 
 function getStabilityFactor() {
-  return parseFloat(parameters.current.stabilityFactorStr);
+  return parseFloat(parameters?.current?.stabilityFactorStr);
+}
+
+function getNetworkMinTollLibWei() {
+  if (!parameters?.current?.minTollUsdStr || !parameters?.current?.stabilityFactorStr) {
+    return 0n;
+  }
+
+  return EthNum.toWei(EthNum.div(parameters.current.minTollUsdStr, parameters.current.stabilityFactorStr)) || 0n;
+}
+
+function normalizeTollToLibWei(tollWei, tollUnit = 'LIB') {
+  const safeToll = typeof tollWei === 'bigint' ? tollWei : 0n;
+  if (safeToll === 0n) {
+    return 0n;
+  }
+
+  if (tollUnit !== 'USD') {
+    return safeToll;
+  }
+
+  const factor = getStabilityFactor();
+  if (!Number.isFinite(factor) || factor <= 0) {
+    return safeToll;
+  }
+
+  return bigxnum2big(safeToll, (1 / factor).toString());
+}
+
+function getEffectiveTollLibWei(tollWei) {
+  const safeToll = typeof tollWei === 'bigint' ? tollWei : 0n;
+  if (safeToll === 0n) {
+    return 0n;
+  }
+
+  const minTollInLib = getNetworkMinTollLibWei();
+  return safeToll < minTollInLib ? minTollInLib : safeToll;
 }
 
 // returns transaction fee in wei
-function getTransactionFeeWei() {
+// pass { allowNull: true } to return null when fee params are unavailable
+function getTransactionFeeWei(options = {}) {
+  const { allowNull = false } = options;
+  if (!parameters?.current?.transactionFeeUsdStr || !parameters?.current?.stabilityFactorStr) {
+    return allowNull ? null : 1n * wei;
+  }
   return EthNum.toWei(EthNum.div(parameters.current.transactionFeeUsdStr, parameters.current.stabilityFactorStr)) || 1n * wei;
+}
+
+/**
+ * Returns current LIB balance from local wallet state.
+ * Falls back to first asset for compatibility with existing wallet structure.
+ * @returns {bigint}
+ */
+function getLibBalanceWei() {
+  const libAsset = (myData?.wallet?.assets || []).find((asset) => asset?.symbol === 'LIB') || myData?.wallet?.assets?.[0];
+  return BigInt(libAsset?.balance ?? 0n);
 }
 
 
