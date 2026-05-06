@@ -1,4 +1,4 @@
-![An image of claiming rewards with coins exploding out of it](liberdus.github.io/blog/4/Trustdontverify.webp)
+![An image of people united around the world over not trusting but verifying code](liberdus.github.io/blog/2/Trustdontverify.webp)
 
 ## Introduction
 
