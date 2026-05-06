@@ -83,4 +83,4 @@ If you have questions, the [community Discord](#) is the right place to ask them
 
 ---
 
-*Welcome to the next chapter. Slowly, carefully, as always.*
+*Welcome to the future of decentralized communications.*
