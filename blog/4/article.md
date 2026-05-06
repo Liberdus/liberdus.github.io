@@ -13,7 +13,7 @@ If you’re eligible, claiming is straightforward:
 3. Set your wallet to the BNB Chain  
    *(Some wallets don’t support BNB Chain. MetaMask is recommended.)*
 4. Click the **Connect Wallet** button on the rewards page
-5. Claim your tokens before the 4-week claim window closes
+5. Claim your tokens before the **4-week claim** window closes
 6. Continue following to claim more in future months
 
 This approach ensures that rewards go to real users, not those trying to game the system.
@@ -32,7 +32,7 @@ If you can’t see your rewards, it’s usually due to one of the following:
 - X removed or banned your account
 - Duplicate or invalid entries were removed
 
-If you need help or have questions, please join the Liberdus Discord and post in the help channel.
+If you need help or have questions, please join the [Liberdus Discord](https://discord.com/invite/2cpJzFnwCR) and post in the help channel.
 
 ---
 
@@ -42,7 +42,7 @@ A total of **1,000,000 LIB** has been allocated to this campaign.
 
 But it’s not being distributed all at once.
 
-Instead, rewards are released over approximately 10 months, and who benefits over time depends on continued participation.
+Instead, rewards are released over approximately **10 months**, and who benefits over time depends on continued participation.
 
 - To keep receiving rewards, users must continue following on their associated accounts
 - If you stop engaging or don’t claim, those rewards don’t sit idle — they are redistributed to users who remain active and can be claimed in future months
@@ -61,7 +61,7 @@ Distributing rewards over time helps:
 - Allow proper validation of participants
 - Protect the token economy and long-term ecosystem
 
-So keep following the Liberdus social channels for announcements about future claim windows. These will typically open sometime after the current 4-week claim window closes.
+So keep following the Liberdus social channels for announcements about future claim windows. These will typically open sometime after the current **4-week claim window** closes.
 
 ---
 
