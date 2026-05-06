@@ -1,3 +1,6 @@
+
+![An image of claiming rewards with coins exploding out of it](liberdus.github.io/blog/4/ClaimLiberdusRewards.webp)
+
 # Liberdus Rewards Campaign: Claiming Your LIB
 
 If you participated in the Liberdus rewards campaign, you can now begin claiming your reward. This isn’t a simple “claim and forget” event. It’s designed to reward real participation over time.
