@@ -1,4 +1,4 @@
-# When Code Is Closed, Trust Becomes Blind: Why Closed-Source Encryption Can Never Be Trusted
+![An image of claiming rewards with coins exploding out of it](liberdus.github.io/blog/4/Trustdontverify.webp)
 
 ## Introduction
 
