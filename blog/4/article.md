@@ -1,5 +1,5 @@
 
-![An image of claiming rewards with coins exploding out of it](liberdus.github.io/blog/4/ClaimLiberdusRewards.webp)
+![An image of claiming rewards with coins exploding out of it](ClaimLiberdusRewards.webp)
 
 # Liberdus Rewards Campaign: Claiming Your LIB
 
