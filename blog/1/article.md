@@ -52,7 +52,7 @@ If this shift is to endure, it must be built on uncompromising foundations such 
 
 ### Quantum-Secure Cryptography
 
-Encryption must be prepared for the next computational epoch. Algorithms like [RSA](https://www.historytools.org/concepts/rsa-encryption) and ECC will one day yield to quantum attacks. Post-quantum schemes such as CRYSTALS-Kyber and Dilithium are already being standardized; they must become the default, not the exception.
+Encryption must be prepared for the next computational epoch. Algorithms like [RSA](https://www.historytools.org/concepts/rsa-encryption) and [ECC](https://www.encryptionconsulting.com/elliptic-curve-cryptography-ecc/) will one day yield to quantum attacks. Post-quantum schemes such as [CRYSTALS-Kyber](https://pq-crystals.org/kyber/) and [Dilithium](https://pq-crystals.org/dilithium/index.shtml) are already being standardized; they must become the default, not the exception.
 
 ### Open-Source Transparency
 
