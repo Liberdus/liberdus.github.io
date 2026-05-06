@@ -26,11 +26,11 @@ articles:
       - retrospective
 
   - id: 1
-    title: "Why We Chose the Slow Path"
-    intro: "On building infrastructure that lasts — and the unfashionable virtues of patience, restraint, and shipping fewer things better."
-    date: "2026-01-18"
-    author: "Henrik Sallé"
+    title: "From Money to Messaging: The Next Phase of the Decentralization Revolution"
+    intro: "In 2009, Bitcoin introduced more than a new kind of currency, it introduced a new kind of trust. For the first time in history, financial transactions could be secured, validated, and verified without banks."
+    date: "2025-11-07"
+    author: "Liberdus Staff"
     tags:
       - philosophy
-      - craft
+      - essay
       - founders-note
