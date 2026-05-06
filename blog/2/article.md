@@ -34,9 +34,9 @@ Algorithms such as ***RSA and Elliptic Curve Cryptography (ECC)***, the basis fo
 
 Quantum computers, however, are poised to change that.
 
-In 1994, mathematician *Peter Shor* demonstrated an algorithm capable of solving these problems exponentially faster on a quantum system. The hardware to run such computations at scale doesn’t yet exist, but progress is accelerating, and governments are already preparing for the aftermath.
+In 1994, mathematician [*Peter Shor*](https://pswscience.org/meeting/2521/) demonstrated an algorithm capable of solving these problems exponentially faster on a quantum system. The hardware to run such computations at scale doesn’t yet exist, but progress is accelerating, and governments are already preparing for the aftermath.
 
-Intelligence agencies are reportedly harvesting encrypted data now in the expectation that they’ll be able to decrypt it later once quantum machines mature; a strategy aptly called ***“harvest now, decrypt later.”***
+Intelligence agencies are reportedly harvesting encrypted data now in the expectation that they’ll be able to decrypt it later once quantum machines mature; a strategy aptly called [***“harvest now, decrypt later.”***](https://www.nist.gov/cybersecurity/what-post-quantum-cryptography)
 
 In other words: your private messages today could become tomorrow’s open archives.
 
