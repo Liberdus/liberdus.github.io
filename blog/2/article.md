@@ -1,4 +1,4 @@
-![An image of people united around the world over not trusting but verifying code](liberdus.github.io/blog/2/Trustdontverify.webp)
+![An image of people united around the world over not trusting but verifying code](Trustdontverify.webp)
 
 ## Introduction
 
