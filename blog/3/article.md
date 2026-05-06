@@ -1,10 +1,4 @@
-# Liberdus Expands to BNB Chain
-
-Liberdus has expanded from Polygon to BNB Chain, marking an important step in improving accessibility, user experience, and liquidity across the ecosystem. This is the kind of change that looks small from the outside and is large from the inside — the result of months of careful integration work, audits, and infrastructure tuning.
-
-This post walks through what's new, why we made the move, and what it means if you hold or use Liberdus tokens today.
-
-![A diagram of the new cross-chain bridge between Polygon and BNB Chain](hero.png)
+![A diagram of the new cross-chain bridge between Polygon and BNB Chain](pic1.jpg)
 
 ## Why BNB Chain
 
