@@ -6,15 +6,11 @@ Encryption has long been the cornerstone of digital privacy. It transforms commu
 
 True security does not come merely from secrecy; it comes from verifiability. And when encryption is deployed within closed-source software, users are no longer protected by mathematics, but by faith. The history of communication technology offers a cautionary tale: one of misplaced trust, quiet compromises, and the slow erosion of privacy behind corporate firewalls.
 
----
-
 ## The Skype Precedent: How Closed Code Became a Backdoor
 
 After the Microsoft acquisition, Skype’s architecture shifted toward a more centralized model. This change made it easier for authorities to issue data-access requests and years later, the Snowden disclosures showed that Microsoft had cooperated with the U.S. National Security Agency’s PRISM program, enabling government access to certain Skype communications. Earlier, in 2008, researchers at Citizen Lab had already uncovered that a Chinese-operated version of Skype (Tom-Skype) had been modified to allow state monitoring.
 
 > “Skype’s history became a case study in how centralization invites surveillance. In 2008, Citizen Lab discovered that the Chinese version of Skype (Tom-Skype), then operated under a local joint venture, had been modified to collect and store user messages for state monitoring. After Microsoft acquired Skype, its architecture became increasingly centralized; and when the Snowden documents were released years later, they showed that Microsoft had cooperated with the NSA’s PRISM program, giving authorities access to certain Skype communications. The lesson wasn’t about one company; it was about the fragility of closed, server-dependent systems.”
-
----
 
 ## The Illusion of Security Without Transparency
 
@@ -23,8 +19,6 @@ Closed-source encryption carries a paradox: it asks users to place blind trust i
 Even the strongest encryption protocol can be subverted if implemented in a system whose behaviour cannot be observed. A developer might add a data-logging mechanism under legal order. An update could silently insert telemetry or weaken randomness in key generation. None of this would be visible to the end user. In cryptography, opacity is not a feature; it’s a risk surface.
 
 Open-source software, by contrast, transforms privacy into something that can be proven. Anyone can examine the code, audit the encryption libraries, and verify that what’s running on their device matches the public repository. This principle — ***“don’t trust, verify”*** — is what separates systems that rely on mathematics from those that rely on marketing.
-
----
 
 ## The New Frontier: Quantum Threats and the Limits of Today’s Encryption
 
@@ -42,8 +36,6 @@ In other words: your private messages today could become tomorrow’s open archi
 
 To counter this, the cryptographic community is developing Post-Quantum (PQ) algorithms such as *CRYSTALS-Kyber* (for key exchange) and *Dilithium* (for digital signatures). These systems are designed to resist both classical and quantum attacks, ensuring privacy survives the next computational era.
 
----
-
 ## Toward Verifiable, Future-Proof Privacy
 
 True privacy in communication requires more than strong encryption. It demands architectural integrity: systems that can’t be silently altered, coerced, or broken by advances in computing power.
@@ -55,8 +47,6 @@ That integrity rests on three interdependent pillars:
 - **Trustless design** — where no single entity, corporate or governmental, can dictate or subvert security.
 
 When these conditions are met, privacy ceases to be a feature; it becomes a property of the system itself.
-
----
 
 ## The Lesson from Skype: Trust, Once Lost, Cannot Be Patched
 
