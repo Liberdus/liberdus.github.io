@@ -5,8 +5,6 @@
 
 If you participated in the Liberdus rewards campaign, you can now begin claiming your reward. This isn’t a simple “claim and forget” event. It’s designed to reward real participation over time.
 
----
-
 ## How to Claim
 
 If you’re eligible, claiming is straightforward:
@@ -20,8 +18,6 @@ If you’re eligible, claiming is straightforward:
 6. Continue following to claim more in future months
 
 This approach ensures that rewards go to real users, not those trying to game the system.
-
----
 
 ## If You Can’t See Your Rewards
 
@@ -37,8 +33,6 @@ If you can’t see your rewards, it’s usually due to one of the following:
 
 If you need help or have questions, please join the [Liberdus Discord](https://discord.com/invite/2cpJzFnwCR) and post in the help channel.
 
----
-
 ## Rewards Don’t End at Claim
 
 A total of **1,000,000 LIB** has been allocated to this campaign.
@@ -52,8 +46,6 @@ Instead, rewards are released over approximately **10 months**, and who benefits
 
 In simple terms: those who stay, benefit more.
 
----
-
 ## Why Distribution Is Phased
 
 The phased rollout is designed to maximise long-term network benefits.
@@ -66,8 +58,6 @@ Distributing rewards over time helps:
 
 So keep following the Liberdus social channels for announcements about future claim windows. These will typically open sometime after the current **4-week claim window** closes.
 
----
-
 ## LP Staking Rewards
 
 Now that you have some LIB, you can add liquidity to the Uniswap LIB-USDT pair on the BNB Chain and stake your LP tokens to earn additional rewards.
@@ -78,8 +68,6 @@ https://app.uniswap.org/explore/pools/bnb/0x5514c39d10952129e94037e82c55221f0e9a
 ### Stake LP Tokens
 1. Visit 👉 https://liberdus.com/farm
 2. Click the button to stake LP tokens
-
----
 
 ## Final Thoughts
 
