@@ -1,34 +1,85 @@
 ![A diagram of the new cross-chain bridge between Polygon and BNB Chain](pic1.jpg)
 
-## Why BNB Chain
 
-There were three reasons, in order of weight.
+Liberdus has expanded from Polygon to BNB Chain, marking an important step in improving accessibility, user experience and overall ecosystem growth.
 
-First, **liquidity**. BNB Chain has one of the largest active user bases of any EVM-compatible network, and the depth of stablecoin pairs there is substantially better than on most alternatives. For a protocol like Liberdus — where value is primarily a function of how easily users can get in and out — that depth matters more than almost anything else.
+This move is about meeting users where they already are. BNB Chain offers a more familiar environment for a large portion of retail users, with simple onboarding, strong wallet support and consistently low transaction fees. It also has a significantly larger active user base, which helps drive participation, liquidity and network effects.
 
-Second, **fees**. The economics of common operations on BNB Chain are an order of magnitude friendlier than on the Ethereum mainnet, and competitive with Polygon for the workloads we care about. This isn't a small detail. A protocol that costs $4 to interact with is fundamentally different from one that costs four cents.
+It’s important to note that Liberdus is multi-chain. LIB will continue to exist on Polygon and is not being removed. However, for now, liquidity efforts will be focused on BNB Chain to reduce fragmentation and build a stronger, more efficient market.
 
-Third, **bridges**. The bridging infrastructure between BNB Chain and the rest of the ecosystem has matured to the point where we feel comfortable recommending it to non-technical users. That wasn't true two years ago. It is now.
+## Bridging from Polygon to BNB Chain
 
-## What this means for users
+To support this transition, a bridge is available:
 
-If you hold Liberdus tokens on Polygon, **nothing breaks**. Your existing balances are unaffected, the contracts you're already using continue to work exactly as they did, and we are committed to maintaining Polygon as a first-class home for the protocol indefinitely.
+Polygon → BNB Chain bridge:
+https://liberdus.com/bsc-bridge
 
-What changes is that you now have *options*:
+At this stage, the bridge is one-way (Polygon → BNB Chain). Following mainnet, Liberdus plans to introduce broader interoperability, including bridges between major EVM chains and the Liberdus mainnet.
 
-- You can bridge to BNB Chain to take advantage of deeper liquidity pools.
-- You can interact with new BNB-native partners and integrations as they roll out over the next quarter.
-- You can hold across both chains, with our official bridge handling the accounting.
+## BNB Chain LIB Contract Address:
 
-The bridge itself is non-custodial and uses a lock-and-mint model audited by [the same firms](#) who reviewed our original deployment. Documentation is available in the [docs portal](#).
+0x5AfdCC93D794762C785Ec14Fb2a24c4aBDbB8aaa
+https://bscscan.com/token/0x5afdcc93d794762c785ec14fb2a24c4abdbb8aaa
 
-> Multi-chain doesn't have to mean fragmented. The goal here is to give the protocol more places to live, not to split the community into camps.
+Always ensure you are interacting with the correct contract when swapping or providing liquidity.
 
-## What's next
+## Strengthening Liquidity on BNB Chain
 
-This is the first of several network expansions we have planned for the year. The decision-making framework is unchanged: we move when the network is mature enough that we'd be comfortable putting our own funds on it, when the bridging story is clear, and when there is genuine user demand. We don't ship to chains for marketing reasons.
+With this expansion, the focus now shifts to building deeper liquidity on the BNB Chain. We’re encouraging the community to participate in liquidity provision using the LIB / USDT pair:
 
-If you have questions, the [community forum](#) is the right place to ask them. The team will be hosting a live AMA next week — details on the [Discord](#).
+Swap LIB / USDT:
+https://app.uniswap.org/explore/pools/bnb/0x5514C39d10952129e94037e82c55221f0e9a9Cd2
+
+Add liquidity (LIB / USDT):
+https://app.uniswap.org/explore/pools/bnb/0x5514C39d10952129e94037e82c55221f0e9a9Cd2
+
+If you previously provided liquidity on Polygon (for example via Uniswap), we also encourage migrating that liquidity over to BNB Chain. Consolidating liquidity in one place improves depth, reduces inefficiencies and creates a more stable and reliable market for LIB.
+
+Soon you will be able to farm your LP tokens to earn rewards from here:
+https://liberdus.com/farm
+
+## Polygon Details
+
+For reference and ease of access, here is the information for LIB on the Polygon network:
+
+LIB contract address: 0x693ed886545970F0a3ADf8C59af5cCdb6dDF0a76
+https://polygonscan.com/token/0x693ed886545970F0a3ADf8C59af5cCdb6dDF0a76
+
+LIB-USDC pair: https://app.uniswap.org/explore/pools/polygon/0x0327fcf60210689d75de0861e8540393c215bf6c
+
+LIB-USDT pair: https://app.uniswap.org/explore/pools/polygon/0x870c7a9be36e4abf69483d7281287e4e85d881bc
+
+LIB-DAI pair: https://app.uniswap.org/explore/pools/polygon/0x958b98ed7b1362ee2580df87150d00439030661d
+
+LIB-WETH pair: https://app.uniswap.org/explore/pools/polygon/0x041e48a5b11c29fdbd92498eb05573c52728398c
+
+LIB-WBTC pair: https://app.uniswap.org/explore/pools/polygon/0xe29e95fe81eee48fa836c2f97f85b619f6d516f7
+
+Always ensure you are interacting with the correct contract when swapping or providing liquidity.
+
+## Why LIB / USDT?
+
+The LIB / USDT pair has been chosen deliberately.
+
+USDT is one of the most widely used and recognised stablecoins in the crypto market. Pairing LIB with USDT provides clearer pricing, reduces volatility compared to crypto-native pairs, and lowers the barrier to entry for new users.
+
+This results in smoother trading, better liquidity conditions, and a more accessible ecosystem overall. For liquidity providers, it also offers more balanced exposure while directly supporting network growth.
+
+## Building a Stronger Foundation
+
+Liquidity is a core component of any functioning ecosystem. Deeper liquidity leads to tighter spreads, reduced slippage and more reliable pricing. These improvements directly impact usability and long-term adoption.
+
+By focusing liquidity on the BNB Chain while maintaining a multi-chain presence, Liberdus is creating a stronger foundation for sustainable growth.
+
+## Get Involved
+
+Providing liquidity is one of the most direct ways to support the ecosystem while participating in its growth.
+
+If you’re already involved on Polygon, consider bridging and consolidating your position on BNB Chain. If you’re new, the LIB / USDT pool offers a straightforward entry point.
+
+Start here: https://app.uniswap.org/explore/pools/bnb/0x5514C39d10952129e94037e82c55221f0e9a9Cd2
+
+If you have questions, the [community Discord](#) is the right place to ask them.
 
 ---
 
