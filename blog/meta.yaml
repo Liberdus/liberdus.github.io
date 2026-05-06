@@ -5,6 +5,17 @@
 # with article.md and thumb.png inside.
 
 articles:
+  - id: 4
+    title: "Liberdus Rewards Are Live: Here’s What You Need to Know"
+    intro: "If you participated in the Liberdus rewards campaign, you can now begin claiming your reward. This isn’t a simple “claim and forget” event. It’s designed to reward real participation over time."
+    date: "2026-04-26"
+    author: "Liberdus Staff"
+    tags:
+      - announcement
+      - bnb-chain
+      - rewards
+
+articles:
   - id: 3
     title: "Liberdus Expands to BNB Chain: Improving Access, Liquidity and User Experience"
     intro: "Liberdus has expanded from Polygon to BNB Chain, marking an important step in improving accessibility, user experience, and liquidity for the Liberdus ecosystem."
@@ -16,14 +27,14 @@ articles:
       - ecosystem
 
   - id: 2
-    title: "A Quiet Year of Building: What's Next for the Liberdus Protocol"
-    intro: "Twelve months of careful, deliberate work — and a roadmap for the year ahead. Here's where we've been, and where the protocol is heading."
-    date: "2026-03-02"
-    author: "Margot Reyes"
+    title: "When Code Is Closed, Trust Becomes Blind: Why Closed-Source Encryption Can Never Be Trusted"
+    intro: "Encryption has long been the cornerstone of digital privacy. It transforms communication into unreadable code, shielding it from eavesdroppers and prying intermediaries. Yet encryption alone is not enough."
+    date: "2025-11-26"
+    author: "Liberdus Staff"
     tags:
-      - roadmap
-      - protocol
-      - retrospective
+      - philosophy
+      - essay
+      - history
 
   - id: 1
     title: "From Money to Messaging: The Next Phase of the Decentralization Revolution"
