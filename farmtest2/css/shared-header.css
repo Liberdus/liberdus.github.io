@@ -180,9 +180,38 @@
 }
 
 @media (max-width: 768px) {
+    .header {
+        height: auto;
+    }
+
+    .header-toolbar {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .logo-section {
+        min-width: 0;
+    }
+
     .nav-section {
+        flex: 1 1 100%;
+        min-width: 0;
         width: 100%;
-        justify-content: space-between;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+    }
+
+    .connect-wallet-btn {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .connect-wallet-btn .wallet-status-text,
+    .connect-wallet-btn .wallet-address-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 }
 
@@ -205,6 +234,7 @@
     }
 
     .connect-wallet-btn {
+        flex: 1 1 160px;
         padding: 8px 12px;
         font-size: 13px;
     }

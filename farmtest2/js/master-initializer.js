@@ -931,6 +931,8 @@ class MasterInitializer {
     }
 }
 
+const VERSION_CHECK_TIMEOUT_MS = 3000;
+
 // Auto-initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
     if (window.masterInitializer?.isReady) {
@@ -938,13 +940,31 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
     }
 
-    window.masterInitializer = new MasterInitializer();
-
     try {
+        const versionCheckTimeout = new Promise((resolve) => {
+            setTimeout(() => resolve({ status: 'ready' }), VERSION_CHECK_TIMEOUT_MS);
+        });
+        const versionCheckResult = window.versionCheckReady
+            ? await Promise.race([
+                window.versionCheckReady.catch(() => ({ status: 'ready' })),
+                versionCheckTimeout
+            ])
+            : { status: 'ready' };
+        if (versionCheckResult.status === 'reload') {
+            return;
+        }
+
+        if (versionCheckResult.status !== 'ready') {
+            throw new Error(`Unknown version check status: ${versionCheckResult.status}`);
+        }
+
+        window.masterInitializer = new MasterInitializer();
         await window.masterInitializer.init();
     } catch (error) {
         console.error('❌ System initialization failed:', error);
-        window.masterInitializer.handleInitializationError(error);
+        if (window.masterInitializer) {
+            window.masterInitializer.handleInitializationError(error);
+        }
     }
 });
 

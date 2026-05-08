@@ -227,8 +227,8 @@ class HomePage {
 
     renderSkeleton() {
         return `
-            <div class="table-container">
-                <table class="table">
+            <div class="table-container staking-table-container">
+                <table class="table staking-pairs-table">
                     <thead>
                         <tr>
                             <th>
@@ -259,13 +259,13 @@ class HomePage {
                     </thead>
                     <tbody>
                         ${Array(3).fill(0).map(() => `
-                            <tr>
-                                <td><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
-                                <td><div class="skeleton" style="height: 20px; width: 60px;"></div></td>
-                                <td><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
-                                <td><div class="skeleton" style="height: 20px; width: 100px;"></div></td>
-                                <td><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
-                                <td><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
+                            <tr class="staking-skeleton-row">
+                                <td class="staking-cell staking-cell--pair" data-label="Pair"><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
+                                <td class="staking-cell staking-cell--apr" data-label="APR"><div class="skeleton" style="height: 20px; width: 60px;"></div></td>
+                                <td class="staking-cell staking-cell--weight" data-label="Weight"><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
+                                <td class="staking-cell staking-cell--tvl" data-label="TVL"><div class="skeleton" style="height: 20px; width: 100px;"></div></td>
+                                <td class="staking-cell staking-cell--share" data-label="My Share"><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
+                                <td class="staking-cell staking-cell--reward" data-label="My Reward"><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -351,8 +351,8 @@ class HomePage {
 
             // Show "no data" row when there are no pairs to display (after filtering)
             tbodyContent = `
-                <tr>
-                    <td colspan="6" style="text-align: center; padding: 48px 24px; color: var(--text-secondary);">
+                <tr class="staking-empty-row">
+                    <td class="staking-empty-cell" colspan="6" style="text-align: center; padding: 48px 24px; color: var(--text-secondary);">
                         <div style="display: flex; flex-direction: column; align-items: center; gap: 16px;">
                             <span class="material-icons" style="font-size: 48px; color: var(--text-secondary); opacity: 0.5;">inbox</span>
                             <div>
@@ -379,8 +379,8 @@ class HomePage {
         }
 
         return `
-            <div class="table-container">
-                <table class="table">
+            <div class="table-container staking-table-container">
+                <table class="table staking-pairs-table">
                     <thead>
                         <tr>
                             <th>
@@ -450,24 +450,24 @@ class HomePage {
         
         return `
             <tr class="pair-row" data-pair-id="${pair.id}" style="cursor: pointer;">
-                <td>
+                <td class="staking-cell staking-cell--pair" data-label="Pair">
                     <div class="pair-link-stack">
                         ${pairNameHtml}
                         ${platformHtml}
                     </div>
                 </td>
-                <td>
+                <td class="staking-cell staking-cell--apr" data-label="APR">
                     <span style="color: var(--success-main); font-weight: bold;">${pair.apr || '0.00'}%</span>
                 </td>
-                <td>
+                <td class="staking-cell staking-cell--weight" data-label="Weight">
                     <span style="font-weight: 600;">
                         ${pair.weightPercentage || '0.00'}%
                     </span>
                 </td>
-                <td>
+                <td class="staking-cell staking-cell--tvl" data-label="TVL">
                     <span style="font-weight: 600;">${this.formatTvlDisplay(pair)}</span>
                 </td>
-                <td>
+                <td class="staking-cell staking-cell--share" data-label="My Share">
                     <button class="btn btn-primary btn-small btn-share"
                             data-pair-id="${pair.id}"
                             data-pair-address="${pair.address}"
@@ -479,7 +479,7 @@ class HomePage {
                         ${userShares}%
                     </button>
                 </td>
-                <td>
+                <td class="staking-cell staking-cell--reward" data-label="My Reward">
                     <button class="btn btn-secondary btn-small btn-earnings"
                             data-pair-id="${pair.id}"
                             data-pair-address="${pair.address}"

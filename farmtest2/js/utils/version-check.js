@@ -73,7 +73,7 @@
         } catch (error) {
             console.error('Version check failed:', error);
             // Continue with stored version on error
-            return;
+            return { status: 'ready', version: storedVersion };
         }
 
         // Compare versions (convert to comparable numbers: "1.2.3" -> 1002003)
@@ -90,9 +90,11 @@
             }
             
             window.location.replace(window.location.href.split('?')[0]);
+            return { status: 'reload', version: newVersion };
         } else {
             cachedVersion = storedVersion;
             console.log(`✅ Running version: ${storedVersion}`);
+            return { status: 'ready', version: newVersion };
         }
     }
 
@@ -198,6 +200,6 @@
     window.getCurrentVersion = getCurrentVersion;
 
     // Auto-run version check on load
-    checkVersion(getCriticalFiles());
+    window.versionCheckReady = checkVersion(getCriticalFiles());
 
 })(window);
