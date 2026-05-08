@@ -931,8 +931,6 @@ class MasterInitializer {
     }
 }
 
-const VERSION_CHECK_TIMEOUT_MS = 3000;
-
 // Auto-initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
     if (window.masterInitializer?.isReady) {
@@ -941,14 +939,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     try {
-        const versionCheckTimeout = new Promise((resolve) => {
-            setTimeout(() => resolve({ status: 'ready' }), VERSION_CHECK_TIMEOUT_MS);
-        });
         const versionCheckResult = window.versionCheckReady
-            ? await Promise.race([
-                window.versionCheckReady.catch(() => ({ status: 'ready' })),
-                versionCheckTimeout
-            ])
+            ? await window.versionCheckReady.catch(() => ({ status: 'ready' }))
             : { status: 'ready' };
         if (versionCheckResult.status === 'reload') {
             return;
