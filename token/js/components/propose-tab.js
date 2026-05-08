@@ -318,6 +318,7 @@ export class ProposeTab {
       { value: 0, label: 'Mint (3,000,000 LIB → contract)' },
       { value: 1, label: 'Burn (from contract balance)' },
       { value: 8, label: 'Distribute (contract → recipient)' },
+      { value: 7, label: 'UpdateSigner' },
     ];
 
     const postLaunchOps = [
@@ -442,7 +443,7 @@ export class ProposeTab {
         break;
       }
       case 7: { // UpdateSigner
-        if (summaryText) summaryText.textContent = 'Replaces an existing signer with a new signer address (requires 3 signatures, including the signer being replaced).';
+        if (summaryText) summaryText.textContent = 'Replaces an existing signer with a new signer address (requires 3 signatures from the remaining signers).';
         if (targetLabel) targetLabel.textContent = 'Old signer address';
         if (valueLabel) valueLabel.textContent = 'New signer address';
         if (this.targetInput) this.targetInput.disabled = false;
