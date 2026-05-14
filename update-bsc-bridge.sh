@@ -20,6 +20,7 @@
 # - Copies the bridge UI into bsc-bridge
 # - Removes development-only files that should not be published to GitHub Pages
 # - Sets js/config.js RUNTIME.PROFILE to prod
+# - Increments CONFIG.APP.VERSION patch in js/config.js (semver X.Y.Z) so the UI shows a fresh build
 # - Refreshes version.html with the current timestamp for cache busting
 #
 # =============================================================================
@@ -109,6 +110,20 @@ if [ ! -f "$config_file" ]; then
 fi
 
 sed -i "/RUNTIME: {/,/}/ s/PROFILE: '[^']*'/PROFILE: '$RUNTIME_PROFILE'/" "$config_file"
+
+current_version="$(sed -n "s/.*VERSION:[[:space:]]*'\\([^']*\\)'.*/\\1/p" "$config_file" | head -n1)"
+new_version=""
+if [[ "$current_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+  major="${BASH_REMATCH[1]}"
+  minor="${BASH_REMATCH[2]}"
+  patch=$((10#${BASH_REMATCH[3]} + 1))
+  new_version="$major.$minor.$patch"
+  sed -i "s/\\(VERSION:[[:space:]]*'\\)[^']*\\('\\)/\\1${new_version}\\2/" "$config_file"
+  echo "APP.VERSION bumped: $current_version -> $new_version"
+else
+  echo "Warning: Could not parse APP.VERSION ('$current_version'); expected semver X.Y.Z. Skipping version bump."
+fi
+
 echo "$timestamp" > "$version_file"
 
 if [ ! -f "$TARGET_DIR/index.html" ]; then
@@ -123,6 +138,11 @@ fi
 
 if ! grep -q "PROFILE: '$RUNTIME_PROFILE'" "$config_file"; then
   echo "Error: Failed to set runtime profile in $config_file"
+  exit 1
+fi
+
+if [[ -n "$new_version" ]] && ! grep -Fq "VERSION: '$new_version'" "$config_file"; then
+  echo "Error: Failed to set APP.VERSION in $config_file"
   exit 1
 fi
 
