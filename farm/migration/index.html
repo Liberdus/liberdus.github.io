@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liberdus LP Farm 1.0 - Migration</title>
+    <meta name="description" content="Unstake and claim rewards from Liberdus LP Farm 1.0 before moving to Farm 2.0.">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="assets/logo.png">
+
+    <!-- Fonts -->
+    <link rel="stylesheet" href="css/fonts.css">
+
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/notifications.css">
+    <link rel="stylesheet" href="css/shared-header.css">
+    <link rel="stylesheet" href="css/wallet-popup.css">
+    <link rel="stylesheet" href="css/network-indicator-selector.css">
+    <link rel="stylesheet" href="css/theme-toggle.css">
+    <link rel="stylesheet" href="css/home.css">
+    <link rel="stylesheet" href="css/staking-modal.css">
+</head>
+<body>
+
+    <header class="header" role="banner">
+        <div class="container-lg">
+            <div class="header-toolbar">
+
+                <a href="./" class="logo-section" aria-label="Liberdus LP Staking - Home">
+                    <img src="assets/logo.png" alt="Liberdus LP Staking" class="logo">
+                    <span class="logo-text">Liberdus LP Farm 1.0</span>
+                    <span class="version-badge" id="app-version">v0.0.0</span>
+                </a>
+
+
+                <nav class="nav-section" role="navigation" aria-label="Main navigation">
+                    <a href="admin/" id="admin-panel-link" class="nav-button" style="display: none;" aria-label="Admin Panel">
+                        <span class="material-icons" aria-hidden="true">admin_panel_settings</span>
+                        <span>Admin Panel</span>
+                    </a>
+
+                    <!-- Network indicator -->
+                    <div id="network-indicator-home" class="network-indicator-home" style="display:none;">
+                        <!-- Populated by JavaScript -->
+                    </div>
+
+                    <button id="connect-wallet-btn"
+                            class="connect-wallet-btn"
+                            aria-label="Connect wallet"
+                            aria-describedby="wallet-status"
+                            aria-live="polite"
+                            aria-busy="true"
+                            disabled>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"></path>
+                        </svg>
+                        <span class="wallet-status-text">Checking wallet status...</span>
+                    </button>
+
+
+                    <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark/light theme">
+                        <span class="material-icons-outlined" aria-hidden="true">light_mode</span>
+                    </button>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+
+    <main class="main-content" role="main" id="main-content">
+        <div class="container-xl">
+
+            <div class="page-title">
+                <div class="page-title-header">
+                    <h1>Migrate to Farm 2.0</h1>
+                    <button id="refresh-button" class="refresh-button" aria-label="Refresh data">
+                        <span class="material-icons" aria-hidden="true">refresh</span>
+                    </button>
+                </div>
+            </div>
+
+
+            <div id="content-container" class="animate-fade-in">
+                <!-- Skeleton table shown immediately on page load -->
+                <div class="table-container staking-table-container">
+                    <table class="table staking-pairs-table">
+                        <thead>
+                            <tr>
+                                <th><span class="material-icons">swap_horiz</span> Pair</th>
+                                <th><span class="material-icons">trending_up</span> APR</th>
+                                <th><span class="material-icons">fitness_center</span> Weight</th>
+                                <th><span class="material-icons">account_balance</span> TVL</th>
+                                <th><span class="material-icons">pie_chart</span> My Share</th>
+                                <th><span class="material-icons">monetization_on</span> My Reward</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="staking-skeleton-row">
+                                <td class="staking-cell staking-cell--pair" data-label="Pair"><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
+                                <td class="staking-cell staking-cell--apr" data-label="APR"><div class="skeleton" style="height: 20px; width: 60px;"></div></td>
+                                <td class="staking-cell staking-cell--weight" data-label="Weight"><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
+                                <td class="staking-cell staking-cell--tvl" data-label="TVL"><div class="skeleton" style="height: 20px; width: 100px;"></div></td>
+                                <td class="staking-cell staking-cell--share" data-label="My Share"><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
+                                <td class="staking-cell staking-cell--reward" data-label="My Reward"><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
+                            </tr>
+                            <tr class="staking-skeleton-row">
+                                <td class="staking-cell staking-cell--pair" data-label="Pair"><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
+                                <td class="staking-cell staking-cell--apr" data-label="APR"><div class="skeleton" style="height: 20px; width: 60px;"></div></td>
+                                <td class="staking-cell staking-cell--weight" data-label="Weight"><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
+                                <td class="staking-cell staking-cell--tvl" data-label="TVL"><div class="skeleton" style="height: 20px; width: 100px;"></div></td>
+                                <td class="staking-cell staking-cell--share" data-label="My Share"><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
+                                <td class="staking-cell staking-cell--reward" data-label="My Reward"><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
+                            </tr>
+                            <tr class="staking-skeleton-row">
+                                <td class="staking-cell staking-cell--pair" data-label="Pair"><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
+                                <td class="staking-cell staking-cell--apr" data-label="APR"><div class="skeleton" style="height: 20px; width: 60px;"></div></td>
+                                <td class="staking-cell staking-cell--weight" data-label="Weight"><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
+                                <td class="staking-cell staking-cell--tvl" data-label="TVL"><div class="skeleton" style="height: 20px; width: 100px;"></div></td>
+                                <td class="staking-cell staking-cell--share" data-label="My Share"><div class="skeleton" style="height: 20px; width: 80px;"></div></td>
+                                <td class="staking-cell staking-cell--reward" data-label="My Reward"><div class="skeleton" style="height: 20px; width: 120px;"></div></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+
+    <footer class="footer">
+        <div class="container-lg">
+            <div class="footer-content">
+                <span class="footer-text">&copy; <a href="https://liberdus.com" target="_blank" rel="noopener noreferrer" class="footer-brand-link">Liberdus</a> <span id="footer-year">2026</span></span>
+                <div class="footer-actions">
+                    <a id="add-token-link" href="#" class="footer-link-anchor footer-link-action" aria-label="Add reward token to MetaMask" title="Add reward token to MetaMask" hidden>
+                        <img src="assets/metamask-fox.svg" alt="" class="footer-link-icon" aria-hidden="true">
+                        <span>Add to MetaMask</span>
+                    </a>
+                    <a id="staking-contract-link" href="#" target="_blank" rel="noopener noreferrer" class="footer-link-anchor" hidden>
+                        Contract
+                    </a>
+                    <a id="footer-support-link" href="https://liberdus.com/discord/help/" target="_blank" rel="noopener noreferrer" class="footer-link-anchor" title="Get support on Discord" aria-label="Get support on Discord">
+                        Support
+                    </a>
+                </div>
+                <div class="social-links">
+                    <a href="https://github.com/Liberdus/lib-lp-staking-frontend" target="_blank" rel="noopener" class="social-link" title="Visit our GitHub">
+                        <svg class="social-link-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path fill="currentColor" d="M12 .3a12 12 0 0 0-3.8 23.38c.6.11.82-.26.82-.58v-2.03c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.74.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.8 1.3 3.49 1 .11-.78.42-1.3.76-1.6-2.66-.31-5.47-1.34-5.47-5.94 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18a4.64 4.64 0 0 1 1.23 3.22c0 4.61-2.8 5.62-5.48 5.92.43.38.82 1.11.82 2.24v3.32c0 .32.22.7.83.58A12 12 0 0 0 12 .3Z"></path>
+                        </svg>
+                    </a>
+                    <a id="discord-support-link" href="https://liberdus.com/discord/" target="_blank" rel="noopener noreferrer" class="social-link" title="Join our Discord">
+                        <svg class="social-link-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path fill="currentColor" d="M20.32 4.37a19.8 19.8 0 0 0-4.89-1.52.08.08 0 0 0-.08.04c-.21.38-.44.86-.61 1.25a18.3 18.3 0 0 0-5.49 0 12.6 12.6 0 0 0-.62-1.25.08.08 0 0 0-.08-.04 19.7 19.7 0 0 0-4.88 1.52.07.07 0 0 0-.03.03C.53 9.05-.32 13.58.1 18.06c0 .02.01.04.03.06a19.9 19.9 0 0 0 5.99 3.03.08.08 0 0 0 .08-.03c.46-.63.87-1.3 1.23-1.99a.08.08 0 0 0-.04-.11 13.1 13.1 0 0 1-1.87-.89.08.08 0 0 1-.01-.13c.13-.09.25-.19.37-.29a.07.07 0 0 1 .08-.01c3.93 1.79 8.18 1.79 12.06 0a.07.07 0 0 1 .08.01c.12.1.25.2.37.29a.08.08 0 0 1-.01.13 12.3 12.3 0 0 1-1.87.89.08.08 0 0 0-.04.11c.36.69.77 1.36 1.23 1.99a.08.08 0 0 0 .08.03 19.8 19.8 0 0 0 6-3.03.08.08 0 0 0 .03-.05c.5-5.18-.84-9.67-3.55-13.66a.06.06 0 0 0-.03-.03ZM8.02 15.33c-1.18 0-2.16-1.09-2.16-2.42s.96-2.42 2.16-2.42c1.21 0 2.18 1.1 2.16 2.42 0 1.33-.96 2.42-2.16 2.42Zm7.98 0c-1.18 0-2.16-1.09-2.16-2.42s.96-2.42 2.16-2.42c1.21 0 2.18 1.1 2.16 2.42 0 1.33-.95 2.42-2.16 2.42Z"></path>
+                        </svg>
+                    </a>
+                    <a href="https://x.com/liberdus" target="_blank" rel="noopener" class="social-link" title="Follow us on X">
+                        <svg class="social-link-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path fill="currentColor" d="M18.9 1.15h3.68l-8.04 9.19L24 22.85h-7.41l-5.8-7.59-6.64 7.59H.47l8.6-9.83L0 1.15h7.59l5.24 6.93 6.07-6.93Zm-1.29 19.5h2.04L6.48 3.23H4.29l13.32 17.42Z"></path>
+                        </svg>
+                    </a>
+                    <a href="https://telegram.me/liberdus" target="_blank" rel="noopener" class="social-link" title="Join our Telegram">
+                        <svg class="social-link-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path fill="currentColor" d="M23.91 3.79 20.3 20.82c-.27 1.2-.98 1.5-1.99.93l-5.5-4.06-2.65 2.55c-.29.29-.54.54-1.11.54l.39-5.6L19.63 6c.44-.39-.1-.61-.68-.22L6.36 13.7.94 12c-1.18-.37-1.2-1.18.25-1.74L22.4 2.08c.98-.36 1.84.24 1.52 1.7Z"></path>
+                        </svg>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <div id="modal-container"></div>
+    <div id="notification-container" class="notification-container"></div>
+
+    <!-- Version Check System (runs first to ensure fresh cache) -->
+    <script src="js/utils/version-check.js"></script>
+
+    <script src="js/master-initializer.js"></script>
+
+    <script>
+    // Display version in header
+    document.addEventListener('DOMContentLoaded', function() {
+        const footerYearElement = document.getElementById('footer-year');
+        if (footerYearElement) {
+            footerYearElement.textContent = String(new Date().getFullYear());
+        }
+
+        if (window.getCurrentVersion) {
+            window.getCurrentVersion().then(function(version) {
+                const versionElement = document.getElementById('app-version');
+                if (versionElement) {
+                    versionElement.textContent = 'v' + version;
+                }
+            });
+        }
+    });
+    </script>
+</body>
+</html>
