@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # =============================================================================
-# UPDATE TOKEN CLIENT SCRIPT
+# UPDATE TOKENTEST SCRIPT
 # =============================================================================
 #
-# PURPOSE: This script updates the token UI by copying files from
-#          liberdus-token-ui to liberdus.github.io/token
+# PURPOSE: This script updates the tokentest staging frontend by copying files
+#          from liberdus-token-ui to liberdus.github.io/tokentest
 #
 # PREREQUISITES:
 # 1. This script must be located in the liberdus.github.io directory
@@ -14,18 +14,18 @@
 #    /path/to/parent/
 #    ├── liberdus.github.io/     (this repo, contains this script)
 #    └── liberdus-token-ui/      (source repo)
-# 3. The script must have execute permissions: chmod +x update-token-client.sh
+# 3. The script must have execute permissions: chmod +x update-tokentest.sh
 #
 # USAGE:
-# 1. Run the script from anywhere: ./update-token-client.sh
-#    (or: cd liberdus.github.io && ./update-token-client.sh)
+# 1. Run the script from anywhere: ./update-tokentest.sh
+#    (or: cd liberdus.github.io && ./update-tokentest.sh)
 #
 # WHAT IT DOES:
 # - Initializes liberdus-token-ui submodules (vendor/liberdus-wallet-module)
-# - Copies liberdus-token-ui/* to liberdus.github.io/token/
+# - Copies liberdus-token-ui/* to liberdus.github.io/tokentest/
 # - Excludes node_modules, .git, and other build/IDE artifacts
 # - Mirrors source to target (removes files not in source)
-# - Increments VERSION in token/js/config.js (patch increment: 0.0.X -> 0.0.X+1)
+# - Increments VERSION in tokentest/js/config.js (patch increment: 0.0.X -> 0.0.X+1)
 #
 # =============================================================================
 
@@ -34,7 +34,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$SCRIPT_DIR"
 SOURCE_DIR="$(dirname "$REPO_DIR")/liberdus-token-ui"
-TARGET_DIR="$REPO_DIR/token"
+TARGET_DIR="$REPO_DIR/tokentest"
 
 cd "$REPO_DIR"
 
@@ -62,7 +62,7 @@ fi
 
 mkdir -p "$TARGET_DIR"
 
-echo "Copying token UI contents..."
+echo "Copying token UI contents to tokentest..."
 echo "Source: $SOURCE_DIR"
 echo "Target: $TARGET_DIR"
 echo "Note: If no files are listed, source and target are identical."
@@ -97,22 +97,22 @@ rsync -av --delete \
   --exclude='vendor/liberdus-wallet-module/demo.html' \
   "$SOURCE_DIR/" "$TARGET_DIR/"
 
-echo "Updating version in token/js/config.js..."
+echo "Updating version in tokentest/js/config.js..."
 if [ -f "$TARGET_DIR/js/config.js" ]; then
     sed -i "s/VERSION: '[0-9.]*'/VERSION: '$new_version'/" "$TARGET_DIR/js/config.js"
     echo "Set VERSION to $new_version"
 else
-    echo "Warning: token/js/config.js not found, skipping version bump"
+    echo "Warning: tokentest/js/config.js not found, skipping version bump"
 fi
 
 if [ ! -f "$TARGET_DIR/index.html" ]; then
-    echo "Error: index.html not found in token folder"
+    echo "Error: index.html not found in tokentest folder"
     exit 1
 fi
 
 if [ ! -f "$TARGET_DIR/vendor/liberdus-wallet-module/index.js" ]; then
-    echo "Warning: token/vendor/liberdus-wallet-module/index.js not found after sync"
+    echo "Warning: tokentest/vendor/liberdus-wallet-module/index.js not found after sync"
 fi
 
-echo "Update completed successfully!"
+echo "Tokentest update completed successfully!"
 echo "New VERSION in config.js: $new_version"

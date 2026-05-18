@@ -144,12 +144,13 @@ export class ContractManager {
 
   getWriteContract() {
     const txEnabled = !!this.networkManager?.isTxEnabled?.();
-    if (!txEnabled || !window.ethereum || !window.ethers) {
+    const injectedProvider = this.walletManager?.getEip1193Provider?.();
+    if (!txEnabled || !injectedProvider || !window.ethers) {
       return this.contractWrite;
     }
 
     // Create a fresh provider/signer for each write to avoid stale network caching.
-    const freshProvider = new window.ethers.providers.Web3Provider(window.ethereum, 'any');
+    const freshProvider = new window.ethers.providers.Web3Provider(injectedProvider, 'any');
     const freshSigner = freshProvider.getSigner();
     return this._makeContract(freshSigner);
   }

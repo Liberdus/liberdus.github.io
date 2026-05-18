@@ -1,11 +1,12 @@
+import { switchOrAddEthereumChain } from '../../vendor/liberdus-wallet-module/adapters/chain.js';
 import { CONFIG } from '../config.js';
 import { peekReadOnlyProvider } from '../utils/read-only-provider.js';
 
 /**
- * NetworkManager (Phase 2)
+ * NetworkManager
  * Polygon-only:
  * - Read-only mode uses CONFIG.NETWORK.RPC_URL
- * - Tx-enabled mode requires MetaMask connected AND chainId === CONFIG.NETWORK.CHAIN_ID
+ * - Tx-enabled mode requires a connected wallet on Polygon
  */
 export class NetworkManager {
   constructor({ walletManager } = {}) {
@@ -15,13 +16,11 @@ export class NetworkManager {
   }
 
   load() {
-    // Subscribe to wallet events so UI can stay in sync.
     document.addEventListener('walletConnected', () => this.updateUIState());
     document.addEventListener('walletDisconnected', () => this.updateUIState());
     document.addEventListener('walletAccountChanged', () => this.updateUIState());
     document.addEventListener('walletChainChanged', () => this.updateUIState());
 
-    // Initial UI state
     this.updateUIState();
   }
 
@@ -36,7 +35,6 @@ export class NetworkManager {
   }
 
   getReadOnlyProvider() {
-    // Reuse the singleton read-only provider (do not create new providers here).
     return peekReadOnlyProvider() || null;
   }
 
@@ -44,39 +42,23 @@ export class NetworkManager {
     return this.walletManager?.getProvider?.() || null;
   }
 
-  async ensurePolygonNetwork() {
-    if (!window.ethereum) throw new Error('MetaMask not available');
-    // Try switching; if missing, add then switch.
-    try {
-      await window.ethereum.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: this.requiredChainHex }],
-      });
-      return true;
-    } catch (error) {
-      if (error && error.code === 4902) {
-        await this.addPolygonNetwork();
-        await window.ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: this.requiredChainHex }],
-        });
-        return true;
-      }
-      throw error;
-    }
+  getWalletProvider() {
+    return this.walletManager?.getEip1193Provider?.() || null;
   }
 
-  async addPolygonNetwork() {
-    const networkConfig = this.buildPolygonNetworkConfig();
-    await window.ethereum.request({
-      method: 'wallet_addEthereumChain',
-      params: [networkConfig],
-    });
+  async ensurePolygonNetwork() {
+    const provider = this.getWalletProvider();
+    if (!provider) {
+      throw new Error('Wallet not available');
+    }
+
+    await switchOrAddEthereumChain(provider, this.buildPolygonNetworkConfig());
+    return true;
   }
 
   buildPolygonNetworkConfig() {
     return {
-      chainId: this.requiredChainHex,
+      chainId: this.requiredChainId,
       chainName: CONFIG.NETWORK.NAME,
       rpcUrls: [CONFIG.NETWORK.RPC_URL, ...(CONFIG.NETWORK.FALLBACK_RPCS || [])].filter(Boolean),
       nativeCurrency: CONFIG.NETWORK.NATIVE_CURRENCY,
@@ -92,15 +74,10 @@ export class NetworkManager {
     this.updateTxGatedControls();
   }
 
-  /**
-   * Simple gating: any element marked data-requires-tx="true"
-   * will be disabled unless tx-enabled.
-   */
   updateTxGatedControls() {
     const txEnabled = this.isTxEnabled();
     const gated = Array.from(document.querySelectorAll('[data-requires-tx="true"]'));
     gated.forEach((el) => {
-      // Allow permanent disable for placeholders (Phase 1/5/6 UI)
       if (el.getAttribute('data-always-disabled') === 'true') return;
 
       if ('disabled' in el) {
@@ -114,4 +91,3 @@ export class NetworkManager {
     return '0x' + Number(chainId).toString(16);
   }
 }
-

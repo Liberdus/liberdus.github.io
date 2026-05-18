@@ -1,5 +1,6 @@
 import { CONFIG } from '../config.js';
 import { formatTxMessage, extractErrorMessage, normalizeErrorMessage, formatSignatureError } from '../utils/transaction-helpers.js';
+import { formatSignatureProgress } from '../utils/proposal-helpers.js';
 
 export class ProposalDetailModal {
   constructor() {
@@ -78,7 +79,16 @@ export class ProposalDetailModal {
     const detailsMap = await contractManager.getOperationsBatch([event.operationId]);
     const details = detailsMap.get(event.operationId) || null;
 
-    this.current = { event, details, requiredSignatures };
+    let resolvedRequiredSignatures = requiredSignatures;
+    if (resolvedRequiredSignatures == null) {
+      try {
+        resolvedRequiredSignatures = await contractManager.getRequiredSignatures?.();
+      } catch {
+        // keep null; UI will display '?' as denominator
+      }
+    }
+
+    this.current = { event, details, requiredSignatures: resolvedRequiredSignatures };
     this.render();
 
     this.backdrop?.classList.remove('hidden');
@@ -247,8 +257,7 @@ export class ProposalDetailModal {
     const valueDisplay = formatValueForOpType(opType, rawValue);
     const dataDisplay = formatDataForOpType(opType, details?.data ?? event?.data);
 
-    const required = opType === 7 ? 2 : (requiredSignatures ?? '?');
-    const sigs = typeof details?.numSignatures === 'number' ? `${details.numSignatures}/${required}` : '';
+    const sigs = formatSignatureProgress(details?.numSignatures, requiredSignatures);
 
     this.bodyEl.innerHTML = `
       <div class="kv-grid">
@@ -413,4 +422,3 @@ function escapeHtml(str) {
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
 }
-

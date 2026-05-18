@@ -1,4 +1,5 @@
 import { CONFIG } from '../config.js';
+import { formatSignatureProgress } from '../utils/proposal-helpers.js';
 
 export class ProposalsTab {
   constructor() {
@@ -306,9 +307,9 @@ export class ProposalsTab {
     const latest = await provider.getBlockNumber();
     this._lastFetchedBlock = latest;
 
-    // Fetch all proposals in one getLogs call (Infura supports full range)
+    // Fetch proposals in one getLogs call; fall back to split ranges if limits are hit
     const topic = contract.interface.getEventTopic('OperationRequested');
-    const logs = await provider.getLogs({
+    const logs = await getLogsWithFallback(provider, {
       address: contract.address,
       topics: [topic],
       fromBlock: floorBlock,
@@ -403,9 +404,9 @@ export class ProposalsTab {
       // Update DOM row if it's currently rendered (it may be filtered out).
       const row = this.listEl?.querySelector?.(`[data-proposal-row="${opId}"]`);
       if (row) {
-        const required = details.opType === 7 ? 2 : (this._requiredSignatures ?? '?');
-        const sigs = `${details.numSignatures}/${required}`;
-        row.querySelector('[data-proposal-sigs]')?.replaceChildren(document.createTextNode(sigs));
+        row.querySelector('[data-proposal-sigs]')?.replaceChildren(
+          document.createTextNode(formatSignatureProgress(details.numSignatures, this._requiredSignatures))
+        );
         row.querySelector('[data-proposal-executed]')?.replaceChildren(
           document.createTextNode(details.executed ? 'Executed' : (details.expired ? 'Expired' : 'Pending'))
         );
@@ -464,11 +465,9 @@ export class ProposalsTab {
       const row = this.listEl?.querySelector?.(`[data-proposal-row="${opId}"]`);
       if (!row) continue;
 
-      const required = Number(ev.opType) === 7 ? 2 : (this._requiredSignatures ?? '?');
-      const num = typeof ev.numSignatures === 'number' ? ev.numSignatures : null;
-      if (num != null) {
-        row.querySelector('[data-proposal-sigs]')?.replaceChildren(document.createTextNode(`${num}/${required}`));
-      }
+      row.querySelector('[data-proposal-sigs]')?.replaceChildren(
+        document.createTextNode(formatSignatureProgress(ev.numSignatures, this._requiredSignatures))
+      );
     }
 
     // Only hydrate rows that can still change (pending/unknown).
@@ -490,8 +489,7 @@ export class ProposalsTab {
         : (ev.expired === true ? 'Expired'
           : (ev.executed === false && ev.expired === false ? 'Pending' : null));
     const statusText = status || 'Loading…';
-    const required = Number(ev.opType) === 7 ? 2 : (this._requiredSignatures ?? '?');
-    const sigsText = typeof ev.numSignatures === 'number' ? `${ev.numSignatures}/${required}` : '—';
+    const sigsText = formatSignatureProgress(ev.numSignatures, this._requiredSignatures);
 
     const row = document.createElement('button');
     row.type = 'button';
@@ -806,7 +804,7 @@ export class ProposalsTab {
       }
 
       const topic = contract.interface.getEventTopic('OperationRequested');
-      const logs = await provider.getLogs({
+      const logs = await getLogsWithFallback(provider, {
         address: contract.address,
         topics: [topic],
         fromBlock: Math.max(last + 1, floorBlock),
@@ -816,6 +814,7 @@ export class ProposalsTab {
       const newEvents = this._parseLogs(contract, logs);
       if (newEvents.length === 0) {
         this._lastFetchedBlock = latestNow;
+        await this._ensureRequiredSignaturesAndHydrateVisible();
         this._saveCache();
         this._setStatus('Ready');
         return;
@@ -915,4 +914,65 @@ function dedupeBy(arr, keyFn) {
     out.push(item);
   }
   return out;
+}
+
+async function getLogsWithFallback(provider, filter) {
+  try {
+    return await provider.getLogs(filter);
+  } catch (error) {
+    if (!isLogLimitError(error)) {
+      throw error;
+    }
+  }
+
+  const from = Number(filter.fromBlock);
+  const to = Number(filter.toBlock);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) {
+    throw new Error('getLogs fallback failed to split range');
+  }
+
+  const mid = Math.floor((from + to) / 2);
+  const [left, right] = await Promise.all([
+    getLogsWithFallback(provider, { ...filter, fromBlock: from, toBlock: mid }),
+    getLogsWithFallback(provider, { ...filter, fromBlock: mid + 1, toBlock: to }),
+  ]);
+
+  return [...left, ...right];
+}
+
+/**
+ * Detect eth_getLogs "too many results" limit errors.
+ *
+ * Known behavior (from community reports, not always in official provider docs):
+ * - Infura: message "query returned more than 10000 results"; some endpoints use RPC code -32005.
+ * - Other providers may use different messages or codes.
+ *
+ * We check message (including nested error.error/data/reason) and code in common
+ * nested shapes. If a provider uses a different format, the fallback won't trigger
+ * and the error will surface; we can extend checks as needed.
+ */
+function isLogLimitError(error) {
+  if (!error) return false;
+
+  const code = Number(error?.code ?? error?.error?.code ?? error?.data?.code);
+  if (code === -32005) return true;
+
+  const message = [
+    error?.message,
+    error?.reason,
+    error?.error?.message,
+    error?.error?.data?.message,
+    error?.data?.message,
+  ]
+    .filter(Boolean)
+    .map((s) => String(s).toLowerCase())
+    .join(' ');
+  if (!message) return false;
+
+  return (
+    message.includes('more than 10000') ||
+    message.includes('10000 results') ||
+    message.includes('too many results') ||
+    /query\s+returned\s+more\s+than\s+\d+\s+result/i.test(message)
+  );
 }
