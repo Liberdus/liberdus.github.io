@@ -103,7 +103,7 @@ window.CONFIG = {
     FARM_MIGRATION: {
         ENABLED: true,
         POSITION_CHECK_ENABLED: true,
-        HIDE_WHEN_CONNECTED_WALLET_HAS_NO_POSITION: true,
+        HIDE_WHEN_CONNECTED_WALLET_HAS_NO_POSITION: false,
         OLD_FARM_LABEL: 'Farm 1.0',
         OLD_FARM_URL: 'https://liberdus.com/farm/migration',
         OLD_FARM_CONTRACTS: {
