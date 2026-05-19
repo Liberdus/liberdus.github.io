@@ -1,66 +1,43 @@
 import { createWalletCore } from '../../vendor/liberdus-wallet-module/index.js';
 
-const DEFAULT_WALLET_SESSION_KEY = 'liberdus_token_ui:wallet-session';
+const WALLET_SESSION_KEY = 'liberdus_token_ui:wallet-session';
 
-/**
- * WalletManager
- * - Wraps liberdus-wallet-core for discovery, connect, and session restore
- * - Keeps the existing app-facing API (provider/signer getters, DOM events)
- */
 export class WalletManager {
-  constructor({ walletSessionKey = DEFAULT_WALLET_SESSION_KEY } = {}) {
-    this.walletSessionKey = walletSessionKey;
-
+  constructor() {
     this.walletCore = createWalletCore({
-      storage: typeof window !== 'undefined' ? window.localStorage : null,
-      walletSessionKey,
+      storage: window.localStorage,
+      walletSessionKey: WALLET_SESSION_KEY,
     });
 
-    this.provider = null; // ethers.providers.Web3Provider
-    this.signer = null; // ethers.Signer
+    this.provider = null;
+    this.signer = null;
     this.address = null;
-    this.chainId = null; // number
+    this.chainId = null;
     this.walletType = null;
-
     this._connectionPromise = null;
-    this._unsubscribeCore = null;
-
-    this.listeners = new Set();
   }
 
   load() {
-    this._unsubscribeCore = this.walletCore.subscribe((event, data) => {
+    this.walletCore.subscribe((event, data) => {
       if (event === 'connected') {
         this._syncFromCoreState();
-        this._notify('connected', {
-          address: this.address,
-          chainId: this.chainId,
-          walletType: this.walletType,
-        });
+        this._notify('connected');
         return;
       }
 
-      if (event === 'disconnected') {
+      if (event === 'disconnected' || (event === 'accountChanged' && !data)) {
         this._clearEthersState();
-        this._notify('disconnected', {});
+        this._notify('disconnected');
         return;
       }
 
-      if (event === 'accountChanged') {
-        if (!data) {
-          this._clearEthersState();
-          this._notify('disconnected', {});
-          return;
-        }
-
-        this._syncFromCoreState();
-        this._notify('accountChanged', { address: this.address, chainId: this.chainId });
+      if ((event === 'accountChanged' || event === 'chainChanged') && !this._hasActiveWalletSession()) {
         return;
       }
 
-      if (event === 'chainChanged') {
+      if (event === 'accountChanged' || event === 'chainChanged') {
         this._syncFromCoreState();
-        this._notify('chainChanged', { address: this.address, chainId: this.chainId });
+        this._notify(event);
       }
     });
   }
@@ -75,14 +52,6 @@ export class WalletManager {
 
   isConnected() {
     return !!(this.address && this.provider && this.signer);
-  }
-
-  isWalletConnected() {
-    return this.isConnected();
-  }
-
-  getAccount() {
-    return this.address;
   }
 
   getAddress() {
@@ -105,34 +74,18 @@ export class WalletManager {
     return this.walletCore.getEip1193Provider();
   }
 
-  subscribe(callback) {
-    this.listeners.add(callback);
-    return () => this.listeners.delete(callback);
-  }
-
-  async getDiscoveredWallets() {
-    return this.walletCore.discoverWallets();
-  }
-
   async connectWallet({ walletId } = {}) {
     if (this._connectionPromise) return this._connectionPromise;
-    this._connectionPromise = this._performConnectWallet({ walletId });
+    this._connectionPromise = this._connect(walletId);
     try {
-      return await this._connectionPromise;
+      await this._connectionPromise;
     } finally {
       this._connectionPromise = null;
     }
   }
 
-  async _performConnectWallet({ walletId } = {}) {
-    if (this.isConnected()) {
-      return {
-        success: true,
-        address: this.address,
-        chainId: this.chainId,
-        walletType: this.walletType,
-      };
-    }
+  async _connect(walletId) {
+    if (this.isConnected()) return;
 
     const wallets = await this.walletCore.discoverWallets();
     if (!wallets.length) {
@@ -158,14 +111,6 @@ export class WalletManager {
     }
 
     await this.walletCore.connect({ walletId: selectedWalletId });
-    this._syncFromCoreState();
-
-    return {
-      success: true,
-      address: this.address,
-      chainId: this.chainId,
-      walletType: this.walletType,
-    };
   }
 
   async disconnect() {
@@ -175,22 +120,18 @@ export class WalletManager {
   async checkPreviousConnection() {
     try {
       await this.walletCore.sync();
-      const state = this.walletCore.getState();
-      if (!state.account) return false;
-
-      this._syncFromCoreState();
-      this._notify('connected', {
-        address: this.address,
-        chainId: this.chainId,
-        walletType: this.walletType,
-        restored: true,
-      });
-      return true;
     } catch {
-      await this.walletCore.disconnect().catch(() => {});
+      await this.walletCore.disconnect();
       this._clearEthersState();
       return false;
     }
+
+    const state = this.walletCore.getState();
+    if (!state.account) return false;
+
+    this._syncFromCoreState();
+    this._notify('connected', { restored: true });
+    return true;
   }
 
   _syncFromCoreState() {
@@ -209,6 +150,11 @@ export class WalletManager {
     this.walletType = state.selectedWalletName || 'wallet';
   }
 
+  _hasActiveWalletSession() {
+    const state = this.walletCore.getState();
+    return !!(state.sessionWalletId || state.selectedWalletId);
+  }
+
   _clearEthersState() {
     this.provider = null;
     this.signer = null;
@@ -217,22 +163,24 @@ export class WalletManager {
     this.walletType = null;
   }
 
-  _notify(event, data) {
-    this.listeners.forEach((cb) => {
-      try {
-        cb(event, data);
-      } catch {
-        // ignore
-      }
-    });
-
-    const eventNameMap = {
+  _notify(event, extra = {}) {
+    const domEvent = {
       connected: 'walletConnected',
       disconnected: 'walletDisconnected',
       accountChanged: 'walletAccountChanged',
       chainChanged: 'walletChainChanged',
-    };
-    const domName = eventNameMap[event] || `wallet${event.charAt(0).toUpperCase()}${event.slice(1)}`;
-    document.dispatchEvent(new CustomEvent(domName, { detail: { event, data } }));
+    }[event];
+
+    document.dispatchEvent(new CustomEvent(domEvent, {
+      detail: {
+        event,
+        data: {
+          address: this.address,
+          chainId: this.chainId,
+          walletType: this.walletType,
+          ...extra,
+        },
+      },
+    }));
   }
 }

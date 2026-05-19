@@ -2,44 +2,39 @@ export class Header {
   constructor() {
     this.connectWalletBtn = null;
     this._connectBtnText = 'Connect Wallet';
-    this._walletPickerMenu = null;
+    this._walletPicker = null;
   }
 
   load() {
     this.connectWalletBtn = document.getElementById('connect-wallet-btn');
     if (!this.connectWalletBtn) return;
 
-    this._connectBtnText = this.connectWalletBtn.textContent?.trim() || this._connectBtnText;
-
+    this._connectBtnText = this.connectWalletBtn.textContent.trim() || this._connectBtnText;
     this.connectWalletBtn.addEventListener('click', () => this.onConnectWalletClick());
 
-    document.addEventListener('walletConnected', () => this.updateConnectButtonStatus());
-    document.addEventListener('walletDisconnected', () => this.updateConnectButtonStatus());
-    document.addEventListener('walletAccountChanged', () => this.updateConnectButtonStatus());
-    document.addEventListener('walletChainChanged', () => this.updateConnectButtonStatus());
-    document.addEventListener('click', (event) => this._handleDocumentClick(event));
+    const refresh = () => this.updateConnectButtonStatus();
+    document.addEventListener('walletConnected', refresh);
+    document.addEventListener('walletDisconnected', refresh);
+    document.addEventListener('walletAccountChanged', refresh);
+    document.addEventListener('walletChainChanged', refresh);
+    document.addEventListener('click', (event) => this._onDocumentClick(event));
 
-    this.updateConnectButtonStatus();
+    refresh();
   }
 
   async onConnectWalletClick() {
-    const btn = this.connectWalletBtn;
-    if (!btn) return;
-
     const walletManager = window.walletManager;
     const networkManager = window.networkManager;
     const walletPopup = window.walletPopup;
 
-    if (walletManager?.isConnecting) {
+    if (walletManager.isConnecting) return;
+
+    if (walletManager.isConnected() && networkManager.isOnRequiredNetwork()) {
+      walletPopup.toggle(this.connectWalletBtn);
       return;
     }
 
-    if (walletManager?.isConnected?.() && networkManager?.isOnRequiredNetwork?.()) {
-      walletPopup?.toggle?.(btn);
-      return;
-    }
-
-    if (walletManager?.isConnected?.() && !networkManager?.isOnRequiredNetwork?.()) {
+    if (walletManager.isConnected() && !networkManager.isOnRequiredNetwork()) {
       this.renderConnectButton({ text: 'Connecting to Polygon…', disabled: true });
       try {
         await networkManager.ensurePolygonNetwork();
@@ -53,49 +48,32 @@ export class Header {
 
     this.renderConnectButton({ text: 'Connecting…', disabled: true });
     try {
-      await this._connectSelectedWallet(walletManager);
+      await walletManager.connectWallet();
     } catch (error) {
-      if (error?.code === 'WALLET_SELECTION_REQUIRED') {
-        try {
-          const walletId = await this._promptWalletSelection(error.wallets || []);
-          if (!walletId) return;
-          await walletManager?.connectWallet?.({ walletId });
-        } catch (selectionError) {
-          if (selectionError?.message !== 'Wallet selection cancelled.') {
-            window.alert(selectionError?.message || 'Failed to connect wallet');
-          }
+      if (error.code !== 'WALLET_SELECTION_REQUIRED') {
+        window.alert(error.message || 'Failed to connect wallet');
+        return;
+      }
+
+      try {
+        const walletId = await this._pickWallet(error.wallets);
+        await walletManager.connectWallet({ walletId });
+      } catch (selectionError) {
+        if (selectionError.message !== 'Wallet selection cancelled.') {
+          window.alert(selectionError.message || 'Failed to connect wallet');
         }
-      } else {
-        window.alert(error?.message || 'Failed to connect wallet');
       }
     } finally {
-      this.hideWalletPicker();
+      this._closeWalletPicker();
       this.updateConnectButtonStatus();
     }
   }
 
-  async _connectSelectedWallet(walletManager) {
-    const wallets = await walletManager?.getDiscoveredWallets?.();
-    if (!wallets?.length) {
-      throw new Error('No compatible wallet was found in this browser.');
-    }
-
-    if (wallets.length === 1) {
-      await walletManager.connectWallet({ walletId: wallets[0].id });
-      return;
-    }
-
-    await walletManager.connectWallet();
-  }
-
-  async _promptWalletSelection(wallets) {
-    this.hideWalletPicker();
-
-    if (!wallets.length) {
-      throw new Error('No compatible wallet was found in this browser.');
-    }
+  _pickWallet(wallets) {
+    this._closeWalletPicker();
 
     return new Promise((resolve, reject) => {
+      const navSection = this.connectWalletBtn.closest('.nav-section');
       const menu = document.createElement('div');
       menu.className = 'wallet-picker-menu';
       menu.setAttribute('role', 'menu');
@@ -106,98 +84,74 @@ export class Header {
       title.textContent = 'Choose a wallet';
       menu.appendChild(title);
 
-      wallets.forEach((wallet) => {
+      for (const wallet of wallets) {
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'wallet-picker-menu__item';
         item.setAttribute('role', 'menuitem');
         item.textContent = wallet.info?.name || 'Wallet';
         item.addEventListener('click', () => {
-          const pending = this._walletSelectionPromise;
-          this._walletSelectionPromise = null;
-          this._removeWalletPickerMenu();
-          pending?.resolve(wallet.id);
+          const walletId = wallet.id;
+          this._closeWalletPicker(false);
+          resolve(walletId);
         });
         menu.appendChild(item);
-      });
-
-      const navSection = this.connectWalletBtn?.closest('.nav-section') || this.connectWalletBtn?.parentElement;
-      if (!navSection) {
-        reject(new Error('Wallet picker could not be displayed.'));
-        return;
       }
 
       navSection.classList.add('has-wallet-picker');
       navSection.appendChild(menu);
-      this._walletPickerMenu = menu;
-
-      this._walletSelectionPromise = { resolve, reject };
+      this._walletPicker = { menu, reject };
     });
   }
 
-  hideWalletPicker() {
-    if (this._walletSelectionPromise) {
-      this._walletSelectionPromise.reject(new Error('Wallet selection cancelled.'));
-      this._walletSelectionPromise = null;
+  _closeWalletPicker(cancelled = true) {
+    if (!this._walletPicker) return;
+
+    if (cancelled) {
+      this._walletPicker.reject(new Error('Wallet selection cancelled.'));
     }
 
-    this._removeWalletPickerMenu();
+    this._walletPicker.menu.remove();
+    this.connectWalletBtn.closest('.nav-section').classList.remove('has-wallet-picker');
+    this._walletPicker = null;
   }
 
-  _removeWalletPickerMenu() {
-    if (this._walletPickerMenu) {
-      this._walletPickerMenu.remove();
-      this._walletPickerMenu = null;
-    }
-
-    this.connectWalletBtn?.closest('.nav-section')?.classList.remove('has-wallet-picker');
-  }
-
-  _handleDocumentClick(event) {
-    if (!this._walletPickerMenu) return;
-
-    const navSection = this.connectWalletBtn?.closest('.nav-section');
-    if (navSection?.contains(event.target)) return;
-
-    this.hideWalletPicker();
+  _onDocumentClick(event) {
+    if (!this._walletPicker) return;
+    if (this.connectWalletBtn.closest('.nav-section').contains(event.target)) return;
+    this._closeWalletPicker();
     this.updateConnectButtonStatus();
   }
 
   updateConnectButtonStatus() {
+    if (!this.connectWalletBtn) return;
+
     const walletManager = window.walletManager;
     const networkManager = window.networkManager;
 
-    if (!this.connectWalletBtn) return;
-
-    if (walletManager?.isConnecting) {
+    if (walletManager.isConnecting) {
       this.renderConnectButton({ text: 'Connecting…', disabled: true });
       return;
     }
 
-    const isConnected = !!walletManager?.isConnected?.();
-    const address = walletManager?.getAddress?.();
-    const onPolygon = !!networkManager?.isOnRequiredNetwork?.();
-
-    if (!isConnected) {
+    if (!walletManager.isConnected()) {
       this.renderConnectButton({ text: 'Connect Wallet', disabled: false });
       return;
     }
 
-    if (!onPolygon) {
+    if (!networkManager.isOnRequiredNetwork()) {
       this.renderConnectButton({ text: 'Connect to Polygon', disabled: false });
       return;
     }
 
+    const address = walletManager.getAddress();
     const short = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Connected';
     this.renderConnectButton({ text: short, disabled: false, connected: true });
   }
 
-  renderConnectButton({ text, disabled = false, connected = false } = {}) {
-    const btn = this.connectWalletBtn;
-    if (!btn) return;
-
-    btn.textContent = text || this._connectBtnText;
-    btn.disabled = !!disabled;
-    btn.classList.toggle('is-connected', !!connected);
+  renderConnectButton({ text, disabled = false, connected = false }) {
+    this.connectWalletBtn.textContent = text || this._connectBtnText;
+    this.connectWalletBtn.disabled = disabled;
+    this.connectWalletBtn.classList.toggle('is-connected', connected);
   }
 }
