@@ -11,6 +11,8 @@
         return;
     }
 
+    const CONTRACT_MANAGER_SCRIPT_SRC = global.document?.currentScript?.src || null;
+
 class ContractManager {
     constructor() {
 
@@ -731,63 +733,37 @@ class ContractManager {
         }
     }
 
+    getAssetPath(assetPath) {
+        const normalizedPath = assetPath.replace(/^\/+/, '');
+        if (CONTRACT_MANAGER_SCRIPT_SRC) {
+            return new URL(`../../${normalizedPath}`, CONTRACT_MANAGER_SCRIPT_SRC).toString();
+        }
+
+        return normalizedPath;
+    }
+
+    async loadABIAsset(assetPath, contractName) {
+        const resolvedPath = this.getAssetPath(assetPath);
+        const response = await fetch(resolvedPath);
+
+        if (!response.ok) {
+            throw new Error(`Failed to load ${contractName} ABI from ${resolvedPath}: ${response.status}`);
+        }
+
+        const abi = await response.json();
+        if (!Array.isArray(abi)) {
+            throw new Error(`${contractName} ABI at ${resolvedPath} must be a JSON array`);
+        }
+
+        return abi;
+    }
+
     /**
-     * Load contract ABIs from configuration or external sources (FIXED)
+     * Load contract ABIs from canonical assets and configuration.
      */
     async loadContractABIs() {
         try {
-            // FIXED: Use ABI from CONFIG instead of hardcoded
-            let stakingABI;
-
-            if (window.CONFIG?.ABIS?.STAKING_CONTRACT) {
-                stakingABI = window.CONFIG.ABIS.STAKING_CONTRACT;
-            } else {
-                console.warn('⚠️ CONFIG ABI not found, using fallback ABI');
-                // Fallback ABI with essential functions only (no duplicates)
-                stakingABI = [
-                    "function rewardToken() external view returns (address)",
-                    "function hourlyRewardRate() external view returns (uint256)",
-                    "function REQUIRED_APPROVALS() external view returns (uint256)",
-                    "function actionCounter() external view returns (uint256)",
-                    "function totalWeight() external view returns (uint256)",
-                    "function getPairs() external view returns (tuple(address lpToken, string pairName, string platform, uint256 weight, bool isActive)[])",
-                    "function getActivePairs() external view returns (address[])",
-                    "function pairs(address lpToken) external view returns (address lpToken_, string pairName, string platform, uint256 weight, bool isActive)",
-                    "function getPairInfo(address lpToken) external view returns (address token, string platform, uint256 weight, bool isActive)",
-                    "function getActionPairs(uint256 actionId) external view returns (address[])",
-                    "function getActionWeights(uint256 actionId) external view returns (uint256[])",
-                    "function getActionApproval(uint256 actionId) external view returns (address[])",
-                    "function actions(uint256 actionId) external view returns (uint8 actionType, uint256 newHourlyRewardRate, address pairToAdd, string memory pairNameToAdd, string memory platformToAdd, uint256 weightToAdd, address pairToRemove, address recipient, uint256 withdrawAmount, bool executed, bool expired, uint8 approvals, uint256 proposedTime, bool rejected)",
-                    "function stake(address lpToken, uint256 amount) external",
-                    "function unstake(address lpToken, uint256 amount, bool claimRewards) external",
-                    "function claimRewards(address lpToken) external",
-
-                    // Admin role functions
-                    "function hasRole(bytes32 role, address account) external view returns (bool)",
-                    "function grantRole(bytes32 role, address account) external",
-                    "function revokeRole(bytes32 role, address account) external",
-
-                    // Multi-signature proposal functions
-                    "function proposeSetHourlyRewardRate(uint256 newRate) external returns (uint256)",
-                    "function proposeUpdatePairWeights(address[] calldata lpTokens, uint256[] calldata weights) external returns (uint256)",
-                    "function proposeAddPair(address lpToken, string calldata pairName, string calldata platform, uint256 weight) external returns (uint256)",
-                    "function proposeRemovePair(address lpToken) external returns (uint256)",
-                    "function proposeChangeSigner(address oldSigner, address newSigner) external returns (uint256)",
-                    "function proposeWithdrawRewards(address recipient, uint256 amount) external returns (uint256)",
-
-                    // Multi-signature approval functions
-                    "function approveAction(uint256 actionId) external",
-                    "function executeAction(uint256 actionId) external",
-                    "function rejectAction(uint256 actionId) external",
-                    "function isActionExpired(uint256 actionId) external view returns (bool)",
-                    "function getSigners() external view returns (address[])",
-                    "function hasApproved(uint256 actionId, address signer) external view returns (bool)",
-                    "function hasRejected(uint256 actionId, address signer) external view returns (bool)",
-
-                    // Utility functions
-                    "function cleanupExpiredActions() external"
-                ];
-            }
+            const stakingABI = await this.loadABIAsset('assets/abi/LPStaking.json', 'LPStaking');
 
             // ERC20 Token ABI (FIXED: Use CONFIG or fallback)
             let erc20ABI;
@@ -2507,9 +2483,41 @@ class ContractManager {
         return false;
     }
 
-    async hasOwnerApproverRole(address = null) {
+    async getOwner() {
         if (!this.stakingContract) {
-            console.warn('⚠️ Staking contract not initialized - owner role check skipped');
+            console.warn('Staking contract not initialized - owner lookup skipped');
+            return null;
+        }
+
+        try {
+            return await this.executeWithRetry(async () => {
+                return await this.stakingContract.owner();
+            }, 'getOwner');
+        } catch (error) {
+            console.warn(`Owner lookup failed gracefully: ${error.message}`);
+            return null;
+        }
+    }
+
+    async getPendingOwner() {
+        if (!this.stakingContract) {
+            console.warn('Staking contract not initialized - pending owner lookup skipped');
+            return ethers.constants.AddressZero;
+        }
+
+        try {
+            return await this.executeWithRetry(async () => {
+                return await this.stakingContract.pendingOwner();
+            }, 'getPendingOwner');
+        } catch (error) {
+            console.warn(`Pending owner lookup failed gracefully: ${error.message}`);
+            return ethers.constants.AddressZero;
+        }
+    }
+
+    async isOwner(address = null) {
+        if (!this.stakingContract) {
+            console.warn('Staking contract not initialized - owner check skipped');
             return false;
         }
 
@@ -2519,12 +2527,109 @@ class ContractManager {
                 if (!userAddress) {
                     throw new Error('No address provided and no signer available');
                 }
-                const OWNER_ROLE = await this.stakingContract.OWNER_APPROVER_ROLE();
-                return await this.stakingContract.hasRole(OWNER_ROLE, userAddress);
-            }, 'hasOwnerApproverRole');
+
+                const ownerAddress = await this.stakingContract.owner();
+                return ownerAddress.toLowerCase() === userAddress.toLowerCase();
+            }, 'isOwner');
         } catch (error) {
-            console.warn(`⚠️ Owner approver role check failed gracefully: ${error.message}`);
+            console.warn(`Owner check failed gracefully: ${error.message}`);
             return false;
+        }
+    }
+
+    async isPendingOwner(address = null) {
+        if (!this.stakingContract) {
+            console.warn('Staking contract not initialized - pending owner check skipped');
+            return false;
+        }
+
+        try {
+            return await this.executeWithRetry(async () => {
+                const userAddress = address || (this.signer ? await this.signer.getAddress() : null);
+                if (!userAddress) {
+                    throw new Error('No address provided and no signer available');
+                }
+
+                const pendingOwnerAddress = await this.stakingContract.pendingOwner();
+                const zeroAddress = ethers.constants.AddressZero.toLowerCase();
+                return pendingOwnerAddress.toLowerCase() !== zeroAddress &&
+                    pendingOwnerAddress.toLowerCase() === userAddress.toLowerCase();
+            }, 'isPendingOwner');
+        } catch (error) {
+            console.warn(`Pending owner check failed gracefully: ${error.message}`);
+            return false;
+        }
+    }
+
+    async transferOwnership(newOwner) {
+        try {
+            newOwner = this.validateAndChecksumAddress(newOwner, 'New Owner Address');
+
+            await this.ensureSigner();
+
+            if (!this.stakingContract || typeof this.stakingContract.transferOwnership !== 'function') {
+                return {
+                    success: false,
+                    error: new Error('transferOwnership function is not available on the deployed contract.')
+                };
+            }
+
+            const result = await this.executeTransactionOnce(async () => {
+                const contractWithSigner = this.stakingContract.connect(this.signer);
+                const tx = await contractWithSigner.transferOwnership(newOwner);
+
+                console.log('Ownership transfer transaction sent:', tx.hash);
+                return tx;
+            }, 'transferOwnership');
+
+            return {
+                success: true,
+                transactionHash: result.transactionHash,
+                blockNumber: result.blockNumber,
+                gasUsed: result.gasUsed?.toString?.() || result.gasUsed,
+                message: 'Ownership transfer started'
+            };
+        } catch (error) {
+            console.error('Failed to transfer ownership:', error);
+            return {
+                success: false,
+                error
+            };
+        }
+    }
+
+    async acceptOwnership() {
+        try {
+            await this.ensureSigner();
+
+            if (!this.stakingContract || typeof this.stakingContract.acceptOwnership !== 'function') {
+                return {
+                    success: false,
+                    error: new Error('acceptOwnership function is not available on the deployed contract.')
+                };
+            }
+
+            const result = await this.executeTransactionOnce(async () => {
+                const contractWithSigner = this.stakingContract.connect(this.signer);
+                const tx = await contractWithSigner.acceptOwnership();
+
+                console.log('Accept ownership transaction sent:', tx.hash);
+                return tx;
+            }, 'acceptOwnership');
+
+            return {
+                success: true,
+                transactionHash: result.transactionHash,
+                blockNumber: result.blockNumber,
+                gasUsed: result.gasUsed?.toString?.() || result.gasUsed,
+                message: 'Ownership accepted'
+            };
+        } catch (error) {
+            console.error('Failed to accept ownership:', error);
+            return {
+                success: false,
+                error
+            };
         }
     }
 

@@ -164,12 +164,16 @@ class MasterInitializer {
 
         // Homepage only: Load CSS for wallet popup
         await this.loadCSS('css/wallet-popup.css');
+        await this.loadCSS('css/farm-migration-banner.css');
 
         const uiScripts = [
             'js/components/wallet-popup.js',
+            'js/services/farm-migration-checker.js',
+            'js/components/farm-migration-banner.js',
             'js/components/home-page.js',
             'js/services/kyber-zap-rate-limiter.js',
             'js/services/kyber-zap-service.js',
+            'js/services/v2-remove-liquidity-service.js',
             'js/components/staking-modal-new.js'
         ];
         console.log('Loading homepage UI components');
@@ -938,13 +942,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
     }
 
-    window.masterInitializer = new MasterInitializer();
-
     try {
+        const versionCheckResult = window.versionCheckReady
+            ? await window.versionCheckReady.catch(() => ({ status: 'ready' }))
+            : { status: 'ready' };
+        if (versionCheckResult.status === 'reload') {
+            return;
+        }
+
+        if (versionCheckResult.status !== 'ready') {
+            throw new Error(`Unknown version check status: ${versionCheckResult.status}`);
+        }
+
+        window.masterInitializer = new MasterInitializer();
         await window.masterInitializer.init();
     } catch (error) {
         console.error('❌ System initialization failed:', error);
-        window.masterInitializer.handleInitializationError(error);
+        if (window.masterInitializer) {
+            window.masterInitializer.handleInitializationError(error);
+        }
     }
 });
 

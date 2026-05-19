@@ -10,6 +10,7 @@
     const isAdminPage = window.location.pathname.includes('admin');
     const VERSION_FILE = isAdminPage ? '../version.html' : 'version.html';
     const STORAGE_KEY = 'version';
+    const VERSION_CHECK_TIMEOUT_MS = 3000;
     let cachedVersion = null;
 
     /**
@@ -28,7 +29,7 @@
                 return stored;
             }
 
-            const response = await fetch(VERSION_FILE, {
+            const response = await fetchWithTimeout(VERSION_FILE, {
                 cache: 'reload',
                 headers: {
                     'Cache-Control': 'no-cache',
@@ -57,7 +58,7 @@
         let newVersion = storedVersion;
 
         try {
-            const response = await fetch(VERSION_FILE, {
+            const response = await fetchWithTimeout(VERSION_FILE, {
                 cache: 'reload',
                 headers: {
                     'Cache-Control': 'no-cache',
@@ -73,7 +74,7 @@
         } catch (error) {
             console.error('Version check failed:', error);
             // Continue with stored version on error
-            return;
+            return { status: 'ready', version: storedVersion };
         }
 
         // Compare versions (convert to comparable numbers: "1.2.3" -> 1002003)
@@ -82,17 +83,19 @@
 
         if (storedVer !== newVer) {
             console.log(`🔄 Updating to version: ${newVersion} (from ${storedVersion})`);
-            localStorage.setItem(STORAGE_KEY, newVersion);
-            cachedVersion = newVersion;
             
             if (criticalFiles.length > 0) {
                 await forceReloadFiles(criticalFiles);
             }
             
+            localStorage.setItem(STORAGE_KEY, newVersion);
+            cachedVersion = newVersion;
             window.location.replace(window.location.href.split('?')[0]);
+            return { status: 'reload', version: newVersion };
         } else {
             cachedVersion = storedVersion;
             console.log(`✅ Running version: ${storedVersion}`);
+            return { status: 'ready', version: newVersion };
         }
     }
 
@@ -106,6 +109,17 @@
         return parseInt(parts.map((p, i) => p.padStart(3, '0')).join('')) || 0;
     }
 
+    async function fetchWithTimeout(url, options) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), VERSION_CHECK_TIMEOUT_MS);
+
+        try {
+            return await fetch(url, { ...options, signal: controller.signal });
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    }
+
     /**
      * Force reload files with cache-busting headers
      * @param {string[]} urls - Files to reload
@@ -113,7 +127,7 @@
     async function forceReloadFiles(urls) {
         try {
             const fetchPromises = urls.map(url =>
-                fetch(url, {
+                fetchWithTimeout(url, {
                     cache: 'reload',
                     headers: {
                         'Cache-Control': 'no-cache',
@@ -141,6 +155,7 @@
             
             // JavaScript - Components (only existing files)
             `${basePath}js/components/admin-page.js`,
+            `${basePath}js/components/farm-migration-banner.js`,
             `${basePath}js/components/home-page.js`,
             `${basePath}js/components/network-indicator-selector.js`,
             `${basePath}js/components/staking-modal-new.js`,
@@ -161,6 +176,12 @@
             
             // JavaScript - Root
             `${basePath}js/master-initializer.js`,
+
+            // JavaScript - Services
+            `${basePath}js/services/farm-migration-checker.js`,
+            `${basePath}js/services/kyber-zap-rate-limiter.js`,
+            `${basePath}js/services/kyber-zap-service.js`,
+            `${basePath}js/services/v2-remove-liquidity-service.js`,
             
             // JavaScript - Utils (only existing files)
             `${basePath}js/utils/admin-test.js`,
@@ -180,6 +201,9 @@
             
             // Libraries
             `${basePath}libs/ethers.umd.min.js`,
+
+            // ABI assets
+            `${basePath}assets/abi/LPStaking.json`,
             
             // CSS - All stylesheets (only existing files)
             `${basePath}css/admin-homepage-theme.css`,
@@ -187,7 +211,9 @@
             `${basePath}css/admin.css`,
             `${basePath}css/base.css`,
             `${basePath}css/components.css`,
+            `${basePath}css/farm-migration-banner.css`,
             `${basePath}css/network-indicator-selector.css`,
+            `${basePath}css/staking-modal.css`,
             `${basePath}css/theme-toggle.css`,
             `${basePath}css/wallet-popup.css`
         ];
@@ -198,6 +224,6 @@
     window.getCurrentVersion = getCurrentVersion;
 
     // Auto-run version check on load
-    checkVersion(getCriticalFiles());
+    window.versionCheckReady = checkVersion(getCriticalFiles());
 
 })(window);

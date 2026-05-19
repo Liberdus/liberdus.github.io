@@ -58,7 +58,7 @@ window.CONFIG = {
             BLOCK_EXPLORER: 'https://bscscan.com',
             NATIVE_CURRENCY: { name: 'BNB', symbol: 'BNB', decimals: 18 },
             CONTRACTS: {
-                STAKING_CONTRACT: '0x89E662CB5d784582DB631e2Cbc81bB6643BB2EF4'
+                STAKING_CONTRACT: '0x67e7cAEc6A043E2E3bFCa27eC5BA12D1ed6EFe4C'
             }
         },
         BSC_TESTNET: {
@@ -73,7 +73,7 @@ window.CONFIG = {
             BLOCK_EXPLORER: 'https://testnet.bscscan.com',
             NATIVE_CURRENCY: { name: 'Test BNB', symbol: 'tBNB', decimals: 18 },
             CONTRACTS: {
-                STAKING_CONTRACT: '0x24F28129B65E9AeDdAfE3f1Fc67ab82DDCF30dF9'
+                STAKING_CONTRACT: '0x87104FB0A772280697F87eE5Af99E18DBbBbbE24'
             }
         }
     },
@@ -97,6 +97,26 @@ window.CONFIG = {
         NOTIFICATION_DURATION: 5000, // 5 seconds
         ANIMATION_DURATION: 300, // 300ms
         DEBOUNCE_DELAY: 500 // 500ms
+    },
+
+    // Farm 1.0 migration notice shown on the Farm page
+    FARM_MIGRATION: {
+        ENABLED: true,
+        POSITION_CHECK_ENABLED: true,
+        HIDE_WHEN_CONNECTED_WALLET_HAS_NO_POSITION: true,
+        OLD_FARM_LABEL: 'Farm 1.0',
+        OLD_FARM_URL: 'https://liberdus.com/farm/migration',
+        OLD_FARM_CONTRACTS: {
+            BSC_MAINNET: '0x89E662CB5d784582DB631e2Cbc81bB6643BB2EF4',
+            BSC_TESTNET: '0x24F28129B65E9AeDdAfE3f1Fc67ab82DDCF30dF9'
+        },
+        LEGACY_LP_TOKENS: {}
+    },
+
+    // Support Links
+    SUPPORT: {
+        DISCORD_URL: 'https://liberdus.com/discord/',
+        DISCORD_HELP_URL: 'https://liberdus.com/discord/help/'
     },
 
     // UI Configuration
@@ -192,6 +212,26 @@ window.CONFIG = {
         }
     },
 
+    // Explicit V2 DEX allowlist for guided remove-liquidity flows.
+    // Routers are intentionally configured here because they cannot be safely discovered from LP pairs.
+    DEX_REMOVE_LIQUIDITY: {
+        56: {
+            wrappedNative: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
+            factories: {
+                '0x8909dc15e40173ff4699343b6eb8132c65e18ec6': {
+                    name: 'Uniswap V2',
+                    type: 'uniswapV2',
+                    router: '0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24'
+                },
+                '0xca143ce32fe78f1f7019d7d551a6402fc5350c73': {
+                    name: 'PancakeSwap V2',
+                    type: 'uniswapV2',
+                    router: '0x10ed43c718714eb63d5aa57b78b54704e256024e'
+                }
+            }
+        }
+    },
+
     // Platform Configuration
     PLATFORMS: {
         // Available platforms for dropdown (matches contract values)
@@ -277,58 +317,8 @@ window.CONFIG = {
     }
 };
 
-// Contract ABIs (Essential functions for local deployment)
+// Token ABI. LPStaking ABI is loaded from assets/abi/LPStaking.json.
 window.CONFIG.ABIS = {
-    STAKING_CONTRACT: [
-        // Core staking functions
-        'function stake(address lpToken, uint256 amount) external',
-        'function unstake(address lpToken, uint256 amount, bool claimRewards) external',
-        'function claimRewards(address lpToken) external',
-
-        // View functions - User info
-        'function getUserStakeInfo(address user, address lpToken) external view returns (uint256 amount, uint256 pendingRewards, uint256 lastRewardTime)',
-        'function earned(address user, address lpToken) external view returns (uint256)',
-
-        // View functions - Pair info
-        'function getPairs() external view returns (tuple(address lpToken, string pairName, string platform, uint256 weight, bool isActive)[])',
-        'function getActivePairs() external view returns (address[])',
-
-        // View functions - Contract state
-        'function rewardToken() external view returns (address)',
-        'function hourlyRewardRate() external view returns (uint256)',
-        'function totalWeight() external view returns (uint256)',
-        'function getSigners() external view returns (address[])',
-        'function getTotalRewardObligation() external view returns (uint256)',
-
-        // Access control
-        'function hasRole(bytes32 role, address account) external view returns (bool)',
-        'function ADMIN_ROLE() external view returns (bytes32)',
-        'function OWNER_APPROVER_ROLE() external view returns (bytes32)',
-
-        // ============ GOVERNANCE FUNCTIONS ============
-        // Multi-signature proposal functions
-        'function proposeSetHourlyRewardRate(uint256 newRate) external returns (uint256)',
-        'function proposeUpdatePairWeights(address[] calldata lpTokens, uint256[] calldata weights) external returns (uint256)',
-        'function proposeAddPair(address lpToken, string calldata pairName, string calldata platform, uint256 weight) external returns (uint256)',
-        'function proposeRemovePair(address lpToken) external returns (uint256)',
-        'function proposeChangeSigner(address oldSigner, address newSigner) external returns (uint256)',
-        'function proposeWithdrawRewards(address recipient, uint256 amount) external returns (uint256)',
-
-        // Multi-signature approval functions
-        'function approveAction(uint256 actionId) external',
-        'function rejectAction(uint256 actionId) external',
-        'function executeAction(uint256 actionId) external',
-
-        // Multi-signature query functions
-        'function actionCounter() external view returns (uint256)',
-        'function REQUIRED_APPROVALS() external view returns (uint256)',
-        'function actions(uint256 actionId) external view returns (uint8 actionType, uint256 newHourlyRewardRate, address pairToAdd, string memory pairNameToAdd, string memory platformToAdd, uint256 weightToAdd, address pairToRemove, address recipient, uint256 withdrawAmount, bool executed, bool expired, uint8 approvals, uint256 proposedTime, bool rejected)',
-        'function getActionPairs(uint256 actionId) external view returns (address[] memory)',
-        'function getActionWeights(uint256 actionId) external view returns (uint256[] memory)',
-        'function getActionApproval(uint256 actionId) external view returns (address[] memory)',
-        'function isActionExpired(uint256 actionId) external view returns (bool)'
-    ],
-
     ERC20: [
         'function balanceOf(address owner) external view returns (uint256)',
         'function allowance(address owner, address spender) external view returns (uint256)',

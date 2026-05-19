@@ -180,19 +180,94 @@
 }
 
 @media (max-width: 768px) {
+    .header {
+        height: auto;
+    }
+
+    .header-toolbar {
+        flex-wrap: nowrap;
+        gap: 8px;
+    }
+
+    .logo-text {
+        display: none;
+    }
+
+    .logo-section {
+        flex: 0 1 auto;
+        min-width: 0;
+    }
+
     .nav-section {
-        width: 100%;
-        justify-content: space-between;
+        flex: 0 1 auto;
+        min-width: 0;
+        justify-content: flex-end;
+        flex-wrap: nowrap;
+        gap: 8px;
+    }
+
+    .connect-wallet-btn {
+        width: 40px;
+        height: 40px;
+        min-height: 40px;
+        min-width: 0;
+        padding: 0;
+        justify-content: center;
+        background: var(--error-main);
+        border-color: var(--error-main);
+        color: #fff;
+    }
+
+    .connect-wallet-btn.connected {
+        background: var(--success-main);
+        border-color: var(--success-main);
+        color: #fff;
+    }
+
+    .connect-wallet-btn svg {
+        display: block;
+        flex: 0 0 16px;
+        opacity: 1;
+        color: currentColor;
+    }
+
+    .connect-wallet-btn .wallet-status-text,
+    .connect-wallet-btn .wallet-address-text {
+        display: none;
     }
 }
 
 @media (max-width: 480px) {
     .header {
-        padding: 12px 0;
+        padding: 8px 0;
+    }
+
+    .header-toolbar {
+        padding: 0;
+        min-height: 0;
+    }
+
+    .logo-section {
+        flex: 0 0 auto;
+        gap: 8px;
+        min-width: 0;
+    }
+
+    .version-badge {
+        font-size: 9px;
+        margin-left: 0;
+        padding: 1px 5px;
+        border-radius: 8px;
+        line-height: 1.4;
     }
 
     .nav-section {
-        gap: 8px;
+        display: flex;
+        flex: 1 1 auto;
+        min-width: 0;
+        justify-content: flex-end;
+        flex-wrap: nowrap;
+        gap: 6px;
     }
 
     .nav-button {
@@ -200,20 +275,48 @@
         font-size: 13px;
     }
 
+    .nav-button span:not(.material-icons) {
+        display: none;
+    }
+
     .nav-button .material-icons {
         font-size: 18px;
     }
 
     .connect-wallet-btn {
-        padding: 8px 12px;
+        width: 40px;
+        flex: 0 0 40px;
+        min-width: 0;
+        height: 40px;
+        padding: 0;
+        gap: 0;
         font-size: 13px;
+        justify-content: center;
+    }
+
+    .theme-toggle {
+        width: 40px;
+        height: 40px;
+        flex: 0 0 40px;
+        justify-self: auto;
+    }
+}
+
+@media (max-width: 360px) {
+    .logo {
+        width: 40px;
+        height: 40px;
+    }
+
+    .version-badge {
+        display: none;
     }
 }
 
 @media (hover: none) and (pointer: coarse) {
     .nav-button,
     .connect-wallet-btn {
-        min-height: 44px;
-        min-width: 44px;
+        min-height: 40px;
+        min-width: 40px;
     }
 }
