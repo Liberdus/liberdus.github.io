@@ -313,6 +313,12 @@ body {
     transition: transform 0.2s;
 }
 
+.social-link-icon {
+    display: block;
+    width: 20px;
+    height: 20px;
+}
+
 .social-link:hover {
     transform: translateY(-2px);
     color: var(--primary-main);
@@ -325,9 +331,11 @@ body {
     }
 
     .version-badge {
-        font-size: 10px;
-        margin-left: 8px;
-        padding: 2px 6px;
+        font-size: 9px;
+        margin-left: 0;
+        padding: 1px 5px;
+        border-radius: 8px;
+        line-height: 1.4;
     }
 
     .nav-section {
@@ -523,12 +531,21 @@ body {
     }
 
     .footer-content {
-        flex-direction: column;
+        flex-direction: row;
         text-align: center;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: nowrap;
     }
 
     .footer-actions {
-        width: 100%;
+        width: auto;
+    }
+
+    .footer-link-anchor {
+        height: 36px;
+        min-height: 36px;
+        padding: 0 12px;
     }
 
     .main-content {
@@ -545,6 +562,98 @@ body {
 
     .main-content {
         padding: var(--spacing-3) var(--spacing-2);
+    }
+
+    .footer {
+        padding: 10px 0;
+    }
+
+    .footer-content {
+        gap: 8px;
+        text-align: left;
+    }
+
+    .footer-text {
+        flex: 0 0 auto;
+        width: auto;
+        min-width: 0;
+        line-height: 1.2;
+        letter-spacing: 0;
+        white-space: nowrap;
+        font-size: 12px;
+    }
+
+    .footer-actions {
+        flex: 0 0 auto;
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 4px;
+    }
+
+    .footer-link-anchor {
+        display: inline-flex;
+        align-items: center;
+        width: 30px;
+        height: 30px;
+        min-height: 30px;
+        justify-content: center;
+        padding: 0;
+        gap: 0;
+        white-space: nowrap;
+    }
+
+    .footer-link-icon {
+        display: block;
+        width: 18px;
+        height: 18px;
+        object-fit: contain;
+    }
+
+    .footer-link-action span {
+        display: none;
+    }
+
+    #staking-contract-link,
+    #footer-support-link {
+        font-size: 0;
+    }
+
+    #staking-contract-link::before,
+    #footer-support-link::before {
+        display: block;
+        font-family: "Material Icons";
+        font-size: 17px;
+        line-height: 17px;
+        width: 17px;
+        height: 17px;
+        text-align: center;
+    }
+
+    #staking-contract-link::before {
+        content: "description";
+    }
+
+    #footer-support-link::before {
+        content: "support_agent";
+    }
+
+    .social-links {
+        flex: 0 0 auto;
+        width: auto;
+        justify-content: flex-end;
+        gap: 4px;
+    }
+
+    .social-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+    }
+
+    .social-link .material-icons {
+        font-size: 20px;
     }
 
     .page-title {

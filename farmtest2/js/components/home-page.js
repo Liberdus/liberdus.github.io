@@ -19,6 +19,12 @@ class HomePage {
         this.lastNetworkId = null;
         this.refreshDebounceTimer = null; // Prevent overlapping refreshes during rapid network changes
         this.isAdmin = false; // Track admin status
+        this.farmMigrationBanner = window.FarmMigrationBanner
+            ? new window.FarmMigrationBanner({
+                isWalletConnected: () => this.isWalletConnected(),
+                requestRender: () => this.render()
+            })
+            : null;
         // OPTIMIZATION: Simple caching for contract data that doesn't change frequently
         this.cache = {
             hourlyRewardRate: { value: null, timestamp: 0, ttl: 300000 }, // 5 minutes
@@ -55,6 +61,7 @@ class HomePage {
             console.log('🏠 HomePage: ContractManager is ready, loading data...');
             this.updateFooter();
             this.loadData().catch(() => {});
+            this.checkFarmMigrationPosition().catch(() => {});
             // Auto-refresh disabled - manual refresh only
         });
 
@@ -89,6 +96,7 @@ class HomePage {
             window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
             this.updateFooter();
             this.refreshDataAfterWalletChange();
+            this.checkFarmMigrationPosition({ force: true }).catch(() => {});
             this.checkAdminAccess();
         });
 
@@ -96,6 +104,7 @@ class HomePage {
             console.log('🏠 HomePage: Wallet disconnected, refreshing data...');
             window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
             this.updateFooter();
+            this.resetFarmMigrationStatus();
             this.refreshDataAfterWalletChange();
             this.hideAdminButton();
         });
@@ -106,6 +115,7 @@ class HomePage {
                 console.log('🏠 HomePage: Accounts changed:', accounts);
                 this.updateFooter();
                 this.refreshDataAfterWalletChange();
+                this.checkFarmMigrationPosition({ force: true }).catch(() => {});
                 this.checkAdminAccess();
             });
 
@@ -115,6 +125,7 @@ class HomePage {
                 // Only update the network indicator to re-check permissions
                 window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
                 this.updateFooter();
+                this.checkFarmMigrationPosition({ force: true }).catch(() => {});
             });
 
             // Re-check permissions when page regains focus (in case permissions were removed in another tab)
@@ -157,6 +168,7 @@ class HomePage {
             console.log('🏠 HomePage: ContractManager already ready, loading data immediately...');
             this.updateFooter();
             await this.loadData().catch(() => {});
+            await this.checkFarmMigrationPosition().catch(() => {});
             this.checkAdminAccess();
             // Auto-refresh disabled - manual refresh only
         } else {
@@ -180,16 +192,22 @@ class HomePage {
         }
     }
 
+    showWalletRequiredToast() {
+        window.notificationManager?.warning('Please connect your wallet to stake token.');
+    }
+
     render() {
         const container = document.getElementById('content-container');
         if (!container) return;
 
+        const migrationBanner = this.renderFarmMigrationBanner();
+
         if (this.loading) {
-            container.innerHTML = this.renderSkeleton();
+            container.innerHTML = migrationBanner + this.renderSkeleton();
         } else if (this.error) {
-            container.innerHTML = this.renderError();
+            container.innerHTML = migrationBanner + this.renderError();
         } else {
-            container.innerHTML = this.renderHomepage();
+            container.innerHTML = migrationBanner + this.renderHomepage();
         }
 
         this.attachRetryHandler();
@@ -197,6 +215,18 @@ class HomePage {
 
     renderHomepage() {
         return this.renderTable();
+    }
+
+    renderFarmMigrationBanner() {
+        return this.farmMigrationBanner?.render() || '';
+    }
+
+    resetFarmMigrationStatus() {
+        this.farmMigrationBanner?.reset();
+    }
+
+    async checkFarmMigrationPosition(options) {
+        await this.farmMigrationBanner?.checkPosition(options);
     }
 
     attachRetryHandler() {
@@ -435,8 +465,6 @@ class HomePage {
     }
 
     renderPairRow(pair) {
-        const isConnected = this.isWalletConnected();
-        const canTransact = isConnected && (window.networkManager?.isOnRequiredNetwork() || false);
         const userShares = pair.userShares || '0.00';
         const userEarnings = pair.userEarnings || '0.00';
         
@@ -472,7 +500,6 @@ class HomePage {
                             data-pair-id="${pair.id}"
                             data-pair-address="${pair.address}"
                             data-tab="0"
-                            ${!canTransact ? 'disabled' : ''}
                             title="Stake or Unstake"
                             style="min-width: 100px;">
                         <span class="material-icons" style="font-size: 16px;">share</span>
@@ -484,7 +511,6 @@ class HomePage {
                             data-pair-id="${pair.id}"
                             data-pair-address="${pair.address}"
                             data-tab="2"
-                            ${!canTransact ? 'disabled' : ''}
                             title="Claim reward"
                             style="min-width: 120px;">
                         <span class="material-icons" style="font-size: 16px;">redeem</span>
@@ -525,22 +551,7 @@ class HomePage {
                 if (!e.target.closest('button') && !e.target.closest('a') && !e.target.closest('.pair-name-link')) {
                     // Check if wallet is connected before opening modal
                     if (!this.isWalletConnected()) {
-                        if (window.notificationManager) {
-                            window.notificationManager.warning(
-                                'Please connect your wallet to stake tokens'
-                            );
-                        }
-                        return; // Don't open modal
-                    }
-                    
-                    // Check if wallet is on configured network
-                    if (!(window.networkManager?.isOnRequiredNetwork() || false)) {
-                        const networkName = window.networkSelector?.getCurrentNetworkName();
-                        if (window.notificationManager) {
-                            window.notificationManager.warning(
-                                `Please switch to ${networkName} network to make transactions`
-                            );
-                        }
+                        this.showWalletRequiredToast();
                         return; // Don't open modal
                     }
                     
@@ -551,6 +562,11 @@ class HomePage {
             // Handle Share button click (open modal on Stake tab)
             if (e.target.closest('.btn-share')) {
                 e.stopPropagation();
+                if (!this.isWalletConnected()) {
+                    this.showWalletRequiredToast();
+                    return;
+                }
+
                 const button = e.target.closest('.btn-share');
                 const pairId = button.dataset.pairId;
                 const tab = parseInt(button.dataset.tab) || 0;
@@ -560,6 +576,11 @@ class HomePage {
             // Handle Earnings button click (open modal on Claim tab)
             if (e.target.closest('.btn-earnings')) {
                 e.stopPropagation();
+                if (!this.isWalletConnected()) {
+                    this.showWalletRequiredToast();
+                    return;
+                }
+
                 const button = e.target.closest('.btn-earnings');
                 const pairId = button.dataset.pairId;
                 this.openStakingModal(pairId, 'claim');
@@ -1279,6 +1300,7 @@ class HomePage {
                 try {
                     await window.contractManager.initialize();
                     this.loadDataWhenReady();
+                    this.checkFarmMigrationPosition({ force: true }).catch(() => {});
                 } catch (error) {
                     console.error('❌ Error refreshing contract data:', error);
                     this.loading = false;
@@ -1366,27 +1388,32 @@ class HomePage {
                 }
             }
 
-            // Check if user has the owner approver role (with timeout and error handling)
-            if (typeof window.contractManager?.hasOwnerApproverRole === 'function') {
+            // Check if user is the contract owner or pending owner (with timeout and error handling)
+            if (typeof window.contractManager?.isOwner === 'function') {
                 try {
                     let timeoutId;
                     const timeoutPromise = new Promise((_, reject) => {
-                        timeoutId = setTimeout(() => reject(new Error('Owner approver role check timeout')), 5000);
+                        timeoutId = setTimeout(() => reject(new Error('Ownership check timeout')), 5000);
                     });
 
-                    const hasOwnerRole = await Promise.race([
-                        window.contractManager.hasOwnerApproverRole(userAddress),
+                    const hasOwnershipAccess = await Promise.race([
+                        Promise.all([
+                            window.contractManager.isOwner(userAddress),
+                            typeof window.contractManager.isPendingOwner === 'function'
+                                ? window.contractManager.isPendingOwner(userAddress)
+                                : Promise.resolve(false)
+                        ]).then(([isOwner, isPendingOwner]) => isOwner || isPendingOwner),
                         timeoutPromise
                     ]);
 
                     clearTimeout(timeoutId);
 
-                    if (hasOwnerRole) {
+                    if (hasOwnershipAccess) {
                         this.showAdminButton();
                         return;
                     }
-                } catch (ownerRoleError) {
-                    console.warn('⚠️ Owner approver role check failed:', ownerRoleError.message);
+                } catch (ownerError) {
+                    console.warn('Ownership check failed:', ownerError.message);
                 }
             }
 

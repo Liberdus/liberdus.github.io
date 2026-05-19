@@ -155,6 +155,7 @@
             
             // JavaScript - Components (only existing files)
             `${basePath}js/components/admin-page.js`,
+            `${basePath}js/components/farm-migration-banner.js`,
             `${basePath}js/components/home-page.js`,
             `${basePath}js/components/network-indicator-selector.js`,
             `${basePath}js/components/staking-modal-new.js`,
@@ -175,6 +176,12 @@
             
             // JavaScript - Root
             `${basePath}js/master-initializer.js`,
+
+            // JavaScript - Services
+            `${basePath}js/services/farm-migration-checker.js`,
+            `${basePath}js/services/kyber-zap-rate-limiter.js`,
+            `${basePath}js/services/kyber-zap-service.js`,
+            `${basePath}js/services/v2-remove-liquidity-service.js`,
             
             // JavaScript - Utils (only existing files)
             `${basePath}js/utils/admin-test.js`,
@@ -194,6 +201,9 @@
             
             // Libraries
             `${basePath}libs/ethers.umd.min.js`,
+
+            // ABI assets
+            `${basePath}assets/abi/LPStaking.json`,
             
             // CSS - All stylesheets (only existing files)
             `${basePath}css/admin-homepage-theme.css`,
@@ -201,7 +211,9 @@
             `${basePath}css/admin.css`,
             `${basePath}css/base.css`,
             `${basePath}css/components.css`,
+            `${basePath}css/farm-migration-banner.css`,
             `${basePath}css/network-indicator-selector.css`,
+            `${basePath}css/staking-modal.css`,
             `${basePath}css/theme-toggle.css`,
             `${basePath}css/wallet-popup.css`
         ];

@@ -49,7 +49,7 @@
                 </a>
 
                 <nav class="nav-section" role="navigation" aria-label="Main navigation">
-                    <a href="../" id="admin-panel-link" class="nav-button">
+                    <a href="../" id="admin-panel-link" class="nav-button" aria-label="Home">
                         <span class="material-icons" aria-hidden="true">home</span>
                         <span>Home</span>
                     </a>
@@ -60,6 +60,7 @@
 
                     <button id="connect-wallet-btn"
                             class="connect-wallet-btn"
+                            aria-label="Connect wallet"
                             aria-describedby="wallet-status"
                             aria-live="polite"
                             aria-busy="true"
@@ -308,7 +309,7 @@
                 console.log('🔗 Attempting wallet connection via WalletManager...');
                 const result = await window.walletManager.connectWallet(preferredWallet);
 
-                // Snapshot connection details for legacy checks
+                // Snapshot connection details for shared wallet consumers
                 const wm = window.walletManager;
                 const provider = wm.getProvider?.() || wm.provider;
                 const chainId = wm.getChainId?.() || result?.chainId;

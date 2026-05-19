@@ -7,6 +7,9 @@ class AdminPage {
     constructor() {
         this.isInitialized = false;
         this.isAuthorized = false;
+        this.isOwner = false;
+        this.isPendingOwner = false;
+        this.canManageProposals = false;
         this.userAddress = null;
         this.adminRole = null;
         this.contractStats = {};
@@ -39,7 +42,9 @@ class AdminPage {
             '.pair-address',
             '.signer-address',
             '[data-info="staking-address"]',
-            '[data-info="reward-token-address"]'
+            '[data-info="reward-token-address"]',
+            '[data-info="owner-address"]',
+            '[data-info="pending-owner-address"]'
         ].join(', ');
 
         // Initialize asynchronously (don't await in constructor)
@@ -203,6 +208,11 @@ class AdminPage {
                 throw new Error('Wallet not connected');
             }
 
+            this.isAuthorized = false;
+            this.isOwner = false;
+            this.isPendingOwner = false;
+            this.canManageProposals = false;
+
             // Check against authorized admin list first (development/fallback)
             if (window.DEV_CONFIG?.AUTHORIZED_ADMINS) {
                 const isAuthorizedAdmin = window.DEV_CONFIG.AUTHORIZED_ADMINS.some(
@@ -211,45 +221,37 @@ class AdminPage {
 
                 if (isAuthorizedAdmin) {
                     this.isAuthorized = true;
+                    this.canManageProposals = true;
                     return;
                 }
             }
 
-            // Check if user has admin role via contract
+            // Check if user has admin or standard ownership access via contract
             if (window.contractManager?.stakingContract) {
+                let hasAdminRole = false;
+
                 try {
-                    // Try to call hasRole function
-                    const hasAdminRole = await window.contractManager.hasAdminRole(this.userAddress);
+                    hasAdminRole = await window.contractManager.hasAdminRole(this.userAddress);
+                } catch (adminRoleError) {
+                    console.warn('Admin role check failed:', adminRoleError.message);
+                }
 
-                    if (hasAdminRole) {
-                        this.isAuthorized = true;
-                        return;
+                try {
+                    if (typeof window.contractManager.isOwner === 'function') {
+                        this.isOwner = await window.contractManager.isOwner(this.userAddress);
                     }
 
-                    if (typeof window.contractManager.hasOwnerApproverRole === 'function') {
-                        const hasOwnerRole = await window.contractManager.hasOwnerApproverRole(this.userAddress);
-                        this.isAuthorized = hasOwnerRole;
-
-                        if (this.isAuthorized) return;
-                    } else {
-                        this.isAuthorized = false;
+                    if (typeof window.contractManager.isPendingOwner === 'function') {
+                        this.isPendingOwner = await window.contractManager.isPendingOwner(this.userAddress);
                     }
+                } catch (ownerError) {
+                    console.warn('Ownership access check failed:', ownerError.message);
+                }
 
-                } catch (roleError) {
-                    console.error('⚠️ Role check failed, checking owner approver role as fallback:', roleError.message);
-
-                    if (typeof window.contractManager?.hasOwnerApproverRole === 'function') {
-                        try {
-                            const hasOwnerRole = await window.contractManager.hasOwnerApproverRole(this.userAddress);
-                            this.isAuthorized = hasOwnerRole;
-                            console.warn(`🔐 Owner approver role fallback: ${hasOwnerRole ? 'AUTHORIZED' : 'DENIED'}`);
-
-                            if (this.isAuthorized) return;
-
-                        } catch (ownerRoleError) {
-                            console.error('⚠️ Owner approver fallback failed:', ownerRoleError.message);
-                        }
-                    }
+                if (hasAdminRole || this.isOwner || this.isPendingOwner) {
+                    this.isAuthorized = true;
+                    this.canManageProposals = hasAdminRole || this.isOwner;
+                    return;
                 }
             } else {
                 console.warn('⚠️ Staking contract not available for role verification');
@@ -335,7 +337,7 @@ class AdminPage {
                     
                     <div class="access-details">
                         <p><strong>Your Address:</strong> ${this.userAddress}</p>
-                        <p><strong>Required Role:</strong> ADMIN_ROLE or OWNER_APPROVER_ROLE</p>
+                        <p><strong>Required Access:</strong> ADMIN_ROLE, contract owner, or pending owner</p>
                     </div>
                 </div>
             </div>
@@ -789,6 +791,9 @@ class AdminPage {
                                 break;
                             case 'withdrawal-form':
                                 await this.submitWithdrawalProposal(e);
+                                break;
+                            case 'transfer-ownership-form':
+                                await this.submitTransferOwnership(e);
                                 break;
                             default:
                                 console.error('📝 Unhandled form submission:', form.id);
@@ -1274,12 +1279,15 @@ class AdminPage {
      */
     setProposalButtonsEnabled(enabled) {
         const proposalButtons = document.querySelectorAll('.proposal-btn');
+        const canEnable = enabled && this.canManageProposals;
 
         proposalButtons.forEach(button => {
-            button.disabled = !enabled;
-            button.setAttribute('aria-disabled', (!enabled).toString());
-            if (enabled) {
+            button.disabled = !canEnable;
+            button.setAttribute('aria-disabled', (!canEnable).toString());
+            if (canEnable) {
                 button.removeAttribute('title');
+            } else if (enabled && !this.canManageProposals) {
+                button.title = 'Accept ownership before managing proposals';
             } else if (!button.hasAttribute('title')) {
                 button.title = 'Unavailable while proposals load';
             }
@@ -1514,8 +1522,6 @@ class AdminPage {
                         </div>
                     </div>
 
-                    <hr class="contract-info-separator">
-
                     <div class="pairs-section">
                         <div class="section-header">
                             <h6>Eligible Pairs</h6>
@@ -1533,6 +1539,17 @@ class AdminPage {
                         </div>
                         <div class="signers-list" data-info="signers">
                             <div class="info-value">Loading signers...</div>
+                        </div>
+                    </div>
+
+                    <hr class="contract-info-separator">
+
+                    <div class="ownership-section">
+                        <div class="section-header">
+                            <h6>Contract Ownership</h6>
+                        </div>
+                        <div class="ownership-list" data-info="ownership">
+                            <div class="info-value">Loading ownership...</div>
                         </div>
                     </div>
                 </div>
@@ -2721,6 +2738,46 @@ class AdminPage {
         `).join('');
     }
 
+    renderOwnershipInfo(owner, pendingOwner) {
+        const ownerDisplay = owner || 'Unavailable';
+        const pendingOwnerDisplay = this.hasPendingOwner(pendingOwner) ? pendingOwner : 'None';
+        const canTransfer = this.isCurrentOwner(owner);
+        const canCancel = canTransfer && this.hasPendingOwner(pendingOwner);
+        const canAccept = this.isCurrentPendingOwner(pendingOwner);
+
+        return `
+            <div class="ownership-grid">
+                <div class="ownership-entry">
+                    <span class="ownership-label">Owner</span>
+                    <p class="ownership-item ownership-address address-display" data-info="owner-address" ${owner ? `data-address="${owner}" title="Click to copy address"` : ''}>${ownerDisplay}</p>
+                </div>
+                <div class="ownership-entry">
+                    <span class="ownership-label">Pending Owner</span>
+                    <p class="ownership-item ownership-address address-display" data-info="pending-owner-address" ${this.hasPendingOwner(pendingOwner) ? `data-address="${pendingOwner}" title="Click to copy address"` : ''}>${pendingOwnerDisplay}</p>
+                </div>
+            </div>
+            ${canTransfer || canAccept ? `
+                <div class="ownership-actions">
+                    ${canTransfer ? `
+                        <button type="button" class="btn btn-primary ownership-action-btn" onclick="adminPage.showTransferOwnershipModal()">
+                            Transfer Ownership
+                        </button>
+                    ` : ''}
+                    ${canCancel ? `
+                        <button type="button" class="btn btn-secondary ownership-action-btn" onclick="adminPage.cancelOwnershipTransfer()">
+                            Cancel Transfer
+                        </button>
+                    ` : ''}
+                    ${canAccept ? `
+                        <button type="button" class="btn btn-primary ownership-action-btn" onclick="adminPage.acceptOwnership()">
+                            Accept Ownership
+                        </button>
+                    ` : ''}
+                </div>
+            ` : ''}
+        `;
+    }
+
     async showDashboard() {
         const contentDiv = document.getElementById('admin-section-content');
         
@@ -2967,6 +3024,30 @@ class AdminPage {
     formatAddress(address) {
         if (!address) return 'Unknown';
         return `${address.slice(0, 6)}...${address.slice(-4)}`;
+    }
+
+    getZeroAddress() {
+        return window.ethers?.constants?.AddressZero || '0x0000000000000000000000000000000000000000';
+    }
+
+    addressesMatch(a, b) {
+        return !!a && !!b && a.toLowerCase() === b.toLowerCase();
+    }
+
+    hasPendingOwner(pendingOwner) {
+        return !!pendingOwner &&
+            !this.addressesMatch(pendingOwner, this.getZeroAddress()) &&
+            pendingOwner !== 'Error' &&
+            pendingOwner !== 'Unavailable';
+    }
+
+    isCurrentOwner(owner = this.contractStats?.owner) {
+        return this.addressesMatch(owner, this.userAddress);
+    }
+
+    isCurrentPendingOwner(pendingOwner = this.contractStats?.pendingOwner) {
+        return this.hasPendingOwner(pendingOwner) &&
+            this.addressesMatch(pendingOwner, this.userAddress);
     }
 
     startAutoRefresh() {
@@ -4018,6 +4099,65 @@ class AdminPage {
         this.applyModalVisibilityFixes(modalContainer);
     }
 
+    showTransferOwnershipModal() {
+        const modalContainer = document.getElementById('modal-container');
+        if (!modalContainer) return;
+
+        if (!this.isCurrentOwner()) {
+            this.showError('Only the current contract owner can transfer ownership.');
+            return;
+        }
+
+        const currentOwner = this.contractStats?.owner || this.userAddress || 'Unknown';
+
+        modalContainer.innerHTML = `
+            <div class="modal-overlay" onclick="adminPage.closeModal()">
+                <div class="modal-content" onclick="event.stopPropagation()">
+                    <div class="modal-header">
+                        <h3>Transfer Ownership</h3>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
+                    </div>
+
+                    <div class="modal-body">
+                        <form id="transfer-ownership-form">
+                            <div class="form-group">
+                                <label>Current Owner</label>
+                                <code class="ownership-address address-display" data-address="${currentOwner}" title="Click to copy address">${currentOwner}</code>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="new-owner">New Owner Address</label>
+                                <input type="text" id="new-owner" required
+                                       placeholder="0x..." pattern="^0x[a-fA-F0-9]{40}$">
+                                <small class="form-help">The new owner must call accept ownership before the transfer is complete.</small>
+                            </div>
+
+                            <div class="warning-box">
+                                <div class="warning-text">
+                                    <strong>Important:</strong> Ownership controls contract-level owner actions.
+                                    Confirm this wallet is controlled by the intended owner.
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary modal-cancel">
+                            Cancel
+                        </button>
+                        <button type="submit" form="transfer-ownership-form" class="btn btn-primary">
+                            Start Ownership Transfer
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        this.applyModalVisibilityFixes(modalContainer);
+    }
+
     showWithdrawalModal() {
         const modalContainer = document.getElementById('modal-container');
         if (!modalContainer) return;
@@ -4348,6 +4488,28 @@ class AdminPage {
             contractInfo.rewardTokenAddress = rewardTokenAddress;
             this.contractStats.rewardTokenAddress = rewardTokenAddress;
 
+            contractInfo.owner = await this.safeContractCall(
+                async () => {
+                    if (typeof contractManager.getOwner === 'function') {
+                        return await contractManager.getOwner();
+                    }
+                    return await contractManager.stakingContract.owner();
+                },
+                null
+            );
+            this.contractStats.owner = contractInfo.owner;
+
+            contractInfo.pendingOwner = await this.safeContractCall(
+                async () => {
+                    if (typeof contractManager.getPendingOwner === 'function') {
+                        return await contractManager.getPendingOwner();
+                    }
+                    return await contractManager.stakingContract.pendingOwner();
+                },
+                this.getZeroAddress()
+            );
+            this.contractStats.pendingOwner = contractInfo.pendingOwner;
+
             let balanceBig = null;
             let rateBig = null;
             let obligationBig = null;
@@ -4453,6 +4615,8 @@ class AdminPage {
                 totalWeight: 'Error',
                 stakingAddress: 'Error',
                 rewardTokenAddress: 'Error',
+                owner: 'Error',
+                pendingOwner: 'Error',
                 pairs: [],
                 signers: []
             };
@@ -4462,6 +4626,8 @@ class AdminPage {
             this.contractStats.rewardObligation = errorInfo.rewardObligation;
             this.contractStats.stakingContractAddress = this.contractStats.stakingContractAddress || null;
             this.contractStats.rewardTokenAddress = this.contractStats.rewardTokenAddress || null;
+            this.contractStats.owner = this.contractStats.owner || null;
+            this.contractStats.pendingOwner = this.contractStats.pendingOwner || this.getZeroAddress();
             this.displayContractInfo(errorInfo);
             return { success: false, error };
         }
@@ -4521,6 +4687,17 @@ class AdminPage {
                 rewardTokenAddressEl.title = 'Click to copy address';
                 rewardTokenAddressEl.setAttribute('data-address', rewardTokenAddress);
             }
+        }
+
+        const ownershipContainer = document.querySelector('[data-info="ownership"]');
+        if (ownershipContainer) {
+            this.contractStats = this.contractStats || {};
+            this.contractStats.owner = info.owner || this.contractStats.owner || null;
+            this.contractStats.pendingOwner = info.pendingOwner || this.contractStats.pendingOwner || this.getZeroAddress();
+            ownershipContainer.innerHTML = this.renderOwnershipInfo(
+                this.contractStats.owner,
+                this.contractStats.pendingOwner
+            );
         }
 
         // Update LP pairs with real contract data
@@ -4988,6 +5165,161 @@ class AdminPage {
         } catch (error) {
             console.error('Failed to create weight update proposal:', error);
             this.showError(error.userMessage?.title || 'Failed to create proposal', error.userMessage?.message);
+        }
+    }
+
+    async submitTransferOwnership(event) {
+        event.preventDefault();
+
+        if (this.isSubmittingOwnershipTransfer) {
+            console.warn('Already submitting ownership transfer, ignoring duplicate request');
+            return;
+        }
+
+        const newOwner = document.getElementById('new-owner')?.value?.trim();
+        const submitBtn = document.querySelector('#transfer-ownership-form button[type="submit"], button[form="transfer-ownership-form"]');
+
+        this.isSubmittingOwnershipTransfer = true;
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Starting Transfer...';
+        }
+
+        try {
+            if (!this.isCurrentOwner()) {
+                this.showError('Only the current contract owner can transfer ownership.');
+                return;
+            }
+
+            if (!newOwner) {
+                this.showError('Please enter the new owner address');
+                return;
+            }
+
+            if (!ethers.utils.isAddress(newOwner)) {
+                this.showError('Invalid new owner address format');
+                return;
+            }
+
+            if (this.addressesMatch(newOwner, this.contractStats?.owner)) {
+                this.showError('New owner address must be different from the current owner');
+                return;
+            }
+
+            if (window.notificationManager) {
+                window.notificationManager.info('Starting ownership transfer');
+            }
+
+            const contractManager = await this.ensureContractReady();
+            const result = await contractManager.transferOwnership(newOwner);
+
+            if (result.success) {
+                this.closeModal();
+
+                let successMessage = 'Ownership transfer started successfully.';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
+                }
+                this.showSuccess(successMessage);
+                await this.verifyAdminAccess();
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error?.userMessage?.title || 'Failed to start ownership transfer', result.error?.userMessage?.message || result.error?.message);
+            }
+        } catch (error) {
+            console.error('Failed to start ownership transfer:', error);
+            this.showError(error.userMessage?.title || 'Failed to start ownership transfer', error.userMessage?.message || error.message);
+        } finally {
+            this.isSubmittingOwnershipTransfer = false;
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Start Ownership Transfer';
+            }
+        }
+    }
+
+    async cancelOwnershipTransfer() {
+        if (this.isCancelingOwnershipTransfer) {
+            console.warn('Already canceling ownership transfer, ignoring duplicate request');
+            return;
+        }
+
+        this.isCancelingOwnershipTransfer = true;
+
+        try {
+            if (!this.isCurrentOwner()) {
+                this.showError('Only the current contract owner can cancel an ownership transfer.');
+                return;
+            }
+
+            if (!this.hasPendingOwner(this.contractStats?.pendingOwner)) {
+                this.showError('There is no pending ownership transfer to cancel.');
+                return;
+            }
+
+            if (window.notificationManager) {
+                window.notificationManager.info('Canceling ownership transfer');
+            }
+
+            const contractManager = await this.ensureContractReady();
+            const result = await contractManager.transferOwnership(this.getZeroAddress());
+
+            if (result.success) {
+                let successMessage = 'Ownership transfer canceled successfully.';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
+                }
+                this.showSuccess(successMessage);
+                await this.verifyAdminAccess();
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error?.userMessage?.title || 'Failed to cancel ownership transfer', result.error?.userMessage?.message || result.error?.message);
+            }
+        } catch (error) {
+            console.error('Failed to cancel ownership transfer:', error);
+            this.showError(error.userMessage?.title || 'Failed to cancel ownership transfer', error.userMessage?.message || error.message);
+        } finally {
+            this.isCancelingOwnershipTransfer = false;
+        }
+    }
+
+    async acceptOwnership() {
+        if (this.isAcceptingOwnership) {
+            console.warn('Already accepting ownership, ignoring duplicate request');
+            return;
+        }
+
+        this.isAcceptingOwnership = true;
+
+        try {
+            if (!this.isCurrentPendingOwner()) {
+                this.showError('Only the pending owner can accept ownership.');
+                return;
+            }
+
+            if (window.notificationManager) {
+                window.notificationManager.info('Accepting ownership');
+            }
+
+            const contractManager = await this.ensureContractReady();
+            const result = await contractManager.acceptOwnership();
+
+            if (result.success) {
+                let successMessage = 'Ownership accepted successfully.';
+                if (result.transactionHash) {
+                    successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
+                }
+                this.showSuccess(successMessage);
+                await this.verifyAdminAccess();
+                this.refreshAdminDataOnce();
+            } else {
+                this.showError(result.error?.userMessage?.title || 'Failed to accept ownership', result.error?.userMessage?.message || result.error?.message);
+            }
+        } catch (error) {
+            console.error('Failed to accept ownership:', error);
+            this.showError(error.userMessage?.title || 'Failed to accept ownership', error.userMessage?.message || error.message);
+        } finally {
+            this.isAcceptingOwnership = false;
         }
     }
 

@@ -25,15 +25,25 @@ class NotificationManagerNew {
     }
 
     show(message, type = 'info', options = {}) {
+        const normalizedOptions = typeof options === 'number' ? { duration: options } : (options || {});
         const {
             duration = 5000,
             title = null,
             persistent = false,
             showProgress = true,
-            onClick = null
-        } = typeof options === 'number' ? { duration: options } : options;
+            onClick = null,
+            supportAction = type === 'error'
+        } = normalizedOptions;
 
-        const notification = this.createNotification(message, type, { title, persistent, showProgress, onClick });
+        const duplicateKey = this.getDuplicateKey(message, type, title);
+        this.pruneNotifications();
+
+        const existingNotification = this.notifications.find(notification => notification.duplicateKey === duplicateKey);
+        if (existingNotification) {
+            return existingNotification.element;
+        }
+
+        const notification = this.createNotification(message, type, { title, persistent, showProgress, onClick, supportAction });
         this.container.appendChild(notification);
 
         // Trigger animation
@@ -60,14 +70,27 @@ class NotificationManagerNew {
             element: notification,
             type,
             message,
+            duplicateKey,
             timestamp: Date.now()
         });
 
         return notification;
     }
 
+    getDuplicateKey(message, type, title) {
+        return JSON.stringify({
+            type: String(type || 'info'),
+            title: title == null ? '' : String(title),
+            message: message == null ? '' : String(message)
+        });
+    }
+
+    pruneNotifications() {
+        this.notifications = this.notifications.filter(notification => notification.element?.parentNode);
+    }
+
     createNotification(message, type, options = {}) {
-        const { title, persistent, showProgress, onClick } = options;
+        const { title, persistent, showProgress, onClick, supportAction } = options;
         const notification = document.createElement('div');
         notification.className = `notification ${type}`;
 
@@ -83,37 +106,79 @@ class NotificationManagerNew {
             info: 'info'
         };
 
-        const titleHtml = title ? `<div class="notification-title">${title}</div>` : '';
-        const progressHtml = showProgress && !persistent ? '<div class="notification-progress"></div>' : '';
+        const iconContainer = document.createElement('div');
+        iconContainer.className = 'notification-icon';
 
-        notification.innerHTML = `
-            <div class="notification-icon">
-                <span class="material-icons">${icons[type] || 'info'}</span>
-            </div>
-            <div class="notification-content">
-                ${titleHtml}
-                <div class="notification-message">${message}</div>
-            </div>
-            ${!persistent ? `
-                <button class="notification-close" aria-label="Close notification">
-                    <span class="material-icons">close</span>
-                </button>
-            ` : ''}
-            ${progressHtml}
-        `;
+        const icon = document.createElement('span');
+        icon.className = 'material-icons';
+        icon.textContent = icons[type] || 'info';
+        iconContainer.appendChild(icon);
 
-        // Add close functionality
-        if (!persistent) {
-            const closeBtn = notification.querySelector('.notification-close');
-            if (closeBtn) {
-                closeBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.remove(notification);
-                });
-            }
+        const content = document.createElement('div');
+        content.className = 'notification-content';
+
+        if (title) {
+            const titleElement = document.createElement('div');
+            titleElement.className = 'notification-title';
+            titleElement.textContent = String(title);
+            content.appendChild(titleElement);
+        }
+
+        const messageElement = document.createElement('div');
+        messageElement.className = 'notification-message';
+        messageElement.textContent = String(message ?? '');
+        content.appendChild(messageElement);
+
+        const discordHelpUrl = window.CONFIG?.SUPPORT?.DISCORD_HELP_URL;
+        if (type === 'error' && supportAction !== false && discordHelpUrl) {
+            const actions = document.createElement('div');
+            actions.className = 'notification-actions';
+            actions.appendChild(this.createSupportLink(discordHelpUrl));
+            content.appendChild(actions);
+        }
+
+        notification.appendChild(iconContainer);
+        notification.appendChild(content);
+
+        const closeButton = document.createElement('button');
+        closeButton.className = 'notification-close';
+        closeButton.type = 'button';
+        closeButton.setAttribute('aria-label', 'Close notification');
+
+        const closeIcon = document.createElement('span');
+        closeIcon.className = 'material-icons';
+        closeIcon.textContent = 'close';
+        closeButton.appendChild(closeIcon);
+        closeButton.addEventListener('click', event => {
+            event.stopPropagation();
+            this.remove(notification);
+        });
+
+        notification.appendChild(closeButton);
+
+        if (showProgress && !persistent) {
+            const progress = document.createElement('div');
+            progress.className = 'notification-progress';
+            notification.appendChild(progress);
         }
 
         return notification;
+    }
+
+    createSupportLink(discordUrl) {
+        const link = document.createElement('a');
+        link.className = 'notification-action-link';
+        link.href = discordUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'Get support';
+        link.setAttribute('aria-label', 'Get support on Discord');
+
+        link.addEventListener('click', event => {
+            event.stopPropagation();
+        });
+
+        return link;
     }
 
     remove(notification) {
@@ -124,6 +189,7 @@ class NotificationManagerNew {
             if (notification.parentNode) {
                 notification.parentNode.removeChild(notification);
             }
+            this.pruneNotifications();
         }, 300);
     }
 
@@ -137,7 +203,11 @@ class NotificationManagerNew {
     }
 
     error(message, options) {
-        return this.show(message, 'error', options);
+        const normalizedOptions = typeof options === 'number' ? { duration: options } : (options || {});
+        return this.show(message, 'error', {
+            persistent: true,
+            ...normalizedOptions
+        });
     }
 
     warning(message, options) {

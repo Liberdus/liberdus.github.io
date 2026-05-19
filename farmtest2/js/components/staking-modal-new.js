@@ -30,6 +30,7 @@ class StakingModalNew {
         this.zapSlippageBps = window.CONFIG?.KYBER_ZAP?.DEFAULT_SLIPPAGE_BPS || 50;
         this.zapCustomSlippage = '';
         this.zapCustomSlippageError = '';
+        this.zapCustomSlippageSelected = false;
         this.zapDeadlineMinutes = window.CONFIG?.KYBER_ZAP?.DEFAULT_DEADLINE_MINUTES || 20;
         this.zapQuoteDebounceTimer = null;
         this.zapQuoteRequestId = 0;
@@ -44,6 +45,29 @@ class StakingModalNew {
         this.zapCustomTokenAddress = '';
         this.zapCustomTokenError = '';
 
+        // V2 remove-liquidity / Kyber zap-out state
+        this.removeLiquidityService = window.V2RemoveLiquidityService ? new window.V2RemoveLiquidityService() : null;
+        this.removeLiquidityZapOutEnabled = false;
+        this.removeLiquidityAmount = '';
+        this.removeLiquidityPreview = null;
+        this.removeLiquidityPreviewStatus = 'idle';
+        this.removeLiquidityPreviewError = '';
+        this.removeLiquiditySlippageBps = window.CONFIG?.KYBER_ZAP?.DEFAULT_SLIPPAGE_BPS || 50;
+        this.removeLiquidityCustomSlippage = '';
+        this.removeLiquidityCustomSlippageError = '';
+        this.removeLiquidityCustomSlippageSelected = false;
+        this.removeLiquidityDeadlineMinutes = window.CONFIG?.KYBER_ZAP?.DEFAULT_DEADLINE_MINUTES || 20;
+        this.removeLiquiditySettingsOpen = false;
+        this.removeLiquidityPreviewDebounceTimer = null;
+        this.removeLiquidityPreviewRefreshTimer = null;
+        this.removeLiquidityPreviewCountdown = this.zapQuoteRefreshSeconds;
+        this.removeLiquidityPreviewRequestId = 0;
+        this.removeLiquidityOutputTokenAddress = '';
+        this.removeLiquidityOutputTokens = [];
+        this.removeLiquiditySelectedOutputToken = null;
+        this.removeLiquidityCustomOutputTokenAddress = '';
+        this.removeLiquidityCustomOutputTokenError = '';
+
         // Approval state
         this.needsApproval = false;
         this.isApproved = false;
@@ -56,7 +80,11 @@ class StakingModalNew {
             unstake: 'idle',
             claim: 'idle',
             approveZap: 'idle',
-            zap: 'idle'
+            zap: 'idle',
+            approveRemoveLiquidity: 'idle',
+            removeLiquidity: 'idle',
+            approveRemoveLiquidityZapOut: 'idle',
+            zapOutLP: 'idle'
         };
         this.pendingOperations = {
             approve: false,
@@ -64,7 +92,11 @@ class StakingModalNew {
             unstake: false,
             claim: false,
             approveZap: false,
-            zap: false
+            zap: false,
+            approveRemoveLiquidity: false,
+            removeLiquidity: false,
+            approveRemoveLiquidityZapOut: false,
+            zapOutLP: false
         };
 
         // Execution guards
@@ -72,6 +104,7 @@ class StakingModalNew {
         this.isExecutingUnstake = false;
         this.isExecutingClaim = false;
         this.isExecutingZap = false;
+        this.isExecutingRemoveLiquidity = false;
 
         // Claim rewards on unstake
         this.claimRewardsOnUnstake = true;
@@ -102,6 +135,14 @@ class StakingModalNew {
                 return 'approveZap';
             case 'zapIntoLP':
                 return 'zap';
+            case 'approveRemoveLiquidity':
+                return 'approveRemoveLiquidity';
+            case 'removeLiquidity':
+                return 'removeLiquidity';
+            case 'approveRemoveLiquidityZapOut':
+                return 'approveRemoveLiquidityZapOut';
+            case 'zapOutLP':
+                return 'zapOutLP';
             default:
                 return null;
         }
@@ -134,6 +175,13 @@ class StakingModalNew {
 
         if (action === 'unstake') {
             this.updateUnstakeButton();
+        }
+
+        if (action === 'approveRemoveLiquidity'
+            || action === 'removeLiquidity'
+            || action === 'approveRemoveLiquidityZapOut'
+            || action === 'zapOutLP') {
+            this.updateRemoveLiquidityButton();
         }
 
         if (action === 'claim') {
@@ -211,21 +259,25 @@ class StakingModalNew {
                     </div>
                     
                     <div class="modal-tabs">
-                        <button class="tab-button active" data-tab="zap">
-                            <span class="material-icons">bolt</span>
-                            Create LP
+                        <button class="tab-button active" aria-label="Create LP" data-tab="zap">
+                            <span class="material-icons" aria-hidden="true">bolt</span>
+                            <span class="tab-label">Create LP</span>
                         </button>
-                        <button class="tab-button" data-tab="stake">
-                            <span class="material-icons">add</span>
-                            Stake
+                        <button class="tab-button" aria-label="Stake" data-tab="stake">
+                            <span class="material-icons" aria-hidden="true">add</span>
+                            <span class="tab-label">Stake</span>
                         </button>
-                        <button class="tab-button" data-tab="unstake">
-                            <span class="material-icons">remove</span>
-                            Unstake
+                        <button class="tab-button" aria-label="Unstake" data-tab="unstake">
+                            <span class="material-icons" aria-hidden="true">remove</span>
+                            <span class="tab-label">Unstake</span>
                         </button>
-                        <button class="tab-button" data-tab="claim">
-                            <span class="material-icons">redeem</span>
-                            Claim
+                        <button class="tab-button" aria-label="Claim" data-tab="claim">
+                            <span class="material-icons" aria-hidden="true">redeem</span>
+                            <span class="tab-label">Claim</span>
+                        </button>
+                        <button class="tab-button" aria-label="Remove LP" data-tab="remove-liquidity">
+                            <span class="material-icons" aria-hidden="true">swap_horiz</span>
+                            <span class="tab-label">Remove LP</span>
                         </button>
                     </div>
                     
@@ -250,22 +302,37 @@ class StakingModalNew {
             }
 
             // Percentage buttons
-            if (e.target.closest('.percentage-btn')) {
-                const percentage = parseInt(e.target.closest('.percentage-btn').dataset.percentage);
+            const percentageButton = e.target.closest('.percentage-btn, .remove-liquidity-percentage-btn');
+            if (percentageButton) {
+                const percentage = parseInt(percentageButton.dataset.percentage);
                 this.setPercentage(percentage);
             }
 
-            if (e.target.closest('.zap-slippage-btn')) {
+            if (e.target.closest('.zap-slippage-btn') && !e.target.closest('.remove-liquidity-slippage-btn')) {
                 const button = e.target.closest('.zap-slippage-btn');
                 this.setZapSlippage(button.dataset.slippage);
             }
 
-            if (e.target.closest('.zap-percentage-btn')) {
+            if (e.target.closest('.remove-liquidity-settings-toggle')) {
+                this.toggleRemoveLiquiditySettings();
+            }
+
+            if (e.target.closest('.remove-liquidity-slippage-btn')) {
+                const button = e.target.closest('.remove-liquidity-slippage-btn');
+                this.setRemoveLiquiditySlippage(button.dataset.slippage);
+            }
+
+            if (e.target.closest('.remove-liquidity-output-token-option')) {
+                const button = e.target.closest('.remove-liquidity-output-token-option');
+                this.setRemoveLiquidityOutputToken(button.dataset.tokenAddress);
+            }
+
+            if (e.target.closest('.zap-percentage-btn') && !e.target.closest('.remove-liquidity-percentage-btn')) {
                 const button = e.target.closest('.zap-percentage-btn');
                 this.setZapAmountPercentage(parseInt(button.dataset.percentage, 10));
             }
 
-            if (e.target.closest('.zap-token-option')) {
+            if (e.target.closest('.zap-token-option') && !e.target.closest('.remove-liquidity-output-token-picker')) {
                 const button = e.target.closest('.zap-token-option');
                 this.setZapInputToken(button.dataset.tokenAddress);
             }
@@ -274,6 +341,22 @@ class StakingModalNew {
                 document.querySelectorAll('.zap-token-picker[open]').forEach(menu => {
                     menu.open = false;
                 });
+            }
+
+            if (!e.target.closest('.remove-liquidity-output-token-picker')) {
+                document.querySelectorAll('.remove-liquidity-output-token-picker[open]').forEach(menu => {
+                    menu.open = false;
+                });
+            }
+        });
+
+        document.addEventListener('focusin', (e) => {
+            if (e.target.id === 'zap-custom-slippage-input') {
+                this.selectZapCustomSlippage();
+            }
+
+            if (e.target.id === 'remove-liquidity-custom-slippage-input') {
+                this.selectRemoveLiquidityCustomSlippage();
             }
         });
 
@@ -287,6 +370,7 @@ class StakingModalNew {
                 this.stakeAmount = sanitizedValue;
                 this.updateSlider('stake');
                 this.updateStakeEstimatedAPR();
+                this.updateStakeUsdEstimate();
 
                 // Reset approval state when amount changes
                 this.isApproved = false;
@@ -300,6 +384,20 @@ class StakingModalNew {
                 }
                 this.unstakeAmount = sanitizedValue;
                 this.updateSlider('unstake');
+                this.updateUnstakeUsdEstimate();
+            }
+
+            if (e.target.id === 'remove-liquidity-amount-input') {
+                const sanitizedValue = this.applyDecimalLimit(e.target.value, this.userBalanceDecimals);
+                if (sanitizedValue !== e.target.value) {
+                    e.target.value = sanitizedValue;
+                }
+                this.removeLiquidityAmount = sanitizedValue;
+                this.updateSlider('remove-liquidity');
+                this.updateRemoveLiquidityUsdEstimate();
+                this.updateRemoveLiquidityBalanceError();
+                this.resetRemoveLiquidityPreview();
+                this.debounceRemoveLiquidityPreview();
             }
 
             if (e.target.classList.contains('amount-slider')) {
@@ -331,6 +429,25 @@ class StakingModalNew {
                 this.zapCustomTokenAddress = e.target.value.trim();
                 this.zapCustomTokenError = '';
             }
+
+            if (e.target.id === 'remove-liquidity-custom-slippage-input') {
+                const sanitizedValue = this.setRemoveLiquidityCustomSlippageInput(e.target.value);
+                if (sanitizedValue !== e.target.value) {
+                    e.target.value = sanitizedValue;
+                }
+            }
+
+            if (e.target.id === 'remove-liquidity-custom-output-token-input') {
+                this.removeLiquidityCustomOutputTokenAddress = e.target.value.trim();
+                this.removeLiquidityCustomOutputTokenError = '';
+            }
+
+            if (e.target.id === 'remove-liquidity-deadline-input') {
+                const sanitizedValue = this.setRemoveLiquidityDeadlineInput(e.target.value);
+                if (sanitizedValue !== e.target.value) {
+                    e.target.value = sanitizedValue;
+                }
+            }
         });
 
         // Checkbox changes
@@ -338,6 +455,13 @@ class StakingModalNew {
             if (e.target.id === 'claim-rewards-checkbox') {
                 this.claimRewardsOnUnstake = e.target.checked;
                 console.log('Claim rewards on unstake:', this.claimRewardsOnUnstake);
+            }
+
+            if (e.target.id === 'remove-liquidity-checkbox') {
+                this.removeLiquidityZapOutEnabled = e.target.checked;
+                this.resetRemoveLiquidityPreview();
+                this.renderTabContent();
+                this.debounceRemoveLiquidityPreview(0);
             }
         });
 
@@ -434,6 +558,7 @@ class StakingModalNew {
         this.zapCustomSlippageError = '';
         this.zapQuoteRequestId += 1;
         this.stopZapQuoteAutoRefresh();
+        this.resetRemoveLiquidityFormState();
 
         // Reset transaction progress state
         this.resetActionStates(false);
@@ -443,6 +568,7 @@ class StakingModalNew {
         this.isExecutingUnstake = false;
         this.isExecutingClaim = false;
         this.isExecutingZap = false;
+        this.isExecutingRemoveLiquidity = false;
 
         // Update pair info
         this.updatePairInfo();
@@ -477,7 +603,7 @@ class StakingModalNew {
      */
     async show(pair, initialTab = 0) {
         // Convert numeric tab index to string tab name
-        const tabNames = ['stake', 'unstake', 'claim', 'zap'];
+        const tabNames = ['stake', 'unstake', 'claim', 'zap', 'remove-liquidity'];
         const tabName = tabNames[initialTab] || 'stake';
 
         console.log(`🎯 Opening modal for ${pair.name}, tab: ${tabName} (index: ${initialTab})`);
@@ -532,6 +658,82 @@ class StakingModalNew {
         }
     }
 
+    getLpUsdPrice() {
+        const tvlUsdValue = this.currentPair?.tvlUsd;
+        const tvlValue = this.currentPair?.tvl;
+
+        if (tvlUsdValue === undefined || tvlUsdValue === null || tvlUsdValue === '') {
+            return null;
+        }
+
+        if (tvlValue === undefined || tvlValue === null || tvlValue === '') {
+            return null;
+        }
+
+        const tvlUsd = Number(tvlUsdValue);
+        const tvl = Number(tvlValue);
+
+        if (!Number.isFinite(tvlUsd) || tvlUsd < 0 || !Number.isFinite(tvl) || tvl <= 0) {
+            return null;
+        }
+
+        return tvlUsd / tvl;
+    }
+
+    getLpUsdEstimate(amount) {
+        if (amount === undefined || amount === null || amount === '') {
+            return null;
+        }
+
+        const lpUsdPrice = this.getLpUsdPrice();
+        const lpAmount = Number(amount);
+
+        if (lpUsdPrice === null || !Number.isFinite(lpAmount) || lpAmount < 0) {
+            return null;
+        }
+
+        return lpAmount * lpUsdPrice;
+    }
+
+    formatLpUsdEstimate(amount) {
+        const estimate = this.getLpUsdEstimate(amount);
+
+        if (estimate === null) {
+            return '';
+        }
+
+        return window.Formatter?.formatCurrency?.(estimate) || `$${estimate.toFixed(2)}`;
+    }
+
+    renderInlineLpUsdEstimate(amount) {
+        const estimate = this.formatLpUsdEstimate(amount);
+        return estimate ? ` <span class="lp-usd-estimate">(${this.escapeHtml(estimate)})</span>` : '';
+    }
+
+    renderLpUsdEstimateElement(id, amount) {
+        const estimate = this.formatLpUsdEstimate(amount);
+        const hiddenAttribute = estimate ? '' : ' hidden';
+        return `<div id="${id}" class="lp-usd-estimate" aria-live="polite"${hiddenAttribute}>${this.escapeHtml(estimate)}</div>`;
+    }
+
+    getZapLpAmountForUsdEstimate(amount) {
+        if (amount === undefined || amount === null || amount === '' || amount === 'N/A') {
+            return null;
+        }
+
+        const amountText = String(amount);
+
+        try {
+            if (/^\d+$/.test(amountText) && window.ethers) {
+                return this.formatTokenAmount(amountText, this.userBalanceDecimals);
+            }
+        } catch (error) {
+            return amountText;
+        }
+
+        return amountText;
+    }
+
     escapeHtml(value) {
         return String(value ?? '')
             .replace(/&/g, '&amp;')
@@ -539,6 +741,11 @@ class StakingModalNew {
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
+    }
+
+    formatAddress(address) {
+        const value = String(address || '');
+        return value.length > 12 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
     }
 
     isNativeZapToken(address) {
@@ -563,6 +770,461 @@ class StakingModalNew {
 
     getKyberZapNetworkConfig() {
         return this.getKyberZapService().getNetworkConfig();
+    }
+
+    getRemoveLiquidityService() {
+        if (!this.removeLiquidityService && window.V2RemoveLiquidityService) {
+            this.removeLiquidityService = new window.V2RemoveLiquidityService();
+        }
+
+        if (!this.removeLiquidityService) {
+            throw new Error('Remove liquidity service is not available.');
+        }
+
+        return this.removeLiquidityService;
+    }
+
+    getRemoveLiquidityChainId() {
+        const chainId = window.networkSelector?.getCurrentChainId?.()
+            ?? window.contractManager?.getCurrentChainIdSafe?.();
+        const parsed = typeof chainId === 'string' ? Number(chainId) : chainId;
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    clearRemoveLiquidityPreviewDebounce() {
+        if (this.removeLiquidityPreviewDebounceTimer) {
+            clearTimeout(this.removeLiquidityPreviewDebounceTimer);
+            this.removeLiquidityPreviewDebounceTimer = null;
+        }
+    }
+
+    stopRemoveLiquidityPreviewAutoRefresh() {
+        clearInterval(this.removeLiquidityPreviewRefreshTimer);
+        this.removeLiquidityPreviewRefreshTimer = null;
+        this.resetRemoveLiquidityPreviewCountdown();
+    }
+
+    resetRemoveLiquidityFormState() {
+        this.removeLiquidityZapOutEnabled = false;
+        this.removeLiquidityAmount = '';
+        this.removeLiquidityPreview = null;
+        this.removeLiquidityPreviewStatus = 'idle';
+        this.removeLiquidityPreviewError = '';
+        this.removeLiquidityCustomSlippage = '';
+        this.removeLiquidityCustomSlippageError = '';
+        this.removeLiquidityCustomSlippageSelected = false;
+        this.removeLiquiditySettingsOpen = false;
+        this.removeLiquidityCustomOutputTokenAddress = '';
+        this.removeLiquidityCustomOutputTokenError = '';
+        this.removeLiquidityPreviewRequestId += 1;
+        this.clearRemoveLiquidityPreviewDebounce();
+        this.stopRemoveLiquidityPreviewAutoRefresh();
+    }
+
+    resetRemoveLiquidityPreview({ status = 'idle', error = '' } = {}) {
+        this.removeLiquidityPreview = null;
+        this.removeLiquidityPreviewStatus = status;
+        this.removeLiquidityPreviewError = error;
+        this.removeLiquidityPreviewRequestId += 1;
+        this.clearRemoveLiquidityPreviewDebounce();
+        this.syncRemoveLiquidityPreviewAutoRefresh();
+        this.updateRemoveLiquidityPreviewPanel();
+        this.updateRemoveLiquidityButton();
+    }
+
+    getRemoveLiquidityPreviewErrorMessage(error) {
+        const message = error?.message || String(error || '');
+        if (/remove liquidity\s*=\s*\d+\s*>\s*position liquidity\s*=\s*\d+/i.test(message)) {
+            return 'Amount exceeds your available LP balance.';
+        }
+
+        return message || 'Unable to preview remove liquidity.';
+    }
+
+    getRemoveLiquidityAmountRaw() {
+        if (!this.removeLiquidityAmount || parseFloat(this.removeLiquidityAmount) <= 0) {
+            return null;
+        }
+
+        return window.ethers.utils.parseUnits(this.removeLiquidityAmount.toString(), this.userBalanceDecimals);
+    }
+
+    getRemoveLiquidityBalanceError() {
+        if (!this.removeLiquidityAmount || parseFloat(this.removeLiquidityAmount) <= 0) {
+            return '';
+        }
+
+        try {
+            const liquidityRaw = this.getRemoveLiquidityAmountRaw();
+            const balanceRaw = this.userBalanceRaw || window.ethers?.BigNumber?.from?.(0);
+            if (liquidityRaw && balanceRaw?.gte && !balanceRaw.gte(liquidityRaw)) {
+                return `Amount exceeds available LP balance (${this.userBalance || '0'} LP).`;
+            }
+        } catch (error) {
+            const amount = parseFloat(this.removeLiquidityAmount);
+            const balance = parseFloat(this.userBalance);
+            if (Number.isFinite(amount) && Number.isFinite(balance) && amount > balance) {
+                return `Amount exceeds available LP balance (${this.userBalance || '0'} LP).`;
+            }
+        }
+
+        return '';
+    }
+
+    updateRemoveLiquidityBalanceError() {
+        const errorElement = document.getElementById('remove-liquidity-balance-error');
+        if (!errorElement) return;
+
+        const balanceError = this.getRemoveLiquidityBalanceError();
+        errorElement.textContent = balanceError;
+        errorElement.hidden = false;
+        errorElement.classList.toggle('zap-balance-error-empty', !balanceError);
+    }
+
+    getRemoveLiquidityCustomSlippageError(value = this.removeLiquidityCustomSlippage) {
+        if (!value) {
+            return '';
+        }
+
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue) || numericValue <= 0 || numericValue > 100) {
+            return 'Enter a custom slippage between 0.01% and 100%.';
+        }
+
+        return '';
+    }
+
+    updateCustomSlippageFieldError(inputId, errorId, errorMessage) {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+
+        input.setAttribute?.('aria-invalid', errorMessage ? 'true' : 'false');
+        if (errorMessage) {
+            input.setAttribute?.('aria-describedby', errorId);
+        } else {
+            input.removeAttribute?.('aria-describedby');
+        }
+
+        const errorElement = document.getElementById(errorId);
+        if (errorElement) {
+            errorElement.textContent = errorMessage;
+        }
+    }
+
+    hasInvalidRemoveLiquidityCustomSlippage() {
+        return !!this.getRemoveLiquidityCustomSlippageError();
+    }
+
+    isRemoveLiquidityCustomSlippageActive() {
+        return (this.removeLiquidityCustomSlippageSelected || !!this.removeLiquidityCustomSlippage)
+            && !this.hasInvalidRemoveLiquidityCustomSlippage();
+    }
+
+    updateRemoveLiquiditySlippageButtonState() {
+        document.querySelectorAll('.remove-liquidity-slippage-btn').forEach(button => {
+            const isCustom = button.dataset?.slippage === 'custom';
+            const isPreset = Number(button.dataset?.slippage) === this.removeLiquiditySlippageBps;
+            const isActive = isCustom
+                ? this.isRemoveLiquidityCustomSlippageActive()
+                : isPreset && !this.removeLiquidityCustomSlippageSelected && !this.removeLiquidityCustomSlippage;
+            button.classList.toggle('active', isActive);
+        });
+    }
+
+    selectRemoveLiquidityCustomSlippage() {
+        this.removeLiquidityCustomSlippageSelected = true;
+        this.updateRemoveLiquiditySlippageButtonState();
+    }
+
+    toggleRemoveLiquiditySettings() {
+        this.removeLiquiditySettingsOpen = !this.removeLiquiditySettingsOpen;
+        this.renderTabContent();
+    }
+
+    setRemoveLiquiditySlippage(value) {
+        if (value === 'custom') {
+            this.removeLiquidityCustomSlippageSelected = true;
+            this.renderTabContent();
+            const customInput = document.getElementById('remove-liquidity-custom-slippage-input');
+            if (customInput) customInput.focus();
+            return;
+        }
+
+        const parsed = parseInt(value, 10);
+        if (Number.isFinite(parsed) && parsed >= 0) {
+            this.removeLiquiditySlippageBps = parsed;
+            this.removeLiquidityCustomSlippage = '';
+            this.removeLiquidityCustomSlippageError = '';
+            this.removeLiquidityCustomSlippageSelected = false;
+            this.resetRemoveLiquidityPreview();
+            this.renderTabContent();
+            this.debounceRemoveLiquidityPreview(0);
+        }
+    }
+
+    setRemoveLiquidityCustomSlippageInput(value) {
+        const sanitizedValue = this.applyDecimalLimit(String(value ?? ''), 2);
+        this.removeLiquidityCustomSlippage = sanitizedValue;
+        this.removeLiquidityCustomSlippageSelected = true;
+        this.removeLiquidityCustomSlippageError = this.getRemoveLiquidityCustomSlippageError(sanitizedValue);
+        this.updateRemoveLiquiditySlippageButtonState();
+        this.updateCustomSlippageFieldError(
+            'remove-liquidity-custom-slippage-input',
+            'remove-liquidity-custom-slippage-error',
+            this.removeLiquidityCustomSlippageError
+        );
+
+        if (this.removeLiquidityCustomSlippageError) {
+            this.resetRemoveLiquidityPreview();
+            return sanitizedValue;
+        }
+
+        if (!sanitizedValue) {
+            this.removeLiquidityPreviewError = '';
+            if (this.removeLiquidityPreviewStatus === 'error' && !this.removeLiquidityPreview) {
+                this.removeLiquidityPreviewStatus = 'idle';
+            }
+            this.updateRemoveLiquidityPreviewPanel();
+            this.debounceRemoveLiquidityPreview();
+            this.updateRemoveLiquidityButton();
+            return sanitizedValue;
+        }
+
+        this.removeLiquiditySlippageBps = Math.round(Number(sanitizedValue) * 100);
+        this.resetRemoveLiquidityPreview();
+        this.debounceRemoveLiquidityPreview();
+        return sanitizedValue;
+    }
+
+    setRemoveLiquidityDeadlineInput(value) {
+        const digitsOnly = String(value ?? '').replace(/[^0-9]/g, '');
+        if (!digitsOnly) {
+            this.removeLiquidityDeadlineMinutes = window.CONFIG?.KYBER_ZAP?.DEFAULT_DEADLINE_MINUTES || 20;
+            this.updateRemoveLiquidityPreviewPanel();
+            return '';
+        }
+
+        const parsed = Math.min(4320, Math.max(1, parseInt(digitsOnly, 10)));
+        this.removeLiquidityDeadlineMinutes = parsed;
+        this.updateRemoveLiquidityPreviewPanel();
+        return String(parsed);
+    }
+
+    canPrepareRemoveLiquidityPreview() {
+        return !!this.currentPair
+            && !!this.removeLiquidityAmount
+            && parseFloat(this.removeLiquidityAmount) > 0
+            && !this.getRemoveLiquidityBalanceError()
+            && !this.hasInvalidRemoveLiquidityCustomSlippage();
+    }
+
+    canFetchRemoveLiquidityPreview() {
+        return this.canPrepareRemoveLiquidityPreview()
+            && (!this.removeLiquidityZapOutEnabled || !!this.removeLiquiditySelectedOutputToken);
+    }
+
+    getRemoveLiquidityOutputTokenAddressForKyber(token = this.removeLiquiditySelectedOutputToken) {
+        if (!token) {
+            return '';
+        }
+
+        if (this.isNativeZapToken(token.address)) {
+            return window.CONFIG?.KYBER_ZAP?.NATIVE_TOKEN_ADDRESS || token.address;
+        }
+
+        return token.address;
+    }
+
+    getRemoveLiquidityRouteData() {
+        return this.getKyberZapService().getRouteData(this.removeLiquidityPreview);
+    }
+
+    getRemoveLiquidityRouteEncoded() {
+        return this.getKyberZapService().getRouteEncoded(this.removeLiquidityPreview);
+    }
+
+    getRemoveLiquidityRouterAddress(source = null) {
+        return this.getKyberZapService().getRouterAddress(source || this.getRemoveLiquidityRouteData());
+    }
+
+    debounceRemoveLiquidityPreview(delay = 400) {
+        this.clearRemoveLiquidityPreviewDebounce();
+
+        if (!this.canFetchRemoveLiquidityPreview()) {
+            this.stopRemoveLiquidityPreviewAutoRefresh();
+            this.updateRemoveLiquidityPreviewPanel();
+            this.updateRemoveLiquidityButton();
+            return;
+        }
+
+        this.syncRemoveLiquidityPreviewAutoRefresh();
+        this.removeLiquidityPreviewDebounceTimer = setTimeout(() => {
+            this.fetchRemoveLiquidityPreview();
+        }, delay);
+    }
+
+    canAutoRefreshRemoveLiquidityPreview() {
+        return this.isOpen
+            && this.currentTab === 'remove-liquidity'
+            && this.canFetchRemoveLiquidityPreview();
+    }
+
+    syncRemoveLiquidityPreviewAutoRefresh() {
+        if (this.canAutoRefreshRemoveLiquidityPreview()) {
+            this.startRemoveLiquidityPreviewAutoRefresh();
+        } else {
+            this.stopRemoveLiquidityPreviewAutoRefresh();
+        }
+    }
+
+    startRemoveLiquidityPreviewAutoRefresh() {
+        if (this.removeLiquidityPreviewRefreshTimer) {
+            this.updateRemoveLiquidityPreviewCountdownDisplay();
+            return;
+        }
+
+        this.resetRemoveLiquidityPreviewCountdown();
+        this.removeLiquidityPreviewRefreshTimer = setInterval(() => {
+            if (this.isExecutingRemoveLiquidity || !this.canAutoRefreshRemoveLiquidityPreview()) {
+                this.stopRemoveLiquidityPreviewAutoRefresh();
+                return;
+            }
+
+            if (this.removeLiquidityPreviewStatus === 'loading') {
+                this.updateRemoveLiquidityPreviewCountdownDisplay();
+                return;
+            }
+
+            this.removeLiquidityPreviewCountdown = Math.max(0, this.removeLiquidityPreviewCountdown - 1);
+            this.updateRemoveLiquidityPreviewCountdownDisplay();
+
+            if (this.removeLiquidityPreviewCountdown === 0) {
+                this.resetRemoveLiquidityPreviewCountdown();
+                this.fetchRemoveLiquidityPreview({ force: true });
+            }
+        }, 1000);
+    }
+
+    resetRemoveLiquidityPreviewCountdown(seconds = this.zapQuoteRefreshSeconds) {
+        this.removeLiquidityPreviewCountdown = seconds;
+        this.updateRemoveLiquidityPreviewCountdownDisplay();
+    }
+
+    updateRemoveLiquidityPreviewCountdownDisplay() {
+        const countdown = document.getElementById('remove-liquidity-preview-countdown');
+        if (countdown) {
+            countdown.textContent = this.canAutoRefreshRemoveLiquidityPreview()
+                ? `${this.removeLiquidityPreviewCountdown}s`
+                : '--';
+        }
+    }
+
+    async fetchRemoveLiquidityPreview({ force = false } = {}) {
+        if (!this.canPrepareRemoveLiquidityPreview()) {
+            this.stopRemoveLiquidityPreviewAutoRefresh();
+            this.updateRemoveLiquidityPreviewPanel();
+            this.updateRemoveLiquidityButton();
+            return;
+        }
+
+        if (!force && this.removeLiquidityPreviewStatus === 'ready' && this.removeLiquidityPreview?.supported) {
+            this.updateRemoveLiquidityPreviewPanel();
+            this.updateRemoveLiquidityButton();
+            return;
+        }
+
+        const requestId = ++this.removeLiquidityPreviewRequestId;
+        this.clearRemoveLiquidityPreviewDebounce();
+
+        try {
+            const provider = window.contractManager?.provider || window.walletManager?.provider;
+            const chainId = this.getRemoveLiquidityChainId();
+            const lpTokenAddress = this.currentPair?.lpToken || this.currentPair?.address;
+            const liquidityRaw = this.getRemoveLiquidityAmountRaw();
+
+            if (!provider) {
+                throw new Error('Connect your wallet to preview remove liquidity.');
+            }
+            if (!liquidityRaw) {
+                throw new Error('Enter an LP amount to preview remove liquidity.');
+            }
+
+            this.removeLiquidityPreviewStatus = 'loading';
+            this.removeLiquidityPreviewError = '';
+            this.updateRemoveLiquidityPreviewPanel();
+            this.updateRemoveLiquidityButton();
+
+            let preview;
+            if (this.removeLiquidityZapOutEnabled) {
+                const networkConfig = this.getKyberZapNetworkConfig();
+                const outputToken = this.removeLiquiditySelectedOutputToken;
+                const tokenOutAddress = this.getRemoveLiquidityOutputTokenAddressForKyber(outputToken);
+
+                if (!networkConfig) {
+                    throw new Error('Zap out is not available on this network.');
+                }
+                if (!window.walletManager?.address) {
+                    throw new Error('Connect your wallet to preview zap out.');
+                }
+                if (!outputToken || !tokenOutAddress) {
+                    throw new Error('Select an output token to preview zap out.');
+                }
+
+                const payload = await this.getKyberZapService().fetchOutQuote({
+                    networkConfig,
+                    lpTokenAddress,
+                    walletAddress: window.walletManager.address,
+                    tokenOutAddress,
+                    liquidityRaw,
+                    slippageBps: this.removeLiquiditySlippageBps,
+                    platform: this.currentPair?.platform
+                });
+                preview = {
+                    ...payload,
+                    supported: true,
+                    zapOut: true,
+                    outputToken,
+                    liquidityRaw: liquidityRaw.toString(),
+                    slippageBps: this.removeLiquiditySlippageBps
+                };
+            } else {
+                preview = await this.getRemoveLiquidityService().getPreview({
+                    chainId,
+                    lpTokenAddress,
+                    liquidityRaw,
+                    slippageBps: this.removeLiquiditySlippageBps,
+                    provider
+                });
+            }
+
+            if (requestId !== this.removeLiquidityPreviewRequestId) {
+                return;
+            }
+
+            this.removeLiquidityPreview = preview;
+            if (preview.supported) {
+                this.removeLiquidityPreviewStatus = 'ready';
+                this.removeLiquidityPreviewError = '';
+            } else {
+                this.removeLiquidityPreviewStatus = 'error';
+                this.removeLiquidityPreviewError = preview.reason || 'Remove liquidity is not supported for this pool.';
+            }
+        } catch (error) {
+            if (requestId !== this.removeLiquidityPreviewRequestId) {
+                return;
+            }
+
+            console.error('Failed to preview remove liquidity:', error);
+            this.removeLiquidityPreview = null;
+            this.removeLiquidityPreviewStatus = 'error';
+            this.removeLiquidityPreviewError = this.getRemoveLiquidityPreviewErrorMessage(error);
+        } finally {
+            if (requestId === this.removeLiquidityPreviewRequestId) {
+                this.updateRemoveLiquidityPreviewPanel();
+                this.updateRemoveLiquidityButton();
+                this.syncRemoveLiquidityPreviewAutoRefresh();
+            }
+        }
     }
 
     async getTokenMetadata(address) {
@@ -644,8 +1306,22 @@ class StakingModalNew {
             this.zapInputTokenAddress = this.zapInputTokens[0]?.address || 'native';
         }
         this.zapSelectedToken = this.zapInputTokens.find(token => token.address === this.zapInputTokenAddress) || this.zapInputTokens[0] || null;
+        this.syncRemoveLiquidityOutputTokens();
 
         await this.loadZapTokenBalances();
+    }
+
+    syncRemoveLiquidityOutputTokens() {
+        this.removeLiquidityOutputTokens = this.sortZapInputTokens([...(this.zapInputTokens || [])]);
+
+        if (!this.removeLiquidityOutputTokens.some(token => token.address === this.removeLiquidityOutputTokenAddress)) {
+            const usdtToken = this.removeLiquidityOutputTokens.find(token => String(token.symbol || '').toUpperCase() === 'USDT');
+            this.removeLiquidityOutputTokenAddress = usdtToken?.address || this.removeLiquidityOutputTokens[0]?.address || '';
+        }
+
+        this.removeLiquiditySelectedOutputToken = this.removeLiquidityOutputTokens.find(token => token.address === this.removeLiquidityOutputTokenAddress)
+            || this.removeLiquidityOutputTokens[0]
+            || null;
     }
 
     async loadZapTokenBalances() {
@@ -751,6 +1427,96 @@ class StakingModalNew {
         }
     }
 
+    setRemoveLiquidityOutputToken(address) {
+        if (address === 'custom') {
+            this.removeLiquidityOutputTokenAddress = 'custom';
+            this.removeLiquiditySelectedOutputToken = null;
+            this.resetRemoveLiquidityPreview();
+            this.removeLiquidityCustomOutputTokenError = '';
+            this.renderTabContent();
+            return;
+        }
+
+        this.removeLiquidityOutputTokenAddress = address;
+        this.removeLiquiditySelectedOutputToken = this.removeLiquidityOutputTokens.find(token => token.address === address) || null;
+        this.resetRemoveLiquidityPreview();
+        this.renderTabContent();
+        this.debounceRemoveLiquidityPreview(0);
+    }
+
+    async addRemoveLiquidityCustomOutputToken() {
+        if (!window.ethers?.utils?.isAddress?.(this.removeLiquidityCustomOutputTokenAddress)) {
+            this.removeLiquidityCustomOutputTokenError = 'Enter a valid token address.';
+            this.renderTabContent();
+            return;
+        }
+
+        try {
+            this.removeLiquidityCustomOutputTokenError = '';
+            const address = window.ethers.utils.getAddress(this.removeLiquidityCustomOutputTokenAddress);
+            const metadata = await this.getTokenMetadata(address);
+            const token = {
+                address,
+                symbol: metadata?.symbol || 'TOKEN',
+                name: metadata?.name || 'Token',
+                decimals: metadata?.decimals ?? 18,
+                iconUrl: '',
+                custom: true
+            };
+
+            const existingIndex = this.removeLiquidityOutputTokens.findIndex(existing =>
+                String(existing.address).toLowerCase() === address.toLowerCase()
+            );
+
+            if (existingIndex >= 0) {
+                this.removeLiquidityOutputTokens[existingIndex] = { ...this.removeLiquidityOutputTokens[existingIndex], ...token };
+            } else {
+                this.removeLiquidityOutputTokens.push(token);
+            }
+            this.removeLiquidityOutputTokens = this.sortZapInputTokens(this.removeLiquidityOutputTokens);
+
+            this.removeLiquidityOutputTokenAddress = token.address;
+            this.removeLiquiditySelectedOutputToken = token;
+            this.resetRemoveLiquidityPreview();
+            this.renderTabContent();
+            this.debounceRemoveLiquidityPreview(0);
+            this.loadRemoveLiquidityCustomOutputTokenIcon(address).catch(error => {
+                console.warn('Unable to load custom remove-liquidity output token icon:', error.message);
+            });
+        } catch (error) {
+            console.error('Failed to add custom remove-liquidity output token:', error);
+            this.removeLiquidityCustomOutputTokenError = 'Unable to load token details.';
+            this.renderTabContent();
+        }
+    }
+
+    async loadRemoveLiquidityCustomOutputTokenIcon(address) {
+        const tokenIndex = this.removeLiquidityOutputTokens.findIndex(existing =>
+            String(existing.address).toLowerCase() === String(address).toLowerCase()
+        );
+        if (tokenIndex < 0) {
+            return false;
+        }
+
+        const marketMetadata = await this.getTokenMarketMetadata(address);
+        const imageUrl = this.getSafeZapTokenIconUrl(marketMetadata?.imageUrl);
+        if (!imageUrl) {
+            return false;
+        }
+
+        this.removeLiquidityOutputTokens[tokenIndex] = {
+            ...this.removeLiquidityOutputTokens[tokenIndex],
+            iconUrl: imageUrl
+        };
+
+        if (String(this.removeLiquidityOutputTokenAddress).toLowerCase() === String(address).toLowerCase()) {
+            this.removeLiquiditySelectedOutputToken = this.removeLiquidityOutputTokens[tokenIndex];
+        }
+
+        this.renderTabContent();
+        return true;
+    }
+
     async loadZapCustomTokenIcon(address) {
         const tokenIndex = this.zapInputTokens.findIndex(existing =>
             String(existing.address).toLowerCase() === String(address).toLowerCase()
@@ -780,6 +1546,7 @@ class StakingModalNew {
 
     setZapSlippage(value) {
         if (value === 'custom') {
+            this.selectZapCustomSlippage();
             const customInput = document.getElementById('zap-custom-slippage-input');
             if (customInput) customInput.focus();
         } else {
@@ -788,6 +1555,7 @@ class StakingModalNew {
                 this.zapSlippageBps = parsed;
                 this.zapCustomSlippage = '';
                 this.zapCustomSlippageError = '';
+                this.zapCustomSlippageSelected = false;
                 this.resetZapQuoteState();
                 this.renderTabContent();
                 this.debounceZapQuote();
@@ -813,19 +1581,44 @@ class StakingModalNew {
     }
 
     isZapCustomSlippageActive() {
-        return !!this.zapCustomSlippage && !this.hasInvalidZapCustomSlippage();
+        return (this.zapCustomSlippageSelected || !!this.zapCustomSlippage)
+            && !this.hasInvalidZapCustomSlippage();
+    }
+
+    updateZapSlippageButtonState() {
+        document.querySelectorAll('.zap-slippage-btn').forEach(button => {
+            if (button.classList.contains('remove-liquidity-slippage-btn')) {
+                return;
+            }
+
+            const isCustom = button.dataset?.slippage === 'custom';
+            const isPreset = Number(button.dataset?.slippage) === this.zapSlippageBps;
+            const isActive = isCustom
+                ? this.isZapCustomSlippageActive()
+                : isPreset && !this.zapCustomSlippageSelected && !this.zapCustomSlippage;
+            button.classList.toggle('active', isActive);
+        });
+    }
+
+    selectZapCustomSlippage() {
+        this.zapCustomSlippageSelected = true;
+        this.updateZapSlippageButtonState();
     }
 
     setZapCustomSlippageInput(value) {
         const sanitizedValue = this.applyDecimalLimit(String(value ?? ''), 2);
         this.zapCustomSlippage = sanitizedValue;
+        this.zapCustomSlippageSelected = true;
         this.zapCustomSlippageError = this.getZapCustomSlippageError(sanitizedValue);
+        this.updateZapSlippageButtonState();
+        this.updateCustomSlippageFieldError(
+            'zap-custom-slippage-input',
+            'zap-custom-slippage-error',
+            this.zapCustomSlippageError
+        );
 
         if (this.zapCustomSlippageError) {
-            this.resetZapQuoteState({
-                status: 'error',
-                error: this.zapCustomSlippageError
-            });
+            this.resetZapQuoteState();
             this.stopZapQuoteAutoRefresh();
             this.updateZapQuotePanel();
             this.updateZapButton();
@@ -1095,8 +1888,7 @@ class StakingModalNew {
         return this.getZapQuoteSummaryEntry(paths, fallback).value;
     }
 
-    getZapQuoteSummaryEntry(paths, fallback = 'N/A') {
-        const data = this.getZapRouteData();
+    getRouteSummaryEntry(data, paths, fallback = 'N/A') {
         for (const path of paths) {
             const value = path.split('.').reduce((current, key) => current?.[key], data);
             if (value !== undefined && value !== null && value !== '') {
@@ -1104,6 +1896,134 @@ class StakingModalNew {
             }
         }
         return { value: fallback, path: null };
+    }
+
+    getZapQuoteSummaryEntry(paths, fallback = 'N/A') {
+        return this.getRouteSummaryEntry(this.getZapRouteData(), paths, fallback);
+    }
+
+    getRemoveLiquidityQuoteSummaryEntry(paths, fallback = 'N/A') {
+        return this.getRouteSummaryEntry(this.getRemoveLiquidityRouteData(), paths, fallback);
+    }
+
+    isRemoveLiquidityOutputTokenAddress(address, outputToken = this.removeLiquiditySelectedOutputToken) {
+        if (!address || !outputToken) {
+            return false;
+        }
+
+        const service = this.getKyberZapService();
+        const normalizedAddress = service.normalizeAddress(address);
+        const normalizedOutputAddress = service.normalizeAddress(this.getRemoveLiquidityOutputTokenAddressForKyber(outputToken));
+        if (normalizedAddress === normalizedOutputAddress) {
+            return true;
+        }
+
+        const wrappedNativeAddress = service.normalizeAddress(this.getKyberZapNetworkConfig()?.WRAPPED_NATIVE_TOKEN_ADDRESS);
+        return this.isNativeZapToken(outputToken.address)
+            && (this.isNativeZapToken(address) || (!!wrappedNativeAddress && normalizedAddress === wrappedNativeAddress));
+    }
+
+    getRemoveLiquidityOutputTokenByAddress(address) {
+        if (!address) {
+            return null;
+        }
+
+        return this.removeLiquidityOutputTokens.find(token =>
+            this.isRemoveLiquidityOutputTokenAddress(address, token)
+        ) || null;
+    }
+
+    parseZapUsdValue(value) {
+        const parsed = Number(String(value ?? '').replace(/[$,]/g, ''));
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    getRemoveLiquidityActionTokenCandidate(token, outputToken) {
+        if (!token?.amount || !this.isRemoveLiquidityOutputTokenAddress(token.address, outputToken)) {
+            return null;
+        }
+
+        const amount = String(token.amount);
+        if (!/^\d+$/.test(amount)) {
+            return null;
+        }
+
+        return {
+            amount,
+            amountUsd: this.parseZapUsdValue(token.amountUsd ?? token.amount_usd)
+        };
+    }
+
+    getRemoveLiquidityActionOutputAmount(outputToken) {
+        const data = this.getRemoveLiquidityRouteData();
+        const actions = data?.zapDetails?.actions;
+        if (!Array.isArray(actions)) {
+            return null;
+        }
+
+        const finalUsdEntry = this.getRemoveLiquidityQuoteSummaryEntry([
+            'zapDetails.finalAmountUsd',
+            'amountOutUsd',
+            'receivedUsd',
+            'routeSummary.amountOutUsd'
+        ], null);
+        const finalUsd = this.parseZapUsdValue(finalUsdEntry.value);
+        if (finalUsd === null) {
+            return null;
+        }
+
+        const candidates = [];
+        const addTokenAmount = token => {
+            const candidate = this.getRemoveLiquidityActionTokenCandidate(token, outputToken);
+            if (candidate) {
+                candidates.push(candidate);
+            }
+        };
+        const addTokens = tokens => {
+            if (Array.isArray(tokens)) {
+                tokens.forEach(addTokenAmount);
+            }
+        };
+        const addSwapOutputs = swapAction => {
+            if (Array.isArray(swapAction?.swaps)) {
+                swapAction.swaps.forEach(swap => addTokenAmount(swap?.tokenOut));
+            }
+        };
+
+        actions.forEach(action => {
+            const removeLiquidity = action?.removeLiquidity;
+            addTokens(removeLiquidity?.tokens);
+            addTokenAmount(removeLiquidity?.token0);
+            addTokenAmount(removeLiquidity?.token1);
+
+            addSwapOutputs(action?.aggregatorSwap);
+            addSwapOutputs(action?.poolSwap);
+            addTokens(action?.refund?.tokens);
+        });
+
+        const tolerance = Math.max(0.01, Math.abs(finalUsd) * 0.02);
+        const finalCandidate = candidates.find(candidate =>
+            candidate.amountUsd !== null && Math.abs(candidate.amountUsd - finalUsd) <= tolerance
+        );
+        return finalCandidate?.amount || null;
+    }
+
+    getRemoveLiquidityEstimatedOutputEntry(outputToken, fallback = 'N/A') {
+        const directEntry = this.getRemoveLiquidityQuoteSummaryEntry([
+            'zapDetails.finalAmount',
+            'zapDetails.outputAmount',
+            'outputAmount',
+            'amountOut',
+            'routeSummary.amountOut'
+        ], null);
+        if (directEntry.value !== null) {
+            return directEntry;
+        }
+
+        const actionAmount = this.getRemoveLiquidityActionOutputAmount(outputToken);
+        return actionAmount
+            ? { value: actionAmount, path: 'zapDetails.actions' }
+            : { value: fallback, path: null };
     }
 
     getZapHighSlippageBps() {
@@ -1193,6 +2113,22 @@ class StakingModalNew {
         return this.formatZapDisplayAmount(value, decimals, symbol);
     }
 
+    formatZapFeeDetailsDisplay(feeDetails) {
+        const details = Array.isArray(feeDetails) ? feeDetails : (feeDetails ? [feeDetails] : []);
+        if (!details.length) {
+            return 'N/A';
+        }
+
+        const nonZeroDetails = details.filter(detail => !this.isZeroZapAmount(detail?.amount));
+        if (!nonZeroDetails.length) {
+            return 'None';
+        }
+
+        return nonZeroDetails
+            .map(detail => this.formatZapFeeDisplay(detail.amount, detail.decimals, detail.symbol))
+            .join(' + ');
+    }
+
     getZapTokenByAddress(address) {
         if (!address) {
             return null;
@@ -1209,7 +2145,7 @@ class StakingModalNew {
         }) || null;
     }
 
-    getZapProtocolFeeDetails(data = this.getZapRouteData()) {
+    getKyberProtocolFeeDetailsList(data, fallbackToken = null, tokenResolver = () => null) {
         const protocolFeeSources = [];
         const addProtocolFeeSource = (source) => {
             if (source && typeof source === 'object') {
@@ -1227,39 +2163,71 @@ class StakingModalNew {
         }
 
         for (const source of protocolFeeSources) {
-            const tokenFee = Array.isArray(source?.tokens)
-                ? (source.tokens.find(token => !this.isZeroZapAmount(token?.amount)) || source.tokens[0])
-                : null;
-            const amount = tokenFee?.amount ?? source?.amount ?? null;
+            if (Array.isArray(source?.tokens) && source.tokens.length) {
+                const tokenDetails = source.tokens
+                    .filter(token => token?.amount !== null && token?.amount !== undefined)
+                    .map(token => {
+                        const knownToken = tokenResolver(token?.address);
+                        return {
+                            amount: token.amount,
+                            symbol: token?.symbol || knownToken?.symbol || this.formatAddress(token?.address) || '',
+                            decimals: Number(token?.decimals ?? knownToken?.decimals ?? 18) || 18
+                        };
+                    });
 
-            if (amount !== null && amount !== undefined) {
-                const knownToken = this.getZapTokenByAddress(tokenFee?.address);
-                return {
-                    amount,
-                    symbol: tokenFee?.symbol || knownToken?.symbol || this.zapSelectedToken?.symbol || '',
-                    decimals: Number(tokenFee?.decimals ?? knownToken?.decimals ?? this.zapSelectedToken?.decimals ?? 18) || 18
-                };
+                if (tokenDetails.length) {
+                    return tokenDetails;
+                }
+            }
+
+            if (source?.amount !== null && source?.amount !== undefined) {
+                return [{
+                    amount: source.amount,
+                    symbol: fallbackToken?.symbol || '',
+                    decimals: fallbackToken?.decimals ?? 18
+                }];
             }
         }
 
-        const fallbackAmount = this.getZapQuoteSummaryValue(['zapDetails.feeAmount', 'fee'], null);
+        const fallbackAmount = this.getRouteSummaryEntry(data, ['zapDetails.feeAmount', 'fee'], null).value;
         if (fallbackAmount !== null && fallbackAmount !== undefined) {
-            return {
+            return [{
                 amount: fallbackAmount,
-                symbol: this.zapSelectedToken?.symbol || '',
-                decimals: this.zapSelectedToken?.decimals ?? 18
-            };
+                symbol: fallbackToken?.symbol || '',
+                decimals: fallbackToken?.decimals ?? 18
+            }];
         }
 
         if (data?.protocolFee !== null && data?.protocolFee !== undefined && typeof data.protocolFee !== 'object') {
-            return {
+            return [{
                 amount: data.protocolFee,
-                symbol: this.zapSelectedToken?.symbol || '',
-                decimals: this.zapSelectedToken?.decimals ?? 18
-            };
+                symbol: fallbackToken?.symbol || '',
+                decimals: fallbackToken?.decimals ?? 18
+            }];
         }
 
         return null;
+    }
+
+    getKyberProtocolFeeDetails(data, fallbackToken = null, tokenResolver = () => null) {
+        const feeDetails = this.getKyberProtocolFeeDetailsList(data, fallbackToken, tokenResolver);
+        return Array.isArray(feeDetails) ? feeDetails[0] || null : feeDetails;
+    }
+
+    getZapProtocolFeeDetails(data = this.getZapRouteData()) {
+        return this.getKyberProtocolFeeDetails(
+            data,
+            this.zapSelectedToken,
+            address => this.getZapTokenByAddress(address)
+        );
+    }
+
+    getRemoveLiquidityProtocolFeeDetails(data = this.getRemoveLiquidityRouteData()) {
+        return this.getKyberProtocolFeeDetailsList(
+            data,
+            this.removeLiquiditySelectedOutputToken,
+            address => this.getRemoveLiquidityOutputTokenByAddress(address)
+        );
     }
 
     formatZapBalanceDisplay(balance, token) {
@@ -1432,11 +2400,12 @@ class StakingModalNew {
             iconOptions.iconUrl = options.iconUrl;
         }
         const iconHtml = this.renderZapTokenIcon(token, iconOptions);
+        const rowClass = options.rowClass || 'zap-token-option';
 
         return `
             <button
                 type="button"
-                class="zap-token-option ${isSelected ? 'active' : ''}"
+                class="${this.escapeHtml(rowClass)} ${isSelected ? 'active' : ''}"
                 data-token-address="${this.escapeHtml(address)}"
                 role="option"
                 aria-selected="${isSelected ? 'true' : 'false'}"
@@ -1813,14 +2782,88 @@ class StakingModalNew {
             return;
         }
 
-        const shouldDisable = this.isExecutingUnstake || !hasAmount || !hasSufficientStaked;
+        const shouldDisable = this.isExecutingUnstake
+            || !hasAmount
+            || !hasSufficientStaked;
         unstakeButton.disabled = shouldDisable;
-        unstakeButton.title = (!hasSufficientStaked && hasAmount)
-            ? 'Insufficient staked balance'
-            : 'Unstake LP Tokens';
+        if (!hasSufficientStaked && hasAmount) {
+            unstakeButton.title = 'Insufficient staked balance';
+        } else {
+            unstakeButton.title = 'Unstake LP Tokens';
+        }
 
         if (buttonIcon) buttonIcon.textContent = 'remove';
         if (buttonText) buttonText.textContent = ' Unstake LP Tokens';
+    }
+
+    updateRemoveLiquidityButton() {
+        const removeButton = document.querySelector('.modal-actions .btn-primary[onclick*="safeModalExecuteRemoveLiquidity"]');
+        if (!removeButton) return;
+
+        const buttonIcon = removeButton.querySelector('.material-icons');
+        const buttonText = removeButton.childNodes[removeButton.childNodes.length - 1];
+        const amount = parseFloat(this.removeLiquidityAmount) || 0;
+        const hasAmount = amount > 0;
+        const balanceRaw = this.userBalanceRaw || window.ethers.BigNumber.from(0);
+        const removeUnits = window.ethers.utils.parseUnits(this.removeLiquidityAmount || '0', this.userBalanceDecimals);
+        const hasSufficientBalance = balanceRaw.gte(removeUnits);
+        const hasValidPreview = this.removeLiquidityPreviewStatus === 'ready'
+            && this.removeLiquidityPreview?.supported;
+        const shouldWaitForPreview = hasAmount && !hasValidPreview;
+        const approvePhase = this.actionPhases?.approveRemoveLiquidity || 'idle';
+        const removePhase = this.actionPhases?.removeLiquidity || 'idle';
+        const approveZapOutPhase = this.actionPhases?.approveRemoveLiquidityZapOut || 'idle';
+        const zapOutPhase = this.actionPhases?.zapOutLP || 'idle';
+        const activePhase = approvePhase !== 'idle'
+            ? approvePhase
+            : removePhase !== 'idle'
+                ? removePhase
+                : approveZapOutPhase !== 'idle'
+                    ? approveZapOutPhase
+                    : zapOutPhase;
+
+        if (activePhase !== 'idle') {
+            removeButton.disabled = true;
+            if (buttonIcon) buttonIcon.textContent = 'hourglass_empty';
+            if (buttonText) {
+                if (approvePhase !== 'idle') {
+                    buttonText.textContent = approvePhase === 'userApproval' ? ' Approve LP...' : ' Confirming LP Approval...';
+                } else if (removePhase !== 'idle') {
+                    buttonText.textContent = removePhase === 'userApproval' ? ' Remove Liquidity...' : ' Removing Liquidity...';
+                } else if (approveZapOutPhase !== 'idle') {
+                    buttonText.textContent = approveZapOutPhase === 'userApproval' ? ' Approve LP...' : ' Confirming LP Approval...';
+                } else {
+                    buttonText.textContent = zapOutPhase === 'userApproval' ? ' Zap Out...' : ' Zapping Out...';
+                }
+            }
+            return;
+        }
+
+        const shouldDisable = this.isExecutingRemoveLiquidity
+            || !hasAmount
+            || !hasSufficientBalance
+            || shouldWaitForPreview;
+        removeButton.disabled = shouldDisable;
+        if (!hasSufficientBalance && hasAmount) {
+            removeButton.title = 'Insufficient LP token balance';
+        } else if (shouldWaitForPreview) {
+            removeButton.title = this.removeLiquidityPreviewError || (
+                this.removeLiquidityZapOutEnabled
+                    ? 'Wait for a supported Kyber zap-out preview.'
+                    : 'Wait for a supported remove-liquidity preview.'
+            );
+        } else {
+            removeButton.title = this.removeLiquidityZapOutEnabled
+                ? 'Zap out LP liquidity to one token'
+                : 'Remove LP liquidity';
+        }
+
+        if (buttonIcon) buttonIcon.textContent = 'swap_horiz';
+        if (buttonText) {
+            buttonText.textContent = this.removeLiquidityZapOutEnabled
+                ? ' Zap Out LP'
+                : ' Remove LP Liquidity';
+        }
     }
 
     /**
@@ -2026,20 +3069,25 @@ class StakingModalNew {
         this.zapQuoteInFlightKey = '';
         this.zapCustomSlippage = '';
         this.zapCustomSlippageError = '';
+        this.zapCustomSlippageSelected = false;
         this.zapQuoteRequestId += 1;
         this.stopZapQuoteAutoRefresh();
         this.clearZapQuoteRateLimitTimer();
+        this.resetRemoveLiquidityFormState();
         this.isApproved = false;
         this.needsApproval = false;
         this.resetActionStates(false);
         
-        // Clear DOM inputs and sliders for both stake and unstake
-        ['stake', 'unstake'].forEach(type => {
+        // Clear DOM inputs and sliders for amount-based tabs
+        ['stake', 'unstake', 'remove-liquidity'].forEach(type => {
             const input = document.getElementById(`${type}-amount-input`);
             const slider = document.getElementById(`${type}-slider`);
             if (input) input.value = '';
             if (slider) slider.value = '0';
         });
+        this.updateStakeUsdEstimate();
+        this.updateUnstakeUsdEstimate();
+        this.updateRemoveLiquidityUsdEstimate();
 
         const zapInput = document.getElementById('zap-amount-input');
         if (zapInput) zapInput.value = '';
@@ -2080,6 +3128,7 @@ class StakingModalNew {
     switchTab(tab) {
         this.currentTab = tab;
         this.syncZapQuoteAutoRefresh();
+        this.syncRemoveLiquidityPreviewAutoRefresh();
 
         // Update tab buttons
         document.querySelectorAll('.tab-button').forEach(btn => {
@@ -2105,6 +3154,9 @@ class StakingModalNew {
             case 'claim':
                 tabContent.innerHTML = this.renderClaimTab();
                 break;
+            case 'remove-liquidity':
+                tabContent.innerHTML = this.renderRemoveLiquidityTab();
+                break;
             case 'zap':
                 tabContent.innerHTML = this.renderZapTab();
                 break;
@@ -2127,6 +3179,7 @@ class StakingModalNew {
                 }
                 this.stakeAmount = sanitizedValue;
                 this.updateStakeEstimatedAPR();
+                this.updateStakeUsdEstimate();
                 this.updateButtonStates();
             });
         }
@@ -2138,6 +3191,7 @@ class StakingModalNew {
                     unstakeInput.value = sanitizedValue;
                 }
                 this.unstakeAmount = sanitizedValue;
+                this.updateUnstakeUsdEstimate();
                 this.updateButtonStates();
             });
         }
@@ -2150,6 +3204,7 @@ class StakingModalNew {
         this.updateStakeButton();
         this.updateUnstakeButton();
         this.updateClaimButton();
+        this.updateRemoveLiquidityButton();
         this.updateZapButton();
     }
 
@@ -2157,7 +3212,7 @@ class StakingModalNew {
         return `
             <div class="balance-info">
                 <span class="balance-label">Available LP Tokens:</span>
-                <span class="balance-value">${this.userBalance} LP</span>
+                <span class="balance-value">${this.userBalance} LP${this.renderInlineLpUsdEstimate(this.userBalance)}</span>
             </div>
 
             <div class="form-group">
@@ -2171,6 +3226,7 @@ class StakingModalNew {
                     min="0"
                     inputmode="decimal"
                 >
+                ${this.renderLpUsdEstimateElement('stake-usd-estimate', this.stakeAmount)}
                 <div class="slider-container">
                     <input
                         type="range"
@@ -2234,11 +3290,15 @@ class StakingModalNew {
         }
     }
 
+    updateStakeUsdEstimate() {
+        this.updateLpUsdEstimate('stake-usd-estimate', this.stakeAmount);
+    }
+
     renderUnstakeTab() {
         return `
             <div class="balance-info">
                 <span class="balance-label">Staked LP Tokens:</span>
-                <span class="balance-value">${this.userStaked} LP</span>
+                <span class="balance-value">${this.userStaked} LP${this.renderInlineLpUsdEstimate(this.userStaked)}</span>
             </div>
 
             <div class="form-group">
@@ -2252,6 +3312,7 @@ class StakingModalNew {
                     min="0"
                     inputmode="decimal"
                 >
+                ${this.renderLpUsdEstimateElement('unstake-usd-estimate', this.unstakeAmount)}
                 <div class="slider-container">
                     <input
                         type="range"
@@ -2298,6 +3359,507 @@ class StakingModalNew {
         `;
     }
 
+    updateUnstakeUsdEstimate() {
+        this.updateLpUsdEstimate('unstake-usd-estimate', this.unstakeAmount);
+    }
+
+    renderRemoveLiquidityTab() {
+        const balanceError = this.getRemoveLiquidityBalanceError();
+        const removeLiquidityAmount = parseFloat(this.removeLiquidityAmount) || 0;
+        const removeLiquidityMax = parseFloat(this.userBalance) || 0;
+        const removeLiquidityPercentage = removeLiquidityMax > 0
+            ? Math.min(100, Math.max(0, (removeLiquidityAmount / removeLiquidityMax) * 100))
+            : 0;
+        const activeRemoveLiquidityPercentage = [25, 50, 75, 100].find(percentage =>
+            Math.abs(removeLiquidityPercentage - percentage) < 0.001
+        );
+        const balanceErrorClass = balanceError ? '' : ' zap-balance-error-empty';
+
+        return `
+            <div class="balance-info">
+                <span class="balance-label">Available LP Tokens:</span>
+                <span class="balance-value">${this.userBalance} LP${this.renderInlineLpUsdEstimate(this.userBalance)}</span>
+            </div>
+
+            <div class="form-group remove-liquidity-amount-group">
+                <div class="zap-label-row zap-amount-label-row">
+                    <label class="form-label">Amount of LP to Remove</label>
+                    <div class="zap-percentage-buttons">
+                        <button type="button" class="zap-percentage-btn remove-liquidity-percentage-btn${activeRemoveLiquidityPercentage === 25 ? ' active' : ''}" data-percentage="25">25%</button>
+                        <button type="button" class="zap-percentage-btn remove-liquidity-percentage-btn${activeRemoveLiquidityPercentage === 50 ? ' active' : ''}" data-percentage="50">50%</button>
+                        <button type="button" class="zap-percentage-btn remove-liquidity-percentage-btn${activeRemoveLiquidityPercentage === 75 ? ' active' : ''}" data-percentage="75">75%</button>
+                        <button type="button" class="zap-percentage-btn remove-liquidity-percentage-btn${activeRemoveLiquidityPercentage === 100 ? ' active' : ''}" data-percentage="100">MAX</button>
+                    </div>
+                </div>
+                <input
+                    type="number"
+                    id="remove-liquidity-amount-input"
+                    class="form-input"
+                    placeholder="0.00"
+                    value="${this.removeLiquidityAmount}"
+                    min="0"
+                    inputmode="decimal"
+                >
+                <div class="remove-liquidity-meta-row">
+                    ${this.renderLpUsdEstimateElement('remove-liquidity-usd-estimate', this.removeLiquidityAmount)}
+                    <label class="checkbox-label remove-liquidity-checkbox-label">
+                        <input
+                            type="checkbox"
+                            id="remove-liquidity-checkbox"
+                            ${this.removeLiquidityZapOutEnabled ? 'checked' : ''}
+                        >
+                        <span class="checkmark"></span>
+                        Convert to one preferred token
+                    </label>
+                    <div id="remove-liquidity-balance-error" class="zap-field-error zap-balance-error${balanceErrorClass}" aria-live="polite">${this.escapeHtml(balanceError)}</div>
+                </div>
+            </div>
+
+            ${this.renderRemoveLiquidityControls()}
+
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="safeModalClose()">Cancel</button>
+                <button class="btn btn-primary remove-liquidity-action-btn" onclick="safeModalExecuteRemoveLiquidity()" ${!this.removeLiquidityAmount || parseFloat(this.removeLiquidityAmount) === 0 ? 'disabled' : ''}>
+                    <span class="material-icons">swap_horiz</span>
+                    ${this.removeLiquidityZapOutEnabled ? 'Zap Out LP' : 'Remove LP Liquidity'}
+                </button>
+            </div>
+        `;
+    }
+
+    updateRemoveLiquidityUsdEstimate() {
+        this.updateLpUsdEstimate('remove-liquidity-usd-estimate', this.removeLiquidityAmount);
+    }
+
+    formatRemoveLiquidityTokenAmount(amount, token) {
+        if (!amount || !token) {
+            return '-';
+        }
+
+        return this.formatZapDisplayAmount(amount.raw ?? amount.formatted, token.decimals ?? 18, token.symbol || '');
+    }
+
+    formatRemoveLiquidityMinOutputAmount(value, token, fallback = '-') {
+        const valueText = String(value ?? '');
+        if (!/^\d+$/.test(valueText) || !token) {
+            return fallback;
+        }
+
+        try {
+            const service = this.getRemoveLiquidityService();
+            const minAmount = service.calculateMinAmount(
+                service.toBigNumber(valueText),
+                this.removeLiquiditySlippageBps
+            );
+            return this.formatZapDisplayAmount(minAmount.toString(), token.decimals ?? 18, token.symbol || '');
+        } catch (error) {
+            return fallback;
+        }
+    }
+
+    renderRemoveLiquidityControls() {
+        const slippageOptions = [10, 50, 100];
+        const slippageDisplay = `${(Number(this.removeLiquiditySlippageBps) / 100).toFixed(2)}%`;
+        const settingsPanel = this.removeLiquiditySettingsOpen ? `
+                <div class="remove-liquidity-settings-panel">
+                    <div class="form-group">
+                        <label
+                            class="form-label"
+                            title="Maximum output movement allowed before the transaction reverts."
+                            data-tooltip="Maximum output movement allowed before the transaction reverts."
+                            tabindex="0"
+                            role="button"
+                            aria-label="Max Slippage: Maximum output movement allowed before the transaction reverts."
+                        >Max Slippage</label>
+                        <div class="remove-liquidity-slippage-row">
+                            ${slippageOptions.map(option => `
+                                <button
+                                    type="button"
+                                    class="zap-slippage-btn remove-liquidity-slippage-btn ${this.removeLiquiditySlippageBps === option && !this.removeLiquidityCustomSlippageSelected && !this.removeLiquidityCustomSlippage ? 'active' : ''}"
+                                    data-slippage="${option}"
+                                >
+                                    ${(option / 100).toFixed(option < 10 ? 2 : 1)}%
+                                </button>
+                            `).join('')}
+                            <button
+                                type="button"
+                                class="zap-slippage-btn remove-liquidity-slippage-btn ${this.isRemoveLiquidityCustomSlippageActive() ? 'active' : ''}"
+                                data-slippage="custom"
+                            >
+                                Custom
+                            </button>
+                            <input
+                                type="number"
+                                id="remove-liquidity-custom-slippage-input"
+                                class="form-input remove-liquidity-custom-slippage"
+                                placeholder="${slippageDisplay}"
+                                value="${this.escapeHtml(this.removeLiquidityCustomSlippage)}"
+                                min="0.01"
+                                max="100"
+                                step="0.01"
+                                aria-invalid="${this.removeLiquidityCustomSlippageError ? 'true' : 'false'}"
+                                ${this.removeLiquidityCustomSlippageError ? 'aria-describedby="remove-liquidity-custom-slippage-error"' : ''}
+                            >
+                        </div>
+                        <div id="remove-liquidity-custom-slippage-error" class="zap-field-error custom-slippage-error" aria-live="polite">${this.escapeHtml(this.removeLiquidityCustomSlippageError)}</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label
+                            class="form-label"
+                            for="remove-liquidity-deadline-input"
+                            title="Latest time this transaction can execute before it reverts."
+                            data-tooltip="Latest time this transaction can execute before it reverts."
+                            tabindex="0"
+                            role="button"
+                            aria-label="Transaction time limit: Latest time this transaction can execute before it reverts."
+                        >Transaction time limit</label>
+                        <div class="remove-liquidity-deadline-row">
+                            <input
+                                type="number"
+                                id="remove-liquidity-deadline-input"
+                                class="form-input"
+                                value="${this.escapeHtml(this.removeLiquidityDeadlineMinutes)}"
+                                min="1"
+                                max="4320"
+                                step="1"
+                                inputmode="numeric"
+                            >
+                            <span class="remove-liquidity-deadline-unit">minutes</span>
+                        </div>
+                    </div>
+                </div>
+        ` : '';
+
+        return `
+            <div class="remove-liquidity-section">
+                ${this.removeLiquidityZapOutEnabled ? this.renderRemoveLiquidityOutputTokenPicker() : ''}
+                <div class="remove-liquidity-settings-summary">
+                    <button
+                        type="button"
+                        class="remove-liquidity-settings-toggle"
+                        aria-expanded="${this.removeLiquiditySettingsOpen ? 'true' : 'false'}"
+                        title="Adjust max slippage and transaction time limit"
+                    >
+                        <span
+                            class="remove-liquidity-settings-label"
+                        >Max slippage:</span>
+                        <strong>${slippageDisplay}</strong>
+                        <span class="material-icons" aria-hidden="true">settings</span>
+                    </button>
+                </div>
+                ${settingsPanel}
+
+                <div id="remove-liquidity-preview-panel">
+                    ${this.renderRemoveLiquidityPreviewPanel()}
+                </div>
+            </div>
+        `;
+    }
+
+    renderRemoveLiquidityOutputTokenPicker() {
+        const isCustomTokenMode = this.removeLiquidityOutputTokenAddress === 'custom';
+        const selectedToken = isCustomTokenMode ? null : (this.removeLiquiditySelectedOutputToken || this.removeLiquidityOutputTokens[0]);
+        const selectedPickerToken = isCustomTokenMode
+            ? { symbol: 'Custom', address: 'custom' }
+            : selectedToken;
+        const selectedPickerLabelParts = isCustomTokenMode
+            ? { symbol: 'Custom token', shortAddress: '', fullLabel: 'Custom token' }
+            : this.getZapTokenLabelParts(selectedToken);
+        const selectedPickerBalance = isCustomTokenMode ? 'Add by address' : (selectedToken?.name || selectedToken?.symbol || '--');
+        const tokenOptions = this.removeLiquidityOutputTokens.map(token => this.renderZapTokenPickerRow(
+            token,
+            selectedPickerToken?.address,
+            {
+                rowClass: 'zap-token-option remove-liquidity-output-token-option',
+                balanceLabel: token.name || token.symbol || '--'
+            }
+        )).join('') + this.renderZapTokenPickerRow(
+            { symbol: 'Custom', address: 'custom' },
+            selectedPickerToken?.address,
+            {
+                rowClass: 'zap-token-option remove-liquidity-output-token-option',
+                label: 'Custom token',
+                balanceLabel: 'Add by address',
+                iconText: '+',
+                iconClass: 'zap-token-icon-custom'
+            }
+        );
+
+        return `
+            <div class="form-group">
+                <label class="form-label">Output Token</label>
+                <details class="zap-token-picker remove-liquidity-output-token-picker">
+                    <summary class="zap-token-trigger">
+                        ${this.renderZapTokenIcon(selectedPickerToken, isCustomTokenMode ? {
+                            iconText: '+',
+                            iconClass: 'zap-token-icon-custom',
+                            iconUrl: ''
+                        } : {})}
+                        <span class="zap-token-option-text">
+                            <span class="zap-token-option-label">
+                                <span>${this.escapeHtml(selectedPickerLabelParts.symbol || 'Select token')}</span>${selectedPickerLabelParts.shortAddress ? ` <span class="zap-token-option-address">${this.escapeHtml(selectedPickerLabelParts.shortAddress)}</span>` : ''}
+                            </span>
+                            <span class="zap-token-option-balance">${this.escapeHtml(selectedPickerBalance || '--')}</span>
+                        </span>
+                        <span class="material-icons zap-token-expand" aria-hidden="true">expand_more</span>
+                    </summary>
+                    <div class="zap-token-menu" role="listbox" aria-label="Zap-out output token">
+                        ${tokenOptions}
+                    </div>
+                </details>
+            </div>
+
+            ${isCustomTokenMode ? `
+                <div class="zap-custom-token-row">
+                    <input
+                        type="text"
+                        id="remove-liquidity-custom-output-token-input"
+                        class="form-input"
+                        placeholder="0x..."
+                        value="${this.escapeHtml(this.removeLiquidityCustomOutputTokenAddress)}"
+                        spellcheck="false"
+                    >
+                    <button class="btn btn-secondary zap-token-add-btn" onclick="safeModalAddRemoveLiquidityCustomOutputToken()">
+                        <span class="material-icons">add</span>
+                        Add
+                    </button>
+                </div>
+                ${this.removeLiquidityCustomOutputTokenError ? `<div class="zap-field-error">${this.escapeHtml(this.removeLiquidityCustomOutputTokenError)}</div>` : ''}
+            ` : ''}
+        `;
+    }
+
+    renderRemoveLiquidityPreviewPanel() {
+        const balanceError = this.getRemoveLiquidityBalanceError();
+        const invalidCustomSlippage = this.hasInvalidRemoveLiquidityCustomSlippage();
+        const isLoading = this.removeLiquidityPreviewStatus === 'loading';
+        const hasPreview = this.removeLiquidityPreviewStatus === 'ready' && this.removeLiquidityPreview?.supported;
+        const isError = this.removeLiquidityPreviewStatus === 'error' || !!balanceError;
+        const pendingValue = isLoading ? '...' : '-';
+        const cardClass = [
+            'zap-quote-card',
+            'remove-liquidity-preview-card',
+            isLoading ? 'zap-quote-loading' : '',
+            isError ? 'zap-quote-error' : '',
+            !hasPreview && !isLoading && !isError ? 'zap-quote-placeholder' : ''
+        ].filter(Boolean).join(' ');
+        if (this.removeLiquidityZapOutEnabled) {
+            const outputToken = this.removeLiquiditySelectedOutputToken;
+            const outputSymbol = outputToken?.symbol || 'token';
+            const isPositionBalanceError = !!balanceError;
+            let summary = this.removeLiquidityAmount
+                ? `Checking Kyber zap-out to ${outputSymbol}...`
+                : `Enter an amount to preview ${outputSymbol} output.`;
+            let estimatedOutput = pendingValue;
+            let minimumReceivedDisplay = pendingValue;
+            let priceImpactDisplay = pendingValue;
+            let feeDisplay = pendingValue;
+            let priceImpactRiskClass = '';
+            let slippageDisplay = `${(Number(this.removeLiquiditySlippageBps) / 100).toFixed(2)}%`;
+            let slippageRiskClass = this.isHighZapSlippage(this.removeLiquiditySlippageBps) ? 'zap-risk-high' : '';
+            const warningMessages = [];
+
+            if (isLoading) {
+                summary = 'Loading Kyber zap-out route...';
+            } else if (invalidCustomSlippage) {
+                summary = `Enter a valid custom slippage to preview ${outputSymbol} output.`;
+            } else if (isPositionBalanceError) {
+                summary = 'Kyber cannot quote more LP than your available balance.';
+            } else if (isError) {
+                summary = this.removeLiquidityPreviewError || 'Unable to fetch a Kyber zap-out preview.';
+            } else if (hasPreview) {
+                const data = this.getRemoveLiquidityRouteData();
+                const outputEntry = this.getRemoveLiquidityEstimatedOutputEntry(outputToken, pendingValue);
+                const priceImpactEntry = this.getRemoveLiquidityQuoteSummaryEntry([
+                    'zapDetails.priceImpact',
+                    'zapDetails.priceImpactPcm',
+                    'priceImpact',
+                    'priceImpactPcm'
+                ], pendingValue);
+                estimatedOutput = outputEntry.value === pendingValue
+                    ? pendingValue
+                    : this.formatZapDisplayAmount(outputEntry.value, outputToken?.decimals ?? 18, outputSymbol);
+                minimumReceivedDisplay = outputEntry.value === pendingValue
+                    ? pendingValue
+                    : this.formatRemoveLiquidityMinOutputAmount(outputEntry.value, outputToken, pendingValue);
+                priceImpactDisplay = priceImpactEntry.value === pendingValue ? pendingValue : this.formatZapPercent(priceImpactEntry);
+                priceImpactRiskClass = this.isHighZapPriceImpact(priceImpactEntry.value, priceImpactEntry.path) ? 'zap-risk-high' : '';
+                if (priceImpactRiskClass) {
+                    warningMessages.push('High price impact. You may receive significantly less LP value than expected.');
+                }
+                const suggestedSlippage = data?.suggestedSlippage || data?.slippage || this.removeLiquiditySlippageBps;
+                slippageDisplay = `${(Number(suggestedSlippage) / 100).toFixed(2)}%`;
+                slippageRiskClass = this.isHighZapSlippage(suggestedSlippage) ? 'zap-risk-high' : '';
+                feeDisplay = this.formatZapFeeDetailsDisplay(this.getRemoveLiquidityProtocolFeeDetails(data));
+                summary = `Kyber zap-out to ${outputSymbol}`;
+            }
+            if (slippageRiskClass) {
+                warningMessages.push('High slippage tolerance. This transaction may execute at a much worse rate.');
+            }
+
+            const rows = [];
+            if (isError || isPositionBalanceError) {
+                rows.push(this.renderZapQuoteRow(
+                    'Kyber quote',
+                    isPositionBalanceError ? 'Unavailable above LP balance' : 'Unsupported',
+                    '',
+                    'Kyber zap-out requires the selected wallet position to hold the requested LP amount.'
+                ));
+            }
+            rows.push(
+                this.renderZapQuoteRow(
+                    `Estimated ${outputSymbol}`,
+                    estimatedOutput,
+                    '',
+                    'Expected output token amount from the latest Kyber route.'
+                ),
+                this.renderZapQuoteRow(
+                    'Minimum received',
+                    minimumReceivedDisplay,
+                    '',
+                    'Transaction reverts if the final output is below this value after max slippage.'
+                ),
+                this.renderZapQuoteRow(
+                    'Kyber Zap Fee',
+                    feeDisplay,
+                    '',
+                    'Fee reported by the Kyber zap-out route, if one is included.'
+                ),
+                this.renderZapQuoteRow(
+                    'Price impact',
+                    priceImpactDisplay,
+                    priceImpactRiskClass,
+                    'Estimated effect of the route on execution price.'
+                ),
+                this.renderZapQuoteRow(
+                    'Slippage',
+                    slippageDisplay,
+                    slippageRiskClass,
+                    'Maximum output movement allowed before the transaction reverts.'
+                )
+            );
+
+            return this.renderRemoveLiquidityPreviewCard(cardClass, summary, rows, isLoading, 'Refresh Kyber zap-out preview', warningMessages);
+        }
+
+        let summary = this.removeLiquidityAmount
+            ? 'Checking remove liquidity support...'
+            : 'Enter an amount to preview pair token outputs.';
+        let dexDisplay = pendingValue;
+        let token0Display = pendingValue;
+        let token1Display = pendingValue;
+        let token0MinDisplay = pendingValue;
+        let token1MinDisplay = pendingValue;
+        const slippageDisplay = `${(Number(this.removeLiquiditySlippageBps) / 100).toFixed(2)}%`;
+        const slippageRiskClass = this.isHighZapSlippage(this.removeLiquiditySlippageBps) ? 'zap-risk-high' : '';
+        const warningMessages = [];
+        if (isLoading) {
+            summary = 'Loading LP reserves...';
+        } else if (invalidCustomSlippage) {
+            summary = 'Enter a valid custom slippage to preview remove liquidity.';
+        } else if (isError) {
+            summary = balanceError || this.removeLiquidityPreviewError || 'Remove liquidity is not supported for this pool.';
+            dexDisplay = this.removeLiquidityPreview?.factoryAddress
+                ? `Unsupported factory ${this.formatAddress(this.removeLiquidityPreview.factoryAddress)}`
+                : 'Unsupported';
+        } else if (hasPreview) {
+            const preview = this.removeLiquidityPreview;
+            dexDisplay = preview.adapter?.name || 'V2 DEX';
+            token0Display = this.formatRemoveLiquidityTokenAmount(preview.token0.amount, preview.token0);
+            token1Display = this.formatRemoveLiquidityTokenAmount(preview.token1.amount, preview.token1);
+            token0MinDisplay = this.formatRemoveLiquidityTokenAmount(preview.token0.minAmount, preview.token0);
+            token1MinDisplay = this.formatRemoveLiquidityTokenAmount(preview.token1.minAmount, preview.token1);
+            summary = `${preview.token0.symbol} + ${preview.token1.symbol} via ${dexDisplay}`;
+        }
+        if (slippageRiskClass) {
+            warningMessages.push('High slippage tolerance. This transaction may execute at a much worse rate.');
+        }
+
+        const estimatedPairDisplay = hasPreview
+            ? `${token0Display} + ${token1Display}`
+            : pendingValue;
+        const minimumPairDisplay = hasPreview
+            ? `${token0MinDisplay} + ${token1MinDisplay}`
+            : pendingValue;
+        let rows = [
+            this.renderZapQuoteRow(
+                'You receive',
+                estimatedPairDisplay,
+                '',
+                'Estimated pair token amounts returned by burning the selected LP amount.'
+            ),
+            this.renderZapQuoteRow(
+                'Minimum received',
+                minimumPairDisplay,
+                '',
+                'Transaction reverts if either token output is below this value after max slippage.'
+            ),
+            this.renderZapQuoteRow(
+                'Slippage',
+                slippageDisplay,
+                slippageRiskClass,
+                'Maximum output movement allowed before the transaction reverts.'
+            )
+        ];
+
+        return this.renderRemoveLiquidityPreviewCard(cardClass, summary, rows, isLoading, 'Refresh remove-liquidity preview', warningMessages);
+    }
+
+    renderRemoveLiquidityPreviewCard(cardClass, summary, rows, isLoading, refreshLabel, warningMessages = []) {
+        const countdownDisplay = this.canAutoRefreshRemoveLiquidityPreview()
+            ? `${this.removeLiquidityPreviewCountdown}s`
+            : '--';
+
+        return `
+            <div class="${cardClass}">
+                <div class="zap-quote-header">
+                    <div class="zap-route-summary">${this.escapeHtml(summary)}</div>
+                    <div class="zap-refresh-controls">
+                        <span id="remove-liquidity-preview-countdown" class="zap-quote-countdown">${this.escapeHtml(countdownDisplay)}</span>
+                        <button
+                            type="button"
+                            class="zap-refresh-btn"
+                            onclick="safeModalFetchRemoveLiquidityPreview()"
+                            title="${refreshLabel}"
+                            aria-label="${refreshLabel}"
+                            ${!this.canFetchRemoveLiquidityPreview() || isLoading ? 'disabled' : ''}
+                        >
+                            <span class="material-icons">sync</span>
+                        </button>
+                    </div>
+                </div>
+                <dl class="zap-quote-list remove-liquidity-preview-list">
+                    ${rows.join('')}
+                </dl>
+                ${warningMessages.length ? `
+                    <div class="zap-risk-warning" role="alert">
+                        <span class="material-icons" aria-hidden="true">warning</span>
+                        <div>
+                            ${warningMessages.map(message => `<div>${this.escapeHtml(message)}</div>`).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    updateRemoveLiquidityPreviewPanel() {
+        const panel = document.getElementById('remove-liquidity-preview-panel');
+        if (panel) {
+            panel.innerHTML = this.renderRemoveLiquidityPreviewPanel();
+        }
+    }
+
+    updateLpUsdEstimate(elementId, amount) {
+        const estimateElement = document.getElementById(elementId);
+        if (estimateElement) {
+            const estimate = this.formatLpUsdEstimate(amount);
+            estimateElement.textContent = estimate;
+            estimateElement.hidden = !estimate;
+        }
+    }
+
     renderClaimTab() {
         return `
             <div class="balance-info">
@@ -2307,7 +3869,7 @@ class StakingModalNew {
 
             <div class="balance-info">
                 <span class="balance-label">Staked Amount:</span>
-                <span class="balance-value">${this.userStaked} LP</span>
+                <span class="balance-value">${this.userStaked} LP${this.renderInlineLpUsdEstimate(this.userStaked)}</span>
             </div>
 
             <div class="balance-info">
@@ -2441,7 +4003,7 @@ class StakingModalNew {
                 <label class="form-label">Slippage</label>
                 <div class="zap-slippage-row">
                     ${slippageOptions.map(option => `
-                        <button class="zap-slippage-btn ${this.zapSlippageBps === option && !this.zapCustomSlippage ? 'active' : ''}" data-slippage="${option}">
+                        <button class="zap-slippage-btn ${this.zapSlippageBps === option && !this.zapCustomSlippageSelected && !this.zapCustomSlippage ? 'active' : ''}" data-slippage="${option}">
                             ${(option / 100).toFixed(1)}%
                         </button>
                     `).join('')}
@@ -2459,7 +4021,7 @@ class StakingModalNew {
                         ${this.zapCustomSlippageError ? 'aria-describedby="zap-custom-slippage-error"' : ''}
                     >
                 </div>
-                ${this.zapCustomSlippageError ? `<div id="zap-custom-slippage-error" class="zap-field-error">${this.escapeHtml(this.zapCustomSlippageError)}</div>` : ''}
+                <div id="zap-custom-slippage-error" class="zap-field-error custom-slippage-error" aria-live="polite">${this.escapeHtml(this.zapCustomSlippageError)}</div>
             </div>
 
             <div id="zap-quote-panel">
@@ -2476,16 +4038,21 @@ class StakingModalNew {
         `;
     }
 
-    renderZapQuoteRow(label, value, riskClass = '') {
+    renderZapQuoteRow(label, value, riskClass = '', title = '') {
+        const escapedTitle = this.escapeHtml(title);
+        const titleAttribute = title
+            ? ` title="${escapedTitle}" data-tooltip="${escapedTitle}" tabindex="0" role="button" aria-label="${this.escapeHtml(`${label}: ${title}`)}"`
+            : '';
         return `
                     <div class="zap-quote-row${riskClass ? ` ${riskClass}` : ''}">
-                        <dt>${this.escapeHtml(label)}</dt>
+                        <dt${titleAttribute}>${this.escapeHtml(label)}</dt>
                         <dd>${this.escapeHtml(value)}</dd>
                     </div>
         `;
     }
 
     renderZapQuotePanel() {
+        const invalidCustomSlippage = this.hasInvalidZapCustomSlippage();
         const isLoading = this.zapQuoteStatus === 'loading';
         const isError = this.zapQuoteStatus === 'error';
         const hasQuote = this.zapQuoteStatus === 'ready' && !!this.zapQuote;
@@ -2520,6 +4087,8 @@ class StakingModalNew {
 
         if (isLoading) {
             routeSummary = 'Fetching quote...';
+        } else if (invalidCustomSlippage) {
+            routeSummary = 'Enter a valid custom slippage to preview the LP route.';
         } else if (isError) {
             routeSummary = this.zapQuoteError || 'Unable to fetch a zap quote.';
         } else if (hasQuote) {
@@ -2530,9 +4099,13 @@ class StakingModalNew {
                 'zapDetails.lpAmount',
                 'amountOut'
             ]);
-            lpResultDisplay = this.formatZapDisplayAmount(lpResult, this.userBalanceDecimals, 'LP');
+            const lpAmountDisplay = this.formatZapDisplayAmount(lpResult, this.userBalanceDecimals, 'LP');
+            const lpUsdEstimate = this.formatLpUsdEstimate(this.getZapLpAmountForUsdEstimate(lpResult));
+            lpResultDisplay = lpAmountDisplay === 'N/A' || !lpUsdEstimate
+                ? lpAmountDisplay
+                : `${lpAmountDisplay} (${lpUsdEstimate})`;
             const feeDetails = this.getZapProtocolFeeDetails(data);
-            feeDisplay = feeDetails ? this.formatZapFeeDisplay(feeDetails.amount, feeDetails.decimals, feeDetails.symbol) : 'N/A';
+            feeDisplay = this.formatZapFeeDetailsDisplay(feeDetails);
             const priceImpact = this.getZapQuoteSummaryEntry([
                 'zapDetails.priceImpact',
                 'zapDetails.priceImpactPcm',
@@ -2547,10 +4120,10 @@ class StakingModalNew {
             const suggestedSlippage = data?.suggestedSlippage || data?.slippage || this.zapSlippageBps;
             slippageDisplay = `${(Number(suggestedSlippage) / 100).toFixed(2)}%`;
             slippageRiskClass = this.isHighZapSlippage(suggestedSlippage) ? 'zap-risk-high' : '';
-            if (slippageRiskClass) {
-                warningMessages.push('High slippage tolerance. This transaction may execute at a much worse rate.');
-            }
             routeSummary = this.getZapRouteSummary();
+        }
+        if (slippageRiskClass) {
+            warningMessages.push('High slippage tolerance. This transaction may execute at a much worse rate.');
         }
 
         const quoteRows = [
@@ -2611,10 +4184,14 @@ class StakingModalNew {
         
         // For 100% (MAX), use the exact original value to preserve precision
         if (percentage === 100) {
-            amount = this.currentTab === 'stake' ? this.userBalance : this.userStaked;
+            amount = this.currentTab === 'stake' || this.currentTab === 'remove-liquidity'
+                ? this.userBalance
+                : this.userStaked;
         } else {
             // For other percentages, calculate the amount
-            const maxAmount = this.currentTab === 'stake' ? parseFloat(this.userBalance) : parseFloat(this.userStaked);
+            const maxAmount = this.currentTab === 'stake' || this.currentTab === 'remove-liquidity'
+                ? parseFloat(this.userBalance)
+                : parseFloat(this.userStaked);
             amount = (maxAmount * percentage / 100).toFixed(6);
         }
 
@@ -2630,6 +4207,7 @@ class StakingModalNew {
 
             // Update button states
             this.updateStakeEstimatedAPR();
+            this.updateStakeUsdEstimate();
             this.updateButtonStates();
         } else if (this.currentTab === 'unstake') {
             this.unstakeAmount = amount;
@@ -2638,11 +4216,23 @@ class StakingModalNew {
             this.updateSlider('unstake');
 
             // Update button states
+            this.updateUnstakeUsdEstimate();
+            this.updateButtonStates();
+        } else if (this.currentTab === 'remove-liquidity') {
+            this.removeLiquidityAmount = amount;
+            const input = document.getElementById('remove-liquidity-amount-input');
+            if (input) input.value = amount;
+            this.updateSlider('remove-liquidity');
+
+            this.updateRemoveLiquidityUsdEstimate();
+            this.updateRemoveLiquidityBalanceError();
+            this.resetRemoveLiquidityPreview();
+            this.debounceRemoveLiquidityPreview();
             this.updateButtonStates();
         }
 
         // Update percentage button states
-        document.querySelectorAll('.percentage-btn').forEach(btn => {
+        document.querySelectorAll('.percentage-btn, .remove-liquidity-percentage-btn').forEach(btn => {
             btn.classList.toggle('active', parseInt(btn.dataset.percentage) === percentage);
         });
     }
@@ -2651,8 +4241,14 @@ class StakingModalNew {
         const slider = document.getElementById(`${type}-slider`);
         if (!slider) return;
 
-        const amount = parseFloat(type === 'stake' ? this.stakeAmount : this.unstakeAmount) || 0;
-        const maxAmount = parseFloat(type === 'stake' ? this.userBalance : this.userStaked) || 1;
+        const amount = parseFloat(
+            type === 'stake'
+                ? this.stakeAmount
+                : type === 'remove-liquidity'
+                    ? this.removeLiquidityAmount
+                    : this.unstakeAmount
+        ) || 0;
+        const maxAmount = parseFloat(type === 'stake' || type === 'remove-liquidity' ? this.userBalance : this.userStaked) || 1;
         const percentage = maxAmount > 0 ? (amount / maxAmount) * 100 : 0;
 
         slider.value = percentage;
@@ -2666,10 +4262,10 @@ class StakingModalNew {
         // For 100% (MAX), use the exact original value to preserve precision
         // This prevents rounding issues when slider is dragged to max
         if (percentage === 100) {
-            amount = type === 'stake' ? this.userBalance : this.userStaked;
+            amount = type === 'stake' || type === 'remove-liquidity' ? this.userBalance : this.userStaked;
         } else {
             // For other percentages, calculate the amount
-            const maxAmount = parseFloat(type === 'stake' ? this.userBalance : this.userStaked) || 0;
+            const maxAmount = parseFloat(type === 'stake' || type === 'remove-liquidity' ? this.userBalance : this.userStaked) || 0;
             amount = (maxAmount * percentage / 100).toFixed(6);
         }
 
@@ -2678,11 +4274,22 @@ class StakingModalNew {
             const input = document.getElementById('stake-amount-input');
             if (input) input.value = amount;
             this.updateStakeEstimatedAPR();
+            this.updateStakeUsdEstimate();
             this.updateButtonStates();
         } else if (type === 'unstake') {
             this.unstakeAmount = amount;
             const input = document.getElementById('unstake-amount-input');
             if (input) input.value = amount;
+            this.updateUnstakeUsdEstimate();
+            this.updateButtonStates();
+        } else if (type === 'remove-liquidity') {
+            this.removeLiquidityAmount = amount;
+            const input = document.getElementById('remove-liquidity-amount-input');
+            if (input) input.value = amount;
+            this.updateRemoveLiquidityUsdEstimate();
+            this.updateRemoveLiquidityBalanceError();
+            this.resetRemoveLiquidityPreview();
+            this.debounceRemoveLiquidityPreview();
             this.updateButtonStates();
         }
     }
@@ -2956,6 +4563,276 @@ class StakingModalNew {
         }
     }
 
+    async approveRemoveLiquidityZapOutIfNeeded(lpTokenAddress, routerAddress, liquidityRaw) {
+        const service = this.getRemoveLiquidityService();
+        const provider = window.contractManager?.provider || window.walletManager?.provider;
+        const signer = window.contractManager?.signer;
+        if (!provider || !signer) {
+            throw new Error('Wallet signer is required for zap-out approval.');
+        }
+
+        const userAddress = await signer.getAddress();
+        const allowance = await service.getAllowance({
+            lpTokenAddress,
+            owner: userAddress,
+            spender: routerAddress,
+            provider
+        });
+        if (allowance.gte(liquidityRaw)) {
+            return null;
+        }
+
+        this.pendingOperations.approveRemoveLiquidityZapOut = true;
+        this.setActionPhase('approveRemoveLiquidityZapOut', 'userApproval');
+        window.notificationManager?.info('Approving Kyber to spend LP tokens...');
+
+        const erc20Abi = ['function approve(address spender,uint256 amount) returns (bool)'];
+        const lpWithSigner = new window.ethers.Contract(lpTokenAddress, erc20Abi, signer);
+        const result = await window.contractManager.executeTransactionOnce(async () => {
+            const tx = await lpWithSigner.approve(routerAddress, liquidityRaw);
+            console.log(`✅ Kyber zap-out approval sent: ${tx.hash}`);
+            return tx;
+        }, 'approveRemoveLiquidityZapOut');
+
+        this.pendingOperations.approveRemoveLiquidityZapOut = false;
+        this.setActionPhase('approveRemoveLiquidityZapOut', 'idle');
+        return result;
+    }
+
+    async buildRemoveLiquidityZapOutRoute() {
+        const networkConfig = this.getKyberZapNetworkConfig();
+        const route = this.getRemoveLiquidityRouteEncoded();
+        const deadlineSeconds = Math.floor(Date.now() / 1000) + (Number(this.removeLiquidityDeadlineMinutes) || 20) * 60;
+
+        return this.getKyberZapService().buildOutRoute({
+            networkConfig,
+            route,
+            sender: window.walletManager.address,
+            recipient: window.walletManager.address,
+            deadline: deadlineSeconds
+        });
+    }
+
+    getRemoveLiquidityZapOutTransactionRequest(buildData) {
+        const txData = buildData?.txData || buildData?.calldata || buildData?.callData || buildData?.transaction?.data || buildData?.data;
+        const to = this.getRemoveLiquidityRouterAddress(buildData);
+        const rawValue = buildData?.value || buildData?.txValue || buildData?.transaction?.value || '0';
+
+        if (!to || !txData) {
+            throw new Error('Kyber did not return zap-out transaction calldata.');
+        }
+
+        this.validateZapRouterAddress(to);
+
+        return {
+            to,
+            data: txData,
+            value: window.ethers.BigNumber.from(rawValue || '0')
+        };
+    }
+
+    async executeRemoveLiquidityZapOutTransaction(lpTokenAddress, liquidityRaw) {
+        await window.contractManager.ensureSigner();
+
+        if (!this.removeLiquidityPreview?.supported || !this.removeLiquidityPreview?.zapOut) {
+            await this.fetchRemoveLiquidityPreview({ force: true });
+        }
+
+        if (!this.removeLiquidityPreview?.supported || !this.removeLiquidityPreview?.zapOut) {
+            throw new Error(this.removeLiquidityPreviewError || 'Kyber zap-out is not supported for this pool.');
+        }
+
+        window.notificationManager?.info('Building Kyber zap-out transaction...');
+        const buildData = await this.buildRemoveLiquidityZapOutRoute();
+        const transactionRequest = this.getRemoveLiquidityZapOutTransactionRequest(buildData);
+        await this.approveRemoveLiquidityZapOutIfNeeded(lpTokenAddress, transactionRequest.to, liquidityRaw);
+
+        this.pendingOperations.zapOutLP = true;
+        this.setActionPhase('zapOutLP', 'userApproval');
+        window.notificationManager?.info('Zapping out LP tokens...');
+
+        return await window.contractManager.executeTransactionOnce(async () => {
+            const tx = await window.contractManager.signer.sendTransaction(transactionRequest);
+            console.log(`✅ Kyber zap-out transaction sent: ${tx.hash}`);
+            return tx;
+        }, 'zapOutLP');
+    }
+
+    async executeRemoveLiquidityTransaction(lpTokenAddress, liquidityRaw) {
+        const service = this.getRemoveLiquidityService();
+        const provider = window.contractManager?.provider || window.walletManager?.provider;
+
+        await window.contractManager.ensureSigner();
+        const signer = window.contractManager.signer;
+        const userAddress = await signer.getAddress();
+
+        if (!this.removeLiquidityPreview?.supported) {
+            await this.fetchRemoveLiquidityPreview({ force: true });
+        }
+
+        const preview = this.removeLiquidityPreview;
+        if (!preview?.supported) {
+            throw new Error(this.removeLiquidityPreviewError || 'Remove liquidity is not supported for this pool.');
+        }
+
+        await service.validateRouterFactory({
+            routerAddress: preview.adapter.routerAddress,
+            factoryAddress: preview.adapter.factoryAddress,
+            provider
+        });
+
+        const lpBalance = await service.getBalance({
+            lpTokenAddress,
+            owner: userAddress,
+            provider
+        });
+        if (lpBalance.lt(liquidityRaw)) {
+            throw new Error('Insufficient LP token balance.');
+        }
+
+        const allowance = await service.getAllowance({
+            lpTokenAddress,
+            owner: userAddress,
+            spender: preview.adapter.routerAddress,
+            provider
+        });
+
+        if (allowance.lt(liquidityRaw)) {
+            this.pendingOperations.approveRemoveLiquidity = true;
+            this.setActionPhase('approveRemoveLiquidity', 'userApproval');
+            window.notificationManager?.info('Approving router to spend LP tokens...');
+
+            const approvalTx = await service.approveIfNeeded({
+                lpTokenAddress,
+                spender: preview.adapter.routerAddress,
+                liquidityRaw,
+                signer
+            });
+
+            if (approvalTx) {
+                await window.contractManager.executeTransactionOnce(async () => {
+                    console.log(`✅ Remove-liquidity approval sent: ${approvalTx.hash}`);
+                    return approvalTx;
+                }, 'approveRemoveLiquidity');
+            }
+
+            this.pendingOperations.approveRemoveLiquidity = false;
+            this.setActionPhase('approveRemoveLiquidity', 'idle');
+        }
+
+        const deadlineSeconds = Math.floor(Date.now() / 1000) + (Number(this.removeLiquidityDeadlineMinutes) || 20) * 60;
+        this.pendingOperations.removeLiquidity = true;
+        this.setActionPhase('removeLiquidity', 'userApproval');
+        window.notificationManager?.info('Removing liquidity...');
+
+        const removeResult = await window.contractManager.executeTransactionOnce(async () => {
+            const tx = await service.removeLiquidity({
+                routerAddress: preview.adapter.routerAddress,
+                token0: preview.token0.address,
+                token1: preview.token1.address,
+                liquidityRaw,
+                amount0Min: preview.token0.minAmount.raw,
+                amount1Min: preview.token1.minAmount.raw,
+                recipient: userAddress,
+                deadline: deadlineSeconds,
+                signer
+            });
+            console.log(`✅ Remove liquidity transaction sent: ${tx.hash}`);
+            return tx;
+        }, 'removeLiquidity');
+
+        return removeResult;
+    }
+
+    async executeRemoveLiquidity() {
+        if (this.isExecutingRemoveLiquidity) {
+            console.log('⚠️ Remove liquidity already in progress, ignoring duplicate call');
+            return;
+        }
+
+        if (!this.removeLiquidityAmount || parseFloat(this.removeLiquidityAmount) === 0) return;
+
+        try {
+            this.isExecutingRemoveLiquidity = true;
+            this.updateRemoveLiquidityButton();
+
+            if (!window.contractManager || !window.contractManager.isReady()) {
+                window.notificationManager?.error('Contract manager not ready. Please connect your wallet first.');
+                return;
+            }
+
+            const slippageError = this.getRemoveLiquidityCustomSlippageError();
+            if (slippageError) {
+                this.updateRemoveLiquidityPreviewPanel();
+                this.updateRemoveLiquidityButton();
+                window.notificationManager?.error(slippageError);
+                return;
+            }
+            const balanceError = this.getRemoveLiquidityBalanceError();
+            if (balanceError) {
+                this.updateRemoveLiquidityPreviewPanel();
+                this.updateRemoveLiquidityButton();
+                window.notificationManager?.error(balanceError);
+                return;
+            }
+
+            if (!this.removeLiquidityPreview?.supported) {
+                await this.fetchRemoveLiquidityPreview({ force: true });
+            }
+
+            if (!this.removeLiquidityPreview?.supported) {
+                window.notificationManager?.error(this.removeLiquidityPreviewError || 'Remove liquidity is not supported for this pool.');
+                return;
+            }
+
+            window.notificationManager?.info('Removing LP liquidity...');
+            const lpTokenAddress = this.currentPair.lpToken || this.currentPair.address;
+            const liquidityRaw = this.getRemoveLiquidityAmountRaw();
+            if (this.removeLiquidityZapOutEnabled) {
+                await this.executeRemoveLiquidityZapOutTransaction(lpTokenAddress, liquidityRaw);
+            } else {
+                await this.executeRemoveLiquidityTransaction(lpTokenAddress, liquidityRaw);
+            }
+            window.notificationManager?.success(
+                this.removeLiquidityZapOutEnabled
+                    ? 'LP tokens zapped out successfully!'
+                    : 'Liquidity removed successfully!'
+            );
+
+            this.clearInputs();
+            this.close();
+
+            console.log('⏳ Waiting for blockchain state to update...');
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            console.log('🔄 Refreshing home page data after remove liquidity...');
+            if (window.homePage?.refreshData) {
+                await window.homePage.refreshData();
+            } else if (window.homePage?.loadData) {
+                await window.homePage.loadData();
+            }
+            console.log('✅ Home page data refreshed after remove liquidity');
+        } catch (error) {
+            console.error('❌ Remove liquidity failed:', error);
+            const errorMessage = error?.userMessage?.message || error?.message || 'Remove liquidity failed. Your LP tokens remain in your wallet.';
+            window.notificationManager?.error(errorMessage, {title: error?.userMessage?.title});
+            await this.loadUserBalances().catch(loadError => {
+                console.warn('Unable to refresh balances after remove-liquidity failure:', loadError.message);
+            });
+        } finally {
+            this.pendingOperations.approveRemoveLiquidity = false;
+            this.pendingOperations.removeLiquidity = false;
+            this.pendingOperations.approveRemoveLiquidityZapOut = false;
+            this.pendingOperations.zapOutLP = false;
+            this.setActionPhase('approveRemoveLiquidity', 'idle');
+            this.setActionPhase('removeLiquidity', 'idle');
+            this.setActionPhase('approveRemoveLiquidityZapOut', 'idle');
+            this.setActionPhase('zapOutLP', 'idle');
+            this.isExecutingRemoveLiquidity = false;
+            this.updateRemoveLiquidityButton();
+        }
+    }
+
     async executeUnstake() {
         // Guard against multiple simultaneous executions
         if (this.isExecutingUnstake) {
@@ -2983,11 +4860,13 @@ class StakingModalNew {
                 window.notificationManager.info('Unstaking LP tokens...');
             }
 
+            const lpTokenAddress = this.currentPair.lpToken || this.currentPair.address;
+
             // Execute real unstaking transaction
             this.pendingOperations.unstake = true;
             this.setActionPhase('unstake', 'userApproval');
             const result = await window.contractManager.unstake(
-                this.currentPair.address,
+                lpTokenAddress,
                 this.unstakeAmount,
                 this.claimRewardsOnUnstake
             );
@@ -3220,6 +5099,19 @@ window.safeModalExecuteClaim = function() {
     }
 };
 
+window.safeModalExecuteRemoveLiquidity = function() {
+    try {
+        const modal = window.stakingModal || window.stakingModalNew || window.getStakingModal();
+        if (modal && typeof modal.executeRemoveLiquidity === 'function') {
+            modal.executeRemoveLiquidity();
+        } else {
+            console.warn('⚠️ Modal executeRemoveLiquidity method not available');
+        }
+    } catch (error) {
+        console.error('❌ Error executing remove liquidity:', error);
+    }
+};
+
 window.safeModalFetchZapQuote = function() {
     try {
         const modal = window.stakingModal || window.stakingModalNew || window.getStakingModal();
@@ -3256,5 +5148,31 @@ window.safeModalAddZapCustomToken = function() {
         }
     } catch (error) {
         console.error('❌ Error adding custom zap token:', error);
+    }
+};
+
+window.safeModalAddRemoveLiquidityCustomOutputToken = function() {
+    try {
+        const modal = window.stakingModal || window.stakingModalNew || window.getStakingModal();
+        if (modal && typeof modal.addRemoveLiquidityCustomOutputToken === 'function') {
+            modal.addRemoveLiquidityCustomOutputToken();
+        } else {
+            console.warn('⚠️ Modal addRemoveLiquidityCustomOutputToken method not available');
+        }
+    } catch (error) {
+        console.error('❌ Error adding custom remove-liquidity output token:', error);
+    }
+};
+
+window.safeModalFetchRemoveLiquidityPreview = function() {
+    try {
+        const modal = window.stakingModal || window.stakingModalNew || window.getStakingModal();
+        if (modal && typeof modal.fetchRemoveLiquidityPreview === 'function') {
+            modal.fetchRemoveLiquidityPreview({ force: true });
+        } else {
+            console.warn('⚠️ Modal fetchRemoveLiquidityPreview method not available');
+        }
+    } catch (error) {
+        console.error('❌ Error fetching remove-liquidity preview:', error);
     }
 };

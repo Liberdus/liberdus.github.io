@@ -164,12 +164,16 @@ class MasterInitializer {
 
         // Homepage only: Load CSS for wallet popup
         await this.loadCSS('css/wallet-popup.css');
+        await this.loadCSS('css/farm-migration-banner.css');
 
         const uiScripts = [
             'js/components/wallet-popup.js',
+            'js/services/farm-migration-checker.js',
+            'js/components/farm-migration-banner.js',
             'js/components/home-page.js',
             'js/services/kyber-zap-rate-limiter.js',
             'js/services/kyber-zap-service.js',
+            'js/services/v2-remove-liquidity-service.js',
             'js/components/staking-modal-new.js'
         ];
         console.log('Loading homepage UI components');

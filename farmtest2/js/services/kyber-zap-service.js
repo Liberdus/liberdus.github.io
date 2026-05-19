@@ -306,6 +306,65 @@
             return payload;
         }
 
+        async fetchOutQuote({ networkConfig, lpTokenAddress, walletAddress, tokenOutAddress, liquidityRaw, slippageBps, platform }) {
+            const initialRateLimitWaitMs = this.getQuoteRateLimitWaitMs();
+            if (initialRateLimitWaitMs > 0) {
+                throw this.createRateLimitError(initialRateLimitWaitMs);
+            }
+
+            if (!networkConfig) {
+                throw new Error('Zap out is not available on this network.');
+            }
+
+            const baseUrl = this.getConfig()?.BASE_URL || 'https://zap-api.kyberswap.com';
+            const dexCandidates = await this.getDexCandidates({ networkConfig, poolAddress: lpTokenAddress, platform });
+            let payload = null;
+            let lastError = null;
+
+            for (const dexId of dexCandidates) {
+                const rateLimit = this.quoteRateLimiter.reserve();
+                if (!rateLimit.allowed) {
+                    throw this.createRateLimitError(rateLimit.waitMs);
+                }
+
+                const params = new URLSearchParams({
+                    dexFrom: dexId,
+                    'poolFrom.id': lpTokenAddress,
+                    'positionFrom.id': walletAddress,
+                    liquidityOut: liquidityRaw.toString(),
+                    tokenOut: tokenOutAddress,
+                    slippage: slippageBps.toString()
+                });
+
+                const url = `${baseUrl}/${networkConfig.CHAIN}/api/v1/out/route?${params.toString()}`;
+                const response = await this.fetchImpl(url, {
+                    headers: {
+                        accept: 'application/json',
+                        'x-client-id': this.getConfig()?.CLIENT_ID || 'liberdus-lp-staking'
+                    }
+                });
+                const candidatePayload = await response.json().catch(() => ({}));
+                const failed = !response.ok || (candidatePayload.code && candidatePayload.code !== 0 && candidatePayload.code !== 200);
+
+                if (!failed) {
+                    payload = candidatePayload;
+                    break;
+                }
+
+                lastError = new Error(candidatePayload.message || `Kyber zap-out quote failed with status ${response.status}`);
+                const canTryNextDex = /invalid pool|does not belong to given dex id/i.test(lastError.message);
+                if (!canTryNextDex) {
+                    break;
+                }
+            }
+
+            if (!payload) {
+                throw lastError || new Error('Unable to fetch a Kyber zap-out quote.');
+            }
+
+            return payload;
+        }
+
         async buildRoute({ networkConfig, route, sender, recipient = sender, deadline }) {
             if (!networkConfig) {
                 throw new Error('Zap is not available on this network.');
@@ -335,6 +394,40 @@
 
             if (!response.ok || (payload.code && payload.code !== 0 && payload.code !== 200)) {
                 throw new Error(payload.message || `Kyber build failed with status ${response.status}`);
+            }
+
+            return payload?.data || payload;
+        }
+
+        async buildOutRoute({ networkConfig, route, sender, recipient = sender, deadline }) {
+            if (!networkConfig) {
+                throw new Error('Zap out is not available on this network.');
+            }
+
+            if (!route) {
+                throw new Error('Kyber zap-out route is missing. Refresh the quote and try again.');
+            }
+
+            const baseUrl = this.getConfig()?.BASE_URL || 'https://zap-api.kyberswap.com';
+            const response = await this.fetchImpl(`${baseUrl}/${networkConfig.CHAIN}/api/v1/out/route/build`, {
+                method: 'POST',
+                headers: {
+                    accept: 'application/json',
+                    'content-type': 'application/json',
+                    'x-client-id': this.getConfig()?.CLIENT_ID || 'liberdus-lp-staking'
+                },
+                body: JSON.stringify({
+                    sender,
+                    recipient,
+                    route,
+                    deadline,
+                    source: this.getConfig()?.SOURCE || 'liberdus-lp-staking'
+                })
+            });
+            const payload = await response.json().catch(() => ({}));
+
+            if (!response.ok || (payload.code && payload.code !== 0 && payload.code !== 200)) {
+                throw new Error(payload.message || `Kyber zap-out build failed with status ${response.status}`);
             }
 
             return payload?.data || payload;
