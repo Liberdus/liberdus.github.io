@@ -343,6 +343,19 @@ table tbody tr:last-child td {
   background: rgba(0, 0, 0, 0.05);
 }
 
+[data-theme="light"] .pair-tvl-item {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .tvl-label {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+[data-theme="light"] .tvl-value {
+  color: rgba(0, 0, 0, 0.82);
+}
+
 [data-theme="light"] .address-label {
   color: rgba(0, 0, 0, 0.6);
 }
@@ -1420,7 +1433,41 @@ table td:last-child {
 .pair-details-section {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 12px;
+}
+
+.pair-tvl-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pair-tvl-item {
+  min-width: 0;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+}
+
+.tvl-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tvl-value {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .pair-address-wrapper {
