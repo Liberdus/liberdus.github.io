@@ -1,4 +1,4 @@
-![An image of Tech Updates](Tech_updates.webp)
+![An image of Tech Updates](Tech_Updates.webp)
 
 # Liberdus Updates May 18th, 2026
 
