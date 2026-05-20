@@ -117,14 +117,9 @@ class MasterInitializer {
             'js/contracts/contract-manager.js'
         ];
 
-        // Only load rewards calculator on homepage
-        if (!this.isAdminPage) {
-            walletScripts.push('js/utils/pricing/gecko-terminal-price-provider.js');
-            walletScripts.push('js/utils/pricing/dex-screener-price-provider.js');
-            walletScripts.push('js/utils/rewards-calculator.js');
-        } else {
-            console.log('⏭️ Skipping homepage utilities (admin mode)');
-        }
+        walletScripts.push('js/utils/pricing/gecko-terminal-price-provider.js');
+        walletScripts.push('js/utils/pricing/dex-screener-price-provider.js');
+        walletScripts.push('js/utils/rewards-calculator.js');
 
         for (const script of walletScripts) {
             await this.loadScript(script);
@@ -302,28 +297,24 @@ class MasterInitializer {
             }
         }
 
-        // Initialize rewards calculator (homepage only)
-        if (!this.isAdminPage) {
-            if (window.RewardsCalculator && !window.rewardsCalculator && window.contractManager) {
-                try {
-                    window.rewardsCalculator = new window.RewardsCalculator();
+        // Initialize rewards calculator for pages that display pool TVL/APR.
+        if (window.RewardsCalculator && !window.rewardsCalculator && window.contractManager) {
+            try {
+                window.rewardsCalculator = new window.RewardsCalculator();
 
-                    await window.rewardsCalculator.initialize({
-                        contractManager: window.contractManager
-                    });
+                await window.rewardsCalculator.initialize({
+                    contractManager: window.contractManager
+                });
 
-                    this.components.set('rewardsCalculator', window.rewardsCalculator);
-                } catch (error) {
-                    console.error('❌ Failed to initialize RewardsCalculator:', error);
-                    console.error('   Error stack:', error.stack);
-                }
-            } else if (window.rewardsCalculator) {
-                console.warn('⚠️ RewardsCalculator instance already exists');
-            } else if (!window.RewardsCalculator || !window.contractManager) {
-                console.error('❌ RewardsCalculator prerequisites not met!');
+                this.components.set('rewardsCalculator', window.rewardsCalculator);
+            } catch (error) {
+                console.error('❌ Failed to initialize RewardsCalculator:', error);
+                console.error('   Error stack:', error.stack);
             }
-        } else {
-            console.log('⏭️ Skipping RewardsCalculator initialization (admin mode)');
+        } else if (window.rewardsCalculator) {
+            console.warn('⚠️ RewardsCalculator instance already exists');
+        } else if (!window.RewardsCalculator || !window.contractManager) {
+            console.error('❌ RewardsCalculator prerequisites not met!');
         }
 
         // Initialize homepage UI components (homepage only)
