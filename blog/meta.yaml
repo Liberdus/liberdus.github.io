@@ -5,6 +5,14 @@
 # with article.md and thumb.png inside.
 
 articles:
+  - id: 5
+    title: "Liberdus Updates: May 18th, 2026"
+    intro: "Updates on what the Liberdus team has done in the past week. Including LP staking migration upgrades and improved bridge infrastructure to wallet refinements, RPC resilience work, signer tooling, social onboarding improvements and major UX upgrades across the ecosystem."
+    date: "2026-05-18"
+    author: "Liberdus Staff"
+    tags:
+      - team-updates
+
   - id: 4
     title: "Liberdus Rewards Are Live: Here’s What You Need to Know"
     intro: "If you participated in the Liberdus rewards campaign, you can now begin claiming your reward. This isn’t a simple “claim and forget” event. It’s designed to reward real participation over time."
