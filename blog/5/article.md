@@ -2,7 +2,7 @@
 
 # Liberdus Updates May 18th, 2026
 
-Updates on what the Liberdus team has done in the past week.Including LP staking migration upgrades and improved bridge infrastructure 
+Updates on what the Liberdus team has done in the past week. Including LP staking migration upgrades and improved bridge infrastructure 
 to wallet refinements, RPC resilience work, signer tooling, social onboarding improvements and major UX upgrades across the ecosystem.
 
 - LP Staking migration (BSC):** found 2 issues when rotating ownership        
