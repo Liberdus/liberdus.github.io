@@ -2656,24 +2656,197 @@ class AdminPage {
         }
     }
 
+    parseWeightValue(weight) {
+        if (!weight && weight !== 0) return null;
+
+        try {
+            if (typeof weight === 'object' && weight._isBigNumber) {
+                return Number(ethers.utils.formatEther(weight));
+            }
+
+            if (typeof weight === 'bigint') {
+                return Number(weight);
+            }
+
+            if (typeof weight === 'string') {
+                const weightStr = weight.trim();
+                const normalizedWeight = (/^\d+$/.test(weightStr) && weightStr.length >= 18)
+                    ? ethers.utils.formatUnits(weightStr, 18)
+                    : weightStr;
+                const num = Number(normalizedWeight);
+                return Number.isFinite(num) ? num : null;
+            }
+
+            const num = Number(weight);
+            return Number.isFinite(num) ? num : null;
+        } catch (error) {
+            console.warn('Failed to parse weight value:', error);
+            return null;
+        }
+    }
+
+    formatPairTvlTokens(pair) {
+        if (!pair?.tvlCalculated) {
+            return '...';
+        }
+
+        if (pair.tvl === null || pair.tvl === undefined) {
+            return 'N/A';
+        }
+
+        const tvl = Number(pair.tvl);
+        if (!Number.isFinite(tvl)) {
+            return 'N/A';
+        }
+
+        const formattedTvl = window.Formatter?.formatSmallNumberWithSubscript?.(tvl)
+            || this.formatNumber(tvl);
+        return `${formattedTvl} LP`;
+    }
+
+    formatPairTvlUsd(pair) {
+        if (!pair?.tvlCalculated) {
+            return '...';
+        }
+
+        if (pair.tvlUsd === null || pair.tvlUsd === undefined) {
+            return 'N/A';
+        }
+
+        const tvlUsd = Number(pair.tvlUsd);
+        if (!Number.isFinite(tvlUsd)) {
+            return 'N/A';
+        }
+
+        return window.Formatter?.formatCompactCurrency?.(tvlUsd)
+            || window.Formatter?.formatCurrency?.(tvlUsd)
+            || `$${this.formatNumber(tvlUsd)}`;
+    }
+
+    async ensureRewardsCalculator(contractManager) {
+        if (window.rewardsCalculator) {
+            return window.rewardsCalculator;
+        }
+
+        if (!window.RewardsCalculator) {
+            return null;
+        }
+
+        try {
+            window.rewardsCalculator = new window.RewardsCalculator();
+            await window.rewardsCalculator.initialize({ contractManager });
+            return window.rewardsCalculator;
+        } catch (error) {
+            console.warn('Unable to initialize rewards calculator for admin TVL:', error);
+            return null;
+        }
+    }
+
+    async enrichPairsWithTvl(pairs, totalWeight) {
+        if (!Array.isArray(pairs) || pairs.length === 0) {
+            return pairs || [];
+        }
+
+        const contractManager = window.contractManager;
+        const rewardsCalculator = await this.ensureRewardsCalculator(contractManager);
+
+        if (!contractManager?.getLPStakeBreakdowns || !rewardsCalculator?.buildPoolMetrics) {
+            console.warn('TVL prerequisites unavailable for admin pair list');
+            return pairs.map(pair => ({
+                ...pair,
+                tvl: null,
+                tvlUsd: null,
+                tvlCalculated: true
+            }));
+        }
+
+        try {
+            const breakdowns = await contractManager.getLPStakeBreakdowns(pairs);
+            const tokenAddresses = new Set();
+
+            breakdowns.forEach((breakdown) => {
+                const token0Address = breakdown?.token0?.address?.toLowerCase?.();
+                const token1Address = breakdown?.token1?.address?.toLowerCase?.();
+
+                if (token0Address) tokenAddresses.add(token0Address);
+                if (token1Address) tokenAddresses.add(token1Address);
+            });
+
+            const tokenPricesUsd = new Map();
+            await Promise.all(Array.from(tokenAddresses).map(async (address) => {
+                const priceUsd = await rewardsCalculator.fetchTokenPriceByAddress(address);
+                tokenPricesUsd.set(address, priceUsd);
+            }));
+
+            const rewardTokenAddress = (contractManager.contractAddresses instanceof Map)
+                ? contractManager.contractAddresses.get('REWARD_TOKEN')
+                : contractManager.rewardTokenContract?.address;
+            const totalWeightValue = this.parseWeightValue(totalWeight)
+                || pairs.reduce((sum, pair) => sum + (this.parseWeightValue(pair?.weight) || 0), 0)
+                || 1;
+
+            return pairs.map((pair) => {
+                try {
+                    const pairIdentifier = pair.address || pair.lpToken || pair.name;
+                    const resolvedAddress = contractManager.resolveLPTokenAddress(pairIdentifier);
+                    const breakdown = resolvedAddress ? breakdowns.get(resolvedAddress) : null;
+
+                    if (!breakdown) {
+                        return {
+                            ...pair,
+                            tvl: null,
+                            tvlUsd: null,
+                            tvlCalculated: true
+                        };
+                    }
+
+                    const token0Addr = breakdown?.token0?.address?.toLowerCase?.();
+                    const token1Addr = breakdown?.token1?.address?.toLowerCase?.();
+                    const poolWeight = this.parseWeightValue(pair?.weight) || 1;
+                    const metrics = rewardsCalculator.buildPoolMetrics({
+                        breakdown,
+                        rewardTokenAddress,
+                        hourlyRate: 0,
+                        poolWeight,
+                        totalWeight: totalWeightValue,
+                        token0PriceUsd: token0Addr ? (tokenPricesUsd.get(token0Addr) || 0) : 0,
+                        token1PriceUsd: token1Addr ? (tokenPricesUsd.get(token1Addr) || 0) : 0
+                    });
+
+                    return {
+                        ...pair,
+                        tvl: metrics.tvlLpTokens,
+                        tvlUsd: metrics.tvlUsd,
+                        tvlCalculated: true
+                    };
+                } catch (error) {
+                    console.warn(`Failed to calculate admin TVL for ${pair?.name || pair?.address || 'pair'}:`, error);
+                    return {
+                        ...pair,
+                        tvl: null,
+                        tvlUsd: null,
+                        tvlCalculated: true
+                    };
+                }
+            });
+        } catch (error) {
+            console.warn('Failed to calculate admin pair TVL:', error);
+            return pairs.map(pair => ({
+                ...pair,
+                tvl: null,
+                tvlUsd: null,
+                tvlCalculated: true
+            }));
+        }
+    }
+
     renderPairsList(pairs, totalWeight) {
         if (!pairs || pairs.length === 0) {
             return '<div class="no-data">No pairs configured</div>';
         }
 
-        // Calculate total weight and parse pair weights
-        const parseWeight = (weight) => {
-            if (!weight || (typeof weight === 'object' && weight === null)) return null;
-            try {
-                const num = typeof weight === 'string' ? parseFloat(weight) : Number(weight);
-                return !isNaN(num) ? num : null;
-            } catch {
-                return null;
-            }
-        };
-
         const pairData = pairs.map(pair => {
-            const weight = parseWeight(pair?.weight);
+            const weight = this.parseWeightValue(pair?.weight);
             let displayWeight;
             if (weight != null) {
                 displayWeight = window.Formatter?.formatSmallNumberWithSubscript(weight) || weight.toString();
@@ -2686,13 +2859,18 @@ class AdminPage {
                 address: pair?.address || 'Unknown',
                 platform: pair?.platform || '',
                 weight: weight,
-                displayWeight: displayWeight
+                displayWeight: displayWeight,
+                tvl: pair?.tvl,
+                tvlUsd: pair?.tvlUsd,
+                tvlCalculated: pair?.tvlCalculated === true
             };
         });
         
         // if totalWeight not provided, calculate it
         if (totalWeight === undefined || totalWeight === null) {
             totalWeight = pairData.reduce((sum, p) => sum + (p.weight || 0), 0);
+        } else {
+            totalWeight = this.parseWeightValue(totalWeight) || 0;
         }
 
         return pairData.map(pair => {
@@ -2719,6 +2897,16 @@ class AdminPage {
                         </div>
                     </div>
                     <div class="pair-details-section">
+                        <div class="pair-tvl-grid">
+                            <div class="pair-tvl-item">
+                                <span class="tvl-label">TVL Tokens</span>
+                                <span class="tvl-value">${this.formatPairTvlTokens(pair)}</span>
+                            </div>
+                            <div class="pair-tvl-item">
+                                <span class="tvl-label">TVL USD</span>
+                                <span class="tvl-value">${this.formatPairTvlUsd(pair)}</span>
+                            </div>
+                        </div>
                         <div class="weight-bar-container">
                             <div class="weight-bar" style="width: ${percentageValue}%"></div>
                         </div>
@@ -4575,6 +4763,7 @@ class AdminPage {
             contractInfo.totalWeight = await this.safeContractCall(
                 async () => {
                     const totalWeight = await contractManager.getTotalWeight();
+                    contractInfo.totalWeightRaw = totalWeight;
                     // consistent formatting without rounding
                     return this.formatWeightForDisplay(totalWeight);
                 },
@@ -4585,7 +4774,7 @@ class AdminPage {
             contractInfo.pairs = await this.safeContractCall(
                 async () => {
                     const pairsInfo = await contractManager.getAllPairsInfo();
-                    return pairsInfo || [];
+                    return await this.enrichPairsWithTvl(pairsInfo || [], contractInfo.totalWeightRaw);
                 },
                 []
             );
@@ -4710,7 +4899,7 @@ class AdminPage {
                     const weightB = parseFloat(b.weight || '0');
                     return weightB - weightA; // Descending order (highest first)
                 });
-                pairsContainer.innerHTML = this.renderPairsList(sortedPairs, info.totalWeight);
+                pairsContainer.innerHTML = this.renderPairsList(sortedPairs, info.totalWeightRaw ?? info.totalWeight);
             } else {
                 pairsContainer.innerHTML = '<div class="no-data">No LP pairs configured</div>';
             }
