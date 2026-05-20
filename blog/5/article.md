@@ -1,3 +1,5 @@
+![An image of Tech Updates](Tech_updates.webp)
+
 # Liberdus Updates May 18th, 2026
 
 Updates on what the Liberdus team has done in the past week.Including LP staking migration upgrades and improved bridge infrastructure 
