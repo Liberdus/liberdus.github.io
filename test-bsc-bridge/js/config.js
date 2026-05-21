@@ -79,10 +79,10 @@ const PROFILES = {
 export const CONFIG = {
   APP: {
     NAME: 'Liberdus BSC Bridge UI',
-    VERSION: '1.0.1',
+    VERSION: '1.0.2',
   },
   RUNTIME: {
-    PROFILE: 'dev', // 'dev' or 'prod'
+    PROFILE: 'prod', // 'dev' or 'prod'
   },
   BRIDGE: {
     LOOKBACK_BLOCKS: 60000,
