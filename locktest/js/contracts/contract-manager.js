@@ -133,6 +133,14 @@ export class ContractManager {
     return this.provider || this.readOnlyProvider;
   }
 
+  async getLatestBlockTimestamp() {
+    const provider = this.getReadContract()?.provider || this.getProvider?.();
+    if (!provider?.getBlock) return null;
+    const block = await provider.getBlock('latest');
+    const timestamp = Number(block?.timestamp?.toString?.() ?? block?.timestamp ?? 0);
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+  }
+
   async getNextLockId() {
     const contract = this.getReadContract();
     if (!contract) return null;
@@ -300,7 +308,9 @@ export class ContractManager {
     if (!provider || !window.ethers) return false;
 
     this._multicallInitPromise = this.multicall
-      .initialize(provider, Number(CONFIG?.NETWORK?.CHAIN_ID))
+      .initialize(provider, Number(CONFIG?.NETWORK?.CHAIN_ID), {
+        address: CONFIG?.NETWORK?.MULTICALL2_ADDRESS || '',
+      })
       .catch(() => false)
       .finally(() => {
         this._multicallInitPromise = null;

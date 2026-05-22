@@ -17,6 +17,9 @@ export class OverviewTab {
     this._scanInFlight = false;
     this._hasLoaded = false;
     this._currentPage = 1;
+    this._chainTimestamp = null;
+    this._chainTimestampSyncedAtMs = null;
+    this._releaseCountdownTimer = null;
   }
 
   load() {
@@ -241,6 +244,7 @@ export class OverviewTab {
     this._refreshTokenFilterOptions();
     await this._primeTokenMeta();
     await this._primeAvailable();
+    await this._refreshChainTimestamp();
     this._resetAndRender();
   }
 
@@ -364,10 +368,12 @@ export class OverviewTab {
 
     if (rows.length === 0) {
       this.locksListEl.innerHTML = '<p class="muted">No locks found.</p>';
+      this._scheduleReleaseCountdown();
       return;
     }
 
     this.locksListEl.innerHTML = rows.map((entry) => this._renderLockRow(entry)).join('');
+    this._scheduleReleaseCountdown(rows);
 
     this.locksListEl.querySelectorAll('[data-copy]')?.forEach((btn) => {
       btn.addEventListener('click', () => this._copyAddress(btn.dataset.copy));
@@ -408,7 +414,7 @@ export class OverviewTab {
     const cliffEnd = unlockTime > 0 ? unlockTime + cliffDays * SECONDS_PER_DAY : null;
     const vestingDays = ratePerDay > 0 ? Math.ceil(RATE_SCALE / ratePerDay) : 0;
     const vestingEnd = cliffEnd ? cliffEnd + vestingDays * SECONDS_PER_DAY : null;
-    const now = Math.floor(Date.now() / 1000);
+    const now = this._getCurrentTimestamp();
     let vestingProgressPct = 0;
     if (vestingEnd && cliffEnd) {
       if (now <= cliffEnd) {
@@ -423,6 +429,15 @@ export class OverviewTab {
     const formatDate = (ts) => {
       if (!Number.isFinite(ts) || ts <= 0) return 'n/a';
       return new Date(ts * 1000).toLocaleDateString();
+    };
+    const formatDateTime = (ts) => {
+      if (!Number.isFinite(ts) || ts <= 0) return 'n/a';
+      return new Date(ts * 1000).toLocaleString();
+    };
+    const formatEndSubtitle = (ts) => {
+      if (!Number.isFinite(ts) || ts <= 0) return '';
+      const tense = now >= ts ? 'Ended' : 'Ends';
+      return `${tense} ${formatDateTime(ts)}`;
     };
 
     const hasUnlock = unlockTime > 0;
@@ -483,7 +498,7 @@ export class OverviewTab {
       ? `Unlock • ${formatDate(unlockTime)}`
       : `Today • ${formatDate(now)}`;
     const timelineRightLabel = hasVestingWindow
-      ? `Vesting end • ${formatDate(vestingEnd)}`
+      ? `${now >= vestingEnd ? 'Fully vested' : 'Fully vests'} • ${formatDate(vestingEnd)}`
       : hasCliff
         ? `Cliff end • ${formatDate(cliffEnd)}`
         : `Today • ${formatDate(now)}`;
@@ -502,7 +517,7 @@ export class OverviewTab {
     }
 
     const nextMilestone = hasVestingWindow ? vestingEnd : (hasCliff ? cliffEnd : (hasUnlock ? unlockTime : null));
-    const milestoneName = hasVestingWindow ? 'vesting end' : (hasCliff ? 'cliff end' : 'unlock');
+    const milestoneName = hasVestingWindow ? 'fully vested' : (hasCliff ? 'cliff end' : 'unlock');
     let milestoneLabel = 'No upcoming milestones';
     if (nextMilestone) {
       const deltaSeconds = nextMilestone - now;
@@ -527,6 +542,23 @@ export class OverviewTab {
     };
     const cliffDurationLabel = formatMonthsDays(cliffDays);
     const vestingDurationLabel = formatMonthsDays(vestingDays);
+    const nextRelease = this._getNextRelease(lock, {
+      now,
+      cliffEnd,
+      vestingDays,
+      ratePerDay,
+    });
+    const nextReleaseLabel = this._formatNextReleaseLabel(nextRelease, {
+      fmt,
+      symbol: meta.symbol || '',
+    });
+    entry.nextReleaseAt = nextRelease?.at || null;
+    const cliffEndSubtitle = hasUnlock && Number.isFinite(cliffEnd)
+      ? formatEndSubtitle(cliffEnd)
+      : '';
+    const vestingEndSubtitle = hasVestingWindow
+      ? formatEndSubtitle(vestingEnd)
+      : '';
 
     const tokenShort = `${lock.token.slice(0, 6)}…${lock.token.slice(-4)}`;
     const withdrawShort = `${lock.withdrawAddress.slice(0, 6)}…${lock.withdrawAddress.slice(-4)}`;
@@ -613,7 +645,7 @@ export class OverviewTab {
               ${hasVestingWindow ? `
               <span class="lock-vesting-marker lock-vesting-marker--end${markerEdgeClass(vestingEndMarkerPct)}${markerOffsetClass('end', markerOffsets)}" style="left:${vestingEndMarkerPct.toFixed(2)}%">
                 <span class="lock-vesting-marker-dot"></span>
-                <span class="lock-vesting-marker-label">Vesting end</span>
+                <span class="lock-vesting-marker-label">Fully vested</span>
               </span>
               ` : ''}
               ${showTodayMarker ? `
@@ -656,7 +688,12 @@ export class OverviewTab {
             </div>
             <div class="lock-kv">
               <div class="field-label">Available now</div>
-              <div class="field-input">${available}</div>
+              <div class="field-input field-input--stack">
+                <span>${available}</span>
+                ${nextReleaseLabel ? `
+                <span class="field-input-subtitle" title="Next release ${formatDateTime(nextRelease.at)}">${nextReleaseLabel}</span>
+                ` : ''}
+              </div>
             </div>
             <div class="lock-progress lock-progress--compact">
               <div class="lock-progress-header">
@@ -677,7 +714,10 @@ export class OverviewTab {
             </div>
             <div class="lock-kv">
               <div class="field-label">Cliff</div>
-              <div class="field-input">${cliffDurationLabel}</div>
+              <div class="field-input field-input--stack">
+                <span>${cliffDurationLabel}</span>
+                ${cliffEndSubtitle ? `<span class="field-input-subtitle">${cliffEndSubtitle}</span>` : ''}
+              </div>
             </div>
             <div class="lock-kv">
               <div class="field-label">Vesting rate</div>
@@ -685,7 +725,10 @@ export class OverviewTab {
             </div>
             <div class="lock-kv">
               <div class="field-label">Vesting duration</div>
-              <div class="field-input">${vestingDurationLabel}${vestingEnd ? ` (ends ${new Date(vestingEnd * 1000).toLocaleDateString()})` : ''}</div>
+              <div class="field-input field-input--stack">
+                <span>${vestingDurationLabel}</span>
+                ${vestingEndSubtitle ? `<span class="field-input-subtitle">${vestingEndSubtitle}</span>` : ''}
+              </div>
             </div>
           </div>
 
@@ -768,23 +811,29 @@ export class OverviewTab {
     if (!Number.isFinite(id) || id < 0) return;
     const entry = this._locks.find((item) => item.id === id) || null;
     const lock = entry?.lock || this._lockIndex.get(id);
-    const reason = this._getWithdrawUnavailableReason(lock, entry?.available ?? null);
+    await this._refreshChainTimestamp();
+    const reason = this._getWithdrawUnavailableReason(lock, null);
     if (reason) {
       this._showActionUnavailable(reason);
       return;
     }
 
-    if (entry && (entry.available == null)) {
+    if (entry) {
       try {
         const available = await window.contractManager.previewWithdrawable(id);
         entry.available = available;
+        await this._refreshChainTimestamp();
         const refreshedReason = this._getWithdrawUnavailableReason(lock, available);
         if (refreshedReason) {
           this._showActionUnavailable(refreshedReason);
           return;
         }
       } catch {
-        // Ignore preview errors and allow the withdraw form to load.
+        const fallbackReason = this._getWithdrawUnavailableReason(lock, entry.available ?? null);
+        if (fallbackReason) {
+          this._showActionUnavailable(fallbackReason);
+          return;
+        }
       }
     }
 
@@ -805,6 +854,117 @@ export class OverviewTab {
     const withdrawAddress = lock.withdrawAddress?.toLowerCase?.() || '';
     const creatorAddress = lock.creator?.toLowerCase?.() || '';
     return withdrawAddress === me || (withdrawAddress === ZERO_ADDRESS && creatorAddress === me);
+  }
+
+  _getCurrentTimestamp({ live = false } = {}) {
+    const chainNow = Number(this._chainTimestamp);
+    if (Number.isFinite(chainNow) && chainNow > 0) {
+      const syncedAt = Number(this._chainTimestampSyncedAtMs);
+      if (live && Number.isFinite(syncedAt) && syncedAt > 0) {
+        const elapsed = Math.max(0, Math.floor((Date.now() - syncedAt) / 1000));
+        return Math.floor(chainNow + elapsed);
+      }
+      return Math.floor(chainNow);
+    }
+    return Math.floor(Date.now() / 1000);
+  }
+
+  _getNextRelease(lock, { now, cliffEnd, vestingDays, ratePerDay } = {}) {
+    if (!lock || !window.ethers?.BigNumber?.from) return null;
+    if (!Number.isFinite(now) || !Number.isFinite(cliffEnd) || !Number.isFinite(vestingDays)) return null;
+    if (!Number.isFinite(ratePerDay) || ratePerDay <= 0 || vestingDays <= 0) return null;
+    if (now >= cliffEnd + (vestingDays * SECONDS_PER_DAY)) return null;
+
+    const bn = window.ethers.BigNumber.from;
+    const amount = bn(lock.amount || 0);
+    const withdrawn = bn(lock.withdrawn || 0);
+    if (amount.isZero() || withdrawn.gte(amount)) return null;
+
+    const elapsedDays = Math.max(0, Math.floor((now - cliffEnd) / SECONDS_PER_DAY));
+    if (elapsedDays >= vestingDays) return null;
+
+    const vestedPct = (day) => Math.min(RATE_SCALE, Math.floor(ratePerDay * day));
+    const currentUnlocked = amount.mul(vestedPct(elapsedDays)).div(RATE_SCALE);
+
+    // Match the contract's integer division: tiny or low-decimal locks can have
+    // zero-sized daily steps, so jump to the first day that unlocks a raw unit.
+    const unlockOneMoreAt = currentUnlocked.add(1).mul(RATE_SCALE);
+    const unlockedPerDay = amount.mul(ratePerDay);
+    const nextNonZeroDay = unlockOneMoreAt.add(unlockedPerDay.sub(1)).div(unlockedPerDay).toNumber();
+    const nextDay = Math.max(elapsedDays + 1, nextNonZeroDay);
+    if (nextDay > vestingDays) return null;
+
+    const nextUnlocked = amount.mul(vestedPct(nextDay)).div(RATE_SCALE);
+    const amountReleased = nextUnlocked.sub(currentUnlocked);
+    if (amountReleased.lte(0)) return null;
+
+    const at = cliffEnd + (nextDay * SECONDS_PER_DAY);
+    return {
+      at,
+      amount: amountReleased,
+      isFirstRelease: currentUnlocked.isZero(),
+    };
+  }
+
+  _formatNextReleaseLabel(release, { fmt, symbol = '' } = {}) {
+    if (!release || typeof fmt !== 'function') return '';
+    const token = symbol ? ` ${symbol}` : '';
+    const prefix = release.isFirstRelease ? '' : '+';
+    const countdown = this._formatCountdown(release.at - this._getCurrentTimestamp({ live: true }));
+    return `Next release: ${prefix}${fmt(release.amount)}${token} in ${countdown}`;
+  }
+
+  _formatCountdown(seconds) {
+    const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+    if (safeSeconds <= 0) return 'now';
+    const days = Math.floor(safeSeconds / SECONDS_PER_DAY);
+    const hours = Math.floor((safeSeconds % SECONDS_PER_DAY) / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const secs = safeSeconds % 60;
+
+    if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m`;
+    return `${secs}s`;
+  }
+
+  _scheduleReleaseCountdown(rows = []) {
+    if (this._releaseCountdownTimer) {
+      window.clearTimeout(this._releaseCountdownTimer);
+      this._releaseCountdownTimer = null;
+    }
+
+    const now = this._getCurrentTimestamp({ live: true });
+    const nextReleaseAt = rows.reduce((soonest, entry) => {
+      const at = Number(entry?.nextReleaseAt || 0);
+      return Number.isFinite(at) && at > now ? Math.min(soonest, at) : soonest;
+    }, Infinity);
+    if (!Number.isFinite(nextReleaseAt)) return;
+
+    const secondsUntilRelease = Math.max(0, nextReleaseAt - now);
+    const delayMs = secondsUntilRelease <= 60
+      ? 1000
+      : Math.min(60_000, Math.max(1000, (secondsUntilRelease - 60) * 1000));
+    this._releaseCountdownTimer = window.setTimeout(() => {
+      this._releaseCountdownTimer = null;
+      this.renderLocks();
+    }, delayMs);
+  }
+
+  async _refreshChainTimestamp() {
+    try {
+      const timestamp = await window.contractManager?.getLatestBlockTimestamp?.();
+      if (Number.isFinite(timestamp) && timestamp > 0) {
+        this._chainTimestamp = Math.floor(timestamp);
+        this._chainTimestampSyncedAtMs = Date.now();
+        return this._chainTimestamp;
+      }
+    } catch {
+      // Fall back to browser time when the latest block cannot be read.
+    }
+    this._chainTimestamp = null;
+    this._chainTimestampSyncedAtMs = null;
+    return this._getCurrentTimestamp();
   }
 
   _getUnlockUnavailableReason(lock) {
@@ -832,7 +992,7 @@ export class OverviewTab {
     if (!this._isWithdrawer(lock)) return 'Only the withdraw address can withdraw.';
     if (!lock.unlocked) return 'This lock is not unlocked.';
 
-    const now = Math.floor(Date.now() / 1000);
+    const now = this._getCurrentTimestamp();
     const unlockTime = Number(lock.unlockTime?.toString?.() ?? lock.unlockTime ?? 0);
     const cliffDays = Number(lock.cliffDays?.toString?.() ?? lock.cliffDays ?? 0);
     if (unlockTime > now) return 'Unlock time has not been reached.';

@@ -22,10 +22,10 @@
 #
 # WHAT IT DOES:
 # - Copies all files from token-lock-ui/* to liberdus.github.io/locktest/
-# - Excludes build artifacts, node_modules, git files, and editor junk
+# - Excludes build artifacts, tests, docs, package files, patches, local scripts, git files, and editor junk
 # - Replaces existing files in the locktest folder
 # - Preserves directory structure
-# - Removes files that no longer exist in the source (syncs the folders)
+# - Removes files that no longer exist in the source and removes excluded dev files from the target
 #
 # =============================================================================
 
@@ -68,17 +68,41 @@ echo "Source: $SOURCE_DIR"
 echo "Target: $TARGET_DIR"
 
 # Copy all files and directories from source to target
-rsync -av --delete \
+rsync -av --delete --delete-excluded \
   --exclude='node_modules' \
   --exclude='.git' \
+  --exclude='.gitignore' \
+  --exclude='.github' \
+  --exclude='.github/' \
   --exclude='.idea' \
   --exclude='.DS_Store' \
   --exclude='.vscode' \
+  --exclude='.cursor' \
+  --exclude='.cursor/' \
   --exclude='.cursorrles' \
   --exclude='.next' \
   --exclude='dist' \
   --exclude='build' \
   --exclude='out' \
+  --exclude='coverage' \
+  --exclude='coverage/' \
+  --exclude='playwright-report' \
+  --exclude='playwright-report/' \
+  --exclude='test-results' \
+  --exclude='test-results/' \
+  --exclude='tests' \
+  --exclude='tests/' \
+  --exclude='scripts' \
+  --exclude='scripts/' \
+  --exclude='patches' \
+  --exclude='patches/' \
+  --exclude='*.patch' \
+  --exclude='*.diff' \
+  --exclude='*.md' \
+  --exclude='*.MD' \
+  --exclude='package.json' \
+  --exclude='package-lock.json' \
+  --exclude='playwright.config.*' \
   --exclude='*.log' \
   "$SOURCE_DIR/" "$TARGET_DIR/"
 
