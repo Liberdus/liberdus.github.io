@@ -192,6 +192,28 @@
     cursor: not-allowed;
 }
 
+.recipient-override {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    margin-bottom: var(--spacing-3);
+}
+
+.recipient-destination {
+    margin-top: var(--spacing-2);
+    margin-bottom: var(--spacing-2);
+}
+
+.recipient-checkbox-label {
+    justify-content: flex-end;
+    margin: 0;
+}
+
+.recipient-field {
+    margin-top: var(--spacing-2);
+    margin-bottom: 0;
+}
+
 /* Slider Styles */
 .slider-container {
     margin: var(--spacing-2) 0;
@@ -592,6 +614,11 @@
     font-size: 12px;
     margin-top: calc(var(--spacing-2) * -1);
     margin-bottom: var(--spacing-2);
+}
+
+.zap-field-error.recipient-error {
+    margin-top: var(--spacing-1);
+    margin-bottom: 0;
 }
 
 .custom-slippage-error {

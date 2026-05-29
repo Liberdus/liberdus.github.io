@@ -195,7 +195,6 @@
             `${basePath}js/utils/multicall-service.js`,
             
             // JavaScript - Wallet
-            `${basePath}js/wallet/metamask-connector.js`,
             `${basePath}js/wallet/network-manager.js`,
             `${basePath}js/wallet/wallet-manager.js`,
             

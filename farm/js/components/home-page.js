@@ -109,32 +109,26 @@ class HomePage {
             this.hideAdminButton();
         });
 
-        // Listen for account changes (MetaMask)
-        if (window.ethereum) {
-            window.ethereum.on('accountsChanged', (accounts) => {
-                console.log('🏠 HomePage: Accounts changed:', accounts);
-                this.updateFooter();
-                this.refreshDataAfterWalletChange();
-                this.checkFarmMigrationPosition({ force: true }).catch(() => {});
-                this.checkAdminAccess();
-            });
+        document.addEventListener('walletAccountChanged', () => {
+            console.log('🏠 HomePage: Account changed');
+            this.updateFooter();
+            this.refreshDataAfterWalletChange();
+            this.checkFarmMigrationPosition({ force: true }).catch(() => {});
+            this.checkAdminAccess();
+        });
 
-            // Re-check permissions when wallet network changes
-            window.ethereum.on('chainChanged', (chainId) => {
-                console.log('🏠 HomePage: Chain changed:', chainId);
-                // Only update the network indicator to re-check permissions
-                window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
-                this.updateFooter();
-                this.checkFarmMigrationPosition({ force: true }).catch(() => {});
-            });
+        document.addEventListener('walletChainChanged', () => {
+            console.log('🏠 HomePage: Chain changed');
+            window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
+            this.updateFooter();
+            this.checkFarmMigrationPosition({ force: true }).catch(() => {});
+        });
 
-            // Re-check permissions when page regains focus (in case permissions were removed in another tab)
-            window.addEventListener('focus', () => {
-                console.log('🏠 HomePage: Page focused, re-checking permissions...');
-                window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
-                this.updateFooter();
-            });
-        }
+        window.addEventListener('focus', () => {
+            console.log('🏠 HomePage: Page focused, re-checking permissions...');
+            window.NetworkIndicator?.update('network-indicator-home', 'home-network-selector', 'home');
+            this.updateFooter();
+        });
     }
 
     /**
@@ -240,9 +234,7 @@ class HomePage {
         if (connectWalletBtn) {
             connectWalletBtn.onclick = async () => {
                 try {
-                    if (window.walletManager?.connectMetaMask) {
-                        await window.walletManager.connectMetaMask();
-                    } else if (document.getElementById('connect-wallet-btn')?.click) {
+                    if (document.getElementById('connect-wallet-btn')?.click) {
                         document.getElementById('connect-wallet-btn').click();
                     } else {
                         window.notificationManager?.error('Wallet connection not available. Please refresh the page.');
@@ -476,49 +468,64 @@ class HomePage {
             ? `<a href="${platformUrl}" target="_blank" rel="noopener noreferrer" class="platform-link" title="View pool on ${platform}" style="font-size: 12px; color: var(--text-secondary); display: inline-block;">${platform}</a>`
             : `<span style="font-size: 12px; color: var(--text-secondary);">${platform}</span>`;
         
+        const desktopActions = (actions) => `
+            <div class="staking-row-actions staking-row-actions--desktop">
+                ${actions.map((action) => this.renderPairActionButton(pair, action)).join('')}
+            </div>
+        `;
+
         return `
             <tr class="pair-row" data-pair-id="${pair.id}" style="cursor: pointer;">
                 <td class="staking-cell staking-cell--pair" data-label="Pair">
-                    <div class="pair-link-stack">
-                        ${pairNameHtml}
-                        ${platformHtml}
-                    </div>
+                    ${this.renderStakingCellBody(`
+                        <div class="pair-link-stack">
+                            ${pairNameHtml}
+                            ${platformHtml}
+                        </div>
+                    `)}
                 </td>
                 <td class="staking-cell staking-cell--apr" data-label="APR">
-                    <span style="color: var(--success-main); font-weight: bold;">${pair.apr || '0.00'}%</span>
+                    ${this.renderStakingCellBody(`<span class="staking-metric-value staking-metric-value--apr">${pair.apr || '0.00'}%</span>`)}
                 </td>
                 <td class="staking-cell staking-cell--weight" data-label="Weight">
-                    <span style="font-weight: 600;">
-                        ${pair.weightPercentage || '0.00'}%
-                    </span>
+                    ${this.renderStakingCellBody(`<span class="staking-metric-value">${pair.weightPercentage || '0.00'}%</span>`)}
                 </td>
                 <td class="staking-cell staking-cell--tvl" data-label="TVL">
-                    <span style="font-weight: 600;">${this.formatTvlDisplay(pair)}</span>
+                    ${this.renderStakingCellBody(`<span class="staking-metric-value">${this.formatTvlDisplay(pair)}</span>`)}
                 </td>
                 <td class="staking-cell staking-cell--share" data-label="My Share">
-                    <button class="btn btn-primary btn-small btn-share"
-                            data-pair-id="${pair.id}"
-                            data-pair-address="${pair.address}"
-                            data-tab="0"
-                            title="Stake or Unstake"
-                            style="min-width: 100px;">
-                        <span class="material-icons" style="font-size: 16px;">share</span>
-                        ${userShares}%
-                    </button>
+                    ${this.renderStakingCellBody(`<span class="staking-metric-value">${userShares}%</span>`, desktopActions(['stake', 'unstake']))}
                 </td>
                 <td class="staking-cell staking-cell--reward" data-label="My Reward">
-                    <button class="btn btn-secondary btn-small btn-earnings"
-                            data-pair-id="${pair.id}"
-                            data-pair-address="${pair.address}"
-                            data-tab="2"
-                            title="Claim reward"
-                            style="min-width: 120px;">
-                        <span class="material-icons" style="font-size: 16px;">redeem</span>
-                        ${userEarnings} LIB
-                    </button>
+                    ${this.renderStakingCellBody(`<span class="staking-metric-value">${userEarnings} LIB</span>`, desktopActions(['claim']))}
+                </td>
+                <td class="staking-cell staking-cell--actions" data-label="">
+                    <div class="staking-row-actions staking-row-actions--mobile">
+                        ${this.renderPairActionButton(pair, 'stake')}
+                        ${this.renderPairActionButton(pair, 'unstake')}
+                        ${this.renderPairActionButton(pair, 'claim')}
+                    </div>
                 </td>
             </tr>
         `;
+    }
+
+    renderStakingCellBody(valueHtml, footerHtml) {
+        return `<div class="staking-cell-body"><div class="staking-cell-value">${valueHtml}</div><div class="staking-cell-footer">${footerHtml || ''}</div></div>`;
+    }
+
+    renderPairActionButton(pair, action) {
+        const classes = {
+            stake: 'btn-primary btn-stake',
+            unstake: 'btn-danger btn-unstake',
+            claim: 'btn-success btn-claim'
+        };
+        const labels = { stake: 'Stake', unstake: 'Unstake', claim: 'Claim' };
+        if (!classes[action]) {
+            throw new Error(`Unknown staking row action: ${action}`);
+        }
+
+        return `<button type="button" class="btn ${classes[action]} btn-small" data-pair-id="${pair.id}" data-pair-address="${pair.address}" data-action="${action}">${labels[action]}</button>`;
     }
 
     attachEventListeners() {
@@ -559,38 +566,22 @@ class HomePage {
                 }
             }
 
-            // Handle Share button click (open modal on Stake tab)
-            if (e.target.closest('.btn-share')) {
+            const actionButton = e.target.closest('.btn-stake, .btn-unstake, .btn-claim');
+            if (actionButton) {
                 e.stopPropagation();
                 if (!this.isWalletConnected()) {
                     this.showWalletRequiredToast();
                     return;
                 }
 
-                const button = e.target.closest('.btn-share');
-                const pairId = button.dataset.pairId;
-                const tab = parseInt(button.dataset.tab) || 0;
-                this.openStakingModal(pairId, tab === 0 ? 'stake' : 'unstake');
-            }
-
-            // Handle Earnings button click (open modal on Claim tab)
-            if (e.target.closest('.btn-earnings')) {
-                e.stopPropagation();
-                if (!this.isWalletConnected()) {
-                    this.showWalletRequiredToast();
-                    return;
-                }
-
-                const button = e.target.closest('.btn-earnings');
-                const pairId = button.dataset.pairId;
-                this.openStakingModal(pairId, 'claim');
+                this.openStakingModal(actionButton.dataset.pairId, actionButton.dataset.action);
             }
 
         });
     }
 
     isMetaMaskWalletSelected() {
-        const provider = window.ethereum;
+        const provider = window.walletManager?.getEip1193Provider?.();
         const walletType = String(window.walletManager?.getWalletType?.() || window.walletManager?.walletType || '').toLowerCase();
 
         if (
@@ -636,7 +627,7 @@ class HomePage {
     }
 
     async addRewardTokenToMetaMask() {
-        const injected = window.ethereum;
+        const injected = window.walletManager?.getEip1193Provider?.();
         if (!injected?.request) {
             throw new Error('MetaMask was not detected in this browser.');
         }

@@ -7,8 +7,8 @@ declare global {
         networkSelector: {
             init: (onNetworkChange?: Function) => void;
             createSelector: (containerId: string, context?: string) => void;
-            addNetworkToMetaMask: (networkKey: string) => Promise<boolean>;
-            addNetworkToMetaMaskAndReload: (networkKey: string) => Promise<void>;
+            addNetworkToWallet: (networkKey: string) => Promise<boolean>;
+            addNetworkToWalletAndReload: (networkKey: string) => Promise<void>;
         };
     }
 }

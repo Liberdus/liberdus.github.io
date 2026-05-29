@@ -272,7 +272,7 @@ window.CONFIG = {
 
     // Development Configuration
     DEV: {
-        DEBUG: true
+        DEBUG: false
     },
 
     // Default Values for Contract Stats

@@ -101,8 +101,7 @@ class WalletPopup {
 
     getWalletData() {
         try {
-            // Try multiple wallet manager sources
-            const walletManager = window.walletManager || window.WalletManagerNew;
+            const walletManager = window.walletManager;
             
             if (!walletManager) {
                 console.warn('No wallet manager found');
@@ -123,7 +122,7 @@ class WalletPopup {
             const address = walletManager.getAccount ? walletManager.getAccount() : 
                            walletManager.getAddress ? walletManager.getAddress() : null;
             
-            const walletType = walletManager.getWalletType ? walletManager.getWalletType() : 'metamask';
+            const walletType = walletManager.getWalletType ? walletManager.getWalletType() : 'wallet';
             const chainId = walletManager.getChainId ? walletManager.getChainId() : null;
 
             return {
@@ -536,7 +535,7 @@ class WalletPopup {
         this.hide();
         
         try {
-            const walletManager = window.walletManager || window.WalletManagerNew;
+            const walletManager = window.walletManager;
             if (walletManager && walletManager.disconnect) {
                 await walletManager.disconnect();
                 

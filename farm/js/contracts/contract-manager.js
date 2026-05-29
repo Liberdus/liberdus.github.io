@@ -1104,6 +1104,108 @@ class ContractManager {
     }
 
     /**
+     * Validate that an address is a deployed V2-compatible LP token contract.
+     * @returns {Promise<{ valid: true, address: string, token0: string, token1: string, reserve0: ethers.BigNumber, reserve1: ethers.BigNumber } | { valid: false, error: string }>}
+     */
+    async validateV2CompatibleLpToken(address) {
+        if (!address || typeof address !== 'string' || !address.trim()) {
+            return { valid: false, error: 'LP token address is required' };
+        }
+
+        let lpTokenAddress;
+        try {
+            lpTokenAddress = ethers.utils.getAddress(address.trim());
+        } catch (error) {
+            return { valid: false, error: 'Invalid Ethereum address format' };
+        }
+
+        const provider = this.provider || this.signer?.provider;
+        if (!provider) {
+            return { valid: false, error: 'Network provider is not available' };
+        }
+
+        let contractCode;
+        try {
+            contractCode = await provider.getCode(lpTokenAddress);
+        } catch (error) {
+            return {
+                valid: false,
+                error: 'Unable to verify contract code. Check your network connection and try again.'
+            };
+        }
+
+        if (contractCode === '0x') {
+            return { valid: false, error: 'No contract code found at this address' };
+        }
+
+        const pairContract = new ethers.Contract(lpTokenAddress, [
+            'function token0() view returns (address)',
+            'function token1() view returns (address)',
+            'function getReserves() view returns (uint112,uint112,uint32)'
+        ], provider);
+
+        let token0Address;
+        let token1Address;
+        let reserves;
+        try {
+            [token0Address, token1Address, reserves] = await Promise.all([
+                pairContract.token0(),
+                pairContract.token1(),
+                pairContract.getReserves()
+            ]);
+        } catch (error) {
+            if (error?.code === 'NETWORK_ERROR' || error?.code === 'TIMEOUT' || error?.code === 'SERVER_ERROR') {
+                return {
+                    valid: false,
+                    error: 'Unable to verify LP token contract. Check your network connection and try again.'
+                };
+            }
+            return {
+                valid: false,
+                error: 'This address does not appear to be a V2-compatible LP token contract'
+            };
+        }
+
+        if (!ethers.utils.isAddress(token0Address) || !ethers.utils.isAddress(token1Address)) {
+            return {
+                valid: false,
+                error: 'This address does not appear to be a V2-compatible LP token contract'
+            };
+        }
+
+        const token0 = ethers.utils.getAddress(token0Address);
+        const token1 = ethers.utils.getAddress(token1Address);
+        const zeroAddress = ethers.constants.AddressZero;
+        if (token0 === zeroAddress || token1 === zeroAddress || token0.toLowerCase() === token1.toLowerCase()) {
+            return {
+                valid: false,
+                error: 'This address does not appear to be a V2-compatible LP token contract'
+            };
+        }
+
+        if (!Array.isArray(reserves) || reserves.length < 2) {
+            return {
+                valid: false,
+                error: 'This address does not appear to be a V2-compatible LP token contract'
+            };
+        }
+
+        let reserve0;
+        let reserve1;
+        try {
+            reserve0 = ethers.BigNumber.from(reserves[0]);
+            reserve1 = ethers.BigNumber.from(reserves[1]);
+        } catch (error) {
+            return {
+                valid: false,
+                error: 'This address does not appear to be a V2-compatible LP token contract'
+            };
+        }
+
+        return { valid: true, address: lpTokenAddress, token0, token1, reserve0, reserve1 };
+    }
+
+    /**
     * Normalize LP pair names so keys remain consistent regardless of contract formatting
     * @param {string} rawName - Original pair name from the contract
     * @returns {string|null} Normalized pair identifier with an LP prefix, or null when input cannot be normalized
@@ -2633,6 +2735,49 @@ class ContractManager {
         }
     }
 
+    async transferRewardTokensToStaking(amount) {
+        try {
+            await this.ensureSigner();
+
+            if (!this.isRewardTokenContractReady()) {
+                return { success: false, error: new Error('Reward token contract is not available.') };
+            }
+
+            const stakingAddress = this.stakingContract?.address || this.contractAddresses?.get('STAKING');
+            if (!stakingAddress || !this.isValidContractAddress(stakingAddress)) {
+                return { success: false, error: new Error('Staking contract address is not available.') };
+            }
+
+            const amountStr = String(amount);
+            const amountNum = parseFloat(amountStr);
+            if (!amountStr || Number.isNaN(amountNum) || amountNum <= 0) {
+                return { success: false, error: new Error('Amount must be a positive number.') };
+            }
+
+            const recipient = this.validateAndChecksumAddress(stakingAddress, 'Staking Contract Address');
+            // Assumes 18-decimal reward token; matches REWARD_PRECISION and admin UI formatting.
+            // See https://github.com/Liberdus/lib-lp-staking-frontend/issues/289 if we need decimal-agnostic tokens.
+            const amountWei = ethers.utils.parseEther(amountStr);
+
+            const result = await this.executeTransactionOnce(async () => {
+                const tx = await this.rewardTokenContract.connect(this.signer).transfer(recipient, amountWei);
+                console.log('Reward token funding transaction sent:', tx.hash);
+                return tx;
+            }, 'transferRewardTokensToStaking');
+
+            return {
+                success: true,
+                transactionHash: result.transactionHash,
+                blockNumber: result.blockNumber,
+                gasUsed: result.gasUsed?.toString?.() || result.gasUsed,
+                message: 'Reward tokens transferred to staking contract'
+            };
+        } catch (error) {
+            console.error('Failed to transfer reward tokens to staking contract:', error);
+            return { success: false, error };
+        }
+    }
+
     // ============ ADMIN PROPOSAL FUNCTIONS ============
 
     /**
@@ -2797,92 +2942,30 @@ class ContractManager {
      */
     async ensureSigner() {
         try {
-            // First ensure MetaMask is connected
-            if (typeof window.ethereum === 'undefined') {
-                throw new Error('MetaMask not installed');
+            if (!window.walletManager?.isConnected()) {
+                throw new Error('Wallet not connected');
             }
 
-            // Check if accounts are connected
-            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-            if (accounts.length === 0) {
-                console.log('🔐 No connected accounts, requesting MetaMask connection...');
-                try {
-                    await window.ethereum.request({ method: 'eth_requestAccounts' });
-                } catch (connectionError) {
-                    if (connectionError.code === 4001) {
-                        throw new Error('User rejected MetaMask connection');
-                    }
-                    throw new Error('Failed to connect to MetaMask: ' + connectionError.message);
-                }
-            }
-
-            // Always create a fresh Web3Provider for transactions (CRITICAL FIX)
-
-            // Create Web3Provider directly from MetaMask
-            const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
-
-            // Ensure we're on the correct network (using centralized config)
-            const network = await web3Provider.getNetwork();
+            let web3Provider = window.walletManager.getProvider();
             const expectedChainId = window.networkSelector?.getCurrentChainId();
-            
-            // Check permissions for the selected network regardless of current network
-            const selectedNetwork = window.networkSelector?.getCurrentChainId();
             const networkName = window.networkSelector?.getCurrentNetworkName();
-            
-            if (selectedNetwork === expectedChainId) {
-                console.log(`🌐 ${networkName} selected in UI, checking permissions...`);
-                
-                // Check if we have permission for the selected network
-                const hasPermission = await window.networkManager.hasRequiredNetworkPermission();
-                if (!hasPermission) {
-                    console.log(`🔐 Requesting ${networkName} permission...`);
-                    try {
-                        const permissionGranted = await window.networkManager.requestNetworkPermission('metamask');
-                        if (!permissionGranted) {
-                            throw new Error(`${networkName} permission required for transactions`);
-                        }
-                    } catch (error) {
-                        // Handle network switching errors gracefully
-                        if (error.message.includes('User rejected') || error.message.includes('denied')) {
-                            throw new Error(`User rejected ${networkName} permission request`);
-                        }
-                        throw new Error(`${networkName} permission required for transactions: ${error.message}`);
-                    }
-                }
-            } else if (network.chainId !== expectedChainId) {
-                throw new Error(`Please switch to ${networkName} (Chain ID: ${expectedChainId}) in MetaMask`);
+
+            if ((await web3Provider.getNetwork()).chainId !== expectedChainId) {
+                console.log(`🔐 Requesting ${networkName} network permission...`);
+                await window.networkManager.requestNetworkPermission();
+                web3Provider = window.walletManager.getProvider();
             }
 
-            // Get signer from Web3Provider
             this.signer = web3Provider.getSigner();
-            // Keep the original provider for read operations, but use Web3Provider for transactions
             this.transactionProvider = web3Provider;
-
-            // Verify signer is connected
-            try {
-                await this.signer.getAddress();
-            } catch (error) {
-                console.error('❌ Signer verification failed:', error);
-
-                // If verification fails, try to recreate signer
-                if (window.ethereum) {
-                    const provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
-                    this.signer = provider.getSigner();
-                    this.provider = provider;
-
-                    // Try verification again
-                    await this.signer.getAddress();
-                } else {
-                    throw new Error('Signer not properly connected');
-                }
-            }
+            await this.signer.getAddress();
 
         } catch (error) {
             console.error('❌ ensureSigner failed:', error);
 
             // If it's a user rejection, throw specific error
             if (error.code === 4001) {
-                throw new Error('User rejected MetaMask connection');
+                throw new Error('User rejected wallet connection');
             }
 
             throw new Error('Signer not properly connected: ' + error.message);
@@ -3088,13 +3171,13 @@ class ContractManager {
                 throw new Error('No approval method available in deployed contract. Check contract ABI.');
             }
 
-            // CRITICAL: Ensure we have a proper signer with MetaMask connection
+            // CRITICAL: Ensure we have a proper signer with wallet connection
             await this.ensureSigner();
 
             // Verify signer is actually available
             if (!this.signer) {
                 const networkName = window.networkSelector?.getCurrentNetworkName?.() || 'the selected network';
-                throw new Error(`No signer available. Please connect MetaMask and ensure you are on ${networkName}.`);
+                throw new Error(`No signer available. Please connect your wallet and ensure you are on ${networkName}.`);
             }
 
             const result = await this.executeTransactionOnce(async () => {
@@ -3130,7 +3213,7 @@ class ContractManager {
                 console.error(`[APPROVE DEBUG]   1. Contract method signature mismatch`);
                 console.error(`[APPROVE DEBUG]   2. Invalid action ID parameter`);
                 console.error(`[APPROVE DEBUG]   3. Network/RPC provider issues`);
-                console.error(`[APPROVE DEBUG]   4. MetaMask connection problems`);
+                console.error(`[APPROVE DEBUG]   4. Wallet connection problems`);
 
                 // Check contract connection
                 console.log(`[APPROVE DEBUG] Contract connection check:`);
@@ -3420,7 +3503,7 @@ class ContractManager {
     /**
      * Get all pairs with their information
      */
-    async getAllPairsInfo() {
+    async getAllPairsInfo({ forceRefresh = false } = {}) {
         return await this.executeWithRetry(async () => {
             if (!this.stakingContract) {
                 throw new Error('Staking contract not initialized');
@@ -3432,7 +3515,7 @@ class ContractManager {
                 // Try multiple methods to get pairs
                 let pairs = [];
 
-                if (Array.isArray(this.cachedPairs) && this.cachedPairs.length > 0) {
+                if (!forceRefresh && Array.isArray(this.cachedPairs) && this.cachedPairs.length > 0) {
                     pairs = this.cachedPairs;
                     console.log('✅ Using cached pairs:', pairs.length);
                 } else {
@@ -3573,7 +3656,7 @@ class ContractManager {
     /**
      * Claim rewards for LP token with enhanced gas estimation
      */
-    async claimRewards(lpTokenAddress) {
+    async claimRewards(lpTokenAddress, recipientAddress = null) {
         // Ensure we have a signer for transactions
         await this.ensureSigner();
 
@@ -3593,10 +3676,16 @@ class ContractManager {
         }
 
         try {
+            const receiver = recipientAddress
+                ? this.validateAndChecksumAddress(recipientAddress, 'Recipient Address')
+                : null;
+
             return await this.executeTransactionOnce(async () => {
                 // Connect contract with signer for transaction
                 const contractWithSigner = this.stakingContract.connect(this.signer);
-                const tx = await contractWithSigner.claimRewards(lpTokenAddress);
+                const tx = receiver
+                    ? await contractWithSigner.claimRewardsTo(lpTokenAddress, receiver)
+                    : await contractWithSigner.claimRewards(lpTokenAddress);
 
                 console.log(`✅ Claim rewards transaction sent: ${tx.hash}`);
 
@@ -3663,7 +3752,7 @@ class ContractManager {
     /**
      * Unstake LP tokens
      */
-    async unstake(lpTokenAddress, amount, claimRewards) {
+    async unstake(lpTokenAddress, amount, claimRewards, recipientAddress = null) {
         // Ensure we have a signer for transactions
         await this.ensureSigner();
 
@@ -3683,13 +3772,19 @@ class ContractManager {
         }
 
         try {
+            const receiver = recipientAddress
+                ? this.validateAndChecksumAddress(recipientAddress, 'Recipient Address')
+                : null;
+
             return await this.executeTransactionOnce(async () => {
                 // Convert amount to wei
                 const amountWei = ethers.utils.parseEther(amount.toString());
 
                 // Connect contract with signer for transaction
                 const contractWithSigner = this.stakingContract.connect(this.signer);
-                const tx = await contractWithSigner.unstake(lpTokenAddress, amountWei, claimRewards);
+                const tx = receiver
+                    ? await contractWithSigner.unstakeTo(lpTokenAddress, amountWei, claimRewards, receiver)
+                    : await contractWithSigner.unstake(lpTokenAddress, amountWei, claimRewards);
 
                 console.log(`✅ Unstake transaction sent: ${tx.hash}`);
                 console.log(`   Amount: ${amount} LP tokens`);
@@ -4053,7 +4148,7 @@ class ContractManager {
             const tx = await operation();
             this.notifyTransactionPhase(operationName, 'processing');
 
-            // CRITICAL: Log transaction hash immediately after MetaMask confirmation
+            // CRITICAL: Log transaction hash immediately after wallet confirmation
             console.log(`✅ Transaction submitted to blockchain: ${tx.hash}`);
             console.log(`[TRANSACTION MONITORING] ${operationName} - Hash: ${tx.hash}`);
 
@@ -4130,11 +4225,11 @@ class ContractManager {
             this.provider = fallbackProvider;
 
             // Get signer if wallet is connected
-            if (window.ethereum) {
+            if (window.walletManager?.isConnected()) {
                 try {
-                    const provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
+                    const provider = window.walletManager.getProvider();
                     this.signer = provider.getSigner();
-                    console.log('✅ Signer obtained from MetaMask during provider switch');
+                    console.log('✅ Signer obtained from selected wallet during provider switch');
                 } catch (error) {
                     console.error('⚠️ Could not get signer during provider switch:', error.message);
                 }
@@ -4367,9 +4462,7 @@ class ContractManager {
      */
     async getCurrentSignerForPermissions() {
         try {
-            if (typeof window.ethereum === 'undefined') return null;
-            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-            return accounts.length > 0 ? accounts[0] : null;
+            return window.walletManager?.getAddress?.() || null;
         } catch (error) {
             if (error.code === 'UNSUPPORTED_OPERATION' || 
                 error.message?.includes('unknown account') ||

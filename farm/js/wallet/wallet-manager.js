@@ -1,655 +1,345 @@
+(function(global) {
+    'use strict';
 
-// Prevent duplicate class declaration
-if (typeof window.WalletManager !== 'undefined') {
-    console.log('⚠️ WalletManager already defined, skipping redeclaration');
-} else {
-
-class WalletManager {
-    constructor() {
-        this.provider = null;
-        this.signer = null;
-        this.address = null;
-        this.chainId = null;
-        this.walletType = null;
-        this.isConnecting = false;
-        this.listeners = new Set();
-        this.eventListeners = [];
-
-        // Rate limiting for MetaMask requests
-        this.lastRequestTime = 0;
-        this.requestCooldown = 2000; // 2 seconds between requests (increased)
-        this.connectionAttempts = 0;
-        this.maxConnectionAttempts = 3;
-        this.connectionCooldownTime = 10000; // 10 seconds between connection attempts (increased)
-
-        // Connection state management
-        this.connectionPromise = null; // Track ongoing connection attempts
-
-        this.init();
+    if (global.WalletManager) {
+        console.log('⚠️ WalletManager already defined, skipping redeclaration');
+        return;
     }
 
-    /**
-     * Rate-limited MetaMask request wrapper to prevent circuit breaker errors
-     */
-    async safeMetaMaskRequest(method, params = [], retryCount = 0) {
-        const maxRetries = 3;
-        const baseDelay = 1000; // 1 second base delay
+    const WALLET_SESSION_KEY = 'lib_lp_staking:wallet-session';
+    const SCRIPT_SRC = global.document?.currentScript?.src || '';
+    const BNB_CHAIN_IDS = new Set([56, 97]);
+    const UNSUPPORTED_WALLET_NETWORK = 'UNSUPPORTED_WALLET_NETWORK';
+    let walletModulePromise = null;
 
-        // Implement exponential backoff for rate limiting
-        const now = Date.now();
-        const minDelay = this.requestCooldown * (retryCount + 1);
-        if (now - this.lastRequestTime < minDelay) {
-            const waitTime = minDelay - (now - this.lastRequestTime);
-            console.log(`Rate limiting MetaMask request: waiting ${waitTime}ms (attempt ${retryCount + 1})`);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
+    function walletModuleUrl() {
+        if (SCRIPT_SRC) {
+            return new URL('../../vendor/liberdus-wallet-module/index.js', SCRIPT_SRC).href;
         }
+        return '../../vendor/liberdus-wallet-module/index.js';
+    }
 
-        this.lastRequestTime = Date.now();
+    async function loadWalletModule() {
+        if (!walletModulePromise) {
+            walletModulePromise = import(walletModuleUrl());
+        }
+        return walletModulePromise;
+    }
 
+    function getStorage() {
         try {
-            console.log(`Making MetaMask request: ${method} (attempt ${retryCount + 1})`);
-            return await window.ethereum.request({ method, params });
-        } catch (error) {
-            console.error(`MetaMask request failed (attempt ${retryCount + 1}):`, error);
-
-            // Handle circuit breaker errors specifically
-            if (error.code === -32603 && error.message.includes('circuit breaker')) {
-                if (retryCount < maxRetries) {
-                    const backoffDelay = baseDelay * Math.pow(2, retryCount); // Exponential backoff
-                    console.warn(`MetaMask circuit breaker triggered, retrying in ${backoffDelay}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, backoffDelay));
-                    return this.safeMetaMaskRequest(method, params, retryCount + 1);
-                } else {
-                    throw new Error('MetaMask is temporarily overloaded. Please wait a few minutes and refresh the page.');
-                }
-            }
-
-            // Handle other common MetaMask errors
-            if (error.code === -32002) {
-                throw new Error('MetaMask is already processing a request. Please wait and try again.');
-            }
-
-            if (error.code === 4001) {
-                throw new Error('Connection cancelled by user.');
-            }
-
-            throw error;
+            return global.localStorage;
+        } catch {
+            return null;
         }
     }
 
-    async init() {
-        this.isConnecting = true;
-        try {
-
-            await this.checkPreviousConnection();
-
-            // Set up event listeners for wallet changes
-            this.setupEventListeners();
-
-            this.log('WalletManager initialized');
-        } catch (error) {
-            this.logError('Failed to initialize WalletManager:', error);
-        } finally {
-            this.isConnecting = false;
-        }
+    function isPhantomWallet(wallet) {
+        const walletIdentity = (wallet.info.name + ' ' + wallet.info.rdns).toLowerCase();
+        const providers = [wallet.provider, ...wallet.linkedProviders];
+        return walletIdentity.includes('phantom') || providers.some((provider) => provider.isPhantom);
     }
 
-    /**
-     * General connect method that chooses the best available wallet
-     */
-    async connectWallet(preferredType = 'auto') {
-        try {
-            this.log(`Connecting wallet (preferred: ${preferredType})...`);
-
-            const normalizedPreference = (preferredType || 'auto').toLowerCase();
-
-            if (normalizedPreference === 'metamask' || normalizedPreference === 'auto') {
-                if (window.ethereum) {
-                    return await this.connectMetaMask();
-                }
-
-                if (normalizedPreference === 'metamask') {
-                    throw new Error('MetaMask not installed. Please install MetaMask browser extension.');
-                }
-            }
-
-            throw new Error('No supported wallet found');
-        } catch (error) {
-            this.logError('Wallet connection failed:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * CRITICAL FIX: Connect to MetaMask wallet with circuit breaker protection
-     */
-    async connectMetaMask() {
-        // Return existing connection promise if one is in progress
-        if (this.connectionPromise) {
-            console.log('Connection already in progress, returning existing promise...');
-            return this.connectionPromise;
-        }
-
-        // Create new connection promise
-        this.connectionPromise = this._performConnection();
-
-        try {
-            const result = await this.connectionPromise;
-            return result;
-        } finally {
-            // Clear the connection promise when done (success or failure)
-            this.connectionPromise = null;
-        }
-    }
-
-    /**
-     * Internal method to perform the actual connection
-     */
-    async _performConnection() {
-        // Rate limiting and attempt limiting
-        const now = Date.now();
-        if (this.connectionAttempts >= this.maxConnectionAttempts) {
-            const timeSinceLastAttempt = now - this.lastRequestTime;
-            if (timeSinceLastAttempt < this.connectionCooldownTime) {
-                const waitTime = this.connectionCooldownTime - timeSinceLastAttempt;
-                throw new Error(`Too many connection attempts. Please wait ${Math.ceil(waitTime / 1000)} seconds before trying again.`);
-            } else {
-                // Reset attempts after cooldown
-                this.connectionAttempts = 0;
-            }
-        }
-
-        // Check if already connected
-        if (this.isConnected()) {
-            console.log('MetaMask already connected:', this.address);
-            return {
-                success: true,
-                address: this.address,
-                chainId: this.chainId,
-                walletType: this.walletType
-            };
-        }
-
-        // Check MetaMask availability
-        if (!window.ethereum) {
-            this.connectionAttempts++;
-            throw new Error('MetaMask not installed. Please install MetaMask browser extension.');
-        }
-
-        // Set connection state with timeout protection
-        this.isConnecting = true;
-        this.connectionAttempts++;
-
-        const connectionTimeout = setTimeout(() => {
-            if (this.isConnecting) {
-                console.error('MetaMask connection timeout');
-                this.isConnecting = false;
-            }
-        }, 30000); // 30 second timeout (reduced from 60)
-
-        try {
-            this.log('Connecting to MetaMask...');
-
-            // Check if ethers is available
-            if (typeof window.ethers === 'undefined') {
-                throw new Error('Ethers.js is not loaded. Please refresh the page and try again.');
-            }
-
-            // Request account access with rate limiting
-            const accounts = await this.safeMetaMaskRequest('eth_requestAccounts');
-
-            if (!accounts || accounts.length === 0) {
-                throw new Error('No accounts found. Please unlock MetaMask.');
-            }
-
-            // Create provider and signer
-            this.provider = new ethers.providers.Web3Provider(window.ethereum);
-            this.signer = this.provider.getSigner();
-            this.address = accounts[0];
-            this.walletType = 'metamask';
-
-            // Get network information
-            const network = await this.provider.getNetwork();
-            this.chainId = network.chainId;
-
-            // Store connection info
-            this.storeConnectionInfo();
-
-            // CRITICAL FIX: Notify listeners with enhanced error handling
-            this.notifyListeners('connected', {
-                address: this.address,
-                chainId: this.chainId,
-                walletType: this.walletType
-            });
-
-            // Show success notification if NotificationManager is available
-            if (window.notificationManager && typeof window.notificationManager.success === 'function') {
-                window.notificationManager.success(
-                    'Wallet Connected Successfully!',
-                    `Address: ${this.address.slice(0, 6)}...${this.address.slice(-4)}`,
-                    { duration: 3000 }
-                );
-            }
-
-            this.log('MetaMask connected successfully:', this.address);
-
-            // Reset connection attempts on success
-            this.connectionAttempts = 0;
-
-            return {
-                success: true,
-                address: this.address,
-                chainId: this.chainId,
-                walletType: this.walletType
-            };
-
-        } catch (error) {
-            this.logError('MetaMask connection failed:', error);
-
-            // Show user-friendly error message
-            if (window.notificationManager) {
-                if (error.code === 4001) {
-                    window.notificationManager.warning('You cancelled the connection request');
-                } else if (error.code === -32002) {
-                    window.notificationManager.warning('MetaMask is already processing a request. Please wait.');
-                } else {
-                    window.notificationManager.error(error.message || 'An error occurred while connecting');
-                }
-            }
-
-            throw error;
-        } finally {
-            clearTimeout(connectionTimeout);
-            this.isConnecting = false;
-        }
-    }
-    /**
-     * Disconnect wallet
-     */
-    async disconnect() {
-        try {
-            this.log('Disconnecting wallet...');
-
-            // Clear stored connection info
-            this.clearConnectionInfo();
-
-            // Reset state
+    class WalletManager {
+        constructor() {
+            this.walletCore = null;
             this.provider = null;
             this.signer = null;
             this.address = null;
+            this.account = null;
             this.chainId = null;
             this.walletType = null;
+            this.listeners = new Set();
+            this.connectionPromise = null;
+        }
 
-            // Notify listeners
-            this.notifyListeners('disconnected', {});
+        async init() {
+            const { createWalletCore } = await loadWalletModule();
+            this.walletCore = createWalletCore({
+                storage: getStorage(),
+                walletSessionKey: WALLET_SESSION_KEY
+            });
 
-            this.log('Wallet disconnected successfully');
+            this.walletCore.subscribe((event, data) => this.handleCoreEvent(event, data));
+            await this.checkPreviousConnection();
+            this.log('WalletManager initialized');
+        }
 
-        } catch (error) {
-            this.logError('Failed to disconnect wallet:', error);
+        get isConnecting() {
+            return !!(this.connectionPromise || this.walletCore?.getState().isConnecting);
+        }
+
+        async discoverWallets() {
+            this.assertReady();
+            return await this.walletCore.discoverWallets();
+        }
+
+        async connectWallet(options = {}) {
+            if (this.connectionPromise) return this.connectionPromise;
+
+            this.connectionPromise = this.connect(options);
+            try {
+                return await this.connectionPromise;
+            } finally {
+                this.connectionPromise = null;
+            }
+        }
+
+        async connectMetaMask() {
+            return await this.connectWallet('metamask');
+        }
+
+        async connect(options) {
+            this.assertReady();
+            if (this.isConnected()) return this.connectionResult();
+
+            const wallets = await this.walletCore.discoverWallets();
+            if (!wallets.length) {
+                throw new Error('No compatible wallet was found in this browser.');
+            }
+
+            const walletId = await this.resolveWalletId(options, wallets);
+            const wallet = wallets.find((candidate) => candidate.id === walletId);
+            if (!wallet) throw new Error('The selected wallet is no longer available. Refresh the page and try again.');
+            this.rejectUnsupportedWallet(wallet);
+
+            await this.walletCore.connect({ walletId });
+            this.syncFromCoreState();
+            return this.connectionResult();
+        }
+
+        async resolveWalletId(options, wallets) {
+            if (typeof options === 'object' && options.walletId) return options.walletId;
+
+            if (typeof options === 'string' && options !== 'auto') {
+                const wallet = wallets.find((candidate) => this.matchesWallet(candidate, options));
+                if (wallet) return wallet.id;
+                throw new Error(`${options} wallet was not found in this browser.`);
+            }
+
+            if (wallets.length === 1) return wallets[0].id;
+
+            await this.walletCore.sync();
+            const sessionWalletId = this.walletCore.getState().sessionWalletId;
+            if (sessionWalletId && wallets.some((wallet) => wallet.id === sessionWalletId)) {
+                return sessionWalletId;
+            }
+
+            const error = new Error('Wallet selection required.');
+            error.code = 'WALLET_SELECTION_REQUIRED';
+            error.wallets = wallets;
             throw error;
         }
-    }
 
-    /**
-     * Check if wallet is connected
-     */
-    isConnected() {
-        return !!(this.provider && this.signer && this.address);
-    }
-
-    /**
-     * Check if wallet is connected (alias for compatibility)
-     */
-    isWalletConnected() {
-        return this.isConnected();
-    }
-
-    /**
-     * Get current wallet address
-     */
-    getAddress() {
-        return this.address;
-    }
-
-    /**
-     * Get current account (alias for address for compatibility)
-     */
-    get currentAccount() {
-        return this.address;
-    }
-
-    /**
-     * Get current chain ID
-     */
-    getChainId() {
-        return this.chainId;
-    }
-
-    /**
-     * Get wallet type
-     */
-    getWalletType() {
-        return this.walletType;
-    }
-
-    /**
-     * Get provider
-     */
-    getProvider() {
-        return this.provider;
-    }
-
-    /**
-     * Get signer
-     */
-    getSigner() {
-        return this.signer;
-    }
-
-    /**
-     * Subscribe to wallet events
-     */
-    subscribe(callback) {
-        this.listeners.add(callback);
-        
-        // Return unsubscribe function
-        return () => {
-            this.listeners.delete(callback);
-        };
-    }
-
-    /**
-     * Check for previously connected wallet
-     */
-    async checkPreviousConnection() {
-        try {
-            // Use safe localStorage access
-            const storageKey = window.CONFIG?.UI?.WALLET_STORAGE_KEY || 'lp_staking_wallet_connection';
-            const connectionInfo = window.sesSafeHandler?.safeLocalStorage?.getItem(storageKey) ||
-                                 localStorage.getItem(storageKey);
-            if (!connectionInfo) return false;
-
-            const { walletType, address } = JSON.parse(connectionInfo);
-            
-            if (walletType === 'metamask' && window.ethereum) {
-                // Check if MetaMask is still connected (use eth_accounts to avoid popup)
-                try {
-                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-                    if (accounts && accounts.length > 0 && accounts[0].toLowerCase() === address.toLowerCase()) {
-                        console.log('✅ Previous MetaMask connection found, restoring...');
-                        
-                        // Restore connection without triggering new request
-                        this.provider = new ethers.providers.Web3Provider(window.ethereum);
-                        this.signer = this.provider.getSigner();
-                        this.address = accounts[0];
-                        this.walletType = 'metamask';
-                        
-                        // Get network information
-                        const network = await this.provider.getNetwork();
-                        this.chainId = network.chainId;
-                        
-                        // Notify listeners about restored connection
-                        this.notifyListeners('connected', {
-                            address: this.address,
-                            chainId: this.chainId,
-                            walletType: this.walletType,
-                            restored: true
-                        });
-                        
-                        console.log('✅ MetaMask connection restored successfully:', this.address);
-                    return true;
-                    }
-                } catch (error) {
-                    console.warn('Could not check previous connection:', error);
-                }
-            }
-
-            // Clear invalid connection info
-            this.clearConnectionInfo();
-            return false;
-
-        } catch (error) {
-            this.logError('Failed to check previous connection:', error);
-            this.clearConnectionInfo();
-            return false;
+        matchesWallet(wallet, requestedName) {
+            const needle = String(requestedName).toLowerCase();
+            const name = String(wallet.info?.name || '').toLowerCase();
+            const rdns = String(wallet.info?.rdns || '').toLowerCase();
+            return name.includes(needle) || rdns.includes(needle);
         }
-    }
 
-    /**
-     * Store connection information
-     */
-    storeConnectionInfo() {
-        const connectionInfo = {
-            walletType: this.walletType,
-            address: this.address,
-            chainId: this.chainId,
-            timestamp: Date.now()
-        };
-        
-        const storageKey = window.CONFIG?.UI?.WALLET_STORAGE_KEY || 'lp_staking_wallet_connection';
-        const success = window.sesSafeHandler?.safeLocalStorage?.setItem(storageKey, JSON.stringify(connectionInfo));
+        rejectUnsupportedWallet(wallet) {
+            const chainId = global.networkSelector.getCurrentChainId();
+            if (!BNB_CHAIN_IDS.has(chainId) || !isPhantomWallet(wallet)) return;
 
-        if (!success) {
-            // Fallback to regular localStorage
-            try {
-                localStorage.setItem(storageKey, JSON.stringify(connectionInfo));
-            } catch (error) {
-                console.warn('Failed to save connection info:', error.message);
-            }
-        }
-    }
-
-    /**
-     * Clear stored connection information
-     */
-    clearConnectionInfo() {
-        const storageKey = window.CONFIG?.UI?.WALLET_STORAGE_KEY || 'lp_staking_wallet_connection';
-        const success = window.sesSafeHandler?.safeLocalStorage?.removeItem(storageKey);
-
-        if (!success) {
-            // Fallback to regular localStorage
-            try {
-                localStorage.removeItem(storageKey);
-            } catch (error) {
-                console.warn('Failed to clear connection info:', error.message);
-            }
-        }
-    }
-
-    /**
-     * Set up event listeners for wallet changes
-     */
-    setupEventListeners() {
-        if (window.ethereum) {
-            // MetaMask event listeners
-            const accountsChangedHandler = (accounts) => this.handleAccountsChanged(accounts);
-            const chainChangedHandler = (chainId) => this.handleChainChanged(chainId);
-            const disconnectHandler = () => this.handleDisconnect();
-
-            window.ethereum.on('accountsChanged', accountsChangedHandler);
-            window.ethereum.on('chainChanged', chainChangedHandler);
-            window.ethereum.on('disconnect', disconnectHandler);
-
-            // Store references for cleanup
-            this.eventListeners.push(
-                { target: window.ethereum, event: 'accountsChanged', handler: accountsChangedHandler },
-                { target: window.ethereum, event: 'chainChanged', handler: chainChangedHandler },
-                { target: window.ethereum, event: 'disconnect', handler: disconnectHandler }
+            const networkName = global.networkSelector.getCurrentNetworkName();
+            const error = new Error(
+                'Phantom does not support ' + networkName + '. Choose a BNB-compatible wallet such as MetaMask, Rabby, Trust Wallet, or OKX.'
             );
+            error.code = UNSUPPORTED_WALLET_NETWORK;
+            error.walletName = wallet.info.name;
+            error.networkName = networkName;
+            error.chainId = chainId;
+            throw error;
         }
-    }
 
-    /**
-     * Handle accounts changed event
-     */
-    async handleAccountsChanged(accounts) {
-        this.log('Accounts changed:', accounts);
-
-        if (!accounts || accounts.length === 0) {
-            // Check if this is a network change (we have a stored address)
-            // MetaMask sometimes sends empty accounts during network switches
-            if (this.address) {
-                this.log('Empty accounts during network change - ignoring');
-                return; // Don't disconnect during network changes
-            }
-            
-            // User disconnected
-            this.disconnect();
-        } else if (accounts[0] !== this.address) {
-            const wasDisconnected = !this.address;
-            
-            // User switched accounts or reconnected
-            this.address = accounts[0];
-            
-            // Re-initialize provider/signer if reconnecting after disconnect
-            if (wasDisconnected && window.ethereum) {
-                this.log('Re-initializing provider and signer after reconnection');
-                try {
-                    this.provider = new ethers.providers.Web3Provider(window.ethereum);
-                    this.signer = this.provider.getSigner();
-                    this.chainId = (await this.provider.getNetwork()).chainId;
-                    
-                    // Detect wallet type: prioritize specific wallet flags, fallback to metamask/injected
-                    this.walletType = window.ethereum.isTrust ? 'trust' : 
-                                     window.ethereum.isCoinbaseWallet ? 'coinbase' :
-                                     window.ethereum.isBraveWallet ? 'brave' :
-                                     window.ethereum.isMetaMask ? 'metamask' : 'injected';
-                } catch (error) {
-                    this.logError('Failed to re-initialize provider/signer:', error);
-                }
-            }
-            
-            this.storeConnectionInfo();
-            
-            this.notifyListeners('accountChanged', {
-                address: this.address,
-                chainId: this.chainId
-            });
+        async disconnect() {
+            this.assertReady();
+            await this.revokeWalletPermissions();
+            await this.walletCore.disconnect();
         }
-    }
 
-    /**
-     * Handle chain changed event
-     */
-    handleChainChanged(chainId) {
-        const numericChainId = typeof chainId === 'string' ? parseInt(chainId, 16) : chainId;
-        this.log('Chain changed:', numericChainId);
+        async revokeWalletPermissions() {
+            const provider = this.walletCore.getEip1193Provider();
+            if (!provider?.request) return;
 
-        this.chainId = numericChainId;
-        this.storeConnectionInfo();
-
-        this.notifyListeners('chainChanged', {
-            address: this.address,
-            chainId: this.chainId
-        });
-    }
-
-    /**
-     * Handle disconnect event
-     */
-    handleDisconnect(code, reason) {
-        this.log('Disconnect event - code:', code, 'reason:', reason);
-        
-        // Don't disconnect if we still have an address (likely a network change)
-        // MetaMask sometimes fires disconnect during network switches
-        if (this.address) {
-            this.log('Disconnect during network change - ignoring');
-            return;
-        }
-        
-        this.disconnect();
-    }
-
-    /**
-     * Notify all listeners of events and dispatch DOM events
-     */
-    notifyListeners(event, data) {
-        // Notify registered listeners
-        this.listeners.forEach(callback => {
             try {
-                callback(event, data);
-            } catch (error) {
-                this.logError('Listener callback error:', error);
+                await provider.request({
+                    method: 'wallet_revokePermissions',
+                    params: [{ eth_accounts: {} }]
+                });
+            } catch {
+                // Not all wallets support permission revocation; local disconnect still applies.
             }
-        });
-
-        // Dispatch DOM events for global listening
-        try {
-            let eventName;
-            switch (event) {
-                case 'connected':
-                    eventName = 'walletConnected';
-                    break;
-                case 'disconnected':
-                    eventName = 'walletDisconnected';
-                    break;
-                case 'accountChanged':
-                    eventName = 'walletAccountChanged';
-                    break;
-                case 'chainChanged':
-                    eventName = 'walletChainChanged';
-                    break;
-                default:
-                    eventName = `wallet${event.charAt(0).toUpperCase() + event.slice(1)}`;
-            }
-
-            document.dispatchEvent(new CustomEvent(eventName, {
-                detail: { event, data }
-            }));
-
-            console.log(`📡 Dispatched ${eventName} event:`, data);
-
-        } catch (error) {
-            this.logError('Failed to dispatch DOM event:', error);
         }
-    }
 
-    /**
-     * Cleanup event listeners
-     */
-    cleanup() {
-        this.eventListeners.forEach(({ target, event, handler }) => {
-            target.removeListener(event, handler);
-        });
-        this.eventListeners = [];
-        this.listeners.clear();
-    }
+        async checkPreviousConnection() {
+            this.assertReady();
+            await this.walletCore.sync();
+            if (!this.walletCore.getState().account) return false;
 
-    /**
-     * Logging utility
-     */
-    log(...args) {
-        try {
-            if (window.CONFIG?.DEV?.DEBUG_MODE) {
-                if (window.safeConsole) {
-                    window.safeConsole.log('[WalletManager]', ...args);
-                } else {
-                    console.log('[WalletManager]', ...args);
+            this.syncFromCoreState();
+            this.notifyListeners('connected', { restored: true });
+            return true;
+        }
+
+        async sync() {
+            this.assertReady();
+            await this.walletCore.sync();
+            this.syncFromCoreState();
+            return this.connectionResult();
+        }
+
+        handleCoreEvent(event, data) {
+            if (event === 'connected') {
+                this.syncFromCoreState();
+                this.notifyListeners('connected', data);
+                return;
+            }
+
+            if (event === 'disconnected' || (event === 'accountChanged' && !data)) {
+                const wasConnected = this.isConnected();
+                this.clearEthersState();
+                if (wasConnected) {
+                    this.notifyListeners('disconnected', {});
                 }
+                return;
             }
-        } catch (error) {
-            // Fallback - do nothing if logging fails
+
+            if ((event === 'accountChanged' || event === 'chainChanged') && !this.hasActiveWalletSession()) {
+                return;
+            }
+
+            if (event === 'accountChanged' || event === 'chainChanged') {
+                this.syncFromCoreState();
+                this.notifyListeners(event, data);
+            }
+        }
+
+        syncFromCoreState() {
+            const state = this.walletCore.getState();
+            const injectedProvider = this.walletCore.getEip1193Provider();
+
+            if (!state.account || !injectedProvider || !global.ethers) {
+                this.clearEthersState();
+                return;
+            }
+
+            this.provider = new global.ethers.providers.Web3Provider(injectedProvider);
+            this.signer = this.provider.getSigner();
+            this.address = state.account;
+            this.account = state.account;
+            this.chainId = state.chainId;
+            this.walletType = state.selectedWalletName || 'wallet';
+        }
+
+        clearEthersState() {
+            this.provider = null;
+            this.signer = null;
+            this.address = null;
+            this.account = null;
+            this.chainId = null;
+            this.walletType = null;
+        }
+
+        hasActiveWalletSession() {
+            const state = this.walletCore.getState();
+            return !!(state.sessionWalletId || state.selectedWalletId);
+        }
+
+        connectionResult() {
+            return {
+                success: this.isConnected(),
+                address: this.address,
+                chainId: this.chainId,
+                walletType: this.walletType
+            };
+        }
+
+        isConnected() {
+            return !!(this.provider && this.signer && this.address);
+        }
+
+        isWalletConnected() {
+            return this.isConnected();
+        }
+
+        getAddress() {
+            return this.address;
+        }
+
+        getAccount() {
+            return this.address;
+        }
+
+        get currentAccount() {
+            return this.address;
+        }
+
+        getChainId() {
+            return this.chainId;
+        }
+
+        getWalletType() {
+            return this.walletType;
+        }
+
+        getProvider() {
+            return this.provider;
+        }
+
+        getSigner() {
+            return this.signer;
+        }
+
+        getEip1193Provider() {
+            this.assertReady();
+            return this.walletCore.getEip1193Provider();
+        }
+
+        subscribe(callback) {
+            this.listeners.add(callback);
+            return () => this.listeners.delete(callback);
+        }
+
+        notifyListeners(event, data) {
+            const payload = {
+                address: this.address,
+                chainId: this.chainId,
+                walletType: this.walletType,
+                ...data
+            };
+
+            this.listeners.forEach((callback) => callback(event, payload));
+
+            const eventName = {
+                connected: 'walletConnected',
+                disconnected: 'walletDisconnected',
+                accountChanged: 'walletAccountChanged',
+                chainChanged: 'walletChainChanged'
+            }[event] || `wallet${event.charAt(0).toUpperCase()}${event.slice(1)}`;
+
+            global.document?.dispatchEvent(new CustomEvent(eventName, {
+                detail: { event, data: payload }
+            }));
+        }
+
+        assertReady() {
+            if (!this.walletCore) {
+                throw new Error('WalletManager is not initialized.');
+            }
+        }
+
+        log(...args) {
+            if (global.CONFIG?.DEV?.DEBUG || global.CONFIG?.DEV?.DEBUG_MODE) {
+                console.log('[WalletManager]', ...args);
+            }
         }
     }
 
-    /**
-     * Error logging utility
-     */
-    logError(...args) {
-        try {
-            if (window.safeConsole) {
-                window.safeConsole.error('[WalletManager]', ...args);
-            } else {
-                console.error('[WalletManager]', ...args);
-            }
-        } catch (error) {
-            // Fallback - do nothing if logging fails
-        }
+    global.WalletManager = WalletManager;
+
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = WalletManager;
     }
-}
-
-// Export the class to global scope
-window.WalletManager = WalletManager;
-
-} // End of duplicate prevention guard
+})(typeof window !== 'undefined' ? window : globalThis);

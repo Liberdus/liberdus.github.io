@@ -319,10 +319,10 @@ class NetworkSelector {
         } catch (error) {
             console.error(`❌ Failed to switch to ${networkKey}:`, error);
             
-            // If the network is not added to MetaMask, try to add it
+            // If the network is not added to the wallet, try to add it
             if (error.code === 4902) {
-                console.log(`🔗 Network ${networkKey} not found in MetaMask, attempting to add it...`);
-                return await this.addNetworkToMetaMask(networkKey);
+                console.log(`🔗 Network ${networkKey} not found in wallet, attempting to add it...`);
+                return await this.addNetworkToWallet(networkKey);
             }
             
             return false;
@@ -330,11 +330,11 @@ class NetworkSelector {
     }
 
     /**
-     * Add network to MetaMask and switch to it
+     * Add network to the connected wallet and switch to it
      * Delegates to NetworkManager.addNetwork()
      * @param {string} networkKey - The network key to add
      */
-    async addNetworkToMetaMask(networkKey) {
+    async addNetworkToWallet(networkKey) {
         try {
             // Switch localStorage to target network for NetworkManager
             localStorage.setItem('liberdus-selected-network', networkKey);
@@ -345,18 +345,18 @@ class NetworkSelector {
             // On success, keep the new network selected (already in localStorage)
             return true;
         } catch (addError) {
-            console.error(`❌ Failed to add network to MetaMask:`, addError);
+            console.error(`❌ Failed to add network to wallet:`, addError);
             return false;
         }
     }
 
     /**
-     * Add network to MetaMask and reload the page
+     * Add network to the connected wallet and reload the page
      * @param {string} networkKey - The network key to add
      */
-    async addNetworkToMetaMaskAndReload(networkKey) {
+    async addNetworkToWalletAndReload(networkKey) {
         try {
-            await this.addNetworkToMetaMask(networkKey);
+            await this.addNetworkToWallet(networkKey);
             window.location.reload();
         } catch (error) {
             console.error(`Failed to add ${networkKey}:`, error);

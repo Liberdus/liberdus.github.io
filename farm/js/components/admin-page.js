@@ -34,6 +34,9 @@ class AdminPage {
 
         // UI state: remember proposal filter preference across refreshes
         this.proposalFilter = 'pending';
+        this.addPairLpValidation = { status: 'idle' };
+        this.addPairRegistryPairs = null;
+        this.isSubmittingFundRewards = false;
 
         // Shared selectors for address copy functionality
         this.addressCopySelectors = [
@@ -432,14 +435,12 @@ class AdminPage {
      * Setup event delegation for address copy-to-clipboard functionality
      */
     setupAddressCopyListeners() {
-        // Use event delegation on document to handle dynamically rendered addresses
         document.addEventListener('click', (event) => {
             const addressElement = event.target.closest(this.addressCopySelectors);
             if (!addressElement) {
                 return;
             }
 
-            // Get address from data-address attribute or text content
             const address = addressElement.getAttribute('data-address') || addressElement.textContent?.trim();
             if (!this.isCopyableAddress(address)) {
                 return;
@@ -448,7 +449,7 @@ class AdminPage {
             event.preventDefault();
             event.stopPropagation();
             this.copyAddressToClipboard(address.trim());
-        });
+        }, true);
     }
 
     /**
@@ -629,25 +630,22 @@ class AdminPage {
             this.handleWalletDisconnected();
         });
 
-        // Listen for account changes
-        if (window.ethereum) {
-            window.ethereum.on('accountsChanged', async (accounts) => {
-                try {
-                    await this.handleAccountsChanged(accounts);
-                } catch (error) {
-                    console.error('❌ Error handling account change:', error);
-                    this.showError('Account Switch Error', 'Failed to switch accounts. Please refresh the page.');
-                }
-            });
+        document.addEventListener('walletAccountChanged', async (event) => {
+            try {
+                await this.handleAccountsChanged([event.detail?.data?.address]);
+            } catch (error) {
+                console.error('❌ Error handling account change:', error);
+                this.showError('Account Switch Error', 'Failed to switch accounts. Please refresh the page.');
+            }
+        });
 
-            window.ethereum.on('chainChanged', async (chainId) => {
-                try {
-                    await this.handleChainChanged(chainId);
-                } catch (error) {
-                    console.error('❌ Error handling chain changed:', error);
-                }
-            });
-        }
+        document.addEventListener('walletChainChanged', async (event) => {
+            try {
+                await this.handleChainChanged(event.detail?.data?.chainId);
+            } catch (error) {
+                console.error('❌ Error handling chain changed:', error);
+            }
+        });
     }
 
     /**
@@ -721,6 +719,12 @@ class AdminPage {
                 return;
             }
 
+            if (e.target.closest('[data-action="fund-rewards"]')) {
+                e.preventDefault();
+                this.showFundRewardsModal();
+                return;
+            }
+
             // Modal overlay click (close modal)
             if (e.target.classList.contains('modal-overlay')) {
                 e.preventDefault();
@@ -778,6 +782,9 @@ class AdminPage {
                                 await this.submitHourlyRateProposal(e);
                                 break;
                             case 'add-pair-form':
+                                if (this.addPairLpValidation.status !== 'valid') {
+                                    return;
+                                }
                                 await this.submitAddPairProposal(e);
                                 break;
                             case 'remove-pair-form':
@@ -1478,11 +1485,16 @@ class AdminPage {
 
                 <div class="card-content">
                     <div class="info-grid">
-                        <div class="info-item">
+                        <div class="info-item info-item-with-action">
                             <div class="info-label-wrapper">
                                 <h6>Reward Token Balance</h6>
                             </div>
-                            <h6 class="info-value" data-info="reward-balance">Loading...</h6>
+                            <div class="info-value-row">
+                                <h6 class="info-value" data-info="reward-balance">Loading...</h6>
+                                <button type="button" class="btn btn-primary fund-rewards-btn" data-action="fund-rewards" hidden>
+                                    Fund Rewards
+                                </button>
+                            </div>
                         </div>
                         <div class="info-item">
                             <div class="info-label-wrapper">
@@ -3928,7 +3940,7 @@ class AdminPage {
                                 <label for="pair-address">LP Token Address *</label>
                                 <input type="text" id="pair-address" class="form-input" required
                                        placeholder="0x..." pattern="^0x[a-fA-F0-9]{40}$">
-                                <small class="form-help">Enter the LP token contract address</small>
+                                <small class="form-help" id="pair-address-help">Enter the LP token contract address</small>
                                 <div class="field-error" id="pair-address-error"></div>
                             </div>
 
@@ -3977,7 +3989,7 @@ class AdminPage {
                         <button type="button" class="btn btn-secondary modal-cancel">
                             Cancel
                         </button>
-                        <button type="submit" form="add-pair-form" class="btn btn-primary" id="add-pair-btn">
+                        <button type="submit" form="add-pair-form" class="btn btn-primary" id="add-pair-btn" disabled>
                             <span class="btn-text">Create Proposal</span>
                             <span class="btn-loading" style="display: none;">
                                 <span class="spinner"></span> Creating...
@@ -3992,13 +4004,15 @@ class AdminPage {
         this.applyModalVisibilityFixes(modalContainer);
 
         console.log('✅ Add pair modal opened');
+        this.addPairRegistryPairs = null;
+        this.loadAddPairRegistry();
 
         // Initialize form validation AFTER a delay to prevent immediate triggering
         setTimeout(() => {
             try {
                 // Set flag to prevent immediate validation
                 this.modalJustOpened = true;
-                this.initializeFormValidation('add-pair-form');
+                this.initializeAddPairFormValidation();
 
                 // Clear flag after a short delay
                 setTimeout(() => {
@@ -4413,7 +4427,215 @@ class AdminPage {
         this.applyModalVisibilityFixes(modalContainer);
     }
 
+    async loadFundRewardsContext() {
+        const contractManager = await this.ensureContractReady();
+        const symbol = this.contractStats.rewardTokenSymbol || 'USDC';
+        const stakingAddress = contractManager.stakingContract?.address || contractManager.contractAddresses?.get('STAKING');
+        const rewardTokenAddress = contractManager.rewardTokenContract?.address;
+
+        if (!contractManager.isRewardTokenContractReady()) {
+            return { ok: false, message: 'The configured reward token contract is not loaded yet.' };
+        }
+        if (!stakingAddress || !rewardTokenAddress) {
+            return { ok: false, message: 'Staking or reward token address is not available yet.' };
+        }
+        if (!this.userAddress) {
+            return { ok: false, message: 'Connect your wallet before funding rewards.' };
+        }
+
+        const walletBalanceRaw = await contractManager.rewardTokenContract.balanceOf(this.userAddress);
+        const walletBalanceAmount = ethers.utils.formatEther(walletBalanceRaw);
+
+        return {
+            ok: true,
+            symbol,
+            stakingAddress,
+            rewardTokenAddress,
+            poolBalance: this.contractStats.rewardBalance ?? 'N/A',
+            walletBalanceRaw,
+            walletBalanceAmount,
+            walletBalanceDisplay: `${walletBalanceAmount} ${symbol}`
+        };
+    }
+
+    async showFundRewardsModal() {
+        if (!this.isAuthorized) {
+            this.showError('Admin access required to fund rewards.');
+            return;
+        }
+
+        const modalContainer = document.getElementById('modal-container');
+        if (!modalContainer) {
+            return;
+        }
+
+        let context;
+        try {
+            context = await this.loadFundRewardsContext();
+        } catch (error) {
+            this.showError('Failed to load reward token details', error.message);
+            return;
+        }
+
+        if (!context.ok) {
+            this.showError('Unable to fund rewards', context.message);
+            return;
+        }
+
+        const addressField = (address) => `
+            <div class="pair-address-wrapper">
+                <span class="address-label">Address:</span>
+                <code class="pair-address" data-address="${address}" title="Click to copy address">${address}</code>
+            </div>`;
+
+        modalContainer.innerHTML = `
+            <div class="modal-overlay" onclick="adminPage.closeModal()">
+                <div class="modal-content" onclick="event.stopPropagation()">
+                    <div class="modal-header">
+                        <h3>Fund Rewards</h3>
+                        <button class="modal-close" type="button" onclick="adminPage.closeModal()">
+                            <span class="material-icons">close</span>
+                        </button>
+                    </div>
+
+                    <div class="modal-body">
+                        <form id="fund-rewards-form" onsubmit="adminPage.submitFundRewards(event)" data-wallet-balance-wei="${context.walletBalanceRaw.toString()}">
+                            <div class="form-group">
+                                <label>Reward Token</label>
+                                ${addressField(context.rewardTokenAddress)}
+                                <small class="form-help">Symbol: ${context.symbol}</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Recipient (Staking Contract)</label>
+                                ${addressField(context.stakingAddress)}
+                                <small class="form-help">Reward tokens will be sent directly to this contract address.</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Contract Reward Balance</label>
+                                <p class="info-value">${context.poolBalance}</p>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Your Wallet Balance</label>
+                                <p class="info-value">${context.walletBalanceDisplay}</p>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="fund-rewards-amount">Amount (${context.symbol})</label>
+                                <div class="fund-rewards-amount-row">
+                                    <input type="number" id="fund-rewards-amount" step="any" min="0" inputmode="decimal" required
+                                           placeholder="Enter amount to transfer">
+                                    <button type="button" class="btn btn-outline" onclick="document.getElementById('fund-rewards-amount').value='${context.walletBalanceAmount}'">
+                                        Max
+                                    </button>
+                                </div>
+                                <small class="form-help">This sends a direct ERC-20 transfer from your connected wallet.</small>
+                            </div>
+
+                            <div class="warning-box">
+                                <div class="warning-icon">💰</div>
+                                <div class="warning-text">
+                                    <strong>Note:</strong> This is not a multisig proposal. Tokens leave your wallet immediately after you confirm the transfer.
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary modal-cancel">
+                            Cancel
+                        </button>
+                        <button type="submit" form="fund-rewards-form" class="btn btn-primary">
+                            Transfer Reward Tokens
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        modalContainer.style.display = 'block';
+        this.applyModalVisibilityFixes(modalContainer);
+    }
+
+    async submitFundRewards(event) {
+        event.preventDefault();
+
+        if (this.isSubmittingFundRewards) {
+            return;
+        }
+
+        const form = document.getElementById('fund-rewards-form');
+        const amount = document.getElementById('fund-rewards-amount')?.value;
+        const submitBtn = document.querySelector('button[form="fund-rewards-form"]');
+        const walletBalanceWei = form?.dataset.walletBalanceWei;
+
+        this.isSubmittingFundRewards = true;
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Transferring...';
+        }
+
+        try {
+            if (!amount) {
+                this.showError('Please enter an amount to transfer');
+                return;
+            }
+
+            const amountNum = parseFloat(amount);
+            if (Number.isNaN(amountNum) || amountNum <= 0) {
+                this.showError('Amount must be a positive number');
+                return;
+            }
+
+            if (walletBalanceWei && ethers.utils.parseEther(amount).gt(walletBalanceWei)) {
+                this.showError('Insufficient reward token balance in your wallet');
+                return;
+            }
+
+            window.notificationManager?.info('Submitting reward token transfer');
+
+            const contractManager = await this.ensureContractReady();
+            const result = await contractManager.transferRewardTokensToStaking(amount);
+
+            if (!result.success) {
+                this.showError(
+                    result.error?.userMessage?.title || 'Failed to transfer reward tokens',
+                    result.error?.userMessage?.message || result.error?.message
+                );
+                return;
+            }
+
+            this.closeModal();
+            let successMessage = 'Reward tokens transferred to the staking contract successfully!';
+            if (result.transactionHash) {
+                successMessage += ` Transaction: ${result.transactionHash.substring(0, 10)}...`;
+            }
+            this.showSuccess(successMessage);
+            await this.refreshContractInfo();
+        } catch (error) {
+            console.error('Failed to transfer reward tokens:', error);
+            this.showError(
+                error.userMessage?.title || 'Failed to transfer reward tokens',
+                error.userMessage?.message || error.message
+            );
+        } finally {
+            this.isSubmittingFundRewards = false;
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Transfer Reward Tokens';
+            }
+        }
+    }
+
     closeModal() {
+        clearTimeout(this.addPairLpCheckTimer);
+        this.addPairLpCheckTimer = null;
+        this.addPairLpValidation = { status: 'idle' };
+        this.addPairLpCheckSeq = 0;
+        this.addPairRegistryPairs = null;
+
         const modalContainer = document.getElementById('modal-container');
         if (modalContainer) {
             modalContainer.style.display = 'none';
@@ -4440,6 +4662,148 @@ class AdminPage {
     }
 
     // Form validation system
+    async loadAddPairRegistry({ forceRefresh = false } = {}) {
+        const contractManager = await this.ensureContractReady();
+        this.addPairRegistryPairs = await contractManager.getAllPairsInfo({ forceRefresh });
+        return this.addPairRegistryPairs;
+    }
+
+    getAddPairConflict(lpAddress) {
+        const normalizedAddress = lpAddress.toLowerCase();
+
+        for (const pair of this.addPairRegistryPairs || []) {
+            if (pair.isActive && pair.address.toLowerCase() === normalizedAddress) {
+                return `This LP token is already registered as ${pair.name} on ${pair.platform}`;
+            }
+        }
+
+        return null;
+    }
+
+    async validateAddPairLpAddress(address, { refreshRegistry = false } = {}) {
+        const contractManager = await this.ensureContractReady();
+
+        const v2Validation = await contractManager.validateV2CompatibleLpToken(address);
+        if (!v2Validation.valid) {
+            return { status: 'invalid', error: v2Validation.error };
+        }
+
+        if (refreshRegistry || !this.addPairRegistryPairs) {
+            await this.loadAddPairRegistry({ forceRefresh: refreshRegistry });
+        }
+
+        const conflictError = this.getAddPairConflict(v2Validation.address);
+        if (conflictError) {
+            return { status: 'invalid', error: conflictError };
+        }
+
+        return {
+            status: 'valid',
+            address: v2Validation.address,
+            token0: v2Validation.token0,
+            token1: v2Validation.token1
+        };
+    }
+
+    initializeAddPairFormValidation() {
+        const form = document.getElementById('add-pair-form');
+        this.addPairLpCheckSeq = 0;
+        this.setAddPairLpValidation({ status: 'idle' });
+
+        form.addEventListener('input', (e) => {
+            if (e.target.id === 'pair-address') {
+                this.scheduleAddPairLpValidation(e.target.value.trim());
+                return;
+            }
+            this.validateField(e.target);
+        });
+    }
+
+    scheduleAddPairLpValidation(address) {
+        clearTimeout(this.addPairLpCheckTimer);
+
+        if (!address) {
+            this.setAddPairLpValidation({ status: 'idle' });
+            return;
+        }
+
+        if (!this.isValidAddress(address)) {
+            this.setAddPairLpValidation({ status: 'invalid', error: 'Invalid Ethereum address format' });
+            return;
+        }
+
+        this.setAddPairLpValidation({ status: 'validating' });
+        const seq = ++this.addPairLpCheckSeq;
+        this.addPairLpCheckTimer = setTimeout(async () => {
+            const isCurrentRequest = () => {
+                if (seq !== this.addPairLpCheckSeq) {
+                    return false;
+                }
+                const pairAddressInput = document.getElementById('pair-address');
+                return pairAddressInput && pairAddressInput.value.trim() === address;
+            };
+
+            try {
+                const validation = await this.validateAddPairLpAddress(address);
+                if (!isCurrentRequest()) {
+                    return;
+                }
+                if (validation.status === 'valid') {
+                    this.setAddPairLpValidation({
+                        status: 'valid',
+                        token0: validation.token0,
+                        token1: validation.token1
+                    });
+                    return;
+                }
+                this.setAddPairLpValidation(validation);
+            } catch (error) {
+                if (!isCurrentRequest()) {
+                    return;
+                }
+                this.setAddPairLpValidation({
+                    status: 'invalid',
+                    error: 'Unable to verify LP token address. Check your network connection and try again.'
+                });
+            }
+        }, 500);
+    }
+
+    setAddPairLpValidation(state) {
+        this.addPairLpValidation = state;
+
+        const input = document.getElementById('pair-address');
+        const help = document.getElementById('pair-address-help');
+        const error = document.getElementById('pair-address-error');
+        const submitButton = document.getElementById('add-pair-btn');
+
+        input.classList.remove('error', 'valid');
+        error.textContent = '';
+        help.textContent = 'Enter the LP token contract address';
+
+        switch (state.status) {
+            case 'idle':
+                submitButton.disabled = true;
+                return;
+            case 'validating':
+                error.textContent = 'Validating LP token...';
+                submitButton.disabled = true;
+                return;
+            case 'invalid':
+                error.textContent = state.error;
+                input.classList.add('error');
+                submitButton.disabled = true;
+                return;
+            case 'valid':
+                help.textContent = `Valid V2 LP pair: ${state.token0.slice(0, 6)}...${state.token0.slice(-4)} / ${state.token1.slice(0, 6)}...${state.token1.slice(-4)}`;
+                input.classList.add('valid');
+                submitButton.disabled = false;
+                return;
+            default:
+                throw new Error(`Unknown add-pair LP validation status: ${state.status}`);
+        }
+    }
+
     initializeFormValidation(formId) {
         const form = document.getElementById(formId);
         if (!form) return;
@@ -4474,12 +4838,6 @@ class AdminPage {
 
         // Specific field validations
         switch (fieldId) {
-            case 'pair-address':
-                if (value && !this.isValidAddress(value)) {
-                    isValid = false;
-                    errorMessage = 'Invalid Ethereum address format';
-                }
-                break;
             case 'pair-name':
                 if (value && (value.length < 2 || value.length > 50)) {
                     isValid = false;
@@ -4828,6 +5186,16 @@ class AdminPage {
         const rewardBalanceEl = document.querySelector('[data-info="reward-balance"]');
         if (rewardBalanceEl) {
             rewardBalanceEl.textContent = info.rewardBalance ?? 'N/A';
+        }
+
+        const fundRewardsBtn = document.querySelector('.fund-rewards-btn');
+        if (fundRewardsBtn) {
+            const hasValidFundingAddresses = ethers.utils.isAddress(info.stakingAddress) &&
+                ethers.utils.isAddress(info.rewardTokenAddress);
+            const canFund = this.isAuthorized &&
+                hasValidFundingAddresses;
+            fundRewardsBtn.hidden = !canFund;
+            fundRewardsBtn.disabled = !canFund;
         }
 
         // Update reward obligation
@@ -5197,19 +5565,14 @@ class AdminPage {
     async submitAddPairProposal(event = null) {
         if (event) event.preventDefault();
 
-        const pairAddress = document.getElementById('pair-address').value;
+        const pairAddressInput = document.getElementById('pair-address');
+        const pairAddress = pairAddressInput.value.trim();
         const weight = document.getElementById('pair-weight').value;
         const pairName = document.getElementById('pair-name').value;
         const platform = document.getElementById('pair-platform').value;
 
-        // Enhanced validation with detailed feedback
         if (!pairAddress || !weight || !pairName || !platform) {
             this.showError('Please fill in all required fields: LP Address, Weight, Pair Name, and Platform');
-            return;
-        }
-
-        if (!this.isValidAddress(pairAddress)) {
-            this.showError('Invalid LP token address format. Please enter a valid Ethereum address starting with 0x');
             return;
         }
 
@@ -5230,8 +5593,15 @@ class AdminPage {
         }
 
         try {
+            const lpValidation = await this.validateAddPairLpAddress(pairAddress, { refreshRegistry: true });
+            if (lpValidation.status !== 'valid') {
+                this.setAddPairLpValidation(lpValidation);
+                this.showError('Invalid LP token address', lpValidation.error);
+                return;
+            }
+
             const contractManager = await this.ensureContractReady();
-            const result = await contractManager.proposeAddPair(pairAddress, pairName, platform, weightNum);
+            const result = await contractManager.proposeAddPair(lpValidation.address, pairName, platform, weightNum);
 
             if (result.success) {
                 this.closeModal();
@@ -5751,16 +6121,6 @@ class AdminPage {
         if (this.refreshInterval) {
             clearInterval(this.refreshInterval);
             this.refreshInterval = null;
-        }
-
-        // Remove event listeners
-        if (window.ethereum) {
-            try {
-                window.ethereum.removeAllListeners('accountsChanged');
-                window.ethereum.removeAllListeners('chainChanged');
-            } catch (error) {
-                console.warn('⚠️ Error removing ethereum listeners:', error);
-            }
         }
 
         // Remove custom event listeners
