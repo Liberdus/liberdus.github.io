@@ -41,7 +41,7 @@ export class BridgeTab {
         <h2>Bridge</h2>
         <p class="muted">Bridge tokens in/out.</p>
         <ul class="list">
-          <li>Transactions are only enabled when MetaMask is connected on Polygon.</li>
+          <li>Transactions are only enabled when a wallet is connected on Polygon.</li>
           <li>Amounts are entered in ${symbolDisplay} (18 decimals).</li>
         </ul>
       </div>
@@ -103,7 +103,7 @@ export class BridgeTab {
     this.submitBtn?.addEventListener('click', () => this._onSubmit());
 
     this._onModeChange();
-    window.networkManager?.updateUIState?.();
+    window.networkManager?.updateTxGatedControls?.();
 
     document.addEventListener('tabActivated', (e) => {
       if (e?.detail?.tabName === 'bridge') this._onActivated();
@@ -209,7 +209,7 @@ export class BridgeTab {
     const chainId = Number(CONFIG?.NETWORK?.CHAIN_ID || 0);
 
     if (!txEnabled) {
-      this.infoEl.innerHTML = `Connect MetaMask on Polygon to enable bridge transactions.`;
+      this.infoEl.innerHTML = `Connect your wallet on Polygon to enable bridge transactions.`;
       return;
     }
 
@@ -235,7 +235,7 @@ export class BridgeTab {
     const contractManager = window.contractManager;
 
     if (!networkManager?.isTxEnabled?.()) {
-      toast?.error?.('Connect MetaMask on Polygon to submit bridge transactions.');
+      toast?.error?.('Connect your wallet on Polygon to submit bridge transactions.');
       return;
     }
 
@@ -349,7 +349,7 @@ export class BridgeTab {
       if (this.submitBtn) {
         this.submitBtn.textContent = 'Submit';
         this.submitBtn.disabled = false;
-        window.networkManager?.updateUIState?.();
+        window.networkManager?.updateTxGatedControls?.();
       }
       this._updateInfo();
     }

@@ -94,7 +94,7 @@ export class ProposalDetailModal {
     this.backdrop?.classList.remove('hidden');
 
     // gate sign button
-    window.networkManager?.updateUIState?.();
+    window.networkManager?.updateTxGatedControls?.();
     this._updateSignButtonState();
   }
 
@@ -113,7 +113,7 @@ export class ProposalDetailModal {
     const networkManager = window.networkManager;
 
     if (!networkManager?.isTxEnabled?.()) {
-      toast?.error?.('Connect MetaMask on Polygon to sign.');
+      toast?.error?.('Connect your wallet on Polygon to sign.');
       return;
     }
 

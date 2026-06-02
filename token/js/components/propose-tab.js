@@ -52,7 +52,7 @@ export class ProposeTab {
         <h2>Propose</h2>
         <p class="muted">Request a new operation. <strong>Only signers/owner</strong> can submit.</p>
         <ul class="list">
-          <li>Transactions are only enabled when MetaMask is connected on Polygon.</li>
+          <li>Transactions are only enabled when a wallet is connected on Polygon.</li>
           <li>Amounts are entered in ${symbolText} (18 decimals) unless stated otherwise.</li>
         </ul>
       </div>
@@ -137,7 +137,7 @@ export class ProposeTab {
     this.submitBtn?.addEventListener('click', () => this._onSubmit());
 
     this._onOperationTypeChange();
-    window.networkManager?.updateUIState?.();
+    window.networkManager?.updateTxGatedControls?.();
 
     document.addEventListener('tabActivated', (e) => {
       if (e?.detail?.tabName === 'propose') this._onActivated();
@@ -517,7 +517,7 @@ export class ProposeTab {
     const contractManager = window.contractManager;
 
     if (!networkManager?.isTxEnabled?.()) {
-      toast?.error?.('Connect MetaMask on Polygon to submit proposals.');
+      toast?.error?.('Connect your wallet on Polygon to submit proposals.');
       return;
     }
 
@@ -660,7 +660,7 @@ export class ProposeTab {
         this.submitBtn.textContent = 'Request Operation';
         // Network manager will re-gate this based on tx-enabled.
         this.submitBtn.disabled = false;
-        window.networkManager?.updateUIState?.();
+        window.networkManager?.updateTxGatedControls?.();
       }
     }
   }

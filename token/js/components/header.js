@@ -2,118 +2,185 @@ export class Header {
   constructor() {
     this.connectWalletBtn = null;
     this._connectBtnText = 'Connect Wallet';
+    this._walletPicker = null;
   }
 
   load() {
     this.connectWalletBtn = document.getElementById('connect-wallet-btn');
     if (!this.connectWalletBtn) return;
 
-    this._connectBtnText = this.connectWalletBtn.textContent?.trim() || this._connectBtnText;
-
-    // Phase 2: MetaMask-only connection (Polygon-only tx)
+    this._connectBtnText = this.connectWalletBtn.textContent.trim() || this._connectBtnText;
     this.connectWalletBtn.addEventListener('click', () => this.onConnectWalletClick());
 
-    // React to wallet events
-    document.addEventListener('walletConnected', () => this.updateConnectButtonStatus());
-    document.addEventListener('walletDisconnected', () => this.updateConnectButtonStatus());
-    document.addEventListener('walletAccountChanged', () => this.updateConnectButtonStatus());
-    document.addEventListener('walletChainChanged', () => this.updateConnectButtonStatus());
+    const refresh = () => this.updateConnectButtonStatus();
+    document.addEventListener('walletConnected', refresh);
+    document.addEventListener('walletDisconnected', refresh);
+    document.addEventListener('walletAccountChanged', refresh);
+    document.addEventListener('walletChainChanged', refresh);
+    document.addEventListener('click', (event) => this._onDocumentClick(event));
 
-    this.updateConnectButtonStatus();
+    refresh();
   }
 
   async onConnectWalletClick() {
-    const btn = this.connectWalletBtn;
-    if (!btn) return;
-
     const walletManager = window.walletManager;
     const networkManager = window.networkManager;
     const walletPopup = window.walletPopup;
 
-    // No MetaMask
-    if (!window.ethereum || !window.ethereum.isMetaMask) {
-      window.alert('MetaMask is required for this app (Phase 2).');
+    if (walletManager.isConnecting) return;
+
+    if (walletManager.isConnected() && networkManager.isOnRequiredNetwork()) {
+      walletPopup.toggle(this.connectWalletBtn);
       return;
     }
 
-    // Connecting
-    if (walletManager?.isConnecting) {
+    if (walletManager.isConnected() && !networkManager.isOnRequiredNetwork()) {
+      await this._switchToPolygon();
       return;
     }
 
-    // Connected + on Polygon → show popup
-    if (walletManager?.isConnected?.() && networkManager?.isOnRequiredNetwork?.()) {
-      walletPopup?.toggle?.(btn);
-      return;
-    }
-
-    // Connected but wrong network → add/switch to Polygon
-    if (walletManager?.isConnected?.() && !networkManager?.isOnRequiredNetwork?.()) {
-      this.renderConnectButton({ text: 'Connecting to Polygon…', disabled: true });
-      try {
-        await networkManager.ensurePolygonNetwork();
-      } catch (e) {
-        window.alert('Please connect to Polygon in MetaMask.');
-      } finally {
-        this.updateConnectButtonStatus();
-      }
-      return;
-    }
-
-    // Not connected → connect
     this.renderConnectButton({ text: 'Connecting…', disabled: true });
     try {
-      await walletManager?.connectMetaMask?.();
-      // If connected but wrong network, keep simple: user can click again to switch.
-    } catch (e) {
-      window.alert(e?.message || 'Failed to connect wallet');
+      await walletManager.connectWallet();
+    } catch (error) {
+      if (error.code !== 'WALLET_SELECTION_REQUIRED') {
+        window.alert(error.message || 'Failed to connect wallet');
+        return;
+      }
+
+      try {
+        const walletId = await this._pickWallet(error.wallets);
+        await walletManager.connectWallet({ walletId });
+      } catch (selectionError) {
+        if (selectionError.message !== 'Wallet selection cancelled.') {
+          window.alert(selectionError.message || 'Failed to connect wallet');
+        }
+      }
     } finally {
+      this._closeWalletPicker();
       this.updateConnectButtonStatus();
+    }
+
+    if (walletManager.isConnected() && !networkManager.isOnRequiredNetwork()) {
+      await this._switchToPolygon();
     }
   }
 
+  async _switchToPolygon() {
+    const networkManager = window.networkManager;
+    this.renderConnectButton({ text: 'Switching to Polygon…', disabled: true });
+    try {
+      await networkManager.ensurePolygonNetwork();
+    } catch {
+      // User rejected or wallet error; keep "Switch to Polygon" CTA.
+    }
+    this.updateConnectButtonStatus();
+  }
+
+  _pickWallet(wallets) {
+    this._closeWalletPicker();
+
+    return new Promise((resolve, reject) => {
+      const navSection = this.connectWalletBtn.closest('.nav-section');
+      const menu = document.createElement('div');
+      menu.className = 'wallet-picker-menu';
+      menu.setAttribute('role', 'menu');
+      menu.setAttribute('aria-label', 'Choose a wallet');
+
+      const title = document.createElement('div');
+      title.className = 'wallet-picker-menu__title';
+      title.textContent = 'Choose a wallet';
+      menu.appendChild(title);
+
+      for (const wallet of wallets) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'wallet-picker-menu__item';
+        item.setAttribute('role', 'menuitem');
+
+        const name = wallet.info?.name || 'Wallet';
+        const words = name.trim().split(/\s+/).filter(Boolean);
+
+        const icon = document.createElement('span');
+        icon.className = 'wallet-picker-menu__icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.textContent = words.slice(0, 2).map((w) => w[0].toUpperCase()).join('') || 'W';
+
+        const iconUrl = wallet.info?.icon;
+        if (iconUrl) {
+          const image = document.createElement('img');
+          image.alt = '';
+          image.onload = () => icon.replaceChildren(image);
+          image.src = iconUrl;
+          if (image.complete && image.naturalWidth) image.onload();
+        }
+
+        const label = document.createElement('span');
+        label.textContent = name;
+
+        item.append(icon, label);
+        item.addEventListener('click', () => {
+          const walletId = wallet.id;
+          this._closeWalletPicker(false);
+          resolve(walletId);
+        });
+        menu.appendChild(item);
+      }
+
+      navSection.classList.add('has-wallet-picker');
+      navSection.appendChild(menu);
+      this._walletPicker = { menu, reject };
+    });
+  }
+
+  _closeWalletPicker(cancelled = true) {
+    if (!this._walletPicker) return;
+
+    if (cancelled) {
+      this._walletPicker.reject(new Error('Wallet selection cancelled.'));
+    }
+
+    this._walletPicker.menu.remove();
+    this.connectWalletBtn.closest('.nav-section').classList.remove('has-wallet-picker');
+    this._walletPicker = null;
+  }
+
+  _onDocumentClick(event) {
+    if (!this._walletPicker) return;
+    if (this.connectWalletBtn.closest('.nav-section').contains(event.target)) return;
+    this._closeWalletPicker();
+    this.updateConnectButtonStatus();
+  }
+
   updateConnectButtonStatus() {
+    if (!this.connectWalletBtn) return;
+
     const walletManager = window.walletManager;
     const networkManager = window.networkManager;
 
-    if (!this.connectWalletBtn) return;
-
-    // MetaMask not installed
-    if (!window.ethereum || !window.ethereum.isMetaMask) {
-      this.renderConnectButton({ text: 'Install MetaMask', disabled: false });
-      return;
-    }
-
-    if (walletManager?.isConnecting) {
+    if (walletManager.isConnecting) {
       this.renderConnectButton({ text: 'Connecting…', disabled: true });
       return;
     }
 
-    const isConnected = !!walletManager?.isConnected?.();
-    const address = walletManager?.getAddress?.();
-    const onPolygon = !!networkManager?.isOnRequiredNetwork?.();
-
-    if (!isConnected) {
+    if (!walletManager.isConnected()) {
       this.renderConnectButton({ text: 'Connect Wallet', disabled: false });
       return;
     }
 
-    if (!onPolygon) {
-      this.renderConnectButton({ text: 'Connect to Polygon', disabled: false });
+    if (!networkManager.isOnRequiredNetwork()) {
+      this.renderConnectButton({ text: 'Switch to Polygon', disabled: false });
       return;
     }
 
+    const address = walletManager.getAddress();
     const short = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Connected';
     this.renderConnectButton({ text: short, disabled: false, connected: true });
   }
 
-  renderConnectButton({ text, disabled = false, connected = false } = {}) {
-    const btn = this.connectWalletBtn;
-    if (!btn) return;
-
-    btn.textContent = text || this._connectBtnText;
-    btn.disabled = !!disabled;
-    btn.classList.toggle('is-connected', !!connected);
+  renderConnectButton({ text, disabled = false, connected = false }) {
+    this.connectWalletBtn.textContent = text || this._connectBtnText;
+    this.connectWalletBtn.disabled = disabled;
+    this.connectWalletBtn.classList.toggle('is-connected', connected);
   }
 }
-

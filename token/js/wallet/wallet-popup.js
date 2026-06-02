@@ -1,6 +1,6 @@
 /**
  * WalletPopup (Phase 2)
- * Simple MetaMask popup:
+ * Simple wallet popup:
  * - address (copy)
  * - balance (native, best-effort)
  * - disconnect

@@ -4,7 +4,27 @@ Liberdus Token UI - User interface for Liberdus token operations.
 
 ## Getting Started
 
-Phase 1 includes the static SPA shell (tabs + placeholder panels).
+Clone with submodules:
+
+```bash
+git clone --recurse-submodules https://github.com/Liberdus/liberdus-token-ui.git
+```
+
+If you already cloned the repo, initialize submodules with:
+
+```bash
+git submodule update --init --recursive
+```
+
+The wallet library lives at `vendor/liberdus-wallet-module/` (from
+[`liberdus-wallet-module`](https://github.com/Liberdus/liberdus-wallet-module)).
+
+See [docs/SUBMODULE.md](docs/SUBMODULE.md) for updating the submodule and deploy
+flow. Quick bump:
+
+```bash
+./scripts/bump-wallet-module.sh
+```
 
 To run locally (needs a static server because we use ES modules):
 

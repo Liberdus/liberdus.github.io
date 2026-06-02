@@ -6,7 +6,7 @@ import { MulticallService } from '../utils/multicall-service.js';
  * ContractManager (Phase 3)
  * - Loads ABI from `./abi.json` (repo root)
  * - Maintains read-only provider (Polygon RPC from config)
- * - When tx-enabled (MetaMask connected + on Polygon), uses wallet provider for reads
+ * - When tx-enabled (wallet connected + on Polygon), uses wallet provider for reads
  *   and signer for writes.
  */
 export class ContractManager {
@@ -144,12 +144,13 @@ export class ContractManager {
 
   getWriteContract() {
     const txEnabled = !!this.networkManager?.isTxEnabled?.();
-    if (!txEnabled || !window.ethereum || !window.ethers) {
+    const injectedProvider = this.walletManager?.getEip1193Provider?.();
+    if (!txEnabled || !injectedProvider || !window.ethers) {
       return this.contractWrite;
     }
 
     // Create a fresh provider/signer for each write to avoid stale network caching.
-    const freshProvider = new window.ethers.providers.Web3Provider(window.ethereum, 'any');
+    const freshProvider = new window.ethers.providers.Web3Provider(injectedProvider, 'any');
     const freshSigner = freshProvider.getSigner();
     return this._makeContract(freshSigner);
   }
