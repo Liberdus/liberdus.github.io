@@ -155,22 +155,7 @@
 
         async disconnect() {
             this.assertReady();
-            await this.revokeWalletPermissions();
             await this.walletCore.disconnect();
-        }
-
-        async revokeWalletPermissions() {
-            const provider = this.walletCore.getEip1193Provider();
-            if (!provider?.request) return;
-
-            try {
-                await provider.request({
-                    method: 'wallet_revokePermissions',
-                    params: [{ eth_accounts: {} }]
-                });
-            } catch {
-                // Not all wallets support permission revocation; local disconnect still applies.
-            }
         }
 
         async checkPreviousConnection() {
