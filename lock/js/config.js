@@ -109,7 +109,7 @@ const ACTIVE_CONFIG = ENVIRONMENTS[ACTIVE_ENVIRONMENT];
 export const CONFIG = {
   APP: {
     NAME: 'Liberdus Token Lock',
-    VERSION: '0.0.0',
+    VERSION: '0.0.1',
     PREFETCH_ON_IDLE: false,
     ENVIRONMENT: ACTIVE_ENVIRONMENT,
   },
