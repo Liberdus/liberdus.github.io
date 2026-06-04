@@ -85,10 +85,6 @@
             }
         }
 
-        async connectMetaMask() {
-            return await this.connectWallet('metamask');
-        }
-
         async connect(options) {
             this.assertReady();
             if (this.isConnected()) return this.connectionResult();
@@ -155,22 +151,7 @@
 
         async disconnect() {
             this.assertReady();
-            await this.revokeWalletPermissions();
             await this.walletCore.disconnect();
-        }
-
-        async revokeWalletPermissions() {
-            const provider = this.walletCore.getEip1193Provider();
-            if (!provider?.request) return;
-
-            try {
-                await provider.request({
-                    method: 'wallet_revokePermissions',
-                    params: [{ eth_accounts: {} }]
-                });
-            } catch {
-                // Not all wallets support permission revocation; local disconnect still applies.
-            }
         }
 
         async checkPreviousConnection() {
@@ -206,10 +187,6 @@
                 return;
             }
 
-            if ((event === 'accountChanged' || event === 'chainChanged') && !this.hasActiveWalletSession()) {
-                return;
-            }
-
             if (event === 'accountChanged' || event === 'chainChanged') {
                 this.syncFromCoreState();
                 this.notifyListeners(event, data);
@@ -240,11 +217,6 @@
             this.account = null;
             this.chainId = null;
             this.walletType = null;
-        }
-
-        hasActiveWalletSession() {
-            const state = this.walletCore.getState();
-            return !!(state.sessionWalletId || state.selectedWalletId);
         }
 
         connectionResult() {
