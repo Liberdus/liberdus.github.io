@@ -27,6 +27,14 @@ function normalizeAddress(address) {
   return trimmed.toLowerCase();
 }
 
+function normalizeSessionText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeSessionRdns(value) {
+  return normalizeSessionText(value).toLowerCase();
+}
+
 function normalizeWalletSession(rawSession) {
   if (!rawSession) return null;
   if (typeof rawSession !== "string") return null;
@@ -36,21 +44,27 @@ function normalizeWalletSession(rawSession) {
   if (rawSession.trim().startsWith("{")) {
     try {
       const parsed = JSON.parse(rawSession);
-      if (typeof parsed?.walletId === "string" && parsed.walletId) {
-        return { walletId: parsed.walletId };
-      }
+      const walletId = normalizeSessionText(parsed?.walletId);
+      const rdns = normalizeSessionRdns(parsed?.rdns);
+      return walletId ? { walletId, ...(rdns ? { rdns } : {}) } : null;
     } catch {
       return null;
     }
   }
-  return rawSession ? { walletId: rawSession } : null;
+  const walletId = normalizeSessionText(rawSession);
+  return walletId ? { walletId } : null;
 }
 
 function isStorageUsable(storage) {
   return storage && typeof storage.getItem === "function" && typeof storage.setItem === "function" && typeof storage.removeItem === "function";
 }
 
-export function createWalletSession({ discovery, storage, walletSessionKey = "liberdus-wallet-module:walletSession" } = {}) {
+export function createWalletSession({
+  discovery,
+  revokePermissionsOnDisconnect = true,
+  storage,
+  walletSessionKey = "liberdus-wallet-module:walletSession",
+} = {}) {
   const sessionSubscribers = new Set();
   const state = {
     account: null,
@@ -67,6 +81,8 @@ export function createWalletSession({ discovery, storage, walletSessionKey = "li
   };
 
   let discoveryUnsubscribe = null;
+  let isSyncing = false;
+  let restorePromise = null;
 
   function updateInjectedProviderState() {
     const provider = discovery.getInjectedProvider();
@@ -74,14 +90,18 @@ export function createWalletSession({ discovery, storage, walletSessionKey = "li
     state.providerSource = provider;
   }
 
-  function saveWalletSession(walletId) {
+  function saveWalletSession(wallet) {
     if (!isStorageUsable(storage)) return;
     try {
-      if (!walletId) {
+      if (!wallet?.id) {
         storage.removeItem(walletSessionKey);
         return;
       }
-      storage.setItem(walletSessionKey, JSON.stringify({ walletId }));
+      const rdns = normalizeSessionRdns(wallet.info?.rdns);
+      storage.setItem(walletSessionKey, JSON.stringify({
+        walletId: wallet.id,
+        ...(rdns ? { rdns } : {}),
+      }));
     } catch {
       // Session persistence is best-effort; live wallet state should still work.
     }
@@ -124,7 +144,7 @@ export function createWalletSession({ discovery, storage, walletSessionKey = "li
     state.injectedProvider = null;
     state.providerSource = null;
     state.isConnecting = false;
-    discovery.applyActiveWallet(null);
+    discovery.clearActiveWallet();
   }
 
   function emitEvent(event, data) {
@@ -141,6 +161,33 @@ export function createWalletSession({ discovery, storage, walletSessionKey = "li
     });
   }
 
+  function emitConnectedEvent() {
+    emitEvent("connected", {
+      walletId: state.selectedWalletId,
+      account: state.account,
+      chainId: state.chainId,
+      wallet: {
+        id: state.selectedWalletId,
+        name: state.selectedWalletName,
+        rdns: state.selectedWalletRdns,
+        icon: state.selectedWalletIcon,
+      },
+    });
+  }
+
+  function restoreSavedSession() {
+    if (isSyncing || restorePromise || state.isConnecting || state.account || !hasWalletSession()) return;
+
+    restorePromise = sync()
+      .then(() => {
+        if (state.account) emitConnectedEvent();
+      })
+      .catch(() => {})
+      .finally(() => {
+        restorePromise = null;
+      });
+  }
+
   function handleDiscoveryEvent(event, data) {
     if (event === "accountChanged") {
       const nextAddress = normalizeAddress(Array.isArray(data) ? data[0] : data);
@@ -151,6 +198,10 @@ export function createWalletSession({ discovery, storage, walletSessionKey = "li
         if (changed) {
           emitEvent("accountChanged", nextAddress);
         }
+        return;
+      }
+
+      if (!hasActiveConnectionState()) {
         return;
       }
 
@@ -169,8 +220,19 @@ export function createWalletSession({ discovery, storage, walletSessionKey = "li
       return;
     }
 
+    if (event === "providerDisconnected") {
+      if (!hasActiveConnectionState()) {
+        return;
+      }
+
+      resetConnectionState();
+      emitEvent("disconnected", null);
+      return;
+    }
+
     if (event === "providersChanged") {
       emitEvent("providersChanged", data);
+      restoreSavedSession();
       return;
     }
   }
@@ -194,8 +256,23 @@ export function createWalletSession({ discovery, storage, walletSessionKey = "li
     return { ...state };
   }
 
+  function hasActiveConnectionState() {
+    return Boolean(state.account || state.selectedWalletId || state.sessionWalletId);
+  }
+
   function hasWalletSession() {
     return Boolean(getWalletSession()?.walletId);
+  }
+
+  async function resolveWalletSession(session) {
+    const wallet = await discovery.resolveWalletById(session.walletId);
+    if (wallet) return { wallet, matchedBy: "walletId" };
+
+    if (!session.rdns) return null;
+
+    const wallets = await discovery.discoverWallets();
+    const matches = wallets.filter((candidate) => normalizeSessionRdns(candidate.info?.rdns) === session.rdns);
+    return matches.length === 1 ? { wallet: matches[0], matchedBy: "rdns" } : null;
   }
 
   async function connect({ walletId } = {}) {
@@ -230,19 +307,9 @@ export function createWalletSession({ discovery, storage, walletSessionKey = "li
       state.selectedWalletRdns = wallet.info?.rdns || null;
       state.selectedWalletIcon = wallet.info?.icon || null;
       state.sessionWalletId = wallet.id;
-      saveWalletSession(wallet.id);
+      saveWalletSession(wallet);
 
-      emitEvent("connected", {
-        walletId: wallet.id,
-        account: state.account,
-        chainId: state.chainId,
-        wallet: {
-          id: wallet.id,
-          name: state.selectedWalletName,
-          rdns: state.selectedWalletRdns,
-          icon: state.selectedWalletIcon,
-        },
-      });
+      emitConnectedEvent();
 
       return state.account;
     } finally {
@@ -250,18 +317,30 @@ export function createWalletSession({ discovery, storage, walletSessionKey = "li
     }
   }
 
-  async function disconnect() {
+  async function disconnect({ revokePermissions = revokePermissionsOnDisconnect } = {}) {
+    if (revokePermissions && hasActiveConnectionState()) {
+      try {
+        await discovery.getInjectedProvider()?.request({
+          method: "wallet_revokePermissions",
+          params: [{ eth_accounts: {} }],
+        });
+      } catch {
+        // Unsupported wallet permission APIs should not block local disconnect.
+      }
+    }
+
     resetConnectionState();
     emitEvent("disconnected", null);
   }
 
-  async function sync() {
+  async function syncState() {
     await initializeDiscoveryEvents();
     const session = getWalletSession();
-    const selectedWallet = session?.walletId ? await discovery.resolveWalletById(session.walletId) : null;
+    const sessionMatch = session?.walletId ? await resolveWalletSession(session) : null;
+    const selectedWallet = sessionMatch?.wallet || null;
 
     if (session?.walletId && !selectedWallet) {
-      resetConnectionState();
+      resetConnectionState({ clearSession: false });
       return state;
     }
 
@@ -271,7 +350,7 @@ export function createWalletSession({ discovery, storage, walletSessionKey = "li
     state.selectedWalletName = selectedWallet?.info?.name || null;
     state.selectedWalletRdns = selectedWallet?.info?.rdns || null;
     state.selectedWalletIcon = selectedWallet?.info?.icon || null;
-    state.sessionWalletId = session?.walletId || null;
+    state.sessionWalletId = selectedWallet?.id || null;
 
     const injected = discovery.getInjectedProvider();
     if (!injected) {
@@ -302,14 +381,24 @@ export function createWalletSession({ discovery, storage, walletSessionKey = "li
       const account = normalizeAddress(Array.isArray(accounts) ? accounts[0] : accounts);
       state.account = account;
       if (!account) {
-        clearWalletSession();
+        resetConnectionState({ clearSession: sessionMatch?.matchedBy !== "rdns" });
+      } else {
+        saveWalletSession(selectedWallet);
       }
     } catch {
-      state.account = null;
-      clearWalletSession();
+      resetConnectionState({ clearSession: sessionMatch?.matchedBy !== "rdns" });
     }
 
     return state;
+  }
+
+  async function sync() {
+    isSyncing = true;
+    try {
+      return await syncState();
+    } finally {
+      isSyncing = false;
+    }
   }
 
   function subscribe(handler) {
