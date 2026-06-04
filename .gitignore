@@ -3,7 +3,5 @@ _site/
 .jekyll-metadata
 node_modules
 .DS_Store
-update-otc-client.sh
-update-otctest-client.sh
 settings.json
 update-docs.sh

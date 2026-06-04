@@ -12,8 +12,7 @@ import { handleTransactionError } from '../utils/ui.js';
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
         super(containerId);
-        this.provider = typeof window.ethereum !== 'undefined' ? 
-            new ethers.providers.Web3Provider(window.ethereum) : null;
+        this.provider = walletManager.getProvider();
         this.currentPage = 1;
         this.totalOrders = 0;
         this.setupErrorHandling();
@@ -331,10 +330,11 @@ export class ViewOrders extends BaseComponent {
             if (orderSort === 'newest') {
                 ordersToDisplay.sort((a, b) => b.id - a.id);
             } else if (orderSort === 'best-deal') {
-                ordersToDisplay.sort((a, b) => 
-                    Number(a.dealMetrics?.deal || Infinity) - 
-                    Number(b.dealMetrics?.deal || Infinity)
-                );
+                ordersToDisplay.sort((a, b) => {
+                    const dealA = a.dealMetrics?.deal > 0 ? 1 / a.dealMetrics.deal : Infinity;
+                    const dealB = b.dealMetrics?.deal > 0 ? 1 / b.dealMetrics.deal : Infinity;
+                    return dealB - dealA; // Higher deal is better for buyer perspective
+                });
             }
 
             // Apply pagination
@@ -457,13 +457,13 @@ export class ViewOrders extends BaseComponent {
             <div class="filter-row">
                 <div class="token-filters">
                     <select id="sell-token-filter" class="token-filter">
-                        <option value="">All Sell Tokens</option>
+                        <option value="">All Buy Tokens</option>
                         ${tokens.map(token => 
                             `<option value="${token.address}">${token.symbol}</option>`
                         ).join('')}
                     </select>
                     <select id="buy-token-filter" class="token-filter">
-                        <option value="">All Buy Tokens</option>
+                        <option value="">All Sell Tokens</option>
                         ${tokens.map(token => 
                             `<option value="${token.address}">${token.symbol}</option>`
                         ).join('')}
@@ -509,17 +509,11 @@ export class ViewOrders extends BaseComponent {
                 <th>Sell</th>
                 <th>
                     Deal
-                    <span class="info-icon" title="Deal = Price × Market Rate
+                    <span class="info-icon" title="Deal = Buy Value / Sell Value
                     
-For Sellers:
 • Higher deal number is better
-• Deal > 1: Getting more than market value
-• Deal < 1: Getting less than market value
-
-For Buyers:
-• Lower deal number is better
-• Deal > 1: Paying more than market value
-• Deal < 1: Paying less than market value">ⓘ</span>
+• Deal > 1: better deal based on market prices
+• Deal < 1: worse deal based on market prices">ⓘ</span>
                 </th>
                 <th>Expires</th>
                 <th>Status</th>
@@ -693,8 +687,10 @@ For Buyers:
         const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
         
         try {
-            if (!this.provider) {
-                throw new Error('MetaMask is not installed. Please install MetaMask to take orders.');
+            this.provider = walletManager.getProvider();
+            const signer = walletManager.getSigner();
+            if (!this.provider || !signer) {
+                throw new Error('Connect a browser wallet to take orders.');
             }
 
             // Check if wallet is connected and has an account
@@ -705,7 +701,6 @@ For Buyers:
 
             // Additional check to ensure signer is properly connected
             try {
-                const signer = this.provider.getSigner();
                 await signer.getAddress(); // This will throw if not properly connected
             } catch (error) {
                 throw new Error('Please sign in to fill order');
@@ -731,7 +726,6 @@ For Buyers:
             if (!contract) {
                 throw new Error('Contract not available');
             }
-            const signer = this.provider.getSigner();
             const contractWithSigner = contract.connect(signer);
 
             // Check order status first
@@ -755,16 +749,16 @@ For Buyers:
             const buyToken = new ethers.Contract(
                 order.buyToken,
                 erc20Abi,
-                this.provider.getSigner()
+                signer
             );
             
             const sellToken = new ethers.Contract(
                 order.sellToken,
                 erc20Abi,
-                this.provider.getSigner()
+                signer
             );
 
-            const currentAccount = await this.provider.getSigner().getAddress();
+            const currentAccount = await signer.getAddress();
 
             // Get token details for proper formatting
             const buyTokenDecimals = await buyToken.decimals();
@@ -885,6 +879,12 @@ For Buyers:
             case -32603:
                 return 'Transaction would fail. Check order status and approvals.';
             case 'UNPREDICTABLE_GAS_LIMIT':
+                // For contract revert errors, extract the actual revert message
+                if (error.error?.data?.message) {
+                    return error.error.data.message;
+                } else if (error.reason) {
+                    return error.reason;
+                }
                 return 'Error estimating gas. The transaction may fail.';
             default:
                 return error.reason || error.message || 'Unknown error occurred';
@@ -919,12 +919,11 @@ For Buyers:
             // Get token info from WebSocket cache
             const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
             const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
-
+            const deal = order.dealMetrics?.deal > 0 ? 1 / order.dealMetrics?.deal : undefined; // view as buyer/taker
             // Use pre-formatted values from dealMetrics
             const { 
                 formattedSellAmount,
                 formattedBuyAmount,
-                deal,
                 sellTokenUsdPrice,
                 buyTokenUsdPrice 
             } = order.dealMetrics || {};
@@ -972,7 +971,9 @@ For Buyers:
 
             const orderStatus = window.webSocket.getOrderStatus(order);
             const expiryEpoch = order?.timings?.expiresAt;
-            const expiryText = typeof expiryEpoch === 'number' ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) : 'Unknown';
+            const expiryText = orderStatus === 'Active' && typeof expiryEpoch === 'number' 
+                ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) 
+                : '';
 
             tr.innerHTML = `
                 <td>${order.id}</td>
@@ -1094,8 +1095,9 @@ For Buyers:
             const currentAccount = walletManager.getAccount()?.toLowerCase();
             const isUserOrder = order.maker?.toLowerCase() === currentAccount;
 
-            // Update expiry text
-            const newExpiryText = this.formatTimeDiff(timeDiff);
+            // Update expiry text - only calculate for active orders
+            const orderStatusForExpiry = window.webSocket.getOrderStatus(order);
+            const newExpiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeDiff) : '';
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
             }
@@ -1159,18 +1161,16 @@ For Buyers:
     }
 
     formatTimeDiff(seconds) {
-        const days = Math.floor(Math.abs(seconds) / 86400);
-        const hours = Math.floor((Math.abs(seconds) % 86400) / 3600);
-        const minutes = Math.floor((Math.abs(seconds) % 3600) / 60);
-        
-        const prefix = seconds < 0 ? '-' : '';
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
         
         if (days > 0) {
-            return `${prefix}${days}D ${hours}H ${minutes}M`;
+            return `${days}D ${hours}H ${minutes}M`;
         } else if (hours > 0) {
-            return `${prefix}${hours}H ${minutes}M`;
+            return `${hours}H ${minutes}M`;
         } else {
-            return `${prefix}${minutes}M`;
+            return `${minutes}M`;
         }
     }
 }

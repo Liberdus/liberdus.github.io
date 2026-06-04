@@ -301,20 +301,15 @@ export class MyOrders extends ViewOrders {
                     <thead>
                         <tr>
                             <th>ID</th>
-                            <th>Buy</th>
                             <th>Sell</th>
+                            <th>Buy</th>
                             <th>
                                 Deal
-                                <span class="info-icon" title="Deal = Price × Market Rate
+                                <span class="info-icon" title="Deal = Buy Value / Sell Value
 
-For Your Orders (as Seller):
 • Higher deal number is better
-• Deal > 1: You're getting more than market value
-• Deal < 1: You're getting less than market value
-
-Example:
-Deal = 1.2 means you're selling at 20% above market rate
-Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
+• Deal > 1: better deal based on market prices
+• Deal < 1: worse deal based on market prices">ⓘ</span>
                             </th>
                             <th>Expires</th>
                             <th>Status</th>
@@ -597,7 +592,8 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
 
             const currentTime = Math.floor(Date.now() / 1000);
             const timeUntilExpiry = order?.timings?.expiresAt ? order.timings.expiresAt - currentTime : 0;
-            const expiryText = this.formatTimeDiff(timeUntilExpiry);
+            const orderStatusForExpiry = window.webSocket.getOrderStatus(order);
+            const expiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeUntilExpiry) : '';
 
             // Get order status from WebSocket cache
             const orderStatus = window.webSocket.getOrderStatus(order);
@@ -649,8 +645,9 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 
                 cancelButton.addEventListener('click', async () => {
                     try {
-                        if (!this.provider) {
-                            throw new Error('MetaMask is not installed. Please install MetaMask to cancel orders.');
+                        const signer = window.walletManager?.getSigner?.();
+                        if (!signer) {
+                            throw new Error('Connect a browser wallet to cancel orders.');
                         }
 
                         cancelButton.disabled = true;
@@ -663,7 +660,6 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                             throw new Error('Contract not available');
                         }
 
-                        const signer = this.provider.getSigner();
                         const contractWithSigner = contract.connect(signer);
                         
                         // Add gas buffer
@@ -799,8 +795,9 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                             const timeDiff = order.timings?.expiresAt ? order.timings.expiresAt - currentTime : 0;
             const currentAccount = window.walletManager.getAccount()?.toLowerCase();
 
-            // Update expiry text
-            const newExpiryText = this.formatTimeDiff(timeDiff);
+            // Update expiry text - only calculate for active orders
+            const orderStatusForExpiry = window.webSocket.getOrderStatus(order);
+            const newExpiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeDiff) : '';
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
             }
@@ -815,8 +812,9 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                     
                     cancelButton.addEventListener('click', async () => {
                         try {
-                            if (!this.provider) {
-                                throw new Error('MetaMask is not installed. Please install MetaMask to cancel orders.');
+                            const signer = window.walletManager?.getSigner?.();
+                            if (!signer) {
+                                throw new Error('Connect a browser wallet to cancel orders.');
                             }
 
                             cancelButton.disabled = true;
@@ -828,7 +826,6 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                                 throw new Error('Contract not available');
                             }
 
-                            const signer = this.provider.getSigner();
                             const contractWithSigner = contract.connect(signer);
                             
                             const gasEstimate = await contractWithSigner.estimateGas.cancelOrder(order.id);
@@ -846,8 +843,8 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                             actionCell.textContent = '-';
                             this.debouncedRefresh();
                         } catch (error) {
-                            console.error('Error cancelling order:', error);
-                            this.showError(this.getReadableError(error));
+                            this.debug('Error cancelling order:', error);
+                            handleTransactionError(error, this, 'order cancellation');
                             cancelButton.disabled = false;
                             cancelButton.textContent = 'Cancel';
                         }
@@ -858,8 +855,6 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 }
             } else if (order.maker?.toLowerCase() === currentAccount) {
                 actionCell.innerHTML = '<span class="your-order">Mine</span>';
-            } else if (order.timings?.expiresAt && currentTime > order.timings.expiresAt) {
-                actionCell.innerHTML = '<span class="expired-order">Expired</span>';
             } else {
                 actionCell.textContent = '-';
             }

@@ -1,6 +1,6 @@
 import { BaseComponent } from './components/BaseComponent.js';
 import { CreateOrder } from './components/CreateOrder.js';
-import { walletManager, WalletManager, getNetworkConfig, getAllNetworks, isDebugEnabled, getNetworkById, APP_BRAND, APP_LOGO } from './config.js';
+import { walletManager, WalletManager, getNetworkConfig, getAllNetworks, isDebugEnabled, getNetworkById, APP_BRAND, APP_LOGO, DEBUG_CONFIG } from './config.js';
 import { WalletUI } from './components/WalletUI.js';
 import { WebSocketService } from './services/WebSocket.js';
 import { ViewOrders } from './components/ViewOrders.js';
@@ -128,12 +128,6 @@ class App {
         // Treat presence of signer as connected for initial render to avoid flicker
         const isInitiallyConnected = !!window.walletManager?.getSigner?.();
         this.currentTab = isInitiallyConnected ? 'create-order' : 'view-orders';
-
-		// Add wallet connect button handler
-		const walletConnectBtn = document.getElementById('walletConnect');
-		if (walletConnectBtn) {
-			walletConnectBtn.addEventListener('click', this.handleConnectWallet);
-		}
 
 		// Add wallet connection state handler
 		walletManager.addListener(async (event, data) => {
@@ -719,6 +713,9 @@ window.showWarning = showWarning;
 window.showInfo = showInfo;
 window.getToast = getToast;
 
+// Make DEBUG_CONFIG globally available for debug panel
+window.DEBUG_CONFIG = DEBUG_CONFIG;
+
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
 	try {
@@ -787,10 +784,7 @@ const populateNetworkOptions = () => {
 				
 				if (window.walletManager && window.walletManager.isConnected()) {
 					const chainId = option.dataset.chainId;
-					await window.ethereum.request({
-						method: 'wallet_switchEthereumChain',
-						params: [{ chainId }],
-					});
+					await window.walletManager.switchToNetwork(chainId);
 				}
 			} catch (error) {
 				console.error('Failed to switch network:', error);
@@ -847,4 +841,3 @@ function showAppParametersPopup() {
 	
 	document.body.appendChild(popup);
 }
-

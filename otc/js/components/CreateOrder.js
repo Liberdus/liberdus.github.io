@@ -537,14 +537,17 @@ export class CreateOrder extends BaseComponent {
                 return;
             }
 
-            // Validate that one of the tokens must be Liberdus (LIB)
-            /* const sellTokenIsLiberdus = this.isLiberdusToken(this.sellToken.address);
-            const buyTokenIsLiberdus = this.isLiberdusToken(this.buyToken.address);
-            
-            if (!sellTokenIsLiberdus && !buyTokenIsLiberdus) {
-                this.showError('One of the tokens must be Liberdus (LIB). Please select Liberdus as either the buy or sell token.');
-                return;
-            } */
+            // Validate that one of the tokens must be Liberdus (LIB) - controlled by debug flag
+            if (window.DEBUG_CONFIG?.LIBERDUS_VALIDATION) {
+                const sellTokenIsLiberdus = this.isLiberdusToken(this.sellToken.address);
+                const buyTokenIsLiberdus = this.isLiberdusToken(this.buyToken.address);
+                
+                if (!sellTokenIsLiberdus && !buyTokenIsLiberdus) {
+                    this.debug('Liberdus validation failed');
+                    this.showError('One of the tokens must be Liberdus (LIB). Please select Liberdus as either the buy or sell token.');
+                    return;
+                }
+            }
 
             // Validate that both tokens are allowed in the contract
             try {
@@ -780,6 +783,12 @@ export class CreateOrder extends BaseComponent {
             case -32603:
                 return 'Network error. Please check your connection';
             case 'UNPREDICTABLE_GAS_LIMIT':
+                // For contract revert errors, extract the actual revert message
+                if (error.error?.data?.message) {
+                    return error.error.data.message;
+                } else if (error.reason) {
+                    return error.reason;
+                }
                 return 'Error estimating gas. The transaction may fail';
             default:
                 return error.reason || error.message || 'Error creating order';
@@ -1746,6 +1755,11 @@ export class CreateOrder extends BaseComponent {
             handleTransactionError(error, this, 'token approval');
             return false;
         }
+    }
+
+    // Helper method to check if Liberdus validation is enabled
+    isLiberdusValidationEnabled() {
+        return window.DEBUG_CONFIG?.LIBERDUS_VALIDATION === true;
     }
 
     // Add new helper method for user-friendly error messages
