@@ -18,28 +18,29 @@ export class WalletManager {
   }
 
   load() {
-    this.walletCore.subscribe((event, data) => {
-      if (event === 'connected') {
-        this._syncFromCoreState();
-        this._notify('connected');
-        return;
-      }
+    this.walletCore.subscribe((event, data) => this._handleCoreEvent(event, data));
+  }
 
-      if (event === 'disconnected' || (event === 'accountChanged' && !data)) {
-        this._clearEthersState();
+  _handleCoreEvent(event, data) {
+    if (event === 'connected') {
+      this._syncFromCoreState();
+      this._notify('connected', data);
+      return;
+    }
+
+    if (event === 'disconnected' || (event === 'accountChanged' && !data)) {
+      const wasConnected = this.isConnected();
+      this._clearEthersState();
+      if (wasConnected) {
         this._notify('disconnected');
-        return;
       }
+      return;
+    }
 
-      if ((event === 'accountChanged' || event === 'chainChanged') && !this._hasActiveWalletSession()) {
-        return;
-      }
-
-      if (event === 'accountChanged' || event === 'chainChanged') {
-        this._syncFromCoreState();
-        this._notify(event);
-      }
-    });
+    if (event === 'accountChanged' || event === 'chainChanged') {
+      this._syncFromCoreState();
+      this._notify(event, data);
+    }
   }
 
   async init() {
@@ -118,16 +119,8 @@ export class WalletManager {
   }
 
   async checkPreviousConnection() {
-    try {
-      await this.walletCore.sync();
-    } catch {
-      await this.walletCore.disconnect();
-      this._clearEthersState();
-      return false;
-    }
-
-    const state = this.walletCore.getState();
-    if (!state.account) return false;
+    await this.walletCore.sync();
+    if (!this.walletCore.getState().account) return false;
 
     this._syncFromCoreState();
     this._notify('connected', { restored: true });
@@ -148,11 +141,6 @@ export class WalletManager {
     this.address = state.account;
     this.chainId = state.chainId;
     this.walletType = state.selectedWalletName || 'wallet';
-  }
-
-  _hasActiveWalletSession() {
-    const state = this.walletCore.getState();
-    return !!(state.sessionWalletId || state.selectedWalletId);
   }
 
   _clearEthersState() {
