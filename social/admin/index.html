@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Liberdus Signup Admin</title>
+    <link rel="icon" type="image/png" href="../assets/liberdus-logo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../styles.css">
+  </head>
+  <body>
+    <div class="page-glow" aria-hidden="true"></div>
+    <div class="toast-stack" aria-live="polite" aria-atomic="true">
+      <div id="adminToast" class="toast" data-tone="info" hidden>
+        <p id="adminToastMessage" class="toast-message"></p>
+        <button id="adminToastClose" type="button" class="toast-close" aria-label="Dismiss notification">x</button>
+      </div>
+    </div>
+
+    <header class="page-header">
+      <div class="page-header-inner">
+        <a class="brand-lockup nav-brand" href="../">
+          <img class="brand-logo" src="../assets/liberdus-logo.png" alt="" aria-hidden="true">
+          <span>
+            <span class="eyebrow">Liberdus</span>
+            <span class="brand-wordmark">Signup Admin</span>
+          </span>
+        </a>
+        <div class="claim-topbar-actions">
+          <a class="secondary nav-button" href="../">Signup</a>
+          <button id="logoutButton" type="button" class="ghost" hidden>Logout</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section id="loginPanel" class="frame login-panel">
+        <div class="panel-title-row">
+          <div>
+            <h2>Admin Login</h2>
+            <p class="hint">Use the username and password configured on the backend.</p>
+          </div>
+        </div>
+        <form id="loginForm" class="form-grid" autocomplete="on">
+          <label>
+            <span>Username</span>
+            <input id="usernameInput" name="username" type="text" autocomplete="username">
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="passwordInput" name="password" type="password" autocomplete="current-password">
+          </label>
+          <div class="full-width button-row">
+            <button type="submit">Login</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="adminPanel" class="frame" hidden>
+        <div class="panel-title-row">
+          <div>
+            <h2>Submissions</h2>
+            <p id="summaryText" class="hint">No data loaded.</p>
+          </div>
+          <div class="button-row">
+            <button id="refreshButton" type="button" class="secondary">Refresh</button>
+            <button id="exportButton" type="button" class="ghost">Export CSV</button>
+          </div>
+        </div>
+
+        <form id="filterForm" class="management-filter-form" autocomplete="off">
+          <label class="management-filter-field">
+            <span>Search</span>
+            <input id="searchInput" type="text" placeholder="Wallet, username, provider ID">
+          </label>
+          <label>
+            <span>Provider</span>
+            <select id="providerFilter">
+              <option value="">Any provider</option>
+              <option value="x">X</option>
+              <option value="discord">Discord</option>
+              <option value="telegram">Telegram</option>
+              <option value="linkedin">LinkedIn</option>
+              <option value="github">GitHub</option>
+              <option value="youtube">YouTube</option>
+              <option value="coinmarketcap">CoinMarketCap</option>
+            </select>
+          </label>
+          <label>
+            <span>Check</span>
+            <select id="checkTypeFilter">
+              <option value="">Any check</option>
+              <option value="x_verified">X verified</option>
+              <option value="discord_guild_member">Discord joined</option>
+              <option value="telegram_group_member">Telegram joined</option>
+              <option value="github_repo_starred">GitHub starred</option>
+              <option value="youtube_channel_subscribed">YouTube subscribed</option>
+            </select>
+          </label>
+          <label>
+            <span>Check status</span>
+            <select id="checkStatusFilter">
+              <option value="">Any status</option>
+              <option value="passed">Passed</option>
+              <option value="failed">Not found / not verified</option>
+              <option value="unknown">Could not verify</option>
+              <option value="claimed">Claimed</option>
+            </select>
+          </label>
+          <label>
+            <span>Manual claim</span>
+            <select id="manualClaimFilter">
+              <option value="">Any claim state</option>
+              <option value="any">Has manual claim</option>
+              <option value="x_follow_manual">X follow</option>
+              <option value="linkedin_follow_manual">LinkedIn follow</option>
+              <option value="coinmarketcap_follow_manual">CMC follow</option>
+            </select>
+          </label>
+          <label>
+            <span>Changed</span>
+            <select id="changedFilter">
+              <option value="">Any change state</option>
+              <option value="any">Has changes</option>
+              <option value="wallet">Wallet changed</option>
+              <option value="social">Social changed</option>
+            </select>
+          </label>
+          <label>
+            <span>Status</span>
+            <select id="statusFilter">
+              <option value="">Any status</option>
+              <option value="received">Received</option>
+            </select>
+          </label>
+          <label>
+            <span>From</span>
+            <input id="submittedFromInput" type="date">
+          </label>
+          <label>
+            <span>To</span>
+            <input id="submittedToInput" type="date">
+          </label>
+          <label class="management-page-size-field">
+            <span>Rows</span>
+            <select id="pageSizeSelect">
+              <option value="25">25</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+          <div class="button-row">
+            <button type="submit">Apply</button>
+            <button id="clearSearchButton" type="button" class="ghost">Clear</button>
+          </div>
+        </form>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Submitted</th>
+                <th>Wallet</th>
+                <th>Profile</th>
+                <th>Changes</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="submissionsBody">
+              <tr><td colspan="5" class="empty-row">Login to load submissions.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="../js/pages/admin.js"></script>
+  </body>
+</html>
