@@ -1,6 +1,7 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 's'
+const version = 't'
+const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
@@ -1030,6 +1031,8 @@ class WelcomeScreen {
 
   load() {
     this.screen = document.getElementById('welcomeScreen');
+    this.bootSplash = document.getElementById('bootSplash');
+    assert(this.bootSplash, 'Boot splash is required');
     this.signInButton = document.getElementById('signInButton');
     this.createAccountButton = document.getElementById('createAccountButton');
     this.openWelcomeMenuButton = document.getElementById('openWelcomeMenu');
@@ -1071,6 +1074,109 @@ class WelcomeScreen {
     });
 
     this.orderButtons();
+    this.revealHydratedWelcome();
+  }
+
+  async revealHydratedWelcome() {
+    await this.waitForBootSplashImages();
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      this.showHydratedWelcome();
+      return;
+    }
+
+    this.bootSplash.classList.add('is-ready');
+    await this.waitForBootSplashPulse();
+    await this.animateBootSplashToWelcome();
+  }
+
+  async waitForBootSplashImages() {
+    const splashLogo = this.bootSplash.querySelector('.boot-splash-logo');
+    const welcomeLogo = this.logoLink.querySelector('img');
+    assert(splashLogo, 'Boot splash logo is required');
+    assert(welcomeLogo, 'Welcome logo is required');
+
+    await Promise.all([
+      this.waitForImage(splashLogo),
+      this.waitForImage(welcomeLogo),
+    ]);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }
+
+  async waitForImage(image) {
+    if (!image.complete) {
+      await new Promise((resolve) => image.addEventListener('load', resolve, { once: true }));
+    }
+    assert(image.naturalWidth > 0, 'Boot splash image is required');
+
+    if (image.decode) {
+      await image.decode();
+    }
+  }
+
+  waitForBootSplashPulse() {
+    const halo = this.bootSplash.querySelector('.boot-splash-halo');
+    assert(halo, 'Boot splash halo is required');
+    const [animation] = halo.getAnimations();
+    assert(animation, 'Boot splash halo animation is required');
+    assert(animation.effect, 'Boot splash halo animation effect is required');
+
+    const pulseDurationMs = animation.effect.getComputedTiming().duration;
+    assert(Number.isFinite(pulseDurationMs) && pulseDurationMs > 0, 'Boot splash halo duration is required');
+    return Promise.race([
+      animation.finished,
+      new Promise((resolve) => setTimeout(resolve, pulseDurationMs + 100)),
+    ]);
+  }
+
+  async animateBootSplashToWelcome() {
+    const splashLogo = this.bootSplash.querySelector('.boot-splash-logo');
+    const splashTitle = document.getElementById('bootSplashBrandTitle');
+    const welcomeLogo = this.logoLink.querySelector('img');
+    const welcomeTitle = document.getElementById('welcomeBrandTitle');
+    assert(splashLogo, 'Boot splash logo is required');
+    assert(splashTitle, 'Boot splash title is required');
+    assert(welcomeLogo, 'Welcome logo is required');
+    assert(welcomeTitle, 'Welcome title is required');
+
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    this.bootSplash.classList.add('is-handoff');
+
+    await Promise.all([
+      this.createBootSplashHandoffAnimation(splashLogo, welcomeLogo).finished,
+      this.createBootSplashHandoffAnimation(splashTitle, welcomeTitle).finished,
+    ]);
+    this.showHydratedWelcome();
+  }
+
+  createBootSplashHandoffAnimation(sourceElement, targetElement) {
+    const sourceRect = sourceElement.getBoundingClientRect();
+    const targetRect = targetElement.getBoundingClientRect();
+    assert(sourceRect.width && sourceRect.height, 'Boot splash handoff source must be measurable');
+    assert(targetRect.width && targetRect.height, 'Boot splash handoff target must be measurable');
+
+    const sourceCenterX = sourceRect.left + sourceRect.width / 2;
+    const sourceCenterY = sourceRect.top + sourceRect.height / 2;
+    const targetCenterX = targetRect.left + targetRect.width / 2;
+    const targetCenterY = targetRect.top + targetRect.height / 2;
+    const translateX = targetCenterX - sourceCenterX;
+    const translateY = targetCenterY - sourceCenterY;
+    const scale = targetRect.width / sourceRect.width;
+    const transform = 'translate3d(' + translateX + 'px, ' + translateY + 'px, 0) scale(' + scale + ')';
+
+    return sourceElement.animate([
+      { transform: 'translate3d(0, 0, 0) scale(1)' },
+      { transform },
+    ], {
+      duration: BOOT_SPLASH_HANDOFF_MS,
+      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      fill: 'forwards',
+    });
+  }
+
+  showHydratedWelcome() {
+    this.screen.classList.remove('is-booting');
+    this.bootSplash.classList.add('hidden');
 
     // Show Apple Safari backup reminder toast after welcome screen has rendered
     setTimeout(() => {
@@ -1080,6 +1186,8 @@ class WelcomeScreen {
   }
 
   open() {
+    this.screen.classList.remove('is-booting');
+    this.bootSplash.classList.add('hidden');
     this.screen.style.display = 'flex';
     // Show the navigation bar on the native app
     reactNativeApp.sendNavigationBarVisibility(true);
@@ -2269,8 +2377,26 @@ class MenuModal {
     // Remove event listeners for beforeunload and visibilitychange
     window.removeEventListener('beforeunload', handleBeforeUnload);
 
+    // Save myData to localStorage if it exists
+    saveState();
+
+    // clear storage
+    clearMyData();
+
     // Lock the app
     unlockModal.lock();
+
+    if (isOnline) {
+      await reactNativeApp.handleNativeAppSubscribe();
+      await checkVersion();
+
+      // checkVersion() may update online status
+      if (isOnline) {
+        const newUrl = window.location.href.split('?')[0];
+        window.location.replace(newUrl);
+        return;
+      }
+    }
 
     // Close all modals
     menuModal.close();
@@ -2296,27 +2422,6 @@ class MenuModal {
 
     // Show welcome screen
     welcomeScreen.open();
-
-
-    // Save myData to localStorage if it exists
-    saveState();
-
-    // clear storage
-    clearMyData();
-
-    // Add offline fallback
-    if (!isOnline) {
-      return;
-    }
-
-    await reactNativeApp.handleNativeAppSubscribe();
-    await checkVersion();
-
-    // checkVersion() may update online status
-    if (isOnline) {
-      const newUrl = window.location.href.split('?')[0];
-      window.location.replace(newUrl);
-    }
   }
 }
 
@@ -3594,6 +3699,8 @@ const SIGN_IN_ACTION_SHEETS = {
     showRemove: false,
   },
 };
+const SIGN_IN_USERNAME_ORDER_KEY = 'signInUsernameOrder';
+const SIGN_IN_USERNAME_PROMOTION_RATIO = 0.5;
 
 class SignInModal {
   constructor() {
@@ -3606,7 +3713,7 @@ class SignInModal {
   load () {
     this.modal = document.getElementById('signInModal');
     this.accountList = document.getElementById('signInAccountList');
-    this.signInModalLastItem = document.getElementById('signInModalLastItem');
+    this.resetRecentUsernamesButton = document.getElementById('resetSignInRecentUsernames');
     this.backButton = document.getElementById('closeSignInModal');
     this.actionSheetOverlay = document.getElementById('signInActionSheetOverlay');
     this.actionSheetTitle = document.getElementById('signInActionSheetTitle');
@@ -3614,7 +3721,10 @@ class SignInModal {
     this.actionRecreateButton = document.getElementById('signInActionRecreate');
     this.actionRemoveButton = document.getElementById('signInActionRemove');
     this.closeActionSheetButton = document.getElementById('closeSignInActionSheet');
-    assert(this.modal && this.accountList && this.actionSheetOverlay, 'SignInModal DOM is incomplete');
+    assert(
+      this.modal && this.accountList && this.resetRecentUsernamesButton && this.actionSheetOverlay,
+      'SignInModal DOM is incomplete'
+    );
 
     this.accountList.addEventListener('click', (event) => {
       const item = event.target.closest('.sign-in-account-item');
@@ -3628,6 +3738,7 @@ class SignInModal {
       if (event.target === this.actionSheetOverlay) this.closeActionSheet();
     });
     this.closeActionSheetButton.addEventListener('click', () => this.closeActionSheet());
+    this.resetRecentUsernamesButton.addEventListener('click', () => this.handleResetRecentSignInUsernames());
 
     const enableActionButtons = () => {
       this.actionRecreateButton.disabled = false;
@@ -3712,46 +3823,212 @@ class SignInModal {
   }
 
   /**
+   * Split current usernames into the same account groups shown in the sign-in list.
+   * @param {string[]} usernames Current network usernames in registry order.
+   * @param {string} netid Active network id.
+   * @returns {{ usernameGroups: { public: string[], private: string[] }, isPrivateMap: Object }}
+   */
+  getSignInUsernameGroups(usernames, netid) {
+    const usernameGroups = { public: [], private: [] };
+    const isPrivateMap = Object.create(null);
+
+    for (const username of usernames) {
+      const localState = loadState(`${username}_${netid}`);
+      const isPrivate = localState?.account?.private === true;
+      const usernameType = isPrivate ? 'private' : 'public';
+      isPrivateMap[username] = isPrivate;
+      usernameGroups[usernameType].push(username);
+    }
+
+    return { usernameGroups, isPrivateMap };
+  }
+
+  /**
+   * Normalize stored sign-in usernames against the supplied valid username set.
+   * @param {string[]} storedUsernames Stored username values.
+   * @param {Set<string>} availableUsernameSet Usernames that should remain in the order.
+   * @returns {string[]} Clean username list.
+   */
+  normalizeSignInUsernameList(storedUsernames, availableUsernameSet) {
+    if (!Array.isArray(storedUsernames)) {
+      return [];
+    }
+
+    const normalizedUsernames = [];
+    const seen = new Set();
+    for (const username of storedUsernames) {
+      if (typeof username !== 'string' || !username) continue;
+      if (seen.has(username) || !availableUsernameSet.has(username)) continue;
+      seen.add(username);
+      normalizedUsernames.push(username);
+    }
+
+    return normalizedUsernames;
+  }
+
+  /**
+   * Build one visible sign-in group from saved order plus current registry order.
+   * @param {string[]} usernames Current group usernames in registry order.
+   * @param {string[]} storedUsernames Stored order for the same group.
+   * @returns {string[]} Usernames ordered by sign-in preference.
+   */
+  getOrderedSignInUsernames(usernames, storedUsernames) {
+    const availableUsernameSet = new Set(usernames);
+    const orderedUsernames = this.normalizeSignInUsernameList(storedUsernames, availableUsernameSet);
+    const orderedUsernameSet = new Set(orderedUsernames);
+
+    return [
+      ...usernames.filter((username) => !orderedUsernameSet.has(username)),
+      ...orderedUsernames,
+    ];
+  }
+
+  /**
+   * Get public and private sign-in ordering for the active network.
+   * @param {{ public: string[], private: string[] }} usernameGroups Current usernames split by type.
+   * @param {Object} netidAccounts Current network account registry.
+   * @returns {{ public: string[], private: string[] }} Ordered usernames split by type.
+   */
+  getSignInUsernameOrder(usernameGroups, netidAccounts) {
+    const storedOrder = netidAccounts[SIGN_IN_USERNAME_ORDER_KEY] || {};
+
+    return {
+      public: this.getOrderedSignInUsernames(usernameGroups.public, storedOrder.public),
+      private: this.getOrderedSignInUsernames(usernameGroups.private, storedOrder.private),
+    };
+  }
+
+  /**
+   * Move the selected username halfway closer to the front, matching emoji picker promotion.
+   * @param {string[]} signInUsernames Current sign-in username order.
+   * @param {string} selectedUsername Username selected for sign-in.
+   * @returns {string[]} Updated sign-in username order.
+   */
+  promoteSignInUsername(signInUsernames, selectedUsername) {
+    const currentIndex = signInUsernames.indexOf(selectedUsername);
+    assert(currentIndex !== -1, `Sign-in order missing ${selectedUsername}`);
+
+    const promotionDistance = Math.max(
+      1,
+      Math.ceil((currentIndex + 1) * SIGN_IN_USERNAME_PROMOTION_RATIO)
+    );
+    const targetIndex = Math.max(0, currentIndex - promotionDistance);
+    const promotedUsernames = signInUsernames.filter((username) => username !== selectedUsername);
+
+    promotedUsernames.splice(targetIndex, 0, selectedUsername);
+    return promotedUsernames;
+  }
+
+  /**
+   * Persist a valid sign-in selection to the active network's username order.
+   * @param {string} username Username selected for sign-in.
+   * @returns {void}
+   */
+  recordRecentSignInUsername(username) {
+    try {
+      const { netid } = network;
+      const accounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+      const netidAccounts = accounts.netids[netid];
+      if (!netidAccounts?.usernames?.[username]) {
+        return;
+      }
+
+      const usernames = Object.keys(netidAccounts.usernames);
+      const { usernameGroups } = this.getSignInUsernameGroups(usernames, netid);
+      const usernameOrder = this.getSignInUsernameOrder(usernameGroups, netidAccounts);
+      const usernameType = usernameGroups.private.includes(username) ? 'private' : 'public';
+      usernameOrder[usernameType] = this.promoteSignInUsername(usernameOrder[usernameType], username);
+
+      netidAccounts[SIGN_IN_USERNAME_ORDER_KEY] = usernameOrder;
+      localStorage.setItem('accounts', stringify(accounts));
+    } catch (error) {
+      console.warn('Failed to update sign-in order:', error);
+    }
+  }
+
+  /**
+   * Check whether the active network has a custom sign-in username order.
+   * @returns {boolean} True when sign-in order is stored.
+   */
+  hasRecentSignInUsernameOverrides() {
+    const { netidAccounts } = this.getSignInUsernames();
+    return Object.prototype.hasOwnProperty.call(netidAccounts, SIGN_IN_USERNAME_ORDER_KEY);
+  }
+
+  /**
+   * Update reset button visibility from the active network account registry.
+   * @returns {void}
+   */
+  updateRecentSignInResetButtonVisibility() {
+    this.resetRecentUsernamesButton.hidden = !this.hasRecentSignInUsernameOverrides();
+  }
+
+  /**
+   * Reset the active network sign-in username order back to registry order.
+   * @returns {void}
+   */
+  handleResetRecentSignInUsernames() {
+    const { netid } = network;
+    const accounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    const netidAccounts = accounts.netids[netid];
+    assert(netidAccounts, 'Active network account registry is missing');
+
+    if (!this.hasRecentSignInUsernameOverrides()) {
+      return;
+    }
+
+    const confirmed = confirm('Reset sign-in account order?');
+    if (!confirmed) {
+      return;
+    }
+
+    delete netidAccounts[SIGN_IN_USERNAME_ORDER_KEY];
+    localStorage.setItem('accounts', stringify(accounts));
+    this.renderAccountList();
+    showToast('Sign-in order reset', 2000, 'success');
+  }
+
+  /**
    * Render the account list with notification indicators and sort by notification status.
    * @returns {string[]} Usernames for the current network (registry order, not display order)
    */
   renderAccountList() {
     const { usernames, netidAccounts } = this.getSignInUsernames();
     const { netid } = network;
+    const { usernameGroups, isPrivateMap } = this.getSignInUsernameGroups(usernames, netid);
+    const usernameOrder = this.getSignInUsernameOrder(usernameGroups, netidAccounts);
     const notifiedAddresses = reactNativeApp.isReactNativeWebView ? reactNativeApp.getNotificationAddresses() : [];
+    const normalizedNotifiedSet = new Set();
+    for (const address of notifiedAddresses) {
+      try {
+        normalizedNotifiedSet.add(normalizeAddress(address));
+      } catch (error) {
+        console.warn('Skipping invalid notification address:', error);
+      }
+    }
     const notifiedUsernameSet = new Set();
-    let sortedUsernames = usernames;
+    const notifiedTop = [];
+    const publicRemaining = [];
+    const privateRemaining = [];
 
-    // If there are notified addresses, partition usernames (stable) so notified come first.
-    if (notifiedAddresses.length > 0) {
-      const normalizedNotifiedSet = new Set(notifiedAddresses.map((addr) => normalizeAddress(addr)));
-      const notifiedUsernames = [];
-      const otherUsernames = [];
-      for (const username of usernames) {
-        const address = netidAccounts.usernames[username].address;
-        if (normalizedNotifiedSet.has(normalizeAddress(address))) {
-          notifiedUsernames.push(username);
-          notifiedUsernameSet.add(username);
-        } else {
-          otherUsernames.push(username);
+    const placeUsername = (username, remainingUsernames) => {
+      if (normalizedNotifiedSet.size > 0) {
+        const address = netidAccounts.usernames[username]?.address;
+        try {
+          if (address && normalizedNotifiedSet.has(normalizeAddress(address))) {
+            notifiedTop.push(username);
+            notifiedUsernameSet.add(username);
+            return;
+          }
+        } catch (error) {
+          console.warn(`Skipping invalid sign-in account address for ${username}:`, error);
         }
       }
-      sortedUsernames = [...notifiedUsernames, ...otherUsernames];
-    }
+      remainingUsernames.push(username);
+    };
 
-    // Build a map of privacy flags to avoid multiple loadState calls.
-    const isPrivateMap = Object.create(null);
-    for (const username of sortedUsernames) {
-      const localState = loadState(`${username}_${netid}`);
-      isPrivateMap[username] = localState?.account?.private === true;
-    }
-
-    // Keep notified accounts (any privacy) at the top, then public accounts,
-    // then remaining private accounts grouped under a section label.
-    const notifiedTop = sortedUsernames.filter((username) => notifiedUsernameSet.has(username));
-    const remaining = sortedUsernames.filter((username) => !notifiedUsernameSet.has(username));
-    const publicRemaining = remaining.filter((username) => !isPrivateMap[username]);
-    const privateRemaining = remaining.filter((username) => isPrivateMap[username]);
+    usernameOrder.public.forEach((username) => placeUsername(username, publicRemaining));
+    usernameOrder.private.forEach((username) => placeUsername(username, privateRemaining));
 
     const renderListItem = (username) => {
       const isPrivateAccount = isPrivateMap[username];
@@ -3779,6 +4056,7 @@ class SignInModal {
       sections.push(...privateRemaining.map(renderListItem));
     }
     this.accountList.innerHTML = sections.join('');
+    this.updateRecentSignInResetButtonVisibility();
 
     return usernames;
   }
@@ -3814,9 +4092,6 @@ class SignInModal {
         await this.handleAccountClick(usernames[0]);
         return;
       }
-
-      // Focus last item so shift+tab and tab prevention works.
-      setTimeout(() => this.signInModalLastItem.focus(), 325);
     });
   }
 
@@ -3846,6 +4121,7 @@ class SignInModal {
     assert(myData, `Account data missing for ${username}`);
     myAccount = myData.account;
     logsModal.log(`SignIn as ${username}_${netid}`)
+    this.recordRecentSignInUsername(username);
 
     // One-time migration: convert legacy friend status to connection
     if (migrateFriendStatusToConnection(myData)) {
@@ -10062,6 +10338,18 @@ class RemoveAccountModal {
     this.modal.classList.remove('active');
   }
 
+  removeSignInUsernameOrder(netidAccounts, username) {
+    const usernameOrder = netidAccounts[SIGN_IN_USERNAME_ORDER_KEY];
+    if (!usernameOrder) return;
+
+    usernameOrder.public = usernameOrder.public.filter((storedUsername) => storedUsername !== username);
+    usernameOrder.private = usernameOrder.private.filter((storedUsername) => storedUsername !== username);
+
+    if (usernameOrder.public.length === 0 && usernameOrder.private.length === 0) {
+      delete netidAccounts[SIGN_IN_USERNAME_ORDER_KEY];
+    }
+  }
+
   submit(username = myAccount.username) {
     // called when the form is submitted
     // Get network ID from network.js
@@ -10071,8 +10359,10 @@ class RemoveAccountModal {
     const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
 
     // Remove the account from the accounts object
-    if (existingAccounts.netids[netid] && existingAccounts.netids[netid].usernames) {
-      delete existingAccounts.netids[netid].usernames[username];
+    const netidAccounts = existingAccounts.netids[netid];
+    if (netidAccounts && netidAccounts.usernames) {
+      delete netidAccounts.usernames[username];
+      this.removeSignInUsernameOrder(netidAccounts, username);
       localStorage.setItem('accounts', stringify(existingAccounts));
     }
     // Remove the account data from localStorage
@@ -10103,8 +10393,10 @@ class RemoveAccountModal {
     const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
 
     // Remove the account from the accounts object
-    if (existingAccounts.netids[netid] && existingAccounts.netids[netid].usernames) {
-      delete existingAccounts.netids[netid].usernames[username];
+    const netidAccounts = existingAccounts.netids[netid];
+    if (netidAccounts && netidAccounts.usernames) {
+      delete netidAccounts.usernames[username];
+      this.removeSignInUsernameOrder(netidAccounts, username);
       localStorage.setItem('accounts', stringify(existingAccounts));
     }
     // Remove the account data from localStorage
@@ -10347,6 +10639,7 @@ class RemoveAccountsModal {
       // remove from registry if present
       if (accountsObj.netids[netid] && accountsObj.netids[netid].usernames && accountsObj.netids[netid].usernames[username]) {
         delete accountsObj.netids[netid].usernames[username];
+        removeAccountModal.removeSignInUsernameOrder(accountsObj.netids[netid], username);
       }
     });
     localStorage.setItem('accounts', stringify(accountsObj));
