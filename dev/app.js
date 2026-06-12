@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'v'
+const version = 'w'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -9839,6 +9839,9 @@ function showToast(message, duration = 2000, type = 'default', isHTML = false, o
   
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
+  if (options?.className) {
+    toast.classList.add(...String(options.className).split(/\s+/).filter(Boolean));
+  }
   
   if (isHTML) {
     toast.innerHTML = message;
@@ -16599,9 +16602,10 @@ class ChatModal {
   /**
    * Stores and displays a pending location before it is sent.
    * @param {GeolocationPosition} position
+   * @param {string} [retryTxId]
    * @returns {void}
    */
-  showPendingLocation(position) {
+  showPendingLocation(position, retryTxId = '') {
     const latitude = Number(position?.coords?.latitude);
     const longitude = Number(position?.coords?.longitude);
     const accuracy = Number(position?.coords?.accuracy);
@@ -16615,7 +16619,9 @@ class ChatModal {
     this.pendingLocation = {
       latitude,
       longitude,
-      accuracy: Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null
+      accuracy: Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null,
+      retryTxId,
+      retryAddress: retryTxId ? this.address : null
     };
     this.renderLocationSharePanel();
   }
@@ -16660,7 +16666,18 @@ class ChatModal {
    * @returns {void}
    */
   clearPendingLocation() {
+    const retryTxId = this.pendingLocation?.retryTxId || '';
+    const retryAddress = this.pendingLocation?.retryAddress || this.address;
     this.pendingLocation = null;
+    if (retryTxId) {
+      if (this.retryOfTxId?.value === retryTxId) {
+        this.retryOfTxId.value = '';
+      }
+      const contact = retryAddress ? myData.contacts[retryAddress] : null;
+      if (contact?.draftRetryTxid === retryTxId) {
+        this.clearRetryState(contact);
+      }
+    }
     if (this.locationSharePanel) {
       this.locationSharePanel.style.display = 'none';
       this.locationSharePanel.style.left = '';
@@ -16691,7 +16708,7 @@ class ChatModal {
 
   /**
    * Sends a standalone encrypted location chat message.
-   * @param {{latitude: number, longitude: number, accuracy: number|null}} location
+   * @param {{latitude: number, longitude: number, accuracy: number|null, retryTxId?: string}} location
    * @returns {Promise<void>}
    */
   async sendLocationMessage(location) {
@@ -16722,6 +16739,7 @@ class ChatModal {
       showToast('You cannot send a location to yourself.', 3000, 'error');
       return;
     }
+    const retryTxId = location.retryTxId || this.retryOfTxId?.value || '';
 
     const keys = myAccount.keys;
     if (!keys) {
@@ -16774,10 +16792,15 @@ class ChatModal {
       );
       txid = builtTxid;
 
-      const retryTxId = this.retryOfTxId.value;
+      const contact = myData.contacts[currentAddress];
       if (retryTxId) {
         removeFailedTx(retryTxId, currentAddress);
-        this.retryOfTxId.value = '';
+        if (this.retryOfTxId?.value === retryTxId) {
+          this.retryOfTxId.value = '';
+        }
+        if (contact?.draftRetryTxid === retryTxId) {
+          this.clearRetryState(contact);
+        }
       }
 
       const newMessage = {
@@ -16793,7 +16816,6 @@ class ChatModal {
         status: 'sent'
       };
 
-      const contact = myData.contacts[currentAddress];
       insertSorted(contact.messages, newMessage, 'timestamp');
 
       const chatIndex = myData.chats.findIndex((chat) => chat.address === currentAddress);
@@ -24469,10 +24491,14 @@ class FailedMessageMenu {
   handleMenuAction(e) {
     const option = e.target.closest('.context-menu-option');
     if (!option || !this.currentMessageEl) return;
+
+    e.preventDefault();
+    e.stopPropagation();
     
     const action = option.dataset.action;
     const messageEl = this.currentMessageEl;
     this.hide();
+    chatModal.clearPendingLocation();
 
     switch (action) {
       case 'retry':
@@ -24560,7 +24586,7 @@ class FailedMessageMenu {
           longitude,
           accuracy: Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null
         }
-      });
+      }, txid);
       return;
     }
 
@@ -24820,7 +24846,13 @@ class VoiceRecordingModal {
       
     } catch (error) {
       console.error('Error starting voice recording:', error);
-      showToast('Could not access microphone. Please check permissions.', 0, 'error');
+      showToast(
+        'Microphone permission was denied. Enable microphone access in your browser or device settings, then try again.',
+        0,
+        'warning',
+        false,
+        { className: 'toast-left-aligned' }
+      );
     }
   }
 
