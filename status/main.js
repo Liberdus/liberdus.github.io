@@ -15,9 +15,6 @@ let CURRENT_NETWORK =
 
 const INTERVAL_OPTIONS = [
   { value: "5m", label: "5 minutes" },
-  { value: "10m", label: "10 minutes" },
-  { value: "20m", label: "20 minutes" },
-  { value: "30m", label: "30 minutes" },
   { value: "1h", label: "1 hour" },
   { value: "1d", label: "1 day" },
 ];
