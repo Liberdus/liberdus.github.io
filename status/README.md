@@ -79,21 +79,3 @@ The dashboard should load and start showing the current status and uptime histor
 When the backend includes a Discord bot service, such as `discord-status-bot`,
 the dashboard groups it under “Discord Bot” and displays whether it is
 `Active` or `Down`.
-
-## Local outage demo
-
-For local demos, run the static UI and mock backend in separate terminals:
-
-```bash
-python3 -m http.server 4177
-node mock-status-backend.mjs
-```
-
-Then open:
-
-```text
-http://localhost:4177/local-demo.html
-```
-
-The demo page includes controls for all-up, Discord-down, site-down, and
-backend-fetch-failed states without changing the production backend.
