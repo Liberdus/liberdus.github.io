@@ -18,7 +18,7 @@ The frontend calls a small backend service that exposes:
 
 By default, the frontend expects the backend at:
 
-- `http://localhost:7070`
+- `https://status.liberdus.com`
 
 You can change this in two ways.
 
@@ -35,15 +35,23 @@ Before loading `main.js`, set `window.LIBERDUS_STATUS_API` in `index.html`:
 
 If `window.LIBERDUS_STATUS_API` is set to a string, the frontend uses it as the base URL for all API calls.
 
-### Option 2: Use the default localhost URL
+### Option 2: Use the default status URL
 
 If you do **not** set `window.LIBERDUS_STATUS_API`, the frontend uses:
 
 ```js
-http://localhost:7070
+https://status.liberdus.com
 ```
 
-Make sure your backend is listening on that host and port.
+Make sure your backend is reachable at that origin.
+
+If the summary request fails, the dashboard shows:
+
+```text
+Status fetch failed. Please check again later.
+```
+
+No mock service data is shown when the backend is unavailable.
 
 ## Choosing the network (Devnet vs Testnet)
 
@@ -60,11 +68,14 @@ You do not need to edit the code to switch networks; just use the dropdown.
 
 For simple usage:
 
-1. Ensure the backend is running and reachable (for example at `http://localhost:7070` or your configured URL).
+1. Ensure the backend is running and reachable (for example at `https://status.liberdus.com` or your configured URL).
 2. Open `index.html` in a browser (double-click it or serve it with a static web server).
 3. If you changed the backend URL, confirm:
    - Either `window.LIBERDUS_STATUS_API` is set correctly in `index.html`, **or**
-   - The backend is running at `http://localhost:7070`.
+   - The backend is reachable at `https://status.liberdus.com`.
 
 The dashboard should load and start showing the current status and uptime history from the configured backend.
 
+When the backend includes a Discord bot service, such as `discord-status-bot`,
+the dashboard groups it under “Discord Bot” and displays whether it is
+`Active` or `Down`.
