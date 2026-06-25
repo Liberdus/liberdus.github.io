@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -802,6 +802,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Settings Modal
   settingsModal.load();
+
+  // Chat Settings Modal
+  chatSettingsModal.load();
 
   // Manage Contacts Modal
   manageContactsModal.load();
@@ -1760,6 +1763,8 @@ class ChatsScreen {
         previewHTML = `<span><i>Voice message</i></span>`;
       } else if (latestActivity.type === 'location') {
         previewHTML = `<span><i>Shared location</i></span>`;
+      } else if (latestActivity.type === 'update_toll_required') {
+        previewHTML = truncateMessage(escapeHtml(getUpdateTollRequiredPreviewText(latestActivity, contact)), 50);
       } else if ((!latestActivity.message || String(latestActivity.message).trim() === '') && latestActivity.xattach) {
         previewHTML = `<span><i>Attachment</i></span>`;
       } else if (latestActivity.xattach && latestActivity.message && String(latestActivity.message).trim() !== '') {
@@ -3058,6 +3063,9 @@ class SettingsModal {
     this.contactsButton = document.getElementById('openManageContactsModal');
     this.contactsButton.addEventListener('click', () => manageContactsModal.open());
     
+    this.chatSettingsButton = document.getElementById('openChatSettingsModal');
+    this.chatSettingsButton.addEventListener('click', () => chatSettingsModal.open());
+
     this.profileButton = document.getElementById('openAccountForm');
     this.profileButton.addEventListener('click', () => myProfileModal.open());
     
@@ -3111,6 +3119,128 @@ class SettingsModal {
 }
 
 const settingsModal = new SettingsModal();
+
+class ChatSettingsModal {
+  constructor() {
+    this.storageKey = 'chat_font_size_px';
+    this.defaultFontSizePx = 16;
+    this.minFontSizePx = 12;
+    this.maxFontSizePx = 30;
+    this.savedFontSizePx = this.defaultFontSizePx;
+    this.draftFontSizePx = this.defaultFontSizePx;
+    this.warningShown = false;
+  }
+
+  load() {
+    this.modal = document.getElementById('chatSettingsModal');
+    this.closeButton = document.getElementById('closeChatSettingsModal');
+    this.preview = document.getElementById('chatSettingsFontPreview');
+    this.fontSizeSlider = document.getElementById('chatSettingsFontSizeSlider');
+    this.saveButton = document.getElementById('saveChatSettingsButton');
+
+    this.closeButton.addEventListener('click', () => this.handleClose());
+    this.fontSizeSlider.addEventListener('input', () => this.handleSliderInput());
+    this.saveButton.addEventListener('click', () => this.save());
+
+    this.savedFontSizePx = this.readSavedFontSize();
+    this.draftFontSizePx = this.savedFontSizePx;
+    this.setSliderValue(this.savedFontSizePx);
+    this.updatePreview();
+    this.applyChatFontSize();
+  }
+
+  open() {
+    this.draftFontSizePx = this.savedFontSizePx;
+    this.warningShown = false;
+    this.setSliderValue(this.draftFontSizePx);
+    this.updatePreview();
+    this.modal.classList.add('active');
+  }
+
+  handleSliderInput() {
+    this.draftFontSizePx = this.clampFontSize(Number(this.fontSizeSlider.value));
+    this.syncSliderPosition(this.draftFontSizePx);
+    this.warningShown = false;
+    this.updatePreview();
+  }
+
+  save() {
+    this.savedFontSizePx = this.draftFontSizePx;
+    localStorage.setItem(this.storageKey, String(this.savedFontSizePx));
+    this.applyChatFontSize();
+    this.warningShown = false;
+    this.close();
+  }
+
+  updatePreview() {
+    this.preview.style.setProperty('--chat-settings-preview-message-font-size', this.draftFontSizePx + 'px');
+    this.preview.style.setProperty('--chat-settings-preview-message-meta-font-size', this.metaFontSizePx(this.draftFontSizePx) + 'px');
+  }
+
+  setSliderValue(value) {
+    this.fontSizeSlider.value = String(value);
+    this.syncSliderPosition(value);
+  }
+
+  syncSliderPosition(value) {
+    const range = this.maxFontSizePx - this.minFontSizePx;
+    const position = range === 0 ? 0 : ((value - this.minFontSizePx) / range) * 100;
+    this.fontSizeSlider.style.setProperty('--chat-settings-slider-position', position + '%');
+  }
+
+  applyChatFontSize() {
+    document.documentElement.style.setProperty('--chat-message-font-size', this.savedFontSizePx + 'px');
+    document.documentElement.style.setProperty('--chat-message-detail-font-size', this.detailFontSizePx(this.savedFontSizePx) + 'px');
+    document.documentElement.style.setProperty('--chat-message-meta-font-size', this.metaFontSizePx(this.savedFontSizePx) + 'px');
+  }
+
+  readSavedFontSize() {
+    const storedValue = localStorage.getItem(this.storageKey);
+    if (storedValue === null) return this.defaultFontSizePx;
+    return this.clampFontSize(Number(storedValue));
+  }
+
+  clampFontSize(value) {
+    if (!Number.isFinite(value)) return this.defaultFontSizePx;
+    return Math.min(this.maxFontSizePx, Math.max(this.minFontSizePx, Math.round(value)));
+  }
+
+  detailFontSizePx(value) {
+    return Math.round(value * 0.875);
+  }
+
+  metaFontSizePx(value) {
+    return Math.round(value * 0.75);
+  }
+
+  hasUnsavedChanges() {
+    return this.draftFontSizePx !== this.savedFontSizePx;
+  }
+
+  handleClose() {
+    if (this.hasUnsavedChanges() && !this.warningShown) {
+      this.warningShown = true;
+      showToast('Press back again to discard changes.', 5000, 'warning');
+      return;
+    }
+
+    this.close();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    this.draftFontSizePx = this.savedFontSizePx;
+    this.warningShown = false;
+    this.setSliderValue(this.savedFontSizePx);
+    this.updatePreview();
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+}
+
+const chatSettingsModal = new ChatSettingsModal();
 
 /**
  * Manage Contacts Modal
@@ -4871,7 +5001,7 @@ class FriendModal {
     this.warningShown = false;
   }
 
-  async postUpdateTollRequired(address, friend) {
+  async postUpdateTollRequired(address, friend, previousFriendStatus) {
     const feeBalanceStatus = await getFeeBalanceStatus();
     if (!feeBalanceStatus.success) {
       showFeeBalanceFailureToast(feeBalanceStatus.reason);
@@ -4881,6 +5011,7 @@ class FriendModal {
     // 0 = blocked, 1 = Other, 2 = Connection
     // required = 1 if toll required, 0 if not and 2 to block other party
     const requiredNum = friend === 2 ? 0 : friend === 1 ? 1 : friend === 0 ? 2 : 1;
+    const previousRequiredNum = previousFriendStatus === 2 ? 0 : previousFriendStatus === 1 ? 1 : previousFriendStatus === 0 ? 2 : 1;
     const fromAddr = longAddress(myAccount.keys.address);
     const toAddr = longAddress(address);
     const chatId_ = hashBytes([fromAddr, toAddr].sort().join(''));
@@ -4890,6 +5021,7 @@ class FriendModal {
       to: toAddr,
       chatId: chatId_,
       required: requiredNum,
+      previousRequired: previousRequiredNum,
       type: 'update_toll_required',
       timestamp: getTransactionTimestamp(),
       networkId: network.netid,
@@ -4930,7 +5062,7 @@ class FriendModal {
     } else {
       try {
         // send transaction to update chat toll
-        const res = await this.postUpdateTollRequired(this.currentContactAddress, Number(selectedStatus));
+        const res = await this.postUpdateTollRequired(this.currentContactAddress, Number(selectedStatus), prevFriendStatus);
         if (res?.result?.success !== true) {
           console.log(
             `[handleFriendSubmit] update_toll_required transaction failed: ${res?.result?.reason}. Did not update contact status.`
@@ -6642,6 +6774,10 @@ function getReactionTargetPreviewText(message) {
     return getDeletedPlaceholderText(message);
   }
 
+  if (message.type === 'update_toll_required') {
+    return 'status change';
+  }
+
   if (message.type === 'call') {
     return 'call';
   }
@@ -6668,6 +6804,143 @@ function getReactionTargetPreviewText(message) {
   }
 
   return '[message]';
+}
+
+function isValidRequiredValue(required) {
+  if (required === null || typeof required === 'undefined') {
+    return false;
+  }
+  if (typeof required === 'string' && required.trim() === '') {
+    return false;
+  }
+  const requiredNum = Number(required);
+  return Number.isInteger(requiredNum) && [0, 1, 2].includes(requiredNum);
+}
+
+function requiredToFriendStatus(required) {
+  const requiredNum = Number(required);
+  return requiredNum === 0 ? 2 : requiredNum === 2 ? 0 : 1;
+}
+
+function getRequiredStatusLabel(required) {
+  const requiredNum = Number(required);
+  if (requiredNum === 0) return 'Connection';
+  if (requiredNum === 2) return 'Blocked';
+  return 'Tolled';
+}
+
+function getUpdateTollRequiredPreviewText(item, contact) {
+  const statusLabel = getRequiredStatusLabel(item.required);
+  const contactName = getContactDisplayName(contact);
+  return item.my
+    ? `You changed ${contactName}'s status to ${statusLabel}`
+    : `${contactName} changed your status to ${statusLabel}`;
+}
+
+function buildUpdateTollRequiredHistoryItem(tx, txid, currentUserAddress) {
+  const required = Number(tx.required);
+  const item = {
+    type: 'update_toll_required',
+    txid,
+    timestamp: Number(tx.timestamp) || 0,
+    my: normalizeAddress(tx.from) === currentUserAddress,
+    from: normalizeAddress(tx.from),
+    to: normalizeAddress(tx.to),
+    required
+  };
+
+  if (isValidRequiredValue(tx.previousRequired)) {
+    item.previousRequired = Number(tx.previousRequired);
+  }
+
+  return item;
+}
+
+function isNewerUpdateTollRequiredHistoryItem(candidate, current) {
+  if (!current) return true;
+  if (candidate.timestamp !== current.timestamp) {
+    return candidate.timestamp > current.timestamp;
+  }
+  return candidate.txid > current.txid;
+}
+
+function applyUpdateTollRequiredState(contact, historyItem, options = {}) {
+  if (historyItem.my) {
+    const { preservePendingFriend = false } = options;
+    contact.tollRequiredToReceive = historyItem.required;
+    if (preservePendingFriend && contact.friend !== contact.friendOld) {
+      return;
+    }
+    const friendStatus = requiredToFriendStatus(historyItem.required);
+    contact.friend = friendStatus;
+    contact.friendOld = friendStatus;
+    return;
+  }
+
+  contact.tollRequiredToSend = historyItem.required;
+}
+
+function insertUpdateTollRequiredHistoryItem(contact, historyItem) {
+  contact.messages ??= [];
+
+  if (contact.messages.some((message) => message.txid === historyItem.txid)) {
+    return false;
+  }
+
+  insertSorted(contact.messages, historyItem, 'timestamp');
+  return true;
+}
+
+function syncPendingUpdateTollRequiredSuccess(pendingTxInfo, receiptTx) {
+  const receiptHasStatusTx = receiptTx?.type === 'update_toll_required'
+    && isValidRequiredValue(receiptTx.required)
+    && receiptTx.from
+    && receiptTx.to;
+  const tx = receiptHasStatusTx
+    ? receiptTx
+    : pendingTxInfo.updateTollRequiredTx;
+
+  if (!tx || !isValidRequiredValue(tx.required)) {
+    const contact = myData.contacts?.[pendingTxInfo.to];
+    if (contact) {
+      contact.friendOld = contact.friend;
+    }
+    return;
+  }
+
+  const currentUserAddress = normalizeAddress(myAccount.keys.address);
+  const txFrom = normalizeAddress(tx.from);
+  const txTo = normalizeAddress(tx.to);
+  const contactAddress = txFrom === currentUserAddress ? txTo : txFrom;
+
+  if (!contactAddress || contactAddress === currentUserAddress) {
+    return;
+  }
+
+  if (!myData.contacts[contactAddress]) {
+    createNewContact(contactAddress, undefined, 1, false);
+  }
+
+  const contact = myData.contacts[contactAddress];
+  contact.messages ??= [];
+
+  const statusHistoryItem = buildUpdateTollRequiredHistoryItem(tx, pendingTxInfo.txid, currentUserAddress);
+  const didInsertStatusHistory = insertUpdateTollRequiredHistoryItem(contact, statusHistoryItem);
+  applyUpdateTollRequiredState(contact, statusHistoryItem);
+
+  if (didInsertStatusHistory) {
+    syncChatLatestActivityTimestamp(contactAddress, contact);
+  }
+
+  if (chatModal.isActive() && chatModal.address === contactAddress) {
+    chatModal.blockedByRecipient = Number(contact.tollRequiredToSend) === 2;
+    chatModal.updateTollAmountUI(contactAddress);
+    chatModal.appendChatModal();
+  }
+
+  if (chatsScreen.isActive()) {
+    chatsScreen.updateChatList();
+  }
 }
 
 /**
@@ -6782,6 +7055,8 @@ function hasPendingEditForTarget(contactAddress, targetTxid) {
     pendingTx.editPending.targetTxid === targetTxid
   );
 }
+
+const DELETE_FOR_ALL_ACTION_GUARD_MS = 15000;
 
 /**
  * Restores local state captured before an optimistic message edit.
@@ -7027,6 +7302,10 @@ async function processChats(chats, keys) {
       const pendingReactionControls = [];
       let didApplyPendingReaction = false;
       let didChangeReactionPreview = false;
+      let didApplyStatusChange = false;
+      let needsStatusChatRefresh = false;
+      let myStatusUpdate = null;
+      let contactStatusUpdate = null;
       const touchedReactionTargetTxids = new Set();
 
       // This check determines if we're currently chatting with the sender
@@ -7052,6 +7331,58 @@ async function processChats(chats, keys) {
             useTxTimestamp = true;
           }
         }
+
+        if (tx.type === 'update_toll_required') {
+          if (!isValidRequiredValue(tx.required)) {
+            console.warn('Ignoring update_toll_required with unknown required value', tx);
+            continue;
+          }
+          if (tx.previousRequired !== undefined && !isValidRequiredValue(tx.previousRequired)) {
+            console.warn('Ignoring update_toll_required with unknown previousRequired value', tx);
+            continue;
+          }
+          if (tx.chatId && tx.chatId !== chats[sender]) {
+            console.warn('Ignoring update_toll_required with mismatched chatId', tx);
+            continue;
+          }
+
+          const txFrom = normalizeAddress(tx.from);
+          const txTo = normalizeAddress(tx.to);
+          if (txFrom !== currentUserAddress && txTo !== currentUserAddress) {
+            continue;
+          }
+
+          const statusContactAddress = txFrom === currentUserAddress ? txTo : txFrom;
+          if (!statusContactAddress || statusContactAddress === currentUserAddress) {
+            continue;
+          }
+          if (!myData.contacts[statusContactAddress]) {
+            createNewContact(statusContactAddress, undefined, 1, false);
+          }
+
+          const statusContact = myData.contacts[statusContactAddress];
+          const statusHistoryItem = buildUpdateTollRequiredHistoryItem(tx, txidHex, currentUserAddress);
+          const didInsertStatusHistory = insertUpdateTollRequiredHistoryItem(statusContact, statusHistoryItem);
+          if (didInsertStatusHistory) {
+            if (statusHistoryItem.my && isNewerUpdateTollRequiredHistoryItem(statusHistoryItem, myStatusUpdate)) {
+              myStatusUpdate = statusHistoryItem;
+            } else if (!statusHistoryItem.my && isNewerUpdateTollRequiredHistoryItem(statusHistoryItem, contactStatusUpdate)) {
+              contactStatusUpdate = statusHistoryItem;
+            }
+          }
+
+          if (didInsertStatusHistory) {
+            syncChatLatestActivityTimestamp(statusContactAddress, statusContact);
+            didApplyStatusChange = true;
+          }
+
+          if (chatModal.isActive() && chatModal.address === statusContactAddress) {
+            needsStatusChatRefresh = true;
+          }
+
+          continue;
+        }
+
         if (tx.type == 'message') {
           // Handle messages without xmessage (same as transfer handling)
           // Ensure payload is always an object, even if xmessage is null/undefined
@@ -7630,6 +7961,31 @@ async function processChats(chats, keys) {
         }
       }
 
+      if (myStatusUpdate || contactStatusUpdate) {
+        const previousFriend = contact.friend;
+
+        if (myStatusUpdate) {
+          applyUpdateTollRequiredState(contact, myStatusUpdate, { preservePendingFriend: true });
+        }
+
+        if (contactStatusUpdate) {
+          applyUpdateTollRequiredState(contact, contactStatusUpdate);
+        }
+
+        if (chatModal.isActive() && chatModal.address === from) {
+          chatModal.blockedByRecipient = Number(contact.tollRequiredToSend) === 2;
+          chatModal.updateTollAmountUI(from);
+
+          if (myStatusUpdate && contact.friend !== previousFriend) {
+            friendModal.updateFriendButton(contact, 'addFriendButtonChat');
+          }
+        }
+      }
+
+      if (needsStatusChatRefresh && chatModal.isActive()) {
+        chatModal.appendChatModal();
+      }
+
       if (pendingReactionControls.length > 0) {
         pendingReactionControls.sort((left, right) => {
           return left.timestamp - right.timestamp || left.order - right.order;
@@ -7706,6 +8062,10 @@ async function processChats(chats, keys) {
       }
 
       if (didChangeReactionPreview && chatsScreen.isActive() && !inActiveChatWithSender) {
+        chatsScreen.updateChatList();
+      }
+
+      if (didApplyStatusChange && chatsScreen.isActive()) {
         chatsScreen.updateChatList();
       }
 
@@ -8157,6 +8517,9 @@ async function injectTx(tx, txid) {
         pendingTxData.address = tx.from; // User's address (longAddress form)
       } else if (tx.type === 'update_toll_required' || tx.type === 'reclaim_toll') {
         pendingTxData.to = normalizeAddress(tx.to);
+        if (tx.type === 'update_toll_required') {
+          pendingTxData.updateTollRequiredTx = tx;
+        }
       } else if (tx.type === 'read') {
         pendingTxData.oldContactTimestamp = tx.oldContactTimestamp;
       } else if (tx.type === 'message' || tx.type === 'transfer') {
@@ -9832,6 +10195,9 @@ function showToast(message, duration = 2000, type = 'default', isHTML = false, o
   if (dedupeEnabled) {
     const existingToast = document.querySelector(`[data-deduplicate-key="${deduplicateKey}"]`);
     if (existingToast) {
+      if (typeof options?.onHidden === 'function') {
+        existingToast.addEventListener('toast:hidden', options.onHidden, { once: true });
+      }
       // Toast with this key already exists, don't create another one
       return existingToast.id;
     }
@@ -9841,6 +10207,9 @@ function showToast(message, duration = 2000, type = 'default', isHTML = false, o
   toast.className = `toast ${type}`;
   if (options?.className) {
     toast.classList.add(...String(options.className).split(/\s+/).filter(Boolean));
+  }
+  if (typeof options?.onHidden === 'function') {
+    toast.addEventListener('toast:hidden', options.onHidden, { once: true });
   }
   
   if (isHTML) {
@@ -9904,6 +10273,7 @@ function hideToast(toastId) {
     const toastContainer = document.getElementById('toastContainer');
     if (toast.parentNode === toastContainer) {
       toastContainer.removeChild(toast);
+      toast.dispatchEvent(new Event('toast:hidden'));
     }
   }, 300); // Match transition duration
 }
@@ -10616,14 +10986,12 @@ class RemoveAccountsModal {
       let state = null;
       try {
         state = loadState(storageKey);
-        
-        // If loadState returned null, it could be decryption failure
-        if (!state) {
-          console.warn('Failed to load orphaned account', storageKey, '- likely decryption failure');
-        }
       } catch (e) {
         console.warn('Error loading orphaned account', storageKey, e);
-        result.push({ username, netid, contactsCount: -1, messagesCount: -1, orphan: true });
+        continue;
+      }
+
+      if (state?.account?.username !== username || state?.account?.netid !== netid) {
         continue;
       }
       
@@ -12114,32 +12482,11 @@ class RestoreAccountModal {
       }
     }
 
-    // Ensure we have local accounts registry
-    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-
-    // Merge accounts registry first
-    const backupAccountsRegistry = parse(backupData.accounts || '{"netids":{}}');
-    Object.keys(backupAccountsRegistry.netids || {}).forEach(netid => {
-      if (!existingAccounts.netids[netid]) existingAccounts.netids[netid] = { usernames: {} };
-      const usernames = backupAccountsRegistry.netids[netid].usernames || {};
-      Object.keys(usernames).forEach(username => {
-        if (overwrite || !existingAccounts.netids[netid].usernames[username]) {
-          existingAccounts.netids[netid].usernames[username] = usernames[username];
-        }
-      });
-    });
-    localStorage.setItem('accounts', stringify(existingAccounts));
-
-
-    // Iterate over keys in backupData and copy account entries
-    let restoredCount = 0;
-    for (const key of Object.keys(backupData)) {
-      const parts = key.split('_');
-      if (parts.length !== 2) continue;
-      const username = parts[0];
-      const netid = parts[1];
-      // basic netid check
-      if (netid.length !== 64 || !/^[a-f0-9]+$/.test(netid)) continue;
+    // Iterate over account payloads and copy account entries.
+    const restoredAccountKeys = new Set();
+    const backupAccountsRegistry = this.parseBackupAccountsRegistry(backupData);
+    const backupAccountEntries = this.getBackupAccountEntries(backupData, backupAccountsRegistry);
+    for (const { key, username, netid, registryAccount } of backupAccountEntries) {
 
       const localKey = `${username}_${netid}`;
       const exists = localStorage.getItem(localKey) !== null;
@@ -12154,7 +12501,7 @@ class RestoreAccountModal {
 
       if (locksMatch) {
         localStorage.setItem(localKey, value);
-        restoredCount++;
+        restoredAccountKeys.add(localKey);
         decryptedAccount = this.tryDecryptWithLocalLock(value);
       } else {
         // Need to decrypt with backupEncKey if available
@@ -12192,11 +12539,13 @@ class RestoreAccountModal {
         }
 
         localStorage.setItem(localKey, finalValue);
-        restoredCount++;
+        restoredAccountKeys.add(localKey);
       }
 
       if (decryptedAccount) {
         this.updateAccountRegistryAddress(netid, username, decryptedAccount);
+      } else if (registryAccount?.address) {
+        this.updateAccountRegistryFromBackup(netid, username, registryAccount);
       }
     }
 
@@ -12218,7 +12567,7 @@ class RestoreAccountModal {
       }
     }
 
-    return restoredCount;
+    return restoredAccountKeys.size;
   }
 
   async handleSubmit(event) {
@@ -12295,16 +12644,31 @@ class RestoreAccountModal {
       if (restoredCount === false) {
         return; // merge failed — keep modal open and do not proceed to reset/close
       }
-      showToast(`${restoredCount} account${restoredCount === 1 ? '' : 's'} restored`, 3000, 'success');
-      
-      // handleNativeAppSubscription()
-
-      // Reset form and close modal after delay
-      setTimeout(() => {
+      clearMyData(); // Prevent stale signed-in state from saving over restored localStorage before refresh.
+      let successToastId;
+      const refreshAfterRestoreToast = () => {
+        document.removeEventListener('click', handleRestoreOutsideClick, true);
         this.close();
-        clearMyData(); // since we already saved to localStore, we want to make sure beforeunload calling saveState does not also save
         window.location.reload(); // need to go through Sign In to make sure imported account exists on network
-      }, 2000);
+      };
+      function handleRestoreOutsideClick(event) {
+        const successToast = document.getElementById(successToastId);
+        if (successToast?.contains(event.target)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        hideToast(successToastId);
+      }
+      successToastId = showToast(
+        `${restoredCount} account${restoredCount === 1 ? '' : 's'} restored`,
+        0,
+        'success',
+        false,
+        { onHidden: refreshAfterRestoreToast }
+      );
+      setTimeout(() => document.addEventListener('click', handleRestoreOutsideClick, true), 0);
+
+      // handleNativeAppSubscription()
     } catch (error) {
       showToast(error.message || 'Import failed. Please check file and password.', 0, 'error');
     }
@@ -12353,6 +12717,71 @@ class RestoreAccountModal {
     cleanup(this.newStringSelect);
   }
 
+  parseBackupAccountsRegistry(backupData) {
+    try {
+      if (!backupData?.accounts) return { netids: {} };
+      const registry = typeof backupData.accounts === 'string'
+        ? parse(backupData.accounts)
+        : backupData.accounts;
+      return registry && typeof registry === 'object' ? registry : { netids: {} };
+    } catch (e) {
+      return { netids: {} };
+    }
+  }
+
+  parseBackupAccountKey(key) {
+    const parts = key.split('_');
+    if (parts.length !== 2) return null;
+
+    const [username, netid] = parts;
+    if (!username || netid.length !== 64 || !/^[a-f0-9]+$/.test(netid)) {
+      return null;
+    }
+
+    return { username, netid };
+  }
+
+  getBackupAccountEntries(backupData, backupAccountsRegistry) {
+    const registryNetids = backupAccountsRegistry?.netids || {};
+    const entries = [];
+    const queuedKeys = new Set();
+
+    Object.keys(registryNetids).forEach(netid => {
+      const usernames = registryNetids[netid]?.usernames || {};
+      Object.keys(usernames).forEach(username => {
+        const key = `${username}_${netid}`;
+        if (!Object.prototype.hasOwnProperty.call(backupData, key)) return;
+        const parsedKey = this.parseBackupAccountKey(key);
+        if (!parsedKey) return;
+
+        queuedKeys.add(key);
+        entries.push({
+          key,
+          username,
+          netid,
+          registryAccount: usernames[username]
+        });
+      });
+    });
+
+    Object.keys(backupData).forEach(key => {
+      if (queuedKeys.has(key)) return;
+
+      const parsedKey = this.parseBackupAccountKey(key);
+      if (!parsedKey) return;
+
+      queuedKeys.add(key);
+      entries.push({
+        key,
+        username: parsedKey.username,
+        netid: parsedKey.netid,
+        registryAccount: registryNetids[parsedKey.netid]?.usernames?.[parsedKey.username]
+      });
+    });
+
+    return entries;
+  }
+
   extractAddress(maybeJson) {
     try {
       const obj = typeof maybeJson === 'string' ? parse(maybeJson) : maybeJson;
@@ -12369,6 +12798,13 @@ class RestoreAccountModal {
     const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
     if (!accountsObj.netids[netid]) accountsObj.netids[netid] = { usernames: {} };
     accountsObj.netids[netid].usernames[username] = { address };
+    localStorage.setItem('accounts', stringify(accountsObj));
+  }
+
+  updateAccountRegistryFromBackup(netid, username, registryAccount) {
+    const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    if (!accountsObj.netids[netid]) accountsObj.netids[netid] = { usernames: {} };
+    accountsObj.netids[netid].usernames[username] = registryAccount;
     localStorage.setItem('accounts', stringify(accountsObj));
   }
 
@@ -14225,6 +14661,21 @@ const LOCATION_GEO_OPTIONS = {
   maximumAge: 0
 };
 const LOCATION_PERMISSION_DENIED_MESSAGE = 'Location permission was denied. Enable location access in your browser or device settings, then try again.';
+/**
+ * Format a voice timer value with tenths-of-a-second precision.
+ * @param {number|string} seconds - Duration or playback position in seconds.
+ * @returns {string} Timer formatted as mm:ss.t.
+ */
+function formatVoiceTimer(seconds) {
+  const duration = Number(seconds);
+  if (!Number.isFinite(duration) || duration <= 0) return '00:00.0';
+
+  const totalTenths = Math.round(duration * 10);
+  const mins = Math.floor(totalTenths / 600);
+  const secs = Math.floor((totalTenths % 600) / 10);
+  const tenths = totalTenths % 10;
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${tenths}`;
+}
 const CHAT_REACTION_SHEET_TAB_ICONS = {
   recent: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v6h6"/><path d="M12 7v5l3 2"/></svg>',
   smileys: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></svg>',
@@ -14292,6 +14743,8 @@ class ChatModal {
     // Drag and drop state
     this.dragCounter = 0;
     this.dropOverlay = null;
+
+    this.recentDeleteForAllTargetTxids = new Set();
 
     this.chatRenderedOldestIndex = CHAT_INITIAL_RENDER_COUNT - 1;
   }
@@ -14787,6 +15240,7 @@ class ChatModal {
     this.locationSharePanel = document.getElementById('locationSharePanel');
     this.locationShareCoordinates = document.getElementById('locationShareCoordinates');
     this.locationShareAccuracy = document.getElementById('locationShareAccuracy');
+    this.locationShareMapLink = document.getElementById('locationShareMapLink');
     this.cancelLocationShareButton = document.getElementById('cancelLocationShareButton');
     this.sendLocationShareButton = document.getElementById('sendLocationShareButton');
     
@@ -14820,10 +15274,10 @@ class ChatModal {
         void this.handleReactionPickerClick(reactionButton);
         return;
       }
-      if (e.target.closest('.context-menu-option')) {
-        const action = e.target.closest('.context-menu-option').dataset.action;
-        this.handleContextMenuAction(action);
-      }
+      const option = e.target.closest('.context-menu-option');
+      if (!option || option.getAttribute('aria-disabled') === 'true') return;
+      const action = option.dataset.action;
+      this.handleContextMenuAction(action);
     });
     // Add image attachment context menu option listeners
     if (this.imageAttachmentContextMenu) {
@@ -14836,7 +15290,7 @@ class ChatModal {
           return;
         }
         const option = e.target.closest('.context-menu-option');
-        if (!option) return;
+        if (!option || option.getAttribute('aria-disabled') === 'true') return;
         const action = option.dataset.action;
         this.handleImageAttachmentContextMenuAction(action);
       });
@@ -14892,8 +15346,8 @@ class ChatModal {
       if (this.headerContextMenu && !this.headerContextMenu.contains(e.target) && this.headerMenuButton && !this.headerMenuButton.contains(e.target)) {
         this.closeHeaderContextMenu();
       }
-      this.handleLocationUiOutsideClick(e);
     });
+    this.locationSharePanel?.addEventListener('click', (e) => this.handleLocationUiOutsideClick(e));
     this.sendButton.addEventListener('click', withButtonCooldown(
       this.sendButton,
       BUTTON_COOLDOWN_MS,
@@ -14955,9 +15409,6 @@ class ChatModal {
 
       if (this.reactionSheetOverlay.classList.contains('active')) {
         requestAnimationFrame(() => this.updateReactionSheetViewport());
-      }
-      if (this.locationSharePanel?.style.display !== 'none') {
-        requestAnimationFrame(() => this.positionLocationSharePanel());
       }
     });
 
@@ -15136,11 +15587,12 @@ class ChatModal {
 
       const newTime = Number(seekEl.value || 0);
 
-      const totalSeconds = Math.floor(Number(seekEl.max) || Number(voiceMessageElement.dataset.duration) || 0);
+      const totalSeconds = this.getPositiveDurationSeconds(seekEl.max) ||
+        this.getPositiveDurationSeconds(voiceMessageElement.dataset.duration);
       // updates the on-screen "current / total" label
       if (timeDisplayElement) {
-        const currentTime = this.formatDuration(newTime);
-        const totalTime = this.formatDuration(totalSeconds);
+        const currentTime = this.formatVoiceProgressTime(newTime, totalSeconds);
+        const totalTime = formatVoiceTimer(totalSeconds);
         timeDisplayElement.textContent = `${currentTime} / ${totalTime}`;
       }
       // ensures playback starts at the chosen position when audio is ready
@@ -15171,8 +15623,10 @@ class ChatModal {
     const timeDisplay = voiceMessageElement.querySelector('.voice-message-time-display');
     if (seekEl) seekEl.value = 0;
     if (timeDisplay && voiceMessageElement.dataset.duration) {
-      const duration = this.formatDuration(Number(voiceMessageElement.dataset.duration) || 0);
-      timeDisplay.textContent = `0:00 / ${duration}`;
+      const totalSeconds = this.getPositiveDurationSeconds(voiceMessageElement.dataset.duration);
+      const currentTime = this.formatVoiceProgressTime(0, totalSeconds);
+      const duration = formatVoiceTimer(totalSeconds);
+      timeDisplay.textContent = `${currentTime} / ${duration}`;
     }
   }
 
@@ -15672,6 +16126,10 @@ class ChatModal {
 
     // Find the last relevant message
     const lastChatMessage = contact.messages.find((message) => {
+      if (message.type === 'update_toll_required') {
+        return false;
+      }
+
       // Skip payment-only messages
       if (message.amount) {
         return false;
@@ -16304,14 +16762,11 @@ class ChatModal {
    * @returns {void}
    */
   handleLocationUiOutsideClick(e) {
-    const target = e.target;
-    if (!(target instanceof Element)) return;
-    if (this.attachmentOptionsContextMenu?.contains(target)) return;
-    if (this.locationSharePanel?.contains(target)) return;
+    if (e.target !== this.locationSharePanel) return;
 
-    if (this.locationSharePanel?.style.display !== 'none') {
-      this.clearPendingLocation();
-    }
+    e.preventDefault();
+    e.stopPropagation();
+    this.clearPendingLocation();
   }
 
   /**
@@ -16320,45 +16775,6 @@ class ChatModal {
    */
   showLocationPermissionDeniedToast() {
     showToast(LOCATION_PERMISSION_DENIED_MESSAGE, 0, 'warning');
-  }
-
-  /**
-   * Positions the staged location popover centered over the chat composer.
-   * @returns {void}
-   */
-  positionLocationSharePanel() {
-    if (!this.locationSharePanel) return;
-
-    const composer = this.modal?.querySelector('.message-input-container');
-    const composerRect = composer?.getBoundingClientRect();
-    const anchorRect = composerRect && composerRect.width > 0
-      ? composerRect
-      : { left: 0, right: window.innerWidth, top: 0, bottom: window.innerHeight, width: window.innerWidth, height: window.innerHeight };
-    const inset = 10;
-    const maxPanelWidth = Math.max(1, anchorRect.width - (inset * 2));
-
-    this.locationSharePanel.style.maxWidth = `${maxPanelWidth}px`;
-    const previousAnimation = this.locationSharePanel.style.animation;
-    this.locationSharePanel.style.animation = 'none';
-    const panelRect = this.locationSharePanel.getBoundingClientRect();
-
-    const minLeft = inset;
-    const maxLeft = window.innerWidth - panelRect.width - inset;
-    const desiredLeft = anchorRect.left + ((anchorRect.width - panelRect.width) / 2);
-    const left = Math.min(Math.max(desiredLeft, minLeft), Math.max(minLeft, maxLeft));
-
-    let top = anchorRect.top - panelRect.height - 8;
-    if (top < inset) {
-      top = anchorRect.bottom + 8;
-    }
-    if (top + panelRect.height > window.innerHeight - inset) {
-      top = window.innerHeight - panelRect.height - inset;
-    }
-    top = Math.max(inset, top);
-
-    this.locationSharePanel.style.left = `${left - anchorRect.left}px`;
-    this.locationSharePanel.style.top = `${top - anchorRect.top}px`;
-    this.locationSharePanel.style.animation = previousAnimation;
   }
 
   /**
@@ -16482,8 +16898,13 @@ class ChatModal {
       this.locationShareAccuracy.textContent = accuracyText;
       this.locationShareAccuracy.style.display = accuracyText ? '' : 'none';
     }
+    if (this.locationShareMapLink) {
+      this.locationShareMapLink.href = this.getLocationMapUrl(
+        this.pendingLocation.latitude,
+        this.pendingLocation.longitude
+      );
+    }
     this.locationSharePanel.style.display = 'flex';
-    this.positionLocationSharePanel();
     this.setLocationPanelBusy(this.locationRequestInProgress);
   }
 
@@ -16506,11 +16927,10 @@ class ChatModal {
     }
     if (this.locationSharePanel) {
       this.locationSharePanel.style.display = 'none';
-      this.locationSharePanel.style.left = '';
-      this.locationSharePanel.style.top = '';
     }
     if (this.locationShareCoordinates) this.locationShareCoordinates.textContent = '';
     if (this.locationShareAccuracy) this.locationShareAccuracy.textContent = '';
+    if (this.locationShareMapLink) this.locationShareMapLink.removeAttribute('href');
     this.setLocationPanelBusy(false);
   }
 
@@ -16917,6 +17337,15 @@ class ChatModal {
     const txidAttribute = item.txid ? `data-txid="${item.txid}"` : '';
     const statusAttribute = item.status ? `data-status="${item.status}"` : '';
 
+    if (item.type === 'update_toll_required') {
+      const statusText = escapeHtml(getUpdateTollRequiredPreviewText(item, contact));
+      return `
+          <div class="update-toll-required-divider" ${timestampAttribute} ${txidAttribute} role="status">
+            <span class="update-toll-required-text">${statusText}</span>
+          </div>
+        `;
+    }
+
     // Check if it's a payment based on the presence of the amount property (BigInt)
     if (typeof item.amount === 'bigint') {
       // Assuming LIB (18 decimals) for now. TODO: Handle different asset decimals if needed.
@@ -17008,10 +17437,10 @@ class ChatModal {
                     ${hasThumbnail ? '<div class="attachment-preview-hint">Click for options</div>' : ''}
                   </div>
                   <div style="min-width:0;">
-                    <span class="attachment-label" style="font-weight:500;color:#222;font-size:0.7em;display:block;word-wrap:break-word;">
+                    <span class="attachment-label" style="font-weight:500;color:#222;display:block;word-wrap:break-word;">
                       ${fileName}
                     </span><br>
-                    <span style="font-size: 0.93em; color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
+                    <span class="attachment-meta" style="color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
                   </div>
                 </div>
               `;
@@ -17061,10 +17490,12 @@ class ChatModal {
       }
       case 'vm': {
         // Check for voice message
-        const duration = this.formatDuration(item.duration);
+        const durationSeconds = this.getPositiveDurationSeconds(item.duration);
+        const currentTime = this.formatVoiceProgressTime(0, durationSeconds);
+        const duration = formatVoiceTimer(durationSeconds);
         // Use audio encryption keys for playback, fall back to message encryption keys if not available
         messageTextHTML = `
-              <div class="voice-message" data-url="${item.url || ''}" data-name="voice-message" data-type="audio/webm" data-duration="${item.duration || 0}">
+              <div class="voice-message" data-url="${item.url || ''}" data-name="voice-message" data-type="audio/webm" data-duration="${durationSeconds}">
                 <div class="voice-message-controls">
                   <div class="voice-message-top-row">
                     <button class="voice-message-play-button" aria-label="Play voice message">
@@ -17073,10 +17504,10 @@ class ChatModal {
                       </svg>
                     </button>
                     <div class="voice-message-text">Voice message</div>
-                    <div class="voice-message-time-display">0:00 / ${duration}</div>
+                    <div class="voice-message-time-display">${currentTime} / ${duration}</div>
                   </div>
                   <div class="voice-message-bottom-row">
-                    <input type="range" class="voice-message-seek" min="0" max="${item.duration || 0}" value="0" step="1" aria-label="Seek voice message">
+                    <input type="range" class="voice-message-seek" min="0" max="${durationSeconds}" value="0" step="0.01" aria-label="Seek voice message">
                     <button class="voice-message-speed-button" aria-label="Toggle playback speed" data-speed="1">1x</button>
                   </div>
                 </div>
@@ -17208,6 +17639,7 @@ class ChatModal {
 
     // Replace the list once to avoid one DOM mutation per message.
     this.messagesList.innerHTML = range.html;
+    this.syncAllRenderedReactionChips();
     const shouldKeepBottomAnchored = !skipAutoScroll && !highlightNewMessage;
 
     // --- 4.5. Load thumbnails for image attachments (async, non-blocking) ---
@@ -17230,7 +17662,6 @@ class ChatModal {
         if (!skipAutoScroll) {
           this.ensureScrollableChatRenderWindow();
         }
-        this.syncAllRenderedReactionChips();
       });
     });
 
@@ -18528,6 +18959,7 @@ class ChatModal {
     // If this is a call message, show call-specific options and hide copy
     const isCall = !!messageEl.querySelector('.call-message');
     const isVoice = !!messageEl.querySelector('.voice-message');
+    const isLocation = !!messageEl.querySelector('.location-message');
     const copyOption = this.contextMenu.querySelector('[data-action="copy"]');
     const joinOption = this.contextMenu.querySelector('[data-action="join"]');
     const inviteOption = this.contextMenu.querySelector('[data-action="call-invite"]');
@@ -18561,6 +18993,7 @@ class ChatModal {
       if (editResendOption) editResendOption.style.display = 'none';
       if (deleteOption) deleteOption.style.display = 'none';
 
+      this.syncDeleteContextMenuDisabledState(this.contextMenu, messageEl, messageRecord);
       this.positionContextMenu(this.contextMenu, messageEl);
       this.contextMenu.style.display = 'block';
       return;
@@ -18593,6 +19026,13 @@ class ChatModal {
       if (joinOption) joinOption.style.display = 'none';
       if (replyOption) replyOption.style.display = 'flex';
       if (editOption) editOption.style.display = 'none';
+    } else if (isLocation) {
+      if (copyOption) copyOption.style.display = 'flex';
+      if (inviteOption) inviteOption.style.display = 'none';
+      if (joinOption) joinOption.style.display = 'none';
+      if (replyOption) replyOption.style.display = 'flex';
+      if (editResendOption) editResendOption.style.display = 'none';
+      if (editOption) editOption.style.display = 'none';
     } else {
       if (copyOption) copyOption.style.display = 'flex';
       if (joinOption) joinOption.style.display = 'none';
@@ -18623,6 +19063,7 @@ class ChatModal {
       if (editOption) editOption.style.display = 'none';
     }
     
+    this.syncDeleteContextMenuDisabledState(this.contextMenu, messageEl, messageRecord);
     this.positionContextMenu(this.contextMenu, messageEl);
     this.contextMenu.style.display = 'block';
   }
@@ -18981,6 +19422,7 @@ class ChatModal {
     if (existingContainer) {
       existingContainer.remove();
     }
+    messageEl.classList.remove('has-reactions');
 
     const messageRecord = this.getMessageRecordFromElement(messageEl);
     if (messageRecord && isDeleted(messageRecord)) {
@@ -18990,6 +19432,7 @@ class ChatModal {
     const reactionHtml = this.buildReactionChipsHTML(reactionsForTarget);
     if (!reactionHtml) return;
 
+    messageEl.classList.add('has-reactions');
     messageEl.insertAdjacentHTML('beforeend', reactionHtml);
   }
 
@@ -19161,6 +19604,29 @@ class ChatModal {
     }
 
     return true;
+  }
+
+  hasRecentDeleteForAllForTarget(targetTxid) {
+    return !!targetTxid && this.recentDeleteForAllTargetTxids.has(targetTxid);
+  }
+
+  markRecentDeleteForAllForTarget(targetTxid) {
+    if (!targetTxid) {
+      return;
+    }
+
+    this.recentDeleteForAllTargetTxids.add(targetTxid);
+    setTimeout(() => {
+      this.recentDeleteForAllTargetTxids.delete(targetTxid);
+    }, DELETE_FOR_ALL_ACTION_GUARD_MS);
+  }
+
+  syncDeleteContextMenuDisabledState(menu, messageEl, messageRecord = null) {
+    const message = messageRecord || this.getMessageRecordFromElement(messageEl);
+    const isDisabled = this.hasRecentDeleteForAllForTarget(message?.txid);
+    menu?.querySelectorAll('[data-action="delete"], [data-action="delete-for-all"]').forEach((option) => {
+      option.setAttribute('aria-disabled', isDisabled ? 'true' : 'false');
+    });
   }
 
   /**
@@ -19736,6 +20202,7 @@ class ChatModal {
     );
     this.syncReactionPickerActiveState(this.imageAttachmentContextMenuReactions, messageEl);
 
+    this.syncDeleteContextMenuDisabledState(this.imageAttachmentContextMenu, messageEl);
     this.positionContextMenu(this.imageAttachmentContextMenu, attachmentRow);
     this.imageAttachmentContextMenu.style.display = 'block';
   }
@@ -20498,6 +20965,23 @@ class ChatModal {
     }
 
     const isPayment = messageEl.classList.contains('payment-info');
+    const locationLink = messageEl.querySelector('.location-message-summary');
+    if (locationLink) {
+      const mapUrl = locationLink.getAttribute('href')?.trim();
+      if (!mapUrl) {
+        return showToast('No location URL to copy', 2000, 'info');
+      }
+
+      try {
+        await navigator.clipboard.writeText(mapUrl);
+        showToast('Location URL copied to clipboard', 2000, 'success');
+      } catch (err) {
+        console.error('Failed to copy:', err);
+        showToast('Failed to copy location URL', 0, 'error');
+      }
+      return;
+    }
+
     const selector = isPayment ? '.payment-memo' : '.message-content';
     const contentType = isPayment ? 'Memo' : 'Message';
     const contentEl = messageEl.querySelector(selector);
@@ -20619,18 +21103,20 @@ class ChatModal {
   async deleteMessageForAll(messageEl) {
     const { txid, messageTimestamp: timestamp } = messageEl.dataset;
     
-    if (!timestamp || !confirm('Delete this message for all participants?')) return;
+    if (!timestamp && !txid) return;
     
     try {
       // Get the message object from contact.messages
       const contact = myData.contacts[this.address];
-      const messageIndex = contact?.messages?.findIndex(msg => 
-        msg.timestamp == timestamp || msg.txid === txid
-      );
-      
-      if (messageIndex === -1) return;
-      
-      const message = contact.messages[messageIndex];
+      if (!contact) return;
+
+      const message = this.getMessageRecordFromElement(messageEl);
+      if (!message) return;
+
+      const targetTxid = message.txid;
+      if (!targetTxid) {
+        return showToast('Cannot delete message: missing message id', 0, 'error');
+      }
       
       if (isDeletedForAll(message)) {
         return showToast('Message already deleted for everyone', 2000, 'info');
@@ -20641,6 +21127,11 @@ class ChatModal {
         return showToast('You can only delete your own messages for all', 0, 'error');
       }
 
+      if (this.hasRecentDeleteForAllForTarget(targetTxid)) return;
+
+      if (!confirm('Delete this message for all participants?')) return;
+      this.markRecentDeleteForAllForTarget(targetTxid);
+
       // Create and send a "delete" message
       const keys = myAccount.keys;
       if (!keys) {
@@ -20648,7 +21139,7 @@ class ChatModal {
         return;
       }
 
-      const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : getEffectiveTollLibWei(this.toll);
+      const tollInLib = contact.tollRequiredToSend == 0 ? 0n : getEffectiveTollLibWei(this.toll);
 
       const sufficientBalance = await validateBalance(tollInLib);
       if (!sufficientBalance) {
@@ -20659,8 +21150,8 @@ class ChatModal {
 
       // Ensure recipient keys are available
       const ok = await ensureContactKeys(this.address);
-      const recipientPubKey = myData.contacts[this.address]?.public;
-      const pqRecPubKey = myData.contacts[this.address]?.pqPublic;
+      const recipientPubKey = contact.public;
+      const pqRecPubKey = contact.pqPublic;
       if (!ok || !recipientPubKey || !pqRecPubKey) {
         console.warn(`No public/PQ key found for recipient ${this.address}`);
         showToast('Failed to get recipient key', 0, 'error');
@@ -20673,7 +21164,7 @@ class ChatModal {
       // Create delete message payload
       const deleteObj = {
         type: 'delete',
-        txid: txid  // ID of the message to delete
+        txid: targetTxid  // ID of the message to delete
       };
 
       // Encrypt the message
@@ -21172,14 +21663,25 @@ class ChatModal {
   // ========== Voice Message Methods ==========
 
   /**
-   * Format duration from seconds to mm:ss
-   * @param {number} seconds - Duration in seconds
-   * @returns {string} Formatted duration
+   * Normalize a duration-like value to a positive finite number of seconds.
+   * @param {number|string} seconds - Duration value to normalize.
+   * @returns {number} Positive duration in seconds, or 0 when invalid.
    */
-  formatDuration(seconds) {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  getPositiveDurationSeconds(seconds) {
+    const duration = Number(seconds);
+    return Number.isFinite(duration) && duration > 0 ? duration : 0;
+  }
+
+  /**
+   * Format the current voice playback position, capped by total duration when known.
+   * @param {number|string} seconds - Current playback or seek position in seconds.
+   * @param {number|string} totalSeconds - Total voice message duration in seconds.
+   * @returns {string} Current playback time formatted as mm:ss.t.
+   */
+  formatVoiceProgressTime(seconds, totalSeconds) {
+    const current = Math.max(0, Number(seconds) || 0);
+    const total = this.getPositiveDurationSeconds(totalSeconds);
+    return formatVoiceTimer(total ? Math.min(current, total) : current);
   }
 
   /**
@@ -21455,19 +21957,32 @@ class ChatModal {
       }
       const seekEl = voiceMessageElement.querySelector('.voice-message-seek');
       const timeDisplayElement = voiceMessageElement.querySelector('.voice-message-time-display');
-      // Use stored duration from message object
-      const totalDurationSeconds = (Number.isFinite(message.duration) && message.duration > 0)
-        ? Math.floor(message.duration)
-        : 0;
-      
+      let totalDurationSeconds = this.getPositiveDurationSeconds(message.duration);
+      const updateDurationUi = () => {
+        if (seekEl) seekEl.max = totalDurationSeconds || 0;
+        voiceMessageElement.dataset.duration = String(totalDurationSeconds || 0);
+        if (!timeDisplayElement) return;
+
+        const current = audio?.currentTime || Number(seekEl?.value || 0);
+        const currentTime = this.formatVoiceProgressTime(current, totalDurationSeconds);
+        const totalTime = formatVoiceTimer(totalDurationSeconds);
+        timeDisplayElement.textContent = `${currentTime} / ${totalTime}`;
+      };
+
       // Set max immediately so slider is seekable before playback
-      if (seekEl) seekEl.max = totalDurationSeconds || 0;
+      updateDurationUi();
       
       // Handle pending seeks (if user moved slider before clicking play)
       audio.addEventListener('loadedmetadata', () => {
+        const metadataDuration = this.getPositiveDurationSeconds(audio.duration);
+        if (metadataDuration && Math.abs(metadataDuration - totalDurationSeconds) > 0.05) {
+          totalDurationSeconds = metadataDuration;
+          updateDurationUi();
+        }
+
         if (voiceMessageElement.pendingSeekTime !== undefined) {
           const pst = voiceMessageElement.pendingSeekTime;
-          if (pst >= 0 && pst < totalDurationSeconds) {
+          if (pst >= 0 && (!totalDurationSeconds || pst < totalDurationSeconds)) {
             try { audio.currentTime = pst; } catch (e) { /* ignore */ }
           }
           delete voiceMessageElement.pendingSeekTime;
@@ -21484,11 +21999,11 @@ class ChatModal {
       audio.ontimeupdate = () => {
         if (!voiceMessageElement.isScrubbing) {
           if (seekEl) {
-            seekEl.value = Math.floor(audio.currentTime);
+            seekEl.value = audio.currentTime;
           }
           if (timeDisplayElement) {
-            const currentTime = this.formatDuration(Math.floor(audio.currentTime));
-            const totalTime = this.formatDuration(totalDurationSeconds);
+            const currentTime = this.formatVoiceProgressTime(audio.currentTime, totalDurationSeconds);
+            const totalTime = formatVoiceTimer(totalDurationSeconds);
             timeDisplayElement.textContent = `${currentTime} / ${totalTime}`;
           }
         }
@@ -24571,7 +25086,7 @@ class VoiceRecordingModal {
     this.recordingControls.style.display = 'none';
     this.recordedControls.style.display = 'none';
     this.listeningControls.style.display = 'none';
-    this.recordingTimer.textContent = '00:00';
+    this.recordingTimer.textContent = formatVoiceTimer(0);
     this.recordingIndicator.classList.remove('recording');
     this.voiceMessageSendStarted = false;
   }
@@ -24656,7 +25171,8 @@ class VoiceRecordingModal {
       this.recordingStopTime = Date.now();
       // Calculate actual recording duration (excluding processing time)
       if (this.recordingStartTime) {
-        this.actualDuration = Math.floor((this.recordingStopTime - this.recordingStartTime) / 1000);
+        this.actualDuration = (this.recordingStopTime - this.recordingStartTime) / 1000;
+        this.recordingTimer.textContent = formatVoiceTimer(this.actualDuration);
       }
       this.stopRecordingTimer();
       this.recordingIndicator.classList.remove('recording');
@@ -24668,17 +25184,20 @@ class VoiceRecordingModal {
    * @returns {void}
    */
   startRecordingTimer() {
-    this.recordingInterval = setInterval(() => {
+    const updateTimer = () => {
       const elapsed = Date.now() - this.recordingStartTime;
-      const seconds = Math.floor(elapsed / 1000);
-      this.recordingTimer.textContent = this.formatDuration(seconds);
+      const seconds = elapsed / 1000;
+      this.recordingTimer.textContent = formatVoiceTimer(seconds);
       
       // Stop recording after 5 minutes
       if (elapsed >= 5 * 60 * 1000) {
         this.stopVoiceRecording();
         showToast('Maximum recording time reached (5 minutes)', 3000, 'warning');
       }
-    }, 1000);
+    };
+
+    updateTimer();
+    this.recordingInterval = setInterval(updateTimer, 100);
   }
 
   /**
@@ -24742,7 +25261,7 @@ class VoiceRecordingModal {
       
       // Start playback timer
       this.playbackStartTime = Date.now();
-      this.recordingTimer.textContent = '00:00'; // Reset to 0:00 when starting
+      this.recordingTimer.textContent = formatVoiceTimer(0);
       this.startPlaybackTimer();
       
       const audioUrl = URL.createObjectURL(this.recordedBlob);
@@ -24751,6 +25270,7 @@ class VoiceRecordingModal {
       
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
+        this.recordingTimer.textContent = formatVoiceTimer(this.actualDuration || audio.duration || audio.currentTime || 0);
         // Disable buttons before returning
         this.pauseResumeButton.disabled = true;
         this.stopListeningButton.disabled = true;
@@ -24781,12 +25301,17 @@ class VoiceRecordingModal {
    * @returns {void}
    */
   startPlaybackTimer() {
-    this.recordingInterval = setInterval(() => {
+    const updateTimer = () => {
       const elapsed = Date.now() - this.playbackStartTime;
-      const seconds = Math.floor(elapsed / 1000);
+      const seconds = this.currentAudio
+        ? this.currentAudio.currentTime
+        : elapsed / 1000;
       
-      this.recordingTimer.textContent = this.formatDuration(seconds);
-    }, 1000);
+      this.recordingTimer.textContent = formatVoiceTimer(seconds);
+    };
+
+    updateTimer();
+    this.recordingInterval = setInterval(updateTimer, 100);
   }
 
   /**
@@ -24826,7 +25351,7 @@ class VoiceRecordingModal {
     this.stopRecordingTimer();
     
     // Reset timer to show duration immediately
-    this.recordingTimer.textContent = this.formatDuration(this.actualDuration || 0);
+    this.recordingTimer.textContent = formatVoiceTimer(this.actualDuration || 0);
     
     // Hide listening controls and show recorded controls
     this.listeningControls.style.display = 'none';
@@ -24928,17 +25453,6 @@ class VoiceRecordingModal {
     } finally {
       hideToast(loadingToastId);
     }
-  }
-
-  /**
-   * Format duration from seconds to mm:ss
-   * @param {number} seconds - Duration in seconds
-   * @returns {string} Formatted duration
-   */
-  formatDuration(seconds) {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
   /**
@@ -29320,7 +29834,7 @@ async function checkPendingTransactions() {
         if (type === 'update_toll_required') {
           // log used by e2e tests do not delete
           console.log(`DEBUG: update_toll_required transaction successfully processed!`);
-          myData.contacts[pendingTxInfo.to].friendOld = myData.contacts[pendingTxInfo.to].friend;
+          syncPendingUpdateTollRequiredSuccess(pendingTxInfo, res.transaction);
         }
 
         if (type === 'read') {
@@ -31141,6 +31655,9 @@ function closeTopModal(topModal){
       break;
     case 'settingsModal':
       settingsModal.close();
+      break;
+    case 'chatSettingsModal':
+      chatSettingsModal.handleClose();
       break;
     case 'sendAssetFormModal':
       sendAssetFormModal.close();
