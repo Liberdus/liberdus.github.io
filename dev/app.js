@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'c'
+const version = 'd'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -4881,6 +4881,14 @@ class ContactInfoModal {
 // Create a singleton instance
 const contactInfoModal = new ContactInfoModal();
 
+const FRIEND_STATUS_PENDING_STALE_MS = 60 * 1000;
+const VALID_FRIEND_STATUSES = new Set([0, 1, 2]);
+
+function isValidFriendStatus(status) {
+  const statusNumber = Number(status);
+  return Number.isInteger(statusNumber) && VALID_FRIEND_STATUSES.has(statusNumber);
+}
+
 /**
  * Friend Modal
  * Frontend: 0 = blocked, 1 = Other, 2 = Connection
@@ -4921,15 +4929,88 @@ class FriendModal {
     this.modal.querySelector('.back-button').addEventListener('click', () => this.close());
   }
 
+  /**
+   * Checks if a contact already has a friend status update waiting to settle.
+   * @param {string} address
+   * @returns {boolean}
+   */
+  hasPendingFriendStatusUpdate(address) {
+    if (!address) return false;
+    const normalizedAddress = normalizeAddress(address);
+    const contact = myData.contacts?.[normalizedAddress];
+    const hasPendingTx = (myData.pending || []).some((pendingTx) =>
+      pendingTx?.type === 'update_toll_required'
+      && pendingTx.to
+      && normalizeAddress(pendingTx.to) === normalizedAddress
+    );
+    if (hasPendingTx) {
+      return true;
+    }
+
+    if (contact) {
+      const currentFriendStatus = Number(contact.friend);
+      const previousFriendStatus = Number(contact.friendOld);
+      const hasKnownFriendStatus =
+        isValidFriendStatus(currentFriendStatus) || isValidFriendStatus(previousFriendStatus);
+      if (hasKnownFriendStatus && currentFriendStatus !== previousFriendStatus) {
+        if (!this.recoverStaleFriendStatusUpdate(contact)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Restores stale local pending friend state so users are not blocked forever.
+   * @param {Object} contact
+   * @returns {boolean}
+   */
+  recoverStaleFriendStatusUpdate(contact) {
+    if (!contact) {
+      return false;
+    }
+
+    const currentFriendStatus = Number(contact.friend);
+    const previousFriendStatus = Number(contact.friendOld);
+
+    if (currentFriendStatus === previousFriendStatus) {
+      return false;
+    }
+
+    if (!isValidFriendStatus(previousFriendStatus)) {
+      if (!isValidFriendStatus(currentFriendStatus)) {
+        return false;
+      }
+      contact.friendOld = currentFriendStatus;
+      return true;
+    }
+
+    if (this.lastChangeTimeStamp >= (Date.now() - FRIEND_STATUS_PENDING_STALE_MS)) {
+      return false;
+    }
+
+    contact.friend = previousFriendStatus;
+    updateRevertedFriendStatusButtons(contact.address, contact);
+    return true;
+  }
+
   // Open the friend modal
   async open() {
-    const contact = myData.contacts[this.currentContactAddress];
+    const contactAddress = this.currentContactAddress ? normalizeAddress(this.currentContactAddress) : '';
+    if (!contactAddress) return;
+    const contact = myData.contacts[contactAddress];
     if (!contact) return;
+    if (this.hasPendingFriendStatusUpdate(contactAddress)) {
+      showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'warning');
+      return;
+    }
 
     // Query network for current toll required status
     try {
       const myAddr = longAddress(myAccount.keys.address);
-      const contactAddr = longAddress(this.currentContactAddress);
+      const contactAddr = longAddress(contactAddress);
       const sortedAddresses = [myAddr, contactAddr].sort();
       const chatId = hashBytes(sortedAddresses.join(''));
       const myIndex = sortedAddresses.indexOf(myAddr);
@@ -5211,13 +5292,13 @@ class FriendModal {
 
     // If there's already a pending tx (friend != friendOld) keep disabled
     if (contact.friend !== contact.friendOld) {
-      const SIXTY_SECONDS = 60 * 1000;
       // if the last change was more than 60 seconds ago, reset the friend status so user does not get stuck
-      if (this.lastChangeTimeStamp < (Date.now() - SIXTY_SECONDS)) {
-        contact.friend = contact.friendOld
+      if (this.recoverStaleFriendStatusUpdate(contact)) {
+        const radio = this.friendForm.querySelector(`input[value="${contact.friend}"]`);
+        if (radio) radio.checked = true;
       } else {
         this.submitButton.disabled = true;
-        showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'error');
+        showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'warning');
         return;
       }
     }
@@ -7133,7 +7214,7 @@ function hasPendingEditForTarget(contactAddress, targetTxid) {
   );
 }
 
-const DELETE_FOR_ALL_ACTION_GUARD_MS = 15000;
+const DELETE_FOR_ALL_ACTION_GUARD_MS = 10000;
 
 /**
  * Restores local state captured before an optimistic message edit.
@@ -14838,7 +14919,7 @@ class ChatModal {
     this.dragCounter = 0;
     this.dropOverlay = null;
 
-    this.recentDeleteForAllTargetTxids = new Set();
+    this.recentDeleteForAllGuardsByTxid = new Map();
 
     this.chatRenderedOldestIndex = CHAT_INITIAL_RENDER_COUNT - 1;
   }
@@ -15348,6 +15429,12 @@ class ChatModal {
       if (!phoneAnchor) return;
       const messageEl = phoneAnchor.closest('.message');
       if (!messageEl) return;
+      if (this.isMessageInDeleteForAllGuard(messageEl)) {
+        e.preventDefault();
+        e.stopPropagation();
+        showToast('This call is being deleted.', 2000, 'warning');
+        return false;
+      }
       if (this.gateScheduledCall(messageEl)) {
         e.preventDefault();
         e.stopPropagation();
@@ -19587,7 +19674,7 @@ class ChatModal {
   }
 
   /**
-   * Applies active-state styling to the quick reaction tray based on stored reaction state.
+   * Applies active and disabled state to a reaction tray based on stored message state.
    * @param {HTMLElement | null} reactionTray
    * @param {HTMLElement | null} messageEl
    */
@@ -19595,6 +19682,7 @@ class ChatModal {
     if (!reactionTray) return;
 
     const activeEmoji = this.getCurrentUserReactionForMessage(messageEl);
+    const isDisabled = this.isMessageInDeleteForAllGuard(messageEl);
     const reactionButtons = reactionTray.querySelectorAll('.message-context-reaction-button');
     reactionButtons.forEach((button) => {
       const isMorePickerTrigger = button.dataset.reactionPickerTrigger === 'true';
@@ -19604,6 +19692,8 @@ class ChatModal {
       const isActive = !isMorePickerTrigger && !!activeEmoji && buttonEmoji === activeEmoji;
 
       button.classList.toggle('active', isActive);
+      button.disabled = isDisabled;
+      button.setAttribute('aria-disabled', isDisabled ? 'true' : 'false');
       button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
     });
   }
@@ -19701,25 +19791,52 @@ class ChatModal {
   }
 
   hasRecentDeleteForAllForTarget(targetTxid) {
-    return !!targetTxid && this.recentDeleteForAllTargetTxids.has(targetTxid);
+    return !!targetTxid && this.recentDeleteForAllGuardsByTxid.has(targetTxid);
+  }
+
+  isMessageInDeleteForAllGuard(messageEl, messageRecord = null) {
+    const message = messageRecord || this.getMessageRecordFromElement(messageEl);
+    return this.hasRecentDeleteForAllForTarget(message?.txid || messageEl?.dataset?.txid);
   }
 
   markRecentDeleteForAllForTarget(targetTxid) {
-    if (!targetTxid) {
+    assert(targetTxid, 'Delete-for-all target txid is required');
+
+    const existingGuard = this.recentDeleteForAllGuardsByTxid.get(targetTxid);
+    clearTimeout(existingGuard?.timeoutId);
+
+    const guard = { targetTxid };
+    guard.timeoutId = setTimeout(() => {
+      if (this.recentDeleteForAllGuardsByTxid.get(targetTxid) !== guard) {
+        return;
+      }
+
+      this.recentDeleteForAllGuardsByTxid.delete(targetTxid);
+    }, DELETE_FOR_ALL_ACTION_GUARD_MS);
+    this.recentDeleteForAllGuardsByTxid.set(targetTxid, guard);
+    return guard;
+  }
+
+  clearRecentDeleteForAllGuard(guard) {
+    if (this.recentDeleteForAllGuardsByTxid.get(guard.targetTxid) !== guard) {
       return;
     }
 
-    this.recentDeleteForAllTargetTxids.add(targetTxid);
-    setTimeout(() => {
-      this.recentDeleteForAllTargetTxids.delete(targetTxid);
-    }, DELETE_FOR_ALL_ACTION_GUARD_MS);
+    clearTimeout(guard.timeoutId);
+    this.recentDeleteForAllGuardsByTxid.delete(guard.targetTxid);
   }
 
   syncDeleteContextMenuDisabledState(menu, messageEl, messageRecord = null) {
     const message = messageRecord || this.getMessageRecordFromElement(messageEl);
-    const isDisabled = this.hasRecentDeleteForAllForTarget(message?.txid);
-    menu?.querySelectorAll('[data-action="delete"], [data-action="delete-for-all"]').forEach((option) => {
-      option.setAttribute('aria-disabled', isDisabled ? 'true' : 'false');
+    const isDeleteGuardDisabled = this.isMessageInDeleteForAllGuard(messageEl, message);
+    const guardedActions = '[data-action="delete"], [data-action="delete-for-all"], ' +
+      '[data-action="copy"], [data-action="reply"], [data-action="join"], [data-action="call-invite"], ' +
+      '[data-action="edit"]';
+    menu?.querySelectorAll(guardedActions).forEach((option) => {
+      const isOfflineDisabled =
+        option.classList.contains('offline-disabled') ||
+        (option.dataset.requiresConnection === 'true' && !isOnline);
+      option.setAttribute('aria-disabled', (isDeleteGuardDisabled || isOfflineDisabled) ? 'true' : 'false');
     });
   }
 
@@ -20533,6 +20650,11 @@ class ChatModal {
   async handleReactionPickerSelection(reactionButton, messageEl, closeMenu) {
     if (!reactionButton) return;
     if (!messageEl) return;
+    if (this.isMessageInDeleteForAllGuard(messageEl)) {
+      closeMenu();
+      showToast('This message is being deleted.', 2000, 'warning');
+      return;
+    }
 
     if (reactionButton.dataset.reactionPickerTrigger === 'true') {
       closeMenu();
@@ -21145,6 +21267,11 @@ class ChatModal {
    * @param {HTMLElement} messageEl
    */
   handleJoinCall(messageEl) {
+    if (this.isMessageInDeleteForAllGuard(messageEl)) {
+      this.closeContextMenu();
+      return showToast('This call is being deleted.', 2000, 'warning');
+    }
+
     const callUrl = messageEl.querySelector('.call-message a')?.href;
     if (!callUrl) return showToast('Call link not found', 2000, 'error');
     // Gate future scheduled calls (context menu path)
@@ -21266,11 +21393,12 @@ class ChatModal {
       if (this.hasRecentDeleteForAllForTarget(targetTxid)) return;
 
       if (!confirm('Delete this message for all participants?')) return;
-      this.markRecentDeleteForAllForTarget(targetTxid);
+      const deleteForAllGuard = this.markRecentDeleteForAllForTarget(targetTxid);
 
       // Create and send a "delete" message
       const keys = myAccount.keys;
       if (!keys) {
+        this.clearRecentDeleteForAllGuard(deleteForAllGuard);
         showToast('Keys not found', 0, 'error');
         return;
       }
@@ -21279,6 +21407,7 @@ class ChatModal {
 
       const sufficientBalance = await validateBalance(tollInLib);
       if (!sufficientBalance) {
+        this.clearRecentDeleteForAllGuard(deleteForAllGuard);
         const msg = `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}. Go to the wallet to add more LIB.`;
         showToast(msg, 0, 'error');
         return;
@@ -21289,6 +21418,7 @@ class ChatModal {
       const recipientPubKey = contact.public;
       const pqRecPubKey = contact.pqPublic;
       if (!ok || !recipientPubKey || !pqRecPubKey) {
+        this.clearRecentDeleteForAllGuard(deleteForAllGuard);
         console.warn(`No public/PQ key found for recipient ${this.address}`);
         showToast('Failed to get recipient key', 0, 'error');
         return;
@@ -22373,6 +22503,12 @@ class CallInviteModal {
     return this.getComparableCallUrl(anchorHref);
   }
 
+  cancelInviteIfSourceCallInDeleteForAllGuard() {
+    if (!chatModal.isMessageInDeleteForAllGuard(this.messageEl)) return false;
+    showToast('Call invite canceled because the call is being deleted.', 2500, 'warning');
+    return true;
+  }
+
   /**
    * Checks whether a contact already has this call URL in their call messages.
    * @param {Object} contact
@@ -22485,6 +22621,10 @@ class CallInviteModal {
    */
   async open(messageEl) {
     this.messageEl = messageEl;
+    if (chatModal.isMessageInDeleteForAllGuard(this.messageEl)) {
+      showToast('This call is being deleted.', 2000, 'warning');
+      return;
+    }
 
     this.contactsList.innerHTML = '';
     this.emptyState.style.display = 'none';
@@ -22551,6 +22691,11 @@ class CallInviteModal {
   }
 
   async sendInvites() {
+    if (this.cancelInviteIfSourceCallInDeleteForAllGuard()) {
+      this.close();
+      return;
+    }
+
     const selectedBoxes = Array.from(this.contactsList.querySelectorAll('.call-invite-checkbox:checked'));
     const addresses = selectedBoxes.map(cb => cb.value).slice(0,10);
     // get call link from original message up to the first # so we don't duplicate callUrlParams
@@ -22578,6 +22723,8 @@ class CallInviteModal {
         }
       };
       for (const addr of addresses) {
+        if (this.cancelInviteIfSourceCallInDeleteForAllGuard()) break;
+
         const keys = myAccount.keys;
         if (!keys) {
           addFailure('keysMissing');
@@ -22643,6 +22790,9 @@ class CallInviteModal {
           messageObj.callType = true
         }
         await signObj(messageObj, keys);
+
+        if (this.cancelInviteIfSourceCallInDeleteForAllGuard()) break;
+
         const txid = getTxid(messageObj);
 
         // Create new message object for local display immediately
